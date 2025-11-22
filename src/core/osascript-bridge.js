@@ -163,7 +163,7 @@ Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Q
       } else if (char === '\\') {
         keystroke = 'keystroke "\\\\" ';
       } else if (char === '\n') {
-        keystroke = 'key code 36'; // Return key
+        keystroke = 'key code 36 using {shift down}'; // Shift+Return for line break (not submit)
       } else {
         keystroke = `keystroke "${char}"`;
       }
