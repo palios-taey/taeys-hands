@@ -52,6 +52,10 @@ export class ChatInterface {
     const waitForResponse = options.waitForResponse !== false;
     const timeout = options.timeout || 120000; // 2 min default for long responses
 
+    // Bring this tab to foreground (critical for osascript typing)
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(100);
+
     // Focus the input
     const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
     await input.click();
@@ -259,13 +263,13 @@ export class ChatGPTInterface extends ChatInterface {
   constructor(config = {}) {
     super({
       name: 'chatgpt',
-      url: 'https://chat.openai.com',
+      url: 'https://chatgpt.com',
       selectors: {
         chatInput: '#prompt-textarea',
         sendButton: 'button[data-testid="send-button"]',
-        responseContainer: '.markdown.prose',
+        responseContainer: '[data-message-author-role="assistant"]',
         newChatButton: 'nav button:first-child',
-        thinkingIndicator: '.result-thinking'
+        thinkingIndicator: '.result-thinking, [class*="thinking"]'
       },
       ...config
     });
@@ -304,25 +308,50 @@ export class GeminiInterface extends ChatInterface {
 }
 
 /**
- * Grok Interface
+ * Grok Interface (grok.com - standalone, supports Heavy model)
  */
 export class GrokInterface extends ChatInterface {
   constructor(config = {}) {
     super({
       name: 'grok',
-      url: 'https://x.com/i/grok',
+      url: 'https://grok.com',
       selectors: {
-        chatInput: 'textarea[data-testid="grok-composer"]',
-        sendButton: 'button[data-testid="grok-send"]',
-        responseContainer: '[data-testid="grok-message"]',
-        newChatButton: '[data-testid="grok-new-chat"]'
+        chatInput: 'textarea, [contenteditable="true"]',
+        sendButton: 'button[type="submit"], button[aria-label*="send" i]',
+        responseContainer: 'p.break-words',
+        newChatButton: 'button[aria-label*="new" i], a[href="/"]'
       },
       ...config
     });
   }
 
   async newConversation() {
-    await this.page.goto('https://x.com/i/grok');
+    await this.page.goto('https://grok.com');
+    await this.page.waitForTimeout(1000);
+    return true;
+  }
+}
+
+/**
+ * Perplexity Interface
+ */
+export class PerplexityInterface extends ChatInterface {
+  constructor(config = {}) {
+    super({
+      name: 'perplexity',
+      url: 'https://perplexity.ai',
+      selectors: {
+        chatInput: 'textarea[placeholder*="Ask"]',
+        sendButton: 'button[aria-label*="Submit"], button[type="submit"]',
+        responseContainer: '[class*="prose"], [class*="answer"]',
+        newChatButton: 'a[href="/"], button[aria-label*="New"]'
+      },
+      ...config
+    });
+  }
+
+  async newConversation() {
+    await this.page.goto('https://perplexity.ai');
     await this.page.waitForTimeout(1000);
     return true;
   }
@@ -336,7 +365,8 @@ export function getInterface(name, config = {}) {
     claude: ClaudeInterface,
     chatgpt: ChatGPTInterface,
     gemini: GeminiInterface,
-    grok: GrokInterface
+    grok: GrokInterface,
+    perplexity: PerplexityInterface
   };
 
   const InterfaceClass = interfaces[name.toLowerCase()];
