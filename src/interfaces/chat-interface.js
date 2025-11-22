@@ -291,9 +291,9 @@ export class GeminiInterface extends ChatInterface {
       name: 'gemini',
       url: 'https://gemini.google.com',
       selectors: {
-        chatInput: 'rich-textarea textarea, textarea[aria-label*="Enter"]',
+        chatInput: '.ql-editor[contenteditable="true"], [aria-label="Enter a prompt here"]',
         sendButton: 'button[aria-label="Send message"]',
-        responseContainer: '.response-container, .model-response-text',
+        responseContainer: 'p[data-path-to-node]',
         newChatButton: 'button[aria-label="New chat"]'
       },
       ...config
@@ -341,7 +341,7 @@ export class PerplexityInterface extends ChatInterface {
       name: 'perplexity',
       url: 'https://perplexity.ai',
       selectors: {
-        chatInput: 'textarea[placeholder*="Ask"]',
+        chatInput: '#ask-input, [data-lexical-editor="true"]',
         sendButton: 'button[aria-label*="Submit"], button[type="submit"]',
         responseContainer: '[class*="prose"], [class*="answer"]',
         newChatButton: 'a[href="/"], button[aria-label*="New"]'
