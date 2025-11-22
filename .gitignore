@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+
+# Chrome debug profile (local only)
+.chrome-debug-profile/
