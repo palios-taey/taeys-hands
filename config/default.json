@@ -1,0 +1,52 @@
+{
+  "browser": {
+    "debuggingPort": 9222,
+    "userDataDir": "/Users/jesselarose/Library/Application Support/Google/Chrome",
+    "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  },
+  "interfaces": {
+    "claude": {
+      "url": "https://claude.ai",
+      "selectors": {
+        "chatInput": "[contenteditable='true']",
+        "sendButton": "button[type='submit']",
+        "responseContainer": ".prose"
+      }
+    },
+    "chatgpt": {
+      "url": "https://chat.openai.com",
+      "selectors": {
+        "chatInput": "#prompt-textarea",
+        "sendButton": "button[data-testid='send-button']",
+        "responseContainer": ".markdown"
+      }
+    },
+    "gemini": {
+      "url": "https://gemini.google.com",
+      "selectors": {
+        "chatInput": "textarea",
+        "sendButton": "button[aria-label='Send']",
+        "responseContainer": ".response-content"
+      }
+    },
+    "grok": {
+      "url": "https://x.com/i/grok",
+      "selectors": {
+        "chatInput": "textarea",
+        "sendButton": "button[type='submit']",
+        "responseContainer": ".grok-response"
+      }
+    }
+  },
+  "mimesis": {
+    "typing": {
+      "baseDelayMs": 50,
+      "variationMs": 30,
+      "burstProbability": 0.1
+    },
+    "mouse": {
+      "bezierSteps": 20,
+      "speedVariation": 0.3
+    }
+  }
+}

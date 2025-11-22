@@ -1,0 +1,27 @@
+{
+  "name": "taey-hands",
+  "version": "0.1.0",
+  "description": "Taey's Hands - Browser automation for AI-to-AI chat orchestration",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "connect": "node src/core/browser-connector.js",
+    "test": "node --test tests/",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Taey",
+  "license": "MIT"
+}
