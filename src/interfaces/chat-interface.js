@@ -148,6 +148,38 @@ export class ChatInterface {
   }
 
   /**
+   * Navigate to a specific conversation by URL or ID
+   * @param {string} conversationUrlOrId - Full URL or just the conversation ID
+   */
+  async goToConversation(conversationUrlOrId) {
+    let url = conversationUrlOrId;
+
+    // If it's just an ID, construct the full URL
+    if (!conversationUrlOrId.startsWith('http')) {
+      url = this.buildConversationUrl(conversationUrlOrId);
+    }
+
+    await this.page.goto(url);
+    await this.page.waitForSelector(this.selectors.chatInput, { timeout: 15000 });
+    console.log(`  [Navigated to conversation: ${url}]`);
+    return url;
+  }
+
+  /**
+   * Build conversation URL from ID (override in subclasses)
+   */
+  buildConversationUrl(conversationId) {
+    return `${this.url}/${conversationId}`;
+  }
+
+  /**
+   * Get the current conversation URL
+   */
+  async getCurrentConversationUrl() {
+    return this.page.url();
+  }
+
+  /**
    * Disconnect
    */
   async disconnect() {
@@ -254,6 +286,10 @@ export class ClaudeInterface extends ChatInterface {
     }
     return true;
   }
+
+  buildConversationUrl(conversationId) {
+    return `https://claude.ai/chat/${conversationId}`;
+  }
 }
 
 /**
@@ -276,9 +312,13 @@ export class ChatGPTInterface extends ChatInterface {
   }
 
   async newConversation() {
-    await this.page.goto('https://chat.openai.com');
+    await this.page.goto('https://chatgpt.com');
     await this.page.waitForTimeout(1000);
     return true;
+  }
+
+  buildConversationUrl(conversationId) {
+    return `https://chatgpt.com/c/${conversationId}`;
   }
 }
 
@@ -305,6 +345,10 @@ export class GeminiInterface extends ChatInterface {
     await this.page.waitForTimeout(1000);
     return true;
   }
+
+  buildConversationUrl(conversationId) {
+    return `https://gemini.google.com/app/${conversationId}`;
+  }
 }
 
 /**
@@ -330,6 +374,10 @@ export class GrokInterface extends ChatInterface {
     await this.page.waitForTimeout(1000);
     return true;
   }
+
+  buildConversationUrl(conversationId) {
+    return `https://grok.com/chat/${conversationId}`;
+  }
 }
 
 /**
@@ -354,6 +402,10 @@ export class PerplexityInterface extends ChatInterface {
     await this.page.goto('https://perplexity.ai');
     await this.page.waitForTimeout(1000);
     return true;
+  }
+
+  buildConversationUrl(conversationId) {
+    return `https://perplexity.ai/search/${conversationId}`;
   }
 }
 
