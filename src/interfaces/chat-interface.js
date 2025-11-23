@@ -471,6 +471,76 @@ export class ChatGPTInterface extends ChatInterface {
   buildConversationUrl(conversationId) {
     return `https://chatgpt.com/c/${conversationId}`;
   }
+
+  /**
+   * Attach file using human-like Finder navigation
+   * @param {string} filePath - Absolute path to the file to attach
+   */
+  async attachFileHumanLike(filePath) {
+    console.log(`  [ChatGPT: Attaching file (human-like) "${filePath}"]`);
+
+    try {
+      // 1. FIRST: Bring Chrome to foreground before any interaction
+      console.log('  [ChatGPT: Bringing Chrome to foreground]');
+      await this.osa.focusApp('Google Chrome');
+      await this.page.waitForTimeout(500);
+
+      // 2. Click + menu button
+      console.log('  [ChatGPT: Clicking + menu]');
+      await this.page.click('[data-testid="composer-plus-btn"]');
+      await this.page.waitForTimeout(500);
+
+      // 3. Click "Add photos & files" option
+      console.log('  [ChatGPT: Clicking "Add photos & files"]');
+      const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
+      await menuItem.click();
+
+      // 4. Wait for native file dialog to appear
+      console.log('  [ChatGPT: Waiting for file dialog]');
+      await this.page.waitForTimeout(1500);
+
+      // 5. Use Cmd+Shift+G to open "Go to Folder" dialog
+      console.log('  [ChatGPT: Opening "Go to Folder" dialog with Cmd+Shift+G]');
+      await this.osa.runScript(`
+        tell application "System Events"
+          tell process "Google Chrome"
+            keystroke "g" using {command down, shift down}
+          end tell
+        end tell
+      `);
+      await this.page.waitForTimeout(800);
+
+      // 6. Type the file path
+      console.log(`  [ChatGPT: Typing path "${filePath}"]`);
+      await this.osa.type(filePath, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(500);
+
+      // 7. Press Enter to navigate
+      console.log('  [ChatGPT: Pressing Enter to navigate to path]');
+      await this.osa.pressKey('return');
+      await this.page.waitForTimeout(1000);
+
+      // 8. Press Enter again to open file
+      console.log('  [ChatGPT: Pressing Enter to open file]');
+      await this.osa.pressKey('return');
+      await this.page.waitForTimeout(1500);
+
+      // Screenshot to confirm
+      const screenshot = `/tmp/taey-chatgpt-attached-humanlike-${Date.now()}.png`;
+      await this.screenshot(screenshot);
+      console.log(`  [ChatGPT: File attached (human-like) - screenshot: ${screenshot}]`);
+
+      return true;
+    } catch (e) {
+      console.error(`  [ChatGPT: Failed to attach file (human-like): ${e.message}]`);
+      try {
+        await this.osa.pressKey('escape');
+        await this.page.waitForTimeout(200);
+        await this.page.keyboard.press('Escape');
+      } catch (_) {}
+      return false;
+    }
+  }
 }
 
 /**
