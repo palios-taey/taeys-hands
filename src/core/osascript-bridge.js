@@ -251,6 +251,72 @@ Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Q
       end tell
     `);
   }
+
+  /**
+   * Validate that Chrome (or specified browser) is the frontmost app
+   * Returns { valid: boolean, currentApp: string, error?: string }
+   */
+  async validateFocus(expectedApp = 'Google Chrome') {
+    const currentApp = await this.getFrontmostApp();
+    const isValid = currentApp.toLowerCase().includes(expectedApp.toLowerCase().split(' ')[0]);
+
+    return {
+      valid: isValid,
+      currentApp,
+      expectedApp,
+      error: isValid ? null : `Expected ${expectedApp} to be frontmost, but found: ${currentApp}`
+    };
+  }
+
+  /**
+   * Safe type - validates Chrome focus before typing, aborts if not focused
+   * Prevents typing into wrong windows (like password dialogs)
+   */
+  async safeType(text, options = {}) {
+    // First validate focus
+    const focus = await this.validateFocus(options.expectedApp || 'Google Chrome');
+
+    if (!focus.valid) {
+      console.error(`  [ABORT] Focus validation failed: ${focus.error}`);
+      throw new Error(`Focus validation failed: ${focus.error}. Refusing to type.`);
+    }
+
+    console.log(`  [Focus OK: ${focus.currentApp}]`);
+
+    // Now safe to type
+    return await this.type(text, options);
+  }
+
+  /**
+   * Re-verify focus periodically during long typing sessions
+   * For messages > 500 chars, check focus every 250 chars
+   */
+  async safeTypeLong(text, options = {}) {
+    const chunkSize = 250;
+    const expectedApp = options.expectedApp || 'Google Chrome';
+
+    // Initial focus check
+    const initialFocus = await this.validateFocus(expectedApp);
+    if (!initialFocus.valid) {
+      throw new Error(`Initial focus validation failed: ${initialFocus.error}`);
+    }
+
+    // Type in chunks, re-validating focus between chunks
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.slice(i, i + chunkSize);
+
+      // Re-check focus before each chunk (except first)
+      if (i > 0) {
+        const focus = await this.validateFocus(expectedApp);
+        if (!focus.valid) {
+          console.error(`  [ABORT at char ${i}] Focus lost: ${focus.error}`);
+          throw new Error(`Focus lost during typing at char ${i}: ${focus.error}`);
+        }
+      }
+
+      await this.type(chunk, options);
+    }
+  }
 }
 
 // CLI test
