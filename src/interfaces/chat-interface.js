@@ -140,9 +140,15 @@ export class ChatInterface {
 
     // Type the message
     if (useHumanInput) {
-      // Use osascript for human-like typing
+      // Use osascript for human-like typing with focus validation
       await this.osa.focusApp('Google Chrome');
-      await this.osa.type(message);
+
+      // Take pre-type screenshot for confirmation (can be reviewed if something goes wrong)
+      const preTypeScreenshot = `/tmp/taey-pretype-${this.name}-${Date.now()}.png`;
+      await this.screenshot(preTypeScreenshot);
+
+      // Use safe typing that validates Chrome focus and re-checks during long messages
+      await this.osa.safeTypeLong(message);
     } else {
       // Direct injection (faster but detectable)
       await input.fill(message);
@@ -163,23 +169,37 @@ export class ChatInterface {
 
   /**
    * Wait for AI response using Fibonacci polling with content stability
+   * Now includes screenshot capture at intervals for visibility
    * @param {number} timeout - Max wait time in ms (default 10 min)
+   * @param {Object} options - { screenshots: boolean, screenshotDir: string }
    */
-  async waitForResponse(timeout = 600000) {
+  async waitForResponse(timeout = 600000, options = {}) {
     const startTime = Date.now();
+    const takeScreenshots = options.screenshots !== false; // Default: enabled
+    const screenshotDir = options.screenshotDir || '/tmp';
+    const sessionId = Date.now();
 
     // Fibonacci sequence (seconds): 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
     const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
+    // Take screenshots at these Fibonacci intervals (seconds)
+    const screenshotIntervals = new Set([0, 2, 5, 13, 34, 55]);
     let fibIndex = 0;
+    let totalElapsed = 0;
 
     let lastContent = '';
     let stableCount = 0;
     const stabilityRequired = 2; // 2 identical content reads = done
 
-    console.log(`  [${this.name}: Fibonacci polling]`);
+    console.log(`  [${this.name}: Fibonacci polling with visual monitoring]`);
 
     // Get initial content to detect when new response appears
     const initialContent = await this.getLatestResponse();
+
+    // Initial screenshot (t=0)
+    if (takeScreenshots) {
+      const filename = `${screenshotDir}/taey-${this.name}-${sessionId}-t0.png`;
+      await this.screenshot(filename);
+    }
 
     while (Date.now() - startTime < timeout) {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -193,6 +213,13 @@ export class ChatInterface {
 
           if (stableCount >= stabilityRequired) {
             console.log(`  [${this.name} complete in ${elapsed}s, ${content.length} chars]`);
+
+            // Final screenshot on completion
+            if (takeScreenshots) {
+              const filename = `${screenshotDir}/taey-${this.name}-${sessionId}-complete.png`;
+              await this.screenshot(filename);
+            }
+
             this.logTimingData(elapsed, content.length);
             return content;
           }
@@ -207,11 +234,25 @@ export class ChatInterface {
       const waitSeconds = fibIndex < 3 ? 1 : fibonacci[Math.min(fibIndex, fibonacci.length - 1)];
       await this.page.waitForTimeout(waitSeconds * 1000);
       fibIndex++;
+      totalElapsed += waitSeconds;
+
+      // Take screenshot at Fibonacci intervals for visibility
+      if (takeScreenshots && screenshotIntervals.has(totalElapsed)) {
+        const filename = `${screenshotDir}/taey-${this.name}-${sessionId}-t${totalElapsed}s.png`;
+        await this.screenshot(filename);
+      }
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     const content = await this.getLatestResponse();
     console.log(`  [${this.name} timeout after ${elapsed}s]`);
+
+    // Timeout screenshot for debugging
+    if (takeScreenshots) {
+      const filename = `${screenshotDir}/taey-${this.name}-${sessionId}-timeout.png`;
+      await this.screenshot(filename);
+    }
+
     return content;
   }
 
