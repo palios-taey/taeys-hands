@@ -122,6 +122,39 @@ export class ChatInterface {
   }
 
   /**
+   * Shared: Navigate Finder dialog to select a file (Cmd+Shift+G flow)
+   * Call this after the native file dialog is open
+   * @param {string} filePath - Absolute path to the file
+   */
+  async _navigateFinderDialog(filePath) {
+    // Open Go to Folder with Cmd+Shift+G
+    console.log(`  [${this.name}: Pressing Cmd+Shift+G]`);
+    await this.osa.runScript(`
+      tell application "System Events"
+        tell process "Google Chrome"
+          keystroke "g" using {command down, shift down}
+        end tell
+      end tell
+    `);
+    await this.page.waitForTimeout(800);
+
+    // Type the file path
+    console.log(`  [${this.name}: Typing path "${filePath}"]`);
+    await this.osa.type(filePath, { baseDelay: 30, variation: 15 });
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to navigate to path
+    console.log(`  [${this.name}: Pressing Enter to navigate]`);
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+
+    // Press Enter to open/select file
+    console.log(`  [${this.name}: Pressing Enter to open file]`);
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+  }
+
+  /**
    * Send a message and wait for response
    */
   async sendMessage(message, options = {}) {
@@ -438,6 +471,41 @@ export class ClaudeInterface extends ChatInterface {
   buildConversationUrl(conversationId) {
     return `https://claude.ai/chat/${conversationId}`;
   }
+
+  /**
+   * Attach file using human-like Finder navigation
+   */
+  async attachFileHumanLike(filePath) {
+    console.log(`  [Claude: Attaching file "${filePath}"]`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Click + menu
+    console.log(`  [${this.name}: Clicking + menu]`);
+    await this.page.click('[data-testid="input-menu-plus"]');
+    await this.page.waitForTimeout(500);
+
+    // Click "Upload a file"
+    console.log(`  [${this.name}: Clicking "Upload a file"]`);
+    const menuItem = await this.page.waitForSelector('text="Upload a file"', { timeout: 5000 });
+    await menuItem.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use shared Finder navigation
+    await this._navigateFinderDialog(filePath);
+
+    console.log(`  [${this.name}: Attachment complete]`);
+    return true;
+  }
 }
 
 /**
@@ -485,49 +553,25 @@ export class ChatGPTInterface extends ChatInterface {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // Step 1: Focus Chrome
-    console.log('  [Step 1: Focusing Chrome]');
+    // Focus Chrome
     await this.osa.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
-    // Step 2: Click + menu
-    console.log('  [Step 2: Clicking + menu]');
+    // Click + menu
+    console.log(`  [${this.name}: Clicking + menu]`);
     await this.page.click('[data-testid="composer-plus-btn"]');
     await this.page.waitForTimeout(500);
 
-    // Step 3: Click "Add photos & files"
-    console.log('  [Step 3: Clicking "Add photos & files"]');
+    // Click "Add photos & files"
+    console.log(`  [${this.name}: Clicking "Add photos & files"]`);
     const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
     await menuItem.click();
     await this.page.waitForTimeout(1500);
 
-    // Step 4: Open Go to Folder with Cmd+Shift+G
-    console.log('  [Step 4: Pressing Cmd+Shift+G]');
-    await this.osa.runScript(`
-      tell application "System Events"
-        tell process "Google Chrome"
-          keystroke "g" using {command down, shift down}
-        end tell
-      end tell
-    `);
-    await this.page.waitForTimeout(800);
+    // Use shared Finder navigation
+    await this._navigateFinderDialog(filePath);
 
-    // Step 5: Type the file path
-    console.log(`  [Step 5: Typing path "${filePath}"]`);
-    await this.osa.type(filePath, { baseDelay: 30, variation: 15 });
-    await this.page.waitForTimeout(300);
-
-    // Step 6: Press Enter to navigate to path
-    console.log('  [Step 6: Pressing Enter to navigate]');
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
-
-    // Step 7: Press Enter to open/select file
-    console.log('  [Step 7: Pressing Enter to open file]');
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
-
-    console.log('  [Attachment complete]');
+    console.log(`  [${this.name}: Attachment complete]`);
     return true;
   }
 }
