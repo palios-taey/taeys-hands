@@ -45,6 +45,83 @@ export class ChatInterface {
   }
 
   /**
+   * Take a screenshot of the current page
+   * @param {string} filename - Optional filename (default: /tmp/taey-screenshot.png)
+   * @returns {string} Path to the saved screenshot
+   */
+  async screenshot(filename = '/tmp/taey-screenshot.png') {
+    await this.page.screenshot({ path: filename, fullPage: false });
+    console.log(`  [Screenshot saved to ${filename}]`);
+    return filename;
+  }
+
+  /**
+   * Attach a file to the current conversation
+   * @param {string|string[]} filePaths - Path(s) to file(s) to attach
+   */
+  async attachFile(filePaths) {
+    const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+
+    // Verify files exist
+    for (const filePath of paths) {
+      try {
+        await fs.access(filePath);
+      } catch {
+        throw new Error(`File not found: ${filePath}`);
+      }
+    }
+
+    // Find the file input element (usually hidden)
+    const fileInputSelector = this.selectors.fileInput;
+    if (!fileInputSelector) {
+      throw new Error(`File attachments not supported for ${this.name}`);
+    }
+
+    // Try to find an existing file input, or click the attachment button to reveal one
+    let fileInput = await this.page.$(fileInputSelector);
+
+    if (!fileInput && this.selectors.attachmentButton) {
+      // Click attachment button to potentially reveal file input
+      const attachBtn = await this.page.$(this.selectors.attachmentButton);
+      if (attachBtn) {
+        await attachBtn.click();
+        await this.page.waitForTimeout(500);
+        fileInput = await this.page.$(fileInputSelector);
+      }
+    }
+
+    if (!fileInput) {
+      throw new Error(`Could not find file input for ${this.name}`);
+    }
+
+    // Use Playwright's setInputFiles to inject files directly
+    await fileInput.setInputFiles(paths);
+
+    // Wait for upload to process
+    await this.page.waitForTimeout(1000);
+
+    console.log(`  [Attached ${paths.length} file(s) to ${this.name}]`);
+    return true;
+  }
+
+  /**
+   * Send a message with file attachment(s)
+   * @param {string} message - The message to send
+   * @param {string|string[]} filePaths - Path(s) to file(s) to attach
+   * @param {Object} options - Same options as sendMessage
+   */
+  async sendMessageWithAttachment(message, filePaths, options = {}) {
+    // Attach files first
+    await this.attachFile(filePaths);
+
+    // Wait a moment for the attachment to register
+    await this.page.waitForTimeout(500);
+
+    // Then send the message
+    return await this.sendMessage(message, options);
+  }
+
+  /**
    * Send a message and wait for response
    */
   async sendMessage(message, options = {}) {
@@ -86,45 +163,67 @@ export class ChatInterface {
 
   /**
    * Wait for AI response to complete
+   * @param {number} timeout - Max wait time in ms (default 1 hour for deep thinking modes)
    */
-  async waitForResponse(timeout = 120000) {
+  async waitForResponse(timeout = 3600000) {
     const startTime = Date.now();
-    const checkInterval = 500;
+    const checkInterval = 1000; // Check every second
+    const stabilityThreshold = 6; // 6 seconds of unchanged content = complete
 
     // Get initial response count
     const initialCount = (await this.page.$$(this.selectors.responseContainer)).length;
 
-    // Wait for a new response to appear
+    // Wait for a new response to appear (up to 60 seconds to start)
     let newResponseFound = false;
-    while (!newResponseFound && Date.now() - startTime < 30000) {
+    const initialWaitTimeout = 60000; // 60 seconds to start responding
+    console.log(`  [Waiting for ${this.name} to start responding...]`);
+
+    while (!newResponseFound && Date.now() - startTime < initialWaitTimeout) {
       const currentCount = (await this.page.$$(this.selectors.responseContainer)).length;
       if (currentCount > initialCount) {
         newResponseFound = true;
+        console.log(`  [${this.name} started responding]`);
       } else {
         await this.page.waitForTimeout(checkInterval);
       }
     }
 
+    if (!newResponseFound) {
+      console.log(`  [Warning: ${this.name} hasn't started responding yet, continuing to wait...]`);
+    }
+
     // Wait for streaming to complete (response stops changing)
     let lastContent = '';
     let unchangedCount = 0;
+    let lastLogTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
       const content = await this.getLatestResponse();
 
       if (content === lastContent && content.length > 0) {
         unchangedCount++;
-        if (unchangedCount >= 4) { // 2 seconds of no changes
+        if (unchangedCount >= stabilityThreshold) {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          console.log(`  [${this.name} response complete after ${elapsed}s]`);
           return content;
         }
       } else {
         unchangedCount = 0;
         lastContent = content;
+
+        // Log progress every 30 seconds
+        if (Date.now() - lastLogTime > 30000) {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          console.log(`  [${this.name} still thinking... ${elapsed}s elapsed]`);
+          lastLogTime = Date.now();
+        }
       }
 
       await this.page.waitForTimeout(checkInterval);
     }
 
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`  [${this.name} response timeout after ${elapsed}s, returning partial]`);
     return lastContent;
   }
 
@@ -203,7 +302,10 @@ export class ClaudeInterface extends ChatInterface {
         newChatButton: 'button[aria-label="New chat"]',
         thinkingIndicator: '[class*="thinking"], [class*="loading"]',
         toolsMenuButton: '#input-tools-menu-trigger, [data-testid="input-menu-tools"]',
-        researchToggle: '[data-testid*="research"], button:has-text("Research")'
+        researchToggle: '[data-testid*="research"], button:has-text("Research")',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[data-testid*="attach"]'
       },
       ...config
     });
@@ -305,7 +407,10 @@ export class ChatGPTInterface extends ChatInterface {
         sendButton: 'button[data-testid="send-button"]',
         responseContainer: '[data-message-author-role="assistant"]',
         newChatButton: 'nav button:first-child',
-        thinkingIndicator: '.result-thinking, [class*="thinking"]'
+        thinkingIndicator: '.result-thinking, [class*="thinking"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[data-testid*="attach"]'
       },
       ...config
     });
@@ -334,7 +439,10 @@ export class GeminiInterface extends ChatInterface {
         chatInput: '.ql-editor[contenteditable="true"], [aria-label="Enter a prompt here"]',
         sendButton: 'button[aria-label="Send message"]',
         responseContainer: 'p[data-path-to-node]',
-        newChatButton: 'button[aria-label="New chat"]'
+        newChatButton: 'button[aria-label="New chat"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Upload"], button[aria-label*="Add"]'
       },
       ...config
     });
@@ -362,8 +470,11 @@ export class GrokInterface extends ChatInterface {
       selectors: {
         chatInput: 'textarea, [contenteditable="true"]',
         sendButton: 'button[type="submit"], button[aria-label*="send" i]',
-        responseContainer: 'p.break-words',
-        newChatButton: 'button[aria-label*="new" i], a[href="/"]'
+        responseContainer: 'div.response-content-markdown',
+        newChatButton: 'button[aria-label*="new" i], a[href="/"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[aria-label*="upload" i]'
       },
       ...config
     });
@@ -392,7 +503,10 @@ export class PerplexityInterface extends ChatInterface {
         chatInput: '#ask-input, [data-lexical-editor="true"]',
         sendButton: 'button[aria-label*="Submit"], button[type="submit"]',
         responseContainer: '[class*="prose"], [class*="answer"]',
-        newChatButton: 'a[href="/"], button[aria-label*="New"]'
+        newChatButton: 'a[href="/"], button[aria-label*="New"]',
+        // File attachment selectors (Pro feature)
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[aria-label*="Upload"]'
       },
       ...config
     });
