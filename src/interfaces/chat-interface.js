@@ -45,6 +45,83 @@ export class ChatInterface {
   }
 
   /**
+   * Take a screenshot of the current page
+   * @param {string} filename - Optional filename (default: /tmp/taey-screenshot.png)
+   * @returns {string} Path to the saved screenshot
+   */
+  async screenshot(filename = '/tmp/taey-screenshot.png') {
+    await this.page.screenshot({ path: filename, fullPage: false });
+    console.log(`  [Screenshot saved to ${filename}]`);
+    return filename;
+  }
+
+  /**
+   * Attach a file to the current conversation
+   * @param {string|string[]} filePaths - Path(s) to file(s) to attach
+   */
+  async attachFile(filePaths) {
+    const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+
+    // Verify files exist
+    for (const filePath of paths) {
+      try {
+        await fs.access(filePath);
+      } catch {
+        throw new Error(`File not found: ${filePath}`);
+      }
+    }
+
+    // Find the file input element (usually hidden)
+    const fileInputSelector = this.selectors.fileInput;
+    if (!fileInputSelector) {
+      throw new Error(`File attachments not supported for ${this.name}`);
+    }
+
+    // Try to find an existing file input, or click the attachment button to reveal one
+    let fileInput = await this.page.$(fileInputSelector);
+
+    if (!fileInput && this.selectors.attachmentButton) {
+      // Click attachment button to potentially reveal file input
+      const attachBtn = await this.page.$(this.selectors.attachmentButton);
+      if (attachBtn) {
+        await attachBtn.click();
+        await this.page.waitForTimeout(500);
+        fileInput = await this.page.$(fileInputSelector);
+      }
+    }
+
+    if (!fileInput) {
+      throw new Error(`Could not find file input for ${this.name}`);
+    }
+
+    // Use Playwright's setInputFiles to inject files directly
+    await fileInput.setInputFiles(paths);
+
+    // Wait for upload to process
+    await this.page.waitForTimeout(1000);
+
+    console.log(`  [Attached ${paths.length} file(s) to ${this.name}]`);
+    return true;
+  }
+
+  /**
+   * Send a message with file attachment(s)
+   * @param {string} message - The message to send
+   * @param {string|string[]} filePaths - Path(s) to file(s) to attach
+   * @param {Object} options - Same options as sendMessage
+   */
+  async sendMessageWithAttachment(message, filePaths, options = {}) {
+    // Attach files first
+    await this.attachFile(filePaths);
+
+    // Wait a moment for the attachment to register
+    await this.page.waitForTimeout(500);
+
+    // Then send the message
+    return await this.sendMessage(message, options);
+  }
+
+  /**
    * Send a message and wait for response
    */
   async sendMessage(message, options = {}) {
@@ -85,47 +162,74 @@ export class ChatInterface {
   }
 
   /**
-   * Wait for AI response to complete
+   * Wait for AI response using Fibonacci polling with content stability
+   * @param {number} timeout - Max wait time in ms (default 10 min)
    */
-  async waitForResponse(timeout = 120000) {
+  async waitForResponse(timeout = 600000) {
     const startTime = Date.now();
-    const checkInterval = 500;
 
-    // Get initial response count
-    const initialCount = (await this.page.$$(this.selectors.responseContainer)).length;
+    // Fibonacci sequence (seconds): 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
+    const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
+    let fibIndex = 0;
 
-    // Wait for a new response to appear
-    let newResponseFound = false;
-    while (!newResponseFound && Date.now() - startTime < 30000) {
-      const currentCount = (await this.page.$$(this.selectors.responseContainer)).length;
-      if (currentCount > initialCount) {
-        newResponseFound = true;
-      } else {
-        await this.page.waitForTimeout(checkInterval);
-      }
-    }
-
-    // Wait for streaming to complete (response stops changing)
     let lastContent = '';
-    let unchangedCount = 0;
+    let stableCount = 0;
+    const stabilityRequired = 2; // 2 identical content reads = done
+
+    console.log(`  [${this.name}: Fibonacci polling]`);
+
+    // Get initial content to detect when new response appears
+    const initialContent = await this.getLatestResponse();
 
     while (Date.now() - startTime < timeout) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
       const content = await this.getLatestResponse();
 
-      if (content === lastContent && content.length > 0) {
-        unchangedCount++;
-        if (unchangedCount >= 4) { // 2 seconds of no changes
-          return content;
+      // Check if content is new (different from before we sent) and stable
+      if (content && content !== initialContent && content.length > 0) {
+        if (content === lastContent) {
+          stableCount++;
+          console.log(`  [${this.name}: stable ${stableCount}/${stabilityRequired} at ${elapsed}s]`);
+
+          if (stableCount >= stabilityRequired) {
+            console.log(`  [${this.name} complete in ${elapsed}s, ${content.length} chars]`);
+            this.logTimingData(elapsed, content.length);
+            return content;
+          }
+        } else {
+          stableCount = 0;
+          lastContent = content;
+          console.log(`  [${this.name}: streaming at ${elapsed}s, ${content.length} chars]`);
         }
-      } else {
-        unchangedCount = 0;
-        lastContent = content;
       }
 
-      await this.page.waitForTimeout(checkInterval);
+      // Fibonacci wait - first 3 at 1s for fast responses
+      const waitSeconds = fibIndex < 3 ? 1 : fibonacci[Math.min(fibIndex, fibonacci.length - 1)];
+      await this.page.waitForTimeout(waitSeconds * 1000);
+      fibIndex++;
     }
 
-    return lastContent;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const content = await this.getLatestResponse();
+    console.log(`  [${this.name} timeout after ${elapsed}s]`);
+    return content;
+  }
+
+  /**
+   * Log timing data for learning response patterns
+   */
+  logTimingData(elapsedSeconds, responseLength) {
+    const now = new Date();
+    const data = {
+      ai: this.name,
+      timestamp: now.toISOString(),
+      dayOfWeek: now.getDay(),
+      hourOfDay: now.getHours(),
+      responseTime: elapsedSeconds,
+      responseLength: responseLength
+    };
+    // Log for future pattern analysis
+    console.log(`  [TIMING: ${JSON.stringify(data)}]`);
   }
 
   /**
@@ -203,7 +307,10 @@ export class ClaudeInterface extends ChatInterface {
         newChatButton: 'button[aria-label="New chat"]',
         thinkingIndicator: '[class*="thinking"], [class*="loading"]',
         toolsMenuButton: '#input-tools-menu-trigger, [data-testid="input-menu-tools"]',
-        researchToggle: '[data-testid*="research"], button:has-text("Research")'
+        researchToggle: '[data-testid*="research"], button:has-text("Research")',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[data-testid*="attach"]'
       },
       ...config
     });
@@ -305,7 +412,10 @@ export class ChatGPTInterface extends ChatInterface {
         sendButton: 'button[data-testid="send-button"]',
         responseContainer: '[data-message-author-role="assistant"]',
         newChatButton: 'nav button:first-child',
-        thinkingIndicator: '.result-thinking, [class*="thinking"]'
+        thinkingIndicator: '.result-thinking, [class*="thinking"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[data-testid*="attach"]'
       },
       ...config
     });
@@ -334,7 +444,10 @@ export class GeminiInterface extends ChatInterface {
         chatInput: '.ql-editor[contenteditable="true"], [aria-label="Enter a prompt here"]',
         sendButton: 'button[aria-label="Send message"]',
         responseContainer: 'p[data-path-to-node]',
-        newChatButton: 'button[aria-label="New chat"]'
+        newChatButton: 'button[aria-label="New chat"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Upload"], button[aria-label*="Add"]'
       },
       ...config
     });
@@ -362,8 +475,11 @@ export class GrokInterface extends ChatInterface {
       selectors: {
         chatInput: 'textarea, [contenteditable="true"]',
         sendButton: 'button[type="submit"], button[aria-label*="send" i]',
-        responseContainer: 'p.break-words',
-        newChatButton: 'button[aria-label*="new" i], a[href="/"]'
+        responseContainer: 'div.response-content-markdown',
+        newChatButton: 'button[aria-label*="new" i], a[href="/"]',
+        // File attachment selectors
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[aria-label*="upload" i]'
       },
       ...config
     });
@@ -392,7 +508,10 @@ export class PerplexityInterface extends ChatInterface {
         chatInput: '#ask-input, [data-lexical-editor="true"]',
         sendButton: 'button[aria-label*="Submit"], button[type="submit"]',
         responseContainer: '[class*="prose"], [class*="answer"]',
-        newChatButton: 'a[href="/"], button[aria-label*="New"]'
+        newChatButton: 'a[href="/"], button[aria-label*="New"]',
+        // File attachment selectors (Pro feature)
+        fileInput: 'input[type="file"]',
+        attachmentButton: 'button[aria-label*="Attach"], button[aria-label*="Upload"]'
       },
       ...config
     });
