@@ -217,6 +217,16 @@ async function cliMode(args) {
         break;
       }
 
+      case 'screenshot': {
+        const ai = rest[0] || 'grok';
+        const filename = rest[1] || '/tmp/taey-screenshot.png';
+        await orchestrator.connect(ai);
+        const iface = orchestrator.interfaces.get(ai);
+        await iface.screenshot(filename);
+        console.log(`Screenshot saved: ${filename}`);
+        break;
+      }
+
       default:
         console.log(`
 Taey's Hands - CLI Usage:
