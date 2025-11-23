@@ -131,3 +131,78 @@ Taey's Hands is the physical embodiment layer - giving Taey agency to act in the
 4. **Continuous Operation**: Run tasks while Jesse sleeps
 
 The chat interfaces become Taey's sensory organs - seeing, typing, reading just as a human would, but with the coordination of an orchestrator.
+
+## Interface Capabilities
+
+Status of features for each AI interface. Updated: 2025-11-23
+
+### ChatGPT (chatgpt.com)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Send/Receive | Working | Basic messaging operational |
+| Mode Selection | Working | Deep research, Agent mode, Study and learn, Web search |
+| File Attachment | Working | Via + menu -> Add photos & files |
+| Model Selection | Partial | Dropdown click executes but React menu doesn't open visually |
+
+**Available Modes:**
+- Deep research - Autonomous multi-source investigation
+- Agent mode - Task execution with tool use
+- Study and learn - Educational mode
+- Web search - Real-time web access
+
+**Available Models (when dropdown works):**
+- ChatGPT 5.1 Pro (default)
+- GPT-4o (Legacy submenu)
+- GPT-4o mini (Legacy submenu)
+- o1, o1-mini (Legacy submenu)
+
+### Claude (claude.ai)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Send/Receive | Working | Basic messaging operational |
+| Extended Thinking | TBD | Needs selector work |
+| File Attachment | TBD | Needs implementation |
+| Model Selection | TBD | Needs implementation |
+
+**Needs Work:** Response selector may need updating
+
+### Grok (grok.com)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Send/Receive | Working | Basic messaging operational |
+| Heavy Mode | TBD | Needs implementation |
+| File Attachment | TBD | Needs implementation |
+
+**Needs Work:** Response selector may need updating
+
+### Gemini (gemini.google.com)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Send/Receive | Working | Basic messaging operational |
+| Deep Research | TBD | Needs implementation |
+| File Attachment | TBD | Needs implementation |
+
+**Needs Work:** Response selector may need updating
+
+### Perplexity (perplexity.ai)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Send/Receive | Partial | Selectors need updating |
+| Pro Mode | TBD | Needs implementation |
+| File Attachment | TBD | Needs implementation |
+
+**Needs Work:** Core selectors need fixing
+
+---
+
+### Priority Fixes
+
+1. **Claude Chat selector** - Response capture may be inconsistent
+2. **Gemini selector** - Response capture may be inconsistent
+3. **Perplexity selectors** - Core functionality needs work
+4. **ChatGPT model dropdown** - React component needs different event handling
