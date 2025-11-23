@@ -18,8 +18,13 @@
       "selectors": {
         "chatInput": "#prompt-textarea",
         "sendButton": "button[data-testid='send-button']",
-        "responseContainer": ".markdown"
-      }
+        "responseContainer": ".markdown",
+        "modelSelector": "[data-testid='model-switcher-dropdown-button']",
+        "modeMenuButton": "[data-testid='composer-plus-btn']",
+        "fileAttachment": "[data-testid='composer-plus-btn']"
+      },
+      "models": ["5.1 Pro", "4o", "4o mini", "o1", "o1-mini"],
+      "modes": ["Deep research", "Agent mode", "Study and learn", "Web search"]
     },
     "gemini": {
       "url": "https://gemini.google.com",
