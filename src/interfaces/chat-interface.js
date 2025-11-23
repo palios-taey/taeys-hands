@@ -377,7 +377,7 @@ export class ClaudeInterface extends ChatInterface {
       selectors: {
         chatInput: '[contenteditable="true"]',
         sendButton: 'button[type="submit"]',
-        responseContainer: '.font-claude-response-body',
+        responseContainer: 'div.grid:has(> .font-claude-response-body)',
         newChatButton: 'button[aria-label="New chat"]',
         thinkingIndicator: '[class*="thinking"], [class*="loading"]',
         toolsMenuButton: '#input-tools-menu-trigger, [data-testid="input-menu-tools"]',
