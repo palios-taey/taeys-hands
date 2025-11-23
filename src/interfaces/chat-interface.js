@@ -263,8 +263,18 @@ export class ChatInterface {
         }
       }
 
-      // Fibonacci wait - first 3 at 1s for fast responses
-      const waitSeconds = fibIndex < 3 ? 1 : fibonacci[Math.min(fibIndex, fibonacci.length - 1)];
+      // Fibonacci wait - but use short delay (2s) once stability starts
+      let waitSeconds;
+      if (stableCount > 0) {
+        // After first stable detection, use fast polling for confirmation
+        waitSeconds = 2;
+      } else if (fibIndex < 3) {
+        // First 3 checks at 1s for fast responses
+        waitSeconds = 1;
+      } else {
+        // Then use Fibonacci sequence
+        waitSeconds = fibonacci[Math.min(fibIndex, fibonacci.length - 1)];
+      }
       await this.page.waitForTimeout(waitSeconds * 1000);
       fibIndex++;
       totalElapsed += waitSeconds;
@@ -377,7 +387,7 @@ export class ClaudeInterface extends ChatInterface {
       selectors: {
         chatInput: '[contenteditable="true"]',
         sendButton: 'button[type="submit"]',
-        responseContainer: 'div.grid:has(> .font-claude-response-body)',
+        responseContainer: 'div.grid.standard-markdown:has(> .font-claude-response-body)',
         newChatButton: 'button[aria-label="New chat"]',
         thinkingIndicator: '[class*="thinking"], [class*="loading"]',
         toolsMenuButton: '#input-tools-menu-trigger, [data-testid="input-menu-tools"]',
