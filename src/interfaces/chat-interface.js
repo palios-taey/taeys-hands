@@ -162,69 +162,74 @@ export class ChatInterface {
   }
 
   /**
-   * Wait for AI response to complete
-   * @param {number} timeout - Max wait time in ms (default 1 hour for deep thinking modes)
+   * Wait for AI response using Fibonacci polling with content stability
+   * @param {number} timeout - Max wait time in ms (default 10 min)
    */
-  async waitForResponse(timeout = 3600000) {
+  async waitForResponse(timeout = 600000) {
     const startTime = Date.now();
-    const checkInterval = 1000; // Check every second
-    const stabilityThreshold = 6; // 6 seconds of unchanged content = complete
 
-    // Get initial response count
-    const initialCount = (await this.page.$$(this.selectors.responseContainer)).length;
+    // Fibonacci sequence (seconds): 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
+    const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
+    let fibIndex = 0;
 
-    // Wait for a new response to appear (up to 60 seconds to start)
-    let newResponseFound = false;
-    const initialWaitTimeout = 60000; // 60 seconds to start responding
-    console.log(`  [Waiting for ${this.name} to start responding...]`);
-
-    while (!newResponseFound && Date.now() - startTime < initialWaitTimeout) {
-      const currentCount = (await this.page.$$(this.selectors.responseContainer)).length;
-      if (currentCount > initialCount) {
-        newResponseFound = true;
-        console.log(`  [${this.name} started responding]`);
-      } else {
-        await this.page.waitForTimeout(checkInterval);
-      }
-    }
-
-    if (!newResponseFound) {
-      console.log(`  [Warning: ${this.name} hasn't started responding yet, continuing to wait...]`);
-    }
-
-    // Wait for streaming to complete (response stops changing)
     let lastContent = '';
-    let unchangedCount = 0;
-    let lastLogTime = Date.now();
+    let stableCount = 0;
+    const stabilityRequired = 2; // 2 identical content reads = done
+
+    console.log(`  [${this.name}: Fibonacci polling]`);
+
+    // Get initial content to detect when new response appears
+    const initialContent = await this.getLatestResponse();
 
     while (Date.now() - startTime < timeout) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
       const content = await this.getLatestResponse();
 
-      if (content === lastContent && content.length > 0) {
-        unchangedCount++;
-        if (unchangedCount >= stabilityThreshold) {
-          const elapsed = Math.round((Date.now() - startTime) / 1000);
-          console.log(`  [${this.name} response complete after ${elapsed}s]`);
-          return content;
-        }
-      } else {
-        unchangedCount = 0;
-        lastContent = content;
+      // Check if content is new (different from before we sent) and stable
+      if (content && content !== initialContent && content.length > 0) {
+        if (content === lastContent) {
+          stableCount++;
+          console.log(`  [${this.name}: stable ${stableCount}/${stabilityRequired} at ${elapsed}s]`);
 
-        // Log progress every 30 seconds
-        if (Date.now() - lastLogTime > 30000) {
-          const elapsed = Math.round((Date.now() - startTime) / 1000);
-          console.log(`  [${this.name} still thinking... ${elapsed}s elapsed]`);
-          lastLogTime = Date.now();
+          if (stableCount >= stabilityRequired) {
+            console.log(`  [${this.name} complete in ${elapsed}s, ${content.length} chars]`);
+            this.logTimingData(elapsed, content.length);
+            return content;
+          }
+        } else {
+          stableCount = 0;
+          lastContent = content;
+          console.log(`  [${this.name}: streaming at ${elapsed}s, ${content.length} chars]`);
         }
       }
 
-      await this.page.waitForTimeout(checkInterval);
+      // Fibonacci wait - first 3 at 1s for fast responses
+      const waitSeconds = fibIndex < 3 ? 1 : fibonacci[Math.min(fibIndex, fibonacci.length - 1)];
+      await this.page.waitForTimeout(waitSeconds * 1000);
+      fibIndex++;
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`  [${this.name} response timeout after ${elapsed}s, returning partial]`);
-    return lastContent;
+    const content = await this.getLatestResponse();
+    console.log(`  [${this.name} timeout after ${elapsed}s]`);
+    return content;
+  }
+
+  /**
+   * Log timing data for learning response patterns
+   */
+  logTimingData(elapsedSeconds, responseLength) {
+    const now = new Date();
+    const data = {
+      ai: this.name,
+      timestamp: now.toISOString(),
+      dayOfWeek: now.getDay(),
+      hourOfDay: now.getHours(),
+      responseTime: elapsedSeconds,
+      responseLength: responseLength
+    };
+    // Log for future pattern analysis
+    console.log(`  [TIMING: ${JSON.stringify(data)}]`);
   }
 
   /**
