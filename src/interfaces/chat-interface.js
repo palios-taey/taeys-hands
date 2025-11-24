@@ -1093,6 +1093,59 @@ export class PerplexityInterface extends ChatInterface {
   }
 
   /**
+   * Enable Research mode (Pro Search) on Perplexity
+   * Overrides base implementation with Perplexity-specific selector
+   */
+  async enableResearchMode(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-research-mode.png`;
+
+    console.log(`[${this.name}] enableResearchMode()`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Find and click research mode button - STRICT (no graceful handling)
+    const button = await this.page.waitForSelector('button[value="research"]', { timeout: 5000 });
+    await button.click();
+    console.log(`  ✓ Research mode enabled`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      enabled: true
+    };
+  }
+
+  /**
+   * Attach file (phase script interface)
+   * Wraps attachFileHumanLike() with screenshot capture
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Use the tested human-like attachment method
+    await this.attachFileHumanLike(filePath);
+
+    // Capture screenshot after attachment
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      attached: true
+    };
+  }
+
+  /**
    * Attach file using human-like Finder navigation
    */
   async attachFileHumanLike(filePath) {
