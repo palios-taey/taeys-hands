@@ -684,6 +684,42 @@ export class GrokInterface extends ChatInterface {
   buildConversationUrl(conversationId) {
     return `https://grok.com/chat/${conversationId}`;
   }
+
+  /**
+   * Attach file using human-like Finder navigation
+   */
+  async attachFileHumanLike(filePath) {
+    console.log(`  [Grok: Attaching file "${filePath}"]`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Step 1: Click "Attach" button to open menu
+    console.log(`  [${this.name}: Opening Attach menu]`);
+    const attachBtn = await this.page.waitForSelector('button[aria-label="Attach"]', { timeout: 5000 });
+    await attachBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Step 2: Click "Upload a file" menu item
+    console.log(`  [${this.name}: Clicking Upload a file]`);
+    const uploadItem = await this.page.waitForSelector('div[role="menuitem"]:has-text("Upload a file")', { timeout: 5000 });
+    await uploadItem.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use shared Finder navigation
+    await this._navigateFinderDialog(filePath);
+
+    console.log(`  [${this.name}: Attachment complete]`);
+    return true;
+  }
 }
 
 /**
