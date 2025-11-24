@@ -616,6 +616,42 @@ export class GeminiInterface extends ChatInterface {
   buildConversationUrl(conversationId) {
     return `https://gemini.google.com/app/${conversationId}`;
   }
+
+  /**
+   * Attach file using human-like Finder navigation
+   */
+  async attachFileHumanLike(filePath) {
+    console.log(`  [Gemini: Attaching file "${filePath}"]`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Step 1: Click "Open upload file menu" button to open the menu
+    console.log(`  [${this.name}: Opening upload file menu]`);
+    const menuBtn = await this.page.waitForSelector('button[aria-label="Open upload file menu"]', { timeout: 5000 });
+    await menuBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Step 2: Click "Upload files" in the menu
+    console.log(`  [${this.name}: Clicking Upload files]`);
+    const uploadBtn = await this.page.waitForSelector('button[data-test-id="local-images-files-uploader-button"]', { timeout: 5000 });
+    await uploadBtn.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use shared Finder navigation
+    await this._navigateFinderDialog(filePath);
+
+    console.log(`  [${this.name}: Attachment complete]`);
+    return true;
+  }
 }
 
 /**
