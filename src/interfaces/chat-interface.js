@@ -188,8 +188,15 @@ export class ChatInterface {
   /**
    * ATOMIC ACTION: Enable research/pro mode
    * Interface-specific implementation (e.g., Pro Search on Perplexity)
+   *
+   * ⚠️ UNVERIFIED ACTION - UI state change MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the UI actually changed state (button toggled, mode enabled).
+   * ALWAYS check the returned screenshot to verify the intended effect occurred.
+   *
    * @param {Object} options - { sessionId, screenshotPath, selector }
-   * @returns {Object} { screenshot: string, enabled: boolean, available: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   * @throws {Error} If research mode button not found or click fails
    */
   async enableResearchMode(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -202,55 +209,35 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    try {
-      const button = await this.page.waitForSelector(selector, { timeout: 3000 }).catch(() => null);
-      if (button) {
-        await button.click();
-        console.log(`  ✓ Research mode enabled`);
-        await this.page.waitForTimeout(500);
+    // STRICT: No graceful failure - throw if button not found
+    const button = await this.page.waitForSelector(selector, { timeout: 5000 });
+    await button.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
 
-        // Capture screenshot
-        await this.screenshot(screenshotPath);
-        console.log(`  ✓ Screenshot → ${screenshotPath}`);
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
-        return {
-          screenshot: screenshotPath,
-          enabled: true,
-          available: true
-        };
-      } else {
-        console.log(`  ⓘ Research mode button not found`);
-
-        // Capture screenshot anyway
-        await this.screenshot(screenshotPath);
-
-        return {
-          screenshot: screenshotPath,
-          enabled: false,
-          available: false
-        };
-      }
-    } catch (e) {
-      console.log(`  ⓘ Could not enable research mode: ${e.message}`);
-
-      // Capture screenshot
-      await this.screenshot(screenshotPath);
-
-      return {
-        screenshot: screenshotPath,
-        enabled: false,
-        available: false,
-        error: e.message
-      };
-    }
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
   }
 
   /**
    * ATOMIC ACTION: Attach file
    * Uses native file picker with osascript Cmd+Shift+G navigation
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
    * @param {string} filePath - Absolute path to file
    * @param {Object} options - { sessionId, screenshotPath, attachButtonSelector }
-   * @returns {Object} { screenshot: string, attached: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If attach button not found or file attachment fails
    */
   async attachFile(filePath, options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -263,76 +250,60 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    try {
-      // Click attach button
-      const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 }).catch(() => null);
-      if (!attachBtn) {
-        console.log(`  ⓘ Attach button not found`);
-        await this.screenshot(screenshotPath);
-        return {
-          screenshot: screenshotPath,
-          attached: false,
-          available: false
-        };
-      }
+    // STRICT: No graceful failure - throw if attach button not found
+    const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 });
+    await attachBtn.click();
+    console.log(`  ✓ Clicked attach button`);
+    await this.page.waitForTimeout(1500); // Wait for file picker
 
-      await attachBtn.click();
-      console.log(`  ✓ Clicked attach button`);
-      await this.page.waitForTimeout(1500); // Wait for file picker
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
 
-      // Use osascript to navigate file picker with Cmd+Shift+G
-      const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-      const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
 
-      // Cmd+Shift+G to open "Go to folder"
-      const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-      await this.osa.runScript(cmdShiftG);
-      await this.page.waitForTimeout(500);
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
 
-      // Type directory path
-      await this.osa.type(dir);
-      await this.page.waitForTimeout(300);
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
 
-      // Press Enter to navigate
-      await this.osa.pressKey('return');
-      await this.page.waitForTimeout(1000);
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
 
-      // Type filename to select it
-      await this.osa.type(filename);
-      await this.page.waitForTimeout(300);
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
-      // Press Enter to open/attach
-      await this.osa.pressKey('return');
-      console.log(`  ✓ File attached: ${filePath}`);
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
-      // Capture screenshot
-      await this.page.waitForTimeout(1500); // Wait for file to appear
-      await this.screenshot(screenshotPath);
-      console.log(`  ✓ Screenshot → ${screenshotPath}`);
-
-      return {
-        screenshot: screenshotPath,
-        attached: true,
-        filePath
-      };
-    } catch (e) {
-      console.log(`  ⓘ File attachment failed: ${e.message}`);
-
-      // Capture screenshot
-      await this.screenshot(screenshotPath);
-
-      return {
-        screenshot: screenshotPath,
-        attached: false,
-        error: e.message
-      };
-    }
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
   }
 
   /**
    * ATOMIC ACTION: Prepare input for typing
    * Brings tab to front, focuses input, captures screenshot
-   * @returns {Object} { screenshot: string, ready: boolean }
+   *
+   * ⚠️ UNVERIFIED ACTION - Input focus MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify focus actually moved to the input (cursor visible).
+   * ALWAYS check the returned screenshot to verify input has focus indicator.
+   *
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async prepareInput(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -351,20 +322,26 @@ export class ChatInterface {
 
     // Capture screenshot
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Input focused → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY FOCUS IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      ready: true
+      automationCompleted: true
     };
   }
 
   /**
    * ATOMIC ACTION: Type message into focused input
    * Assumes input is already focused (call prepareInput first)
+   *
+   * ⚠️ UNVERIFIED ACTION - Text in input MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify text actually appeared in the input box.
+   * ALWAYS check the returned screenshot to verify message is visible in input.
+   *
    * @param {string} message - The message to type
    * @param {Object} options - { humanLike: boolean, mixedContent: boolean, sessionId, screenshotPath }
-   * @returns {Object} { screenshot: string, typed: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async typeMessage(message, options = {}) {
     const useHumanInput = options.humanLike !== false;
@@ -396,19 +373,25 @@ export class ChatInterface {
     // Capture screenshot
     await this.page.waitForTimeout(500);
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Message typed → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY TEXT IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      typed: true
+      automationCompleted: true
     };
   }
 
   /**
    * ATOMIC ACTION: Send the message
    * Assumes message is already typed in input
+   *
+   * ⚠️ UNVERIFIED ACTION - Message submission MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the message actually sent (input cleared, message appears).
+   * ALWAYS check the returned screenshot to verify input is empty and sending.
+   *
    * @param {Object} options - { sessionId, screenshotPath }
-   * @returns {Object} { screenshot: string, sent: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async clickSend(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -423,11 +406,11 @@ export class ChatInterface {
     // Capture screenshot after send
     await this.page.waitForTimeout(1000);
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Message sent → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY SEND IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      sent: true
+      automationCompleted: true
     };
   }
 
@@ -1095,6 +1078,9 @@ export class PerplexityInterface extends ChatInterface {
   /**
    * Enable Research mode (Pro Search) on Perplexity
    * Overrides base implementation with Perplexity-specific selector
+   *
+   * ⚠️ UNVERIFIED ACTION - UI state change MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
    */
   async enableResearchMode(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -1109,7 +1095,7 @@ export class PerplexityInterface extends ChatInterface {
     // Find and click research mode button - STRICT (no graceful handling)
     const button = await this.page.waitForSelector('button[value="research"]', { timeout: 5000 });
     await button.click();
-    console.log(`  ✓ Research mode enabled`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
     await this.page.waitForTimeout(500);
 
     // Capture screenshot
@@ -1118,13 +1104,16 @@ export class PerplexityInterface extends ChatInterface {
 
     return {
       screenshot: screenshotPath,
-      enabled: true
+      automationCompleted: true
     };
   }
 
   /**
    * Attach file (phase script interface)
    * Wraps attachFileHumanLike() with screenshot capture
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
    */
   async attachFile(filePath, options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -1141,7 +1130,8 @@ export class PerplexityInterface extends ChatInterface {
 
     return {
       screenshot: screenshotPath,
-      attached: true
+      automationCompleted: true,
+      filePath
     };
   }
 
