@@ -752,6 +752,42 @@ export class PerplexityInterface extends ChatInterface {
   buildConversationUrl(conversationId) {
     return `https://perplexity.ai/search/${conversationId}`;
   }
+
+  /**
+   * Attach file using human-like Finder navigation
+   */
+  async attachFileHumanLike(filePath) {
+    console.log(`  [Perplexity: Attaching file "${filePath}"]`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Step 1: Click attach-files-button to open menu
+    console.log(`  [${this.name}: Opening attach files menu]`);
+    const attachBtn = await this.page.waitForSelector('button[data-testid="attach-files-button"]', { timeout: 5000 });
+    await attachBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Step 2: Click "Local files" menu item
+    console.log(`  [${this.name}: Clicking Local files]`);
+    const localFilesItem = await this.page.waitForSelector('div[role="menuitem"]:has-text("Local files")', { timeout: 5000 });
+    await localFilesItem.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use shared Finder navigation
+    await this._navigateFinderDialog(filePath);
+
+    console.log(`  [${this.name}: Attachment complete]`);
+    return true;
+  }
 }
 
 /**
