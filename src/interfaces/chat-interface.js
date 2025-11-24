@@ -173,6 +173,11 @@ export class ChatInterface {
 
     // Type the message
     if (useHumanInput) {
+      // CRITICAL: Bring this tab to front before focusing Chrome
+      // Without this, typing goes to whatever tab Chrome was showing
+      await this.page.bringToFront();
+      await this.page.waitForTimeout(200);
+
       // Use osascript for human-like typing with focus validation
       await this.osa.focusApp('Google Chrome');
 
@@ -495,6 +500,10 @@ export class ClaudeInterface extends ChatInterface {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
     // Focus Chrome
     await this.osa.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
@@ -563,6 +572,10 @@ export class ChatGPTInterface extends ChatInterface {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
     // Focus Chrome
     await this.osa.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
@@ -629,6 +642,10 @@ export class GeminiInterface extends ChatInterface {
     } catch {
       throw new Error(`File not found: ${filePath}`);
     }
+
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
 
     // Focus Chrome
     await this.osa.focusApp('Google Chrome');
@@ -698,6 +715,10 @@ export class GrokInterface extends ChatInterface {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
     // Focus Chrome
     await this.osa.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
@@ -765,6 +786,10 @@ export class PerplexityInterface extends ChatInterface {
     } catch {
       throw new Error(`File not found: ${filePath}`);
     }
+
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
 
     // Focus Chrome
     await this.osa.focusApp('Google Chrome');
