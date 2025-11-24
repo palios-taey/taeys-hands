@@ -278,14 +278,35 @@ export class ChatInterface {
 
       await attachBtn.click();
       console.log(`  ✓ Clicked attach button`);
+      await this.page.waitForTimeout(1500); // Wait for file picker
+
+      // Use osascript to navigate file picker with Cmd+Shift+G
+      const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+      const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+      // Cmd+Shift+G to open "Go to folder"
+      const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+      await this.osa.runScript(cmdShiftG);
       await this.page.waitForTimeout(500);
 
-      // Use existing attachFile helper (uses Cmd+Shift+G)
-      await this.attachFileWithKeyboard(filePath);
+      // Type directory path
+      await this.osa.type(dir);
+      await this.page.waitForTimeout(300);
+
+      // Press Enter to navigate
+      await this.osa.pressKey('return');
+      await this.page.waitForTimeout(1000);
+
+      // Type filename to select it
+      await this.osa.type(filename);
+      await this.page.waitForTimeout(300);
+
+      // Press Enter to open/attach
+      await this.osa.pressKey('return');
       console.log(`  ✓ File attached: ${filePath}`);
 
       // Capture screenshot
-      await this.page.waitForTimeout(1000);
+      await this.page.waitForTimeout(1500); // Wait for file to appear
       await this.screenshot(screenshotPath);
       console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
