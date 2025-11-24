@@ -317,6 +317,100 @@ Quartz.CGEventPost(Quartz.kCGHIDEventTap, Quartz.CGEventCreateMouseEvent(None, Q
       await this.type(chunk, options);
     }
   }
+
+  /**
+   * Set clipboard content using pbcopy
+   */
+  async setClipboard(text) {
+    // Use pbcopy to set clipboard - handles all characters safely
+    const { exec: execCb } = await import('child_process');
+    return new Promise((resolve, reject) => {
+      const proc = execCb('pbcopy');
+      proc.stdin.write(text);
+      proc.stdin.end();
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`pbcopy failed with code ${code}`));
+      });
+    });
+  }
+
+  /**
+   * Paste from clipboard (Cmd+V)
+   */
+  async paste() {
+    await this.runScript(`tell application "System Events" to keystroke "v" using {command down}`);
+    // Small delay to let paste complete
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  /**
+   * Safe paste - validates Chrome focus before pasting
+   */
+  async safePaste(options = {}) {
+    const focus = await this.validateFocus(options.expectedApp || 'Google Chrome');
+    if (!focus.valid) {
+      throw new Error(`Focus validation failed for paste: ${focus.error}`);
+    }
+    return await this.paste();
+  }
+
+  /**
+   * Type with mixed content - TYPE regular text, PASTE quoted content
+   * Detects patterns like "Quote from AI: \"...\""
+   *
+   * @param text - Full message text
+   * @param options.quotePattern - Regex to detect quoted content (default: content in quotes after colon)
+   * @param options.pasteQuotes - If true, paste quoted content; if false, type everything
+   */
+  async typeWithMixedContent(text, options = {}) {
+    const expectedApp = options.expectedApp || 'Google Chrome';
+    const pasteQuotes = options.pasteQuotes !== false; // Default true
+
+    // Pattern to match: AI_NAME: "quoted content" or similar patterns
+    // Also matches content after "Previous responses:" or similar headers
+    const quotePattern = options.quotePattern ||
+      /(?:^|\n)([A-Z]+:?\s*[""]([^""]+)[""])|(?:Previous responses:\n)([\s\S]+?)(?=\n\n|$)/gm;
+
+    // Validate initial focus
+    const initialFocus = await this.validateFocus(expectedApp);
+    if (!initialFocus.valid) {
+      throw new Error(`Initial focus validation failed: ${initialFocus.error}`);
+    }
+
+    // Simple approach: if message contains other AI responses, use paste for those sections
+    // For now, let's use a simpler heuristic: if text contains "\n\nPrevious" or "AI_NAME:" patterns
+
+    // Check if this looks like it contains other AI content
+    const hasAIContent = /\n(CLAUDE|CHATGPT|GROK|PERPLEXITY|GEMINI):/.test(text) ||
+                         /Previous responses:/i.test(text);
+
+    if (pasteQuotes && hasAIContent) {
+      // Split into my content (type) and AI content (paste)
+      const parts = text.split(/(\n(?:CLAUDE|CHATGPT|GROK|PERPLEXITY|GEMINI):[^\n]*(?:\n|$))/gi);
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+
+        // Check if this part is AI content (should be pasted)
+        const isAIContent = /^[\n\s]*(CLAUDE|CHATGPT|GROK|PERPLEXITY|GEMINI):/i.test(part);
+
+        if (isAIContent) {
+          // PASTE this content
+          console.log(`  [Pasting AI content: "${part.substring(0, 50)}..."]`);
+          await this.setClipboard(part);
+          await this.safePaste({ expectedApp });
+        } else {
+          // TYPE this content
+          await this.safeTypeLong(part, { expectedApp, ...options });
+        }
+      }
+    } else {
+      // No AI content detected, just type normally
+      await this.safeTypeLong(text, { expectedApp, ...options });
+    }
+  }
 }
 
 // CLI test

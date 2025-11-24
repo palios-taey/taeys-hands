@@ -45,6 +45,37 @@ export class ChatInterface {
   }
 
   /**
+   * Start a new chat conversation
+   * Either clicks the new chat button or navigates to the base URL
+   */
+  async startNewChat() {
+    // Try to click new chat button if available
+    if (this.selectors.newChatButton) {
+      try {
+        const newChatBtn = await this.page.$(this.selectors.newChatButton);
+        if (newChatBtn) {
+          await newChatBtn.click();
+          await this.page.waitForTimeout(1000);
+          console.log(`  [${this.name}: Started new chat via button]`);
+          return true;
+        }
+      } catch (e) {
+        // Fall through to URL navigation
+      }
+    }
+
+    // Fall back to navigating to base URL
+    if (this.url) {
+      await this.page.goto(this.url);
+      await this.page.waitForTimeout(2000);
+      console.log(`  [${this.name}: Started new chat via URL navigation]`);
+      return true;
+    }
+
+    throw new Error(`Cannot start new chat for ${this.name} - no button selector or URL`);
+  }
+
+  /**
    * Take a screenshot of the current page
    * @param {string} filename - Optional filename (default: /tmp/taey-screenshot.png)
    * @returns {string} Path to the saved screenshot
@@ -186,7 +217,12 @@ export class ChatInterface {
       await this.screenshot(preTypeScreenshot);
 
       // Use safe typing that validates Chrome focus and re-checks during long messages
-      await this.osa.safeTypeLong(message);
+      // If message contains AI content (cross-pollination), use mixed typing (type + paste)
+      if (options.mixedContent !== false) {
+        await this.osa.typeWithMixedContent(message);
+      } else {
+        await this.osa.safeTypeLong(message);
+      }
     } else {
       // Direct injection (faster but detectable)
       await input.fill(message);
