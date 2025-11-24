@@ -186,6 +186,129 @@ export class ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Enable research/pro mode
+   * Interface-specific implementation (e.g., Pro Search on Perplexity)
+   * @param {Object} options - { sessionId, screenshotPath, selector }
+   * @returns {Object} { screenshot: string, enabled: boolean, available: boolean }
+   */
+  async enableResearchMode(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-research-mode.png`;
+    const selector = options.selector || 'button[aria-label*="Pro"]'; // Default for Perplexity
+
+    console.log(`[${this.name}] enableResearchMode()`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    try {
+      const button = await this.page.waitForSelector(selector, { timeout: 3000 }).catch(() => null);
+      if (button) {
+        await button.click();
+        console.log(`  ✓ Research mode enabled`);
+        await this.page.waitForTimeout(500);
+
+        // Capture screenshot
+        await this.screenshot(screenshotPath);
+        console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+        return {
+          screenshot: screenshotPath,
+          enabled: true,
+          available: true
+        };
+      } else {
+        console.log(`  ⓘ Research mode button not found`);
+
+        // Capture screenshot anyway
+        await this.screenshot(screenshotPath);
+
+        return {
+          screenshot: screenshotPath,
+          enabled: false,
+          available: false
+        };
+      }
+    } catch (e) {
+      console.log(`  ⓘ Could not enable research mode: ${e.message}`);
+
+      // Capture screenshot
+      await this.screenshot(screenshotPath);
+
+      return {
+        screenshot: screenshotPath,
+        enabled: false,
+        available: false,
+        error: e.message
+      };
+    }
+  }
+
+  /**
+   * ATOMIC ACTION: Attach file
+   * Uses native file picker with osascript Cmd+Shift+G navigation
+   * @param {string} filePath - Absolute path to file
+   * @param {Object} options - { sessionId, screenshotPath, attachButtonSelector }
+   * @returns {Object} { screenshot: string, attached: boolean }
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+    const attachButtonSelector = options.attachButtonSelector || 'button[data-testid="attach-files-button"]';
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    try {
+      // Click attach button
+      const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 }).catch(() => null);
+      if (!attachBtn) {
+        console.log(`  ⓘ Attach button not found`);
+        await this.screenshot(screenshotPath);
+        return {
+          screenshot: screenshotPath,
+          attached: false,
+          available: false
+        };
+      }
+
+      await attachBtn.click();
+      console.log(`  ✓ Clicked attach button`);
+      await this.page.waitForTimeout(500);
+
+      // Use existing attachFile helper (uses Cmd+Shift+G)
+      await this.attachFileWithKeyboard(filePath);
+      console.log(`  ✓ File attached: ${filePath}`);
+
+      // Capture screenshot
+      await this.page.waitForTimeout(1000);
+      await this.screenshot(screenshotPath);
+      console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+      return {
+        screenshot: screenshotPath,
+        attached: true,
+        filePath
+      };
+    } catch (e) {
+      console.log(`  ⓘ File attachment failed: ${e.message}`);
+
+      // Capture screenshot
+      await this.screenshot(screenshotPath);
+
+      return {
+        screenshot: screenshotPath,
+        attached: false,
+        error: e.message
+      };
+    }
+  }
+
+  /**
    * ATOMIC ACTION: Prepare input for typing
    * Brings tab to front, focuses input, captures screenshot
    * @returns {Object} { screenshot: string, ready: boolean }
