@@ -186,12 +186,124 @@ export class ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Prepare input for typing
+   * Brings tab to front, focuses input, captures screenshot
+   * @returns {Object} { screenshot: string, ready: boolean }
+   */
+  async prepareInput(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-focused.png`;
+
+    console.log(`[${this.name}] prepareInput()`);
+
+    // Bring tab to front (CRITICAL for osascript typing)
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(100);
+
+    // Focus the input
+    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    await input.click();
+    await this.page.waitForTimeout(200);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Input focused → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      ready: true
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Type message into focused input
+   * Assumes input is already focused (call prepareInput first)
+   * @param {string} message - The message to type
+   * @param {Object} options - { humanLike: boolean, mixedContent: boolean, sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, typed: boolean }
+   */
+  async typeMessage(message, options = {}) {
+    const useHumanInput = options.humanLike !== false;
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-typed.png`;
+
+    console.log(`[${this.name}] typeMessage(${message.length} chars)`);
+
+    if (useHumanInput) {
+      // CRITICAL: Bring tab to front again before typing
+      await this.page.bringToFront();
+      await this.page.waitForTimeout(200);
+
+      // Use osascript for human-like typing
+      await this.osa.focusApp('Google Chrome');
+
+      // Use mixed content typing (type + paste) for AI quotes
+      if (options.mixedContent !== false) {
+        await this.osa.typeWithMixedContent(message);
+      } else {
+        await this.osa.safeTypeLong(message);
+      }
+    } else {
+      // Direct injection (faster but detectable)
+      const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+      await input.fill(message);
+    }
+
+    // Capture screenshot
+    await this.page.waitForTimeout(500);
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Message typed → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      typed: true
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Send the message
+   * Assumes message is already typed in input
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, sent: boolean }
+   */
+  async clickSend(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-sent.png`;
+
+    console.log(`[${this.name}] clickSend()`);
+
+    // Send via Enter key
+    await this.page.waitForTimeout(300);
+    await this.osa.pressKey('return');
+
+    // Capture screenshot after send
+    await this.page.waitForTimeout(1000);
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Message sent → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      sent: true
+    };
+  }
+
+  /**
    * Send a message and wait for response
+   * NOTE: This is now a convenience wrapper around atomic actions
+   * For step-by-step control, use: prepareInput() → typeMessage() → clickSend() → waitForResponse()
    */
   async sendMessage(message, options = {}) {
     const useHumanInput = options.humanLike !== false;
     const waitForResponse = options.waitForResponse !== false;
     const timeout = options.timeout || 120000; // 2 min default for long responses
+    const sessionId = Date.now();
+
+    console.log(`\n[${this.name}] Starting sendMessage with systematic verification`);
+
+    // CHECKPOINT 1: Initial state before any action
+    const ss1 = `/tmp/taey-${this.name}-${sessionId}-01-initial.png`;
+    await this.screenshot(ss1);
+    console.log(`  ✓ Screenshot 1: Initial state → ${ss1}`);
 
     // Bring this tab to foreground (critical for osascript typing)
     await this.page.bringToFront();
@@ -201,6 +313,11 @@ export class ChatInterface {
     const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
     await input.click();
     await this.page.waitForTimeout(200);
+
+    // CHECKPOINT 2: After focusing input, before typing
+    const ss2 = `/tmp/taey-${this.name}-${sessionId}-02-focused.png`;
+    await this.screenshot(ss2);
+    console.log(`  ✓ Screenshot 2: Input focused → ${ss2}`);
 
     // Type the message
     if (useHumanInput) {
@@ -212,12 +329,9 @@ export class ChatInterface {
       // Use osascript for human-like typing with focus validation
       await this.osa.focusApp('Google Chrome');
 
-      // Take pre-type screenshot for confirmation (can be reviewed if something goes wrong)
-      const preTypeScreenshot = `/tmp/taey-pretype-${this.name}-${Date.now()}.png`;
-      await this.screenshot(preTypeScreenshot);
-
       // Use safe typing that validates Chrome focus and re-checks during long messages
       // If message contains AI content (cross-pollination), use mixed typing (type + paste)
+      console.log(`  [Typing message: ${message.length} chars...]`);
       if (options.mixedContent !== false) {
         await this.osa.typeWithMixedContent(message);
       } else {
@@ -228,17 +342,41 @@ export class ChatInterface {
       await input.fill(message);
     }
 
+    // CHECKPOINT 3: After typing, before sending
+    await this.page.waitForTimeout(500);
+    const ss3 = `/tmp/taey-${this.name}-${sessionId}-03-typed.png`;
+    await this.screenshot(ss3);
+    console.log(`  ✓ Screenshot 3: Message typed → ${ss3}`);
+
     // Send the message
     await this.page.waitForTimeout(300);
     await this.osa.pressKey('return');
 
+    // CHECKPOINT 4: After clicking send
+    await this.page.waitForTimeout(1000);
+    const ss4 = `/tmp/taey-${this.name}-${sessionId}-04-sent.png`;
+    await this.screenshot(ss4);
+    console.log(`  ✓ Screenshot 4: Message sent → ${ss4}`);
+
     if (!waitForResponse) {
-      return { sent: true, response: null };
+      return { sent: true, response: null, screenshots: [ss1, ss2, ss3, ss4] };
     }
 
-    // Wait for response
-    const response = await this.waitForResponse(timeout);
-    return { sent: true, response };
+    // Wait for response (includes periodic screenshots during polling)
+    console.log(`  [Waiting for response, timeout: ${timeout/1000}s...]`);
+    const response = await this.waitForResponse(timeout, { sessionId });
+
+    return {
+      sent: true,
+      response,
+      screenshots: {
+        initial: ss1,
+        focused: ss2,
+        typed: ss3,
+        sent: ss4,
+        // waitForResponse adds its own screenshots
+      }
+    };
   }
 
   /**
@@ -251,7 +389,7 @@ export class ChatInterface {
     const startTime = Date.now();
     const takeScreenshots = options.screenshots !== false; // Default: enabled
     const screenshotDir = options.screenshotDir || '/tmp';
-    const sessionId = Date.now();
+    const sessionId = options.sessionId || Date.now();
 
     // Fibonacci sequence (seconds): 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
     const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
