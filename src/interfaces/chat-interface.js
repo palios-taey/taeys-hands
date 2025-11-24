@@ -707,6 +707,57 @@ export class ClaudeInterface extends ChatInterface {
   }
 
   /**
+   * Select Claude model (e.g., "Opus 4.5", "Sonnet 4")
+   *
+   * ⚠️ UNVERIFIED ACTION - Model selection MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the model actually changed in the UI.
+   * ALWAYS check the returned screenshot to verify model selected.
+   *
+   * @param {string} modelName - Model name to select (e.g., "Opus 4.5")
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   */
+  async selectModel(modelName = "Opus 4.5", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-claude-${sessionId}-model-selected.png`;
+
+    console.log(`[claude] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector dropdown button
+    const modelBtn = await this.page.waitForSelector('[data-testid="model-selector-dropdown"]', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Find and click the model menu item
+    const modelItem = this.page.locator(`div[role="menuitem"]:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
    * Enable or disable Research mode
    * @param {boolean} enabled - Whether to enable Research mode
    */
