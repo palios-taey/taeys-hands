@@ -1109,8 +1109,9 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button
-    const modelBtn = await this.page.waitForSelector('[data-testid="model-switcher-dropdown-button"]', { timeout: 5000 });
+    // Click model selector dropdown button (use .first() to handle duplicate elements)
+    const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
+    await modelBtn.waitFor({ state: 'visible', timeout: 5000 });
     await modelBtn.click();
     await this.page.waitForTimeout(400);
 
@@ -1171,8 +1172,9 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click + button
-    const plusBtn = await this.page.waitForSelector('[data-testid="composer-plus-btn"]', { timeout: 5000 });
+    // Click + button (use .first() to handle duplicate elements)
+    const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
+    await plusBtn.waitFor({ state: 'visible', timeout: 5000 });
     await plusBtn.click();
     await this.page.waitForTimeout(400);
 
@@ -1524,8 +1526,9 @@ export class GrokInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector button
-    const modelBtn = await this.page.waitForSelector('#model-select-trigger', { timeout: 5000 });
+    // Click model selector button (use .first() to handle duplicate elements)
+    const modelBtn = this.page.locator('#model-select-trigger').first();
+    await modelBtn.waitFor({ state: 'visible', timeout: 5000 });
     await modelBtn.click();
     await this.page.waitForTimeout(400);
 
