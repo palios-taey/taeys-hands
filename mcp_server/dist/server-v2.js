@@ -191,7 +191,7 @@ const TOOLS = [
     },
     {
         name: "taey_download_artifact",
-        description: "Download an artifact file from a chat response. Currently works with Claude artifacts. Detects download button and saves the file to specified path.",
+        description: "Download an artifact file from a chat response. Works with Claude (simple download), Gemini (multi-step export), and Perplexity (multi-step export). ChatGPT and Grok do not support artifact downloads.",
         inputSchema: {
             type: "object",
             properties: {
@@ -203,6 +203,11 @@ const TOOLS = [
                     type: "string",
                     description: "Directory path to save the downloaded file. Defaults to /tmp",
                     default: "/tmp"
+                },
+                format: {
+                    type: "string",
+                    description: "Download format for Gemini/Perplexity: 'markdown' or 'html'. Ignored for Claude. Defaults to 'markdown'",
+                    default: "markdown"
                 },
                 timeout: {
                     type: "number",
@@ -525,28 +530,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case "taey_download_artifact": {
-                const { sessionId, downloadPath = "/tmp", timeout = 10000 } = args;
+                const { sessionId, downloadPath = "/tmp", format = "markdown", timeout = 10000 } = args;
                 // Get interface from session
+                const session = sessionManager.getSession(sessionId);
                 const chatInterface = sessionManager.getInterface(sessionId);
                 // Check if interface supports downloadArtifact
                 if (typeof chatInterface.downloadArtifact !== 'function') {
-                    const session = sessionManager.getSession(sessionId);
                     throw new Error(`Artifact download not supported for ${session?.interfaceType || 'this interface'}`);
                 }
-                // Call downloadArtifact method
-                const result = await chatInterface.downloadArtifact({ downloadPath, timeout });
+                // Call downloadArtifact method with interface-specific options
+                const result = await chatInterface.downloadArtifact({
+                    downloadPath,
+                    format,
+                    timeout,
+                    sessionId
+                });
                 return {
                     content: [
                         {
                             type: "text",
                             text: JSON.stringify({
-                                success: result.downloaded,
+                                success: result.automationCompleted || result.downloaded || false,
                                 sessionId,
-                                downloaded: result.downloaded,
+                                interfaceType: session?.interfaceType || 'unknown',
                                 filePath: result.filePath,
-                                fileName: result.fileName,
-                                message: result.downloaded
-                                    ? `Downloaded artifact: ${result.fileName}`
+                                screenshot: result.screenshot,
+                                format: format,
+                                message: result.filePath
+                                    ? `Downloaded artifact to: ${result.filePath}`
                                     : "No artifact download button found",
                             }, null, 2),
                         },

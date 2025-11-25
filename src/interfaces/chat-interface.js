@@ -1364,6 +1364,76 @@ export class GeminiInterface extends ChatInterface {
       mode: modeName
     };
   }
+
+  /**
+   * Download artifact from Gemini conversation
+   * @param {Object} options - Download options
+   * @param {string} [options.format='markdown'] - Download format ('markdown' or 'html')
+   * @param {string} [options.downloadPath='/tmp'] - Directory to save file
+   * @param {number} [options.timeout=10000] - Timeout in ms
+   * @returns {Promise<{filePath: string, screenshot: string, automationCompleted: boolean}>}
+   */
+  async downloadArtifact(options = {}) {
+    const {
+      format = 'markdown',
+      downloadPath = '/tmp',
+      timeout = 10000,
+      sessionId = null
+    } = options;
+
+    console.log(`\n[Gemini] Downloading artifact (format: ${format})...`);
+    const screenshotPath = await this.getScreenshotPath('download-artifact', sessionId);
+
+    // Wait for and click asset card button
+    console.log('  → Looking for asset card...');
+    const assetCardBtn = await this.page.waitForSelector('[data-testid="asset-card-open-button"]', { timeout: 5000 });
+    if (!assetCardBtn) {
+      throw new Error('Asset card button not found');
+    }
+    await assetCardBtn.click();
+    await this.page.waitForTimeout(1000);
+
+    // Click Export button
+    console.log('  → Clicking Export...');
+    const exportBtn = await this.page.waitForSelector('text="Export"', { timeout: 5000 });
+    if (!exportBtn) {
+      throw new Error('Export button not found');
+    }
+    await exportBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click appropriate download format
+    const formatText = format === 'html' ? 'Download as HTML' : 'Download as Markdown';
+    console.log(`  → Clicking "${formatText}"...`);
+    const downloadBtn = await this.page.waitForSelector(`text="${formatText}"`, { timeout: 5000 });
+    if (!downloadBtn) {
+      throw new Error(`"${formatText}" button not found`);
+    }
+
+    // Set up download listener
+    const downloadPromise = this.page.waitForEvent('download', { timeout });
+    await downloadBtn.click();
+
+    // Wait for download to complete
+    console.log('  → Waiting for download...');
+    const download = await downloadPromise;
+    const fileName = download.suggestedFilename();
+    const filePath = `${downloadPath}/${fileName}`;
+    await download.saveAs(filePath);
+
+    console.log(`  ✓ Downloaded → ${filePath}`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      filePath,
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
+  }
 }
 
 /**
@@ -1647,6 +1717,76 @@ export class PerplexityInterface extends ChatInterface {
       screenshot: screenshotPath,
       automationCompleted: true,
       mode: modeValue
+    };
+  }
+
+  /**
+   * Download artifact from Perplexity conversation
+   * @param {Object} options - Download options
+   * @param {string} [options.format='markdown'] - Download format ('markdown' or 'html')
+   * @param {string} [options.downloadPath='/tmp'] - Directory to save file
+   * @param {number} [options.timeout=10000] - Timeout in ms
+   * @returns {Promise<{filePath: string, screenshot: string, automationCompleted: boolean}>}
+   */
+  async downloadArtifact(options = {}) {
+    const {
+      format = 'markdown',
+      downloadPath = '/tmp',
+      timeout = 10000,
+      sessionId = null
+    } = options;
+
+    console.log(`\n[Perplexity] Downloading artifact (format: ${format})...`);
+    const screenshotPath = await this.getScreenshotPath('download-artifact', sessionId);
+
+    // Wait for and click asset card button
+    console.log('  → Looking for asset card...');
+    const assetCardBtn = await this.page.waitForSelector('[data-testid="asset-card-open-button"]', { timeout: 5000 });
+    if (!assetCardBtn) {
+      throw new Error('Asset card button not found');
+    }
+    await assetCardBtn.click();
+    await this.page.waitForTimeout(1000);
+
+    // Click Export button
+    console.log('  → Clicking Export...');
+    const exportBtn = await this.page.waitForSelector('text="Export"', { timeout: 5000 });
+    if (!exportBtn) {
+      throw new Error('Export button not found');
+    }
+    await exportBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click appropriate download format
+    const formatText = format === 'html' ? 'Download as HTML' : 'Download as Markdown';
+    console.log(`  → Clicking "${formatText}"...`);
+    const downloadBtn = await this.page.waitForSelector(`text="${formatText}"`, { timeout: 5000 });
+    if (!downloadBtn) {
+      throw new Error(`"${formatText}" button not found`);
+    }
+
+    // Set up download listener
+    const downloadPromise = this.page.waitForEvent('download', { timeout });
+    await downloadBtn.click();
+
+    // Wait for download to complete
+    console.log('  → Waiting for download...');
+    const download = await downloadPromise;
+    const fileName = download.suggestedFilename();
+    const filePath = `${downloadPath}/${fileName}`;
+    await download.saveAs(filePath);
+
+    console.log(`  ✓ Downloaded → ${filePath}`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      filePath,
+      screenshot: screenshotPath,
+      automationCompleted: true
     };
   }
 }
