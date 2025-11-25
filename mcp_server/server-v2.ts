@@ -196,6 +196,30 @@ const TOOLS: Tool[] = [
       },
       required: ["sessionId"]
     }
+  },
+  {
+    name: "taey_download_artifact",
+    description: "Download an artifact file from a chat response. Currently works with Claude artifacts. Detects download button and saves the file to specified path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "Session ID returned from taey_connect"
+        },
+        downloadPath: {
+          type: "string",
+          description: "Directory path to save the downloaded file. Defaults to /tmp",
+          default: "/tmp"
+        },
+        timeout: {
+          type: "number",
+          description: "Timeout in milliseconds to wait for download button. Defaults to 10000ms",
+          default: 10000
+        }
+      },
+      required: ["sessionId"]
+    }
   }
 ];
 
@@ -570,6 +594,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 enabled: session.interfaceType === "claude" ? enabled : true,
                 mode: result.mode,
                 message: result.mode,
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      case "taey_download_artifact": {
+        const { sessionId, downloadPath = "/tmp", timeout = 10000 } = args as {
+          sessionId: string;
+          downloadPath?: string;
+          timeout?: number;
+        };
+
+        // Get interface from session
+        const chatInterface = sessionManager.getInterface(sessionId);
+
+        // Check if interface supports downloadArtifact
+        if (typeof chatInterface.downloadArtifact !== 'function') {
+          const session = sessionManager.getSession(sessionId);
+          throw new Error(`Artifact download not supported for ${session?.interfaceType || 'this interface'}`);
+        }
+
+        // Call downloadArtifact method
+        const result = await chatInterface.downloadArtifact({ downloadPath, timeout });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: result.downloaded,
+                sessionId,
+                downloaded: result.downloaded,
+                filePath: result.filePath,
+                fileName: result.fileName,
+                message: result.downloaded
+                  ? `Downloaded artifact: ${result.fileName}`
+                  : "No artifact download button found",
               }, null, 2),
             },
           ],
