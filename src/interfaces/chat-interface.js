@@ -1109,10 +1109,10 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button (use .first() to handle duplicate elements)
+    // Click model selector dropdown button (use dispatchEvent for CDP compatibility)
     const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
-    await modelBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await modelBtn.click();
+    await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await modelBtn.dispatchEvent('click');
     await this.page.waitForTimeout(400);
 
     if (isLegacy) {
@@ -1172,10 +1172,10 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click + button (use .first() to handle duplicate elements)
+    // Click + button (use dispatchEvent for CDP compatibility)
     const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
-    await plusBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await plusBtn.click();
+    await plusBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await plusBtn.dispatchEvent('click');
     await this.page.waitForTimeout(400);
 
     // Click mode option
@@ -1526,10 +1526,10 @@ export class GrokInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector button (use .first() to handle duplicate elements)
+    // Click model selector button (use dispatchEvent for CDP compatibility)
     const modelBtn = this.page.locator('#model-select-trigger').first();
-    await modelBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await modelBtn.click();
+    await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await modelBtn.dispatchEvent('click');
     await this.page.waitForTimeout(400);
 
     // Find and click the model menu item by text
