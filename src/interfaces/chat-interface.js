@@ -1109,16 +1109,16 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button (use dispatchEvent for CDP compatibility)
+    // Click model selector dropdown button
     const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
     await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await modelBtn.dispatchEvent('click');
-    await this.page.waitForTimeout(400);
+    await modelBtn.click();  // Use regular click, not dispatchEvent
+    await this.page.waitForTimeout(1000); // Wait for menu to fully render
 
     if (isLegacy) {
       // Click Legacy submenu first
       console.log(`  → Opening Legacy submenu`);
-      const legacyMenu = this.page.locator('text="Legacy"').first();
+      const legacyMenu = this.page.locator('[role="menuitem"]:has-text("Legacy"), div:has-text("Legacy models")').first();
       const legacyExists = await legacyMenu.count() > 0;
 
       if (!legacyExists) {
@@ -1130,8 +1130,8 @@ export class ChatGPTInterface extends ChatInterface {
       await this.page.waitForTimeout(300);
     }
 
-    // Find and click the model
-    const modelItem = this.page.locator(`text="${modelName}"`).first();
+    // Find and click the model (search within role="menu" or use flexible text matching)
+    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}")`).first();
     const itemExists = await modelItem.count() > 0;
 
     if (!itemExists) {
@@ -1172,11 +1172,11 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click + button (use dispatchEvent for CDP compatibility)
+    // Click + button
     const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
     await plusBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await plusBtn.dispatchEvent('click');
-    await this.page.waitForTimeout(400);
+    await plusBtn.click();  // Use regular click, not dispatchEvent
+    await this.page.waitForTimeout(800);
 
     // Click mode option
     const modeItem = this.page.locator(`text="${modeName}"`).first();
@@ -1526,14 +1526,16 @@ export class GrokInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector button (use dispatchEvent for CDP compatibility)
-    const modelBtn = this.page.locator('#model-select-trigger').first();
-    await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await modelBtn.dispatchEvent('click');
-    await this.page.waitForTimeout(400);
+    // Click model selector button using JavaScript (bypasses Playwright visibility checks)
+    await this.page.waitForSelector('#model-select-trigger', { state: 'attached', timeout: 5000 });
+    await this.page.evaluate(() => {
+      const button = document.querySelector('#model-select-trigger');
+      if (button) button.click();
+    });
+    await this.page.waitForTimeout(1000); // Wait for menu to fully render
 
-    // Find and click the model menu item by text
-    const modelItem = this.page.locator(`div[role="menuitem"]:has-text("${modelName}")`).first();
+    // Find and click the model menu item by text (flexible matching)
+    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}"), button:has-text("${modelName}")`).first();
     const itemExists = await modelItem.count() > 0;
 
     if (!itemExists) {

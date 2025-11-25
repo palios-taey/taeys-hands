@@ -4,7 +4,7 @@
  * Tests selectModel() and setMode() across all interfaces
  */
 
-import { ChatGPTInterface, GeminiInterface, GrokInterface, PerplexityInterface } from '../src/interfaces/chat-interface.js';
+import { ClaudeInterface, ChatGPTInterface, GeminiInterface, GrokInterface, PerplexityInterface } from '../src/interfaces/chat-interface.js';
 
 const DELAY = 2000; // 2 second delay between tests
 
@@ -27,8 +27,8 @@ async function testChatGPT() {
     await chatgpt.page.waitForTimeout(DELAY);
 
     // Test selectModel()
-    log('Testing selectModel("Thinking")...');
-    const modelResult = await chatgpt.selectModel("Thinking");
+    log('Testing selectModel("Instant")...');
+    const modelResult = await chatgpt.selectModel("Instant");
     log(`Model selected: ${modelResult.modelName}`, 'success');
     log(`Screenshot: ${modelResult.screenshot}`);
     await chatgpt.page.waitForTimeout(DELAY);
@@ -99,8 +99,8 @@ async function testGrok() {
     await grok.page.waitForTimeout(DELAY);
 
     // Test selectModel()
-    log('Testing selectModel("Grok 4.1 Thinking")...');
-    const modelResult = await grok.selectModel("Grok 4.1 Thinking");
+    log('Testing selectModel("Grok 4.1")...');
+    const modelResult = await grok.selectModel("Grok 4.1");
     log(`Model selected: ${modelResult.modelName}`, 'success');
     log(`Screenshot: ${modelResult.screenshot}`);
 
@@ -144,10 +144,40 @@ async function testPerplexity() {
   }
 }
 
+async function testClaude() {
+  log('\n=== Testing Claude Interface ===');
+  const claude = new ClaudeInterface();
+
+  try {
+    await claude.connect();
+    log('Connected to Claude');
+
+    // Start a new conversation
+    await claude.newConversation();
+    await claude.page.waitForTimeout(DELAY);
+
+    // Test selectModel()
+    log('Testing selectModel("Opus 4.5")...');
+    const modelResult = await claude.selectModel("Opus 4.5");
+    log(`Model selected: ${modelResult.modelName}`, 'success');
+    log(`Screenshot: ${modelResult.screenshot}`);
+
+    await claude.disconnect();
+    log('Claude tests complete', 'success');
+    return true;
+
+  } catch (error) {
+    log(`Claude test failed: ${error.message}`, 'error');
+    await claude.disconnect();
+    return false;
+  }
+}
+
 async function main() {
   log('Starting interface method tests...\n');
 
   const results = {
+    claude: false,
     chatgpt: false,
     gemini: false,
     grok: false,
@@ -155,8 +185,11 @@ async function main() {
   };
 
   // Run tests sequentially to avoid browser conflicts
-  results.chatgpt = await testChatGPT();
+  results.claude = await testClaude();
   await new Promise(resolve => setTimeout(resolve, 3000)); // 3s gap between interfaces
+
+  results.chatgpt = await testChatGPT();
+  await new Promise(resolve => setTimeout(resolve, 3000));
 
   results.gemini = await testGemini();
   await new Promise(resolve => setTimeout(resolve, 3000));
@@ -168,6 +201,7 @@ async function main() {
 
   // Print summary
   log('\n=== Test Summary ===');
+  log(`Claude:  ${results.claude ? '✅ PASS' : '❌ FAIL'}`);
   log(`ChatGPT: ${results.chatgpt ? '✅ PASS' : '❌ FAIL'}`);
   log(`Gemini:  ${results.gemini ? '✅ PASS' : '❌ FAIL'}`);
   log(`Grok:    ${results.grok ? '✅ PASS' : '❌ FAIL'}`);
