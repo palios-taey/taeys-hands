@@ -109,19 +109,22 @@ const TOOLS: Tool[] = [
   },
   {
     name: "taey_select_model",
-    description: "Select a Claude model in the current conversation. Only works with Claude interface sessions. Returns screenshot showing the selected model.",
+    description: "Select an AI model in the current conversation. Works with Claude, ChatGPT, Gemini, and Grok interfaces. Returns screenshot showing the selected model.",
     inputSchema: {
       type: "object",
       properties: {
         sessionId: {
           type: "string",
-          description: "Session ID returned from taey_connect (must be a Claude session)"
+          description: "Session ID returned from taey_connect"
         },
         modelName: {
           type: "string",
-          enum: ["Opus 4.5", "Sonnet 4", "Haiku 4"],
-          description: "Which Claude model to select",
-          default: "Opus 4.5"
+          description: "Model name to select. Options vary by interface:\n- Claude: 'Opus 4.5', 'Sonnet 4', 'Haiku 4'\n- ChatGPT: 'Auto', 'Instant', 'Thinking', 'Pro', 'GPT-4o' (legacy)\n- Gemini: 'Thinking with 3 Pro', 'Thinking'\n- Grok: 'Grok 4.1', 'Grok 4.1 Thinking', 'Grok 4 Heavy'"
+        },
+        isLegacy: {
+          type: "boolean",
+          description: "ChatGPT only: Set to true for legacy models like GPT-4o that are in the Legacy submenu",
+          default: false
         }
       },
       required: ["sessionId", "modelName"]
@@ -173,7 +176,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "taey_enable_research_mode",
-    description: "Enable extended thinking or research modes. For Claude: enables Extended Thinking mode via tools menu. For Perplexity: enables Pro Search mode. Returns screenshot confirming the mode change.",
+    description: "Enable extended thinking or research modes. Works with Claude (Extended Thinking), ChatGPT (Deep research), Gemini (Deep Research/Deep Think), and Perplexity (Pro Search). Returns screenshot confirming the mode change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -183,8 +186,12 @@ const TOOLS: Tool[] = [
         },
         enabled: {
           type: "boolean",
-          description: "Whether to enable (true) or disable (false) research mode. For Claude only - Perplexity always enables.",
+          description: "Whether to enable (true) or disable (false) research mode. For Claude only - other interfaces always enable.",
           default: true
+        },
+        modeName: {
+          type: "string",
+          description: "Optional mode name. For ChatGPT: 'Deep research'. For Gemini: 'Deep Research' or 'Deep Think'. Ignored for Claude and Perplexity."
         }
       },
       required: ["sessionId"]
@@ -364,9 +371,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "taey_select_model": {
-        const { sessionId, modelName } = args as {
+        const { sessionId, modelName, isLegacy = false } = args as {
           sessionId: string;
           modelName: string;
+          isLegacy?: boolean;
         };
 
         // Get session to check interface type
@@ -375,16 +383,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error(`Session not found: ${sessionId}`);
         }
 
-        // Check that this is a Claude session
-        if (session.interfaceType !== "claude") {
-          throw new Error(`taey_select_model only works with Claude sessions. This session is: ${session.interfaceType}`);
-        }
-
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
 
-        // Call selectModel method (Claude-specific)
-        const result = await chatInterface.selectModel(modelName);
+        // Verify interface has selectModel method
+        if (typeof chatInterface.selectModel !== 'function') {
+          throw new Error(`Model selection not supported for ${session.interfaceType}`);
+        }
+
+        // Call selectModel with interface-specific parameters
+        let result;
+        if (session.interfaceType === "chatgpt") {
+          // ChatGPT: pass isLegacy parameter
+          result = await chatInterface.selectModel(modelName, isLegacy, { sessionId });
+        } else {
+          // Claude, Gemini, Grok: standard call
+          result = await chatInterface.selectModel(modelName, { sessionId });
+        }
 
         return {
           content: [
@@ -393,6 +408,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 sessionId,
+                interfaceType: session.interfaceType,
                 modelName: result.modelName,
                 screenshot: result.screenshot,
                 message: `Selected model: ${result.modelName}`,
@@ -484,9 +500,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "taey_enable_research_mode": {
-        const { sessionId, enabled = true } = args as {
+        const { sessionId, enabled = true, modeName } = args as {
           sessionId: string;
           enabled?: boolean;
+          modeName?: string;
         };
 
         // Get session to check interface type
@@ -513,6 +530,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             enabled,
             mode: enabled ? "Extended Thinking enabled" : "Extended Thinking disabled"
           };
+        } else if (session.interfaceType === "chatgpt") {
+          // ChatGPT: use setMode() with Deep research
+          const mode = modeName || "Deep research";
+          result = await chatInterface.setMode(mode, { sessionId });
+          screenshot = result.screenshot || '';
+          result.mode = `${mode} enabled`;
+        } else if (session.interfaceType === "gemini") {
+          // Gemini: use setMode() with Deep Research or Deep Think
+          const mode = modeName || "Deep Research";
+          result = await chatInterface.setMode(mode, { sessionId });
+          screenshot = result.screenshot || '';
+          result.mode = `${mode} enabled`;
         } else if (session.interfaceType === "perplexity") {
           // Perplexity: use enableResearchMode() - always enables
           result = await chatInterface.enableResearchMode({ sessionId });
