@@ -1090,6 +1090,115 @@ export class ChatGPTInterface extends ChatInterface {
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
   }
+
+  /**
+   * ATOMIC ACTION: Select AI model (ChatGPT-specific)
+   *
+   * @param {string} modelName - Model name: "Auto", "Instant", "Thinking", "Pro", or "GPT-4o" (legacy)
+   * @param {boolean} isLegacy - Whether to access model from Legacy submenu (e.g., for GPT-4o)
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Auto", isLegacy = false, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-model-selected.png`;
+
+    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector dropdown button
+    const modelBtn = await this.page.waitForSelector('[data-testid="model-switcher-dropdown-button"]', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    if (isLegacy) {
+      // Click Legacy submenu first
+      console.log(`  → Opening Legacy submenu`);
+      const legacyMenu = this.page.locator('text="Legacy"').first();
+      const legacyExists = await legacyMenu.count() > 0;
+
+      if (!legacyExists) {
+        await this.page.keyboard.press('Escape');
+        throw new Error('Legacy submenu not found in model selector');
+      }
+
+      await legacyMenu.click();
+      await this.page.waitForTimeout(300);
+    }
+
+    // Find and click the model
+    const modelItem = this.page.locator(`text="${modelName}"`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (ChatGPT-specific)
+   * Enables special modes like Deep research, Agent mode, Web search, or GitHub
+   *
+   * @param {string} modeName - Mode: "Deep research", "Agent mode", "Web search", or "GitHub"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeName, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-mode-set.png`;
+
+    console.log(`[chatgpt] setMode(${modeName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click + button
+    const plusBtn = await this.page.waitForSelector('[data-testid="composer-plus-btn"]', { timeout: 5000 });
+    await plusBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Click mode option
+    const modeItem = this.page.locator(`text="${modeName}"`).first();
+    const itemExists = await modeItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Mode "${modeName}" not found in + menu`);
+    }
+
+    await modeItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeName
+    };
+  }
 }
 
 /**
@@ -1162,6 +1271,99 @@ export class GeminiInterface extends ChatInterface {
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
   }
+
+  /**
+   * ATOMIC ACTION: Select AI model (Gemini-specific)
+   *
+   * @param {string} modelName - Model name (e.g., "Thinking with 3 Pro", "Thinking")
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Thinking", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-gemini-${sessionId}-model-selected.png`;
+
+    console.log(`[gemini] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector button
+    const modelBtn = await this.page.waitForSelector('[data-test-id="bard-mode-menu-button"]', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Find and click the model menu item by text
+    const modelItem = this.page.locator(`button[mat-menu-item]:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (Gemini-specific)
+   * Enables special modes like Deep Research or Deep Think
+   *
+   * @param {string} modeName - Mode: "Deep Research" or "Deep Think"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeName, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-gemini-${sessionId}-mode-set.png`;
+
+    console.log(`[gemini] setMode(${modeName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click toolbox drawer button to open modes menu
+    const drawerBtn = await this.page.waitForSelector('button.toolbox-drawer-button', { timeout: 5000 });
+    await drawerBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Click mode option by text
+    const modeItem = this.page.locator(`button[mat-list-item]:has-text("${modeName}")`).first();
+    const itemExists = await modeItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Mode "${modeName}" not found in toolbox drawer menu`);
+    }
+
+    await modeItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeName
+    };
+  }
 }
 
 /**
@@ -1233,6 +1435,52 @@ export class GrokInterface extends ChatInterface {
 
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
+  }
+
+  /**
+   * ATOMIC ACTION: Select AI model (Grok-specific)
+   *
+   * @param {string} modelName - Model name: "Grok 4.1", "Grok 4.1 Thinking", or "Grok 4 Heavy"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Grok 4.1", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-grok-${sessionId}-model-selected.png`;
+
+    console.log(`[grok] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector button
+    const modelBtn = await this.page.waitForSelector('#model-select-trigger', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Find and click the model menu item by text
+    const modelItem = this.page.locator(`div[role="menuitem"]:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
   }
 }
 
@@ -1365,6 +1613,41 @@ export class PerplexityInterface extends ChatInterface {
 
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (Perplexity-specific)
+   * Selects one of the three available modes: Search, Research Pro, or Labs
+   *
+   * @param {string} modeValue - Mode value: "search", "research", or "studio"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeValue, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-perplexity-${sessionId}-mode-set.png`;
+
+    console.log(`[perplexity] setMode(${modeValue})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click the mode button with the specified value attribute
+    const modeBtn = await this.page.waitForSelector(`button[role="radio"][value="${modeValue}"]`, { timeout: 5000 });
+    await modeBtn.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeValue
+    };
   }
 }
 
