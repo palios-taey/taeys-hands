@@ -11,6 +11,7 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.22.0",
     "neo4j-driver": "^6.0.1",
     "playwright": "^1.40.0",
     "playwright-extra": "^4.3.6",

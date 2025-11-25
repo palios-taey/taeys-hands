@@ -758,6 +758,89 @@ export class ClaudeInterface extends ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Attach file (Claude-specific override)
+   * Uses + menu instead of direct attach button
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
+   * @param {string} filePath - Absolute path to file
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If + menu or file attachment fails
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Validate file exists
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Click + menu
+    const plusBtn = await this.page.waitForSelector('[data-testid="input-menu-plus"]', { timeout: 5000 });
+    await plusBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click "Upload a file"
+    const menuItem = await this.page.waitForSelector('text="Upload a file"', { timeout: 5000 });
+    await menuItem.click();
+    console.log(`  ✓ Clicked "Upload a file"`);
+    await this.page.waitForTimeout(1500); // Wait for file picker
+
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
+
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
+  }
+
+  /**
    * Enable or disable Research mode
    * @param {boolean} enabled - Whether to enable Research mode
    */
@@ -795,6 +878,64 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.keyboard.press('Escape');
     await this.page.waitForTimeout(200);
     return true;
+  }
+
+  /**
+   * Download artifact from Claude Chat response
+   * Detects Download button and downloads the artifact file
+   *
+   * @param {Object} options - { downloadPath, timeout }
+   * @returns {Object} { downloaded: boolean, filePath: string|null, fileName: string|null }
+   */
+  async downloadArtifact(options = {}) {
+    const downloadPath = options.downloadPath || '/tmp';
+    const timeout = options.timeout || 10000;
+
+    console.log(`[${this.name}] downloadArtifact()`);
+
+    // Check if Download button exists
+    try {
+      const downloadBtn = await this.page.waitForSelector('button[aria-label="Download"]', {
+        timeout,
+        state: 'visible'
+      });
+
+      if (!downloadBtn) {
+        console.log('  ✗ No Download button found');
+        return { downloaded: false, filePath: null, fileName: null };
+      }
+
+      console.log('  ✓ Download button found');
+
+      // Set up download handler
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 30000 });
+
+      // Click download button
+      await downloadBtn.click();
+      console.log('  ✓ Clicked Download button');
+
+      // Wait for download to start
+      const download = await downloadPromise;
+      const fileName = download.suggestedFilename();
+      const filePath = `${downloadPath}/${fileName}`;
+
+      // Save to specified path
+      await download.saveAs(filePath);
+      console.log(`  ✓ Downloaded → ${filePath}`);
+
+      return {
+        downloaded: true,
+        filePath,
+        fileName
+      };
+
+    } catch (e) {
+      if (e.message.includes('Timeout')) {
+        console.log('  ✗ No Download button found (timeout)');
+        return { downloaded: false, filePath: null, fileName: null };
+      }
+      throw e;
+    }
   }
 
   async waitForResponse(timeout = 300000) {
