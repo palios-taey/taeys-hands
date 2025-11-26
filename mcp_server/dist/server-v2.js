@@ -466,12 +466,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: "text",
                             text: JSON.stringify({
-                                success: true,
+                                automationCompleted: true,
                                 sessionId,
                                 interfaceType: session.interfaceType,
                                 modelName: result.modelName,
                                 screenshot: result.screenshot,
-                                message: `Selected model: ${result.modelName}`,
+                                message: `Automation completed for model: ${result.modelName}. VERIFY in screenshot - tool cannot confirm UI actually changed.`,
                             }, null, 2),
                         },
                     ],
@@ -498,11 +498,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: "text",
                             text: JSON.stringify({
-                                success: true,
+                                automationCompleted: true,
                                 filesAttached: attachmentResults.length,
                                 attachments: attachmentResults,
                                 screenshot: lastScreenshot,
-                                message: `Attached ${attachmentResults.length} file(s)`,
+                                message: `Automation completed for ${attachmentResults.length} file(s). VERIFY in screenshot - tool cannot confirm files actually attached.`,
                             }, null, 2),
                         },
                     ],
