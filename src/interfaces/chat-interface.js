@@ -1250,27 +1250,29 @@ export class ChatGPTInterface extends ChatInterface {
 
     console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''})`);
 
-    // Bring tab to front and wait for it to be fully interactive
+    // Bring tab to front
     await this.osa.focusApp('Google Chrome');
     await this.page.bringToFront();
-    await this.page.waitForTimeout(800); // Increased wait for tab to become interactive
+    await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button (use JavaScript evaluate for CDP)
-    const clicked = await this.page.evaluate(() => {
+    // Get button coordinates and perform real mouse click
+    const buttonBox = await this.page.evaluate(() => {
       const btn = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
-      if (btn) {
-        btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-        btn.click();
-        return true;
-      }
-      return false;
+      if (!btn) return null;
+      const rect = btn.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      };
     });
 
-    if (!clicked) {
+    if (!buttonBox) {
       throw new Error('Model selector button not found');
     }
 
-    await this.page.waitForTimeout(1500); // Wait for menu to fully render
+    // Perform real mouse click at button center
+    await this.page.mouse.click(buttonBox.x, buttonBox.y);
+    await this.page.waitForTimeout(400); // Wait for menu to open
 
     if (isLegacy) {
       // Click Legacy submenu first
