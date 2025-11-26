@@ -14,3 +14,15 @@ logs/
 
 # Chrome debug profile (local only)
 .chrome-debug-profile/
+
+# Test outputs
+/tmp/
+/screenshots/
+tests/**/*.png
+tests/**/results/
+
+# Build artifacts (source maps can be large)
+mcp_server/dist/*.js.map
+
+# Session data
+.sessions/
