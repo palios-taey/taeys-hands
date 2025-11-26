@@ -345,6 +345,96 @@ export class ConversationStore {
       { conversationId, summary }
     );
   }
+
+  /**
+   * Update conversation metadata (model, context state, etc.)
+   */
+  async updateConversation(conversationId, updates = {}) {
+    const params = { conversationId };
+    const setClauses = [];
+
+    if (updates.model) {
+      setClauses.push('c.model = $model');
+      params.model = updates.model;
+    }
+    if (updates.contextProvided !== undefined) {
+      setClauses.push('c.contextProvided = $contextProvided');
+      params.contextProvided = updates.contextProvided;
+    }
+    if (updates.sessionType) {
+      setClauses.push('c.sessionType = $sessionType'); // 'fresh' | 'continuing'
+      params.sessionType = updates.sessionType;
+    }
+    if (updates.lastActivity) {
+      setClauses.push('c.lastActivity = datetime($lastActivity)');
+      params.lastActivity = updates.lastActivity;
+    }
+
+    if (setClauses.length === 0) return;
+
+    await this.client.write(
+      `MATCH (c:Conversation {id: $conversationId})
+       SET ${setClauses.join(', ')}
+       RETURN c`,
+      params
+    );
+
+    console.log(`[ConversationStore] Updated conversation ${conversationId}`);
+  }
+
+  /**
+   * Get all active sessions (for post-compact recovery)
+   */
+  async getActiveSessions() {
+    const results = await this.client.run(
+      `MATCH (c:Conversation {status: 'active'})
+       OPTIONAL MATCH (c)-[:INVOLVES]->(p:Platform)
+       OPTIONAL MATCH (m:Message)-[:PART_OF]->(c)
+       WITH c, collect(DISTINCT p.name) as platforms,
+            count(m) as messageCount,
+            max(m.timestamp) as lastMessageTime
+       RETURN c, platforms, messageCount, lastMessageTime
+       ORDER BY c.createdAt DESC`
+    );
+
+    return results.map(row => ({
+      ...row.c.properties,
+      platforms: row.platforms,
+      messageCount: row.messageCount,
+      lastMessageTime: row.lastMessageTime
+    }));
+  }
+
+  /**
+   * Get session context summary (for quick reload after compact)
+   */
+  async getSessionContext(conversationId) {
+    const results = await this.client.run(
+      `MATCH (c:Conversation {id: $conversationId})
+       OPTIONAL MATCH (m:Message)-[:PART_OF]->(c)
+       OPTIONAL MATCH (m)-[:FROM]->(p:Platform)
+       WITH c, m, p
+       ORDER BY m.timestamp DESC
+       LIMIT 5
+       RETURN c,
+              collect({
+                role: m.role,
+                content: substring(m.content, 0, 200),
+                platform: p.name,
+                timestamp: m.timestamp,
+                attachments: m.attachments
+              }) as recentMessages`,
+      { conversationId }
+    );
+
+    if (!results.length) return null;
+
+    const row = results[0];
+    return {
+      conversation: row.c.properties,
+      recentMessages: row.recentMessages.filter(m => m.role !== null)
+    };
+  }
 }
 
 // Import neo4j for int conversion
