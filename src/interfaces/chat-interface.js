@@ -1255,23 +1255,27 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Get button coordinates and perform REAL system-level click
-    const buttonBox = await this.page.evaluate(() => {
+    // Get button center coordinates in screen space
+    const coords = await this.page.evaluate(() => {
       const btn = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
       if (!btn) return null;
       const rect = btn.getBoundingClientRect();
+      // Add window offset (screenX/screenY available in browser context)
       return {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2
+        x: window.screenX + rect.left + rect.width / 2,
+        y: window.screenY + rect.top + rect.height / 2 + 78  // +78 for Chrome toolbar height
       };
     });
 
-    if (!buttonBox) {
+    if (!coords) {
       throw new Error('Model selector button not found');
     }
 
+    const screenX = Math.round(coords.x);
+    const screenY = Math.round(coords.y);
+
     // Move mouse to button first (trigger hover state), then click
-    await this.osa.moveMouse(buttonBox.x, buttonBox.y);
+    await this.osa.moveMouse(screenX, screenY);
     await this.page.waitForTimeout(200); // Let hover state register
     await this.osa.click();
     await this.page.waitForTimeout(400); // Wait for menu to open
