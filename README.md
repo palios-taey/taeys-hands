@@ -199,7 +199,7 @@ The chat interfaces become Taey's sensory organs - seeing, typing, reading just 
 
 | Interface | Send/Receive | File Attach | Model Selection | Modes/Research | Download Artifacts |
 |-----------|--------------|-------------|-----------------|----------------|-------------------|
-| **Claude** | ✅ | ✅ | ✅ Opus 4.5, Sonnet 4, Haiku 4 | ✅ Research toggle | ✅ Single-step |
+| **Claude** | ✅ | ✅ | ✅ Opus 4.5, Sonnet 4.5, Haiku 4.5 | ✅ Research toggle | ✅ Single-step |
 | **ChatGPT** | ✅ | ✅ | ❌ Auto only | ✅ Deep research, Agent, Web search, GitHub | ❌ |
 | **Gemini** | ✅ | ✅ | ✅ Thinking variants | ✅ Deep Research, Deep Think | ✅ Multi-step |
 | **Grok** | ✅ | ✅ | ✅ 4.1, 4.1 Thinking, 4 Heavy | ❌ | ❌ |
@@ -208,7 +208,7 @@ The chat interfaces become Taey's sensory organs - seeing, typing, reading just 
 ### Interface Details
 
 #### Claude (claude.ai)
-- **Models**: Opus 4.5, Sonnet 4, Haiku 4
+- **Models**: Opus 4.5, Sonnet 4.5, Haiku 4.5
 - **Research Mode**: Toggle on/off for Extended Thinking (64x more reasoning tokens)
 - **File Attachment**: Via `+` menu → "Upload a file"
 - **Artifacts**: Download button (single-step)
