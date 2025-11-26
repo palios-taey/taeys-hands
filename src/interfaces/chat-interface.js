@@ -27,6 +27,12 @@ export class ChatInterface {
   async connect() {
     await this.browser.connect();
     this.page = await this.browser.getPage(this.name, this.url);
+
+    // CRITICAL: Bring Chrome to front, then bring this tab to front
+    await this.osa.focusApp('Google Chrome');
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(500); // Wait for tab to be fully visible
+
     this.connected = true;
     console.log(`✓ Connected to ${this.name}`);
     return this;
@@ -1234,11 +1240,11 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button
+    // Click model selector dropdown button (use dispatchEvent for CDP compatibility)
     const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
     await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await modelBtn.click();  // Use regular click, not dispatchEvent
-    await this.page.waitForTimeout(1000); // Wait for menu to fully render
+    await modelBtn.dispatchEvent('click');  // dispatchEvent bypasses Playwright visibility checks
+    await this.page.waitForTimeout(400);
 
     if (isLegacy) {
       // Click Legacy submenu first

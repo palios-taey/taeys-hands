@@ -16,7 +16,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { getSessionManager, type InterfaceType } from "./session-manager.js";
 // @ts-ignore - conversation-store is JS, not TS
-import { getConversationStore } from "../src/core/conversation-store.js";
+import { getConversationStore } from "../../src/core/conversation-store.js";
 
 // Get singleton session manager
 const sessionManager = getSessionManager();
