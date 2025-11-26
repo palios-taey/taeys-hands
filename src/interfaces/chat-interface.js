@@ -1255,7 +1255,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Get button coordinates and perform real mouse click
+    // Get button coordinates and perform REAL system-level click
     const buttonBox = await this.page.evaluate(() => {
       const btn = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
       if (!btn) return null;
@@ -1270,8 +1270,8 @@ export class ChatGPTInterface extends ChatInterface {
       throw new Error('Model selector button not found');
     }
 
-    // Perform real mouse click at button center
-    await this.page.mouse.click(buttonBox.x, buttonBox.y);
+    // Use OSABridge for real system-level click (not Playwright simulation)
+    await this.osa.clickAt(buttonBox.x, buttonBox.y);
     await this.page.waitForTimeout(400); // Wait for menu to open
 
     // Verify menu opened by checking for menu items
