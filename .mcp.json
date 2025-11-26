@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "taey-hands": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./mcp_server/dist/server-v2.js"
+      ],
+      "env": {}
+    }
+  }
+}
