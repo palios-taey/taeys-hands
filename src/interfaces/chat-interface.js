@@ -1270,8 +1270,10 @@ export class ChatGPTInterface extends ChatInterface {
       throw new Error('Model selector button not found');
     }
 
-    // Use OSABridge for real system-level click (not Playwright simulation)
-    await this.osa.clickAt(buttonBox.x, buttonBox.y);
+    // Move mouse to button first (trigger hover state), then click
+    await this.osa.moveMouse(buttonBox.x, buttonBox.y);
+    await this.page.waitForTimeout(200); // Let hover state register
+    await this.osa.click();
     await this.page.waitForTimeout(400); // Wait for menu to open
 
     // Verify menu opened by checking for menu items
