@@ -1254,11 +1254,11 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector dropdown button (use dispatchEvent for CDP compatibility)
+    // Click model selector dropdown button
     const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
     await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await modelBtn.dispatchEvent('click');  // dispatchEvent bypasses Playwright visibility checks
-    await this.page.waitForTimeout(400);
+    await modelBtn.click();  // Use regular click, not dispatchEvent
+    await this.page.waitForTimeout(1000); // Wait for menu to fully render
 
     if (isLegacy) {
       // Click Legacy submenu first
