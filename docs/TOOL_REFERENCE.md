@@ -235,8 +235,8 @@ taey_extract_response(sessionId: "abc-123")
 
 **Claude**:
 - Opus 4.5 (recommended for complex reasoning)
-- Sonnet 4 (faster, good balance)
-- Haiku 4 (fastest)
+- Sonnet 4.5 (faster, good balance)
+- Haiku 4.5 (fastest)
 
 **ChatGPT** (Model selection disabled - Auto mode only):
 - Auto (default, automatic selection)

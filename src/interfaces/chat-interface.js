@@ -769,14 +769,14 @@ export class ClaudeInterface extends ChatInterface {
   }
 
   /**
-   * Select Claude model (e.g., "Opus 4.5", "Sonnet 4")
+   * Select Claude model (e.g., "Opus 4.5", "Sonnet 4.5", "Haiku 4.5")
    *
    * ⚠️ UNVERIFIED ACTION - Model selection MUST be confirmed via screenshot
    * This method only confirms automation steps completed without errors.
    * It does NOT verify the model actually changed in the UI.
    * ALWAYS check the returned screenshot to verify model selected.
    *
-   * @param {string} modelName - Model name to select (e.g., "Opus 4.5")
+   * @param {string} modelName - Model name to select (e.g., "Opus 4.5", "Sonnet 4.5", "Haiku 4.5")
    * @param {Object} options - { sessionId, screenshotPath }
    * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
