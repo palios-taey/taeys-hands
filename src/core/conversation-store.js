@@ -419,7 +419,7 @@ export class ConversationStore {
        RETURN c,
               collect({
                 role: m.role,
-                content: substring(m.content, 0, 200),
+                content: m.content,
                 platform: p.name,
                 timestamp: m.timestamp,
                 attachments: m.attachments
