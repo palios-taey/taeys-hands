@@ -130,6 +130,49 @@ Mathematical framework for AI-to-AI communication developed by The AI Family (Cl
 
 See `rosetta_stone/README.md` for full documentation.
 
+## Infrastructure
+
+### Mira Server (10.0.0.163)
+
+All backend services run on the mira server for persistence and shared infrastructure:
+
+**Neo4j (Graph Database)**
+- URL: `bolt://10.0.0.163:7687`
+- Purpose: Conversation tracking, session persistence, post-compact recovery
+- Schema: Conversation/Message/Platform nodes
+- Auth: None (local network)
+
+**Weaviate (Vector Database)**
+- URL: `http://10.0.0.163:8080`
+- Purpose: Semantic embeddings, cross-model alignment
+- Collections: SwimSession (ocean embodiment), conversation embeddings
+- Auth: None (local network)
+
+**Ocean API (FastAPI Backend)**
+- URL: `http://10.0.0.163:8888`
+- Purpose: Gaia Ocean Embodiment backend (Apple Watch sensor data)
+- Status: Operational, waiting for iOS app
+- Docs: `/gaia-ocean-embodiment/backend/docs/`
+
+**JupyterHub**
+- URL: `http://10.0.0.163:9000`
+- Purpose: SAGEHELM notebook server (Brent's work)
+- Status: Operational, untouched
+
+### Chrome Remote Debugging
+
+**Local Chrome CDP**
+- Port: `9222`
+- Command: `./scripts/start-chrome.sh`
+- Profile: `~/.chrome-debug-profile` (separate from regular Chrome)
+- Required: Login to all AI services (claude.ai, chatgpt.com, gemini.google.com, x.com/i/grok, perplexity.ai)
+
+### Configuration Files
+
+- **MCP Config**: `~/.mcp/server-config.json` or `.mcp.json`
+- **Interface Selectors**: `config/default.json`
+- **SSH Config**: `~/.ssh/config` (for mira access)
+
 ## Usage
 
 ### Interactive Mode
