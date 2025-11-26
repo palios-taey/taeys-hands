@@ -15,9 +15,19 @@ import {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { getSessionManager, type InterfaceType } from "./session-manager.js";
+// @ts-ignore - conversation-store is JS, not TS
+import { getConversationStore } from "../src/core/conversation-store.js";
 
 // Get singleton session manager
 const sessionManager = getSessionManager();
+
+// Get conversation store for Neo4j logging
+const conversationStore = getConversationStore();
+
+// Initialize schema on startup
+conversationStore.initSchema().catch((err: any) => {
+  console.error('[MCP] Failed to initialize ConversationStore schema:', err.message);
+});
 
 /**
  * MCP Tools Definitions
@@ -269,6 +279,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Create new session
         const sessionId = await sessionManager.createSession(interfaceType);
 
+        // Create conversation in Neo4j
+        try {
+          await conversationStore.createConversation({
+            id: sessionId,
+            title: conversationId ? `Resume: ${conversationId}` : `New ${interfaceType} session`,
+            purpose: 'AI Family collaboration via Taey Hands MCP',
+            initiator: 'mcp_server',
+            platforms: [interfaceType],
+            metadata: {
+              conversationId: conversationId || null,
+              createdVia: 'taey_connect'
+            }
+          });
+        } catch (err: any) {
+          console.error('[MCP] Failed to create conversation in Neo4j:', err.message);
+        }
+
         // If conversationId provided, navigate to that conversation
         let conversationUrl: string | undefined;
         if (conversationId) {
@@ -350,6 +377,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
+        const interfaceName = chatInterface.name;
+
+        // Log to Neo4j - store sent message
+        try {
+          await conversationStore.addMessage(sessionId, {
+            role: 'user',
+            content: message,
+            platform: interfaceName,
+            timestamp: new Date().toISOString(),
+            metadata: { source: 'mcp_taey_send_message' }
+          });
+        } catch (err: any) {
+          console.error('[MCP] Failed to log message to Neo4j:', err.message);
+        }
 
         // Prepare input (focus)
         await chatInterface.prepareInput();
@@ -381,9 +422,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
+        const interfaceName = chatInterface.name;
 
         // Extract latest response
         const responseText = await chatInterface.getLatestResponse();
+        const timestamp = new Date().toISOString();
+
+        // Log to Neo4j - store assistant response
+        try {
+          await conversationStore.addMessage(sessionId, {
+            role: 'assistant',
+            content: responseText,
+            platform: interfaceName,
+            timestamp,
+            metadata: {
+              source: 'mcp_taey_extract_response',
+              contentLength: responseText.length
+            }
+          });
+        } catch (err: any) {
+          console.error('[MCP] Failed to log response to Neo4j:', err.message);
+        }
 
         return {
           content: [
@@ -392,7 +451,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 responseText,
-                timestamp: new Date().toISOString(),
+                timestamp,
               }, null, 2),
             },
           ],
@@ -504,10 +563,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Build message with optional prefix
         const messageToSend = prefix ? `${prefix}${responseText}` : responseText;
 
-        // Get target interface and send message
+        // Get target interface and PASTE message (not type!)
         const targetInterface = sessionManager.getInterface(targetSessionId);
         await targetInterface.prepareInput();
-        await targetInterface.typeMessage(messageToSend);
+        await targetInterface.pasteMessage(messageToSend);
         await targetInterface.clickSend();
 
         return {
