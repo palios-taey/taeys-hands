@@ -1248,86 +1248,13 @@ export class ChatGPTInterface extends ChatInterface {
     const sessionId = options.sessionId || Date.now();
     const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-model-selected.png`;
 
-    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''})`);
+    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''}) - DISABLED`);
+    console.log(`  ChatGPT model selection disabled - using Auto mode`);
+    console.log(`  For thinking: use Deep Research mode via setMode() instead`);
 
-    // Bring tab to front
-    await this.osa.focusApp('Google Chrome');
+    // Just bring tab to front and take screenshot
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
-
-    // Get button center coordinates in screen space with debug info
-    const coords = await this.page.evaluate(() => {
-      const btn = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
-      if (!btn) return null;
-      const rect = btn.getBoundingClientRect();
-      // Add window offset (screenX/screenY available in browser context)
-      return {
-        windowScreenX: window.screenX,
-        windowScreenY: window.screenY,
-        rectLeft: rect.left,
-        rectTop: rect.top,
-        rectWidth: rect.width,
-        rectHeight: rect.height,
-        x: window.screenX + rect.left + rect.width / 2,
-        y: window.screenY + rect.top + rect.height / 2 + 78  // +78 for Chrome toolbar height
-      };
-    });
-
-    if (!coords) {
-      throw new Error('Model selector button not found');
-    }
-
-    const screenX = Math.round(coords.x);
-    const screenY = Math.round(coords.y);
-
-    console.log(`  [DEBUG] Button coordinates:`);
-    console.log(`    window.screenX: ${coords.windowScreenX}, window.screenY: ${coords.windowScreenY}`);
-    console.log(`    rect: left=${coords.rectLeft}, top=${coords.rectTop}, w=${coords.rectWidth}, h=${coords.rectHeight}`);
-    console.log(`    Calculated screen pos: (${screenX}, ${screenY})`);
-
-    // Write debug info to file
-    const fs = await import('fs');
-    await fs.promises.writeFile('/tmp/click-debug.txt', JSON.stringify(coords, null, 2));
-
-    // Move mouse to button first (trigger hover state), then click
-    await this.osa.moveMouse(screenX, screenY);
-    await this.page.waitForTimeout(200); // Let hover state register
-    await this.osa.click();
-    await this.page.waitForTimeout(400); // Wait for menu to open
-
-    // Verify menu opened by checking for menu items
-    const menuOpened = await this.page.locator('[role="menu"]').count() > 0;
-    if (!menuOpened) {
-      throw new Error('Model selector menu did not open after click');
-    }
-
-    if (isLegacy) {
-      // Click Legacy submenu first
-      console.log(`  → Opening Legacy submenu`);
-      const legacyMenu = this.page.locator('[role="menuitem"]:has-text("Legacy"), div:has-text("Legacy models")').first();
-      const legacyExists = await legacyMenu.count() > 0;
-
-      if (!legacyExists) {
-        await this.page.keyboard.press('Escape');
-        throw new Error('Legacy submenu not found in model selector');
-      }
-
-      await legacyMenu.click();
-      await this.page.waitForTimeout(300);
-    }
-
-    // Find and click the model menu item (search ONLY within the role="menu")
-    const modelItem = this.page.locator(`[role="menu"] [role="menuitem"]:has-text("${modelName}")`).first();
-    const itemExists = await modelItem.count() > 0;
-
-    if (!itemExists) {
-      await this.page.keyboard.press('Escape');
-      throw new Error(`Model "${modelName}" not found in model selector menu`);
-    }
-
-    await modelItem.click();
-    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
-    await this.page.waitForTimeout(500);
 
     // Capture screenshot
     await this.screenshot(screenshotPath);
@@ -1336,7 +1263,7 @@ export class ChatGPTInterface extends ChatInterface {
     return {
       screenshot: screenshotPath,
       automationCompleted: true,
-      modelName
+      modelName: 'Auto (selection disabled)'
     };
   }
 
