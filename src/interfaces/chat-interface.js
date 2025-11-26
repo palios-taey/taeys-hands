@@ -1275,8 +1275,8 @@ export class ChatGPTInterface extends ChatInterface {
       await this.page.waitForTimeout(300);
     }
 
-    // Find and click the model (search within role="menu" or use flexible text matching)
-    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}")`).first();
+    // Find and click the model menu item
+    const modelItem = this.page.locator(`text="${modelName}"`).first();
     const itemExists = await modelItem.count() > 0;
 
     if (!itemExists) {
