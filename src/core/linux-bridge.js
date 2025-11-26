@@ -272,7 +272,11 @@ export class LinuxBridge {
 
       // Linux window titles often contain more info, so do partial match
       // Match first word of expected app (e.g., "Chrome" from "Google Chrome")
-      const expectedKeyword = expectedApp.split(' ')[0].toLowerCase();
+      // Special case: "chrom" matches both "Chrome" and "Chromium"
+      let expectedKeyword = expectedApp.split(' ')[0].toLowerCase();
+      if (expectedKeyword === 'chrome' || expectedKeyword === 'chromium') {
+        expectedKeyword = 'chrom';  // Match both Chrome and Chromium
+      }
       const isValid = currentApp.toLowerCase().includes(expectedKeyword);
 
       return {
