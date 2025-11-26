@@ -3,18 +3,18 @@
 ## Tool Overview Matrix
 
 ```
-NAME                    INPUT ARGS              OUTPUT FIELDS           SPEED    ERROR SAFE
-─────────────────────────────────────────────────────────────────────────────────────────
-taey_connect            interface               sessionId, success      2-4s     ✓
-taey_disconnect         sessionId               success                 1-2s     ✓
-taey_new_conversation   sessionId               conversationUrl         2-3s     ✓
-taey_send_message       sessionId, message      success, sentText       1-2s     ✓
-taey_extract_response   sessionId               responseText, timestamp <1s      ✓
-taey_select_model       sessionId, modelName    success, screenshot     2-3s     ✓
-taey_attach_files       sessionId, filePaths[]  filesAttached, results  5-8s     ✓
-taey_paste_response     srcSessionId, tgtSsId  pastedText, length      2-3s     ✓
-taey_enable_research    sessionId, enabled?    success, mode           3-5s     ✓
-taey_download_artifact  sessionId, path?       filePath, screenshot    8-12s    ✓
+NAME                    INPUT ARGS              OUTPUT FIELDS                  SPEED    ERROR SAFE
+──────────────────────────────────────────────────────────────────────────────────────────────
+taey_connect            interface               sessionId, screenshot          2-4s     ✓
+taey_disconnect         sessionId               success                        1-2s     ✓
+taey_new_conversation   sessionId               conversationUrl                2-3s     ✓
+taey_send_message       sessionId, message      success, sentText              1-2s     ✓
+taey_extract_response   sessionId               responseText, timestamp        <1s      ✓
+taey_select_model       sessionId, modelName    automationCompleted, screenshot 2-3s     ✓
+taey_attach_files       sessionId, filePaths[]  automationCompleted, results   5-8s     ✓
+taey_paste_response     srcSessionId, tgtSsId   automationCompleted, pastedText 2-3s     ✓
+taey_enable_research    sessionId, enabled?     automationCompleted, mode      3-5s     ✓
+taey_download_artifact  sessionId, path?        automationCompleted, filePath  8-12s    ✓
 ```
 
 ---
@@ -29,9 +29,13 @@ taey_download_artifact  sessionId, path?       filePath, screenshot    8-12s    
 ```json
 {
   "interface": "claude|chatgpt|gemini|grok|perplexity",
+  "newSession": true,
+  "sessionId": "optional-reuse-existing-session",
   "conversationId": "optional-conversation-id-or-url"
 }
 ```
+
+**REQUIRED**: Must specify EITHER `newSession: true` OR `sessionId` (explicit session management)
 
 **Output**:
 ```json
@@ -39,6 +43,7 @@ taey_download_artifact  sessionId, path?       filePath, screenshot    8-12s    
   "success": true,
   "sessionId": "uuid-string",
   "interface": "claude|chatgpt|gemini|grok|perplexity",
+  "screenshot": "/tmp/taey-{interface}-{sessionId}-connected.png",
   "conversationUrl": "url-if-conversation-specified",
   "message": "Connected to {interface}"
 }
@@ -46,10 +51,17 @@ taey_download_artifact  sessionId, path?       filePath, screenshot    8-12s    
 
 **Example**:
 ```
-taey_connect(interface: "claude")
+// Create new session (REQUIRED parameter)
+taey_connect(interface: "claude", newSession: true)
 → sessionId: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+→ screenshot: "/tmp/taey-claude-f47ac10b-...-connected.png"
 
-taey_connect(interface: "claude", conversationId: "abc123")
+// Reuse existing session
+taey_connect(interface: "claude", sessionId: "f47ac10b-...")
+→ Reuses same browser tab
+
+// Navigate to specific conversation
+taey_connect(interface: "claude", newSession: true, conversationId: "abc123")
 → sessionId: "...", conversationUrl: "https://claude.ai/chat/abc123"
 ```
 
@@ -196,6 +208,8 @@ taey_extract_response(sessionId: "abc-123")
 
 **Purpose**: Switch to a different AI model
 
+**⚠️ ChatGPT Note**: Model selection is currently **disabled** for ChatGPT. ChatGPT sessions use Auto mode by default. For thinking-intensive tasks, use `taey_enable_research_mode` with `modeName: "Deep research"` instead.
+
 **Input Parameters**:
 ```json
 {
@@ -208,7 +222,7 @@ taey_extract_response(sessionId: "abc-123")
 **Output**:
 ```json
 {
-  "success": true,
+  "automationCompleted": true,
   "sessionId": "uuid-string",
   "interfaceType": "claude|chatgpt|gemini|grok|perplexity",
   "modelName": "Selected Model Name",
@@ -224,12 +238,12 @@ taey_extract_response(sessionId: "abc-123")
 - Sonnet 4 (faster, good balance)
 - Haiku 4 (fastest)
 
-**ChatGPT**:
-- Auto (automatic selection)
-- Instant (fastest)
-- Thinking (advanced reasoning)
-- Pro (flagship model)
-- GPT-4o (legacy - use isLegacy: true)
+**ChatGPT** (Model selection disabled - Auto mode only):
+- Auto (default, automatic selection)
+- ~~Instant~~ (use Auto mode)
+- ~~Thinking~~ (use Deep research mode via `taey_enable_research_mode`)
+- ~~Pro~~ (use Auto mode)
+- ~~GPT-4o~~ (legacy models unavailable)
 
 **Gemini**:
 - Thinking with 3 Pro (advanced reasoning)
@@ -248,11 +262,20 @@ taey_extract_response(sessionId: "abc-123")
 
 **Example**:
 ```
+// Claude model selection (works)
 taey_select_model(
   sessionId: "abc-123",
   modelName: "Opus 4.5"
 )
-→ success: true, screenshot: "/tmp/..."
+→ automationCompleted: true, screenshot: "/tmp/..."
+
+// ChatGPT model selection (disabled, returns stub)
+taey_select_model(
+  sessionId: "chatgpt-session",
+  modelName: "Thinking"
+)
+→ automationCompleted: true, modelName: "Auto (selection disabled)"
+→ Use taey_enable_research_mode(sessionId, modeName: "Deep research") instead
 ```
 
 ---
@@ -275,7 +298,7 @@ taey_select_model(
 **Output**:
 ```json
 {
-  "success": true,
+  "automationCompleted": true,
   "filesAttached": 2,
   "attachments": [
     {
@@ -294,7 +317,7 @@ taey_attach_files(
   sessionId: "abc-123",
   filePaths: ["/Users/jesse/document.pdf", "/Users/jesse/data.csv"]
 )
-→ filesAttached: 2
+→ automationCompleted: true, filesAttached: 2
 ```
 
 **Important**:
@@ -321,7 +344,7 @@ taey_attach_files(
 **Output**:
 ```json
 {
-  "success": true,
+  "automationCompleted": true,
   "sourceSessionId": "uuid",
   "targetSessionId": "uuid",
   "pastedText": "Text from source + optional prefix",
@@ -338,7 +361,7 @@ taey_paste_response(
   targetSessionId: "chatgpt-id",
   prefix: "Claude said: "
 )
-→ pastedText: "Claude said: The answer is..."
+→ automationCompleted: true, pastedText: "Claude said: The answer is..."
 ```
 
 **Workflow**:
@@ -365,7 +388,7 @@ taey_paste_response(
 **Output**:
 ```json
 {
-  "success": true,
+  "automationCompleted": true,
   "sessionId": "uuid-string",
   "interfaceType": "claude|chatgpt|gemini|grok|perplexity",
   "screenshot": "/tmp/taey-screenshot.png",
@@ -404,15 +427,15 @@ taey_enable_research_mode(
   sessionId: "claude-id",
   enabled: true
 )
-→ success: true, mode: "Extended Thinking enabled"
+→ automationCompleted: true, mode: "Extended Thinking enabled"
 
-// Enable ChatGPT deep research
+// Enable ChatGPT deep research (recommended over model selection)
 taey_enable_research_mode(
   sessionId: "chatgpt-id",
   enabled: true,
   modeName: "Deep research"
 )
-→ success: true, mode: "Deep research enabled"
+→ automationCompleted: true, mode: "Deep research enabled"
 ```
 
 ---
@@ -434,7 +457,7 @@ taey_enable_research_mode(
 **Output**:
 ```json
 {
-  "success": true,
+  "automationCompleted": true,
   "sessionId": "uuid-string",
   "interfaceType": "claude|chatgpt|gemini|grok|perplexity",
   "filePath": "/tmp/artifact_filename.md",
@@ -458,7 +481,7 @@ taey_download_artifact(
   downloadPath: "/Users/jesse/Downloads",
   format: "markdown"
 )
-→ success: true, filePath: "/Users/jesse/Downloads/code_1234.md"
+→ automationCompleted: true, filePath: "/Users/jesse/Downloads/code_1234.md"
 ```
 
 **File Types**:
