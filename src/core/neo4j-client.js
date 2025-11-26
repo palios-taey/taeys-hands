@@ -10,11 +10,9 @@
 
 import neo4j from 'neo4j-driver';
 
-// Default connection to mira
+// Default connection to mira (auth disabled on server)
 const DEFAULT_CONFIG = {
   uri: process.env.NEO4J_URI || 'bolt://10.x.x.163:7687',
-  user: process.env.NEO4J_USER || 'neo4j',
-  password: process.env.NEO4J_PASSWORD || 'neo4j',
   database: process.env.NEO4J_DATABASE || 'neo4j'
 };
 
@@ -34,7 +32,7 @@ export class Neo4jClient {
 
     this.driver = neo4j.driver(
       this.config.uri,
-      neo4j.auth.basic(this.config.user, this.config.password),
+      neo4j.auth.none(), // Auth disabled on mira
       {
         maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
         maxConnectionPoolSize: 50,
