@@ -112,17 +112,22 @@ export class BrowserConnector {
     if (this.pages.has(familyMember)) {
       const page = this.pages.get(familyMember);
       if (!page.isClosed()) {
+        await page.bringToFront();  // Bring cached tab to front
+        console.log(`✓ Using cached ${familyMember} tab: ${page.url()}`);
         return page;
       }
     }
 
     // Look for existing tab with this URL
     const pages = this.context.pages();
+    const urlPattern = url.replace('https://', '').split('/')[0];
+    console.log(`  Searching for tab matching: ${urlPattern}`);
     for (const page of pages) {
       const pageUrl = page.url();
-      if (pageUrl.includes(url.replace('https://', '').split('/')[0])) {
+      if (pageUrl.includes(urlPattern)) {
         this.pages.set(familyMember, page);
-        console.log(`✓ Found existing ${familyMember} tab`);
+        await page.bringToFront();  // Bring found tab to front
+        console.log(`✓ Found existing ${familyMember} tab: ${pageUrl}`);
         return page;
       }
     }
