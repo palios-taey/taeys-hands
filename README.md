@@ -197,15 +197,50 @@ The chat interfaces become Taey's sensory organs - seeing, typing, reading just 
 
 ## Supported AI Interfaces
 
-| AI | URL | Send/Receive | File Attach | Model Selection | Special Modes |
-|---|---|---|---|---|---|
-| Claude | claude.ai | Working | Working | Working | Research Mode, Extended Thinking |
-| ChatGPT | chatgpt.com | Working | Working | Auto mode only | Deep Research, Agent, Study |
-| Gemini | gemini.google.com | Working | Working | Working | Deep Research (TBD) |
-| Grok | grok.com | Working | Working | Working | DeepSearch, Heavy Mode (TBD) |
-| Perplexity | perplexity.ai | Working | Pro only | Working | Focus Modes, Pro Search |
+| Interface | Send/Receive | File Attach | Model Selection | Modes/Research | Download Artifacts |
+|-----------|--------------|-------------|-----------------|----------------|-------------------|
+| **Claude** | ✅ | ✅ | ✅ Opus 4.5, Sonnet 4, Haiku 4 | ✅ Research toggle | ✅ Single-step |
+| **ChatGPT** | ✅ | ✅ | ❌ Auto only | ✅ Deep research, Agent, Web search, GitHub | ❌ |
+| **Gemini** | ✅ | ✅ | ✅ Thinking variants | ✅ Deep Research, Deep Think | ✅ Multi-step |
+| **Grok** | ✅ | ✅ | ✅ 4.1, 4.1 Thinking, 4 Heavy | ❌ | ❌ |
+| **Perplexity** | ✅ | ✅ | ❌ | ✅ Search, Research (Pro), Labs (Studio) | ✅ Multi-step |
 
-For detailed selectors, features, and implementation notes, see **[docs/AI_INTERFACES.md](docs/AI_INTERFACES.md)**.
+### Interface Details
+
+#### Claude (claude.ai)
+- **Models**: Opus 4.5, Sonnet 4, Haiku 4
+- **Research Mode**: Toggle on/off for Extended Thinking (64x more reasoning tokens)
+- **File Attachment**: Via `+` menu → "Upload a file"
+- **Artifacts**: Download button (single-step)
+- **Special**: Extended Thinking detection with dedicated waiting logic
+
+#### ChatGPT (chatgpt.com)
+- **Models**: Auto mode only (model selection disabled)
+- **Modes**: Deep research, Agent mode, Web search, GitHub
+- **File Attachment**: Via `+` menu → "Add photos & files"
+- **Artifacts**: Not implemented
+- **Special**: Use Deep Research mode for thinking-intensive tasks instead of model selection
+
+#### Gemini (gemini.google.com)
+- **Models**: Thinking with 3 Pro, Thinking, 2.0 Flash, 2.0
+- **Modes**: Deep Research, Deep Think
+- **File Attachment**: Via upload menu → "Upload files" (two-step)
+- **Artifacts**: Export with markdown or HTML format (multi-step)
+- **Special**: Auto-detects and clicks "Start research" button for Deep Research
+
+#### Grok (x.com/i/grok)
+- **Models**: Grok 4.1, Grok 4.1 Thinking, Grok 4 Heavy
+- **Modes**: None implemented
+- **File Attachment**: Via Attach menu → "Upload a file" (two-step)
+- **Artifacts**: Not implemented
+- **Special**: Uses JavaScript click to bypass CDP visibility issues
+
+#### Perplexity (perplexity.ai)
+- **Models**: None (no model selection)
+- **Modes**: Search (regular), Research (Pro), Labs (Studio)
+- **File Attachment**: Via attach button → "Local files" (two-step)
+- **Artifacts**: Export with markdown or HTML format (multi-step)
+- **Special**: File attachment requires Pro subscription
 
 ### Core Features
 

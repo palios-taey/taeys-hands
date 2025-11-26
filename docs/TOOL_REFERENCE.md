@@ -252,13 +252,13 @@ taey_extract_response(sessionId: "abc-123")
 - 2.0 (balanced)
 
 **Grok**:
-- Grok 4.1 (latest)
-- Grok 4.1 Thinking (with reasoning)
-- Grok 4 Heavy (powerful)
+- Grok 4.1 (latest, standard)
+- Grok 4.1 Thinking (with extended reasoning)
+- Grok 4 Heavy (powerful, resource-intensive)
 
 **Perplexity**:
-- Sonar Pro (advanced)
-- Sonar (standard)
+- ❌ No model selection implemented
+- Uses default model per mode (Search/Research/Labs)
 
 **Example**:
 ```
@@ -401,24 +401,27 @@ taey_paste_response(
 **Modes by Interface**:
 
 **Claude**:
-- Extended Thinking (enabled/disabled via checkbox)
+- Extended Thinking (Research toggle - enabled/disabled via checkbox)
 - Uses 64x more tokens for reasoning
 
 **ChatGPT**:
 - Deep research (autonomous web search)
 - Agent mode (tool use)
-- Study and learn (educational)
+- Web search (standard web search)
+- GitHub (GitHub integration)
 
 **Gemini**:
 - Deep Research (web search + synthesis)
 - Deep Think (extended reasoning)
 
 **Grok**:
-- Deep Search (web search)
-- Heavy Mode (powerful reasoning)
+- ❌ No mode selection implemented
+- Use model selection instead (4.1 Thinking, 4 Heavy)
 
 **Perplexity**:
-- Pro Search (research-focused)
+- Search (regular search mode)
+- Research (Research Pro mode)
+- Labs (Studio mode)
 
 **Example**:
 ```
