@@ -1,18 +1,25 @@
 /**
- * Browser Connector - CDP connection to local Chrome
+ * Browser Connector - CDP connection to local Chrome/Firefox
  *
- * Key insight: Connect to EXISTING Chrome session (logged into all AI chats)
+ * Cross-platform support:
+ * - macOS: Chrome/Chromium via CDP
+ * - Linux: Chrome/Chromium/Firefox via CDP
+ *
+ * Key insight: Connect to EXISTING browser session (logged into all AI chats)
  * rather than launching new browser. This preserves auth cookies and sessions.
  *
- * Launch Chrome with debugging:
- *   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+ * Launch browser with debugging:
+ *   macOS: /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+ *   Linux Chrome: google-chrome --remote-debugging-port=9222
+ *   Linux Firefox: firefox --remote-debugging-port=9222
  */
 
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 const execAsync = promisify(exec);
 
@@ -37,65 +44,137 @@ export class BrowserConnector {
   }
 
   /**
-   * Launch Chrome with remote debugging if not already running
+   * Launch browser with remote debugging if not already running
+   * Cross-platform: supports Chrome/Chromium/Firefox on macOS and Linux
    */
-  async ensureChromeRunning() {
+  async ensureBrowserRunning() {
     if (await this.isDebuggingAvailable()) {
-      console.log(`✓ Chrome debugging already available on port ${this.debuggingPort}`);
+      console.log(`✓ Browser debugging already available on port ${this.debuggingPort}`);
       return true;
     }
 
-    console.log('Starting Chrome with remote debugging...');
+    console.log('Starting browser with remote debugging...');
 
-    // Use osascript to launch Chrome properly on macOS
-    const script = `
-      tell application "Google Chrome"
-        activate
-      end tell
-    `;
+    const platform = os.platform();
 
-    // First check if Chrome is running at all
-    try {
-      await execAsync('pgrep -x "Google Chrome"');
-      console.log('Chrome is running but debugging not enabled.');
-      console.log('Please restart Chrome with:');
-      console.log(`  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${this.debuggingPort}`);
-      return false;
-    } catch {
-      // Chrome not running, launch it with debugging
-      const chromePath = '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome';
-      await execAsync(`${chromePath} --remote-debugging-port=${this.debuggingPort} &`);
+    if (platform === 'darwin') {
+      // macOS: Try Chrome/Chromium
+      try {
+        await execAsync('pgrep -x "Google Chrome"');
+        console.log('Chrome is running but debugging not enabled.');
+        console.log('Please restart Chrome with:');
+        console.log(`  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${this.debuggingPort}`);
+        return false;
+      } catch {
+        // Chrome not running, launch it with debugging
+        const chromePath = '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome';
+        await execAsync(`${chromePath} --remote-debugging-port=${this.debuggingPort} &`);
 
-      // Wait for debugging to become available
-      for (let i = 0; i < 10; i++) {
-        await new Promise(r => setTimeout(r, 500));
-        if (await this.isDebuggingAvailable()) {
-          console.log('✓ Chrome started with debugging enabled');
-          return true;
+        // Wait for debugging to become available
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          if (await this.isDebuggingAvailable()) {
+            console.log('✓ Chrome started with debugging enabled');
+            return true;
+          }
         }
       }
+    } else if (platform === 'linux') {
+      // Linux: Try to find and launch browser
+      // Priority: google-chrome > chromium > firefox
+
+      let browserCmd = null;
+      let browserName = null;
+
+      // Check for Chrome
+      try {
+        await execAsync('which google-chrome');
+        browserCmd = 'google-chrome';
+        browserName = 'Chrome';
+      } catch {
+        // Check for Chromium
+        try {
+          await execAsync('which chromium-browser');
+          browserCmd = 'chromium-browser';
+          browserName = 'Chromium';
+        } catch {
+          try {
+            await execAsync('which chromium');
+            browserCmd = 'chromium';
+            browserName = 'Chromium';
+          } catch {
+            // Check for Firefox
+            try {
+              await execAsync('which firefox');
+              browserCmd = 'firefox';
+              browserName = 'Firefox';
+            } catch {
+              console.log('ERROR: No supported browser found');
+              console.log('Please install: google-chrome, chromium-browser, chromium, or firefox');
+              return false;
+            }
+          }
+        }
+      }
+
+      console.log(`Found ${browserName}, launching with debugging...`);
+
+      // Check if already running
+      try {
+        await execAsync(`pgrep -x "${browserCmd}"`);
+        console.log(`${browserName} is running but debugging not enabled.`);
+        console.log(`Please restart ${browserName} with:`);
+        console.log(`  ${browserCmd} --remote-debugging-port=${this.debuggingPort}`);
+        return false;
+      } catch {
+        // Not running, launch with debugging
+        await execAsync(`${browserCmd} --remote-debugging-port=${this.debuggingPort} >/dev/null 2>&1 &`);
+
+        // Wait for debugging to become available
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          if (await this.isDebuggingAvailable()) {
+            console.log(`✓ ${browserName} started with debugging enabled`);
+            return true;
+          }
+        }
+      }
+    } else {
+      console.log(`ERROR: Unsupported platform: ${platform}`);
+      return false;
     }
 
     return false;
   }
 
   /**
-   * Connect to existing Chrome via CDP
+   * Connect to existing browser via CDP
+   * Auto-detects Firefox vs Chrome/Chromium
    */
   async connect() {
-    if (!await this.ensureChromeRunning()) {
-      throw new Error('Chrome debugging not available');
+    if (!await this.ensureBrowserRunning()) {
+      throw new Error('Browser debugging not available');
     }
 
     try {
-      // Connect to existing browser
-      this.browser = await chromium.connectOverCDP(`http://localhost:${this.debuggingPort}`);
+      // Try Chromium first (Chrome, Chromium, Edge)
+      try {
+        this.browser = await chromium.connectOverCDP(`http://localhost:${this.debuggingPort}`);
+        console.log(`✓ Connected to Chromium-based browser via CDP`);
+      } catch (chromeError) {
+        // If Chromium fails, try Firefox
+        try {
+          this.browser = await firefox.connectOverCDP(`http://localhost:${this.debuggingPort}`);
+          console.log(`✓ Connected to Firefox via CDP`);
+        } catch (firefoxError) {
+          throw new Error(`Failed to connect to browser: ${chromeError.message}`);
+        }
+      }
 
       // Get existing context (with all cookies/sessions intact)
       const contexts = this.browser.contexts();
       this.context = contexts[0] || await this.browser.newContext();
 
-      console.log(`✓ Connected to Chrome via CDP`);
       console.log(`  Active pages: ${this.context.pages().length}`);
 
       return this.browser;

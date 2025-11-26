@@ -6,19 +6,20 @@
  */
 
 import BrowserConnector from '../core/browser-connector.js';
-import OSABridge from '../core/osascript-bridge.js';
+import { createPlatformBridge } from '../core/platform-bridge.js';
 import fs from 'fs/promises';
 import path from 'path';
 
 export class ChatInterface {
   constructor(config = {}) {
     this.browser = new BrowserConnector(config.browser);
-    this.osa = new OSABridge(config.mimesis);
+    this.bridge = null; // Will be initialized in connect()
     this.page = null;
     this.name = config.name || 'unknown';
     this.url = config.url;
     this.selectors = config.selectors || {};
     this.connected = false;
+    this.mimesisConfig = config.mimesis || {};
   }
 
   /**
@@ -27,6 +28,10 @@ export class ChatInterface {
   async connect() {
     await this.browser.connect();
     this.page = await this.browser.getPage(this.name, this.url);
+
+    // Initialize platform-specific bridge
+    this.bridge = await createPlatformBridge(this.mimesisConfig);
+
     this.connected = true;
     console.log(`✓ Connected to ${this.name}`);
     return this;
@@ -153,36 +158,59 @@ export class ChatInterface {
   }
 
   /**
-   * Shared: Navigate Finder dialog to select a file (Cmd+Shift+G flow)
+   * Shared: Navigate file dialog to select a file
+   * Cross-platform: Cmd+Shift+G on macOS, Ctrl+L on Linux
    * Call this after the native file dialog is open
    * @param {string} filePath - Absolute path to the file
    */
   async _navigateFinderDialog(filePath) {
-    // Open Go to Folder with Cmd+Shift+G
-    console.log(`  [${this.name}: Pressing Cmd+Shift+G]`);
-    await this.osa.runScript(`
-      tell application "System Events"
-        tell process "Google Chrome"
-          keystroke "g" using {command down, shift down}
+    const os = await import('os');
+    const platform = os.platform();
+
+    if (platform === 'darwin') {
+      // macOS: Use Cmd+Shift+G (Go to folder)
+      console.log(`  [${this.name}: macOS - Pressing Cmd+Shift+G]`);
+      await this.bridge.runScript(`
+        tell application "System Events"
+          tell process "Google Chrome"
+            keystroke "g" using {command down, shift down}
+          end tell
         end tell
-      end tell
-    `);
-    await this.page.waitForTimeout(800);
+      `);
+      await this.page.waitForTimeout(800);
 
-    // Type the file path
-    console.log(`  [${this.name}: Typing path "${filePath}"]`);
-    await this.osa.type(filePath, { baseDelay: 30, variation: 15 });
-    await this.page.waitForTimeout(300);
+      // Type the file path
+      console.log(`  [${this.name}: Typing path "${filePath}"]`);
+      await this.bridge.type(filePath, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(300);
 
-    // Press Enter to navigate to path
-    console.log(`  [${this.name}: Pressing Enter to navigate]`);
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
+      // Press Enter to navigate to path
+      console.log(`  [${this.name}: Pressing Enter to navigate]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
 
-    // Press Enter to open/select file
-    console.log(`  [${this.name}: Pressing Enter to open file]`);
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
+      // Press Enter to open/select file
+      console.log(`  [${this.name}: Pressing Enter to open file]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
+    } else if (platform === 'linux') {
+      // Linux: Use Ctrl+L (location bar in file dialogs)
+      console.log(`  [${this.name}: Linux - Pressing Ctrl+L]`);
+      await this.bridge.pressKeyWithModifier('l', 'control');
+      await this.page.waitForTimeout(800);
+
+      // Type the file path
+      console.log(`  [${this.name}: Typing path "${filePath}"]`);
+      await this.bridge.type(filePath, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(300);
+
+      // Press Enter to navigate/select
+      console.log(`  [${this.name}: Pressing Enter to select file]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
+    } else {
+      throw new Error(`File dialog navigation not supported on platform: ${platform}`);
+    }
   }
 
   /**
@@ -262,23 +290,23 @@ export class ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -356,13 +384,13 @@ export class ChatInterface {
       await this.page.waitForTimeout(200);
 
       // Use osascript for human-like typing
-      await this.osa.focusApp('Google Chrome');
+      await this.bridge.focusApp('Google Chrome');
 
       // Use mixed content typing (type + paste) for AI quotes
       if (options.mixedContent !== false) {
-        await this.osa.typeWithMixedContent(message);
+        await this.bridge.typeWithMixedContent(message);
       } else {
-        await this.osa.safeTypeLong(message);
+        await this.bridge.safeTypeLong(message);
       }
     } else {
       // Direct injection (faster but detectable)
@@ -406,11 +434,11 @@ export class ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Set clipboard content
-    await this.osa.setClipboard(message);
+    await this.bridge.setClipboard(message);
     await this.page.waitForTimeout(100);
 
     // Paste using Cmd+V
-    await this.osa.safePaste();
+    await this.bridge.safePaste();
 
     // Capture screenshot
     await this.page.waitForTimeout(500);
@@ -443,7 +471,7 @@ export class ChatInterface {
 
     // Send via Enter key
     await this.page.waitForTimeout(300);
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
 
     // Capture screenshot after send
     await this.page.waitForTimeout(1000);
@@ -496,15 +524,15 @@ export class ChatInterface {
       await this.page.waitForTimeout(200);
 
       // Use osascript for human-like typing with focus validation
-      await this.osa.focusApp('Google Chrome');
+      await this.bridge.focusApp('Google Chrome');
 
       // Use safe typing that validates Chrome focus and re-checks during long messages
       // If message contains AI content (cross-pollination), use mixed typing (type + paste)
       console.log(`  [Typing message: ${message.length} chars...]`);
       if (options.mixedContent !== false) {
-        await this.osa.typeWithMixedContent(message);
+        await this.bridge.typeWithMixedContent(message);
       } else {
-        await this.osa.safeTypeLong(message);
+        await this.bridge.safeTypeLong(message);
       }
     } else {
       // Direct injection (faster but detectable)
@@ -519,7 +547,7 @@ export class ChatInterface {
 
     // Send the message
     await this.page.waitForTimeout(300);
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
 
     // CHECKPOINT 4: After clicking send
     await this.page.waitForTimeout(1000);
@@ -831,7 +859,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -851,23 +879,23 @@ export class ClaudeInterface extends ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -1040,7 +1068,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1126,7 +1154,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1146,23 +1174,23 @@ export class ChatGPTInterface extends ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -1195,7 +1223,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1377,7 +1405,7 @@ export class GeminiInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Open upload file menu" button to open the menu
@@ -1647,7 +1675,7 @@ export class GrokInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Attach" button to open menu
@@ -1828,7 +1856,7 @@ export class PerplexityInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp('Google Chrome');
     await this.page.waitForTimeout(500);
 
     // Step 1: Click attach-files-button to open menu
