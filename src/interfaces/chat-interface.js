@@ -1274,6 +1274,12 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.mouse.click(buttonBox.x, buttonBox.y);
     await this.page.waitForTimeout(400); // Wait for menu to open
 
+    // Verify menu opened by checking for menu items
+    const menuOpened = await this.page.locator('[role="menu"]').count() > 0;
+    if (!menuOpened) {
+      throw new Error('Model selector menu did not open after click');
+    }
+
     if (isLegacy) {
       // Click Legacy submenu first
       console.log(`  → Opening Legacy submenu`);
@@ -1289,8 +1295,8 @@ export class ChatGPTInterface extends ChatInterface {
       await this.page.waitForTimeout(300);
     }
 
-    // Find and click the model menu item
-    const modelItem = this.page.locator(`text="${modelName}"`).first();
+    // Find and click the model menu item (search ONLY within the role="menu")
+    const modelItem = this.page.locator(`[role="menu"] [role="menuitem"]:has-text("${modelName}")`).first();
     const itemExists = await modelItem.count() > 0;
 
     if (!itemExists) {
