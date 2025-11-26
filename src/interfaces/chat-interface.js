@@ -1739,6 +1739,36 @@ export class PerplexityInterface extends ChatInterface {
   }
 
   /**
+   * Get the latest response content (Perplexity-specific override)
+   *
+   * Perplexity wraps the full answer in a single prose container with many child elements.
+   * The base selector '[class*="prose"]' matches ALL child elements (p, h1, h2, ul, etc.),
+   * causing us to only get the last paragraph instead of the full response.
+   *
+   * This override targets the parent answer container specifically.
+   */
+  async getLatestResponse() {
+    // More specific selector for the main answer container
+    // Target the parent prose div, not child elements
+    const answerSelector = 'div.prose.dark\\:prose-invert.inline.leading-relaxed, div[class*="prose"][class*="inline"]';
+
+    const containers = await this.page.$$(answerSelector);
+    if (containers.length === 0) {
+      console.log('[Perplexity] No response container found, returning empty');
+      return '';
+    }
+
+    // Get the last (most recent) answer container
+    const lastContainer = containers[containers.length - 1];
+
+    // Get full text content (this should include all child elements)
+    const text = await lastContainer.textContent();
+
+    console.log(`[Perplexity] Extracted response (${text.length} chars)`);
+    return text;
+  }
+
+  /**
    * Enable Research mode (Pro Search) on Perplexity
    * Overrides base implementation with Perplexity-specific selector
    *
