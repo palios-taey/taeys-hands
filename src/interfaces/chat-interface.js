@@ -188,8 +188,15 @@ export class ChatInterface {
   /**
    * ATOMIC ACTION: Enable research/pro mode
    * Interface-specific implementation (e.g., Pro Search on Perplexity)
+   *
+   * ⚠️ UNVERIFIED ACTION - UI state change MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the UI actually changed state (button toggled, mode enabled).
+   * ALWAYS check the returned screenshot to verify the intended effect occurred.
+   *
    * @param {Object} options - { sessionId, screenshotPath, selector }
-   * @returns {Object} { screenshot: string, enabled: boolean, available: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   * @throws {Error} If research mode button not found or click fails
    */
   async enableResearchMode(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -202,55 +209,35 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    try {
-      const button = await this.page.waitForSelector(selector, { timeout: 3000 }).catch(() => null);
-      if (button) {
-        await button.click();
-        console.log(`  ✓ Research mode enabled`);
-        await this.page.waitForTimeout(500);
+    // STRICT: No graceful failure - throw if button not found
+    const button = await this.page.waitForSelector(selector, { timeout: 5000 });
+    await button.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
 
-        // Capture screenshot
-        await this.screenshot(screenshotPath);
-        console.log(`  ✓ Screenshot → ${screenshotPath}`);
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
-        return {
-          screenshot: screenshotPath,
-          enabled: true,
-          available: true
-        };
-      } else {
-        console.log(`  ⓘ Research mode button not found`);
-
-        // Capture screenshot anyway
-        await this.screenshot(screenshotPath);
-
-        return {
-          screenshot: screenshotPath,
-          enabled: false,
-          available: false
-        };
-      }
-    } catch (e) {
-      console.log(`  ⓘ Could not enable research mode: ${e.message}`);
-
-      // Capture screenshot
-      await this.screenshot(screenshotPath);
-
-      return {
-        screenshot: screenshotPath,
-        enabled: false,
-        available: false,
-        error: e.message
-      };
-    }
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
   }
 
   /**
    * ATOMIC ACTION: Attach file
    * Uses native file picker with osascript Cmd+Shift+G navigation
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
    * @param {string} filePath - Absolute path to file
    * @param {Object} options - { sessionId, screenshotPath, attachButtonSelector }
-   * @returns {Object} { screenshot: string, attached: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If attach button not found or file attachment fails
    */
   async attachFile(filePath, options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -263,76 +250,60 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    try {
-      // Click attach button
-      const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 }).catch(() => null);
-      if (!attachBtn) {
-        console.log(`  ⓘ Attach button not found`);
-        await this.screenshot(screenshotPath);
-        return {
-          screenshot: screenshotPath,
-          attached: false,
-          available: false
-        };
-      }
+    // STRICT: No graceful failure - throw if attach button not found
+    const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 });
+    await attachBtn.click();
+    console.log(`  ✓ Clicked attach button`);
+    await this.page.waitForTimeout(1500); // Wait for file picker
 
-      await attachBtn.click();
-      console.log(`  ✓ Clicked attach button`);
-      await this.page.waitForTimeout(1500); // Wait for file picker
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
 
-      // Use osascript to navigate file picker with Cmd+Shift+G
-      const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-      const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
 
-      // Cmd+Shift+G to open "Go to folder"
-      const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-      await this.osa.runScript(cmdShiftG);
-      await this.page.waitForTimeout(500);
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
 
-      // Type directory path
-      await this.osa.type(dir);
-      await this.page.waitForTimeout(300);
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
 
-      // Press Enter to navigate
-      await this.osa.pressKey('return');
-      await this.page.waitForTimeout(1000);
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
 
-      // Type filename to select it
-      await this.osa.type(filename);
-      await this.page.waitForTimeout(300);
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
-      // Press Enter to open/attach
-      await this.osa.pressKey('return');
-      console.log(`  ✓ File attached: ${filePath}`);
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
-      // Capture screenshot
-      await this.page.waitForTimeout(1500); // Wait for file to appear
-      await this.screenshot(screenshotPath);
-      console.log(`  ✓ Screenshot → ${screenshotPath}`);
-
-      return {
-        screenshot: screenshotPath,
-        attached: true,
-        filePath
-      };
-    } catch (e) {
-      console.log(`  ⓘ File attachment failed: ${e.message}`);
-
-      // Capture screenshot
-      await this.screenshot(screenshotPath);
-
-      return {
-        screenshot: screenshotPath,
-        attached: false,
-        error: e.message
-      };
-    }
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
   }
 
   /**
    * ATOMIC ACTION: Prepare input for typing
    * Brings tab to front, focuses input, captures screenshot
-   * @returns {Object} { screenshot: string, ready: boolean }
+   *
+   * ⚠️ UNVERIFIED ACTION - Input focus MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify focus actually moved to the input (cursor visible).
+   * ALWAYS check the returned screenshot to verify input has focus indicator.
+   *
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async prepareInput(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -351,20 +322,26 @@ export class ChatInterface {
 
     // Capture screenshot
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Input focused → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY FOCUS IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      ready: true
+      automationCompleted: true
     };
   }
 
   /**
    * ATOMIC ACTION: Type message into focused input
    * Assumes input is already focused (call prepareInput first)
+   *
+   * ⚠️ UNVERIFIED ACTION - Text in input MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify text actually appeared in the input box.
+   * ALWAYS check the returned screenshot to verify message is visible in input.
+   *
    * @param {string} message - The message to type
    * @param {Object} options - { humanLike: boolean, mixedContent: boolean, sessionId, screenshotPath }
-   * @returns {Object} { screenshot: string, typed: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async typeMessage(message, options = {}) {
     const useHumanInput = options.humanLike !== false;
@@ -396,19 +373,67 @@ export class ChatInterface {
     // Capture screenshot
     await this.page.waitForTimeout(500);
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Message typed → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY TEXT IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      typed: true
+      automationCompleted: true
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Paste message into focused input
+   * Assumes input is already focused (call prepareInput first)
+   * Uses clipboard paste instead of typing for maximum speed
+   *
+   * ⚠️ UNVERIFIED ACTION - Text in input MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify text actually appeared in the input box.
+   * ALWAYS check the returned screenshot to verify message is visible in input.
+   *
+   * @param {string} message - The message to paste
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   */
+  async pasteMessage(message, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-pasted.png`;
+
+    console.log(`[${this.name}] pasteMessage(${message.length} chars)`);
+
+    // CRITICAL: Bring tab to front before pasting
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Set clipboard content
+    await this.osa.setClipboard(message);
+    await this.page.waitForTimeout(100);
+
+    // Paste using Cmd+V
+    await this.osa.safePaste();
+
+    // Capture screenshot
+    await this.page.waitForTimeout(500);
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Automation completed - VERIFY TEXT IN SCREENSHOT`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
     };
   }
 
   /**
    * ATOMIC ACTION: Send the message
    * Assumes message is already typed in input
+   *
+   * ⚠️ UNVERIFIED ACTION - Message submission MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the message actually sent (input cleared, message appears).
+   * ALWAYS check the returned screenshot to verify input is empty and sending.
+   *
    * @param {Object} options - { sessionId, screenshotPath }
-   * @returns {Object} { screenshot: string, sent: boolean }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
    */
   async clickSend(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -423,11 +448,11 @@ export class ChatInterface {
     // Capture screenshot after send
     await this.page.waitForTimeout(1000);
     await this.screenshot(screenshotPath);
-    console.log(`  ✓ Message sent → ${screenshotPath}`);
+    console.log(`  ✓ Automation completed - VERIFY SEND IN SCREENSHOT`);
 
     return {
       screenshot: screenshotPath,
-      sent: true
+      automationCompleted: true
     };
   }
 
@@ -724,6 +749,140 @@ export class ClaudeInterface extends ChatInterface {
   }
 
   /**
+   * Select Claude model (e.g., "Opus 4.5", "Sonnet 4")
+   *
+   * ⚠️ UNVERIFIED ACTION - Model selection MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the model actually changed in the UI.
+   * ALWAYS check the returned screenshot to verify model selected.
+   *
+   * @param {string} modelName - Model name to select (e.g., "Opus 4.5")
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   */
+  async selectModel(modelName = "Opus 4.5", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-claude-${sessionId}-model-selected.png`;
+
+    console.log(`[claude] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector dropdown button
+    const modelBtn = await this.page.waitForSelector('[data-testid="model-selector-dropdown"]', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Find and click the model menu item
+    const modelItem = this.page.locator(`div[role="menuitem"]:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Attach file (Claude-specific override)
+   * Uses + menu instead of direct attach button
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
+   * @param {string} filePath - Absolute path to file
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If + menu or file attachment fails
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Validate file exists
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Click + menu
+    const plusBtn = await this.page.waitForSelector('[data-testid="input-menu-plus"]', { timeout: 5000 });
+    await plusBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click "Upload a file"
+    const menuItem = await this.page.waitForSelector('text="Upload a file"', { timeout: 5000 });
+    await menuItem.click();
+    console.log(`  ✓ Clicked "Upload a file"`);
+    await this.page.waitForTimeout(1500); // Wait for file picker
+
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
+
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
+  }
+
+  /**
    * Enable or disable Research mode
    * @param {boolean} enabled - Whether to enable Research mode
    */
@@ -761,6 +920,64 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.keyboard.press('Escape');
     await this.page.waitForTimeout(200);
     return true;
+  }
+
+  /**
+   * Download artifact from Claude Chat response
+   * Detects Download button and downloads the artifact file
+   *
+   * @param {Object} options - { downloadPath, timeout }
+   * @returns {Object} { downloaded: boolean, filePath: string|null, fileName: string|null }
+   */
+  async downloadArtifact(options = {}) {
+    const downloadPath = options.downloadPath || '/tmp';
+    const timeout = options.timeout || 10000;
+
+    console.log(`[${this.name}] downloadArtifact()`);
+
+    // Check if Download button exists
+    try {
+      const downloadBtn = await this.page.waitForSelector('button[aria-label="Download"]', {
+        timeout,
+        state: 'visible'
+      });
+
+      if (!downloadBtn) {
+        console.log('  ✗ No Download button found');
+        return { downloaded: false, filePath: null, fileName: null };
+      }
+
+      console.log('  ✓ Download button found');
+
+      // Set up download handler
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 30000 });
+
+      // Click download button
+      await downloadBtn.click();
+      console.log('  ✓ Clicked Download button');
+
+      // Wait for download to start
+      const download = await downloadPromise;
+      const fileName = download.suggestedFilename();
+      const filePath = `${downloadPath}/${fileName}`;
+
+      // Save to specified path
+      await download.saveAs(filePath);
+      console.log(`  ✓ Downloaded → ${filePath}`);
+
+      return {
+        downloaded: true,
+        filePath,
+        fileName
+      };
+
+    } catch (e) {
+      if (e.message.includes('Timeout')) {
+        console.log('  ✗ No Download button found (timeout)');
+        return { downloaded: false, filePath: null, fileName: null };
+      }
+      throw e;
+    }
   }
 
   async waitForResponse(timeout = 300000) {
@@ -878,6 +1095,89 @@ export class ChatGPTInterface extends ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Attach file (ChatGPT-specific override)
+   * Uses + menu instead of direct attach button
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
+   * @param {string} filePath - Absolute path to file
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If + menu or file attachment fails
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Click + menu
+    console.log(`  [${this.name}: Clicking + menu]`);
+    await this.page.click('[data-testid="composer-plus-btn"]');
+    await this.page.waitForTimeout(500);
+
+    // Click "Add photos & files"
+    console.log(`  [${this.name}: Clicking "Add photos & files"]`);
+    const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
+    await menuItem.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
+
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
+  }
+
+  /**
    * Attach file using human-like Finder navigation
    */
   async attachFileHumanLike(filePath) {
@@ -915,6 +1215,117 @@ export class ChatGPTInterface extends ChatInterface {
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
   }
+
+  /**
+   * ATOMIC ACTION: Select AI model (ChatGPT-specific)
+   *
+   * @param {string} modelName - Model name: "Auto", "Instant", "Thinking", "Pro", or "GPT-4o" (legacy)
+   * @param {boolean} isLegacy - Whether to access model from Legacy submenu (e.g., for GPT-4o)
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Auto", isLegacy = false, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-model-selected.png`;
+
+    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector dropdown button
+    const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
+    await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await modelBtn.click();  // Use regular click, not dispatchEvent
+    await this.page.waitForTimeout(1000); // Wait for menu to fully render
+
+    if (isLegacy) {
+      // Click Legacy submenu first
+      console.log(`  → Opening Legacy submenu`);
+      const legacyMenu = this.page.locator('[role="menuitem"]:has-text("Legacy"), div:has-text("Legacy models")').first();
+      const legacyExists = await legacyMenu.count() > 0;
+
+      if (!legacyExists) {
+        await this.page.keyboard.press('Escape');
+        throw new Error('Legacy submenu not found in model selector');
+      }
+
+      await legacyMenu.click();
+      await this.page.waitForTimeout(300);
+    }
+
+    // Find and click the model (search within role="menu" or use flexible text matching)
+    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (ChatGPT-specific)
+   * Enables special modes like Deep research, Agent mode, Web search, or GitHub
+   *
+   * @param {string} modeName - Mode: "Deep research", "Agent mode", "Web search", or "GitHub"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeName, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-mode-set.png`;
+
+    console.log(`[chatgpt] setMode(${modeName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click + button
+    const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
+    await plusBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await plusBtn.click();  // Use regular click, not dispatchEvent
+    await this.page.waitForTimeout(800);
+
+    // Click mode option
+    const modeItem = this.page.locator(`text="${modeName}"`).first();
+    const itemExists = await modeItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Mode "${modeName}" not found in + menu`);
+    }
+
+    await modeItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeName
+    };
+  }
 }
 
 /**
@@ -928,7 +1339,7 @@ export class GeminiInterface extends ChatInterface {
       selectors: {
         chatInput: '.ql-editor[contenteditable="true"], [aria-label="Enter a prompt here"]',
         sendButton: 'button[aria-label="Send message"]',
-        responseContainer: 'p[data-path-to-node]',
+        responseContainer: 'message-content .markdown',
         newChatButton: 'button[aria-label="New chat"]',
         // File attachment selectors
         fileInput: 'input[type="file"]',
@@ -986,6 +1397,204 @@ export class GeminiInterface extends ChatInterface {
 
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
+  }
+
+  /**
+   * ATOMIC ACTION: Select AI model (Gemini-specific)
+   *
+   * @param {string} modelName - Model name (e.g., "Thinking with 3 Pro", "Thinking")
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Thinking", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-gemini-${sessionId}-model-selected.png`;
+
+    console.log(`[gemini] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector button
+    const modelBtn = await this.page.waitForSelector('[data-test-id="bard-mode-menu-button"]', { timeout: 5000 });
+    await modelBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Find and click the model menu item by text
+    const modelItem = this.page.locator(`button[mat-menu-item]:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (Gemini-specific)
+   * Enables special modes like Deep Research or Deep Think
+   *
+   * @param {string} modeName - Mode: "Deep Research" or "Deep Think"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeName, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-gemini-${sessionId}-mode-set.png`;
+
+    console.log(`[gemini] setMode(${modeName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click toolbox drawer button to open modes menu
+    const drawerBtn = await this.page.waitForSelector('button.toolbox-drawer-button', { timeout: 5000 });
+    await drawerBtn.click();
+    await this.page.waitForTimeout(400);
+
+    // Click mode option by text
+    const modeItem = this.page.locator(`button[mat-list-item]:has-text("${modeName}")`).first();
+    const itemExists = await modeItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Mode "${modeName}" not found in toolbox drawer menu`);
+    }
+
+    await modeItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeName
+    };
+  }
+
+  /**
+   * Download artifact from Gemini conversation
+   * @param {Object} options - Download options
+   * @param {string} [options.format='markdown'] - Download format ('markdown' or 'html')
+   * @param {string} [options.downloadPath='/tmp'] - Directory to save file
+   * @param {number} [options.timeout=10000] - Timeout in ms
+   * @returns {Promise<{filePath: string, screenshot: string, automationCompleted: boolean}>}
+   */
+  async downloadArtifact(options = {}) {
+    const {
+      format = 'markdown',
+      downloadPath = '/tmp',
+      timeout = 10000,
+      sessionId = null
+    } = options;
+
+    console.log(`\n[Gemini] Downloading artifact (format: ${format})...`);
+    const screenshotPath = await this.getScreenshotPath('download-artifact', sessionId);
+
+    // Wait for and click asset card button
+    console.log('  → Looking for asset card...');
+    const assetCardBtn = await this.page.waitForSelector('[data-testid="asset-card-open-button"]', { timeout: 5000 });
+    if (!assetCardBtn) {
+      throw new Error('Asset card button not found');
+    }
+    await assetCardBtn.click();
+    await this.page.waitForTimeout(1000);
+
+    // Click Export button
+    console.log('  → Clicking Export...');
+    const exportBtn = await this.page.waitForSelector('text="Export"', { timeout: 5000 });
+    if (!exportBtn) {
+      throw new Error('Export button not found');
+    }
+    await exportBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click appropriate download format
+    const formatText = format === 'html' ? 'Download as HTML' : 'Download as Markdown';
+    console.log(`  → Clicking "${formatText}"...`);
+    const downloadBtn = await this.page.waitForSelector(`text="${formatText}"`, { timeout: 5000 });
+    if (!downloadBtn) {
+      throw new Error(`"${formatText}" button not found`);
+    }
+
+    // Set up download listener
+    const downloadPromise = this.page.waitForEvent('download', { timeout });
+    await downloadBtn.click();
+
+    // Wait for download to complete
+    console.log('  → Waiting for download...');
+    const download = await downloadPromise;
+    const fileName = download.suggestedFilename();
+    const filePath = `${downloadPath}/${fileName}`;
+    await download.saveAs(filePath);
+
+    console.log(`  ✓ Downloaded → ${filePath}`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      filePath,
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
+  }
+
+  /**
+   * Override waitForResponse to detect and click "Start research" button for Deep Research mode
+   */
+  async waitForResponse(timeout = 600000, options = {}) {
+    const startTime = Date.now();
+    const sessionId = options.sessionId || Date.now();
+
+    console.log(`  [${this.name}: Checking for Deep Research Start button...]`);
+
+    try {
+      // Wait for either the Start Research button OR a normal response
+      // This handles both Deep Research mode and regular conversations
+      const startResearchButton = await this.page.waitForSelector(
+        'button[data-test-id="confirm-button"][aria-label="Start research"]',
+        { timeout: 10000, state: 'attached' }
+      );
+
+      if (startResearchButton) {
+        console.log(`  [${this.name}: Deep Research plan ready - clicking Start research button]`);
+        await startResearchButton.click();
+        await this.page.waitForTimeout(2000);
+        console.log(`  [${this.name}: Research started, waiting for completion...]`);
+      }
+    } catch (err) {
+      // No Start Research button found - this is a normal conversation
+      console.log(`  [${this.name}: No Deep Research button - proceeding with normal response wait]`);
+    }
+
+    // Now use the base class waitForResponse with remaining time
+    const elapsed = Date.now() - startTime;
+    const remainingTimeout = timeout - elapsed;
+
+    return await super.waitForResponse(remainingTimeout, options);
   }
 }
 
@@ -1059,6 +1668,55 @@ export class GrokInterface extends ChatInterface {
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
   }
+
+  /**
+   * ATOMIC ACTION: Select AI model (Grok-specific)
+   *
+   * @param {string} modelName - Model name: "Grok 4.1", "Grok 4.1 Thinking", or "Grok 4 Heavy"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, modelName }
+   */
+  async selectModel(modelName = "Grok 4.1", options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-grok-${sessionId}-model-selected.png`;
+
+    console.log(`[grok] selectModel(${modelName})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click model selector button using JavaScript (bypasses Playwright visibility checks)
+    await this.page.waitForSelector('#model-select-trigger', { state: 'attached', timeout: 5000 });
+    await this.page.evaluate(() => {
+      const button = document.querySelector('#model-select-trigger');
+      if (button) button.click();
+    });
+    await this.page.waitForTimeout(1000); // Wait for menu to fully render
+
+    // Find and click the model menu item by text (flexible matching)
+    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}"), button:has-text("${modelName}")`).first();
+    const itemExists = await modelItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(`Model "${modelName}" not found in model selector menu`);
+    }
+
+    await modelItem.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      modelName
+    };
+  }
 }
 
 /**
@@ -1095,6 +1753,9 @@ export class PerplexityInterface extends ChatInterface {
   /**
    * Enable Research mode (Pro Search) on Perplexity
    * Overrides base implementation with Perplexity-specific selector
+   *
+   * ⚠️ UNVERIFIED ACTION - UI state change MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
    */
   async enableResearchMode(options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -1109,7 +1770,7 @@ export class PerplexityInterface extends ChatInterface {
     // Find and click research mode button - STRICT (no graceful handling)
     const button = await this.page.waitForSelector('button[value="research"]', { timeout: 5000 });
     await button.click();
-    console.log(`  ✓ Research mode enabled`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
     await this.page.waitForTimeout(500);
 
     // Capture screenshot
@@ -1118,13 +1779,16 @@ export class PerplexityInterface extends ChatInterface {
 
     return {
       screenshot: screenshotPath,
-      enabled: true
+      automationCompleted: true
     };
   }
 
   /**
    * Attach file (phase script interface)
    * Wraps attachFileHumanLike() with screenshot capture
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
    */
   async attachFile(filePath, options = {}) {
     const sessionId = options.sessionId || Date.now();
@@ -1141,7 +1805,8 @@ export class PerplexityInterface extends ChatInterface {
 
     return {
       screenshot: screenshotPath,
-      attached: true
+      automationCompleted: true,
+      filePath
     };
   }
 
@@ -1183,6 +1848,111 @@ export class PerplexityInterface extends ChatInterface {
 
     console.log(`  [${this.name}: Attachment complete]`);
     return true;
+  }
+
+  /**
+   * ATOMIC ACTION: Set mode (Perplexity-specific)
+   * Selects one of the three available modes: Search, Research Pro, or Labs
+   *
+   * @param {string} modeValue - Mode value: "search", "research", or "studio"
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot, automationCompleted, mode }
+   */
+  async setMode(modeValue, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-perplexity-${sessionId}-mode-set.png`;
+
+    console.log(`[perplexity] setMode(${modeValue})`);
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Click the mode button with the specified value attribute
+    const modeBtn = await this.page.waitForSelector(`button[role="radio"][value="${modeValue}"]`, { timeout: 5000 });
+    await modeBtn.click();
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+    await this.page.waitForTimeout(500);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      mode: modeValue
+    };
+  }
+
+  /**
+   * Download artifact from Perplexity conversation
+   * @param {Object} options - Download options
+   * @param {string} [options.format='markdown'] - Download format ('markdown' or 'html')
+   * @param {string} [options.downloadPath='/tmp'] - Directory to save file
+   * @param {number} [options.timeout=10000] - Timeout in ms
+   * @returns {Promise<{filePath: string, screenshot: string, automationCompleted: boolean}>}
+   */
+  async downloadArtifact(options = {}) {
+    const {
+      format = 'markdown',
+      downloadPath = '/tmp',
+      timeout = 10000,
+      sessionId = null
+    } = options;
+
+    console.log(`\n[Perplexity] Downloading artifact (format: ${format})...`);
+    const screenshotPath = await this.getScreenshotPath('download-artifact', sessionId);
+
+    // Wait for and click asset card button
+    console.log('  → Looking for asset card...');
+    const assetCardBtn = await this.page.waitForSelector('[data-testid="asset-card-open-button"]', { timeout: 5000 });
+    if (!assetCardBtn) {
+      throw new Error('Asset card button not found');
+    }
+    await assetCardBtn.click();
+    await this.page.waitForTimeout(1000);
+
+    // Click Export button
+    console.log('  → Clicking Export...');
+    const exportBtn = await this.page.waitForSelector('text="Export"', { timeout: 5000 });
+    if (!exportBtn) {
+      throw new Error('Export button not found');
+    }
+    await exportBtn.click();
+    await this.page.waitForTimeout(500);
+
+    // Click appropriate download format
+    const formatText = format === 'html' ? 'Download as HTML' : 'Download as Markdown';
+    console.log(`  → Clicking "${formatText}"...`);
+    const downloadBtn = await this.page.waitForSelector(`text="${formatText}"`, { timeout: 5000 });
+    if (!downloadBtn) {
+      throw new Error(`"${formatText}" button not found`);
+    }
+
+    // Set up download listener
+    const downloadPromise = this.page.waitForEvent('download', { timeout });
+    await downloadBtn.click();
+
+    // Wait for download to complete
+    console.log('  → Waiting for download...');
+    const download = await downloadPromise;
+    const fileName = download.suggestedFilename();
+    const filePath = `${downloadPath}/${fileName}`;
+    await download.saveAs(filePath);
+
+    console.log(`  ✓ Downloaded → ${filePath}`);
+    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      filePath,
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
   }
 }
 
