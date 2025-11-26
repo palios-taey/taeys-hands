@@ -1255,13 +1255,19 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Get button center coordinates in screen space
+    // Get button center coordinates in screen space with debug info
     const coords = await this.page.evaluate(() => {
       const btn = document.querySelector('[data-testid="model-switcher-dropdown-button"]');
       if (!btn) return null;
       const rect = btn.getBoundingClientRect();
       // Add window offset (screenX/screenY available in browser context)
       return {
+        windowScreenX: window.screenX,
+        windowScreenY: window.screenY,
+        rectLeft: rect.left,
+        rectTop: rect.top,
+        rectWidth: rect.width,
+        rectHeight: rect.height,
         x: window.screenX + rect.left + rect.width / 2,
         y: window.screenY + rect.top + rect.height / 2 + 78  // +78 for Chrome toolbar height
       };
@@ -1273,6 +1279,15 @@ export class ChatGPTInterface extends ChatInterface {
 
     const screenX = Math.round(coords.x);
     const screenY = Math.round(coords.y);
+
+    console.log(`  [DEBUG] Button coordinates:`);
+    console.log(`    window.screenX: ${coords.windowScreenX}, window.screenY: ${coords.windowScreenY}`);
+    console.log(`    rect: left=${coords.rectLeft}, top=${coords.rectTop}, w=${coords.rectWidth}, h=${coords.rectHeight}`);
+    console.log(`    Calculated screen pos: (${screenX}, ${screenY})`);
+
+    // Write debug info to file
+    const fs = await import('fs');
+    await fs.promises.writeFile('/tmp/click-debug.txt', JSON.stringify(coords, null, 2));
 
     // Move mouse to button first (trigger hover state), then click
     await this.osa.moveMouse(screenX, screenY);
