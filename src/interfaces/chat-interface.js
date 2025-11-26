@@ -382,6 +382,48 @@ export class ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Paste message into focused input
+   * Assumes input is already focused (call prepareInput first)
+   * Uses clipboard paste instead of typing for maximum speed
+   *
+   * ⚠️ UNVERIFIED ACTION - Text in input MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify text actually appeared in the input box.
+   * ALWAYS check the returned screenshot to verify message is visible in input.
+   *
+   * @param {string} message - The message to paste
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean }
+   */
+  async pasteMessage(message, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-pasted.png`;
+
+    console.log(`[${this.name}] pasteMessage(${message.length} chars)`);
+
+    // CRITICAL: Bring tab to front before pasting
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Set clipboard content
+    await this.osa.setClipboard(message);
+    await this.page.waitForTimeout(100);
+
+    // Paste using Cmd+V
+    await this.osa.safePaste();
+
+    // Capture screenshot
+    await this.page.waitForTimeout(500);
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Automation completed - VERIFY TEXT IN SCREENSHOT`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
+  }
+
+  /**
    * ATOMIC ACTION: Send the message
    * Assumes message is already typed in input
    *
@@ -1053,6 +1095,89 @@ export class ChatGPTInterface extends ChatInterface {
   }
 
   /**
+   * ATOMIC ACTION: Attach file (ChatGPT-specific override)
+   * Uses + menu instead of direct attach button
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * This method only confirms automation steps completed without errors.
+   * It does NOT verify the file actually appeared in the UI attachment area.
+   * ALWAYS check the returned screenshot to verify file is visible in input.
+   *
+   * @param {string} filePath - Absolute path to file
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, automationCompleted: boolean, filePath: string }
+   * @throws {Error} If + menu or file attachment fails
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Validate file exists FIRST
+    try {
+      await import('fs/promises').then(fs => fs.access(filePath));
+    } catch {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // CRITICAL: Bring this tab to front before focusing Chrome
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(200);
+
+    // Focus Chrome
+    await this.osa.focusApp('Google Chrome');
+    await this.page.waitForTimeout(500);
+
+    // Click + menu
+    console.log(`  [${this.name}: Clicking + menu]`);
+    await this.page.click('[data-testid="composer-plus-btn"]');
+    await this.page.waitForTimeout(500);
+
+    // Click "Add photos & files"
+    console.log(`  [${this.name}: Clicking "Add photos & files"]`);
+    const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
+    await menuItem.click();
+    await this.page.waitForTimeout(1500);
+
+    // Use osascript to navigate file picker with Cmd+Shift+G
+    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
+    // Cmd+Shift+G to open "Go to folder"
+    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    await this.osa.runScript(cmdShiftG);
+    await this.page.waitForTimeout(500);
+
+    // Type directory path
+    await this.osa.type(dir);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to navigate
+    await this.osa.pressKey('return');
+    await this.page.waitForTimeout(1000);
+
+    // Type filename to select it
+    await this.osa.type(filename);
+    await this.page.waitForTimeout(300);
+
+    // Press Enter to open/attach
+    await this.osa.pressKey('return');
+    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
+
+    // Capture screenshot
+    await this.page.waitForTimeout(1500); // Wait for file to appear
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
+  }
+
+  /**
    * Attach file using human-like Finder navigation
    */
   async attachFileHumanLike(filePath) {
@@ -1214,7 +1339,7 @@ export class GeminiInterface extends ChatInterface {
       selectors: {
         chatInput: '.ql-editor[contenteditable="true"], [aria-label="Enter a prompt here"]',
         sendButton: 'button[aria-label="Send message"]',
-        responseContainer: 'p[data-path-to-node]',
+        responseContainer: 'message-content .markdown',
         newChatButton: 'button[aria-label="New chat"]',
         // File attachment selectors
         fileInput: 'input[type="file"]',
@@ -1435,6 +1560,41 @@ export class GeminiInterface extends ChatInterface {
       screenshot: screenshotPath,
       automationCompleted: true
     };
+  }
+
+  /**
+   * Override waitForResponse to detect and click "Start research" button for Deep Research mode
+   */
+  async waitForResponse(timeout = 600000, options = {}) {
+    const startTime = Date.now();
+    const sessionId = options.sessionId || Date.now();
+
+    console.log(`  [${this.name}: Checking for Deep Research Start button...]`);
+
+    try {
+      // Wait for either the Start Research button OR a normal response
+      // This handles both Deep Research mode and regular conversations
+      const startResearchButton = await this.page.waitForSelector(
+        'button[data-test-id="confirm-button"][aria-label="Start research"]',
+        { timeout: 10000, state: 'attached' }
+      );
+
+      if (startResearchButton) {
+        console.log(`  [${this.name}: Deep Research plan ready - clicking Start research button]`);
+        await startResearchButton.click();
+        await this.page.waitForTimeout(2000);
+        console.log(`  [${this.name}: Research started, waiting for completion...]`);
+      }
+    } catch (err) {
+      // No Start Research button found - this is a normal conversation
+      console.log(`  [${this.name}: No Deep Research button - proceeding with normal response wait]`);
+    }
+
+    // Now use the base class waitForResponse with remaining time
+    const elapsed = Date.now() - startTime;
+    const remainingTimeout = timeout - elapsed;
+
+    return await super.waitForResponse(remainingTimeout, options);
   }
 }
 
