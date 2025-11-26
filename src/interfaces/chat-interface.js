@@ -23,8 +23,14 @@ export class ChatInterface {
 
   /**
    * Connect to this chat interface
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, sessionId: string }
    */
-  async connect() {
+  async connect(options = {}) {
+    // Session ID is required - either provided or generated
+    const sessionId = options.sessionId || Date.now().toString();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-connected.png`;
+
     await this.browser.connect();
     this.page = await this.browser.getPage(this.name, this.url);
 
@@ -33,9 +39,17 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(500); // Wait for tab to be fully visible
 
+    // Capture screenshot to verify tab is visible
+    await this.screenshot(screenshotPath);
+
     this.connected = true;
     console.log(`✓ Connected to ${this.name}`);
-    return this;
+    console.log(`  Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      sessionId: sessionId
+    };
   }
 
   /**
