@@ -292,6 +292,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               createdVia: 'taey_connect'
             }
           });
+
+          // Mark as fresh session (no context provided yet)
+          await conversationStore.updateConversation(sessionId, {
+            sessionType: conversationId ? 'continuing' : 'fresh',
+            contextProvided: false,
+            lastActivity: new Date().toISOString()
+          });
         } catch (err: any) {
           console.error('[MCP] Failed to create conversation in Neo4j:', err.message);
         }
@@ -323,6 +330,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "taey_disconnect": {
         const { sessionId } = args as { sessionId: string };
+
+        // Close conversation in Neo4j
+        try {
+          await conversationStore.closeConversation(sessionId);
+        } catch (err: any) {
+          console.error('[MCP] Failed to close conversation:', err.message);
+        }
 
         // Destroy session
         await sessionManager.destroySession(sessionId);
@@ -487,6 +501,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } else {
           // Claude, Gemini, Grok: standard call
           result = await chatInterface.selectModel(modelName, { sessionId });
+        }
+
+        // Update Neo4j with model selection
+        try {
+          await conversationStore.updateConversation(sessionId, {
+            model: result.modelName,
+            lastActivity: new Date().toISOString()
+          });
+        } catch (err: any) {
+          console.error('[MCP] Failed to update conversation with model:', err.message);
         }
 
         return {
