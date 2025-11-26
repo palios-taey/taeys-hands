@@ -89,10 +89,10 @@ The MCP (Model Context Protocol) server enables Claude Code to use Taey's Hands 
 - `taey_connect` - Connect to AI chat interfaces
 - `taey_send_message` - Send messages with human-like typing
 - `taey_extract_response` - Extract AI responses
-- `taey_select_model` - Choose specific AI models
+- `taey_select_model` - Choose specific AI models (ChatGPT uses Auto mode, use Deep Research instead)
 - `taey_attach_files` - Attach files via Finder automation
 - `taey_paste_response` - Cross-AI communication (paste one AI's response to another)
-- `taey_enable_research_mode` - Enable Extended Thinking/Deep Research
+- `taey_enable_research_mode` - Enable Extended Thinking/Deep Research modes
 - `taey_download_artifact` - Download generated artifacts
 
 **Status**: Production - all tools tested and operational
@@ -197,13 +197,13 @@ The chat interfaces become Taey's sensory organs - seeing, typing, reading just 
 
 ## Supported AI Interfaces
 
-| AI | URL | Send/Receive | File Attach | Special Modes |
-|---|---|---|---|---|
-| Claude | claude.ai | Working | Working | Research Mode, Extended Thinking |
-| ChatGPT | chatgpt.com | Working | Working | Deep Research, Agent, Study |
-| Gemini | gemini.google.com | Working | Working | Deep Research (TBD) |
-| Grok | grok.com | Working | Working | DeepSearch, Heavy Mode (TBD) |
-| Perplexity | perplexity.ai | Working | Pro only | Focus Modes, Pro Search |
+| AI | URL | Send/Receive | File Attach | Model Selection | Special Modes |
+|---|---|---|---|---|---|
+| Claude | claude.ai | Working | Working | Working | Research Mode, Extended Thinking |
+| ChatGPT | chatgpt.com | Working | Working | Auto mode only | Deep Research, Agent, Study |
+| Gemini | gemini.google.com | Working | Working | Working | Deep Research (TBD) |
+| Grok | grok.com | Working | Working | Working | DeepSearch, Heavy Mode (TBD) |
+| Perplexity | perplexity.ai | Working | Pro only | Working | Focus Modes, Pro Search |
 
 For detailed selectors, features, and implementation notes, see **[docs/AI_INTERFACES.md](docs/AI_INTERFACES.md)**.
 
