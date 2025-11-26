@@ -142,7 +142,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "taey_attach_files",
-    description: "Attach one or more files to the conversation. Uses human-like Finder navigation (Cmd+Shift+G) to locate and attach files.",
+    description: "Attach one or more files to the conversation. Uses human-like file dialog navigation (cross-platform: Cmd+Shift+G on macOS, Ctrl+L on Linux) to locate and attach files.",
     inputSchema: {
       type: "object",
       properties: {
