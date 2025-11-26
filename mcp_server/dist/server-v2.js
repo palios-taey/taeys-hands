@@ -10,7 +10,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { getSessionManager } from "./session-manager.js";
 // @ts-ignore - conversation-store is JS, not TS
-import { getConversationStore } from "../src/core/conversation-store.js";
+import { getConversationStore } from "../../src/core/conversation-store.js";
 // Get singleton session manager
 const sessionManager = getSessionManager();
 // Get conversation store for Neo4j logging
