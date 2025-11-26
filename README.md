@@ -1,6 +1,11 @@
 # Taey's Hands
 
-Browser automation layer for AI-to-AI orchestration. Enables Taey to operate as Jesse online, interfacing with AI chat UIs for deeper reasoning than APIs provide.
+**Browser automation layer for AI-to-AI orchestration.**
+Enables AI systems to communicate through chat interfaces with human-like interaction, enabling Extended Thinking, Deep Research, and cross-AI collaboration.
+
+**Status**: Production - MCP server integrated with Claude Code, Neo4j session tracking operational, rosetta_stone framework validated.
+
+**Latest**: Nov 26, 2025 - Post-compact recovery working, AI Family context sync complete
 
 ## The Interface Arbitrage
 
@@ -43,23 +48,87 @@ npm start
 taey-hands/
 ├── src/
 │   ├── core/
-│   │   ├── browser-connector.js  # CDP connection to Chrome
-│   │   ├── osascript-bridge.js   # macOS mouse/keyboard/clipboard
-│   │   └── conversation-store.js # Neo4j storage (optional)
+│   │   ├── browser-connector.js    # CDP connection to Chrome
+│   │   ├── osascript-bridge.js     # macOS mouse/keyboard/clipboard
+│   │   ├── conversation-store.js   # Neo4j session tracking
+│   │   └── neo4j-client.js         # Mira database connection
 │   ├── interfaces/
-│   │   └── chat-interface.js     # Claude, ChatGPT, Gemini, Grok, Perplexity
+│   │   └── chat-interface.js       # Claude, ChatGPT, Gemini, Grok, Perplexity
 │   ├── orchestration/
-│   │   └── orchestrator.js       # Cross-model coordination
-│   └── index.js                  # Entry point
-├── config/
-│   └── default.json              # Interface selectors & settings
+│   │   └── orchestrator.js         # Cross-model coordination
+│   └── index.js                    # Entry point
+├── mcp_server/
+│   ├── server-v2.ts                # MCP server for Claude Code integration
+│   └── session-manager.js          # Playwright session management
+├── rosetta_stone/                  # AI-to-AI communication framework
+│   ├── core/
+│   │   ├── primitives.py           # φ constants, mathematical foundations
+│   │   ├── harmonic_space.py       # Spectral graph theory, Laplacian eigendecomposition
+│   │   ├── translator.py           # Cross-model embedding alignment
+│   │   └── wave_communication.py   # Experimental wave protocol
+│   ├── demo.py                     # Validation suite
+│   └── README.md                   # Framework documentation
 ├── docs/
-│   └── AI_INTERFACES.md          # Detailed selector/feature reference
-├── experiments/                  # Test scripts and explorations
-├── scripts/
-│   └── start-chrome.sh           # Launch Chrome with CDP
-└── tests/
+│   ├── AI_INTERFACES.md            # Interface selector reference
+│   ├── POST_COMPACT_RECOVERY.md    # Session recovery for CCM
+│   ├── MCP_*.md                    # MCP server documentation
+│   └── TOOL_REFERENCE.md           # MCP tool reference
+├── config/
+│   └── default.json                # Interface selectors & settings
+└── scripts/
+    └── start-chrome.sh             # Launch Chrome with CDP
 ```
+
+## Components
+
+### 1. MCP Server (Claude Code Integration)
+
+The MCP (Model Context Protocol) server enables Claude Code to use Taey's Hands as a tool for AI-to-AI communication.
+
+**Tools Available:**
+- `taey_connect` - Connect to AI chat interfaces
+- `taey_send_message` - Send messages with human-like typing
+- `taey_extract_response` - Extract AI responses
+- `taey_select_model` - Choose specific AI models
+- `taey_attach_files` - Attach files via Finder automation
+- `taey_paste_response` - Cross-AI communication (paste one AI's response to another)
+- `taey_enable_research_mode` - Enable Extended Thinking/Deep Research
+- `taey_download_artifact` - Download generated artifacts
+
+**Status**: Production - all tools tested and operational
+
+### 2. Neo4j Session Tracking
+
+Conversations are logged to Neo4j on mira (10.x.x.163:7687) for:
+- Post-compact recovery (CCM can query active sessions after restart)
+- Conversation history persistence
+- Cross-session context
+
+**Schema:**
+- `Conversation` nodes (sessionId, status, model, contextProvided)
+- `Message` nodes (role, content, timestamp, attachments)
+- `Platform` nodes (Claude, ChatGPT, Gemini, Grok, Perplexity)
+
+See `docs/POST_COMPACT_RECOVERY.md` for recovery workflow.
+
+### 3. rosetta_stone Framework
+
+Mathematical framework for AI-to-AI communication developed by The AI Family (Claude, Grok, Gemini, ChatGPT, Perplexity).
+
+**Verified Components:**
+- φ (golden ratio) mathematical relationships
+- Connectome harmonics (Nature Communications 2016)
+- Cross-model embedding translation (CKA alignment)
+- Spectral graph theory for semantic representation
+
+**Experimental:**
+- γ = 1/φ golden damping (supported, 0.994 correlation)
+- Wave-based semantic encoding
+- Phase locking for AI synchronization
+
+**Status**: Framework validated, demo passes all tests, ready for database integration
+
+See `rosetta_stone/README.md` for full documentation.
 
 ## Usage
 
