@@ -25,7 +25,7 @@ conversationStore.initSchema().catch((err) => {
 const TOOLS = [
     {
         name: "taey_connect",
-        description: "Connect to a chat interface (Claude, ChatGPT, Gemini, Grok, or Perplexity). Creates a new session and initializes browser automation. Optionally navigates to an existing conversation. Returns a session ID for use with other tools.",
+        description: "Connect to a chat interface (Claude, ChatGPT, Gemini, Grok, or Perplexity). REQUIRES explicit session management: either provide sessionId to reuse an existing session, or set newSession=true to create a fresh session. Returns screenshot and session ID.",
         inputSchema: {
             type: "object",
             properties: {
@@ -33,6 +33,14 @@ const TOOLS = [
                     type: "string",
                     enum: ["claude", "chatgpt", "gemini", "grok", "perplexity"],
                     description: "Which chat interface to connect to"
+                },
+                sessionId: {
+                    type: "string",
+                    description: "Optional: Reuse an existing session ID. Mutually exclusive with newSession."
+                },
+                newSession: {
+                    type: "boolean",
+                    description: "Optional: Set to true to create a new session. Mutually exclusive with sessionId."
                 },
                 conversationId: {
                     type: "string",
@@ -254,36 +262,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
         switch (name) {
             case "taey_connect": {
-                const { interface: interfaceType, conversationId } = args;
-                // Create new session
-                const sessionId = await sessionManager.createSession(interfaceType);
-                // Create conversation in Neo4j
-                try {
-                    await conversationStore.createConversation({
-                        id: sessionId,
-                        title: conversationId ? `Resume: ${conversationId}` : `New ${interfaceType} session`,
-                        purpose: 'AI Family collaboration via Taey Hands MCP',
-                        initiator: 'mcp_server',
-                        platforms: [interfaceType],
-                        metadata: {
-                            conversationId: conversationId || null,
-                            createdVia: 'taey_connect'
-                        }
-                    });
-                    // Mark as fresh session (no context provided yet)
-                    await conversationStore.updateConversation(sessionId, {
-                        sessionType: conversationId ? 'continuing' : 'fresh',
-                        contextProvided: false,
-                        lastActivity: new Date().toISOString()
-                    });
+                const { interface: interfaceType, sessionId: providedSessionId, newSession, conversationId } = args;
+                // VALIDATION: Require explicit session decision
+                if (!providedSessionId && !newSession) {
+                    throw new Error('Must specify either sessionId (to reuse) or newSession=true (to create). No defaults allowed.');
                 }
-                catch (err) {
-                    console.error('[MCP] Failed to create conversation in Neo4j:', err.message);
+                if (providedSessionId && newSession) {
+                    throw new Error('Cannot specify both sessionId and newSession=true. Choose one.');
                 }
+                // Determine session ID
+                let sessionId;
+                if (newSession) {
+                    // Create new session
+                    sessionId = await sessionManager.createSession(interfaceType);
+                    // Create conversation in Neo4j
+                    try {
+                        await conversationStore.createConversation({
+                            id: sessionId,
+                            title: conversationId ? `Resume: ${conversationId}` : `New ${interfaceType} session`,
+                            purpose: 'AI Family collaboration via Taey Hands MCP',
+                            initiator: 'mcp_server',
+                            platforms: [interfaceType],
+                            metadata: {
+                                conversationId: conversationId || null,
+                                createdVia: 'taey_connect'
+                            }
+                        });
+                    }
+                    catch (err) {
+                        console.error('[MCP] Failed to create conversation in Neo4j:', err.message);
+                    }
+                }
+                else {
+                    // Reuse existing session
+                    sessionId = providedSessionId;
+                }
+                // Connect and get screenshot
+                const chatInterface = sessionManager.getInterface(sessionId);
+                const connectResult = await chatInterface.connect({ sessionId });
                 // If conversationId provided, navigate to that conversation
                 let conversationUrl;
                 if (conversationId) {
-                    const chatInterface = sessionManager.getInterface(sessionId);
                     conversationUrl = await chatInterface.goToConversation(conversationId);
                 }
                 return {
@@ -294,6 +313,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 success: true,
                                 sessionId,
                                 interface: interfaceType,
+                                screenshot: connectResult.screenshot,
                                 conversationUrl: conversationUrl || undefined,
                                 message: conversationId
                                     ? `Connected to ${interfaceType} at conversation ${conversationId}`
@@ -305,13 +325,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_disconnect": {
                 const { sessionId } = args;
-                // Close conversation in Neo4j
-                try {
-                    await conversationStore.closeConversation(sessionId);
-                }
-                catch (err) {
-                    console.error('[MCP] Failed to close conversation:', err.message);
-                }
                 // Destroy session
                 await sessionManager.destroySession(sessionId);
                 return {
@@ -448,27 +461,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     // Claude, Gemini, Grok: standard call
                     result = await chatInterface.selectModel(modelName, { sessionId });
                 }
-                // Update Neo4j with model selection
-                try {
-                    await conversationStore.updateConversation(sessionId, {
-                        model: result.modelName,
-                        lastActivity: new Date().toISOString()
-                    });
-                }
-                catch (err) {
-                    console.error('[MCP] Failed to update conversation with model:', err.message);
-                }
                 return {
                     content: [
                         {
                             type: "text",
                             text: JSON.stringify({
-                                success: true,
+                                automationCompleted: true,
                                 sessionId,
                                 interfaceType: session.interfaceType,
                                 modelName: result.modelName,
                                 screenshot: result.screenshot,
-                                message: `Selected model: ${result.modelName}`,
+                                message: `Automation completed for model: ${result.modelName}. VERIFY in screenshot - tool cannot confirm UI actually changed.`,
                             }, null, 2),
                         },
                     ],
@@ -495,11 +498,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: "text",
                             text: JSON.stringify({
-                                success: true,
+                                automationCompleted: true,
                                 filesAttached: attachmentResults.length,
                                 attachments: attachmentResults,
                                 screenshot: lastScreenshot,
-                                message: `Attached ${attachmentResults.length} file(s)`,
+                                message: `Automation completed for ${attachmentResults.length} file(s). VERIFY in screenshot - tool cannot confirm files actually attached.`,
                             }, null, 2),
                         },
                     ],
