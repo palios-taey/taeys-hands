@@ -6,19 +6,29 @@
  */
 
 import BrowserConnector from '../core/browser-connector.js';
-import OSABridge from '../core/osascript-bridge.js';
+import { createPlatformBridge } from '../core/platform-bridge.js';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 export class ChatInterface {
   constructor(config = {}) {
     this.browser = new BrowserConnector(config.browser);
-    this.osa = new OSABridge(config.mimesis);
+    this.bridge = null; // Will be initialized in connect()
     this.page = null;
     this.name = config.name || 'unknown';
     this.url = config.url;
     this.selectors = config.selectors || {};
     this.connected = false;
+    this.mimesisConfig = config.mimesis || {};
+  }
+
+  /**
+   * Get browser window name for focusApp calls
+   * Handles Chrome, Chromium, and Firefox on both macOS and Linux
+   */
+  _getBrowserName() {
+    return this.browser.getBrowserName ? this.browser.getBrowserName() : 'Chromium';
   }
 
   /**
@@ -34,8 +44,11 @@ export class ChatInterface {
     await this.browser.connect();
     this.page = await this.browser.getPage(this.name, this.url);
 
-    // CRITICAL: Bring Chrome to front, then bring this tab to front
-    await this.osa.focusApp('Google Chrome');
+    // Initialize platform-specific bridge
+    this.bridge = await createPlatformBridge(this.mimesisConfig);
+
+    // Bring browser to front, then bring this tab to front
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.bringToFront();
     await this.page.waitForTimeout(500); // Wait for tab to be fully visible
 
@@ -173,36 +186,58 @@ export class ChatInterface {
   }
 
   /**
-   * Shared: Navigate Finder dialog to select a file (Cmd+Shift+G flow)
+   * Shared: Navigate file dialog to select a file
+   * Cross-platform: Cmd+Shift+G on macOS, Ctrl+L on Linux
    * Call this after the native file dialog is open
    * @param {string} filePath - Absolute path to the file
    */
   async _navigateFinderDialog(filePath) {
-    // Open Go to Folder with Cmd+Shift+G
-    console.log(`  [${this.name}: Pressing Cmd+Shift+G]`);
-    await this.osa.runScript(`
-      tell application "System Events"
-        tell process "Google Chrome"
-          keystroke "g" using {command down, shift down}
+    const platform = os.platform();
+
+    if (platform === 'darwin') {
+      // macOS: Use Cmd+Shift+G (Go to folder)
+      console.log(`  [${this.name}: macOS - Pressing Cmd+Shift+G]`);
+      await this.bridge.runScript(`
+        tell application "System Events"
+          tell process "Google Chrome"
+            keystroke "g" using {command down, shift down}
+          end tell
         end tell
-      end tell
-    `);
-    await this.page.waitForTimeout(800);
+      `);
+      await this.page.waitForTimeout(800);
 
-    // Type the file path
-    console.log(`  [${this.name}: Typing path "${filePath}"]`);
-    await this.osa.type(filePath, { baseDelay: 30, variation: 15 });
-    await this.page.waitForTimeout(300);
+      // Type the file path
+      console.log(`  [${this.name}: Typing path "${filePath}"]`);
+      await this.bridge.type(filePath, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(300);
 
-    // Press Enter to navigate to path
-    console.log(`  [${this.name}: Pressing Enter to navigate]`);
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
+      // Press Enter to navigate to path
+      console.log(`  [${this.name}: Pressing Enter to navigate]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
 
-    // Press Enter to open/select file
-    console.log(`  [${this.name}: Pressing Enter to open file]`);
-    await this.osa.pressKey('return');
-    await this.page.waitForTimeout(1000);
+      // Press Enter to open/select file
+      console.log(`  [${this.name}: Pressing Enter to open file]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
+    } else if (platform === 'linux') {
+      // Linux: Use Ctrl+L (location bar in file dialogs)
+      console.log(`  [${this.name}: Linux - Pressing Ctrl+L]`);
+      await this.bridge.pressKeyWithModifier('l', 'control');
+      await this.page.waitForTimeout(800);
+
+      // Type the file path
+      console.log(`  [${this.name}: Typing path "${filePath}"]`);
+      await this.bridge.type(filePath, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(300);
+
+      // Press Enter to navigate/select
+      console.log(`  [${this.name}: Pressing Enter to select file]`);
+      await this.bridge.pressKey('return');
+      await this.page.waitForTimeout(1000);
+    } else {
+      throw new Error(`File dialog navigation not supported on platform: ${platform}`);
+    }
   }
 
   /**
@@ -282,23 +317,23 @@ export class ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -375,14 +410,52 @@ export class ChatInterface {
       await this.page.bringToFront();
       await this.page.waitForTimeout(200);
 
-      // Use osascript for human-like typing
-      await this.osa.focusApp('Google Chrome');
+      // Focus the browser window (using xdotool windowraise + windowfocus)
+      await this.bridge.focusApp(this._getBrowserName());
+
+      // CRITICAL: Get input element coordinates and click with xdotool (not Playwright)
+      // This ensures X11 focus is set correctly for xdotool typing
+      const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+      const box = await input.boundingBox();
+      if (box) {
+        // Get browser window position and chrome height to convert viewport coords to screen coords
+        // boundingBox() returns viewport-relative coordinates, but xdotool needs screen coordinates
+        const windowInfo = await this.page.evaluate(() => ({
+          screenX: window.screenX,
+          screenY: window.screenY,
+          outerHeight: window.outerHeight,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          innerWidth: window.innerWidth
+        }));
+
+        // Calculate offsets: window position + browser chrome (toolbar, etc.)
+        const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+        const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+
+        // Convert viewport coordinates to screen coordinates
+        const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+        const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+
+        const clickX = Math.round(screenX);
+        const clickY = Math.round(screenY);
+
+        console.log(`  [DEBUG] Window: (${windowInfo.screenX}, ${windowInfo.screenY}), Chrome: ${chromeHeight}px`);
+        console.log(`  [DEBUG] Box: (${box.x}, ${box.y}) -> Screen: (${clickX}, ${clickY})`);
+
+        await this.bridge.clickAt(clickX, clickY);
+        await this.page.waitForTimeout(300);
+      } else {
+        // Fallback to Playwright click if boundingBox fails
+        await input.click();
+        await this.page.waitForTimeout(200);
+      }
 
       // Use mixed content typing (type + paste) for AI quotes
       if (options.mixedContent !== false) {
-        await this.osa.typeWithMixedContent(message);
+        await this.bridge.typeWithMixedContent(message);
       } else {
-        await this.osa.safeTypeLong(message);
+        await this.bridge.safeTypeLong(message);
       }
     } else {
       // Direct injection (faster but detectable)
@@ -421,16 +494,35 @@ export class ChatInterface {
 
     console.log(`[${this.name}] pasteMessage(${message.length} chars)`);
 
-    // CRITICAL: Bring tab to front before pasting
+    // CRITICAL: Bring tab to front before typing
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Set clipboard content
-    await this.osa.setClipboard(message);
-    await this.page.waitForTimeout(100);
+    // Focus the browser window (required for xdotool on Linux)
+    await this.bridge.focusApp(this._getBrowserName());
 
-    // Paste using Cmd+V
-    await this.osa.safePaste();
+    // Click on input to ensure focus using screen coordinates
+    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const box = await input.boundingBox();
+    if (box) {
+      const windowInfo = await this.page.evaluate(() => ({
+        screenX: window.screenX,
+        screenY: window.screenY,
+        outerHeight: window.outerHeight,
+        innerHeight: window.innerHeight,
+        outerWidth: window.outerWidth,
+        innerWidth: window.innerWidth
+      }));
+      const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+      const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+      const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+      const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+      await this.bridge.clickAt(screenX, screenY);
+      await this.page.waitForTimeout(100);
+    }
+
+    // Use typeFast to bypass clipboard (xclip doesn't work in VNC)
+    await this.bridge.typeFast(message);
 
     // Capture screenshot
     await this.page.waitForTimeout(500);
@@ -463,7 +555,7 @@ export class ChatInterface {
 
     // Send via Enter key
     await this.page.waitForTimeout(300);
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
 
     // Capture screenshot after send
     await this.page.waitForTimeout(1000);
@@ -516,15 +608,15 @@ export class ChatInterface {
       await this.page.waitForTimeout(200);
 
       // Use osascript for human-like typing with focus validation
-      await this.osa.focusApp('Google Chrome');
+      await this.bridge.focusApp(this._getBrowserName());
 
       // Use safe typing that validates Chrome focus and re-checks during long messages
       // If message contains AI content (cross-pollination), use mixed typing (type + paste)
       console.log(`  [Typing message: ${message.length} chars...]`);
       if (options.mixedContent !== false) {
-        await this.osa.typeWithMixedContent(message);
+        await this.bridge.typeWithMixedContent(message);
       } else {
-        await this.osa.safeTypeLong(message);
+        await this.bridge.safeTypeLong(message);
       }
     } else {
       // Direct injection (faster but detectable)
@@ -539,7 +631,7 @@ export class ChatInterface {
 
     // Send the message
     await this.page.waitForTimeout(300);
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
 
     // CHECKPOINT 4: After clicking send
     await this.page.waitForTimeout(1000);
@@ -851,7 +943,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -871,23 +963,23 @@ export class ClaudeInterface extends ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -1060,7 +1152,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1146,7 +1238,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1166,23 +1258,23 @@ export class ChatGPTInterface extends ChatInterface {
 
     // Cmd+Shift+G to open "Go to folder"
     const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
-    await this.osa.runScript(cmdShiftG);
+    await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
     // Type directory path
-    await this.osa.type(dir);
+    await this.bridge.type(dir);
     await this.page.waitForTimeout(300);
 
     // Press Enter to navigate
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     await this.page.waitForTimeout(1000);
 
     // Type filename to select it
-    await this.osa.type(filename);
+    await this.bridge.type(filename);
     await this.page.waitForTimeout(300);
 
     // Press Enter to open/attach
-    await this.osa.pressKey('return');
+    await this.bridge.pressKey('return');
     console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
 
     // Capture screenshot
@@ -1215,7 +1307,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1340,7 +1432,121 @@ export class GeminiInterface extends ChatInterface {
   async newConversation() {
     await this.page.goto('https://gemini.google.com/app');
     await this.page.waitForTimeout(1000);
+    await this.dismissOverlays();
     return true;
+  }
+
+  /**
+   * Dismiss any overlay popups (promotional banners, etc.)
+   * Gemini often shows promotional overlays that block the input area
+   */
+  async dismissOverlays() {
+    console.log('  [Gemini] Attempting to dismiss overlays...');
+
+    // Try multiple approaches to close overlays
+    try {
+      // Approach 1: Click the X button on promotional banner
+      const closeSelectors = [
+        'button[aria-label="Close"]',
+        'button[aria-label="Dismiss"]',
+        '.cdk-overlay-container button mat-icon[fonticon="close"]',
+        '.cdk-overlay-backdrop',
+        '[aria-label="Close promotional banner"]'
+      ];
+
+      for (const selector of closeSelectors) {
+        const closeButton = await this.page.$(selector);
+        if (closeButton) {
+          await closeButton.click({ force: true });
+          console.log(`  [Gemini] Clicked close button: ${selector}`);
+          await this.page.waitForTimeout(300);
+          break;
+        }
+      }
+    } catch {
+      // No overlay button found
+    }
+
+    // Approach 2: Press Escape multiple times via xdotool (more reliable)
+    try {
+      await this.bridge.focusApp(this._getBrowserName());
+      await this.bridge.runCommand('xdotool key Escape');
+      await this.page.waitForTimeout(200);
+      await this.bridge.runCommand('xdotool key Escape');
+      await this.page.waitForTimeout(200);
+      console.log('  [Gemini] Pressed Escape via xdotool');
+    } catch (e) {
+      console.log('  [Gemini] Escape key failed:', e.message);
+    }
+
+    // Approach 3: Click in an empty area to dismiss any popover
+    try {
+      // Click at top-left corner of the page (usually empty area)
+      await this.bridge.clickAt(50, 50);
+      await this.page.waitForTimeout(200);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Override prepareInput to use xdotool click (bypasses overlay blocking)
+   * Gemini has promotional overlays that block Playwright's click() method
+   */
+  async prepareInput(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-focused.png`;
+
+    console.log(`[${this.name}] prepareInput() - using xdotool to bypass overlays`);
+
+    // Dismiss overlays first
+    await this.dismissOverlays();
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(100);
+
+    // Focus the browser window using xdotool
+    await this.bridge.focusApp(this._getBrowserName());
+
+    // Find the input element and get its coordinates
+    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const box = await input.boundingBox();
+
+    if (box) {
+      // Use xdotool click (bypasses overlay blocking)
+      const windowInfo = await this.page.evaluate(() => ({
+        screenX: window.screenX,
+        screenY: window.screenY,
+        outerHeight: window.outerHeight,
+        innerHeight: window.innerHeight,
+        outerWidth: window.outerWidth,
+        innerWidth: window.innerWidth
+      }));
+
+      const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+      const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+
+      const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+      const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+
+      console.log(`  [Gemini] Clicking input at screen coords (${Math.round(screenX)}, ${Math.round(screenY)})`);
+      await this.bridge.clickAt(Math.round(screenX), Math.round(screenY));
+      await this.page.waitForTimeout(200);
+    } else {
+      // Fallback to Playwright click with force
+      await input.click({ force: true });
+      await this.page.waitForTimeout(200);
+    }
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Automation completed - VERIFY FOCUS IN SCREENSHOT`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
   }
 
   buildConversationUrl(conversationId) {
@@ -1365,7 +1571,7 @@ export class GeminiInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Open upload file menu" button to open the menu
@@ -1648,7 +1854,7 @@ export class GrokInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Attach" button to open menu
@@ -1859,7 +2065,7 @@ export class PerplexityInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.osa.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click attach-files-button to open menu
