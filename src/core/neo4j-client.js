@@ -81,6 +81,13 @@ export class Neo4jClient {
   }
 
   /**
+   * Run a read query (convenience method)
+   */
+  async read(cypher, params = {}) {
+    return this.run(cypher, params, { write: false });
+  }
+
+  /**
    * Run a write query (convenience method)
    */
   async write(cypher, params = {}) {

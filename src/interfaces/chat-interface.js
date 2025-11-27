@@ -1576,13 +1576,64 @@ export class GeminiInterface extends ChatInterface {
 
     // Step 1: Click "Open upload file menu" button to open the menu
     console.log(`  [${this.name}: Opening upload file menu]`);
-    const menuBtn = await this.page.waitForSelector('button[aria-label="Open upload file menu"]', { timeout: 5000 });
+
+    // Try multiple selectors as Gemini's UI changes frequently
+    const menuSelectors = [
+      'button[aria-label="Open upload file menu"]',
+      'button[aria-label="Attach files"]',
+      'button[data-test-id="upload-menu-button"]',
+      'button[aria-label*="Upload"]',
+      'button svg[data-icon-name="attachment_24px"]'  // Sometimes identified by icon
+    ];
+
+    let menuBtn = null;
+    for (const selector of menuSelectors) {
+      try {
+        menuBtn = await this.page.waitForSelector(selector, { timeout: 1000 });
+        if (menuBtn) {
+          console.log(`  [${this.name}: Found menu button: ${selector}]`);
+          break;
+        }
+      } catch {
+        // Continue to next selector
+      }
+    }
+
+    if (!menuBtn) {
+      throw new Error('Could not find Gemini upload menu button');
+    }
+
     await menuBtn.click();
     await this.page.waitForTimeout(500);
 
     // Step 2: Click "Upload files" in the menu
     console.log(`  [${this.name}: Clicking Upload files]`);
-    const uploadBtn = await this.page.waitForSelector('button[data-test-id="local-images-files-uploader-button"]', { timeout: 5000 });
+
+    const uploadSelectors = [
+      'button[data-test-id="local-images-files-uploader-button"]',
+      'button:has-text("Upload files")',
+      'button:has-text("Upload from computer")',
+      '[role="menuitem"]:has-text("Upload")',
+      'div[role="menuitem"]:has-text("Local files")'
+    ];
+
+    let uploadBtn = null;
+    for (const selector of uploadSelectors) {
+      try {
+        uploadBtn = await this.page.waitForSelector(selector, { timeout: 1000 });
+        if (uploadBtn) {
+          console.log(`  [${this.name}: Found upload item: ${selector}]`);
+          break;
+        }
+      } catch {
+        // Continue to next selector
+      }
+    }
+
+    if (!uploadBtn) {
+      throw new Error('Could not find Gemini upload menu item');
+    }
+
     await uploadBtn.click();
     await this.page.waitForTimeout(1500);
 
