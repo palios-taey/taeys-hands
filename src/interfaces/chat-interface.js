@@ -9,6 +9,7 @@ import BrowserConnector from '../core/browser-connector.js';
 import { createPlatformBridge } from '../core/platform-bridge.js';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 export class ChatInterface {
   constructor(config = {}) {
@@ -24,17 +25,37 @@ export class ChatInterface {
 
   /**
    * Connect to this chat interface
+   * @param {Object} options - { sessionId, screenshotPath }
+   * @returns {Object} { screenshot: string, sessionId: string }
    */
-  async connect() {
+  async connect(options = {}) {
+    // Session ID is required - either provided or generated
+    const sessionId = options.sessionId || Date.now().toString();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-connected.png`;
+
     await this.browser.connect();
     this.page = await this.browser.getPage(this.name, this.url);
 
     // Initialize platform-specific bridge
     this.bridge = await createPlatformBridge(this.mimesisConfig);
 
+    // Bring browser to front, then bring this tab to front
+    const browserName = this.browser.getBrowserName ? this.browser.getBrowserName() : 'Chromium';
+    await this.bridge.focusApp(browserName);
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(500); // Wait for tab to be fully visible
+
+    // Capture screenshot to verify tab is visible
+    await this.screenshot(screenshotPath);
+
     this.connected = true;
     console.log(`✓ Connected to ${this.name}`);
-    return this;
+    console.log(`  Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      sessionId: sessionId
+    };
   }
 
   /**
@@ -164,7 +185,6 @@ export class ChatInterface {
    * @param {string} filePath - Absolute path to the file
    */
   async _navigateFinderDialog(filePath) {
-    const os = await import('os');
     const platform = os.platform();
 
     if (platform === 'darwin') {
@@ -1256,45 +1276,13 @@ export class ChatGPTInterface extends ChatInterface {
     const sessionId = options.sessionId || Date.now();
     const screenshotPath = options.screenshotPath || `/tmp/taey-chatgpt-${sessionId}-model-selected.png`;
 
-    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''})`);
+    console.log(`[chatgpt] selectModel(${modelName}${isLegacy ? ', legacy' : ''}) - DISABLED`);
+    console.log(`  ChatGPT model selection disabled - using Auto mode`);
+    console.log(`  For thinking: use Deep Research mode via setMode() instead`);
 
-    // Bring tab to front
+    // Just bring tab to front and take screenshot
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
-
-    // Click model selector dropdown button
-    const modelBtn = this.page.locator('[data-testid="model-switcher-dropdown-button"]').first();
-    await modelBtn.waitFor({ state: 'attached', timeout: 5000 });
-    await modelBtn.click();  // Use regular click, not dispatchEvent
-    await this.page.waitForTimeout(1000); // Wait for menu to fully render
-
-    if (isLegacy) {
-      // Click Legacy submenu first
-      console.log(`  → Opening Legacy submenu`);
-      const legacyMenu = this.page.locator('[role="menuitem"]:has-text("Legacy"), div:has-text("Legacy models")').first();
-      const legacyExists = await legacyMenu.count() > 0;
-
-      if (!legacyExists) {
-        await this.page.keyboard.press('Escape');
-        throw new Error('Legacy submenu not found in model selector');
-      }
-
-      await legacyMenu.click();
-      await this.page.waitForTimeout(300);
-    }
-
-    // Find and click the model (search within role="menu" or use flexible text matching)
-    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}")`).first();
-    const itemExists = await modelItem.count() > 0;
-
-    if (!itemExists) {
-      await this.page.keyboard.press('Escape');
-      throw new Error(`Model "${modelName}" not found in model selector menu`);
-    }
-
-    await modelItem.click();
-    console.log(`  ✓ Automation completed - VERIFY IN SCREENSHOT`);
-    await this.page.waitForTimeout(500);
 
     // Capture screenshot
     await this.screenshot(screenshotPath);
@@ -1303,7 +1291,7 @@ export class ChatGPTInterface extends ChatInterface {
     return {
       screenshot: screenshotPath,
       automationCompleted: true,
-      modelName
+      modelName: 'Auto (selection disabled)'
     };
   }
 
