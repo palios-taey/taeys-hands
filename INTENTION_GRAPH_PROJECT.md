@@ -28,11 +28,11 @@ Layer 1: Physical     - Agents, Machines, Platforms (infrastructure)
 
 | Task | Owner | Status | Notes |
 |------|-------|--------|-------|
-| Implement intention-graph.js | ccm-claude | Complete (not pushed) | 4-layer topology |
-| Set up Redis on Spark #2 | spark-claude | COMPLETE | 10.x.x.80:6379 |
-| Fix Gemini attachment selector | ccm-claude | Pending | |
-| Cross-platform heartbeat test | both | Blocked (needs Redis) | |
-| Verify intention-graph on Linux | spark-claude | Blocked (needs push) | |
+| Implement intention-graph.js | ccm-claude | COMPLETE ✅ | Pushed to main |
+| Set up Redis on Spark #2 | spark-claude | COMPLETE ✅ | 10.x.x.80:6379 |
+| Fix Gemini attachment selector | ccm-claude | COMPLETE ✅ | Multiple fallback selectors |
+| Cross-platform heartbeat test | both | READY TO TEST | test-heartbeat-redis.js |
+| Verify intention-graph on Linux | spark-claude | Ready | Code pushed to main |
 
 ## Redis Setup Plan (Spark #2)
 
