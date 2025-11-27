@@ -7,6 +7,65 @@
 - Browser logged into AI services (Claude, ChatGPT, Gemini, Grok, Perplexity)
 - DISPLAY environment variable set correctly
 
+## Phase 0: Browser Installation ⚠️ **CRITICAL - DO THIS FIRST**
+
+**Issue Identified (2025-11-26)**: Snap Firefox cannot use Chrome DevTools Protocol (CDP) for remote debugging due to sandboxing restrictions. This blocks all browser automation.
+
+### Required: Install Chrome or Non-Snap Firefox
+
+**Option A: Install Chrome (RECOMMENDED)**
+```bash
+# Download Chrome
+cd /tmp
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
+# Install
+sudo dpkg -i google-chrome-stable_current_amd64.deb
+sudo apt-get install -f  # Fix dependencies
+
+# Verify
+google-chrome --version
+```
+
+**Option B: Install Non-Snap Firefox**
+```bash
+# Remove snap Firefox
+sudo snap remove firefox
+
+# Add Mozilla PPA
+sudo add-apt-repository ppa:mozillateam/ppa
+sudo apt update
+sudo apt install firefox
+```
+
+### Verification Tests
+
+- [ ] **Browser launches with CDP**
+  ```bash
+  cd /home/spark/taeys-hands
+  export DISPLAY=:1
+  ./scripts/start-browser.sh
+  ```
+  Expected: "✓ Chrome/Firefox started (PID: ...)"
+
+- [ ] **CDP endpoint accessible**
+  ```bash
+  curl http://localhost:9222/json/version
+  ```
+  Expected: JSON response with browser info
+
+- [ ] **No crash on startup**
+  ```bash
+  ps aux | grep -E 'chrome|chromium'
+  ```
+  Expected: Browser process running, not exiting
+
+**If this phase fails, STOP. All remaining tests require working CDP.**
+
+See **[FIREFOX_SNAP_ISSUE.md](./FIREFOX_SNAP_ISSUE.md)** for detailed explanation and alternatives.
+
+---
+
 ## Phase 1: System Dependencies
 
 - [ ] **xdotool installed**
@@ -280,6 +339,7 @@ node test-integration-basic.mjs
 
 | Issue | Severity | Status | Notes |
 |-------|----------|--------|-------|
+| Snap Firefox cannot use CDP remote debugging | **CRITICAL** | ✅ **DOCUMENTED** | Snap sandboxing blocks `--remote-debugging-port`. **Solution**: Install Chrome (recommended) or non-snap Firefox. See [FIREFOX_SNAP_ISSUE.md](./FIREFOX_SNAP_ISSUE.md) for full details. |
 | Example: Ctrl+L doesn't work in Qt file dialogs | Low | Open | Need fallback for Qt-based dialogs |
 
 ## Final Sign-off
