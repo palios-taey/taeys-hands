@@ -24,6 +24,14 @@ export class ChatInterface {
   }
 
   /**
+   * Get browser window name for focusApp calls
+   * Handles Chrome, Chromium, and Firefox on both macOS and Linux
+   */
+  _getBrowserName() {
+    return this.browser.getBrowserName ? this.browser.getBrowserName() : 'Chromium';
+  }
+
+  /**
    * Connect to this chat interface
    * @param {Object} options - { sessionId, screenshotPath }
    * @returns {Object} { screenshot: string, sessionId: string }
@@ -40,8 +48,7 @@ export class ChatInterface {
     this.bridge = await createPlatformBridge(this.mimesisConfig);
 
     // Bring browser to front, then bring this tab to front
-    const browserName = this.browser.getBrowserName ? this.browser.getBrowserName() : 'Chromium';
-    await this.bridge.focusApp(browserName);
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.bringToFront();
     await this.page.waitForTimeout(500); // Wait for tab to be fully visible
 
@@ -403,8 +410,46 @@ export class ChatInterface {
       await this.page.bringToFront();
       await this.page.waitForTimeout(200);
 
-      // Use osascript for human-like typing
-      await this.bridge.focusApp('Google Chrome');
+      // Focus the browser window (using xdotool windowraise + windowfocus)
+      await this.bridge.focusApp(this._getBrowserName());
+
+      // CRITICAL: Get input element coordinates and click with xdotool (not Playwright)
+      // This ensures X11 focus is set correctly for xdotool typing
+      const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+      const box = await input.boundingBox();
+      if (box) {
+        // Get browser window position and chrome height to convert viewport coords to screen coords
+        // boundingBox() returns viewport-relative coordinates, but xdotool needs screen coordinates
+        const windowInfo = await this.page.evaluate(() => ({
+          screenX: window.screenX,
+          screenY: window.screenY,
+          outerHeight: window.outerHeight,
+          innerHeight: window.innerHeight,
+          outerWidth: window.outerWidth,
+          innerWidth: window.innerWidth
+        }));
+
+        // Calculate offsets: window position + browser chrome (toolbar, etc.)
+        const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+        const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+
+        // Convert viewport coordinates to screen coordinates
+        const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+        const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+
+        const clickX = Math.round(screenX);
+        const clickY = Math.round(screenY);
+
+        console.log(`  [DEBUG] Window: (${windowInfo.screenX}, ${windowInfo.screenY}), Chrome: ${chromeHeight}px`);
+        console.log(`  [DEBUG] Box: (${box.x}, ${box.y}) -> Screen: (${clickX}, ${clickY})`);
+
+        await this.bridge.clickAt(clickX, clickY);
+        await this.page.waitForTimeout(300);
+      } else {
+        // Fallback to Playwright click if boundingBox fails
+        await input.click();
+        await this.page.waitForTimeout(200);
+      }
 
       // Use mixed content typing (type + paste) for AI quotes
       if (options.mixedContent !== false) {
@@ -449,16 +494,35 @@ export class ChatInterface {
 
     console.log(`[${this.name}] pasteMessage(${message.length} chars)`);
 
-    // CRITICAL: Bring tab to front before pasting
+    // CRITICAL: Bring tab to front before typing
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Set clipboard content
-    await this.bridge.setClipboard(message);
-    await this.page.waitForTimeout(100);
+    // Focus the browser window (required for xdotool on Linux)
+    await this.bridge.focusApp(this._getBrowserName());
 
-    // Paste using Cmd+V
-    await this.bridge.safePaste();
+    // Click on input to ensure focus using screen coordinates
+    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const box = await input.boundingBox();
+    if (box) {
+      const windowInfo = await this.page.evaluate(() => ({
+        screenX: window.screenX,
+        screenY: window.screenY,
+        outerHeight: window.outerHeight,
+        innerHeight: window.innerHeight,
+        outerWidth: window.outerWidth,
+        innerWidth: window.innerWidth
+      }));
+      const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+      const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+      const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+      const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+      await this.bridge.clickAt(screenX, screenY);
+      await this.page.waitForTimeout(100);
+    }
+
+    // Use typeFast to bypass clipboard (xclip doesn't work in VNC)
+    await this.bridge.typeFast(message);
 
     // Capture screenshot
     await this.page.waitForTimeout(500);
@@ -544,7 +608,7 @@ export class ChatInterface {
       await this.page.waitForTimeout(200);
 
       // Use osascript for human-like typing with focus validation
-      await this.bridge.focusApp('Google Chrome');
+      await this.bridge.focusApp(this._getBrowserName());
 
       // Use safe typing that validates Chrome focus and re-checks during long messages
       // If message contains AI content (cross-pollination), use mixed typing (type + paste)
@@ -879,7 +943,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1088,7 +1152,7 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1174,7 +1238,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1243,7 +1307,7 @@ export class ChatGPTInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Click + menu
@@ -1368,7 +1432,121 @@ export class GeminiInterface extends ChatInterface {
   async newConversation() {
     await this.page.goto('https://gemini.google.com/app');
     await this.page.waitForTimeout(1000);
+    await this.dismissOverlays();
     return true;
+  }
+
+  /**
+   * Dismiss any overlay popups (promotional banners, etc.)
+   * Gemini often shows promotional overlays that block the input area
+   */
+  async dismissOverlays() {
+    console.log('  [Gemini] Attempting to dismiss overlays...');
+
+    // Try multiple approaches to close overlays
+    try {
+      // Approach 1: Click the X button on promotional banner
+      const closeSelectors = [
+        'button[aria-label="Close"]',
+        'button[aria-label="Dismiss"]',
+        '.cdk-overlay-container button mat-icon[fonticon="close"]',
+        '.cdk-overlay-backdrop',
+        '[aria-label="Close promotional banner"]'
+      ];
+
+      for (const selector of closeSelectors) {
+        const closeButton = await this.page.$(selector);
+        if (closeButton) {
+          await closeButton.click({ force: true });
+          console.log(`  [Gemini] Clicked close button: ${selector}`);
+          await this.page.waitForTimeout(300);
+          break;
+        }
+      }
+    } catch {
+      // No overlay button found
+    }
+
+    // Approach 2: Press Escape multiple times via xdotool (more reliable)
+    try {
+      await this.bridge.focusApp(this._getBrowserName());
+      await this.bridge.runCommand('xdotool key Escape');
+      await this.page.waitForTimeout(200);
+      await this.bridge.runCommand('xdotool key Escape');
+      await this.page.waitForTimeout(200);
+      console.log('  [Gemini] Pressed Escape via xdotool');
+    } catch (e) {
+      console.log('  [Gemini] Escape key failed:', e.message);
+    }
+
+    // Approach 3: Click in an empty area to dismiss any popover
+    try {
+      // Click at top-left corner of the page (usually empty area)
+      await this.bridge.clickAt(50, 50);
+      await this.page.waitForTimeout(200);
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Override prepareInput to use xdotool click (bypasses overlay blocking)
+   * Gemini has promotional overlays that block Playwright's click() method
+   */
+  async prepareInput(options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-focused.png`;
+
+    console.log(`[${this.name}] prepareInput() - using xdotool to bypass overlays`);
+
+    // Dismiss overlays first
+    await this.dismissOverlays();
+
+    // Bring tab to front
+    await this.page.bringToFront();
+    await this.page.waitForTimeout(100);
+
+    // Focus the browser window using xdotool
+    await this.bridge.focusApp(this._getBrowserName());
+
+    // Find the input element and get its coordinates
+    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const box = await input.boundingBox();
+
+    if (box) {
+      // Use xdotool click (bypasses overlay blocking)
+      const windowInfo = await this.page.evaluate(() => ({
+        screenX: window.screenX,
+        screenY: window.screenY,
+        outerHeight: window.outerHeight,
+        innerHeight: window.innerHeight,
+        outerWidth: window.outerWidth,
+        innerWidth: window.innerWidth
+      }));
+
+      const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+      const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+
+      const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+      const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+
+      console.log(`  [Gemini] Clicking input at screen coords (${Math.round(screenX)}, ${Math.round(screenY)})`);
+      await this.bridge.clickAt(Math.round(screenX), Math.round(screenY));
+      await this.page.waitForTimeout(200);
+    } else {
+      // Fallback to Playwright click with force
+      await input.click({ force: true });
+      await this.page.waitForTimeout(200);
+    }
+
+    // Capture screenshot
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Automation completed - VERIFY FOCUS IN SCREENSHOT`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true
+    };
   }
 
   buildConversationUrl(conversationId) {
@@ -1393,7 +1571,7 @@ export class GeminiInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Open upload file menu" button to open the menu
@@ -1663,7 +1841,7 @@ export class GrokInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click "Attach" button to open menu
@@ -1844,7 +2022,7 @@ export class PerplexityInterface extends ChatInterface {
     await this.page.waitForTimeout(200);
 
     // Focus Chrome
-    await this.bridge.focusApp('Google Chrome');
+    await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
     // Step 1: Click attach-files-button to open menu
