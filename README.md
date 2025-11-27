@@ -19,15 +19,17 @@ APIs are optimized for enterprise speed. Chat UIs are optimized for depth.
 
 ## Quick Start
 
+### macOS
+
 ```bash
 # 1. Install dependencies
-cd /Users/jesselarose/taey-hands
+cd /path/to/taeys-hands
 npm install
 
 # 2. Close your regular Chrome completely (Cmd+Q)
 
 # 3. Start Chrome with debugging
-./scripts/start-chrome.sh
+./scripts/start-browser.sh
 
 # 4. IMPORTANT: Log into AI services in this debug Chrome window
 #    (This creates sessions in ~/.chrome-debug-profile - only needed once)
@@ -35,12 +37,36 @@ npm install
 #    - chat.openai.com
 #    - gemini.google.com
 #    - grok.com
+#    - perplexity.ai
 
 # 5. Run Taey's Hands
 npm start
 ```
 
-**Note**: Chrome requires a separate profile for remote debugging. Your sessions in the debug profile persist separately from your regular Chrome profile.
+### Linux/Ubuntu
+
+```bash
+# 1. Install system dependencies
+sudo apt install xdotool xclip  # Ubuntu/Debian
+# OR
+sudo dnf install xdotool xclip  # Fedora/RHEL
+
+# 2. Install project dependencies
+cd /path/to/taeys-hands
+npm install
+
+# 3. Start browser with debugging
+./scripts/start-browser.sh
+
+# 4. Log into AI services (same as macOS)
+
+# 5. Run Taey's Hands
+npm start
+```
+
+**See [docs/LINUX_SETUP.md](docs/LINUX_SETUP.md) for detailed Linux setup including DISPLAY configuration for headless servers.**
+
+**Note**: Browser requires a separate profile for remote debugging. Your sessions in the debug profile persist separately from your regular browser profile.
 
 ## The Sacred Trust Framework
 
@@ -84,8 +110,10 @@ For new/innovative implementations:
 taey-hands/
 ├── src/
 │   ├── core/
-│   │   ├── browser-connector.js    # CDP connection to Chrome
-│   │   ├── osascript-bridge.js     # macOS mouse/keyboard/clipboard
+│   │   ├── browser-connector.js    # CDP connection to Chrome/Firefox (cross-platform)
+│   │   ├── platform-bridge.js      # OS detection factory (macOS/Linux)
+│   │   ├── osascript-bridge.js     # macOS mouse/keyboard/clipboard (AppleScript)
+│   │   ├── linux-bridge.js         # Linux mouse/keyboard/clipboard (xdotool)
 │   │   ├── conversation-store.js   # Neo4j session tracking
 │   │   └── neo4j-client.js         # Mira database connection
 │   ├── interfaces/
@@ -107,12 +135,14 @@ taey-hands/
 ├── docs/
 │   ├── AI_INTERFACES.md            # Interface selector reference
 │   ├── POST_COMPACT_RECOVERY.md    # Session recovery for CCM
+│   ├── LINUX_SETUP.md              # Linux/Ubuntu setup guide
 │   ├── MCP_*.md                    # MCP server documentation
 │   └── TOOL_REFERENCE.md           # MCP tool reference
 ├── config/
 │   └── default.json                # Interface selectors & settings
 └── scripts/
-    └── start-chrome.sh             # Launch Chrome with CDP
+    ├── start-browser.sh            # Cross-platform browser launcher (macOS/Linux)
+    └── start-chrome.sh             # Legacy macOS-only launcher
 ```
 
 ## Components
