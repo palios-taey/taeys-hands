@@ -29,6 +29,7 @@ export class BrowserConnector {
     this.browser = null;
     this.context = null;
     this.pages = new Map(); // Track pages by AI family member name
+    this.browserWindowName = null; // Cached window name for xdotool/osascript
   }
 
   /**
@@ -161,11 +162,15 @@ export class BrowserConnector {
       try {
         this.browser = await chromium.connectOverCDP(`http://localhost:${this.debuggingPort}`);
         console.log(`✓ Connected to Chromium-based browser via CDP`);
+
+        // Detect actual browser name for window management
+        await this._detectBrowserWindowName();
       } catch (chromeError) {
         // If Chromium fails, try Firefox
         try {
           this.browser = await firefox.connectOverCDP(`http://localhost:${this.debuggingPort}`);
           console.log(`✓ Connected to Firefox via CDP`);
+          this.browserWindowName = 'Firefox';
         } catch (firefoxError) {
           throw new Error(`Failed to connect to browser: ${chromeError.message}`);
         }
@@ -182,6 +187,66 @@ export class BrowserConnector {
       console.error('Failed to connect via CDP:', error.message);
       throw error;
     }
+  }
+
+  /**
+   * Detect browser window name for window management (xdotool/osascript)
+   * This is the name used by the window manager, not the CDP version
+   */
+  async _detectBrowserWindowName() {
+    const platform = os.platform();
+
+    if (platform === 'darwin') {
+      // macOS: Always "Google Chrome" or "Chromium"
+      try {
+        await execAsync('pgrep -x "Google Chrome"');
+        this.browserWindowName = 'Google Chrome';
+      } catch {
+        this.browserWindowName = 'Chromium';
+      }
+    } else if (platform === 'linux') {
+      // Linux: Check which browser process is actually running
+      // Note: Snap Chromium creates processes named "chrome" but windows titled "Chromium"
+      // Priority: google-chrome > chromium-browser > chromium > chrome (snap)
+      try {
+        await execAsync('pgrep -x "google-chrome"');
+        this.browserWindowName = 'Google Chrome';
+        return;
+      } catch {}
+
+      try {
+        await execAsync('pgrep -x "chromium-browser"');
+        this.browserWindowName = 'Chromium';
+        return;
+      } catch {}
+
+      try {
+        await execAsync('pgrep -x "chromium"');
+        this.browserWindowName = 'Chromium';
+        return;
+      } catch {}
+
+      try {
+        // Snap Chromium creates processes named "chrome" but windows are "- Chromium"
+        await execAsync('pgrep -x "chrome"');
+        this.browserWindowName = 'Chromium';
+        return;
+      } catch {}
+
+      // Fallback to Chromium (most common)
+      this.browserWindowName = 'Chromium';
+    } else {
+      // Fallback
+      this.browserWindowName = 'Google Chrome';
+    }
+  }
+
+  /**
+   * Get browser window name for window management
+   * Returns the name used by xdotool/osascript, not the CDP version
+   */
+  getBrowserName() {
+    return this.browserWindowName || 'Chromium';
   }
 
   /**
