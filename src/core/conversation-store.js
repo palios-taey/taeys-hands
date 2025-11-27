@@ -99,7 +99,11 @@ export class ConversationStore {
       purpose: options.purpose || null,
       initiator: options.initiator || null, // Who started it (human, claude, etc.)
       createdAt: new Date().toISOString(),
-      metadata: JSON.stringify(options.metadata || {})
+      metadata: JSON.stringify(options.metadata || {}),
+      // Add MCP session tracking fields
+      platform: options.platform || null,
+      sessionId: options.sessionId || null,
+      conversationId: options.conversationId || null
     };
 
     const result = await this.client.write(
@@ -110,6 +114,9 @@ export class ConversationStore {
         initiator: $initiator,
         createdAt: datetime($createdAt),
         metadata: $metadata,
+        platform: $platform,
+        sessionId: $sessionId,
+        conversationId: $conversationId,
         status: 'active'
       })
       RETURN c`,
@@ -155,6 +162,8 @@ export class ConversationStore {
          id: $id,
          role: $role,
          content: $content,
+         platform: $platform,
+         conversationId: $conversationId,
          timestamp: datetime($timestamp),
          attachments: $attachments,
          metadata: $metadata

@@ -17,6 +17,8 @@ import {
 import { getSessionManager, type InterfaceType } from "./session-manager.js";
 // @ts-ignore - conversation-store is JS, not TS
 import { getConversationStore } from "../../src/core/conversation-store.js";
+// @ts-ignore - response-detection is JS, not TS
+import { ResponseDetectionEngine } from "../../src/core/response-detection.js";
 
 // Get singleton session manager
 const sessionManager = getSessionManager();
@@ -90,7 +92,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "taey_send_message",
-    description: "Type and send a message in the current conversation. Uses human-like typing and clicks the send button.",
+    description: "Type and send a message in the current conversation. Uses human-like typing and clicks the send button. When waitForResponse is true, automatically waits for the AI response, extracts it, and saves to Neo4j.",
     inputSchema: {
       type: "object",
       properties: {
@@ -102,9 +104,17 @@ const TOOLS: Tool[] = [
           type: "string",
           description: "The message to send"
         },
+        attachments: {
+          type: "array",
+          description: "Array of file paths to attach to the message",
+          items: {
+            type: "string"
+          },
+          default: []
+        },
         waitForResponse: {
           type: "boolean",
-          description: "Whether to wait for a response (not implemented yet)",
+          description: "Whether to wait for AI response completion. If true, uses ResponseDetectionEngine to wait for response, extracts it, and saves to Neo4j automatically.",
           default: false
         }
       },
@@ -308,6 +318,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               purpose: 'AI Family collaboration via Taey Hands MCP',
               initiator: 'mcp_server',
               platforms: [interfaceType],
+              platform: interfaceType,  // Add platform as top-level field for querying
+              sessionId: sessionId,      // Add sessionId as top-level field
+              conversationId: conversationId || null,  // Add conversationId as top-level field
               metadata: {
                 conversationId: conversationId || null,
                 createdVia: 'taey_connect'
@@ -398,15 +411,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "taey_send_message": {
-        const { sessionId, message, waitForResponse } = args as {
+        const { sessionId, message, attachments, waitForResponse } = args as {
           sessionId: string;
           message: string;
+          attachments?: string[];
           waitForResponse?: boolean;
         };
 
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
         const interfaceName = chatInterface.name;
+        const session = sessionManager.getSession(sessionId);
 
         // Log to Neo4j - store sent message
         try {
@@ -415,6 +430,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: message,
             platform: interfaceName,
             timestamp: new Date().toISOString(),
+            attachments: attachments || [],
             metadata: { source: 'mcp_taey_send_message' }
           });
         } catch (err: any) {
@@ -430,6 +446,85 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Click send button
         await chatInterface.clickSend();
 
+        // If waitForResponse is true, use ResponseDetectionEngine
+        if (waitForResponse) {
+          console.error(`[MCP] Waiting for response from ${interfaceName}...`);
+
+          try {
+            // Create detection engine for this platform
+            const detector = new ResponseDetectionEngine(
+              chatInterface.page,
+              session?.interfaceType || interfaceName,
+              { debug: true }
+            );
+
+            // Wait for response completion
+            const detectionResult = await detector.detectCompletion();
+            const responseText = detectionResult.content;
+            const timestamp = new Date().toISOString();
+
+            console.error(`[MCP] Response detected (${detectionResult.method}, ${detectionResult.confidence * 100}% confidence) in ${detectionResult.detectionTime}ms`);
+
+            // Log response to Neo4j
+            try {
+              await conversationStore.addMessage(sessionId, {
+                role: 'assistant',
+                content: responseText,
+                platform: interfaceName,
+                timestamp,
+                metadata: {
+                  source: 'mcp_taey_send_message_auto_extract',
+                  detectionMethod: detectionResult.method,
+                  detectionConfidence: detectionResult.confidence,
+                  detectionTime: detectionResult.detectionTime,
+                  contentLength: responseText.length
+                }
+              });
+            } catch (err: any) {
+              console.error('[MCP] Failed to log response to Neo4j:', err.message);
+            }
+
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    success: true,
+                    sessionId,
+                    message: "Message sent and response received",
+                    sentText: message,
+                    waitForResponse: true,
+                    responseText,
+                    responseLength: responseText.length,
+                    detectionMethod: detectionResult.method,
+                    detectionConfidence: detectionResult.confidence,
+                    detectionTime: detectionResult.detectionTime,
+                    timestamp
+                  }, null, 2),
+                },
+              ],
+            };
+          } catch (err: any) {
+            console.error('[MCP] Response detection failed:', err.message);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    success: false,
+                    sessionId,
+                    message: "Message sent but response detection failed",
+                    sentText: message,
+                    waitForResponse: true,
+                    error: err.message,
+                  }, null, 2),
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+
         return {
           content: [
             {
@@ -439,7 +534,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 sessionId,
                 message: "Message sent",
                 sentText: message,
-                waitForResponse: waitForResponse || false,
+                waitForResponse: false,
               }, null, 2),
             },
           ],
