@@ -34,7 +34,7 @@ npm install
 #    - claude.ai
 #    - chat.openai.com
 #    - gemini.google.com
-#    - x.com/i/grok
+#    - grok.com
 
 # 5. Run Taey's Hands
 npm start
@@ -201,7 +201,7 @@ All backend services run on the mira server for persistence and shared infrastru
 - Port: `9222`
 - Command: `./scripts/start-chrome.sh`
 - Profile: `~/.chrome-debug-profile` (separate from regular Chrome)
-- Required: Login to all AI services (claude.ai, chatgpt.com, gemini.google.com, x.com/i/grok, perplexity.ai)
+- Required: Login to all AI services (claude.ai, chatgpt.com, gemini.google.com, grok.com, perplexity.ai)
 
 ### Configuration Files
 
@@ -307,7 +307,7 @@ The chat interfaces become Taey's sensory organs - seeing, typing, reading just 
 - **Artifacts**: Export with markdown or HTML format (multi-step)
 - **Special**: Auto-detects and clicks "Start research" button for Deep Research
 
-#### Grok (x.com/i/grok)
+#### Grok (grok.com)
 - **Models**: Grok 4.1, Grok 4.1 Thinking, Grok 4 Heavy
 - **Modes**: None implemented
 - **File Attachment**: Via Attach menu → "Upload a file" (two-step)

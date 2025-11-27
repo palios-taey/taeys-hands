@@ -105,7 +105,7 @@ npm install
 #    - claude.ai
 #    - chat.openai.com
 #    - gemini.google.com
-#    - x.com/i/grok
+#    - grok.com
 #    - perplexity.ai
 
 # 4. Run MCP server (in Claude Code)
@@ -173,7 +173,7 @@ npm install
 - Selector reference: [CHAT_ELEMENTS.md](../CHAT_ELEMENTS.md#gemini)
 - **New**: Auto-clicks "Start research" button (Nov 25, 2025)
 
-### Grok (x.com/i/grok)
+### Grok (grok.com)
 - Models: Grok 4.1, Grok 4.1 Thinking, Grok 4 Heavy
 - Special modes: DeepSearch (TBD)
 - File attachments: Working
