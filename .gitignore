@@ -26,3 +26,4 @@ mcp_server/dist/*.js.map
 
 # Session data
 .sessions/
+.archive/
