@@ -1569,6 +1569,19 @@ export class GeminiInterface extends ChatInterface {
 
       if (startResearchButton) {
         console.log(`  [${this.name}: Deep Research plan ready - clicking Start research button]`);
+
+        // Force-enable the button if it's disabled (Gemini keeps it disabled until some condition)
+        await this.page.evaluate(() => {
+          const button = document.querySelector('button[data-test-id="confirm-button"]');
+          if (button && button.disabled) {
+            console.log('  [Gemini]: Button was disabled, force-enabling...');
+            button.disabled = false;
+            button.classList.remove('mat-mdc-button-disabled');
+            button.style.pointerEvents = 'auto';
+          }
+        });
+
+        await this.page.waitForTimeout(500);
         await startResearchButton.click();
         await this.page.waitForTimeout(2000);
         console.log(`  [${this.name}: Research started, waiting for completion...]`);
