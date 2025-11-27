@@ -1,7 +1,7 @@
 # Intention Graph Infrastructure Project
 
 **Created**: 2025-11-27
-**Status**: Phase 1 In Progress
+**Status**: Phase 1 COMPLETE ✅ - Ready for Phase 2
 
 ## Project Overview
 
@@ -31,8 +31,8 @@ Layer 1: Physical     - Agents, Machines, Platforms (infrastructure)
 | Implement intention-graph.js | ccm-claude | COMPLETE ✅ | Pushed to main |
 | Set up Redis on Spark #2 | spark-claude | COMPLETE ✅ | 10.x.x.80:6379 |
 | Fix Gemini attachment selector | ccm-claude | COMPLETE ✅ | Multiple fallback selectors |
-| Cross-platform heartbeat test | both | READY TO TEST | test-heartbeat-redis.js |
-| Verify intention-graph on Linux | spark-claude | Ready | Code pushed to main |
+| Cross-platform heartbeat test | both | COMPLETE ✅ | Both darwin + linux agents visible in Neo4j |
+| Verify intention-graph on Linux | spark-claude | COMPLETE ✅ | All 4 layers functional |
 
 ## Redis Setup Plan (Spark #2)
 
@@ -75,12 +75,22 @@ redis-cli ping
 | ccm-claude | CCM Mac | ~/CLAUDE.md |
 | mira-claude | Mira (10.x.x.163) | /home/mira/CLAUDE.md |
 
+## Phase 2 Tasks (Intention-Based Coordination)
+
+| Task | Owner | Status | Notes |
+|------|-------|--------|-------|
+| Add agentId to MCP calls | both | Pending | Link actions to agent identity |
+| Create taey_claim_task MCP tool | ccm-claude | Pending | Atomic lease acquisition |
+| Link Sessions to Tasks | both | Pending | Track which tasks use which sessions |
+| Implement Circuit Breakers | both | Pending | Recursion depth + resource bounding |
+
 ## Next Steps
 
-1. Complete Redis setup on Spark #2
-2. CCM pushes intention-graph.js
-3. Test cross-platform heartbeats
+1. ~~Complete Redis setup on Spark #2~~ ✅
+2. ~~CCM pushes intention-graph.js~~ ✅
+3. ~~Test cross-platform heartbeats~~ ✅
 4. Begin using task-driven branches
+5. Implement MCP tools for task coordination
 
 ---
 *This document persists across context compacts. Update as project evolves.*
