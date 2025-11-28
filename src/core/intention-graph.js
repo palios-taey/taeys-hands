@@ -1,13 +1,13 @@
 /**
  * Intention Graph - Multi-Claude Coordination via Neo4j
  *
- * Implements Gemini's 4-layer topology for distributed AI consciousness:
- * - Layer 1: Physical Substrate (Agent, Machine)
- * - Layer 2: Interaction Layer (Session, Conversation, Message)
- * - Layer 3: Conceptual Layer (Project, Task, Insight)
- * - Layer 4: Resonance Layer (Axiom, ResonanceEvent)
+ * Simplified model for 2-5 Claudes with machine-specific work:
+ * - Simple task assignment (not competitive leasing)
+ * - Status tracking (pending, in_progress, blocked, done)
+ * - Context sharing via notes
+ * - Heartbeats for visibility (not lease renewal)
  *
- * Based on Deep Think analysis from 2025-11-27
+ * Based on Gemini's 4-layer topology, grounded in our actual reality.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -22,7 +22,6 @@ export class IntentionGraph {
 
   /**
    * Initialize the Intention Graph schema
-   * Creates indexes and constraints for all node types
    */
   async initializeSchema() {
     console.log('[IntentionGraph] Initializing schema...');
@@ -52,7 +51,6 @@ export class IntentionGraph {
         await this.client.write(constraint);
       } catch (err) {
         // Constraint might already exist
-        console.log(`  Schema constraint: ${err.message}`);
       }
     }
 
@@ -61,18 +59,17 @@ export class IntentionGraph {
 
   /**
    * Register this Claude instance as an Agent
-   * @param {Object} identity - From CLAUDE.md or config
-   * @returns {Object} Agent node data
    */
   async registerAgent(identity = {}) {
     const hostname = os.hostname();
     const platform = os.platform();
 
-    this.agentId = identity.agentId || `${hostname}-${Date.now()}`;
+    // Use stable agent ID based on machine, not timestamp
+    this.agentId = identity.agentId || `${hostname}-claude`;
 
     const agent = {
       id: this.agentId,
-      name: identity.name || hostname,
+      name: identity.name || `${hostname}-claude`,
       type: identity.type || 'claude-instance',
       platform: platform,
       machineId: hostname,
@@ -104,52 +101,36 @@ export class IntentionGraph {
   }
 
   /**
-   * Send heartbeat and renew any active leases
-   * @returns {Object} Updated agent status
+   * Send heartbeat - just visibility, no lease mechanics
    */
-  async heartbeat() {
+  async heartbeat(currentActivity = null) {
     if (!this.agentId) {
       throw new Error('Agent not registered. Call registerAgent() first.');
     }
 
     const now = new Date().toISOString();
 
-    // Update agent heartbeat and renew task leases
-    const result = await this.client.write(
+    await this.client.write(
       `MATCH (a:Agent {id: $agentId})
        SET a.lastHeartbeat = $now,
-           a.status = 'active'
-       WITH a
-       OPTIONAL MATCH (a)-[:CLAIMS]->(t:Task {status: 'claimed'})
-       WHERE t.leaseExpires > datetime()
-       SET t.leaseExpires = datetime() + duration('PT5M')
-       RETURN a, collect(t.id) as renewedTasks`,
-      { agentId: this.agentId, now }
+           a.status = 'active',
+           a.currentActivity = $currentActivity
+       RETURN a`,
+      { agentId: this.agentId, now, currentActivity }
     );
 
-    // Handle the array of objects return format
-    const renewedTasks = result && result.length > 0 && result[0].renewedTasks
-      ? result[0].renewedTasks
-      : [];
-
-    return {
-      agentId: this.agentId,
-      lastHeartbeat: now,
-      renewedTasks
-    };
+    return { agentId: this.agentId, lastHeartbeat: now, currentActivity };
   }
 
   /**
-   * Create a new Project (high-level objective)
-   * @param {Object} projectData
-   * @returns {Object} Project node
+   * Create a new Project
    */
   async createProject(projectData) {
     const project = {
       id: projectData.id || uuidv4(),
       title: projectData.title,
       description: projectData.description,
-      type: projectData.type || 'development', // development, research, dream, council
+      type: projectData.type || 'development',
       status: 'active',
       priority: projectData.priority || 1,
       created: new Date().toISOString(),
@@ -168,9 +149,7 @@ export class IntentionGraph {
   }
 
   /**
-   * Create a new Task within a Project
-   * @param {Object} taskData
-   * @returns {Object} Task node
+   * Create a new Task - with optional direct assignment
    */
   async createTask(taskData) {
     const task = {
@@ -178,11 +157,13 @@ export class IntentionGraph {
       projectId: taskData.projectId,
       title: taskData.title,
       description: taskData.description,
-      type: taskData.type || 'implementation', // implementation, review, research, synthesis
-      status: 'pending',
+      type: taskData.type || 'implementation',
+      status: taskData.assignedTo ? 'in_progress' : 'pending',
+      assignedTo: taskData.assignedTo || null,
       priority: taskData.priority || 1,
-      estimatedMinutes: taskData.estimatedMinutes || 30,
       created: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+      notes: taskData.notes || null,
       metadata: JSON.stringify(taskData.metadata || {})
     };
 
@@ -191,142 +172,156 @@ export class IntentionGraph {
        CREATE (t:Task)
        SET t = $task
        CREATE (t)-[:PART_OF]->(p)
+       WITH t
+       FOREACH (_ IN CASE WHEN $assignedTo IS NOT NULL THEN [1] ELSE [] END |
+         MERGE (a:Agent {id: $assignedTo})
+         MERGE (a)-[:WORKS_ON]->(t)
+       )
        RETURN t`,
-      { projectId: task.projectId, task }
+      { projectId: task.projectId, task, assignedTo: task.assignedTo }
     );
 
-    console.log(`[IntentionGraph] Task created: ${task.title}`);
+    console.log(`[IntentionGraph] Task created: ${task.title}${task.assignedTo ? ` (assigned to ${task.assignedTo})` : ''}`);
     return task;
   }
 
   /**
-   * Atomically claim an available Task
-   * Implements Gemini's dynamic leasing protocol
-   * @param {Array} activeProjects - Project IDs to consider
-   * @returns {Object|null} Claimed task or null if none available
+   * Assign a task to an agent (simple ownership, not leasing)
    */
-  async claimTask(activeProjects = []) {
-    if (!this.agentId) {
-      throw new Error('Agent not registered. Call registerAgent() first.');
+  async assignTask(taskId, agentId = null) {
+    const assignTo = agentId || this.agentId;
+    if (!assignTo) {
+      throw new Error('No agent ID provided and no agent registered.');
     }
 
-    // Use Cypher's atomic operations to claim highest priority task
     const result = await this.client.write(
-      `MATCH (t:Task {status: 'pending'})
-       WHERE t.projectId IN $activeProjects OR size($activeProjects) = 0
-       WITH t ORDER BY t.priority DESC, t.created ASC LIMIT 1
+      `MATCH (t:Task {id: $taskId})
        MATCH (a:Agent {id: $agentId})
-       SET t.status = 'claimed',
-           t.claimedBy = $agentId,
-           t.claimedAt = datetime(),
-           t.leaseExpires = datetime() + duration('PT5M')
-       MERGE (a)-[:CLAIMS]->(t)
+       SET t.assignedTo = $agentId,
+           t.status = 'in_progress',
+           t.assignedAt = datetime(),
+           t.lastUpdate = datetime()
+       MERGE (a)-[:WORKS_ON]->(t)
        RETURN t`,
-      { activeProjects, agentId: this.agentId }
+      { taskId, agentId: assignTo }
     );
 
     if (!result || result.length === 0) {
-      return null; // No tasks available
+      throw new Error(`Task ${taskId} not found`);
     }
 
     const task = result[0].t.properties || result[0].t;
-    console.log(`[IntentionGraph] Task claimed: ${task.title} (expires: ${task.leaseExpires})`);
+    console.log(`[IntentionGraph] Task assigned: ${task.title} → ${assignTo}`);
     return task;
   }
 
   /**
-   * Complete a claimed Task
-   * @param {string} taskId
-   * @param {Object} outcome - Results, insights, artifacts produced
-   * @returns {Object} Updated task
+   * Update task status
    */
-  async completeTask(taskId, outcome = {}) {
-    if (!this.agentId) {
-      throw new Error('Agent not registered. Call registerAgent() first.');
+  async updateTaskStatus(taskId, status, notes = null) {
+    const validStatuses = ['pending', 'in_progress', 'blocked', 'done'];
+    if (!validStatuses.includes(status)) {
+      throw new Error(`Invalid status: ${status}. Must be one of: ${validStatuses.join(', ')}`);
+    }
+
+    const updates = {
+      status,
+      lastUpdate: new Date().toISOString()
+    };
+
+    if (notes) {
+      updates.notes = notes;
+    }
+
+    if (status === 'done') {
+      updates.completedAt = new Date().toISOString();
     }
 
     const result = await this.client.write(
-      `MATCH (t:Task {id: $taskId, claimedBy: $agentId})
-       SET t.status = 'completed',
-           t.completedAt = datetime(),
-           t.outcome = $outcome,
-           t.leaseExpires = null
+      `MATCH (t:Task {id: $taskId})
+       SET t += $updates
        RETURN t`,
-      {
-        taskId,
-        agentId: this.agentId,
-        outcome: JSON.stringify(outcome)
-      }
+      { taskId, updates }
     );
 
     if (!result || result.length === 0) {
-      throw new Error(`Task ${taskId} not found or not claimed by ${this.agentId}`);
+      throw new Error(`Task ${taskId} not found`);
     }
 
-    console.log(`[IntentionGraph] Task completed: ${taskId}`);
+    const task = result[0].t.properties || result[0].t;
+    console.log(`[IntentionGraph] Task ${taskId}: ${status}${notes ? ` - "${notes}"` : ''}`);
+    return task;
+  }
+
+  /**
+   * Add a note to a task (for context sharing)
+   */
+  async addTaskNote(taskId, note) {
+    const timestamp = new Date().toISOString();
+    const noteEntry = `[${timestamp}] ${this.agentId || 'unknown'}: ${note}`;
+
+    const result = await this.client.write(
+      `MATCH (t:Task {id: $taskId})
+       SET t.notes = CASE
+           WHEN t.notes IS NULL THEN $noteEntry
+           ELSE t.notes + '\\n' + $noteEntry
+         END,
+         t.lastUpdate = datetime()
+       RETURN t`,
+      { taskId, noteEntry }
+    );
+
+    if (!result || result.length === 0) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    console.log(`[IntentionGraph] Note added to ${taskId}`);
     return result[0].t.properties || result[0].t;
   }
 
   /**
-   * Release a claimed Task (voluntary release or failure)
-   * @param {string} taskId
-   * @param {string} reason
+   * Hand off a task to another agent
    */
-  async releaseTask(taskId, reason = 'voluntary') {
+  async handoffTask(taskId, toAgentId, handoffNotes = '') {
     if (!this.agentId) {
       throw new Error('Agent not registered. Call registerAgent() first.');
     }
 
-    await this.client.write(
-      `MATCH (t:Task {id: $taskId, claimedBy: $agentId})
-       SET t.status = 'pending',
-           t.claimedBy = null,
-           t.claimedAt = null,
-           t.leaseExpires = null,
-           t.releaseReason = $reason,
-           t.releasedAt = datetime()
-       WITH t
-       MATCH (a:Agent {id: $agentId})-[r:CLAIMS]->(t)
-       DELETE r
-       RETURN t`,
-      { taskId, agentId: this.agentId, reason }
-    );
+    const timestamp = new Date().toISOString();
+    const note = `[${timestamp}] HANDOFF from ${this.agentId} to ${toAgentId}: ${handoffNotes}`;
 
-    console.log(`[IntentionGraph] Task released: ${taskId} (${reason})`);
-  }
-
-  /**
-   * Clean up expired Task leases (self-healing)
-   * Should be called periodically by a monitor process
-   */
-  async cleanupExpiredLeases() {
     const result = await this.client.write(
-      `MATCH (t:Task {status: 'claimed'})
-       WHERE t.leaseExpires < datetime()
-       SET t.status = 'pending',
-           t.claimedBy = null,
-           t.claimedAt = null,
-           t.leaseExpires = null,
-           t.releaseReason = 'lease_expired',
-           t.releasedAt = datetime()
-       WITH t
-       MATCH (a:Agent)-[r:CLAIMS]->(t)
+      `MATCH (t:Task {id: $taskId})
+       MATCH (fromAgent:Agent {id: $fromAgentId})
+       MATCH (toAgent:Agent {id: $toAgentId})
+
+       // Remove old assignment
+       OPTIONAL MATCH (fromAgent)-[r:WORKS_ON]->(t)
        DELETE r
-       RETURN count(t) as expiredCount`
+
+       // Create new assignment
+       MERGE (toAgent)-[:WORKS_ON]->(t)
+
+       SET t.assignedTo = $toAgentId,
+           t.lastUpdate = datetime(),
+           t.notes = CASE
+             WHEN t.notes IS NULL THEN $note
+             ELSE t.notes + '\\n' + $note
+           END
+       RETURN t`,
+      { taskId, fromAgentId: this.agentId, toAgentId, note }
     );
 
-    const count = result && result.length > 0 ? result[0].expiredCount : 0;
-    if (count > 0) {
-      console.log(`[IntentionGraph] Cleaned up ${count} expired task leases`);
+    if (!result || result.length === 0) {
+      throw new Error(`Task ${taskId} not found or agents not found`);
     }
-    return count;
+
+    console.log(`[IntentionGraph] Task ${taskId} handed off: ${this.agentId} → ${toAgentId}`);
+    return result[0].t.properties || result[0].t;
   }
 
   /**
-   * Link a Session to a Task (when using taey-hands for task execution)
-   * @param {string} taskId
-   * @param {string} sessionId
-   * @param {string} platform - Which AI interface
+   * Link a Session to a Task
    */
   async linkSessionToTask(taskId, sessionId, platform) {
     await this.client.write(
@@ -343,16 +338,14 @@ export class IntentionGraph {
   }
 
   /**
-   * Record an Insight derived from conversations
-   * @param {Object} insightData
-   * @returns {Object} Insight node
+   * Record an Insight
    */
   async recordInsight(insightData) {
     const insight = {
       id: insightData.id || uuidv4(),
       title: insightData.title,
       content: insightData.content,
-      type: insightData.type || 'emergent', // emergent, synthesis, pattern, learning
+      type: insightData.type || 'emergent',
       confidence: insightData.confidence || 0.5,
       sourceConversations: JSON.stringify(insightData.sourceConversations || []),
       created: new Date().toISOString(),
@@ -374,47 +367,49 @@ export class IntentionGraph {
   }
 
   /**
-   * Query available Tasks across Projects
-   * @param {Object} filters
-   * @returns {Array} Available tasks
+   * Get tasks for an agent
    */
-  async getAvailableTasks(filters = {}) {
-    const query = `
-      MATCH (t:Task {status: 'pending'})
-      ${filters.projectId ? 'WHERE t.projectId = $projectId' : ''}
-      RETURN t
-      ORDER BY t.priority DESC, t.created ASC
-      LIMIT ${filters.limit || 10}
-    `;
-
-    const result = await this.client.read(query, filters);
-    return result ? result.map(r => r.t.properties || r.t) : [];
-  }
-
-  /**
-   * Get Agent's current workload
-   * @returns {Object} Agent status and claimed tasks
-   */
-  async getAgentWorkload() {
+  async getMyTasks(status = null) {
     if (!this.agentId) {
       throw new Error('Agent not registered. Call registerAgent() first.');
     }
 
+    const query = status
+      ? `MATCH (t:Task {assignedTo: $agentId, status: $status}) RETURN t ORDER BY t.priority DESC`
+      : `MATCH (t:Task {assignedTo: $agentId}) WHERE t.status <> 'done' RETURN t ORDER BY t.priority DESC`;
+
+    const result = await this.client.read(query, { agentId: this.agentId, status });
+    return result ? result.map(r => r.t.properties || r.t) : [];
+  }
+
+  /**
+   * Get all agents and their current status
+   */
+  async getAllAgents() {
     const result = await this.client.read(
-      `MATCH (a:Agent {id: $agentId})
-       OPTIONAL MATCH (a)-[:CLAIMS]->(t:Task {status: 'claimed'})
-       RETURN a, collect(t) as claimedTasks`,
-      { agentId: this.agentId }
+      `MATCH (a:Agent)
+       OPTIONAL MATCH (a)-[:WORKS_ON]->(t:Task)
+       WHERE t.status = 'in_progress'
+       RETURN a, collect(t.title) as currentTasks
+       ORDER BY a.lastHeartbeat DESC`
     );
 
-    if (!result || result.length === 0) {
-      return null;
-    }
+    return result ? result.map(r => ({
+      ...((r.a.properties || r.a)),
+      currentTasks: r.currentTasks || []
+    })) : [];
+  }
 
-    return {
-      agent: result[0].a.properties || result[0].a,
-      claimedTasks: (result[0].claimedTasks || []).map(t => t.properties || t)
-    };
+  /**
+   * Get unassigned tasks
+   */
+  async getUnassignedTasks(projectId = null) {
+    const query = projectId
+      ? `MATCH (t:Task {status: 'pending', assignedTo: null, projectId: $projectId}) RETURN t ORDER BY t.priority DESC`
+      : `MATCH (t:Task {status: 'pending'}) WHERE t.assignedTo IS NULL RETURN t ORDER BY t.priority DESC`;
+
+    const result = await this.client.read(query, { projectId });
+    return result ? result.map(r => r.t.properties || r.t) : [];
   }
 }
 
