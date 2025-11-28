@@ -1,11 +1,30 @@
 # Intention Graph Infrastructure Project
 
 **Created**: 2025-11-27
-**Status**: Phase 1 COMPLETE ✅ - Ready for Phase 2
+**Status**: Phase 1 COMPLETE ✅ - Simplified for Reality
 
 ## Project Overview
 
-Implementing Gemini's 4-layer Intention Graph architecture for multi-Claude coordination.
+Implementing Gemini's 4-layer Intention Graph architecture, **simplified for our actual reality**:
+- 2-5 Claudes (not a worker swarm)
+- Machine-specific work (not competing for tasks)
+- Tasks take hours (not minutes)
+- Crashes are rare
+
+## Simplified Model (v2)
+
+**Removed** (over-engineered for our reality):
+- 5-minute lease expiration
+- Atomic lease acquisition
+- Heartbeat-based lease renewal
+- Self-healing from crashes
+
+**Kept** (actually useful):
+- Simple task assignment (`assignedTo: 'node-1-claude'`)
+- Status tracking (`pending → in_progress → blocked → done`)
+- Notes for context sharing
+- Heartbeats for visibility (not lease renewal)
+- Task handoff between agents
 
 ## Architecture
 
