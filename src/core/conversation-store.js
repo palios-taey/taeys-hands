@@ -43,6 +43,8 @@ export class ConversationStore {
       'CREATE INDEX conversation_created IF NOT EXISTS FOR (c:Conversation) ON (c.createdAt)',
       'CREATE INDEX message_timestamp IF NOT EXISTS FOR (m:Message) ON (m.timestamp)',
       'CREATE INDEX message_role IF NOT EXISTS FOR (m:Message) ON (m.role)',
+      'CREATE INDEX message_sent IF NOT EXISTS FOR (m:Message) ON (m.sent)',
+      'CREATE INDEX message_sender IF NOT EXISTS FOR (m:Message) ON (m.sender)',
       'CREATE INDEX platform_type IF NOT EXISTS FOR (p:Platform) ON (p.type)'
     ];
 
@@ -151,7 +153,13 @@ export class ConversationStore {
       platform: options.platform, // Which AI platform
       timestamp: options.timestamp || new Date().toISOString(),
       attachments: JSON.stringify(options.attachments || []),
-      metadata: JSON.stringify(options.metadata || {})
+      metadata: JSON.stringify(options.metadata || {}),
+      // Draft message fields (optional)
+      sent: options.sent !== undefined ? options.sent : true, // Default to sent=true for backward compatibility
+      sentAt: options.sentAt || (options.sent !== false ? new Date().toISOString() : null),
+      sender: options.sender || null,
+      pastedContent: JSON.stringify(options.pastedContent || []),
+      intent: options.intent || null
     };
 
     // Create message and link to conversation
@@ -166,7 +174,12 @@ export class ConversationStore {
          conversationId: $conversationId,
          timestamp: datetime($timestamp),
          attachments: $attachments,
-         metadata: $metadata
+         metadata: $metadata,
+         sent: $sent,
+         sentAt: $sentAt,
+         sender: $sender,
+         pastedContent: $pastedContent,
+         intent: $intent
        })
        CREATE (m)-[:PART_OF]->(c)
        CREATE (m)-[:FROM]->(p)
