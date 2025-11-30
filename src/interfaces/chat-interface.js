@@ -7,6 +7,7 @@
 
 import BrowserConnector from '../core/browser-connector.js';
 import { createPlatformBridge } from '../core/platform-bridge.js';
+import { SelectorRegistry } from '../v2/core/selectors/selector-registry.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -21,6 +22,7 @@ export class ChatInterface {
     this.selectors = config.selectors || {};
     this.connected = false;
     this.mimesisConfig = config.mimesis || {};
+    this.registry = new SelectorRegistry(); // Initialize SelectorRegistry
   }
 
   /**
@@ -29,6 +31,26 @@ export class ChatInterface {
    */
   _getBrowserName() {
     return this.browser.getBrowserName ? this.browser.getBrowserName() : 'Chromium';
+  }
+
+  /**
+   * Get selector from registry with fallback to hardcoded selectors
+   * @param {string} key - Selector key (e.g., 'attach_button', 'send_button', 'message_input')
+   * @param {string} fallback - Fallback selector if registry fails
+   * @returns {Promise<string>} Selector string
+   */
+  async _getSelector(key, fallback) {
+    try {
+      const selector = await this.registry.getSelector(this.name, key);
+      console.log(`  → Using registry selector for '${key}': ${selector}`);
+      return selector;
+    } catch (err) {
+      if (fallback) {
+        console.log(`  → Using fallback selector for '${key}': ${fallback}`);
+        return fallback;
+      }
+      throw new Error(`Selector '${key}' not found in registry and no fallback provided: ${err.message}`);
+    }
   }
 
   /**
@@ -63,7 +85,8 @@ export class ChatInterface {
 
     // Wait for chat input to be ready
     try {
-      await this.page.waitForSelector(this.selectors.chatInput, { timeout: 15000 });
+      const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+      await this.page.waitForSelector(chatInputSelector, { timeout: 15000 });
     } catch (err) {
       console.error(`  [${this.name}: Chat input not found after navigation]`);
       throw new Error(`Chat input not found for ${this.name} at ${targetUrl}`);
@@ -124,7 +147,8 @@ export class ChatInterface {
    */
   async isLoggedIn() {
     try {
-      await this.page.waitForSelector(this.selectors.chatInput, { timeout: 5000 });
+      const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+      await this.page.waitForSelector(chatInputSelector, { timeout: 5000 });
       return true;
     } catch {
       return false;
@@ -137,18 +161,19 @@ export class ChatInterface {
    */
   async startNewChat() {
     // Try to click new chat button if available
-    if (this.selectors.newChatButton) {
-      try {
-        const newChatBtn = await this.page.$(this.selectors.newChatButton);
+    try {
+      const newChatBtnSelector = await this._getSelector('new_chat_button', this.selectors.newChatButton);
+      if (newChatBtnSelector) {
+        const newChatBtn = await this.page.$(newChatBtnSelector);
         if (newChatBtn) {
           await newChatBtn.click();
           await this.page.waitForTimeout(1000);
           console.log(`  [${this.name}: Started new chat via button]`);
           return true;
         }
-      } catch (e) {
-        // Fall through to URL navigation
       }
+    } catch (e) {
+      // Fall through to URL navigation
     }
 
     // Fall back to navigating to base URL
@@ -189,8 +214,8 @@ export class ChatInterface {
       }
     }
 
-    // Find the file input element (usually hidden)
-    const fileInputSelector = this.selectors.fileInput;
+    // Get file input selector from registry with fallback
+    const fileInputSelector = await this._getSelector('file_input', this.selectors.fileInput);
     if (!fileInputSelector) {
       throw new Error(`File attachments not supported for ${this.name}`);
     }
@@ -198,13 +223,16 @@ export class ChatInterface {
     // Try to find an existing file input, or click the attachment button to reveal one
     let fileInput = await this.page.$(fileInputSelector);
 
-    if (!fileInput && this.selectors.attachmentButton) {
-      // Click attachment button to potentially reveal file input
-      const attachBtn = await this.page.$(this.selectors.attachmentButton);
-      if (attachBtn) {
-        await attachBtn.click();
-        await this.page.waitForTimeout(500);
-        fileInput = await this.page.$(fileInputSelector);
+    if (!fileInput) {
+      // Get attach button selector from registry with fallback
+      const attachBtnSelector = await this._getSelector('attach_button', this.selectors.attachmentButton);
+      if (attachBtnSelector) {
+        const attachBtn = await this.page.$(attachBtnSelector);
+        if (attachBtn) {
+          await attachBtn.click();
+          await this.page.waitForTimeout(500);
+          fileInput = await this.page.$(fileInputSelector);
+        }
       }
     }
 
@@ -476,7 +504,8 @@ export class ChatInterface {
     await this.page.waitForTimeout(100);
 
     // Focus the input
-    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+    const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
     await input.click();
     await this.page.waitForTimeout(200);
 
@@ -520,7 +549,8 @@ export class ChatInterface {
 
       // CRITICAL: Get input element coordinates and click with xdotool (not Playwright)
       // This ensures X11 focus is set correctly for xdotool typing
-      const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+      const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+      const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
       const box = await input.boundingBox();
       if (box) {
         // Get browser window position and chrome height to convert viewport coords to screen coords
@@ -564,7 +594,8 @@ export class ChatInterface {
       }
     } else {
       // Direct injection (faster but detectable)
-      const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+      const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+      const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
       await input.fill(message);
     }
 
@@ -607,7 +638,8 @@ export class ChatInterface {
     await this.bridge.focusApp(this._getBrowserName());
 
     // Click on input to ensure focus using screen coordinates
-    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+    const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
     const box = await input.boundingBox();
     if (box) {
       const windowInfo = await this.page.evaluate(() => ({
@@ -696,7 +728,8 @@ export class ChatInterface {
     await this.page.waitForTimeout(100);
 
     // Focus the input
-    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+    const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
     await input.click();
     await this.page.waitForTimeout(200);
 
@@ -913,7 +946,8 @@ export class ChatInterface {
     }
 
     await this.page.goto(url);
-    await this.page.waitForSelector(this.selectors.chatInput, { timeout: 15000 });
+    const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+    await this.page.waitForSelector(chatInputSelector, { timeout: 15000 });
     console.log(`  [Navigated to conversation: ${url}]`);
     return url;
   }
@@ -1221,7 +1255,8 @@ export class ClaudeInterface extends ChatInterface {
 
   async newConversation() {
     try {
-      const newChatBtn = await this.page.$(this.selectors.newChatButton);
+      const newChatBtnSelector = await this._getSelector('new_chat_button', this.selectors.newChatButton);
+      const newChatBtn = await this.page.$(newChatBtnSelector);
       if (newChatBtn) {
         await newChatBtn.click();
         await this.page.waitForTimeout(1000);
@@ -1636,7 +1671,8 @@ export class GeminiInterface extends ChatInterface {
     await this.bridge.focusApp(this._getBrowserName());
 
     // Find the input element and get its coordinates
-    const input = await this.page.waitForSelector(this.selectors.chatInput, { timeout: 10000 });
+    const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
+    const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
     const box = await input.boundingBox();
 
     if (box) {
