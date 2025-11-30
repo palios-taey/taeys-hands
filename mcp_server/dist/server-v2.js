@@ -277,6 +277,11 @@ const TOOLS = [
                 screenshot: {
                     type: "string",
                     description: "Optional: Screenshot path if not from previous tool"
+                },
+                requiredAttachments: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "For 'plan' step: Array of file paths that MUST be attached before sending"
                 }
             },
             required: ["conversationId", "step", "validated", "notes"]
@@ -415,23 +420,62 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_send_message": {
                 const { sessionId, message, attachments, waitForResponse } = args;
-                // VALIDATION CHECKPOINT: Check last validation
-                const lastValidation = await validationStore.getLastValidation(sessionId);
-                if (!lastValidation) {
-                    throw new Error(`Validation checkpoint failed: No validation checkpoints found. ` +
-                        `You must validate the 'plan' step before sending a message.`);
+                // VALIDATION CHECKPOINT: Check if attachments are required by the plan
+                const attachmentRequirement = await validationStore.requiresAttachments(sessionId);
+                if (attachmentRequirement.required) {
+                    // Attachments were specified in plan - MUST have attach_files validated
+                    const lastValidation = await validationStore.getLastValidation(sessionId);
+                    if (!lastValidation) {
+                        throw new Error(`Validation checkpoint failed: Draft plan requires ${attachmentRequirement.count} attachment(s).\n` +
+                            `No validation checkpoints found. You must:\n` +
+                            `1. Call taey_attach_files with files: ${JSON.stringify(attachmentRequirement.files)}\n` +
+                            `2. Review screenshot to confirm files are visible\n` +
+                            `3. Call taey_validate_step with step='attach_files' and validated=true`);
+                    }
+                    // If attachments required, last validated step MUST be 'attach_files'
+                    if (lastValidation.step !== 'attach_files') {
+                        throw new Error(`Validation checkpoint failed: Draft plan requires ${attachmentRequirement.count} attachment(s).\n` +
+                            `Last validated step was '${lastValidation.step}'.\n` +
+                            `You MUST:\n` +
+                            `1. Call taey_attach_files with files: ${JSON.stringify(attachmentRequirement.files)}\n` +
+                            `2. Review screenshot to confirm files are visible\n` +
+                            `3. Call taey_validate_step with step='attach_files' and validated=true\n\n` +
+                            `You cannot skip attachment when the draft plan specifies files.`);
+                    }
+                    // Check that attachment step is validated (not pending)
+                    if (!lastValidation.validated) {
+                        throw new Error(`Validation checkpoint failed: Attachment step is pending validation (validated=false).\n` +
+                            `You must review the screenshot and call taey_validate_step with validated=true.\n` +
+                            `Notes from pending checkpoint: ${lastValidation.notes}`);
+                    }
+                    // Verify correct number of attachments were actually attached
+                    const actualCount = lastValidation.actualAttachments?.length || 0;
+                    if (actualCount !== attachmentRequirement.count) {
+                        throw new Error(`Validation checkpoint failed: Plan required ${attachmentRequirement.count} file(s), ` +
+                            `but only ${actualCount} were attached.\n` +
+                            `Required files: ${JSON.stringify(attachmentRequirement.files)}\n` +
+                            `Actual files: ${JSON.stringify(lastValidation.actualAttachments || [])}`);
+                    }
+                    console.error(`[MCP] ✓ Attachment validation passed: ${actualCount} file(s) verified`);
                 }
-                // Check that the last checkpoint is validated=true (not pending)
-                if (!lastValidation.validated) {
-                    throw new Error(`Validation checkpoint failed: The most recent step '${lastValidation.step}' is pending validation (validated=false). ` +
-                        `You must call taey_validate_step with validated=true after reviewing the screenshot. ` +
-                        `Notes from pending checkpoint: ${lastValidation.notes}`);
-                }
-                // Check that last validated step is an acceptable prerequisite
-                const validSteps = ['plan', 'attach_files'];
-                if (!validSteps.includes(lastValidation.step)) {
-                    throw new Error(`Validation checkpoint failed: Last validated step was '${lastValidation.step}'. ` +
-                        `Must validate one of: ${validSteps.join(', ')} before sending.`);
+                else {
+                    // No attachments required - original validation logic
+                    const lastValidation = await validationStore.getLastValidation(sessionId);
+                    if (!lastValidation) {
+                        throw new Error(`Validation checkpoint failed: No validation checkpoints found. ` +
+                            `You must validate the 'plan' step before sending a message.`);
+                    }
+                    if (!lastValidation.validated) {
+                        throw new Error(`Validation checkpoint failed: Step '${lastValidation.step}' is pending validation (validated=false). ` +
+                            `Call taey_validate_step with validated=true after reviewing screenshot.\n` +
+                            `Notes from pending checkpoint: ${lastValidation.notes}`);
+                    }
+                    const validSteps = ['plan', 'attach_files'];
+                    if (!validSteps.includes(lastValidation.step)) {
+                        throw new Error(`Validation checkpoint failed: Last validated step was '${lastValidation.step}'. ` +
+                            `Must validate one of: ${validSteps.join(', ')} before sending.`);
+                    }
+                    console.error(`[MCP] ✓ No attachments required - proceeding with '${lastValidation.step}' validation`);
                 }
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
@@ -648,7 +692,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     step: 'attach_files',
                     validated: false,
                     notes: `Attached ${attachmentResults.length} file(s). Awaiting manual validation. MUST call taey_validate_step with validated=true after reviewing screenshot.`,
-                    screenshot: lastScreenshot
+                    screenshot: lastScreenshot,
+                    requiredAttachments: [],
+                    actualAttachments: filePaths
                 });
                 return {
                     content: [
@@ -805,14 +851,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case "taey_validate_step": {
-                const { conversationId, step, validated, notes, screenshot } = args;
+                const { conversationId, step, validated, notes, screenshot, requiredAttachments } = args;
                 // Create validation checkpoint
                 const checkpoint = await validationStore.createCheckpoint({
                     conversationId,
                     step,
                     validated,
                     notes,
-                    screenshot: screenshot || null
+                    screenshot: screenshot || null,
+                    requiredAttachments: requiredAttachments || [],
+                    actualAttachments: []
                 });
                 return {
                     content: [
@@ -824,6 +872,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 step,
                                 validated,
                                 timestamp: checkpoint.timestamp,
+                                requiredAttachments: checkpoint.requiredAttachments,
                                 message: validated
                                     ? `✓ Step '${step}' validated. Can proceed to next step.`
                                     : `✗ Step '${step}' marked as failed. Fix and retry before proceeding.`
