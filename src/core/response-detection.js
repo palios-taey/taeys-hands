@@ -40,8 +40,8 @@ const DETECTION_STRATEGIES = {
       responseContent: '.markdown'
     },
     detection: {
-      primary: 'buttonAppearance', // Regenerate button appears when done
-      secondary: 'stabilityCheck',
+      primary: 'stabilityCheck', // More reliable than buttonAppearance (avoids old buttons)
+      secondary: 'buttonAppearance',
       fallback: 'stabilityCheck',
       timeout: 180000 // 3 minutes for o1 reasoning
     }
