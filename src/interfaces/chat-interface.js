@@ -1092,10 +1092,6 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
-
     // Click + menu
     const plusBtn = await this.page.waitForSelector('[data-testid="input-menu-plus"]', { timeout: 5000 });
     await plusBtn.click();
@@ -1313,10 +1309,6 @@ export class ClaudeInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
-
     // Click + menu
     console.log(`  [${this.name}: Clicking + menu]`);
     await this.page.click('[data-testid="input-menu-plus"]');
@@ -1475,13 +1467,9 @@ export class ChatGPTInterface extends ChatInterface {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // CRITICAL: Bring this tab to front before focusing Chrome
+    // Bring tab to front (matches setMode() pattern - NO focusApp())
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
-
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
 
     // Click + menu using locator pattern (matches setMode() which works)
     console.log(`  [${this.name}: Clicking + menu]`);
@@ -1850,10 +1838,6 @@ export class GeminiInterface extends ChatInterface {
     // CRITICAL: Bring this tab to front before focusing Chrome
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
-
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
 
     // Step 1: Click "Open upload file menu" button to open the menu
     console.log(`  [${this.name}: Opening upload file menu]`);
@@ -2272,10 +2256,6 @@ export class GrokInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
-
     // Step 1: Click "Attach" button to open menu
     console.log(`  [${this.name}: Opening Attach menu]`);
     const attachBtn = await this.page.waitForSelector('button[aria-label="Attach"]', { timeout: 5000 });
@@ -2538,10 +2518,6 @@ export class PerplexityInterface extends ChatInterface {
     // CRITICAL: Bring this tab to front before focusing Chrome
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
-
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
 
     // Step 1: Click attach-files-button to open menu
     console.log(`  [${this.name}: Opening attach files menu]`);
