@@ -205,13 +205,13 @@ class PerplexityPlatform {
   }
 
   /**
-   * Send message (uses textarea instead of contenteditable)
+   * Send message (uses Lexical editor with contenteditable div)
    */
   async sendMessage(message) {
     const inputSelector = await this.registry.getSelector(this.platform, 'message_input');
     const sendSelector = await this.registry.getSelector(this.platform, 'send_button');
 
-    // Note: Perplexity uses <textarea>, not contenteditable div
+    // Note: Perplexity uses Lexical editor (#ask-input with contenteditable div)
     await this.page.fill(inputSelector, message);
     await this.page.click(sendSelector);
   }
