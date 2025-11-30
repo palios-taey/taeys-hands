@@ -1478,22 +1478,11 @@ export class ChatGPTInterface extends ChatInterface {
     await plusBtn.click();
     await this.page.waitForTimeout(800);  // Increased from 500ms to match setMode()
 
-    // Click "Add photos & files" using locator pattern with validation
+    // Click "Add photos & files" menu item (matches Grok pattern)
     console.log(`  [${this.name}: Clicking "Add photos & files"]`);
-    const menuItem = this.page.locator('text="Add photos & files"').first();
-    const itemExists = await menuItem.count() > 0;
-
-    if (!itemExists) {
-      await this.page.keyboard.press('Escape');
-      throw new Error('Menu item "Add photos & files" not found in + menu');
-    }
-
+    const menuItem = await this.page.waitForSelector('[role="menuitem"]:has-text("Add photos & files")', { timeout: 5000 });
     await menuItem.click();
-    await this.page.waitForTimeout(2000);  // Increased wait for file picker
-
-    // Capture screenshot to verify file picker opened
-    console.log(`  [${this.name}: Taking screenshot before file navigation]`);
-    await this.page.screenshot({ path: '/tmp/chatgpt-before-file-nav.png' });
+    await this.page.waitForTimeout(1500);
 
     // Use shared Finder navigation
     await this._navigateFinderDialog(filePath);
