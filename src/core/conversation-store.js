@@ -38,6 +38,7 @@ export class ConversationStore {
       'CREATE CONSTRAINT message_id IF NOT EXISTS FOR (m:Message) REQUIRE m.id IS UNIQUE',
       'CREATE CONSTRAINT platform_name IF NOT EXISTS FOR (p:Platform) REQUIRE p.name IS UNIQUE',
       'CREATE CONSTRAINT detection_id IF NOT EXISTS FOR (d:Detection) REQUIRE d.id IS UNIQUE',
+      'CREATE CONSTRAINT validation_checkpoint_id IF NOT EXISTS FOR (v:ValidationCheckpoint) REQUIRE v.id IS UNIQUE',
 
       // Indexes for common queries
       'CREATE INDEX conversation_created IF NOT EXISTS FOR (c:Conversation) ON (c.createdAt)',
@@ -45,7 +46,10 @@ export class ConversationStore {
       'CREATE INDEX message_role IF NOT EXISTS FOR (m:Message) ON (m.role)',
       'CREATE INDEX message_sent IF NOT EXISTS FOR (m:Message) ON (m.sent)',
       'CREATE INDEX message_sender IF NOT EXISTS FOR (m:Message) ON (m.sender)',
-      'CREATE INDEX platform_type IF NOT EXISTS FOR (p:Platform) ON (p.type)'
+      'CREATE INDEX platform_type IF NOT EXISTS FOR (p:Platform) ON (p.type)',
+      'CREATE INDEX validation_conversation IF NOT EXISTS FOR (v:ValidationCheckpoint) ON (v.conversationId)',
+      'CREATE INDEX validation_step IF NOT EXISTS FOR (v:ValidationCheckpoint) ON (v.step)',
+      'CREATE INDEX validation_timestamp IF NOT EXISTS FOR (v:ValidationCheckpoint) ON (v.timestamp)'
     ];
 
     for (const cypher of queries) {
