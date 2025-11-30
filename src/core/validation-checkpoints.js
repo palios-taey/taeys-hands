@@ -71,7 +71,9 @@ export class ValidationCheckpointStore {
       notes: options.notes,
       screenshot: options.screenshot || null,
       validator: options.validator || this.getValidatorIdentity(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      requiredAttachments: options.requiredAttachments || [],
+      actualAttachments: options.actualAttachments || []
     };
 
     await this.client.write(
@@ -84,7 +86,9 @@ export class ValidationCheckpointStore {
          notes: $notes,
          screenshot: $screenshot,
          validator: $validator,
-         timestamp: datetime($timestamp)
+         timestamp: datetime($timestamp),
+         requiredAttachments: $requiredAttachments,
+         actualAttachments: $actualAttachments
        })
        CREATE (v)-[:IN_CONVERSATION]->(c)
        RETURN v`,
@@ -122,7 +126,9 @@ export class ValidationCheckpointStore {
       timestamp: checkpoint.timestamp,
       notes: checkpoint.notes,
       screenshot: checkpoint.screenshot,
-      validator: checkpoint.validator
+      validator: checkpoint.validator,
+      requiredAttachments: checkpoint.requiredAttachments || [],
+      actualAttachments: checkpoint.actualAttachments || []
     };
   }
 
@@ -173,7 +179,9 @@ export class ValidationCheckpointStore {
         timestamp: checkpoint.timestamp,
         notes: checkpoint.notes,
         screenshot: checkpoint.screenshot,
-        validator: checkpoint.validator
+        validator: checkpoint.validator,
+        requiredAttachments: checkpoint.requiredAttachments || [],
+        actualAttachments: checkpoint.actualAttachments || []
       };
     });
   }
@@ -235,6 +243,36 @@ export class ValidationCheckpointStore {
       canProceed: true,
       reason: `Step '${lastValidation.step}' validated successfully`,
       lastValidated: lastValidation.step
+    };
+  }
+
+  /**
+   * Check if the plan for this conversation requires attachments
+   *
+   * @param {string} conversationId
+   * @returns {Object} {required: boolean, files: Array<string>, count: number}
+   */
+  async requiresAttachments(conversationId) {
+    // Get the 'plan' checkpoint for this conversation
+    const result = await this.client.read(
+      `MATCH (v:ValidationCheckpoint {conversationId: $conversationId, step: 'plan'})
+       RETURN v
+       ORDER BY v.timestamp DESC
+       LIMIT 1`,
+      { conversationId }
+    );
+
+    if (!result || result.length === 0) {
+      return { required: false, files: [], count: 0 };
+    }
+
+    const checkpoint = result[0].v.properties || result[0].v;
+    const requiredFiles = checkpoint.requiredAttachments || [];
+
+    return {
+      required: requiredFiles.length > 0,
+      files: requiredFiles,
+      count: requiredFiles.length
     };
   }
 }
