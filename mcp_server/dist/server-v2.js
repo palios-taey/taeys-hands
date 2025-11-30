@@ -13,13 +13,20 @@ import { getSessionManager } from "./session-manager.js";
 import { getConversationStore } from "../../src/core/conversation-store.js";
 // @ts-ignore - response-detection is JS, not TS
 import { ResponseDetectionEngine } from "../../src/core/response-detection.js";
+// @ts-ignore - validation-checkpoints is JS, not TS
+import { ValidationCheckpointStore } from "../../src/core/validation-checkpoints.js";
 // Get singleton session manager
 const sessionManager = getSessionManager();
 // Get conversation store for Neo4j logging
 const conversationStore = getConversationStore();
+// Get validation checkpoint store
+const validationStore = new ValidationCheckpointStore();
 // Initialize schema on startup
 conversationStore.initSchema().catch((err) => {
     console.error('[MCP] Failed to initialize ConversationStore schema:', err.message);
+});
+validationStore.initSchema().catch((err) => {
+    console.error('[MCP] Failed to initialize ValidationCheckpointStore schema:', err.message);
 });
 /**
  * MCP Tools Definitions
@@ -243,6 +250,37 @@ const TOOLS = [
             },
             required: ["sessionId"]
         }
+    },
+    {
+        name: "taey_validate_step",
+        description: "Validate a workflow step after reviewing screenshot. REQUIRED between each workflow step to prevent runaway execution. Creates validation checkpoint in Neo4j that next tool will check.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                conversationId: {
+                    type: "string",
+                    description: "Conversation ID (same as sessionId)"
+                },
+                step: {
+                    type: "string",
+                    enum: ["plan", "attach_files", "type_message", "click_send", "wait_response", "extract_response"],
+                    description: "Which workflow step to validate"
+                },
+                validated: {
+                    type: "boolean",
+                    description: "True if step succeeded and screenshot confirms it, false if failed"
+                },
+                notes: {
+                    type: "string",
+                    description: "REQUIRED: What you observed in the screenshot that confirms validation"
+                },
+                screenshot: {
+                    type: "string",
+                    description: "Optional: Screenshot path if not from previous tool"
+                }
+            },
+            required: ["conversationId", "step", "validated", "notes"]
+        }
     }
 ];
 /**
@@ -377,6 +415,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_send_message": {
                 const { sessionId, message, attachments, waitForResponse } = args;
+                // VALIDATION CHECKPOINT: Require either 'attach_files' or 'plan' validated
+                // (allows skipping attach step if no files needed)
+                const lastValidation = await validationStore.getLastValidation(sessionId);
+                const validSteps = ['plan', 'attach_files'];
+                if (!lastValidation || !validSteps.includes(lastValidation.step)) {
+                    throw new Error(`Validation checkpoint failed: Last validated step was '${lastValidation?.step || 'none'}'. ` +
+                        `Must validate one of: ${validSteps.join(', ')}.\n\n` +
+                        `If you attached files, validate the 'attach_files' step. ` +
+                        `If no files needed, validate the 'plan' step. ` +
+                        `Review the screenshot and call taey_validate_step before sending.`);
+                }
+                if (!lastValidation.validated) {
+                    throw new Error(`Validation checkpoint failed: Step '${lastValidation.step}' was marked as failed. ` +
+                        `Fix the issue and re-validate before sending the message.`);
+                }
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
                 const interfaceName = chatInterface.name;
@@ -565,6 +618,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_attach_files": {
                 const { sessionId, filePaths } = args;
+                // VALIDATION CHECKPOINT: Require 'plan' step validated
+                const canProceed = await validationStore.canProceedToStep(sessionId, 'attach_files');
+                if (!canProceed.canProceed) {
+                    throw new Error(`Validation checkpoint failed: ${canProceed.reason}\n\n` +
+                        `You must call taey_validate_step to validate the 'plan' step before attaching files.\n` +
+                        `Review the screenshot from planning and confirm the session state is correct.`);
+                }
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
                 // Attach each file and collect results
@@ -728,6 +788,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 message: result.filePath
                                     ? `Downloaded artifact to: ${result.filePath}`
                                     : "No artifact download button found",
+                            }, null, 2),
+                        },
+                    ],
+                };
+            }
+            case "taey_validate_step": {
+                const { conversationId, step, validated, notes, screenshot } = args;
+                // Create validation checkpoint
+                const checkpoint = await validationStore.createCheckpoint({
+                    conversationId,
+                    step,
+                    validated,
+                    notes,
+                    screenshot: screenshot || null
+                });
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify({
+                                success: true,
+                                validationId: checkpoint.id,
+                                step,
+                                validated,
+                                timestamp: checkpoint.timestamp,
+                                message: validated
+                                    ? `✓ Step '${step}' validated. Can proceed to next step.`
+                                    : `✗ Step '${step}' marked as failed. Fix and retry before proceeding.`
                             }, null, 2),
                         },
                     ],
