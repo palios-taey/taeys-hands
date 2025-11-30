@@ -1,0 +1,59 @@
+{
+  "version": "1.0.0",
+  "platform": "grok",
+  "url": "https://x.ai/grok",
+  "selectors": {
+    "model_selector": {
+      "primary": "button[id=\"model-select-trigger\"]",
+      "fallback": "button[aria-label=\"Model select\"]",
+      "description": "Main model selector dropdown trigger"
+    },
+    "attach_button": {
+      "primary": "button[aria-label*=\"Attach\"]",
+      "fallback": "button[aria-label*=\"attach\"]",
+      "description": "Attach files button (usually paperclip icon)"
+    },
+    "send_button": {
+      "primary": "button[aria-label*=\"Send\"]",
+      "fallback": "button[type=\"submit\"]",
+      "description": "Send message button in composer"
+    },
+    "message_input": {
+      "primary": "div[contenteditable=\"true\"]",
+      "description": "Message input contenteditable div in composer"
+    },
+    "new_chat_button": {
+      "primary": "button[aria-label*=\"New chat\"]",
+      "fallback": "a[href*=\"/new\"]",
+      "description": "New chat button to start fresh conversation"
+    },
+    "model_auto": {
+      "primary": "text=Auto",
+      "description": "Auto model - chooses Fast or Expert"
+    },
+    "model_fast": {
+      "primary": "text=Fast",
+      "description": "Fast model - quick responses"
+    },
+    "model_expert": {
+      "primary": "text=Expert",
+      "description": "Expert model - thinks hard"
+    },
+    "model_heavy": {
+      "primary": "text=Heavy",
+      "description": "Heavy model - team of experts"
+    },
+    "model_grok41": {
+      "primary": "text=Grok 4.1",
+      "description": "Grok 4.1 Beta model"
+    },
+    "custom_instructions_section": {
+      "primary": ".group\\/custom-instructions",
+      "description": "Custom Instructions section container"
+    },
+    "custom_instructions_button": {
+      "primary": "button[aria-label=\"Open Custom Instructions\"]",
+      "description": "Customize button for custom instructions"
+    }
+  }
+}

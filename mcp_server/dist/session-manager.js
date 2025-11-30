@@ -49,9 +49,10 @@ export class SessionManager {
      * Create a new session
      *
      * @param interfaceType - Which chat interface to use
+     * @param options - Options to pass to connect() (newConversation, conversationId)
      * @returns Session ID
      */
-    async createSession(interfaceType) {
+    async createSession(interfaceType, options) {
         const sessionId = randomUUID();
         // Factory: create correct interface subclass
         let chatInterface;
@@ -74,17 +75,38 @@ export class SessionManager {
             default:
                 throw new Error(`Unknown interface type: ${interfaceType}`);
         }
-        // Connect the interface (browser automation setup)
-        await chatInterface.connect();
-        // Store session
+        // Store session BEFORE connecting (so interface is available)
+        const now = new Date();
         const session = {
             sessionId,
             interface: chatInterface,
             interfaceType,
-            createdAt: new Date(),
-            connected: true
+            createdAt: now,
+            connected: false, // Will be set to true after connect succeeds
+            conversationId: null,
+            conversationUrl: null,
+            lastActivity: now,
+            healthStatus: 'healthy',
+            lastHealthCheck: now
         };
         this.sessions.set(sessionId, session);
+        // Connect the interface with options
+        await chatInterface.connect({
+            sessionId,
+            newConversation: options?.newConversation,
+            conversationId: options?.conversationId
+        });
+        // Mark as connected
+        session.connected = true;
+        // Get current URL and extract conversationId
+        try {
+            const currentUrl = await chatInterface.getCurrentConversationUrl();
+            session.conversationUrl = currentUrl;
+            // conversationId extraction will happen in updateSessionState
+        }
+        catch (err) {
+            console.warn(`[SessionManager] Could not get conversation URL: ${err.message}`);
+        }
         console.log(`[SessionManager] Created session ${sessionId} (${interfaceType})`);
         return sessionId;
     }
@@ -158,6 +180,80 @@ export class SessionManager {
         console.log(`[SessionManager] Destroying ${sessionIds.length} sessions`);
         for (const sessionId of sessionIds) {
             await this.destroySession(sessionId);
+        }
+    }
+    /**
+     * Health check for a specific session
+     * Verifies browser is responsive and updates health status
+     *
+     * @param sessionId - Session ID to check
+     * @returns Health status ('healthy' | 'stale' | 'dead')
+     */
+    async healthCheck(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            throw new Error(`Session not found: ${sessionId}`);
+        }
+        try {
+            // Try to get page URL - will fail if browser dead
+            await session.interface.page.url();
+            session.healthStatus = 'healthy';
+            session.lastHealthCheck = new Date();
+            return 'healthy';
+        }
+        catch (err) {
+            session.healthStatus = 'dead';
+            session.lastHealthCheck = new Date();
+            console.error(`[SessionManager] Session ${sessionId} health check failed: ${err.message}`);
+            return 'dead';
+        }
+    }
+    /**
+     * Update session state from browser
+     * Syncs conversationId and URL from current browser state
+     *
+     * @param sessionId - Session ID
+     * @returns Updated session info
+     */
+    async updateSessionState(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            throw new Error(`Session not found: ${sessionId}`);
+        }
+        // Get current URL from browser
+        const currentUrl = await session.interface.getCurrentConversationUrl();
+        session.conversationUrl = currentUrl;
+        session.lastActivity = new Date();
+        // ConversationId extraction will be handled by ConversationStore
+        // We just return the URL for the store to process
+        return {
+            conversationId: session.conversationId,
+            conversationUrl: currentUrl
+        };
+    }
+    /**
+     * Validate session health before tool execution
+     * Throws error if session is dead
+     *
+     * @param sessionId - Session ID
+     */
+    async validateSessionHealth(sessionId) {
+        const health = await this.healthCheck(sessionId);
+        if (health === 'dead') {
+            throw new Error(`Session ${sessionId} is dead (browser crashed or closed)`);
+        }
+    }
+    /**
+     * Sync with database to detect orphaned sessions
+     * Called on server startup
+     *
+     * @param conversationStore - ConversationStore instance
+     */
+    async syncWithDatabase(conversationStore) {
+        const activeMcpSessionIds = this.getActiveSessions();
+        const result = await conversationStore.reconcileOrphanedSessions(activeMcpSessionIds);
+        if (result.orphaned.length > 0) {
+            console.log(`[SessionManager] Reconciled ${result.updated} orphaned sessions`);
         }
     }
 }
