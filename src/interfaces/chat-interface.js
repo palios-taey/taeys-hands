@@ -1421,6 +1421,42 @@ export class ChatGPTInterface extends ChatInterface {
   }
 
   /**
+   * ChatGPT-specific file attachment
+   * Clicks "Add photos & files" from + menu, then uses base setInputFiles
+   */
+  async attachFile(filePaths) {
+    const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+
+    // Verify files exist
+    const fs = await import('fs/promises');
+    for (const filePath of paths) {
+      try {
+        await fs.access(filePath);
+      } catch {
+        throw new Error(`File not found: ${filePath}`);
+      }
+    }
+
+    // The + menu should already be open from the base class click
+    // Now click "Add photos & files" menu item
+    console.log(`  [${this.name}: Clicking "Add photos & files" from menu]`);
+    const addPhotosItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
+    await addPhotosItem.click();
+    await this.page.waitForTimeout(500);
+
+    // Now find and use the file input
+    const fileInputSelector = await this._getSelector('file_input', this.selectors.fileInput);
+    const fileInput = await this.page.waitForSelector(fileInputSelector, { timeout: 5000 });
+
+    // Use Playwright's setInputFiles to inject files
+    await fileInput.setInputFiles(paths);
+    await this.page.waitForTimeout(1000);
+
+    console.log(`  [Attached ${paths.length} file(s) to ${this.name}]`);
+    return true;
+  }
+
+  /**
    * ATOMIC ACTION: Select AI model (ChatGPT-specific)
    *
    * @param {string} modelName - Model name: "Auto", "Instant", "Thinking", "Pro", or "GPT-4o" (legacy)
