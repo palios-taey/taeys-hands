@@ -1478,9 +1478,9 @@ export class ChatGPTInterface extends ChatInterface {
     await plusBtn.click();
     await this.page.waitForTimeout(800);  // Increased from 500ms to match setMode()
 
-    // Click "Add photos & files" menu item (matches Grok pattern)
+    // Click "Add photos & files" menu item
     console.log(`  [${this.name}: Clicking "Add photos & files"]`);
-    const menuItem = await this.page.waitForSelector('[role="menuitem"]:has-text("Add photos & files")', { timeout: 5000 });
+    const menuItem = await this.page.waitForSelector('div.truncate:has-text("Add photos")', { timeout: 5000 });
     await menuItem.click();
     await this.page.waitForTimeout(1500);
 
