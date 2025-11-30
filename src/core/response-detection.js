@@ -40,8 +40,8 @@ const DETECTION_STRATEGIES = {
       responseContent: '.markdown'
     },
     detection: {
-      primary: 'stabilityCheck', // More reliable than buttonAppearance
-      secondary: 'buttonAppearance',
+      primary: 'buttonAppearance', // Regenerate button appears when done
+      secondary: 'stabilityCheck',
       fallback: 'stabilityCheck',
       timeout: 180000 // 3 minutes for o1 reasoning
     }
@@ -105,15 +105,10 @@ export class ResponseDetectionEngine {
     }
 
     this.options = {
-      stabilityWindow: options.stabilityWindow || 3000, // 3s no changes = stable (was 2s)
-      pollInterval: options.pollInterval || 300, // Check every 300ms (was 500ms)
-      initialDelay: options.initialDelay || 1000, // Wait 1s before checking (new)
       debug: options.debug || false,
       ...options
     };
 
-    this.lastContent = '';
-    this.lastChangeTime = Date.now();
     this.detectionStartTime = null;
   }
 
@@ -203,93 +198,92 @@ export class ResponseDetectionEngine {
 
   /**
    * STRATEGY: Content Stability Check (85% confidence)
-   * Watches for content to stop changing for stabilityWindow ms
+   * Uses Fibonacci polling: 1s, 1s, 2s, 3s, 5s, 8s, 13s, 21s, 34s, 55s
+   * Switches to fast 2s polling once content stops changing
    */
   async detectViaStability() {
-    this.log('info', `Starting stability detection (${this.options.stabilityWindow}ms window)`);
+    this.log('info', 'Starting Fibonacci stability detection');
 
     const containerSelector = this.config.selectors.container;
+    const fibonacci = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]; // Seconds
+    const screenshotIntervals = new Set([0, 2, 5, 13, 34, 55]); // Screenshot at these Fibonacci indices
 
-    return new Promise(async (resolve, reject) => {
-      const checkStability = async () => {
-        try {
-          // Get all response containers and use the last one
-          const containers = await this.page.$$(containerSelector);
-          if (containers.length === 0) {
-            this.log('debug', 'No containers found yet');
-            return false;
-          }
+    let fibIndex = 0;
+    let stableCount = 0;
+    let lastContent = '';
+    const startTime = Date.now();
 
-          const lastContainer = containers[containers.length - 1];
-          const currentContent = await lastContainer.textContent();
-          const now = Date.now();
+    while (Date.now() - startTime < this.config.detection.timeout) {
+      try {
+        // Get current response content
+        const containers = await this.page.$$(containerSelector);
+        if (containers.length === 0) {
+          this.log('debug', 'No containers found yet');
+          await this.page.waitForTimeout(1000);
+          continue;
+        }
 
-          if (currentContent !== this.lastContent) {
-            // Content changed - reset timer
-            this.lastContent = currentContent;
-            this.lastChangeTime = now;
-            this.log('debug', `Content updated (${currentContent.length} chars)`);
-            return false;
-          }
+        const lastContainer = containers[containers.length - 1];
+        const currentContent = await lastContainer.textContent();
+        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
 
-          // Check if stable long enough
-          const stableTime = now - this.lastChangeTime;
-          if (stableTime >= this.options.stabilityWindow && currentContent.length > 0) {
-            this.log('success', `Content stable for ${stableTime}ms - Complete`);
+        // Check for content stability (2 identical reads = complete)
+        if (currentContent === lastContent && currentContent.length > 0) {
+          stableCount++;
+          this.log('debug', `Content stable (${stableCount}/2) - ${currentContent.length} chars`);
+
+          if (stableCount >= 2) {
+            // Content has been stable for 2 checks - complete!
+            this.log('success', `Response complete after ${elapsedSeconds}s (Fibonacci polling)`);
             return {
               method: 'stability',
               confidence: 0.85,
-              content: currentContent,
-              stableTime,
-              detectionTime: now - this.detectionStartTime
+              content: currentContent.trim(),
+              detectionTime: Date.now() - this.detectionStartTime,
+              fibonacciIndex: fibIndex
             };
           }
 
-          return false;
-        } catch (err) {
-          this.log('debug', `Check error: ${err.message}`);
-          return false;
-        }
-      };
+          // Content is stable, switch to fast 2s polling
+          this.log('debug', 'Content stable, switching to 2s fast polling');
+          await this.page.waitForTimeout(2000);
+        } else {
+          // Content changed - reset stability counter
+          if (currentContent !== lastContent) {
+            this.log('debug', `Content updated: ${currentContent.length} chars (was ${lastContent.length})`);
+            stableCount = 0;
+            lastContent = currentContent;
+          }
 
-      // Poll for stability
-      const pollInterval = setInterval(async () => {
-        const result = await checkStability();
-        if (result) {
-          clearInterval(pollInterval);
-          clearTimeout(timeoutId);
-          resolve(result);
-        }
+          // Use Fibonacci interval for next check
+          const nextInterval = fibonacci[fibIndex] || 55; // Cap at 55s
+          this.log('debug', `Waiting ${nextInterval}s (Fibonacci[${fibIndex}])`);
+          await this.page.waitForTimeout(nextInterval * 1000);
 
-        // Check timeout
-        if (Date.now() - this.detectionStartTime > this.config.detection.timeout) {
-          clearInterval(pollInterval);
-          clearTimeout(timeoutId);
-
-          // Return whatever we have
-          const finalContent = this.lastContent;
-          if (finalContent && finalContent.length > 0) {
-            resolve({
-              method: 'timeout',
-              confidence: 0.5,
-              content: finalContent,
-              detectionTime: Date.now() - this.detectionStartTime
-            });
-          } else {
-            reject(new Error('Detection timeout with no content'));
+          // Advance Fibonacci index (cap at max)
+          if (fibIndex < fibonacci.length - 1) {
+            fibIndex++;
           }
         }
-      }, this.options.pollInterval);
 
-      // Absolute timeout
-      const timeoutId = setTimeout(() => {
-        clearInterval(pollInterval);
-        reject(new Error(`Detection timeout after ${this.config.detection.timeout}ms`));
-      }, this.config.detection.timeout + 1000);
+      } catch (err) {
+        this.log('debug', `Check error: ${err.message}`);
+        await this.page.waitForTimeout(1000);
+      }
+    }
 
-      // Initial check
-      await checkStability();
-    });
+    // Timeout reached - return whatever we have
+    if (lastContent && lastContent.length > 0) {
+      this.log('warning', `Timeout after ${this.config.detection.timeout}ms - returning partial content`);
+      return {
+        method: 'timeout',
+        confidence: 0.5,
+        content: lastContent.trim(),
+        detectionTime: Date.now() - this.detectionStartTime
+      };
+    } else {
+      throw new Error(`Detection timeout after ${this.config.detection.timeout}ms with no content`);
+    }
   }
 
   /**
@@ -331,9 +325,12 @@ export class ResponseDetectionEngine {
         }
       };
 
-      // Wait before checking - avoid false positives from pre-existing buttons
-      await new Promise(r => setTimeout(r, this.options.initialDelay));
-      this.log('debug', `Waited ${this.options.initialDelay}ms initial delay`);
+      // Check immediately - handle already-complete responses
+      const immediateResult = await checkButton();
+      if (immediateResult) {
+        this.log('success', 'Completion button already visible - Response complete');
+        return resolve(immediateResult);
+      }
 
       const pollInterval = setInterval(async () => {
         const result = await checkButton();
@@ -343,7 +340,7 @@ export class ResponseDetectionEngine {
           this.log('success', 'Completion button appeared - Complete');
           resolve(result);
         }
-      }, this.options.pollInterval);
+      }, 500); // 500ms fixed polling for button appearance
 
       const timeoutId = setTimeout(() => {
         clearInterval(pollInterval);
