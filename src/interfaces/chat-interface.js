@@ -297,7 +297,17 @@ export class ChatInterface {
   async attachFile(filePath, options = {}) {
     const sessionId = options.sessionId || Date.now();
     const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
-    const attachButtonSelector = options.attachButtonSelector || 'button[data-testid="attach-files-button"]';
+
+    // Platform-specific attach button selectors
+    const platformSelectors = {
+      'grok': 'button[aria-label="Attach"]',
+      'claude': 'button[data-testid="attach-files-button"]',
+      'chatgpt': 'button[data-testid="composer-plus-btn"]',
+      'gemini': 'button[aria-label="Attach files"]',
+      'perplexity': 'button[aria-label="Attach"]'
+    };
+
+    const attachButtonSelector = options.attachButtonSelector || platformSelectors[this.name] || 'button[data-testid="attach-files-button"]';
 
     console.log(`[${this.name}] attachFile(${filePath})`);
 
