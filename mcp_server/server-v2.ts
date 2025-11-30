@@ -45,6 +45,11 @@ validationStore.initSchema().catch((err: any) => {
   console.error('[MCP] Failed to initialize ValidationCheckpointStore schema:', err.message);
 });
 
+// Reconcile orphaned sessions on startup
+sessionManager.syncWithDatabase(conversationStore).catch((err: any) => {
+  console.error('[MCP] Failed to reconcile orphaned sessions on startup:', err.message);
+});
+
 /**
  * MCP Tools Definitions
  */
@@ -481,6 +486,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           waitForResponse?: boolean;
         };
 
+        // PRE-FLIGHT: Validate session health
+        await sessionManager.validateSessionHealth(sessionId);
+
         // VALIDATION CHECKPOINT: Use RequirementEnforcer to block send if requirements not met
         // This makes it mathematically impossible to skip attachments when plan specifies them
         await requirementEnforcer.ensureCanSendMessage(sessionId);
@@ -513,6 +521,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Click send button
         await chatInterface.clickSend();
+
+        // POST-SYNC: Update session state in database
+        try {
+          const currentUrl = await chatInterface.getCurrentConversationUrl();
+          await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+        } catch (err: any) {
+          console.error('[MCP] Failed to sync session state after send:', err.message);
+        }
 
         // If waitForResponse is true, use ResponseDetectionEngine
         if (waitForResponse) {
@@ -612,6 +628,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "taey_extract_response": {
         const { sessionId } = args as { sessionId: string };
 
+        // PRE-FLIGHT: Validate session health
+        await sessionManager.validateSessionHealth(sessionId);
+
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
         const interfaceName = chatInterface.name;
@@ -636,6 +655,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           console.error('[MCP] Failed to log response to Neo4j:', err.message);
         }
 
+        // POST-SYNC: Update session state in database
+        try {
+          const currentUrl = await chatInterface.getCurrentConversationUrl();
+          await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+        } catch (err: any) {
+          console.error('[MCP] Failed to sync session state after extract response:', err.message);
+        }
+
         return {
           content: [
             {
@@ -656,6 +683,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           modelName: string;
           isLegacy?: boolean;
         };
+
+        // PRE-FLIGHT: Validate session health
+        await sessionManager.validateSessionHealth(sessionId);
 
         // Get session to check interface type
         const session = sessionManager.getSession(sessionId);
@@ -681,6 +711,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           result = await chatInterface.selectModel(modelName, { sessionId });
         }
 
+        // POST-SYNC: Update session state in database
+        try {
+          const currentUrl = await chatInterface.getCurrentConversationUrl();
+          await conversationStore.updateSessionState(sessionId, currentUrl, session.interfaceType);
+        } catch (err: any) {
+          console.error('[MCP] Failed to sync session state after model selection:', err.message);
+        }
+
         return {
           content: [
             {
@@ -704,11 +742,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           filePaths: string[];
         };
 
+        // PRE-FLIGHT: Validate session health
+        await sessionManager.validateSessionHealth(sessionId);
+
         // VALIDATION CHECKPOINT: Ensure plan step is validated before attaching files
         await requirementEnforcer.ensureCanAttachFiles(sessionId);
 
         // Get interface from session
         const chatInterface = sessionManager.getInterface(sessionId);
+        const interfaceName = chatInterface.name;
 
         // Attach each file and collect results
         const attachmentResults = [];
@@ -734,6 +776,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           requiredAttachments: [],
           actualAttachments: filePaths
         });
+
+        // POST-SYNC: Update session state in database
+        try {
+          const currentUrl = await chatInterface.getCurrentConversationUrl();
+          await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+        } catch (err: any) {
+          console.error('[MCP] Failed to sync session state after attach files:', err.message);
+        }
 
         return {
           content: [
