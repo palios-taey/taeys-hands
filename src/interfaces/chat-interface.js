@@ -68,7 +68,7 @@ export class ChatInterface {
     // Determine target URL based on session type
     let targetUrl;
     if (options.newConversation) {
-      // Fresh session - navigate to new chat URL
+      // Fresh session - navigate to new chat URL (will click new chat button after)
       targetUrl = this._getNewChatUrl();
       console.log(`  [${this.name}: Creating new conversation → ${targetUrl}]`);
     } else if (options.conversationId) {
@@ -278,28 +278,38 @@ export class ChatInterface {
 
     if (platform === 'darwin') {
       // macOS: Use Cmd+Shift+G (Go to folder)
+      // Split path into directory and filename
+      const dir = filePath.substring(0, filePath.lastIndexOf('/'));
+      const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
+
       console.log(`  [${this.name}: macOS - Pressing Cmd+Shift+G]`);
+      const browserName = this._getBrowserName();
       await this.bridge.runScript(`
         tell application "System Events"
-          tell process "Google Chrome"
+          tell process "${browserName}"
             keystroke "g" using {command down, shift down}
           end tell
         end tell
       `);
       await this.page.waitForTimeout(800);
 
-      // Type the file path
-      console.log(`  [${this.name}: Typing path "${filePath}"]`);
-      await this.bridge.type(filePath, { baseDelay: 30, variation: 15 });
+      // Type the directory path only
+      console.log(`  [${this.name}: Typing directory "${dir}"]`);
+      await this.bridge.type(dir, { baseDelay: 30, variation: 15 });
       await this.page.waitForTimeout(300);
 
-      // Press Enter to navigate to path
-      console.log(`  [${this.name}: Pressing Enter to navigate]`);
+      // Press Enter to navigate to directory
+      console.log(`  [${this.name}: Pressing Enter to navigate to directory]`);
       await this.bridge.pressKey('return');
       await this.page.waitForTimeout(1000);
 
+      // Type filename to select it
+      console.log(`  [${this.name}: Typing filename "${filename}"]`);
+      await this.bridge.type(filename, { baseDelay: 30, variation: 15 });
+      await this.page.waitForTimeout(300);
+
       // Press Enter to open/select file
-      console.log(`  [${this.name}: Pressing Enter to open file]`);
+      console.log(`  [${this.name}: Pressing Enter to select file]`);
       await this.bridge.pressKey('return');
       await this.page.waitForTimeout(1000);
     } else if (platform === 'linux') {
@@ -449,7 +459,8 @@ export class ChatInterface {
     const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
 
     // Cmd+Shift+G to open "Go to folder"
-    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    const browserName = this._getBrowserName();
+    const cmdShiftG = `tell application "System Events" to tell process "${browserName}" to keystroke "g" using {command down, shift down}`;
     await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
@@ -1101,7 +1112,8 @@ export class ClaudeInterface extends ChatInterface {
     const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
 
     // Cmd+Shift+G to open "Go to folder"
-    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    const browserName = this._getBrowserName();
+    const cmdShiftG = `tell application "System Events" to tell process "${browserName}" to keystroke "g" using {command down, shift down}`;
     await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
@@ -1347,6 +1359,55 @@ export class ChatGPTInterface extends ChatInterface {
   }
 
   async newConversation() {
+    console.log(`[${this.name}] Starting new conversation...`);
+
+    // Try to click the new chat button
+    try {
+      // First check if sidebar is visible - look for the new chat button
+      const newChatBtn = await this.page.$('a[data-testid="create-new-chat-button"]');
+
+      if (!newChatBtn) {
+        // Sidebar might be collapsed - try to expand it
+        console.log(`  [${this.name}] New chat button not found - checking for collapsed sidebar`);
+        const sidebarToggle = await this.page.$('button[aria-label*="sidebar"], button[aria-label*="menu"]');
+        if (sidebarToggle) {
+          console.log(`  [${this.name}] Clicking sidebar toggle`);
+          await sidebarToggle.click();
+          await this.page.waitForTimeout(500);
+        }
+      }
+
+      // Try again after potential sidebar expansion
+      const newChatBtnRetry = await this.page.$('a[data-testid="create-new-chat-button"]');
+      if (newChatBtnRetry) {
+        console.log(`  [${this.name}] Clicking new chat button`);
+        await newChatBtnRetry.click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New chat button clicked`);
+        return true;
+      }
+
+      // Alternative selector: a[href="/"] containing "New chat"
+      const newChatLink = await this.page.evaluateHandle(() => {
+        const links = Array.from(document.querySelectorAll('a[href="/"]'));
+        return links.find(link => link.textContent.includes('New chat'));
+      });
+
+      if (newChatLink && newChatLink.asElement()) {
+        console.log(`  [${this.name}] Clicking new chat link (alternative selector)`);
+        await newChatLink.asElement().click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New chat link clicked`);
+        return true;
+      }
+
+      console.log(`  [${this.name}] New chat button not found - falling back to URL navigation`);
+    } catch (error) {
+      console.log(`  [${this.name}] Button click failed: ${error.message} - falling back to URL navigation`);
+    }
+
+    // Fallback: navigate to home
+    console.log(`  [${this.name}] Navigating to home URL`);
     await this.page.goto('https://chatgpt.com');
     await this.page.waitForTimeout(1000);
     return true;
@@ -1418,7 +1479,8 @@ export class ChatGPTInterface extends ChatInterface {
     const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
 
     // Cmd+Shift+G to open "Go to folder"
-    const cmdShiftG = 'tell application "System Events" to tell process "Google Chrome" to keystroke "g" using {command down, shift down}';
+    const browserName = this._getBrowserName();
+    const cmdShiftG = `tell application "System Events" to tell process "${browserName}" to keystroke "g" using {command down, shift down}`;
     await this.bridge.runScript(cmdShiftG);
     await this.page.waitForTimeout(500);
 
@@ -1591,6 +1653,66 @@ export class GeminiInterface extends ChatInterface {
   }
 
   async newConversation() {
+    console.log(`[${this.name}] Starting new conversation...`);
+
+    // Try to click the new chat button
+    try {
+      // Look for the new chat button with text content
+      const newChatBtn = await this.page.evaluateHandle(() => {
+        const spans = Array.from(document.querySelectorAll('span[data-test-id="side-nav-action-button-content"]'));
+        return spans.find(span => span.textContent.includes('New chat'));
+      });
+
+      if (!newChatBtn || !newChatBtn.asElement()) {
+        // Sidebar might be collapsed - try to find and click menu/sidebar toggle
+        console.log(`  [${this.name}] New chat button not found - checking for collapsed sidebar`);
+        const menuBtn = await this.page.$('button[aria-label*="menu"], button[aria-label*="sidebar"]');
+        if (menuBtn) {
+          console.log(`  [${this.name}] Clicking menu toggle`);
+          await menuBtn.click();
+          await this.page.waitForTimeout(500);
+        }
+      }
+
+      // Try again after potential sidebar expansion
+      const newChatBtnRetry = await this.page.evaluateHandle(() => {
+        const spans = Array.from(document.querySelectorAll('span[data-test-id="side-nav-action-button-content"]'));
+        const newChatSpan = spans.find(span => span.textContent.includes('New chat'));
+        // Return the button parent, not the span
+        return newChatSpan ? newChatSpan.closest('button') : null;
+      });
+
+      if (newChatBtnRetry && newChatBtnRetry.asElement()) {
+        console.log(`  [${this.name}] Clicking new chat button`);
+        await newChatBtnRetry.asElement().click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New chat button clicked`);
+        await this.dismissOverlays();
+        return true;
+      }
+
+      // Alternative: text-based selection
+      const newChatTextBtn = await this.page.evaluateHandle(() => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        return buttons.find(btn => btn.textContent.includes('New chat'));
+      });
+
+      if (newChatTextBtn && newChatTextBtn.asElement()) {
+        console.log(`  [${this.name}] Clicking new chat button (text-based)`);
+        await newChatTextBtn.asElement().click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New chat button clicked`);
+        await this.dismissOverlays();
+        return true;
+      }
+
+      console.log(`  [${this.name}] New chat button not found - falling back to URL navigation`);
+    } catch (error) {
+      console.log(`  [${this.name}] Button click failed: ${error.message} - falling back to URL navigation`);
+    }
+
+    // Fallback: navigate to home
+    console.log(`  [${this.name}] Navigating to home URL`);
     await this.page.goto('https://gemini.google.com/app');
     await this.page.waitForTimeout(1000);
     await this.dismissOverlays();
@@ -1724,6 +1846,33 @@ export class GeminiInterface extends ChatInterface {
     // Extract from URL like https://gemini.google.com/app/abc123def456
     const match = url.match(/\/app\/([a-f0-9]+)/);
     return match ? match[1] : null;
+  }
+
+  /**
+   * Attach file (phase script interface)
+   * Wraps attachFileHumanLike() with screenshot capture
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Use the tested human-like attachment method
+    await this.attachFileHumanLike(filePath);
+
+    // Capture screenshot after attachment
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
   }
 
   /**
@@ -2051,6 +2200,55 @@ export class GrokInterface extends ChatInterface {
   }
 
   async newConversation() {
+    console.log(`[${this.name}] Starting new conversation...`);
+
+    // Try to click the new chat button
+    try {
+      // Look for the new chat button/link in sidebar
+      const newChatLink = await this.page.$('a[data-sidebar="menu-button"][href="/"]');
+
+      if (!newChatLink) {
+        // Sidebar might be collapsed - try to find and click sidebar toggle
+        console.log(`  [${this.name}] New chat button not found - checking for collapsed sidebar`);
+        const sidebarToggle = await this.page.$('button[aria-label*="sidebar"], button[aria-label*="menu"]');
+        if (sidebarToggle) {
+          console.log(`  [${this.name}] Clicking sidebar toggle`);
+          await sidebarToggle.click();
+          await this.page.waitForTimeout(500);
+        }
+      }
+
+      // Try again after potential sidebar expansion
+      const newChatLinkRetry = await this.page.$('a[data-sidebar="menu-button"][href="/"]');
+      if (newChatLinkRetry) {
+        console.log(`  [${this.name}] Clicking new chat link`);
+        await newChatLinkRetry.click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New chat link clicked`);
+        return true;
+      }
+
+      // Alternative: text-based selection for "Chat" link with edit icon
+      const chatLink = await this.page.evaluateHandle(() => {
+        const links = Array.from(document.querySelectorAll('a[href="/"]'));
+        return links.find(link => link.textContent.includes('Chat'));
+      });
+
+      if (chatLink && chatLink.asElement()) {
+        console.log(`  [${this.name}] Clicking chat link (text-based)`);
+        await chatLink.asElement().click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ Chat link clicked`);
+        return true;
+      }
+
+      console.log(`  [${this.name}] New chat button not found - falling back to URL navigation`);
+    } catch (error) {
+      console.log(`  [${this.name}] Button click failed: ${error.message} - falling back to URL navigation`);
+    }
+
+    // Fallback: navigate to home
+    console.log(`  [${this.name}] Navigating to home URL`);
     await this.page.goto('https://grok.com');
     await this.page.waitForTimeout(1000);
     return true;
@@ -2069,6 +2267,33 @@ export class GrokInterface extends ChatInterface {
     // Extract from URL like https://grok.com/chat/abc-def-123
     const match = url.match(/\/chat\/([a-f0-9-]+)/);
     return match ? match[1] : null;
+  }
+
+  /**
+   * Attach file (phase script interface)
+   * Wraps attachFileHumanLike() with screenshot capture
+   *
+   * ⚠️ UNVERIFIED ACTION - File attachment MUST be confirmed via screenshot
+   * See base class documentation for verification requirements.
+   */
+  async attachFile(filePath, options = {}) {
+    const sessionId = options.sessionId || Date.now();
+    const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
+
+    console.log(`[${this.name}] attachFile(${filePath})`);
+
+    // Use the tested human-like attachment method
+    await this.attachFileHumanLike(filePath);
+
+    // Capture screenshot after attachment
+    await this.screenshot(screenshotPath);
+    console.log(`  ✓ Screenshot → ${screenshotPath}`);
+
+    return {
+      screenshot: screenshotPath,
+      automationCompleted: true,
+      filePath
+    };
   }
 
   /**
@@ -2183,6 +2408,51 @@ export class PerplexityInterface extends ChatInterface {
   }
 
   async newConversation() {
+    console.log(`[${this.name}] Starting new conversation...`);
+
+    // Try to click the new thread button
+    try {
+      // Look for the new thread button
+      const newThreadBtn = await this.page.$('button[data-testid="sidebar-new-thread"]');
+
+      if (!newThreadBtn) {
+        // Sidebar might be collapsed - try to find and click sidebar toggle
+        console.log(`  [${this.name}] New thread button not found - checking for collapsed sidebar`);
+        const sidebarToggle = await this.page.$('button[aria-label*="sidebar"], button[aria-label*="menu"]');
+        if (sidebarToggle) {
+          console.log(`  [${this.name}] Clicking sidebar toggle`);
+          await sidebarToggle.click();
+          await this.page.waitForTimeout(500);
+        }
+      }
+
+      // Try again after potential sidebar expansion
+      const newThreadBtnRetry = await this.page.$('button[data-testid="sidebar-new-thread"]');
+      if (newThreadBtnRetry) {
+        console.log(`  [${this.name}] Clicking new thread button`);
+        await newThreadBtnRetry.click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New thread button clicked`);
+        return true;
+      }
+
+      // Alternative: aria-label based selection
+      const newThreadAria = await this.page.$('button[aria-label="New Thread"]');
+      if (newThreadAria) {
+        console.log(`  [${this.name}] Clicking new thread button (aria-label)`);
+        await newThreadAria.click();
+        await this.page.waitForTimeout(1000);
+        console.log(`  ✓ New thread button clicked`);
+        return true;
+      }
+
+      console.log(`  [${this.name}] New thread button not found - falling back to URL navigation`);
+    } catch (error) {
+      console.log(`  [${this.name}] Button click failed: ${error.message} - falling back to URL navigation`);
+    }
+
+    // Fallback: navigate to home
+    console.log(`  [${this.name}] Navigating to home URL`);
     await this.page.goto('https://perplexity.ai');
     await this.page.waitForTimeout(1000);
     return true;

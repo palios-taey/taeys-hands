@@ -4,12 +4,17 @@ Clean extraction from CHAT_ELEMENTS.md - essential selectors only, no HTML dumps
 
 ## ChatGPT
 
+### New Chat
+- **New chat button**: `a[data-testid="create-new-chat-button"]`
+  - Alternative: `a[href="/"]` containing text "New chat"
+  - Keyboard shortcut: Shift+Cmd+O (⇧⌘O)
+
 ### Model Selection
 - **Model selector button**: `button[data-testid="model-switcher-dropdown-button"]`
   - Alternative: `button[aria-label*="Model selector"]`
 - **Model menu items** (text-based selection):
   - Auto: Text content "Auto"
-  - Instant: Text content "Instant"  
+  - Instant: Text content "Instant"
   - Thinking: Text content "Thinking"
   - Pro: Text content "Pro"
   - Legacy submenu: Text content "Legacy"
@@ -32,6 +37,11 @@ Clean extraction from CHAT_ELEMENTS.md - essential selectors only, no HTML dumps
 ---
 
 ## Claude
+
+### New Chat
+- **New chat button**: Button/link containing text "New chat"
+  - Located in sidebar navigation
+  - Often has transition-all styling class
 
 ### Model Selection
 - **Model selector button**: `button[data-testid="model-selector-dropdown"]`
@@ -61,6 +71,11 @@ Clean extraction from CHAT_ELEMENTS.md - essential selectors only, no HTML dumps
 ---
 
 ## Gemini
+
+### New Chat
+- **New chat button**: `span[data-test-id="side-nav-action-button-content"]` containing text "New chat"
+  - Located in side navigation
+  - Also can use text-based selection for "New chat"
 
 ### Model Selection
 - **Model selector button**: `button[data-test-id="bard-mode-menu-button"]`
@@ -95,6 +110,11 @@ Clean extraction from CHAT_ELEMENTS.md - essential selectors only, no HTML dumps
 
 ## Grok
 
+### New Chat
+- **New chat button**: `a[data-sidebar="menu-button"][href="/"]`
+  - Alternative: Link in sidebar containing text "Chat"
+  - Contains edit/pen icon SVG
+
 ### Model Selection
 - **Model selector button**: `button[id="model-select-trigger"]`
   - Alternative: `button[aria-label="Model select"]`
@@ -116,6 +136,11 @@ Clean extraction from CHAT_ELEMENTS.md - essential selectors only, no HTML dumps
 ---
 
 ## Perplexity
+
+### New Thread
+- **New thread button**: `button[data-testid="sidebar-new-thread"]`
+  - Alternative: `button[aria-label="New Thread"]`
+  - Contains plus icon SVG
 
 ### Mode Selection (No model picker)
 - **Mode radiogroup**: `div[role="radiogroup"]` container
@@ -219,4 +244,5 @@ if (button) {
 - Created: 2025-11-30
 - Source: CHAT_ELEMENTS.md analysis
 - Perplexity selectors extracted: 2025-11-30
+- New Chat button selectors added: 2025-11-30
 - Status: Complete - ready for implementation testing
