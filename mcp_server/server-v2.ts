@@ -975,6 +975,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           requiredAttachments?: string[];
         };
 
+        // CRITICAL: For attach_files step, preserve actualAttachments from pending checkpoint
+        let actualAttachments: string[] = [];
+        if (step === 'attach_files') {
+          const lastCheckpoint = await validationStore.getLastValidation(conversationId);
+          if (lastCheckpoint && lastCheckpoint.step === 'attach_files' && !lastCheckpoint.validated) {
+            // Preserve actualAttachments from the pending checkpoint created by taey_attach_files
+            actualAttachments = lastCheckpoint.actualAttachments || [];
+            console.error(`[MCP] ✓ Preserving ${actualAttachments.length} actualAttachments from pending checkpoint`);
+          }
+        }
+
         // Create validation checkpoint
         const checkpoint = await validationStore.createCheckpoint({
           conversationId,
@@ -983,7 +994,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           notes,
           screenshot: screenshot || null,
           requiredAttachments: requiredAttachments || [],
-          actualAttachments: []
+          actualAttachments
         });
 
         return {
