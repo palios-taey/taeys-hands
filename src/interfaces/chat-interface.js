@@ -1444,11 +1444,9 @@ export class ChatGPTInterface extends ChatInterface {
     await addPhotosItem.click();
     await this.page.waitForTimeout(500);
 
-    // Now find and use the file input
-    const fileInputSelector = await this._getSelector('file_input', this.selectors.fileInput);
-    const fileInput = await this.page.waitForSelector(fileInputSelector, { timeout: 5000 });
-
-    // Use Playwright's setInputFiles to inject files
+    // File input is hidden - use locator to find first input[type="file"]
+    console.log(`  [${this.name}: Injecting file into hidden input]`);
+    const fileInput = this.page.locator('input[type="file"]').first();
     await fileInput.setInputFiles(paths);
     await this.page.waitForTimeout(1000);
 
