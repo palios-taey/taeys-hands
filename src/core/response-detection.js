@@ -40,8 +40,8 @@ const DETECTION_STRATEGIES = {
       responseContent: '.markdown'
     },
     detection: {
-      primary: 'buttonAppearance', // Regenerate button appears when done
-      secondary: 'stabilityCheck',
+      primary: 'stabilityCheck', // More reliable than buttonAppearance
+      secondary: 'buttonAppearance',
       fallback: 'stabilityCheck',
       timeout: 180000 // 3 minutes for o1 reasoning
     }
@@ -105,8 +105,9 @@ export class ResponseDetectionEngine {
     }
 
     this.options = {
-      stabilityWindow: options.stabilityWindow || 2000, // 2s no changes = stable
-      pollInterval: options.pollInterval || 500, // Check every 500ms
+      stabilityWindow: options.stabilityWindow || 3000, // 3s no changes = stable (was 2s)
+      pollInterval: options.pollInterval || 300, // Check every 300ms (was 500ms)
+      initialDelay: options.initialDelay || 1000, // Wait 1s before checking (new)
       debug: options.debug || false,
       ...options
     };
@@ -330,12 +331,9 @@ export class ResponseDetectionEngine {
         }
       };
 
-      // Check immediately - handle already-complete responses
-      const immediateResult = await checkButton();
-      if (immediateResult) {
-        this.log('success', 'Completion button already visible - Response complete');
-        return resolve(immediateResult);
-      }
+      // Wait before checking - avoid false positives from pre-existing buttons
+      await new Promise(r => setTimeout(r, this.options.initialDelay));
+      this.log('debug', `Waited ${this.options.initialDelay}ms initial delay`);
 
       const pollInterval = setInterval(async () => {
         const result = await checkButton();
