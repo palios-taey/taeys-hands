@@ -1422,7 +1422,7 @@ export class ChatGPTInterface extends ChatInterface {
 
   /**
    * ChatGPT-specific file attachment
-   * Clicks "Add photos & files" from + menu, then uses base setInputFiles
+   * Clicks + menu, then "Add photos & files", then injects file
    */
   async attachFile(filePaths) {
     const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
@@ -1437,8 +1437,13 @@ export class ChatGPTInterface extends ChatInterface {
       }
     }
 
-    // The + menu should already be open from the base class click
-    // Now click "Add photos & files" menu item
+    // Click + button to open menu
+    console.log(`  [${this.name}: Clicking + button]`);
+    const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
+    await plusBtn.click();
+    await this.page.waitForTimeout(800);
+
+    // Click "Add photos & files" menu item
     console.log(`  [${this.name}: Clicking "Add photos & files" from menu]`);
     const addPhotosItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
     await addPhotosItem.click();
