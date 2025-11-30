@@ -1483,14 +1483,23 @@ export class ChatGPTInterface extends ChatInterface {
     await this.bridge.focusApp(this._getBrowserName());
     await this.page.waitForTimeout(500);
 
-    // Click + menu
+    // Click + menu using locator pattern (matches setMode() which works)
     console.log(`  [${this.name}: Clicking + menu]`);
-    await this.page.click('[data-testid="composer-plus-btn"]');
-    await this.page.waitForTimeout(500);
+    const plusBtn = this.page.locator('[data-testid="composer-plus-btn"]').first();
+    await plusBtn.waitFor({ state: 'attached', timeout: 5000 });
+    await plusBtn.click();
+    await this.page.waitForTimeout(800);  // Increased from 500ms to match setMode()
 
-    // Click "Add photos & files"
+    // Click "Add photos & files" using locator pattern with validation
     console.log(`  [${this.name}: Clicking "Add photos & files"]`);
-    const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
+    const menuItem = this.page.locator('text="Add photos & files"').first();
+    const itemExists = await menuItem.count() > 0;
+
+    if (!itemExists) {
+      await this.page.keyboard.press('Escape');
+      throw new Error('Menu item "Add photos & files" not found in + menu');
+    }
+
     await menuItem.click();
     await this.page.waitForTimeout(1500);
 
