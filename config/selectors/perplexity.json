@@ -14,9 +14,9 @@
       "description": "Send message button in composer"
     },
     "message_input": {
-      "primary": "textarea",
+      "primary": "#ask-input, [data-lexical-editor=\"true\"]",
       "fallback": "div[contenteditable=\"true\"]",
-      "description": "Message input (textarea or contenteditable div)"
+      "description": "Message input (Lexical editor with contenteditable div)"
     },
     "new_chat_button": {
       "primary": "button[aria-label*=\"New\"]",

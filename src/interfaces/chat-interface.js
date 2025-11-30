@@ -1448,60 +1448,10 @@ export class ChatGPTInterface extends ChatInterface {
 
     console.log(`[${this.name}] attachFile(${filePath})`);
 
-    // Validate file exists FIRST
-    try {
-      await import('fs/promises').then(fs => fs.access(filePath));
-    } catch {
-      throw new Error(`File not found: ${filePath}`);
-    }
+    // Use the tested human-like attachment method
+    await this.attachFileHumanLike(filePath);
 
-    // CRITICAL: Bring this tab to front before focusing Chrome
-    await this.page.bringToFront();
-    await this.page.waitForTimeout(200);
-
-    // Focus Chrome
-    await this.bridge.focusApp(this._getBrowserName());
-    await this.page.waitForTimeout(500);
-
-    // Click + menu
-    console.log(`  [${this.name}: Clicking + menu]`);
-    await this.page.click('[data-testid="composer-plus-btn"]');
-    await this.page.waitForTimeout(500);
-
-    // Click "Add photos & files"
-    console.log(`  [${this.name}: Clicking "Add photos & files"]`);
-    const menuItem = await this.page.waitForSelector('text="Add photos & files"', { timeout: 5000 });
-    await menuItem.click();
-    await this.page.waitForTimeout(1500);
-
-    // Use osascript to navigate file picker with Cmd+Shift+G
-    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-    const filename = filePath.substring(filePath.lastIndexOf('/') + 1);
-
-    // Cmd+Shift+G to open "Go to folder"
-    const browserName = this._getBrowserName();
-    const cmdShiftG = `tell application "System Events" to tell process "${browserName}" to keystroke "g" using {command down, shift down}`;
-    await this.bridge.runScript(cmdShiftG);
-    await this.page.waitForTimeout(500);
-
-    // Type directory path
-    await this.bridge.type(dir);
-    await this.page.waitForTimeout(300);
-
-    // Press Enter to navigate
-    await this.bridge.pressKey('return');
-    await this.page.waitForTimeout(1000);
-
-    // Type filename to select it
-    await this.bridge.type(filename);
-    await this.page.waitForTimeout(300);
-
-    // Press Enter to open/attach
-    await this.bridge.pressKey('return');
-    console.log(`  ✓ Automation completed - VERIFY FILE IN SCREENSHOT`);
-
-    // Capture screenshot
-    await this.page.waitForTimeout(1500); // Wait for file to appear
+    // Capture screenshot after attachment
     await this.screenshot(screenshotPath);
     console.log(`  ✓ Screenshot → ${screenshotPath}`);
 
