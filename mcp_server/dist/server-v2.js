@@ -32,6 +32,10 @@ conversationStore.initSchema().catch((err) => {
 validationStore.initSchema().catch((err) => {
     console.error('[MCP] Failed to initialize ValidationCheckpointStore schema:', err.message);
 });
+// Reconcile orphaned sessions on startup
+sessionManager.syncWithDatabase(conversationStore).catch((err) => {
+    console.error('[MCP] Failed to reconcile orphaned sessions on startup:', err.message);
+});
 /**
  * MCP Tools Definitions
  */
@@ -435,6 +439,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_send_message": {
                 const { sessionId, message, attachments, waitForResponse } = args;
+                // PRE-FLIGHT: Validate session health
+                await sessionManager.validateSessionHealth(sessionId);
                 // VALIDATION CHECKPOINT: Use RequirementEnforcer to block send if requirements not met
                 // This makes it mathematically impossible to skip attachments when plan specifies them
                 await requirementEnforcer.ensureCanSendMessage(sessionId);
@@ -463,6 +469,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 await chatInterface.typeMessage(message);
                 // Click send button
                 await chatInterface.clickSend();
+                // POST-SYNC: Update session state in database
+                try {
+                    const currentUrl = await chatInterface.getCurrentConversationUrl();
+                    await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+                }
+                catch (err) {
+                    console.error('[MCP] Failed to sync session state after send:', err.message);
+                }
                 // If waitForResponse is true, use ResponseDetectionEngine
                 if (waitForResponse) {
                     console.error(`[MCP] Waiting for response from ${interfaceName}...`);
@@ -551,6 +565,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_extract_response": {
                 const { sessionId } = args;
+                // PRE-FLIGHT: Validate session health
+                await sessionManager.validateSessionHealth(sessionId);
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
                 const interfaceName = chatInterface.name;
@@ -573,6 +589,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 catch (err) {
                     console.error('[MCP] Failed to log response to Neo4j:', err.message);
                 }
+                // POST-SYNC: Update session state in database
+                try {
+                    const currentUrl = await chatInterface.getCurrentConversationUrl();
+                    await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+                }
+                catch (err) {
+                    console.error('[MCP] Failed to sync session state after extract response:', err.message);
+                }
                 return {
                     content: [
                         {
@@ -588,6 +612,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_select_model": {
                 const { sessionId, modelName, isLegacy = false } = args;
+                // PRE-FLIGHT: Validate session health
+                await sessionManager.validateSessionHealth(sessionId);
                 // Get session to check interface type
                 const session = sessionManager.getSession(sessionId);
                 if (!session) {
@@ -609,6 +635,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     // Claude, Gemini, Grok: standard call
                     result = await chatInterface.selectModel(modelName, { sessionId });
                 }
+                // POST-SYNC: Update session state in database
+                try {
+                    const currentUrl = await chatInterface.getCurrentConversationUrl();
+                    await conversationStore.updateSessionState(sessionId, currentUrl, session.interfaceType);
+                }
+                catch (err) {
+                    console.error('[MCP] Failed to sync session state after model selection:', err.message);
+                }
                 return {
                     content: [
                         {
@@ -627,10 +661,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_attach_files": {
                 const { sessionId, filePaths } = args;
+                // PRE-FLIGHT: Validate session health
+                await sessionManager.validateSessionHealth(sessionId);
                 // VALIDATION CHECKPOINT: Ensure plan step is validated before attaching files
                 await requirementEnforcer.ensureCanAttachFiles(sessionId);
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
+                const interfaceName = chatInterface.name;
                 // Attach each file and collect results
                 const attachmentResults = [];
                 let lastScreenshot = '';
@@ -653,6 +690,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     requiredAttachments: [],
                     actualAttachments: filePaths
                 });
+                // POST-SYNC: Update session state in database
+                try {
+                    const currentUrl = await chatInterface.getCurrentConversationUrl();
+                    await conversationStore.updateSessionState(sessionId, currentUrl, interfaceName);
+                }
+                catch (err) {
+                    console.error('[MCP] Failed to sync session state after attach files:', err.message);
+                }
                 return {
                     content: [
                         {
