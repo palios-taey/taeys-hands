@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "platform": "perplexity",
+  "url": "https://www.perplexity.ai",
+  "selectors": {
+    "attach_button": {
+      "primary": "button[data-testid=\"attach-files-button\"]",
+      "fallback": "button[aria-label*=\"attach\"]",
+      "description": "Attach files button with paperclip icon"
+    },
+    "send_button": {
+      "primary": "button[aria-label*=\"Send\"]",
+      "fallback": "button[type=\"submit\"]",
+      "description": "Send message button in composer"
+    },
+    "message_input": {
+      "primary": "textarea",
+      "fallback": "div[contenteditable=\"true\"]",
+      "description": "Message input (textarea or contenteditable div)"
+    },
+    "new_chat_button": {
+      "primary": "button[aria-label*=\"New\"]",
+      "fallback": "a[href=\"/\"]",
+      "description": "New thread button to start fresh conversation"
+    },
+    "mode_radiogroup": {
+      "primary": "div[role=\"radiogroup\"]",
+      "description": "Mode selection radio button container"
+    },
+    "mode_search": {
+      "primary": "button[role=\"radio\"][value=\"search\"][aria-label=\"Search\"]",
+      "fallback": "button[data-testid=\"search-mode-search\"]",
+      "description": "Search mode radio button"
+    },
+    "mode_research": {
+      "primary": "button[role=\"radio\"][value=\"research\"][aria-label=\"Research\"]",
+      "fallback": "button[data-testid=\"search-mode-research\"]",
+      "description": "Research (Pro) mode radio button"
+    },
+    "mode_labs": {
+      "primary": "button[role=\"radio\"][value=\"studio\"][aria-label=\"Labs\"]",
+      "fallback": "button[data-testid=\"search-mode-studio\"]",
+      "description": "Labs mode radio button"
+    }
+  }
+}
