@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "platform": "claude",
+  "url": "https://claude.ai",
+  "selectors": {
+    "model_selector": {
+      "primary": "button[data-testid=\"model-selector-dropdown\"]",
+      "fallback": "button[aria-label*=\"model\"]",
+      "description": "Main model selector dropdown button"
+    },
+    "attach_button": {
+      "primary": "button[aria-label*=\"Attach\"]",
+      "fallback": "button[aria-label*=\"attach\"]",
+      "description": "Attach files button (usually paperclip icon)"
+    },
+    "send_button": {
+      "primary": "button[aria-label*=\"Send\"]",
+      "fallback": "button[type=\"submit\"]",
+      "description": "Send message button in composer"
+    },
+    "message_input": {
+      "primary": "div[contenteditable=\"true\"]",
+      "description": "Message input contenteditable div in composer"
+    },
+    "new_chat_button": {
+      "primary": "button[aria-label*=\"New chat\"]",
+      "fallback": "a[href=\"/new\"]",
+      "description": "New chat button to start fresh conversation"
+    },
+    "model_opus": {
+      "primary": "div[role=\"menuitem\"]:has-text(\"Opus 4.5\")",
+      "fallback": "text=Opus 4.5",
+      "description": "Opus 4.5 model selection"
+    },
+    "model_sonnet": {
+      "primary": "div[role=\"menuitem\"]:has-text(\"Sonnet 4.5\")",
+      "fallback": "text=Sonnet 4.5",
+      "description": "Sonnet 4.5 model selection"
+    },
+    "model_haiku": {
+      "primary": "div[role=\"menuitem\"]:has-text(\"Haiku 4\")",
+      "fallback": "text=Haiku 4",
+      "description": "Haiku 4 model selection"
+    },
+    "web_search_toggle": {
+      "primary": "button:has-text(\"Web search\")",
+      "description": "Web search toggle button with checkbox"
+    },
+    "research_toggle": {
+      "primary": "button:has-text(\"Research\")",
+      "description": "Research toggle button with checkbox"
+    },
+    "extended_thinking_toggle": {
+      "primary": "button:has-text(\"Extended thinking\")",
+      "description": "Extended thinking toggle button with checkbox"
+    },
+    "download_artifact_button": {
+      "primary": "button[aria-label=\"Download\"]",
+      "description": "Download button for artifacts"
+    },
+    "download_as_markdown": {
+      "primary": "text=Download as Markdown",
+      "description": "Download as Markdown option in artifact menu"
+    }
+  }
+}

@@ -15,12 +15,16 @@ import { getConversationStore } from "../../src/core/conversation-store.js";
 import { ResponseDetectionEngine } from "../../src/core/response-detection.js";
 // @ts-ignore - validation-checkpoints is JS, not TS
 import { ValidationCheckpointStore } from "../../src/core/validation-checkpoints.js";
+// @ts-ignore - RequirementEnforcer is JS, not TS
+import { RequirementEnforcer } from "../../src/v2/core/validation/requirement-enforcer.js";
 // Get singleton session manager
 const sessionManager = getSessionManager();
 // Get conversation store for Neo4j logging
 const conversationStore = getConversationStore();
 // Get validation checkpoint store
 const validationStore = new ValidationCheckpointStore();
+// Initialize RequirementEnforcer - CRITICAL component that prevents attachment bypass
+const requirementEnforcer = new RequirementEnforcer(validationStore);
 // Initialize schema on startup
 conversationStore.initSchema().catch((err) => {
     console.error('[MCP] Failed to initialize ConversationStore schema:', err.message);
@@ -323,11 +327,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (providedSessionId && newSession) {
                     throw new Error('Cannot specify both sessionId and newSession=true. Choose one.');
                 }
-                // Determine session ID
+                // Determine session ID and connect
                 let sessionId;
+                let actualConversationId;
                 if (newSession) {
-                    // Create new session
-                    sessionId = await sessionManager.createSession(interfaceType);
+                    // Create new session - SessionManager.createSession() handles connect() internally
+                    sessionId = await sessionManager.createSession(interfaceType, {
+                        newConversation: !conversationId, // Only set if NOT resuming an existing conversation
+                        conversationId: conversationId // Pass through if resuming
+                    });
+                    // Extract conversationId from the URL after connection
+                    // SessionManager already called connect(), so we can get the current URL
+                    const chatInterface = sessionManager.getInterface(sessionId);
+                    const currentUrl = await chatInterface.getCurrentConversationUrl();
+                    actualConversationId = chatInterface._extractConversationId ?
+                        chatInterface._extractConversationId(currentUrl) : conversationId;
                     // Create conversation in Neo4j
                     try {
                         await conversationStore.createConversation({
@@ -338,9 +352,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             platforms: [interfaceType],
                             platform: interfaceType, // Add platform as top-level field for querying
                             sessionId: sessionId, // Add sessionId as top-level field
-                            conversationId: conversationId || null, // Add conversationId as top-level field
+                            conversationId: actualConversationId || null, // Add conversationId as top-level field
                             metadata: {
-                                conversationId: conversationId || null,
+                                conversationId: actualConversationId || null,
                                 createdVia: 'taey_connect'
                             }
                         });
@@ -352,15 +366,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 else {
                     // Reuse existing session
                     sessionId = providedSessionId;
+                    // If conversationId provided, navigate to that conversation
+                    if (conversationId) {
+                        const chatInterface = sessionManager.getInterface(sessionId);
+                        await chatInterface.goToConversation(conversationId);
+                        actualConversationId = conversationId;
+                    }
                 }
-                // Connect and get screenshot
+                // Get screenshot path from interface
                 const chatInterface = sessionManager.getInterface(sessionId);
-                const connectResult = await chatInterface.connect({ sessionId });
-                // If conversationId provided, navigate to that conversation
-                let conversationUrl;
-                if (conversationId) {
-                    conversationUrl = await chatInterface.goToConversation(conversationId);
-                }
+                const screenshotPath = `/tmp/taey-${interfaceType}-${sessionId}-connected.png`;
                 return {
                     content: [
                         {
@@ -369,10 +384,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                 success: true,
                                 sessionId,
                                 interface: interfaceType,
-                                screenshot: connectResult.screenshot,
-                                conversationUrl: conversationUrl || undefined,
-                                message: conversationId
-                                    ? `Connected to ${interfaceType} at conversation ${conversationId}`
+                                conversationId: actualConversationId || undefined,
+                                screenshot: screenshotPath,
+                                message: actualConversationId
+                                    ? `Connected to ${interfaceType} at conversation ${actualConversationId}`
                                     : `Connected to ${interfaceType}`,
                             }, null, 2),
                         },
@@ -420,63 +435,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_send_message": {
                 const { sessionId, message, attachments, waitForResponse } = args;
-                // VALIDATION CHECKPOINT: Check if attachments are required by the plan
-                const attachmentRequirement = await validationStore.requiresAttachments(sessionId);
-                if (attachmentRequirement.required) {
-                    // Attachments were specified in plan - MUST have attach_files validated
-                    const lastValidation = await validationStore.getLastValidation(sessionId);
-                    if (!lastValidation) {
-                        throw new Error(`Validation checkpoint failed: Draft plan requires ${attachmentRequirement.count} attachment(s).\n` +
-                            `No validation checkpoints found. You must:\n` +
-                            `1. Call taey_attach_files with files: ${JSON.stringify(attachmentRequirement.files)}\n` +
-                            `2. Review screenshot to confirm files are visible\n` +
-                            `3. Call taey_validate_step with step='attach_files' and validated=true`);
-                    }
-                    // If attachments required, last validated step MUST be 'attach_files'
-                    if (lastValidation.step !== 'attach_files') {
-                        throw new Error(`Validation checkpoint failed: Draft plan requires ${attachmentRequirement.count} attachment(s).\n` +
-                            `Last validated step was '${lastValidation.step}'.\n` +
-                            `You MUST:\n` +
-                            `1. Call taey_attach_files with files: ${JSON.stringify(attachmentRequirement.files)}\n` +
-                            `2. Review screenshot to confirm files are visible\n` +
-                            `3. Call taey_validate_step with step='attach_files' and validated=true\n\n` +
-                            `You cannot skip attachment when the draft plan specifies files.`);
-                    }
-                    // Check that attachment step is validated (not pending)
-                    if (!lastValidation.validated) {
-                        throw new Error(`Validation checkpoint failed: Attachment step is pending validation (validated=false).\n` +
-                            `You must review the screenshot and call taey_validate_step with validated=true.\n` +
-                            `Notes from pending checkpoint: ${lastValidation.notes}`);
-                    }
-                    // Verify correct number of attachments were actually attached
-                    const actualCount = lastValidation.actualAttachments?.length || 0;
-                    if (actualCount !== attachmentRequirement.count) {
-                        throw new Error(`Validation checkpoint failed: Plan required ${attachmentRequirement.count} file(s), ` +
-                            `but only ${actualCount} were attached.\n` +
-                            `Required files: ${JSON.stringify(attachmentRequirement.files)}\n` +
-                            `Actual files: ${JSON.stringify(lastValidation.actualAttachments || [])}`);
-                    }
-                    console.error(`[MCP] ✓ Attachment validation passed: ${actualCount} file(s) verified`);
-                }
-                else {
-                    // No attachments required - original validation logic
-                    const lastValidation = await validationStore.getLastValidation(sessionId);
-                    if (!lastValidation) {
-                        throw new Error(`Validation checkpoint failed: No validation checkpoints found. ` +
-                            `You must validate the 'plan' step before sending a message.`);
-                    }
-                    if (!lastValidation.validated) {
-                        throw new Error(`Validation checkpoint failed: Step '${lastValidation.step}' is pending validation (validated=false). ` +
-                            `Call taey_validate_step with validated=true after reviewing screenshot.\n` +
-                            `Notes from pending checkpoint: ${lastValidation.notes}`);
-                    }
-                    const validSteps = ['plan', 'attach_files'];
-                    if (!validSteps.includes(lastValidation.step)) {
-                        throw new Error(`Validation checkpoint failed: Last validated step was '${lastValidation.step}'. ` +
-                            `Must validate one of: ${validSteps.join(', ')} before sending.`);
-                    }
-                    console.error(`[MCP] ✓ No attachments required - proceeding with '${lastValidation.step}' validation`);
-                }
+                // VALIDATION CHECKPOINT: Use RequirementEnforcer to block send if requirements not met
+                // This makes it mathematically impossible to skip attachments when plan specifies them
+                await requirementEnforcer.ensureCanSendMessage(sessionId);
+                console.error(`[MCP] ✓ Validation passed - proceeding with send`);
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
                 const interfaceName = chatInterface.name;
@@ -665,13 +627,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case "taey_attach_files": {
                 const { sessionId, filePaths } = args;
-                // VALIDATION CHECKPOINT: Require 'plan' step validated
-                const canProceed = await validationStore.canProceedToStep(sessionId, 'attach_files');
-                if (!canProceed.canProceed) {
-                    throw new Error(`Validation checkpoint failed: ${canProceed.reason}\n\n` +
-                        `You must call taey_validate_step to validate the 'plan' step before attaching files.\n` +
-                        `Review the screenshot from planning and confirm the session state is correct.`);
-                }
+                // VALIDATION CHECKPOINT: Ensure plan step is validated before attaching files
+                await requirementEnforcer.ensureCanAttachFiles(sessionId);
                 // Get interface from session
                 const chatInterface = sessionManager.getInterface(sessionId);
                 // Attach each file and collect results

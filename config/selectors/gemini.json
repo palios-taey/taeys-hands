@@ -1,0 +1,70 @@
+{
+  "version": "1.0.0",
+  "platform": "gemini",
+  "url": "https://gemini.google.com",
+  "selectors": {
+    "model_selector": {
+      "primary": "button[data-test-id=\"bard-mode-menu-button\"]",
+      "description": "Main model selector button (shows current model name)"
+    },
+    "attach_button": {
+      "primary": "button[aria-label=\"Open upload file menu\"]",
+      "fallback": "button:has(mat-icon:has-text(\"add_2\"))",
+      "description": "Upload button to open file attachment menu"
+    },
+    "send_button": {
+      "primary": "button[aria-label=\"Send message\"]",
+      "fallback": "button:has(mat-icon[fonticon=\"send\"])",
+      "description": "Send message button with send icon"
+    },
+    "message_input": {
+      "primary": "div.ql-editor[contenteditable=\"true\"][aria-label=\"Enter a prompt here\"]",
+      "fallback": "div[contenteditable=\"true\"]",
+      "description": "Message input contenteditable div with specific aria-label"
+    },
+    "new_chat_button": {
+      "primary": "button[aria-label*=\"New chat\"]",
+      "fallback": "button[aria-label*=\"new conversation\"]",
+      "description": "New chat button to start fresh conversation"
+    },
+    "model_thinking_3pro": {
+      "primary": "button[data-test-id=\"bard-mode-option-thinkingwith3pro\"]",
+      "fallback": "text=Thinking with 3 Pro",
+      "description": "Thinking with 3 Pro model selection"
+    },
+    "model_thinking": {
+      "primary": "button[data-test-id=\"bard-mode-option-thinking\"]",
+      "fallback": "text=Thinking",
+      "description": "Thinking model selection"
+    },
+    "model_deep_research": {
+      "primary": "button[data-test-id*=\"deepresearch\"]",
+      "fallback": "text=Deep Research",
+      "description": "Deep Research model selection"
+    },
+    "hidden_image_upload": {
+      "primary": "button[data-test-id=\"hidden-local-image-upload-button\"]",
+      "description": "Hidden file upload button for images"
+    },
+    "hidden_file_upload": {
+      "primary": "button[data-test-id=\"hidden-local-file-upload-button\"]",
+      "description": "Hidden file upload button for general files"
+    },
+    "tools_button": {
+      "primary": "button[aria-label=\"Tools\"]",
+      "description": "Tools button for Deep Research mode"
+    },
+    "deselect_deep_research": {
+      "primary": "button[aria-label=\"Deselect Deep Research\"]",
+      "description": "Button to deselect Deep Research mode"
+    },
+    "start_research_button": {
+      "primary": "button[data-test-id=\"confirm-button\"]",
+      "description": "Start research button (often requires force-enable via JS)"
+    },
+    "microphone_button": {
+      "primary": "button[aria-label=\"Microphone\"]",
+      "description": "Microphone button for voice input"
+    }
+  }
+}

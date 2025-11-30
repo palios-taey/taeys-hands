@@ -33,8 +33,8 @@ export class ChatInterface {
 
   /**
    * Connect to this chat interface
-   * @param {Object} options - { sessionId, screenshotPath }
-   * @returns {Object} { screenshot: string, sessionId: string }
+   * @param {Object} options - { sessionId, screenshotPath, newConversation, conversationId }
+   * @returns {Object} { screenshot: string, sessionId: string, conversationId: string|null }
    */
   async connect(options = {}) {
     // Session ID is required - either provided or generated
@@ -42,7 +42,32 @@ export class ChatInterface {
     const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-connected.png`;
 
     await this.browser.connect();
-    this.page = await this.browser.getPage(this.name, this.url);
+
+    // Determine target URL based on session type
+    let targetUrl;
+    if (options.newConversation) {
+      // Fresh session - navigate to new chat URL
+      targetUrl = this._getNewChatUrl();
+      console.log(`  [${this.name}: Creating new conversation → ${targetUrl}]`);
+    } else if (options.conversationId) {
+      // Resume existing conversation - navigate directly to it
+      targetUrl = this.buildConversationUrl(options.conversationId);
+      console.log(`  [${this.name}: Resuming conversation → ${targetUrl}]`);
+    } else {
+      // No explicit session type - navigate to base URL (may load cached conversation)
+      targetUrl = this.url;
+      console.log(`  [${this.name}: Navigating to base URL → ${targetUrl}]`);
+    }
+
+    this.page = await this.browser.getPage(this.name, targetUrl);
+
+    // Wait for chat input to be ready
+    try {
+      await this.page.waitForSelector(this.selectors.chatInput, { timeout: 15000 });
+    } catch (err) {
+      console.error(`  [${this.name}: Chat input not found after navigation]`);
+      throw new Error(`Chat input not found for ${this.name} at ${targetUrl}`);
+    }
 
     // Initialize platform-specific bridge
     this.bridge = await createPlatformBridge(this.mimesisConfig);
@@ -52,17 +77,46 @@ export class ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(500); // Wait for tab to be fully visible
 
+    // Extract actual conversationId from URL (for new conversations)
+    const currentUrl = await this.getCurrentConversationUrl();
+    const actualConversationId = this._extractConversationId(currentUrl);
+
     // Capture screenshot to verify tab is visible
     await this.screenshot(screenshotPath);
 
     this.connected = true;
     console.log(`✓ Connected to ${this.name}`);
     console.log(`  Screenshot → ${screenshotPath}`);
+    if (actualConversationId) {
+      console.log(`  Conversation ID → ${actualConversationId}`);
+    }
 
     return {
       screenshot: screenshotPath,
-      sessionId: sessionId
+      sessionId: sessionId,
+      conversationId: actualConversationId
     };
+  }
+
+  /**
+   * Get the new chat URL for this platform
+   * Override in subclasses for platform-specific URLs
+   * @returns {string} URL to navigate to for creating a new chat
+   */
+  _getNewChatUrl() {
+    // Default: most platforms create new chat at base URL
+    return this.url;
+  }
+
+  /**
+   * Extract conversation ID from URL
+   * Override in subclasses for platform-specific URL patterns
+   * @param {string} url - Current page URL
+   * @returns {string|null} Conversation ID or null if not found
+   */
+  _extractConversationId(url) {
+    // Default: no extraction (override in subclasses)
+    return null;
   }
 
   /**
@@ -299,27 +353,68 @@ export class ChatInterface {
     const screenshotPath = options.screenshotPath || `/tmp/taey-${this.name}-${sessionId}-file-attached.png`;
 
     // Platform-specific attach button selectors
+    // NOTE: Claude, ChatGPT, and Perplexity have override methods with menu navigation
     const platformSelectors = {
       'grok': 'button[aria-label="Attach"]',
-      'claude': 'button[data-testid="attach-files-button"]',
-      'chatgpt': 'button[data-testid="composer-plus-btn"]',
-      'gemini': 'button[aria-label="Attach files"]',
-      'perplexity': 'button[aria-label="Attach"]'
+      'claude': '[data-testid="input-menu-plus"]',  // Claude uses + menu (but has override)
+      'chatgpt': '[data-testid="composer-plus-btn"]',  // ChatGPT uses + menu (but has override)
+      'gemini': 'button[aria-label="Open upload file menu"]',
+      'perplexity': 'button[data-testid="attach-files-button"]'  // Perplexity has override
     };
 
-    const attachButtonSelector = options.attachButtonSelector || platformSelectors[this.name] || 'button[data-testid="attach-files-button"]';
+    const attachButtonSelector = options.attachButtonSelector || platformSelectors[this.name];
+
+    if (!attachButtonSelector) {
+      throw new Error(`No attach button selector defined for platform: ${this.name}`);
+    }
 
     console.log(`[${this.name}] attachFile(${filePath})`);
+    console.log(`  → Using selector: ${attachButtonSelector}`);
 
     // Bring tab to front
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // STRICT: No graceful failure - throw if attach button not found
-    const attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 });
+    // Try to find attach button with multiple fallback strategies
+    let attachBtn = null;
+    try {
+      attachBtn = await this.page.waitForSelector(attachButtonSelector, { timeout: 5000 });
+      console.log(`  ✓ Found attach button with primary selector`);
+    } catch (firstError) {
+      console.log(`  ⚠ Primary selector timed out: ${attachButtonSelector}`);
+
+      // Fallback: Try generic attachment button selectors
+      const fallbackSelectors = [
+        'button[aria-label*="Attach"]',
+        'button[aria-label*="Upload"]',
+        'button[aria-label*="attach" i]',
+        'button[data-testid*="attach"]',
+        'button[aria-label*="file" i]',
+        '[data-testid="input-menu-plus"]',  // Claude fallback
+        '[data-testid="composer-plus-btn"]'  // ChatGPT fallback
+      ];
+
+      for (const fallbackSelector of fallbackSelectors) {
+        try {
+          console.log(`  → Trying fallback: ${fallbackSelector}`);
+          attachBtn = await this.page.waitForSelector(fallbackSelector, { timeout: 2000 });
+          if (attachBtn) {
+            console.log(`  ✓ Found attach button with fallback: ${fallbackSelector}`);
+            break;
+          }
+        } catch {
+          // Continue to next fallback
+        }
+      }
+
+      if (!attachBtn) {
+        throw new Error(`Attach button not found after trying primary and fallback selectors for ${this.name}`);
+      }
+    }
+
     await attachBtn.click();
     console.log(`  ✓ Clicked attach button`);
-    await this.page.waitForTimeout(1500); // Wait for file picker
+    await this.page.waitForTimeout(1500); // Wait for file picker or menu
 
     // Use osascript to navigate file picker with Cmd+Shift+G
     const dir = filePath.substring(0, filePath.lastIndexOf('/'));
@@ -1144,6 +1239,16 @@ export class ClaudeInterface extends ChatInterface {
     return `https://claude.ai/chat/${conversationId}`;
   }
 
+  _getNewChatUrl() {
+    return 'https://claude.ai/new';
+  }
+
+  _extractConversationId(url) {
+    // Extract from URL like https://claude.ai/chat/abc-def-123
+    const match = url.match(/\/chat\/([a-f0-9-]+)/);
+    return match ? match[1] : null;
+  }
+
   /**
    * Attach file using human-like Finder navigation
    */
@@ -1214,6 +1319,17 @@ export class ChatGPTInterface extends ChatInterface {
 
   buildConversationUrl(conversationId) {
     return `https://chatgpt.com/c/${conversationId}`;
+  }
+
+  _getNewChatUrl() {
+    // ChatGPT home auto-creates new conversation
+    return 'https://chatgpt.com';
+  }
+
+  _extractConversationId(url) {
+    // Extract from URL like https://chatgpt.com/c/abc123xyz
+    const match = url.match(/\/c\/([a-zA-Z0-9-]+)/);
+    return match ? match[1] : null;
   }
 
   /**
@@ -1563,6 +1679,17 @@ export class GeminiInterface extends ChatInterface {
     return `https://gemini.google.com/app/${conversationId}`;
   }
 
+  _getNewChatUrl() {
+    // Gemini app home creates new conversation
+    return 'https://gemini.google.com/app';
+  }
+
+  _extractConversationId(url) {
+    // Extract from URL like https://gemini.google.com/app/abc123def456
+    const match = url.match(/\/app\/([a-f0-9]+)/);
+    return match ? match[1] : null;
+  }
+
   /**
    * Attach file using human-like Finder navigation
    */
@@ -1897,6 +2024,17 @@ export class GrokInterface extends ChatInterface {
     return `https://grok.com/chat/${conversationId}`;
   }
 
+  _getNewChatUrl() {
+    // Grok home creates new conversation
+    return 'https://grok.com';
+  }
+
+  _extractConversationId(url) {
+    // Extract from URL like https://grok.com/chat/abc-def-123
+    const match = url.match(/\/chat\/([a-f0-9-]+)/);
+    return match ? match[1] : null;
+  }
+
   /**
    * Attach file using human-like Finder navigation
    */
@@ -2016,6 +2154,17 @@ export class PerplexityInterface extends ChatInterface {
 
   buildConversationUrl(conversationId) {
     return `https://perplexity.ai/search/${conversationId}`;
+  }
+
+  _getNewChatUrl() {
+    // Perplexity home is always new
+    return 'https://perplexity.ai';
+  }
+
+  _extractConversationId(url) {
+    // Extract from URL like https://perplexity.ai/search/abc-def-123
+    const match = url.match(/\/search\/([a-f0-9-]+)/);
+    return match ? match[1] : null;
   }
 
   /**

@@ -19,6 +19,11 @@ export interface Session {
     interfaceType: InterfaceType;
     createdAt: Date;
     connected: boolean;
+    conversationId: string | null;
+    conversationUrl: string | null;
+    lastActivity: Date;
+    healthStatus: 'healthy' | 'stale' | 'dead';
+    lastHealthCheck: Date;
 }
 /**
  * Session Manager
@@ -37,9 +42,13 @@ export declare class SessionManager {
      * Create a new session
      *
      * @param interfaceType - Which chat interface to use
+     * @param options - Options to pass to connect() (newConversation, conversationId)
      * @returns Session ID
      */
-    createSession(interfaceType: InterfaceType): Promise<string>;
+    createSession(interfaceType: InterfaceType, options?: {
+        newConversation?: boolean;
+        conversationId?: string;
+    }): Promise<string>;
     /**
      * Get an existing session
      *
@@ -75,6 +84,39 @@ export declare class SessionManager {
      * Destroy all sessions (cleanup)
      */
     destroyAllSessions(): Promise<void>;
+    /**
+     * Health check for a specific session
+     * Verifies browser is responsive and updates health status
+     *
+     * @param sessionId - Session ID to check
+     * @returns Health status ('healthy' | 'stale' | 'dead')
+     */
+    healthCheck(sessionId: string): Promise<'healthy' | 'stale' | 'dead'>;
+    /**
+     * Update session state from browser
+     * Syncs conversationId and URL from current browser state
+     *
+     * @param sessionId - Session ID
+     * @returns Updated session info
+     */
+    updateSessionState(sessionId: string): Promise<{
+        conversationId: string | null;
+        conversationUrl: string;
+    }>;
+    /**
+     * Validate session health before tool execution
+     * Throws error if session is dead
+     *
+     * @param sessionId - Session ID
+     */
+    validateSessionHealth(sessionId: string): Promise<void>;
+    /**
+     * Sync with database to detect orphaned sessions
+     * Called on server startup
+     *
+     * @param conversationStore - ConversationStore instance
+     */
+    syncWithDatabase(conversationStore: any): Promise<void>;
 }
 /**
  * Get the singleton session manager instance

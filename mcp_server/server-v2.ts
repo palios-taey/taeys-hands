@@ -354,11 +354,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error('Cannot specify both sessionId and newSession=true. Choose one.');
         }
 
-        // Determine session ID
+        // Determine session ID and connect
         let sessionId: string;
+        let actualConversationId: string | undefined;
+
         if (newSession) {
-          // Create new session
-          sessionId = await sessionManager.createSession(interfaceType);
+          // Create new session - SessionManager.createSession() handles connect() internally
+          sessionId = await sessionManager.createSession(interfaceType, {
+            newConversation: !conversationId,  // Only set if NOT resuming an existing conversation
+            conversationId: conversationId     // Pass through if resuming
+          });
+
+          // Extract conversationId from the URL after connection
+          // SessionManager already called connect(), so we can get the current URL
+          const chatInterface = sessionManager.getInterface(sessionId);
+          const currentUrl = await chatInterface.getCurrentConversationUrl();
+          actualConversationId = chatInterface._extractConversationId ?
+            chatInterface._extractConversationId(currentUrl) : conversationId;
 
           // Create conversation in Neo4j
           try {
@@ -370,9 +382,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               platforms: [interfaceType],
               platform: interfaceType,  // Add platform as top-level field for querying
               sessionId: sessionId,      // Add sessionId as top-level field
-              conversationId: conversationId || null,  // Add conversationId as top-level field
+              conversationId: actualConversationId || null,  // Add conversationId as top-level field
               metadata: {
-                conversationId: conversationId || null,
+                conversationId: actualConversationId || null,
                 createdVia: 'taey_connect'
               }
             });
@@ -382,17 +394,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         } else {
           // Reuse existing session
           sessionId = providedSessionId!;
+
+          // If conversationId provided, navigate to that conversation
+          if (conversationId) {
+            const chatInterface = sessionManager.getInterface(sessionId);
+            await chatInterface.goToConversation(conversationId);
+            actualConversationId = conversationId;
+          }
         }
 
-        // Connect and get screenshot
+        // Get screenshot path from interface
         const chatInterface = sessionManager.getInterface(sessionId);
-        const connectResult = await chatInterface.connect({ sessionId });
-
-        // If conversationId provided, navigate to that conversation
-        let conversationUrl: string | undefined;
-        if (conversationId) {
-          conversationUrl = await chatInterface.goToConversation(conversationId);
-        }
+        const screenshotPath = `/tmp/taey-${interfaceType}-${sessionId}-connected.png`;
 
         return {
           content: [
@@ -402,10 +415,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 sessionId,
                 interface: interfaceType,
-                screenshot: connectResult.screenshot,
-                conversationUrl: conversationUrl || undefined,
-                message: conversationId
-                  ? `Connected to ${interfaceType} at conversation ${conversationId}`
+                conversationId: actualConversationId || undefined,
+                screenshot: screenshotPath,
+                message: actualConversationId
+                  ? `Connected to ${interfaceType} at conversation ${actualConversationId}`
                   : `Connected to ${interfaceType}`,
               }, null, 2),
             },
