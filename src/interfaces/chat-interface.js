@@ -1489,7 +1489,11 @@ export class ChatGPTInterface extends ChatInterface {
     }
 
     await menuItem.click();
-    await this.page.waitForTimeout(1500);
+    await this.page.waitForTimeout(2000);  // Increased wait for file picker
+
+    // Capture screenshot to verify file picker opened
+    console.log(`  [${this.name}: Taking screenshot before file navigation]`);
+    await this.page.screenshot({ path: '/tmp/chatgpt-before-file-nav.png' });
 
     // Use shared Finder navigation
     await this._navigateFinderDialog(filePath);
