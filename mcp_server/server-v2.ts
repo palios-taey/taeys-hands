@@ -458,25 +458,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           waitForResponse?: boolean;
         };
 
-        // VALIDATION CHECKPOINT: Require either 'attach_files' or 'plan' validated
-        // (allows skipping attach step if no files needed)
+        // VALIDATION CHECKPOINT: Check last validation
         const lastValidation = await validationStore.getLastValidation(sessionId);
-        const validSteps = ['plan', 'attach_files'];
 
-        if (!lastValidation || !validSteps.includes(lastValidation.step)) {
+        if (!lastValidation) {
           throw new Error(
-            `Validation checkpoint failed: Last validated step was '${lastValidation?.step || 'none'}'. ` +
-            `Must validate one of: ${validSteps.join(', ')}.\n\n` +
-            `If you attached files, validate the 'attach_files' step. ` +
-            `If no files needed, validate the 'plan' step. ` +
-            `Review the screenshot and call taey_validate_step before sending.`
+            `Validation checkpoint failed: No validation checkpoints found. ` +
+            `You must validate the 'plan' step before sending a message.`
           );
         }
 
+        // Check that the last checkpoint is validated=true (not pending)
         if (!lastValidation.validated) {
           throw new Error(
-            `Validation checkpoint failed: Step '${lastValidation.step}' was marked as failed. ` +
-            `Fix the issue and re-validate before sending the message.`
+            `Validation checkpoint failed: The most recent step '${lastValidation.step}' is pending validation (validated=false). ` +
+            `You must call taey_validate_step with validated=true after reviewing the screenshot. ` +
+            `Notes from pending checkpoint: ${lastValidation.notes}`
+          );
+        }
+
+        // Check that last validated step is an acceptable prerequisite
+        const validSteps = ['plan', 'attach_files'];
+        if (!validSteps.includes(lastValidation.step)) {
+          throw new Error(
+            `Validation checkpoint failed: Last validated step was '${lastValidation.step}'. ` +
+            `Must validate one of: ${validSteps.join(', ')} before sending.`
           );
         }
 
@@ -725,6 +731,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           lastScreenshot = result.screenshot; // Keep last screenshot
         }
 
+        // Create pending validation checkpoint (must be validated before continuing)
+        await validationStore.createCheckpoint({
+          conversationId: sessionId,
+          step: 'attach_files',
+          validated: false,
+          notes: `Attached ${attachmentResults.length} file(s). Awaiting manual validation. MUST call taey_validate_step with validated=true after reviewing screenshot.`,
+          screenshot: lastScreenshot
+        });
+
         return {
           content: [
             {
@@ -734,7 +749,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 filesAttached: attachmentResults.length,
                 attachments: attachmentResults,
                 screenshot: lastScreenshot,
-                message: `Automation completed for ${attachmentResults.length} file(s). VERIFY in screenshot - tool cannot confirm files actually attached.`,
+                message: `Automation completed for ${attachmentResults.length} file(s). VERIFY in screenshot and call taey_validate_step to confirm.`,
               }, null, 2),
             },
           ],
