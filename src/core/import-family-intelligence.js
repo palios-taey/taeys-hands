@@ -12,11 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const NEO4J_URI = process.env.NEO4J_URI || 'bolt://10.x.x.163:7687';
-const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
-const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || 'buddhabuddha';
 
 async function importFamilyIntelligence() {
-  const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD));
+  // Auth disabled on mira - matches production neo4j-client.js pattern
+  const driver = neo4j.driver(NEO4J_URI, neo4j.auth.none());
   const session = driver.session({ database: 'neo4j' });
 
   try {
