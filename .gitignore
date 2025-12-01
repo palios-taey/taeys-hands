@@ -1,29 +1,25 @@
-# Dependencies
-node_modules/
 
-# Logs
-logs/
-*.log
-
-# Environment
-.env
-.env.local
-
-# OS
-.DS_Store
-
-# Chrome debug profile (local only)
-.chrome-debug-profile/
-
-# Test outputs
-/tmp/
-/screenshots/
-tests/**/*.png
-tests/**/results/
-
+.archive/
 # Build artifacts (source maps can be large)
+.chrome-debug-profile/
+# Chrome debug profile (local only)
+# Dependencies
+.DS_Store
+.env
+# Environment
+.env.local
+*.log
+logs/
+# Logs
 mcp_server/dist/*.js.map
-
+node_modules/
+# OS
+*.pyc
+__pycache__/
+/screenshots/
 # Session data
 .sessions/
-.archive/
+# Test outputs
+tests/**/*.png
+tests/**/results/
+/tmp/
