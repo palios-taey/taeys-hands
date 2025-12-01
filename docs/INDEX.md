@@ -41,6 +41,13 @@ Welcome to the Taey Hands documentation. This MCP server enables AI-to-AI commun
 - [MCP Tools Reconnaissance](MCP_TOOLS_RECONNAISSANCE.md) - Available MCP tools and capabilities
 - [AI Interfaces](AI_INTERFACES.md) - Detailed reference for Claude, ChatGPT, Gemini, Grok, Perplexity
 
+#### MCP Timeout Solution (NEW)
+Comprehensive documentation for handling Extended Thinking (5-15 min) and Deep Research (2-10 min) operations:
+- [MCP Timeout Quick Reference](MCP_TIMEOUT_QUICK_REFERENCE.md) - 5-minute overview and implementation checklist
+- [MCP Timeout Research Summary](MCP_TIMEOUT_RESEARCH_SUMMARY.md) - Research findings, confidence levels, and sources
+- [MCP Timeout Architecture](MCP_TIMEOUT_ARCHITECTURE.md) - Visual ASCII diagrams explaining the timeout problem and solution
+- [MCP Async Pattern Implementation](rebuild/MCP_ASYNC_PATTERN_IMPLEMENTATION.md) - Step-by-step code implementation guide
+
 ### Tool Reference
 - [Tool Reference](TOOL_REFERENCE.md) - Complete MCP tool documentation
   - taey_connect, taey_disconnect
