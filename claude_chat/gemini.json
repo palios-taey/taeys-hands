@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-11-30",
+  "platform": "gemini",
+  "selectors": {
+    "chatInput": ".ql-editor[contenteditable=\"true\"]",
+    "sendButton": "button[aria-label=\"Send message\"]",
+    "modelSelector": "button[data-test-id=\"bard-mode-menu-button\"]",
+    "modelMenuItem": "button[mat-menu-item]",
+    "uploadMenuButton": "button[aria-label=\"Open upload file menu\"]",
+    "uploadFilesButton": "button[data-test-id=\"local-images-files-uploader-button\"]",
+    "hiddenFileUpload": "button[data-test-id=\"hidden-local-file-upload-button\"]",
+    "toolsButton": "button[aria-label=\"Tools\"]",
+    "toolboxDrawerButton": "button.toolbox-drawer-button",
+    "startResearchButton": "button[data-test-id=\"confirm-button\"]",
+    "deselectDeepResearch": "button[aria-label=\"Deselect Deep Research\"]",
+    "responseContainer": ".response-content",
+    "assetCardOpen": "[data-testid=\"asset-card-open-button\"]",
+    "overlayClose": "button[aria-label=\"Close\"]",
+    "overlayDismiss": "button[aria-label=\"Dismiss\"]",
+    "overlayBackdrop": ".cdk-overlay-backdrop"
+  },
+  "fallbacks": {
+    "chatInput": [
+      ".ql-editor[contenteditable=\"true\"]",
+      "[aria-label=\"Enter a prompt here\"]",
+      "[contenteditable=\"true\"]"
+    ],
+    "uploadMenuButton": [
+      "button[aria-label=\"Open upload file menu\"]",
+      "button[aria-label=\"Add files\"]",
+      "button mat-icon[fonticon=\"add_2\"]",
+      "[data-test-id=\"upload-menu-button\"]"
+    ],
+    "uploadFilesButton": [
+      "button[data-test-id=\"local-images-files-uploader-button\"]",
+      "button:has-text(\"Upload files\")",
+      "[data-test-id=\"hidden-local-file-upload-button\"]"
+    ],
+    "responseContainer": [
+      ".response-content",
+      ".model-response-text",
+      "[class*=\"response\"]"
+    ],
+    "overlayClose": [
+      "button[aria-label=\"Close\"]",
+      "button[aria-label=\"Dismiss\"]",
+      ".cdk-overlay-container button mat-icon[fonticon=\"close\"]",
+      "[aria-label=\"Close promotional banner\"]"
+    ]
+  },
+  "quirks": {
+    "overlayDismissalRequired": true,
+    "startButtonOftenDisabled": true,
+    "twoStepAttachmentMenu": true
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-11-30",
+  "platform": "grok",
+  "selectors": {
+    "chatInput": "[contenteditable=\"true\"]",
+    "sendButton": "button[type=\"submit\"]",
+    "modelSelector": "#model-select-trigger",
+    "modelMenuItem": "[role=\"menuitem\"]",
+    "attachButton": "button[aria-label=\"Attach\"]",
+    "uploadMenuItem": "div[role=\"menuitem\"]:has-text(\"Upload a file\")",
+    "customInstructions": "button[aria-label=\"Open Custom Instructions\"]",
+    "responseContainer": "[data-testid=\"assistant-message\"]"
+  },
+  "fallbacks": {
+    "chatInput": [
+      "[contenteditable=\"true\"]",
+      "div[role=\"textbox\"]",
+      "[class*=\"input\"]"
+    ],
+    "modelSelector": [
+      "#model-select-trigger",
+      "button[aria-label=\"Model select\"]",
+      "[data-testid=\"model-selector\"]"
+    ],
+    "sendButton": [
+      "button[type=\"submit\"]",
+      "button[aria-label*=\"send\" i]"
+    ],
+    "responseContainer": [
+      "[data-testid=\"assistant-message\"]",
+      ".assistant-message",
+      "[class*=\"response\"]"
+    ]
+  },
+  "quirks": {
+    "modelSelectorRequiresJsClick": true,
+    "modelSelectorVisibilityTrick": "Use page.evaluate to click #model-select-trigger"
+  },
+  "models": {
+    "Auto": { "description": "Chooses Fast or Expert automatically" },
+    "Fast": { "description": "Quick responses" },
+    "Expert": { "description": "Thinks harder, better for complex tasks" },
+    "Heavy": { "description": "Team of experts approach" },
+    "Grok 4.1": { "description": "Beta model", "tag": "Beta" }
+  }
+}
