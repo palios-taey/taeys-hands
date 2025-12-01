@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-11-30",
+  "platform": "chatgpt",
+  "selectors": {
+    "chatInput": "#prompt-textarea",
+    "sendButton": "button[data-testid=\"send-button\"]",
+    "modelSelector": "button[data-testid=\"model-switcher-dropdown-button\"]",
+    "plusButton": "button[data-testid=\"composer-plus-btn\"]",
+    "uploadMenuItem": "text=\"Add photos & files\"",
+    "deepResearchMenuItem": "text=\"Deep research\"",
+    "agentModeMenuItem": "text=\"Agent mode\"",
+    "webSearchMenuItem": "text=\"Web search\"",
+    "responseContainer": "[data-message-author-role=\"assistant\"]",
+    "regenerateButton": "button:has-text(\"Regenerate\")"
+  },
+  "fallbacks": {
+    "chatInput": [
+      "#prompt-textarea",
+      "[contenteditable=\"true\"]",
+      "textarea[placeholder*=\"Message\"]"
+    ],
+    "plusButton": [
+      "button[data-testid=\"composer-plus-btn\"]",
+      "button[aria-label=\"Add files and more\"]"
+    ],
+    "responseContainer": [
+      "[data-message-author-role=\"assistant\"]",
+      ".agent-turn",
+      "[class*=\"assistant\"]"
+    ]
+  },
+  "notes": {
+    "modelSelector": "Currently disabled - ChatGPT uses Auto mode by default",
+    "legacyModels": "GPT-4o and others are in Legacy submenu if ever re-enabled"
+  }
+}

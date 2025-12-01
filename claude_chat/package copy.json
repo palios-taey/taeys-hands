@@ -1,0 +1,41 @@
+{
+  "name": "taey-hands",
+  "version": "2.0.0",
+  "description": "AI Family Chat Interface Automation - Nova Rebuild",
+  "type": "module",
+  "main": "dist/mcp/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp/server.js",
+    "dev": "tsx watch src/mcp/server.ts",
+    "test": "vitest",
+    "test:unit": "vitest run --dir tests/unit",
+    "test:integration": "vitest run --dir tests/integration",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "neo4j-driver": "^5.15.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.22.4",
+    "uuid": "^9.0.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.2",
+    "tsx": "^4.6.2",
+    "vitest": "^1.0.0",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/parser": "^6.13.2",
+    "@typescript-eslint/eslint-plugin": "^6.13.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "AI Family",
+  "license": "MIT"
+}

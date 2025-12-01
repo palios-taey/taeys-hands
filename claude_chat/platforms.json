@@ -1,0 +1,154 @@
+{
+  "claude": {
+    "name": "claude",
+    "displayName": "Claude",
+    "provider": "Anthropic",
+    "url": "https://claude.ai",
+    "newChatPath": "/new",
+    "chatPath": "/chat/{conversationId}",
+    "conversationIdPattern": "/chat/([a-zA-Z0-9-]+)",
+    "models": ["Opus 4.5", "Sonnet 4", "Haiku 4"],
+    "defaultModel": "Sonnet 4",
+    "modes": ["Extended Thinking", "Research", "Web Search"],
+    "features": {
+      "modelSelection": true,
+      "researchMode": true,
+      "fileAttachment": true,
+      "artifactDownload": true
+    },
+    "quirks": {
+      "hasOverlays": false,
+      "needsButtonForceEnable": false,
+      "modelSelectionMethod": "standard",
+      "hasThinkingIndicator": true
+    },
+    "timeouts": {
+      "default": 300000,
+      "extendedThinking": 600000,
+      "navigation": 10000,
+      "elementWait": 5000
+    }
+  },
+  "chatgpt": {
+    "name": "chatgpt",
+    "displayName": "ChatGPT",
+    "provider": "OpenAI",
+    "url": "https://chatgpt.com",
+    "newChatPath": "/",
+    "chatPath": "/c/{conversationId}",
+    "conversationIdPattern": "/c/([a-zA-Z0-9-]+)",
+    "models": [],
+    "defaultModel": "Auto",
+    "modes": ["Deep research", "Agent mode", "Web search", "GitHub"],
+    "features": {
+      "modelSelection": false,
+      "researchMode": true,
+      "fileAttachment": true,
+      "artifactDownload": false
+    },
+    "quirks": {
+      "hasOverlays": false,
+      "needsButtonForceEnable": false,
+      "modelSelectionMethod": "disabled",
+      "hasRegenerateButton": true
+    },
+    "timeouts": {
+      "default": 180000,
+      "deepResearch": 600000,
+      "navigation": 10000,
+      "elementWait": 5000
+    }
+  },
+  "gemini": {
+    "name": "gemini",
+    "displayName": "Gemini",
+    "provider": "Google",
+    "url": "https://gemini.google.com",
+    "newChatPath": "/app",
+    "chatPath": "/app/conversation/{conversationId}",
+    "conversationIdPattern": "/conversation/([a-zA-Z0-9_-]+)",
+    "models": ["Thinking with 3 Pro", "Thinking"],
+    "defaultModel": "Thinking with 3 Pro",
+    "modes": ["Deep Research", "Deep Think"],
+    "features": {
+      "modelSelection": true,
+      "researchMode": true,
+      "fileAttachment": true,
+      "artifactDownload": true
+    },
+    "quirks": {
+      "hasOverlays": true,
+      "needsButtonForceEnable": true,
+      "modelSelectionMethod": "standard",
+      "twoStepAttachment": true
+    },
+    "timeouts": {
+      "default": 60000,
+      "deepResearch": 3600000,
+      "navigation": 10000,
+      "elementWait": 5000
+    }
+  },
+  "grok": {
+    "name": "grok",
+    "displayName": "Grok",
+    "provider": "xAI",
+    "url": "https://grok.com",
+    "newChatPath": "/",
+    "chatPath": "/chat/{conversationId}",
+    "conversationIdPattern": "/chat/([a-zA-Z0-9_-]+)",
+    "models": ["Auto", "Fast", "Expert", "Heavy", "Grok 4.1"],
+    "defaultModel": "Auto",
+    "modes": [],
+    "features": {
+      "modelSelection": true,
+      "researchMode": false,
+      "fileAttachment": true,
+      "artifactDownload": false
+    },
+    "quirks": {
+      "hasOverlays": false,
+      "needsButtonForceEnable": false,
+      "modelSelectionMethod": "javascript-click",
+      "modelSelectorNotVisible": true
+    },
+    "timeouts": {
+      "default": 60000,
+      "expert": 120000,
+      "navigation": 10000,
+      "elementWait": 5000
+    }
+  },
+  "perplexity": {
+    "name": "perplexity",
+    "displayName": "Perplexity",
+    "provider": "Perplexity AI",
+    "url": "https://perplexity.ai",
+    "newChatPath": "/",
+    "chatPath": "/search/{conversationId}",
+    "conversationIdPattern": "/search/([a-zA-Z0-9_-]+)",
+    "models": [],
+    "defaultModel": null,
+    "modes": ["search", "research", "studio"],
+    "features": {
+      "modelSelection": false,
+      "researchMode": true,
+      "fileAttachment": true,
+      "artifactDownload": true
+    },
+    "quirks": {
+      "hasOverlays": false,
+      "needsButtonForceEnable": false,
+      "modelSelectionMethod": "none",
+      "modeSelectionViaRadio": true,
+      "specialResponseSelector": true
+    },
+    "timeouts": {
+      "default": 120000,
+      "research": 600000,
+      "labs": 1800000,
+      "navigation": 10000,
+      "elementWait": 5000
+    }
+  }
+}
