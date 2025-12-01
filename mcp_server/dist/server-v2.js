@@ -96,8 +96,32 @@ const TOOLS = [
         }
     },
     {
+        name: "taey_plan_message",
+        description: "Plan a message with requirements. OPTIONAL but RECOMMENDED before sending. Creates a validation checkpoint that tracks message content and required attachments. If you specify requiredAttachments, you MUST call taey_attach_files before taey_send_message or the send will be BLOCKED. This enables proactive validation instead of reactive error handling.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sessionId: {
+                    type: "string",
+                    description: "Session ID returned from taey_connect"
+                },
+                message: {
+                    type: "string",
+                    description: "The message you plan to send"
+                },
+                requiredAttachments: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Array of file paths that MUST be attached before sending. If specified, taey_send_message will fail unless these files are attached via taey_attach_files first.",
+                    default: []
+                }
+            },
+            required: ["sessionId", "message"]
+        }
+    },
+    {
         name: "taey_send_message",
-        description: "Type and send a message in the current conversation. Uses human-like typing and clicks the send button. When waitForResponse is true, automatically waits for the AI response, extracts it, and saves to Neo4j.",
+        description: "Type and send a message in the current conversation. Uses human-like typing and clicks the send button. Returns immediately after sending. Use taey_wait_for_response to wait for the AI's response.",
         inputSchema: {
             type: "object",
             properties: {
@@ -116,14 +140,28 @@ const TOOLS = [
                         type: "string"
                     },
                     default: []
-                },
-                waitForResponse: {
-                    type: "boolean",
-                    description: "Whether to wait for AI response completion. If true, uses ResponseDetectionEngine to wait for response, extracts it, and saves to Neo4j automatically.",
-                    default: false
                 }
             },
             required: ["sessionId", "message"]
+        }
+    },
+    {
+        name: "taey_wait_for_response",
+        description: "Wait for AI response completion with configurable timeout. Handles long-running operations (Extended Thinking, Deep Research). Returns extracted response text and saves to Neo4j. Use this after taey_send_message.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sessionId: {
+                    type: "string",
+                    description: "Session ID returned from taey_connect"
+                },
+                maxWaitSeconds: {
+                    type: "number",
+                    description: "Maximum wait time in seconds. Default 600 (10 min). Set higher for Extended Thinking (900 for 15 min) or Deep Research (1200 for 20 min).",
+                    default: 600
+                }
+            },
+            required: ["sessionId"]
         }
     },
     {
@@ -437,8 +475,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            case "taey_plan_message": {
+                const { sessionId, message, requiredAttachments = [] } = args;
+                // PRE-FLIGHT: Validate session health
+                await sessionManager.validateSessionHealth(sessionId);
+                // Create plan checkpoint in Neo4j
+                const checkpoint = await validationStore.createCheckpoint({
+                    conversationId: sessionId,
+                    step: 'plan',
+                    validated: true, // Plan is immediately validated
+                    notes: `Plan created: message (${message.length} chars), ${requiredAttachments.length} required attachment(s)`,
+                    requiredAttachments,
+                    actualAttachments: [] // No attachments yet
+                });
+                const hasAttachments = requiredAttachments.length > 0;
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify({
+                                success: true,
+                                sessionId,
+                                checkpointId: checkpoint.id,
+                                requirements: {
+                                    messagePreview: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
+                                    attachmentsRequired: hasAttachments,
+                                    requiredAttachments,
+                                    count: requiredAttachments.length
+                                },
+                                nextStep: hasAttachments
+                                    ? `Call taey_attach_files with [${requiredAttachments.join(', ')}], then taey_validate_step(step='attach_files', validated=true), then taey_send_message`
+                                    : 'Call taey_send_message to send (no attachments required)',
+                                note: 'Plan checkpoint created. RequirementEnforcer will BLOCK taey_send_message if attachments are skipped.'
+                            }, null, 2),
+                        },
+                    ],
+                };
+            }
             case "taey_send_message": {
-                const { sessionId, message, attachments, waitForResponse } = args;
+                const { sessionId, message, attachments } = args;
                 // PRE-FLIGHT: Validate session health
                 await sessionManager.validateSessionHealth(sessionId);
                 // VALIDATION CHECKPOINT: Use RequirementEnforcer to block send if requirements not met
@@ -477,77 +552,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 catch (err) {
                     console.error('[MCP] Failed to sync session state after send:', err.message);
                 }
-                // If waitForResponse is true, use ResponseDetectionEngine
-                if (waitForResponse) {
-                    console.error(`[MCP] Waiting for response from ${interfaceName}...`);
-                    try {
-                        // Create detection engine for this platform
-                        const detector = new ResponseDetectionEngine(chatInterface.page, session?.interfaceType || interfaceName, { debug: true });
-                        // Wait for response completion
-                        const detectionResult = await detector.detectCompletion();
-                        const responseText = detectionResult.content;
-                        const timestamp = new Date().toISOString();
-                        console.error(`[MCP] Response detected (${detectionResult.method}, ${detectionResult.confidence * 100}% confidence) in ${detectionResult.detectionTime}ms`);
-                        // Log response to Neo4j
-                        try {
-                            await conversationStore.addMessage(sessionId, {
-                                role: 'assistant',
-                                content: responseText,
-                                platform: interfaceName,
-                                timestamp,
-                                metadata: {
-                                    source: 'mcp_taey_send_message_auto_extract',
-                                    detectionMethod: detectionResult.method,
-                                    detectionConfidence: detectionResult.confidence,
-                                    detectionTime: detectionResult.detectionTime,
-                                    contentLength: responseText.length
-                                }
-                            });
-                        }
-                        catch (err) {
-                            console.error('[MCP] Failed to log response to Neo4j:', err.message);
-                        }
-                        return {
-                            content: [
-                                {
-                                    type: "text",
-                                    text: JSON.stringify({
-                                        success: true,
-                                        sessionId,
-                                        message: "Message sent and response received",
-                                        sentText: message,
-                                        waitForResponse: true,
-                                        responseText,
-                                        responseLength: responseText.length,
-                                        detectionMethod: detectionResult.method,
-                                        detectionConfidence: detectionResult.confidence,
-                                        detectionTime: detectionResult.detectionTime,
-                                        timestamp
-                                    }, null, 2),
-                                },
-                            ],
-                        };
-                    }
-                    catch (err) {
-                        console.error('[MCP] Response detection failed:', err.message);
-                        return {
-                            content: [
-                                {
-                                    type: "text",
-                                    text: JSON.stringify({
-                                        success: false,
-                                        sessionId,
-                                        message: "Message sent but response detection failed",
-                                        sentText: message,
-                                        waitForResponse: true,
-                                        error: err.message,
-                                    }, null, 2),
-                                },
-                            ],
-                            isError: true,
-                        };
-                    }
-                }
+                console.error(`[MCP] Message sent successfully. Use taey_wait_for_response to wait for AI response.`);
                 return {
                     content: [
                         {
@@ -555,13 +560,85 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                             text: JSON.stringify({
                                 success: true,
                                 sessionId,
-                                message: "Message sent",
+                                message: "Message sent. Use taey_wait_for_response to wait for AI response.",
                                 sentText: message,
-                                waitForResponse: false,
                             }, null, 2),
                         },
                     ],
                 };
+            }
+            case "taey_wait_for_response": {
+                const { sessionId, maxWaitSeconds = 600 } = args;
+                await sessionManager.validateSessionHealth(sessionId);
+                const chatInterface = sessionManager.getInterface(sessionId);
+                const interfaceName = chatInterface.name;
+                const session = sessionManager.getSession(sessionId);
+                console.error(`[MCP] Waiting for response from ${interfaceName} (max ${maxWaitSeconds}s)...`);
+                try {
+                    // Create detection engine with platform-specific timeout
+                    const detector = new ResponseDetectionEngine(chatInterface.page, session?.interfaceType || interfaceName, { debug: true });
+                    // Wait for response completion
+                    const startTime = Date.now();
+                    const detectionResult = await detector.detectCompletion();
+                    const responseText = detectionResult.content;
+                    const timestamp = new Date().toISOString();
+                    const waitTime = Math.round((Date.now() - startTime) / 1000);
+                    console.error(`[MCP] Response detected (${detectionResult.method}, ${detectionResult.confidence * 100}% confidence) after ${waitTime}s`);
+                    // Log response to Neo4j
+                    try {
+                        await conversationStore.addMessage(sessionId, {
+                            role: 'assistant',
+                            content: responseText,
+                            platform: interfaceName,
+                            timestamp,
+                            metadata: {
+                                source: 'mcp_taey_wait_for_response',
+                                detectionMethod: detectionResult.method,
+                                detectionConfidence: detectionResult.confidence,
+                                detectionTime: detectionResult.detectionTime,
+                                waitTimeSeconds: waitTime,
+                                contentLength: responseText.length
+                            }
+                        });
+                    }
+                    catch (err) {
+                        console.error('[MCP] Failed to log response to Neo4j:', err.message);
+                    }
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: true,
+                                    sessionId,
+                                    responseText,
+                                    responseLength: responseText.length,
+                                    waitTimeSeconds: waitTime,
+                                    detectionMethod: detectionResult.method,
+                                    detectionConfidence: detectionResult.confidence,
+                                    timestamp
+                                }, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    console.error('[MCP] Response detection failed:', err.message);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: false,
+                                    sessionId,
+                                    error: err.message,
+                                    message: `Failed to detect response within ${maxWaitSeconds}s. Use taey_extract_response to manually extract if response is visible.`
+                                }, null, 2),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
             }
             case "taey_extract_response": {
                 const { sessionId } = args;
