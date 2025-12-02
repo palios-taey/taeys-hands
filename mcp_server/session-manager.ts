@@ -48,6 +48,7 @@ export interface Session {
   lastActivity: Date; // Last tool call timestamp
   healthStatus: 'healthy' | 'stale' | 'dead';
   lastHealthCheck: Date;
+  responseInProgress: boolean; // TRUE if waiting for AI response (blocks sending)
 }
 
 /**
@@ -117,7 +118,8 @@ export class SessionManager {
       conversationUrl: null,
       lastActivity: now,
       healthStatus: 'healthy',
-      lastHealthCheck: now
+      lastHealthCheck: now,
+      responseInProgress: false  // No response pending initially
     };
 
     this.sessions.set(sessionId, session);
@@ -172,6 +174,47 @@ export class SessionManager {
       throw new Error(`Session disconnected: ${sessionId}`);
     }
     return session.interface;
+  }
+
+  /**
+   * Check if a response is currently pending for this session
+   *
+   * @param sessionId - Session ID
+   * @returns true if response is in progress (blocks sending)
+   */
+  isResponsePending(sessionId: string): boolean {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      return false; // No session = no pending response
+    }
+    return session.responseInProgress;
+  }
+
+  /**
+   * Mark that a response is now in progress (after sending message)
+   * Blocks taey_send_message from being called again until cleared
+   *
+   * @param sessionId - Session ID
+   */
+  markResponsePending(sessionId: string): void {
+    const session = this.getSession(sessionId);
+    if (session) {
+      session.responseInProgress = true;
+      console.log(`[SessionManager] Response pending for ${sessionId}`);
+    }
+  }
+
+  /**
+   * Mark that response has been received/extracted (clear blocking state)
+   *
+   * @param sessionId - Session ID
+   */
+  markResponseComplete(sessionId: string): void {
+    const session = this.getSession(sessionId);
+    if (session) {
+      session.responseInProgress = false;
+      console.log(`[SessionManager] Response complete for ${sessionId}`);
+    }
   }
 
   /**
