@@ -72,7 +72,17 @@ async function extractArtifact() {
     const content = await page.evaluate(() => {
       // Monaco editor
       const monacoContent = document.querySelector('.monaco-editor .view-lines');
-      if (monacoContent) return monacoContent.innerText;
+      if (monacoContent) {
+        // innerText includes line number decorations at start of each line
+        // Monaco renders actual code in individual line divs - get textContent from each instead
+        const lineElements = monacoContent.querySelectorAll('.view-line');
+        if (lineElements.length > 0) {
+          return Array.from(lineElements).map(el => el.textContent || '').join('\n');
+        }
+        // Fallback: strip leading digits from innerText
+        const raw = monacoContent.innerText;
+        return raw.split('\n').map(line => line.replace(/^\d+/, '')).join('\n');
+      }
 
       // CodeMirror
       const codeMirror = document.querySelector('.CodeMirror');
