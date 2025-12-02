@@ -272,8 +272,8 @@ import aiohttp
 
 # Both Sparks now running V0 scheduler (VLLM_USE_V1=0) - stable
 VLLM_ENDPOINTS = [
-    "http://localhost:8001/v1/embeddings",      # Spark #1 (V0 scheduler)
-    "http://10.x.x.80:8001/v1/embeddings"       # Spark #2 (V0 scheduler)
+    "http://localhost:8001/v1/embeddings",      # Spark #1 (Docker maps 8001->8000)
+    "http://10.x.x.80:8001/v1/embeddings"       # Spark #2 (Docker maps 8001->8000)
 ]
 MODEL_NAME = "Qwen/Qwen3-Embedding-8B"
 
