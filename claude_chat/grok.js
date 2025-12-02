@@ -63,53 +63,70 @@ export class GrokAdapter extends BasePlatformAdapter {
   }
 
   /**
-   * Select a model using JavaScript click bypass
-   * QUIRK: Standard click fails due to Grok's visibility tricks
-   * 
+   * Select a model using mouse.click() to open the dropdown
+   * QUIRK: JavaScript .click() doesn't trigger the menu, must use mouse.click()
+   *
    * @param {string} modelName - 'Auto', 'Fast', 'Expert', 'Heavy', 'Grok 4.1'
    */
   async selectModel(modelName, options = {}) {
     try {
-      // QUIRK: Use JavaScript click instead of Playwright click
-      // The model selector button is "not visible" to Playwright
-      await this.page.waitForSelector('#model-select-trigger', { 
-        state: 'attached', 
-        timeout: 5000 
+      // Wait for button to be in DOM
+      await this.page.waitForSelector('#model-select-trigger', {
+        state: 'attached',
+        timeout: 5000
       });
-      
-      await this.page.evaluate(() => {
-        const button = document.querySelector('#model-select-trigger');
-        if (button) button.click();
+
+      // QUIRK: Get button coordinates and use mouse.click()
+      // JavaScript .click() doesn't trigger the dropdown menu
+      const coords = await this.page.evaluate(() => {
+        const buttons = document.querySelectorAll('#model-select-trigger');
+        for (const btn of buttons) {
+          const rect = btn.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            return {
+              x: rect.x + rect.width / 2,
+              y: rect.y + rect.height / 2
+            };
+          }
+        }
+        return null;
       });
-      
+
+      if (!coords) {
+        throw new Error('Could not find visible model selector button');
+      }
+
+      // Use mouse.click() instead of .click() - this actually triggers the menu
+      await this.page.mouse.click(coords.x, coords.y);
       await this.sleep(getTiming('MENU_RENDER'));
-      
+
       // Now find and click the model option
-      // Grok uses text content for model names
+      // Grok uses div elements with the model name text
       const modelItem = await this.page.waitForSelector(
-        `[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}")`,
+        `div:has-text("${modelName}"):not(:has(div:has-text("${modelName}")))`,
         { timeout: 5000 }
       );
       await modelItem.click();
       await this.sleep(500);
-      
+
       const screenshot = await this.screenshot('select-model');
       return { success: true, screenshot, model: modelName };
     } catch (error) {
       const screenshot = await this.screenshot('select-model-failed');
-      
+
       // Get available models for error message
       let availableModels = [];
       try {
         availableModels = await this.page.$$eval(
-          '[role="menuitem"], [role="option"]',
-          items => items.map(item => item.textContent.trim()).filter(t => t)
+          '[data-radix-collection-item], [role="menuitem"], [role="option"]',
+          items => items.map(item => item.textContent.trim()).filter(t => t && t.length < 50)
         );
       } catch {}
-      
+
       throw new Error(
         `Failed to select model "${modelName}". ` +
         `Available: ${availableModels.join(', ') || 'unknown'}. ` +
+        `Error: ${error.message}. ` +
         `Screenshot: ${screenshot}`
       );
     }
