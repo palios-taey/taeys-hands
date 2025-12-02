@@ -1139,8 +1139,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
  */
 async function main() {
   const transport = new StdioServerTransport();
+
+  // Global error handlers - CRITICAL for Linux stability
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[MCP] Unhandled Rejection:', reason);
+    // Don't exit - log and continue. Most rejections are from browser operations
+    // that have already been handled at a higher level.
+  });
+
+  process.on('uncaughtException', (error) => {
+    console.error('[MCP] Uncaught Exception:', error);
+    // For uncaught exceptions, attempt graceful shutdown
+    shutdown().then(() => process.exit(1)).catch(() => process.exit(1));
+  });
+
+  // Signal handlers for graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.error('[MCP] Received SIGTERM');
+    await shutdown();
+    process.exit(0);
+  });
+
+  process.on('SIGINT', async () => {
+    console.error('[MCP] Received SIGINT');
+    await shutdown();
+    process.exit(0);
+  });
+
+  // Detect stdio errors - connection to Claude Code
+  process.stdin.on('error', (error) => {
+    console.error('[MCP] stdin error:', error);
+    shutdown().then(() => process.exit(1)).catch(() => process.exit(1));
+  });
+
+  process.stdout.on('error', (error) => {
+    console.error('[MCP] stdout error:', error);
+    shutdown().then(() => process.exit(1)).catch(() => process.exit(1));
+  });
+
+  // Connect and run
   await server.connect(transport);
-  console.error("Taey-Hands MCP Server v2 running on stdio");
+  console.error('[MCP] Taey-Hands MCP Server v2 running on stdio');
+}
+
+// Graceful shutdown function
+async function shutdown() {
+  try {
+    console.error('[MCP] Shutting down...');
+    await sessionManager.destroyAllSessions();
+    console.error('[MCP] Shutdown complete');
+  } catch (error: any) {
+    console.error('[MCP] Error during shutdown:', error.message);
+  }
 }
 
 main().catch((error) => {

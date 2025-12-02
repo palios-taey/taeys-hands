@@ -66,7 +66,7 @@ def find_local_md_files(base_path: str, source_name: str, skip_backup_exclusions
 
     # Minimal exclusions for expansion-local (we WANT backup content)
     MINIMAL_EXCLUDE = ['node_modules', '.cache', '__pycache__', '.venv', 'site-packages',
-                       'nemo-env', '.git', '.npm', '.cargo']
+                       'nemo-env', '.git', '.npm', '.cargo', '.Trash', 'heartbeat']
 
     for filepath in base.rglob("*.md"):
         str_path = str(filepath)
@@ -368,7 +368,7 @@ async def main():
     parser.add_argument("--expansion", action="store_true", help="Load from /media/spark/Expansion")
     parser.add_argument("--mira", action="store_true", help="Load from mira via SSH")
     parser.add_argument("--mira-local", action="store_true", help="Load from synced mira files at /tmp/mira_md_files")
-    parser.add_argument("--expansion-local", action="store_true", help="Load from synced expansion files at /tmp/expansion_md_files (includes backups)")
+    parser.add_argument("--expansion-local", action="store_true", help="Load from synced expansion files at /home/spark/data/expansion_md (includes backups)")
     parser.add_argument("--all", action="store_true", help="Load from all sources")
     parser.add_argument("--dry-run", action="store_true", help="Just count files")
     args = parser.parse_args()
@@ -396,7 +396,7 @@ async def main():
     if args.mira_local:
         file_list.extend(find_local_md_files("/tmp/mira_md_files", "mira"))
     if args.expansion_local:
-        file_list.extend(find_local_md_files("/tmp/expansion_md_files", "expansion", skip_backup_exclusions=True))
+        file_list.extend(find_local_md_files("/home/spark/data/expansion_md", "expansion", skip_backup_exclusions=True))
 
     print(f"\nTotal files to process: {len(file_list)}")
 
