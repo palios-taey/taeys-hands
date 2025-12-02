@@ -520,6 +520,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const { sessionId, message, attachments } = args;
                 // PRE-FLIGHT: Validate session health
                 await sessionManager.validateSessionHealth(sessionId);
+                // BLOCKING CHECK: Prevent sending while a response is pending
+                if (sessionManager.isResponsePending(sessionId)) {
+                    throw new Error(`Cannot send message: response already in progress for session ${sessionId}. ` +
+                        `Please wait for the response to complete (use taey_wait_for_response or taey_extract_response) ` +
+                        `before sending another message. This prevents race conditions and conversation flow confusion.`);
+                }
                 // VALIDATION CHECKPOINT: Use RequirementEnforcer to block send if requirements not met
                 // This makes it mathematically impossible to skip attachments when plan specifies them
                 await requirementEnforcer.ensureCanSendMessage(sessionId);
@@ -556,6 +562,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 catch (err) {
                     console.error('[MCP] Failed to sync session state after send:', err.message);
                 }
+                // MARK RESPONSE PENDING: Block subsequent sends until response extracted
+                sessionManager.markResponsePending(sessionId);
                 console.error(`[MCP] Message sent successfully. Use taey_wait_for_response to wait for AI response.`);
                 return {
                     content: [
@@ -608,6 +616,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     catch (err) {
                         console.error('[MCP] Failed to log response to Neo4j:', err.message);
                     }
+                    // CLEAR RESPONSE PENDING: Response received, can send again
+                    sessionManager.markResponseComplete(sessionId);
                     return {
                         content: [
                             {
@@ -628,6 +638,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 }
                 catch (err) {
                     console.error('[MCP] Response detection failed:', err.message);
+                    // CLEAR RESPONSE PENDING even on timeout - don't block forever
+                    sessionManager.markResponseComplete(sessionId);
                     return {
                         content: [
                             {
@@ -678,6 +690,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 catch (err) {
                     console.error('[MCP] Failed to sync session state after extract response:', err.message);
                 }
+                // CLEAR RESPONSE PENDING: Response extracted, can send again
+                sessionManager.markResponseComplete(sessionId);
                 return {
                     content: [
                         {
