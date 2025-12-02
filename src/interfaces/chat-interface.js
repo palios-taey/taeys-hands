@@ -2352,16 +2352,30 @@ export class GrokInterface extends ChatInterface {
     await this.page.bringToFront();
     await this.page.waitForTimeout(200);
 
-    // Click model selector button using JavaScript (bypasses Playwright visibility checks)
+    // QUIRK: JavaScript .click() doesn't trigger the dropdown, must use mouse.click()
+    // Get button coordinates and click with mouse
     await this.page.waitForSelector('#model-select-trigger', { state: 'attached', timeout: 5000 });
-    await this.page.evaluate(() => {
-      const button = document.querySelector('#model-select-trigger');
-      if (button) button.click();
+    const coords = await this.page.evaluate(() => {
+      const buttons = document.querySelectorAll('#model-select-trigger');
+      for (const btn of buttons) {
+        const rect = btn.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+      }
+      return null;
     });
+
+    if (!coords) {
+      throw new Error('Could not find visible model selector button');
+    }
+
+    await this.page.mouse.click(coords.x, coords.y);
     await this.page.waitForTimeout(1000); // Wait for menu to fully render
 
-    // Find and click the model menu item by text (flexible matching)
-    const modelItem = this.page.locator(`[role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}"), div:has-text("${modelName}"), button:has-text("${modelName}")`).first();
+    // Find and click the model menu item by exact text match
+    // Use span with exact text to avoid matching parent containers
+    const modelItem = this.page.locator(`span:text-is("${modelName}"), div:text-is("${modelName}"), [role="menuitem"]:has-text("${modelName}"), [role="option"]:has-text("${modelName}")`).first();
     const itemExists = await modelItem.count() > 0;
 
     if (!itemExists) {
