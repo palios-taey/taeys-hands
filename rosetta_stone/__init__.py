@@ -16,34 +16,34 @@ IMPORTANT: This framework combines:
 The experimental components are clearly marked and designed to be testable.
 """
 
-from .primitives import (
+from .core.primitives import (
     # Verified constants
     PHI, PHI_INVERSE, PHI_SQUARED, PHI_INVERSE_SQUARED, PHI_HALF,
     BACH_RATIOS, SOLFEGGIO_FREQUENCIES, CURRENT_SOTA_COSINE_SIM,
-    
+
     # Experimental constants
     GOLDEN_DAMPING, BASE_FREQUENCY_HZ, THRESHOLDS, ThresholdType,
-    
+
     # Data structures
     WaveParameters, HarmonicSignature, TranslationResult,
-    
+
     # Functions
     phi_weight, golden_decay_envelope, damped_wave,
     compute_phase_alignment, compute_harmonic_preservation,
     determine_threshold_achieved, validate_phi_relationships
 )
 
-from .harmonic_space import (
+from .core.harmonic_space import (
     HarmonicSpace, SemanticEncoder,
     create_concept_graph, create_default_harmonic_space
 )
 
-from .translator import (
+from .core.translator import (
     compute_cka, minibatch_cka,
     EmbeddingAligner, ModelProfile, RosettaTranslator
 )
 
-from .wave_communication import (
+from .core.wave_communication import (
     DampedWaveEquation, WavePacket, WaveChannel, WaveSynchronizer
 )
 
