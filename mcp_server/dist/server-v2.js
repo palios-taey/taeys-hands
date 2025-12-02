@@ -17,6 +17,8 @@ import { ResponseDetectionEngine } from "../../src/core/response-detection.js";
 import { ValidationCheckpointStore } from "../../src/core/validation-checkpoints.js";
 // @ts-ignore - RequirementEnforcer is JS, not TS
 import { RequirementEnforcer } from "../../src/v2/core/validation/requirement-enforcer.js";
+// @ts-ignore - ResponseWaitManager is JS, not TS
+import { ResponseWaitManager } from "../../src/core/response-wait-manager.js";
 // Get singleton session manager
 const sessionManager = getSessionManager();
 // Get conversation store for Neo4j logging
@@ -25,6 +27,8 @@ const conversationStore = getConversationStore();
 const validationStore = new ValidationCheckpointStore();
 // Initialize RequirementEnforcer - CRITICAL component that prevents attachment bypass
 const requirementEnforcer = new RequirementEnforcer(validationStore);
+// Initialize ResponseWaitManager - Background response detection
+const responseWaitManager = new ResponseWaitManager(sessionManager);
 // Initialize schema on startup
 conversationStore.initSchema().catch((err) => {
     console.error('[MCP] Failed to initialize ConversationStore schema:', err.message);
@@ -335,6 +339,69 @@ const TOOLS = [
                 }
             },
             required: ["conversationId", "step", "validated", "notes"]
+        }
+    },
+    {
+        name: "taey_start_waiting",
+        description: "Start waiting for AI response in background. Returns immediately with wait_id. Use taey_check_wait_status to monitor progress. This allows you to continue working while detection runs in background.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                sessionId: {
+                    type: "string",
+                    description: "Session ID to wait on (from taey_connect)"
+                },
+                maxWaitSeconds: {
+                    type: "number",
+                    description: "Maximum wait time in seconds (default: 600 = 10 minutes)"
+                }
+            },
+            required: ["sessionId"]
+        }
+    },
+    {
+        name: "taey_check_wait_status",
+        description: "Check status of background wait. Returns current state (waiting/completed/timeout/error). If completed, returns the response text. If still waiting, returns progress info.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                waitId: {
+                    type: "string",
+                    description: "Wait ID from taey_start_waiting"
+                }
+            },
+            required: ["waitId"]
+        }
+    },
+    {
+        name: "taey_cancel_wait",
+        description: "Cancel background wait. Use if you no longer need the response or want to stop detection early.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                waitId: {
+                    type: "string",
+                    description: "Wait ID to cancel"
+                }
+            },
+            required: ["waitId"]
+        }
+    },
+    {
+        name: "taey_list_waits",
+        description: "List all background waits. Optionally filter by status (waiting/completed/timeout/error/cancelled) or sessionId. Shows summary counts and individual wait details.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                status: {
+                    type: "string",
+                    description: "Filter by status: waiting, completed, timeout, error, cancelled"
+                },
+                sessionId: {
+                    type: "string",
+                    description: "Filter by session ID"
+                }
+            }
         }
     }
 ];
@@ -649,6 +716,118 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                                     sessionId,
                                     error: err.message,
                                     message: `Failed to detect response within ${maxWaitSeconds}s. Use taey_extract_response to manually extract if response is visible.`
+                                }, null, 2),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+            }
+            case "taey_start_waiting": {
+                const { sessionId, maxWaitSeconds = 600 } = args;
+                try {
+                    const result = await responseWaitManager.startWaiting(sessionId, maxWaitSeconds);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify(result, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: false,
+                                    error: err.message
+                                }, null, 2),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+            }
+            case "taey_check_wait_status": {
+                const { waitId } = args;
+                try {
+                    const status = await responseWaitManager.checkStatus(waitId);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify(status, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: false,
+                                    error: err.message
+                                }, null, 2),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+            }
+            case "taey_cancel_wait": {
+                const { waitId } = args;
+                try {
+                    const result = await responseWaitManager.cancelWait(waitId);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify(result, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: false,
+                                    error: err.message
+                                }, null, 2),
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
+            }
+            case "taey_list_waits": {
+                const { status, sessionId } = args;
+                try {
+                    const result = responseWaitManager.listWaits({ status, sessionId });
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify(result, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: JSON.stringify({
+                                    success: false,
+                                    error: err.message
                                 }, null, 2),
                             },
                         ],
