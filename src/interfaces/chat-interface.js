@@ -1183,46 +1183,139 @@ export class ClaudeInterface extends ChatInterface {
 
   /**
    * Download artifact from Claude Chat response
-   * Detects Download button and downloads the artifact file
+   * Extracts artifact content via DOM (new Claude interface with sidebar)
    *
-   * @param {Object} options - { downloadPath, timeout }
+   * @param {Object} options - { artifactName, downloadPath, timeout }
    * @returns {Object} { downloaded: boolean, filePath: string|null, fileName: string|null }
    */
   async downloadArtifact(options = {}) {
+    const artifactName = options.artifactName || null;
     const downloadPath = options.downloadPath || '/tmp';
     const timeout = options.timeout || 10000;
 
-    console.log(`[${this.name}] downloadArtifact()`);
+    console.log(`[${this.name}] downloadArtifact() - ${artifactName || 'first artifact'}`);
 
-    // Check if Download button exists
     try {
-      const downloadBtn = await this.page.waitForSelector('button[aria-label="Download"]', {
-        timeout,
-        state: 'visible'
-      });
+      // Close any open artifact first
+      const backBtn = this.page.locator('button[aria-label="Go back"]');
+      if (await backBtn.count() > 0) {
+        console.log('  → Closing currently open artifact');
+        await backBtn.click();
+        await this.page.waitForTimeout(1000);
+      }
 
-      if (!downloadBtn) {
-        console.log('  ✗ No Download button found');
+      // Open sidebar if needed
+      const sidebarBtn = this.page.locator('button[aria-label="Open sidebar"][data-testid="wiggle-controls-actions-toggle"]');
+      if (await sidebarBtn.count() > 0) {
+        console.log('  → Opening sidebar');
+        await sidebarBtn.click();
+        await this.page.waitForTimeout(1500);
+      }
+
+      // Find artifacts
+      const artifactItems = this.page.locator('div[role="button"][aria-label="Preview contents"]');
+      const count = await artifactItems.count();
+
+      if (count === 0) {
+        console.log('  ✗ No artifacts found');
         return { downloaded: false, filePath: null, fileName: null };
       }
 
-      console.log('  ✓ Download button found');
+      console.log(`  ✓ Found ${count} artifact(s)`);
 
-      // Set up download handler
-      const downloadPromise = this.page.waitForEvent('download', { timeout: 30000 });
+      // Build artifact list
+      const artifacts = [];
+      for (let i = 0; i < count; i++) {
+        const item = artifactItems.nth(i);
+        const nameEl = item.locator('.leading-tight.text-sm');
+        const name = await nameEl.textContent();
+        artifacts.push({ index: i, name: name.trim() });
+      }
 
-      // Click download button
-      await downloadBtn.click();
-      console.log('  ✓ Clicked Download button');
+      // Find target artifact
+      let targetIndex;
+      let targetName;
 
-      // Wait for download to start
-      const download = await downloadPromise;
-      const fileName = download.suggestedFilename();
+      if (artifactName) {
+        // Find by exact name match
+        targetIndex = artifacts.findIndex(a => a.name === artifactName);
+        if (targetIndex === -1) {
+          console.log(`  ✗ Artifact "${artifactName}" not found`);
+          console.log('  Available artifacts:', artifacts.map(a => a.name).join(', '));
+          return { downloaded: false, filePath: null, fileName: null };
+        }
+        targetName = artifactName;
+      } else {
+        // Use first artifact
+        targetIndex = 0;
+        targetName = artifacts[0].name;
+      }
+
+      console.log(`  → Extracting artifact "${targetName}" at index ${targetIndex}`);
+
+      // Click artifact to view
+      await artifactItems.nth(targetIndex).click();
+      await this.page.waitForTimeout(2000);
+
+      // Extract content via DOM
+      const content = await this.page.evaluate(() => {
+        // Monaco editor
+        const monacoContent = document.querySelector('.monaco-editor .view-lines');
+        if (monacoContent) return monacoContent.innerText;
+
+        // CodeMirror
+        const codeMirror = document.querySelector('.CodeMirror');
+        if (codeMirror && codeMirror.CodeMirror) {
+          return codeMirror.CodeMirror.getValue();
+        }
+
+        // Pre/code blocks
+        const codeBlocks = document.querySelectorAll('pre code, pre, code[class*="language"]');
+        let largestCode = '';
+        codeBlocks.forEach(block => {
+          const text = block.textContent || block.innerText || '';
+          if (text.length > largestCode.length) {
+            largestCode = text;
+          }
+        });
+        if (largestCode.length > 100) return largestCode;
+
+        // Code-related elements
+        const codeElements = document.querySelectorAll('[data-code], [class*="code-"], [class*="source"]');
+        codeElements.forEach(el => {
+          const text = el.textContent || el.innerText || '';
+          if (text.length > largestCode.length) {
+            largestCode = text;
+          }
+        });
+
+        return largestCode || 'Could not find code content';
+      });
+
+      if (!content || content === 'Could not find code content') {
+        console.log('  ✗ Could not extract artifact content');
+        return { downloaded: false, filePath: null, fileName: null };
+      }
+
+      // Determine file extension from name
+      let fileName = targetName;
+      if (!fileName.includes('.')) {
+        // Try to guess extension from content
+        if (content.startsWith('#!/usr/bin/env python') || content.includes('import ') || content.includes('def ')) {
+          fileName += '.py';
+        } else if (content.includes('function ') || content.includes('const ') || content.includes('let ')) {
+          fileName += '.js';
+        } else {
+          fileName += '.txt';
+        }
+      }
+
       const filePath = `${downloadPath}/${fileName}`;
 
-      // Save to specified path
-      await download.saveAs(filePath);
-      console.log(`  ✓ Downloaded → ${filePath}`);
+      // Save to file
+      const fs = await import('fs');
+      fs.writeFileSync(filePath, content);
+      console.log(`  ✓ Extracted ${content.length} characters → ${filePath}`);
 
       return {
         downloaded: true,
@@ -1231,11 +1324,8 @@ export class ClaudeInterface extends ChatInterface {
       };
 
     } catch (e) {
-      if (e.message.includes('Timeout')) {
-        console.log('  ✗ No Download button found (timeout)');
-        return { downloaded: false, filePath: null, fileName: null };
-      }
-      throw e;
+      console.error(`  ✗ Error extracting artifact: ${e.message}`);
+      return { downloaded: false, filePath: null, fileName: null, error: e.message };
     }
   }
 
