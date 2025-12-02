@@ -284,13 +284,17 @@ const TOOLS: Tool[] = [
   },
   {
     name: "taey_download_artifact",
-    description: "Download an artifact file from a chat response. Works with Claude (simple download), Gemini (multi-step export), and Perplexity (multi-step export). ChatGPT and Grok do not support artifact downloads.",
+    description: "Download an artifact file from a chat response. Works with Claude (sidebar-based extraction), Gemini (multi-step export), and Perplexity (multi-step export). ChatGPT and Grok do not support artifact downloads.",
     inputSchema: {
       type: "object",
       properties: {
         sessionId: {
           type: "string",
           description: "Session ID returned from taey_connect"
+        },
+        artifactName: {
+          type: "string",
+          description: "Optional: Name of specific artifact to download (Claude only). If not provided, downloads first available artifact."
         },
         downloadPath: {
           type: "string",
@@ -1013,8 +1017,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "taey_download_artifact": {
-        const { sessionId, downloadPath = "/tmp", format = "markdown", timeout = 10000 } = args as {
+        const { sessionId, artifactName, downloadPath = "/tmp", format = "markdown", timeout = 10000 } = args as {
           sessionId: string;
+          artifactName?: string;
           downloadPath?: string;
           format?: string;
           timeout?: number;
@@ -1031,6 +1036,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Call downloadArtifact method with interface-specific options
         const result = await chatInterface.downloadArtifact({
+          artifactName,
           downloadPath,
           format,
           timeout,
