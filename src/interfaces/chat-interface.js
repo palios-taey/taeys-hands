@@ -558,41 +558,50 @@ export class ChatInterface {
       // Focus the browser window (using xdotool windowraise + windowfocus)
       await this.bridge.focusApp(this._getBrowserName());
 
-      // CRITICAL: Get input element coordinates and click with xdotool (not Playwright)
-      // This ensures X11 focus is set correctly for xdotool typing
+      // Get input and focus it
       const chatInputSelector = await this._getSelector('message_input', this.selectors.chatInput);
       const input = await this.page.waitForSelector(chatInputSelector, { timeout: 10000 });
-      const box = await input.boundingBox();
-      if (box) {
-        // Get browser window position and chrome height to convert viewport coords to screen coords
-        // boundingBox() returns viewport-relative coordinates, but xdotool needs screen coordinates
-        const windowInfo = await this.page.evaluate(() => ({
-          screenX: window.screenX,
-          screenY: window.screenY,
-          outerHeight: window.outerHeight,
-          innerHeight: window.innerHeight,
-          outerWidth: window.outerWidth,
-          innerWidth: window.innerWidth
-        }));
 
-        // Calculate offsets: window position + browser chrome (toolbar, etc.)
-        const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
-        const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
+      // Platform-specific click: Linux needs coordinate-based (xdotool), Mac uses Playwright
+      if (process.platform === 'linux') {
+        // LINUX: Get input element coordinates and click with xdotool (not Playwright)
+        // This ensures X11 focus is set correctly for xdotool typing
+        const box = await input.boundingBox();
+        if (box) {
+          // Get browser window position and chrome height to convert viewport coords to screen coords
+          // boundingBox() returns viewport-relative coordinates, but xdotool needs screen coordinates
+          const windowInfo = await this.page.evaluate(() => ({
+            screenX: window.screenX,
+            screenY: window.screenY,
+            outerHeight: window.outerHeight,
+            innerHeight: window.innerHeight,
+            outerWidth: window.outerWidth,
+            innerWidth: window.innerWidth
+          }));
 
-        // Convert viewport coordinates to screen coordinates
-        const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
-        const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
+          // Calculate offsets: window position + browser chrome (toolbar, etc.)
+          const chromeHeight = windowInfo.outerHeight - windowInfo.innerHeight;
+          const chromeWidth = windowInfo.outerWidth - windowInfo.innerWidth;
 
-        const clickX = Math.round(screenX);
-        const clickY = Math.round(screenY);
+          // Convert viewport coordinates to screen coordinates
+          const screenX = windowInfo.screenX + (chromeWidth / 2) + box.x + (box.width / 2);
+          const screenY = windowInfo.screenY + chromeHeight + box.y + (box.height / 2);
 
-        console.log(`  [DEBUG] Window: (${windowInfo.screenX}, ${windowInfo.screenY}), Chrome: ${chromeHeight}px`);
-        console.log(`  [DEBUG] Box: (${box.x}, ${box.y}) -> Screen: (${clickX}, ${clickY})`);
+          const clickX = Math.round(screenX);
+          const clickY = Math.round(screenY);
 
-        await this.bridge.clickAt(clickX, clickY);
-        await this.page.waitForTimeout(300);
+          console.log(`  [DEBUG] Window: (${windowInfo.screenX}, ${windowInfo.screenY}), Chrome: ${chromeHeight}px`);
+          console.log(`  [DEBUG] Box: (${box.x}, ${box.y}) -> Screen: (${clickX}, ${clickY})`);
+
+          await this.bridge.clickAt(clickX, clickY);
+          await this.page.waitForTimeout(300);
+        } else {
+          // Fallback to Playwright click if boundingBox fails
+          await input.click();
+          await this.page.waitForTimeout(200);
+        }
       } else {
-        // Fallback to Playwright click if boundingBox fails
+        // MACOS: Simple Playwright click works fine (no coordinate calculation needed)
         await input.click();
         await this.page.waitForTimeout(200);
       }
