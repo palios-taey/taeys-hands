@@ -155,53 +155,51 @@ export class ResponseDetectionEngine {
           }
         }
 
-        // Watch for class removal via polling
-        const checkStreaming = async () => {
-          const containers = await this.page.$$(containerSelector);
-          if (containers.length === 0) return false;
+        // Watch for class removal via async while loop (NOT setInterval)
+        // setInterval with async callbacks causes unhandled promise rejections on Linux
+        const startTime = Date.now();
+        const timeout = 30000; // 30s for streaming detection
 
-          const lastContainer = containers[containers.length - 1];
-          const hasStreamingClass = await lastContainer.evaluate(
-            (el, cls) => el.classList.contains(cls),
-            streamingClass
-          );
-
-          if (!hasStreamingClass) {
-            const content = await lastContainer.textContent();
-            if (content && content.length > 0) {
-              return {
-                method: 'streamingClass',
-                confidence: 0.95,
-                content: content.trim(),
-                detectionTime: Date.now() - this.detectionStartTime
-              };
-            }
-          }
-          return false;
-        };
-
-        const pollInterval = setInterval(async () => {
+        while (Date.now() - startTime < timeout) {
           try {
-            const result = await checkStreaming();
-            if (result) {
-              clearInterval(pollInterval);
-              clearTimeout(timeoutId);
-              this.log('success', 'Streaming class removed - Complete');
-              resolve(result);
+            const containers = await this.page.$$(containerSelector);
+            if (containers.length > 0) {
+              const lastContainer = containers[containers.length - 1];
+              const hasStreamingClass = await lastContainer.evaluate(
+                (el, cls) => el.classList.contains(cls),
+                streamingClass
+              );
+
+              if (!hasStreamingClass) {
+                const content = await lastContainer.textContent();
+                if (content && content.length > 0) {
+                  this.log('success', 'Streaming class removed - Complete');
+                  return resolve({
+                    method: 'streamingClass',
+                    confidence: 0.95,
+                    content: content.trim(),
+                    detectionTime: Date.now() - this.detectionStartTime
+                  });
+                }
+              }
             }
+
+            // Continue polling
+            await this.page.waitForTimeout(this.options.pollInterval);
           } catch (err) {
-            clearInterval(pollInterval);
-            clearTimeout(timeoutId);
-            this.log('error', `Polling error: ${err.message}`);
-            reject(err);
+            // Fail fast on critical errors (browser disconnect)
+            if (err.message.includes('Target closed') ||
+                err.message.includes('Connection closed') ||
+                err.message.includes('Session closed')) {
+              return reject(new Error(`Browser disconnected: ${err.message}`));
+            }
+            // Transient error - log and continue
+            this.log('warning', `Transient error: ${err.message}, retrying...`);
+            await this.page.waitForTimeout(1000);
           }
-        }, this.options.pollInterval);
+        }
 
-        const timeoutId = setTimeout(() => {
-          clearInterval(pollInterval);
-          reject(new Error('Streaming class detection timeout'));
-        }, 30000); // 30s for streaming detection
-
+        reject(new Error('Streaming class detection timeout after 30s'));
       } catch (err) {
         reject(err);
       }
@@ -351,29 +349,35 @@ export class ResponseDetectionEngine {
         return resolve(immediateResult);
       }
 
-      const pollInterval = setInterval(async () => {
+      // Use async while loop instead of setInterval (prevents unhandled rejections)
+      const startTime = Date.now();
+      const timeout = 30000; // 30s for button, then fallback
+
+      while (Date.now() - startTime < timeout) {
         try {
           const result = await checkButton();
           if (result) {
-            clearInterval(pollInterval);
-            clearTimeout(timeoutId);
             this.log('success', 'Completion button appeared - Complete');
-            resolve(result);
+            return resolve(result);
           }
+          // Continue polling at 500ms
+          await this.page.waitForTimeout(500);
         } catch (err) {
-          clearInterval(pollInterval);
-          clearTimeout(timeoutId);
-          this.log('error', `Button polling error: ${err.message}`);
-          reject(err);
+          // Fail fast on critical errors
+          if (err.message.includes('Target closed') ||
+              err.message.includes('Connection closed') ||
+              err.message.includes('Session closed')) {
+            return reject(new Error(`Browser disconnected: ${err.message}`));
+          }
+          // Transient error - continue
+          this.log('warning', `Button check error: ${err.message}, continuing...`);
+          await this.page.waitForTimeout(500);
         }
-      }, 500); // 500ms fixed polling for button appearance
+      }
 
-      const timeoutId = setTimeout(() => {
-        clearInterval(pollInterval);
-        this.log('warning', 'Button appearance timeout, falling back to stability');
-        // Fall back to stability check
-        this.detectViaStability().then(resolve).catch(reject);
-      }, 30000); // 30s for button, then fallback
+      // Timeout reached - fall back to stability check
+      this.log('warning', 'Button appearance timeout, falling back to stability');
+      this.detectViaStability().then(resolve).catch(reject);
     });
   }
 
@@ -444,27 +448,33 @@ export class ResponseDetectionEngine {
         wasWorking = true;
       }
 
-      const pollInterval = setInterval(async () => {
+      // Use async while loop instead of setInterval (prevents unhandled rejections)
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < this.config.detection.timeout) {
         try {
           const result = await checkLabs();
           if (result) {
-            clearInterval(pollInterval);
-            clearTimeout(timeoutId);
-            resolve(result);
+            return resolve(result);
           }
+          // Check every second for Labs
+          await this.page.waitForTimeout(1000);
         } catch (err) {
-          clearInterval(pollInterval);
-          clearTimeout(timeoutId);
-          this.log('error', `Labs polling error: ${err.message}`);
-          reject(err);
+          // Fail fast on critical errors
+          if (err.message.includes('Target closed') ||
+              err.message.includes('Connection closed') ||
+              err.message.includes('Session closed')) {
+            return reject(new Error(`Browser disconnected: ${err.message}`));
+          }
+          // Transient error - continue
+          this.log('warning', `Labs check error: ${err.message}, continuing...`);
+          await this.page.waitForTimeout(1000);
         }
-      }, 1000); // Check every second for Labs
+      }
 
-      const timeoutId = setTimeout(() => {
-        clearInterval(pollInterval);
-        this.log('warning', 'Labs timeout, falling back to stability');
-        this.detectViaStability().then(resolve).catch(reject);
-      }, this.config.detection.timeout);
+      // Timeout reached - fall back to stability
+      this.log('warning', 'Labs timeout, falling back to stability');
+      this.detectViaStability().then(resolve).catch(reject);
     });
   }
 

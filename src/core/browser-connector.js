@@ -180,6 +180,10 @@ export class BrowserConnector {
       const contexts = this.browser.contexts();
       this.context = contexts[0] || await this.browser.newContext();
 
+      // Apply stealth measures to hide automation detection
+      // ChatGPT and other sites check navigator.webdriver
+      await this._applyStealthMeasures();
+
       console.log(`  Active pages: ${this.context.pages().length}`);
 
       return this.browser;
@@ -247,6 +251,68 @@ export class BrowserConnector {
    */
   getBrowserName() {
     return this.browserWindowName || 'Chromium';
+  }
+
+  /**
+   * Apply stealth measures to hide automation detection
+   * ChatGPT and other sites check navigator.webdriver and other signals
+   */
+  async _applyStealthMeasures() {
+    console.log('  Applying stealth measures...');
+
+    // Add init script to all pages (existing and new)
+    await this.context.addInitScript(() => {
+      // Hide webdriver property - most important detection vector
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+
+      // Mask automation indicators
+      delete navigator.__proto__.webdriver;
+
+      // Add realistic chrome object if missing
+      if (!window.chrome) {
+        window.chrome = {
+          runtime: {},
+          loadTimes: function() {},
+          csi: function() {},
+          app: {},
+        };
+      }
+
+      // Mask Playwright-specific properties
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+
+      // Add realistic plugins (headless browsers often have none)
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+          const plugins = [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+          ];
+          plugins.item = (i) => plugins[i];
+          plugins.namedItem = (n) => plugins.find(p => p.name === n);
+          plugins.refresh = () => {};
+          return plugins;
+        },
+      });
+
+      // Add realistic languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+
+      // Console log to verify (only in debug)
+      // console.log('[Stealth] Applied automation masking');
+    });
+
+    console.log('  ✓ Stealth measures applied');
   }
 
   /**
