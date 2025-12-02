@@ -13,22 +13,131 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { readFileSync, existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 const execAsync = promisify(exec);
+
+// Load secrets from palios-taey-secrets.json
+function loadSecrets() {
+  const secretsPath = join(homedir(), '.palios-taey-secrets.json');
+  if (existsSync(secretsPath)) {
+    try {
+      const data = JSON.parse(readFileSync(secretsPath, 'utf-8'));
+      return data;
+    } catch (e) {
+      console.warn('[LinuxBridge] Could not load secrets:', e.message);
+    }
+  }
+  return null;
+}
 
 export class LinuxBridge {
   constructor(config = {}) {
     this.typingBaseDelay = config.typingBaseDelay || 50;
     this.typingVariation = config.typingVariation || 30;
     this.bezierSteps = config.bezierSteps || 20;
+    // DISPLAY must be set for xdotool to work
+    this.display = process.env.DISPLAY || ':1';
+    // Password for screen unlock - from secrets file or env
+    const secrets = loadSecrets();
+    this.unlockPassword = process.env.SPARK_PASSWORD || secrets?.system?.sudo_password || null;
+  }
+
+  /**
+   * Check if screen is locked
+   * Uses GNOME ScreenSaver D-Bus interface
+   */
+  async isScreenLocked() {
+    try {
+      const { stdout } = await execAsync(
+        `DISPLAY=${this.display} gdbus call -e -d org.gnome.ScreenSaver -o /org/gnome/ScreenSaver -m org.gnome.ScreenSaver.GetActive`
+      );
+      return stdout.trim() === '(true,)';
+    } catch (error) {
+      // Fallback to loginctl
+      try {
+        const { stdout } = await execAsync(
+          `loginctl show-session $(loginctl | grep $(whoami) | head -1 | awk '{print $1}') -p LockedHint`
+        );
+        return stdout.includes('LockedHint=yes');
+      } catch {
+        console.warn('Could not detect lock state, assuming unlocked');
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Unlock the screen if locked
+   * Types password and presses Enter
+   */
+  async unlockScreen() {
+    const locked = await this.isScreenLocked();
+    if (!locked) {
+      console.log('[LinuxBridge] Screen is not locked');
+      return true;
+    }
+
+    if (!this.unlockPassword) {
+      console.error('[LinuxBridge] Screen is locked but SPARK_PASSWORD not set');
+      throw new Error('Screen is locked and no unlock password available. Set SPARK_PASSWORD env var.');
+    }
+
+    console.log('[LinuxBridge] Screen is locked, attempting unlock...');
+
+    // Wake up the screen with mouse movement
+    await this.runCommand('xdotool mousemove_relative 1 1');
+    await new Promise(r => setTimeout(r, 500));
+
+    // Click to ensure focus on password field
+    await this.runCommand('xdotool click 1');
+    await new Promise(r => setTimeout(r, 300));
+
+    // Type password (direct, no human delay needed)
+    await this.runCommand(`xdotool type --clearmodifiers "${this.unlockPassword}"`);
+    await new Promise(r => setTimeout(r, 100));
+
+    // Press Enter to submit
+    await this.runCommand('xdotool key Return');
+    await new Promise(r => setTimeout(r, 1000));
+
+    // Verify unlocked
+    const stillLocked = await this.isScreenLocked();
+    if (stillLocked) {
+      console.error('[LinuxBridge] Failed to unlock screen');
+      throw new Error('Failed to unlock screen - password may be incorrect');
+    }
+
+    console.log('[LinuxBridge] Screen unlocked successfully');
+    return true;
+  }
+
+  /**
+   * Ensure screen is unlocked before operation
+   * Call this before any xdotool operation that needs focus
+   */
+  async ensureUnlocked() {
+    const locked = await this.isScreenLocked();
+    if (locked) {
+      return await this.unlockScreen();
+    }
+    return true;
   }
 
   /**
    * Execute shell command safely
+   * Prepends DISPLAY for xdotool/xclip commands
    */
   async runCommand(command) {
     try {
-      const { stdout, stderr } = await execAsync(command);
+      // Prepend DISPLAY for X11 commands
+      const fullCommand = command.startsWith('xdotool') || command.startsWith('xclip')
+        ? `DISPLAY=${this.display} ${command}`
+        : command;
+
+      const { stdout, stderr } = await execAsync(fullCommand);
       if (stderr && !stderr.includes('Warning')) {
         console.warn('Command warning:', stderr);
       }
@@ -152,11 +261,11 @@ export class LinuxBridge {
         await this.runCommand('xdotool key shift+Return');
       } else {
         // xdotool type handles most characters, but we'll type char-by-char for timing
-        // Escape special shell characters
+        // Escape special shell characters for double-quoted strings
+        // Note: Single quotes DON'T need escaping inside double quotes
         const escaped = char
           .replace(/\\/g, '\\\\')
           .replace(/"/g, '\\"')
-          .replace(/'/g, "'\\''")
           .replace(/\$/g, '\\$')
           .replace(/`/g, '\\`');
 
@@ -235,6 +344,9 @@ export class LinuxBridge {
    * Uses windowraise + windowfocus for VNC/remote display compatibility
    */
   async focusApp(appName) {
+    // Auto-unlock screen if locked
+    await this.ensureUnlocked();
+
     try {
       // Get window ID first
       const windowId = await this.runCommand(`xdotool search --name "${appName}" | head -1`);
@@ -418,29 +530,33 @@ export class LinuxBridge {
 
   /**
    * Set clipboard content using xclip
+   * Uses file-based approach to avoid shell escaping issues with special characters
    * Note: May not work in VNC environments - use typeFast() as alternative
    */
   async setClipboard(text) {
-    const { exec: execCb } = await import('child_process');
+    const { writeFileSync, unlinkSync } = await import('fs');
+    const { randomUUID } = await import('crypto');
     const display = process.env.DISPLAY || ':1';
-    return new Promise((resolve, reject) => {
-      // Set timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        reject(new Error('xclip timeout after 5s - use typeFast() instead in VNC'));
-      }, 5000);
 
-      const proc = execCb(`DISPLAY=${display} xclip -selection clipboard`, (error) => {
-        clearTimeout(timeout);
-        if (error) reject(error);
+    // Write to temp file to avoid ANY shell escaping issues
+    const tempFile = `/tmp/taey-clipboard-${randomUUID()}.txt`;
+
+    try {
+      // Write text directly to file (no shell interpretation)
+      writeFileSync(tempFile, text, 'utf-8');
+
+      // Use xclip to read from file (shell-safe)
+      await execAsync(`DISPLAY=${display} xclip -selection clipboard < "${tempFile}"`, {
+        timeout: 5000
       });
-      proc.stdin.write(text);
-      proc.stdin.end();
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        if (code === 0) resolve();
-        else reject(new Error(`xclip failed with code ${code}`));
-      });
-    });
+    } finally {
+      // Clean up temp file
+      try {
+        unlinkSync(tempFile);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   }
 
   /**
