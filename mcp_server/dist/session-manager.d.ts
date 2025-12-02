@@ -24,6 +24,7 @@ export interface Session {
     lastActivity: Date;
     healthStatus: 'healthy' | 'stale' | 'dead';
     lastHealthCheck: Date;
+    responseInProgress: boolean;
 }
 /**
  * Session Manager
@@ -64,6 +65,26 @@ export declare class SessionManager {
      * @throws Error if session not found
      */
     getInterface(sessionId: string): any;
+    /**
+     * Check if a response is currently pending for this session
+     *
+     * @param sessionId - Session ID
+     * @returns true if response is in progress (blocks sending)
+     */
+    isResponsePending(sessionId: string): boolean;
+    /**
+     * Mark that a response is now in progress (after sending message)
+     * Blocks taey_send_message from being called again until cleared
+     *
+     * @param sessionId - Session ID
+     */
+    markResponsePending(sessionId: string): void;
+    /**
+     * Mark that response has been received/extracted (clear blocking state)
+     *
+     * @param sessionId - Session ID
+     */
+    markResponseComplete(sessionId: string): void;
     /**
      * Destroy a session
      *
