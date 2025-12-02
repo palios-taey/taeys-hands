@@ -237,6 +237,20 @@ export class ResponseDetectionEngine {
         const currentContent = await lastContainer.textContent();
         const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
 
+        // Filter out placeholder/loading messages (Gemini Deep Think, etc.)
+        const isPlaceholder = currentContent.includes("I'm on it") ||
+                             currentContent.includes("Generating your response") ||
+                             currentContent.includes("Check back later") ||
+                             currentContent.includes("Deep Think can take some time");
+
+        if (isPlaceholder) {
+          this.log('debug', 'Detected placeholder text - continuing to wait for real response');
+          stableCount = 0;
+          lastContent = currentContent;
+          await this.page.waitForTimeout(2000);
+          continue;
+        }
+
         // Check for content stability (2 identical reads = complete)
         if (currentContent === lastContent && currentContent.length > 0) {
           stableCount++;
