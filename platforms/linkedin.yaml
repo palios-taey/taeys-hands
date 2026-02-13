@@ -1,0 +1,23 @@
+# LinkedIn Platform Configuration
+platform: linkedin
+url_pattern: linkedin.com
+base_url: https://www.linkedin.com/feed/
+tab_shortcut: alt+7
+
+capabilities:
+  models: []
+  modes: []
+  tools: []
+  sources: []
+
+quirks:
+  - compose: "Start a post button opens editor"
+  - media: "Supports image/document attachments"
+
+stop_patterns: []
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: post
+  compose_name_pattern: start a post

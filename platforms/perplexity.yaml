@@ -1,0 +1,37 @@
+# Perplexity Platform Configuration
+platform: perplexity
+url_pattern: perplexity.ai
+base_url: https://www.perplexity.ai/
+tab_shortcut: alt+5
+
+capabilities:
+  # Feb 2026: Perplexity redesigned - now model-centric
+  models:
+    - Best
+    - Sonar
+    - Sonar Huge
+    - Gemini 3 Flash
+    - Gemini 3 Pro
+    - GPT-5.2
+  modes: []
+  tools:
+    # Deep Research and Model Council are under "Add files or tools" button
+    - Deep Research
+    - Model Council
+  sources: []
+
+quirks:
+  - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
+  - model_selector: "'Choose a model' button for model selection"
+  - tools_button: "'Add files or tools' opens dropdown with Upload files, Deep Research (radio), Model Council (radio)"
+  - deep_research: "Tools are radio menu items, NOT modes. Select via the dropdown."
+
+stop_patterns:
+  - stop
+  - cancel
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: submit
+  copy_name_pattern: copy

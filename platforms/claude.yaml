@@ -1,0 +1,31 @@
+# Claude Platform Configuration
+platform: claude
+url_pattern: claude.ai
+base_url: https://claude.ai/new
+tab_shortcut: alt+2
+
+capabilities:
+  models:
+    - Claude 4.5 Sonnet
+    - Claude 4 Opus
+    - Claude 3.5 Haiku
+  modes: []
+  tools:
+    - Extended thinking
+    - Research
+    - Artifacts
+  sources: []
+
+quirks:
+  - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
+  - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
+
+stop_patterns:
+  - stop
+  - stop response
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: send
+  copy_name_pattern: copy
