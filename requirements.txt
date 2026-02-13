@@ -1,0 +1,8 @@
+# Core dependencies
+redis>=5.0.0
+neo4j>=5.0.0
+PyGObject>=3.42.0
+PyYAML>=6.0
+
+# Testing
+pytest>=7.0.0

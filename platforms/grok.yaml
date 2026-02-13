@@ -1,0 +1,28 @@
+# Grok Platform Configuration
+platform: grok
+url_pattern: grok.com
+base_url: https://grok.com/
+tab_shortcut: alt+4
+
+capabilities:
+  models:
+    - Grok 3
+    - Grok 3 mini
+  modes: []
+  tools:
+    - Think
+    - DeepSearch
+  sources: []
+
+quirks:
+  - sidebar: "Left sidebar OPEN, no right sidebar"
+
+stop_patterns:
+  - stop
+  - stop generating
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: send
+  copy_name_pattern: copy

@@ -1,12 +1,13 @@
 {
   "mcpServers": {
-    "taey-hands": {
+    "taeys-hands": {
       "type": "stdio",
-      "command": "node",
-      "args": [
-        "./mcp_server/dist/server-v2.js"
-      ],
-      "env": {}
+      "command": "/usr/bin/python3",
+      "args": ["server.py"],
+      "cwd": "/home/spark/taeys-hands",
+      "env": {
+        "PYTHONPATH": "/home/spark/taeys-hands"
+      }
     }
   }
 }

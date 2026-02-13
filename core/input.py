@@ -1,0 +1,191 @@
+"""
+System input operations via xdotool.
+
+Provides keyboard and mouse input for interacting with
+Firefox through the X11 windowing system.
+
+FROZEN once working - do not modify without approval.
+"""
+
+import subprocess
+import os
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
+_ENV = None
+
+
+def _get_env() -> dict:
+    """Get subprocess environment with DISPLAY set."""
+    global _ENV
+    if _ENV is None:
+        _ENV = {**os.environ}
+    return _ENV
+
+
+def set_display(display: str):
+    """Set the DISPLAY for input operations."""
+    env = _get_env()
+    env['DISPLAY'] = display
+
+
+def press_key(key: str, timeout: int = 10) -> bool:
+    """Press a key combination via xdotool.
+
+    Args:
+        key: Key name (e.g., 'Return', 'ctrl+l', 'alt+1').
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        True if key press succeeded.
+    """
+    try:
+        result = subprocess.run(
+            ['xdotool', 'key', key],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            logger.warning(f"xdotool key {key} failed: {result.stderr.decode()}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"xdotool key {key} timed out after {timeout}s")
+        return False
+    except Exception as e:
+        logger.error(f"xdotool key {key} error: {e}")
+        return False
+
+
+def click_at(x: int, y: int, timeout: int = 5) -> bool:
+    """Click at specific screen coordinates.
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        True if click succeeded.
+    """
+    try:
+        result = subprocess.run(
+            ['xdotool', 'mousemove', str(x), str(y), 'click', '1'],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            logger.warning(f"Click at ({x}, {y}) failed: {result.stderr.decode()}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"Click at ({x}, {y}) timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Click at ({x}, {y}) error: {e}")
+        return False
+
+
+def type_text(text: str, delay_ms: int = 5, timeout: int = 30) -> bool:
+    """Type text via xdotool with per-character delay.
+
+    For long text, timeout scales with length.
+
+    Args:
+        text: Text to type.
+        delay_ms: Milliseconds between keystrokes.
+        timeout: Base timeout in seconds (scales with text length).
+
+    Returns:
+        True if typing succeeded.
+    """
+    actual_timeout = timeout + (len(text) * 0.1)
+    try:
+        result = subprocess.run(
+            ['xdotool', 'type', '--clearmodifiers', '--delay', str(delay_ms), '--', text],
+            env=_get_env(), capture_output=True, timeout=actual_timeout,
+        )
+        if result.returncode != 0:
+            logger.warning(f"Type failed: {result.stderr.decode()}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"Typing timed out (text length: {len(text)})")
+        return False
+    except Exception as e:
+        logger.error(f"Type error: {e}")
+        return False
+
+
+def focus_firefox(timeout: int = 5) -> bool:
+    """Activate/focus the Firefox window.
+
+    Returns:
+        True if Firefox was found and activated.
+    """
+    try:
+        result = subprocess.run(
+            ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return False
+
+        window_id = result.stdout.strip().split('\n')[0]
+        subprocess.run(
+            ['xdotool', 'windowactivate', window_id],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        time.sleep(0.3)
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error("Firefox focus timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Firefox focus error: {e}")
+        return False
+
+
+def switch_to_platform(platform: str) -> bool:
+    """Switch to a platform tab using Alt+N shortcut.
+
+    Activates Firefox window and presses the platform's tab shortcut.
+
+    Args:
+        platform: Platform name (e.g., 'claude').
+
+    Returns:
+        True if switch succeeded.
+    """
+    from core.platforms import TAB_SHORTCUTS
+    shortcut = TAB_SHORTCUTS.get(platform)
+    if not shortcut:
+        return False
+
+    if not focus_firefox():
+        return False
+
+    press_key(shortcut)
+    time.sleep(0.5)
+    return True
+
+
+def scroll_to_bottom():
+    """Scroll to bottom of page using End key."""
+    press_key('End')
+    time.sleep(0.3)
+
+
+def scroll_to_top():
+    """Scroll to top of page using Home key."""
+    press_key('Home')
+    time.sleep(0.5)
+
+
+def scroll_page_down():
+    """Scroll down one page."""
+    press_key('Page_Down')
+    time.sleep(0.3)
+
+
+def scroll_page_up():
+    """Scroll up one page."""
+    press_key('Page_Up')
+    time.sleep(0.3)
