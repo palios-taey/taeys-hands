@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""
+Background Monitor Daemon for Taey's Hands.
+
+Monitors chat platform responses using AT-SPI events.
+Runs as an independent subprocess, spawned by send_message.
+
+Usage:
+    python3 monitor/daemon.py --platform gemini --monitor-id abc123 \
+        --baseline-copy-count 5 --session-id uuid --user-message-id uuid
+
+Detection strategy:
+    Stop button appears = AI generating (GENERATING state)
+    Stop button disappears = response complete (COMPLETE state)
+    This is more reliable than copy button counting (scroll-dependent).
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+from typing import Optional, Dict, Any
+
+# =========================================================================
+# Set DISPLAY before AT-SPI import
+# =========================================================================
+
+
+def _detect_display() -> str:
+    """Detect active X display."""
+    for d in [':0', ':1']:
+        if os.path.exists(f'/tmp/.X{d[1:]}-lock'):
+            return d
+    for d in [':0', ':1']:
+        if os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
+            return d
+    return os.environ.get('DISPLAY', ':0')
+
+
+DISPLAY = _detect_display()
+os.environ['DISPLAY'] = DISPLAY
+
+import gi
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi, GLib
+
+# Optional dependencies
+try:
+    import redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+
+try:
+    from neo4j import GraphDatabase
+    NEO4J_AVAILABLE = True
+except ImportError:
+    NEO4J_AVAILABLE = False
+
+
+# =========================================================================
+# Platform patterns
+# =========================================================================
+
+STOP_PATTERNS = {
+    'chatgpt': ['stop', 'stop generating'],
+    'claude': ['stop', 'stop response'],
+    'gemini': ['stop', 'cancel'],
+    'grok': ['stop', 'stop generating'],
+    'perplexity': ['stop', 'cancel'],
+}
+
+URL_PATTERNS = {
+    'chatgpt': 'chatgpt.com',
+    'claude': 'claude.ai',
+    'gemini': 'gemini.google.com',
+    'grok': 'grok.com',
+    'perplexity': 'perplexity.ai',
+}
+
+
+# =========================================================================
+# Monitor daemon
+# =========================================================================
+
+class MonitorDaemon:
+    """Event-driven AT-SPI monitor for chat platform responses.
+
+    State machine:
+        IDLE -> GENERATING (stop button appears)
+        GENERATING -> NOTIFYING (stop button disappears)
+        NOTIFYING -> COMPLETE (notification sent, exit)
+    """
+
+    def __init__(self, platform: str, monitor_id: str,
+                 baseline_copy_count: int,
+                 session_id: Optional[str] = None,
+                 user_message_id: Optional[str] = None,
+                 timeout_seconds: int = 3600):
+        self.platform = platform.lower()
+        self.monitor_id = monitor_id
+        self.baseline_copy_count = baseline_copy_count
+        self.session_id = session_id
+        self.user_message_id = user_message_id
+        self.timeout_seconds = timeout_seconds
+
+        self.state = "IDLE"
+        self.start_time = time.time()
+        self.stop_button_seen = False
+
+        self.poll_interval_ms = 3000
+        self.initial_delay_ms = 10000
+        self.no_stop_warning_seconds = 30
+        self.no_stop_warned = False
+        self.verbose_logged = False
+
+        self.main_loop = GLib.MainLoop()
+
+        # Connect services
+        self.redis_client = self._connect_redis()
+        self.neo4j_driver = self._connect_neo4j()
+        self.firefox_app = self._find_firefox()
+
+        if not self.firefox_app:
+            self._log("ERROR: Firefox not found in AT-SPI tree")
+            sys.exit(1)
+
+        self._log(f"Initialized for {platform}, baseline={baseline_copy_count}")
+
+    def _log(self, message: str):
+        """Log with timestamp."""
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{ts}] [{self.monitor_id}] {message}", flush=True)
+
+    def _connect_redis(self):
+        """Connect to Redis for notifications."""
+        if not REDIS_AVAILABLE:
+            return None
+        try:
+            client = redis.Redis(
+                host=os.environ.get('REDIS_HOST', '192.168.x.10'),
+                port=int(os.environ.get('REDIS_PORT', 6379)),
+                decode_responses=True,
+            )
+            client.ping()
+            self._log("Redis connected")
+            return client
+        except Exception as e:
+            self._log(f"Redis connection failed: {e}")
+            return None
+
+    def _connect_neo4j(self):
+        """Connect to Neo4j for message storage."""
+        if not NEO4J_AVAILABLE:
+            return None
+        try:
+            uri = os.environ.get('NEO4J_URI', 'bolt://192.168.x.10:7689')
+            driver = GraphDatabase.driver(uri, auth=None)
+            driver.verify_connectivity()
+            self._log("Neo4j connected")
+            return driver
+        except Exception as e:
+            self._log(f"Neo4j connection failed: {e}")
+            return None
+
+    def _find_firefox(self):
+        """Find Firefox in AT-SPI desktop tree."""
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if 'firefox' in (app.get_name() or '').lower():
+                return app
+        return None
+
+    def _find_platform_document(self):
+        """Find the document element for this platform's tab."""
+        if not self.firefox_app:
+            return None
+
+        url_pattern = URL_PATTERNS.get(self.platform, self.platform)
+
+        def search(obj, depth=0):
+            if depth > 10:
+                return None
+            try:
+                if (obj.get_role_name() or '') == 'document web':
+                    iface = obj.get_document_iface()
+                    if iface:
+                        url = iface.get_document_attribute_value('DocURL')
+                        if url and url_pattern in url.lower():
+                            return obj
+
+                for i in range(obj.get_child_count()):
+                    child = obj.get_child_at_index(i)
+                    if child:
+                        result = search(child, depth + 1)
+                        if result:
+                            return result
+            except Exception:
+                pass
+            return None
+
+        return search(self.firefox_app)
+
+    def _is_stop_button(self, name: str) -> bool:
+        """Check if button name matches stop patterns."""
+        name_lower = (name or '').lower()
+        patterns = STOP_PATTERNS.get(self.platform, ['stop'])
+        return any(p in name_lower for p in patterns)
+
+    def _notify_agent(self, status: str, message: str, extra: Dict = None):
+        """Write notification to Redis for agent injection."""
+        notification = {
+            "monitor_id": self.monitor_id,
+            "platform": self.platform,
+            "status": status,
+            "message": message,
+            "timestamp": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "elapsed_seconds": int(time.time() - self.start_time),
+        }
+        if extra:
+            notification.update(extra)
+
+        notification_json = json.dumps(notification)
+
+        if self.redis_client:
+            try:
+                self.redis_client.rpush("taey:notifications", notification_json)
+                self.redis_client.setex(
+                    f"taey:monitor:{self.monitor_id}",
+                    3600,
+                    notification_json,
+                )
+                self._log(f"Notification sent: {status}")
+            except Exception as e:
+                self._log(f"Redis notification error: {e}")
+        else:
+            path = f"/tmp/taey_monitor_{self.monitor_id}.json"
+            try:
+                with open(path, 'w') as f:
+                    json.dump(notification, f)
+                self._log(f"Notification written to {path}")
+            except Exception as e:
+                self._log(f"File notification failed: {e}")
+
+    def _on_first_poll(self) -> bool:
+        """First poll after initial delay."""
+        self._log("Initial delay complete, starting regular polling")
+        self._on_poll_check()
+        if self.state != "COMPLETE":
+            GLib.timeout_add(self.poll_interval_ms, self._on_poll_check)
+        return False
+
+    def _on_poll_check(self) -> bool:
+        """Periodic check for response completion."""
+        elapsed = time.time() - self.start_time
+
+        # Timeout
+        if elapsed > self.timeout_seconds:
+            self._log(f"Timeout after {elapsed:.0f}s")
+            self._notify_agent("timeout", f"Timed out after {elapsed:.0f}s")
+            self.main_loop.quit()
+            return False
+
+        # Early warning: no stop button detected
+        if (not self.stop_button_seen and not self.no_stop_warned
+                and elapsed > self.no_stop_warning_seconds):
+            self._log("WARNING: No stop button detected - possible submission error")
+            self._notify_agent(
+                "warning",
+                f"No stop button detected after {elapsed:.0f}s - message may not have been sent",
+                {"warning_type": "no_stop_button"},
+            )
+            self.no_stop_warned = True
+
+        # Find platform document
+        platform_doc = self._find_platform_document()
+        if not platform_doc:
+            self._log("WARNING: Platform document not found, skipping poll")
+            return True
+
+        # Search for stop button in document
+        all_buttons = []
+
+        def find_stop(obj, depth=0):
+            if depth > 25:
+                return None
+            try:
+                role = obj.get_role_name() or ''
+                name = obj.get_name() or ''
+
+                if role in ('push button', 'button'):
+                    if name and not self.verbose_logged:
+                        all_buttons.append(name)
+                    if self._is_stop_button(name):
+                        return obj
+
+                for i in range(obj.get_child_count()):
+                    child = obj.get_child_at_index(i)
+                    if child:
+                        result = find_stop(child, depth + 1)
+                        if result:
+                            return result
+            except Exception:
+                pass
+            return None
+
+        stop_button = find_stop(platform_doc)
+
+        # Log buttons once for debugging
+        if all_buttons and not self.verbose_logged:
+            self._log(f"Buttons in doc (sample): {all_buttons[:10]}")
+            self.verbose_logged = True
+
+        if stop_button:
+            if self.state == "IDLE":
+                self.state = "GENERATING"
+                self.stop_button_seen = True
+                self._log("Stop button appeared - response generating")
+        else:
+            if self.stop_button_seen:
+                self._log("Completion detected: stop button disappeared")
+                self.state = "NOTIFYING"
+                self._notify_agent(
+                    "response_ready",
+                    f"Response complete on {self.platform} - switch to tab and extract",
+                    {"requires_action": True},
+                )
+                self.state = "COMPLETE"
+                self.main_loop.quit()
+                return False
+
+        return True
+
+    def start(self):
+        """Start the monitoring loop."""
+        self._log(f"Starting monitor for {self.platform}")
+
+        if self.redis_client:
+            self.redis_client.setex(
+                f"taey:monitor:{self.monitor_id}",
+                self.timeout_seconds,
+                json.dumps({
+                    "status": "monitoring",
+                    "platform": self.platform,
+                    "started": datetime.now().isoformat(),
+                    "baseline_copy_count": self.baseline_copy_count,
+                }),
+            )
+
+        self._log(f"Waiting {self.initial_delay_ms / 1000:.0f}s before first poll...")
+        GLib.timeout_add(self.initial_delay_ms, self._on_first_poll)
+
+        try:
+            self.main_loop.run()
+        except KeyboardInterrupt:
+            self._log("Interrupted by user")
+            self._notify_agent("interrupted", "Monitor stopped by user")
+        finally:
+            if self.neo4j_driver:
+                self.neo4j_driver.close()
+            self._log("Monitor exited")
+
+
+# =========================================================================
+# CLI entry point
+# =========================================================================
+
+def main():
+    parser = argparse.ArgumentParser(description='Background monitor daemon')
+    parser.add_argument('--platform', required=True)
+    parser.add_argument('--monitor-id', required=True)
+    parser.add_argument('--baseline-copy-count', type=int, required=True)
+    parser.add_argument('--session-id')
+    parser.add_argument('--user-message-id')
+    parser.add_argument('--timeout', type=int, default=3600)
+
+    args = parser.parse_args()
+
+    daemon = MonitorDaemon(
+        platform=args.platform,
+        monitor_id=args.monitor_id,
+        baseline_copy_count=args.baseline_copy_count,
+        session_id=args.session_id,
+        user_message_id=args.user_message_id,
+        timeout_seconds=args.timeout,
+    )
+    daemon.start()
+
+
+if __name__ == '__main__':
+    main()

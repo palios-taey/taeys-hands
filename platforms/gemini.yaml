@@ -1,0 +1,30 @@
+# Gemini Platform Configuration
+platform: gemini
+url_pattern: gemini.google.com
+base_url: https://gemini.google.com/app
+tab_shortcut: alt+3
+
+capabilities:
+  models:
+    - 2.5 Flash
+    - 2.5 Pro
+    - 2.0 Flash
+  modes: []
+  tools:
+    - Thinking
+  sources: []
+
+quirks:
+  - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
+  - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"
+  - artifacts: "Use export_menu or tile_then_export for artifact extraction"
+
+stop_patterns:
+  - stop
+  - cancel
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: send
+  copy_name_pattern: copy
