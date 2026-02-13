@@ -47,8 +47,8 @@ def handle_send_message(platform: str, message: str,
     3. Count baseline copy buttons
     4. Click input, type message (with shift+Return for line breaks)
     5. Store in Neo4j
-    6. Press Enter to send
-    7. Spawn background monitor daemon
+    6. Spawn monitor daemon BEFORE sending (avoids race condition)
+    7. Press Enter to send (daemon already watching)
 
     Args:
         platform: Which platform.
@@ -144,16 +144,9 @@ def handle_send_message(platform: str, message: str,
             'sent_at': datetime.now().isoformat(),
         }))
 
-    # Step 6: Send via Enter key
-    if not inp.press_key('Return', timeout=5):
-        return {
-            "success": False,
-            "error": "Send (Enter key) failed",
-            "platform": platform,
-            "neo4j": neo4j_result,
-        }
-
-    # Step 7: Spawn monitor daemon
+    # Step 6: Spawn monitor daemon BEFORE sending (fixes race condition)
+    # The daemon must be polling before Enter is pressed, otherwise fast
+    # responses can complete before the daemon even starts.
     import uuid
     monitor_id = str(uuid.uuid4())[:8]
 
@@ -213,6 +206,21 @@ def handle_send_message(platform: str, message: str,
         if 'daemon_log' in locals():
             daemon_log.close()
 
+    # Step 7: Send via Enter key (daemon is already watching)
+    if not inp.press_key('Return', timeout=5):
+        # Kill the daemon since we failed to send
+        if daemon_spawned and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        return {
+            "success": False,
+            "error": "Send (Enter key) failed",
+            "platform": platform,
+            "neo4j": neo4j_result,
+        }
+
     return {
         "success": True,
         "platform": platform,
@@ -226,5 +234,5 @@ def handle_send_message(platform: str, message: str,
             "pid": daemon_pid,
             "log": daemon_log_path,
         },
-        "info": "Message sent. Monitor daemon will detect response completion.",
+        "info": "Message sent. Monitor daemon was pre-spawned to catch fast responses.",
     }
