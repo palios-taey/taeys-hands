@@ -1,0 +1,24 @@
+# X/Twitter Platform Configuration
+platform: x_twitter
+url_pattern: x.com
+base_url: https://x.com/home
+tab_shortcut: alt+6
+
+capabilities:
+  models: []
+  modes: []
+  tools: []
+  sources: []
+
+quirks:
+  - compose: "Compose button opens tweet editor"
+  - media: "Supports image/video attachments"
+  - threads: "Multiple tweets can be chained as threads"
+
+stop_patterns: []
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: post
+  compose_name_pattern: compose

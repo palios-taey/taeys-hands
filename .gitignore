@@ -1,25 +1,32 @@
+# Archive - old code preserved for reference
+archive/
 
-.archive/
-# Build artifacts (source maps can be large)
-.chrome-debug-profile/
-# Chrome debug profile (local only)
-# Dependencies
-.DS_Store
-.env
-# Environment
-.env.local
-*.log
-logs/
-# Logs
-mcp_server/dist/*.js.map
-node_modules/
-# OS
-*.pyc
+# Python
 __pycache__/
-/screenshots/
-# Session data
-.sessions/
-# Test outputs
-tests/**/*.png
-tests/**/results/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node (legacy)
+node_modules/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
 /tmp/
+
+# State
+.state.json
