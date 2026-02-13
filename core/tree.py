@@ -7,6 +7,7 @@ visible elements with their names, roles, states, and coordinates.
 FROZEN once working - do not modify without approval.
 """
 
+import hashlib
 from typing import Dict, List, Optional
 
 import gi
@@ -269,3 +270,21 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
         return items
 
     return []
+
+
+def compute_tree_hash(elements: List[Dict]) -> str:
+    """Compute SHA256 hash of element role:name pairs for state comparison.
+
+    Used to detect whether an action actually changed the UI.
+    Same algorithm as taey-ed-v7's compute_tree_hash for consistency.
+
+    Args:
+        elements: Element list from find_elements.
+
+    Returns:
+        16-character hex digest (first 64 bits of SHA256).
+    """
+    pairs = sorted(f"{e.get('role', '')}:{e.get('name', '')}" for e in elements
+                   if e.get('role') or e.get('name'))
+    content = "|".join(pairs)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]

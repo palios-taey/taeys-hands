@@ -157,12 +157,30 @@ def handle_send_message(platform: str, message: str,
     import uuid
     monitor_id = str(uuid.uuid4())[:8]
 
+    # Determine timeout from plan's mode/tool guidance
+    daemon_timeout = 3600  # Default 1 hour
+    if redis_client:
+        plan_id = redis_client.get(f"taey:v4:plan:current:{platform}")
+        if plan_id:
+            plan_json = redis_client.get(f"taey:v4:plan:{plan_id}")
+            if plan_json:
+                try:
+                    plan_data = json.loads(plan_json)
+                    req_tools = plan_data.get('required_state', {}).get('tools', [])
+                    # Check if any research/deep tool is enabled - use longer timeout
+                    research_tools = {'Deep Research', 'DeepSearch', 'Research'}
+                    if any(t in research_tools for t in req_tools):
+                        daemon_timeout = 7200  # 2 hours for research modes
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
     daemon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'monitor', 'daemon.py')
     daemon_cmd = [
         '/usr/bin/python3', daemon_path,
         '--platform', platform,
         '--monitor-id', monitor_id,
         '--baseline-copy-count', str(baseline_copy_count),
+        '--timeout', str(daemon_timeout),
     ]
     if session_id:
         daemon_cmd.extend(['--session-id', session_id])
