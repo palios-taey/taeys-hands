@@ -23,6 +23,16 @@ stop_patterns:
   - stop
   - cancel
 
+mode_guidance:
+  thinking:
+    when: "Complex reasoning, step-by-step analysis, math, code"
+    how: "Enable 'Thinking' tool toggle"
+    timeout: 3600
+  normal:
+    when: "Quick questions, creative writing, conversational"
+    how: "Default - no tool selection needed"
+    timeout: 1800
+
 element_hints:
   input_role: textbox
   send_role: push button

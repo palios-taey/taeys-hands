@@ -30,6 +30,17 @@ stop_patterns:
   - stop
   - cancel
 
+mode_guidance:
+  deep_research:
+    when: "Need facts, citations, multi-source synthesis, current events, documentation lookup"
+    how: "Click 'Add files or tools' button, select 'Deep Research' radio item"
+    timeout: 7200
+    note: "Can take 5-30 minutes. Uses multiple search passes."
+  normal:
+    when: "Quick questions, simple lookups, conversational queries"
+    how: "Default - no tool selection needed"
+    timeout: 3600
+
 element_hints:
   input_role: textbox
   send_role: push button

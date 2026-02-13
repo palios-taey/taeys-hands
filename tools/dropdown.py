@@ -6,13 +6,18 @@ platform capabilities for planning.
 """
 
 import json
+import os
 import time
 import logging
 from typing import Any, Dict
 
+import yaml
+
 from core import atspi, input as inp
-from core.tree import find_elements
+from core.tree import find_elements, find_dropdown_menus
 from tools.interact import handle_click
+
+PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
     time.sleep(0.5)
 
-    # Find dropdown items
+    # Find dropdown items - search for MENU elements specifically,
+    # not all page elements (which returns marketing text, page content, etc.)
     firefox = atspi.find_firefox()
     if not firefox:
         return {"error": "Firefox not found", "success": False}
@@ -52,22 +58,27 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document", "success": False}
 
-    elements = find_elements(doc)
+    # Primary: find active menu elements (dropdowns render as separate AT-SPI menus)
+    menu_items = find_dropdown_menus(firefox, doc)
 
-    # Search for target
+    # Fallback: scan document for actionable elements if no menu found
+    if not menu_items:
+        elements = find_elements(doc)
+        actionable_roles = ('menu item', 'radio button', 'radio menu item',
+                            'push button', 'toggle button', 'check menu item')
+        menu_items = [e for e in elements if e.get('role', '') in actionable_roles]
+
+    # Search for target in menu items
     target_lower = target_value.lower()
     target_option = None
     candidates = []
 
-    actionable_roles = ('menu item', 'radio button', 'push button', 'toggle button', 'check menu item')
-    for e in elements:
+    for e in menu_items:
         name = (e.get('name') or '').lower()
-        role = e.get('role', '')
-        if role in actionable_roles:
-            candidates.append(e)
-            if target_lower in name or name in target_lower:
-                target_option = e
-                break
+        candidates.append(e)
+        if target_lower in name or name in target_lower:
+            target_option = e
+            break
 
     if not target_option:
         return {
@@ -109,26 +120,35 @@ def handle_select_dropdown(platform: str, dropdown: str,
     }
 
 
+def _load_platform_yaml(platform: str) -> Dict:
+    """Load platform YAML config. Returns empty dict on failure."""
+    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+    if not os.path.exists(yaml_path):
+        return {}
+    try:
+        with open(yaml_path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.error(f"Failed to load {yaml_path}: {e}")
+        return {}
+
+
 def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
     """Get available options for a platform before creating a plan.
 
-    Returns models, modes, tools, and sources available on the platform.
+    Reads from platform YAML config files (source of truth for capabilities).
+    These are manually maintained with accurate, current model/mode/tool names.
 
     Args:
         platform: Which platform.
-        redis_client: Redis client (capabilities stored here).
+        redis_client: Redis client.
 
     Returns:
-        Available options for the platform.
+        Available options including models, modes, tools, quirks, and mode guidance.
     """
-    caps = {}
-    if redis_client:
-        caps_json = redis_client.get(f"taey:v4:capabilities:{platform}")
-        if caps_json:
-            try:
-                caps = json.loads(caps_json)
-            except json.JSONDecodeError:
-                pass
+    config = _load_platform_yaml(platform)
+    caps = config.get('capabilities', {})
+    guidance = config.get('mode_guidance', {})
 
     return {
         "success": True,
@@ -137,4 +157,8 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
         "modes": caps.get('modes', []),
         "tools": caps.get('tools', []),
         "sources": caps.get('sources', []),
+        "quirks": config.get('quirks', []),
+        "mode_guidance": guidance,
+        "element_hints": config.get('element_hints', {}),
+        "note": "These are from platform YAML configs. Use EXACTLY these names when selecting models/modes.",
     }

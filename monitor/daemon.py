@@ -112,8 +112,8 @@ class MonitorDaemon:
         self.stop_button_seen = False
 
         self.poll_interval_ms = 3000
-        self.initial_delay_ms = 10000
-        self.no_stop_warning_seconds = 30
+        self.initial_delay_ms = 3000  # Reduced from 10s - fast responses missed at 10s
+        self.no_stop_warning_seconds = 45  # Increased to account for slower initial load
         self.no_stop_warned = False
         self.verbose_logged = False
 

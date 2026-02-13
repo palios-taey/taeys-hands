@@ -24,6 +24,21 @@ stop_patterns:
   - stop
   - stop response
 
+mode_guidance:
+  extended_thinking:
+    when: "Complex reasoning, code generation, architectural review, multi-step analysis"
+    how: "Select model with 'Extended' suffix (e.g., 'Opus 4.6 Extended')"
+    timeout: 3600
+    note: "Thinking is built into model selection, not a separate toggle"
+  research:
+    when: "Need web search, current information, documentation lookup"
+    how: "Enable 'Research' tool toggle"
+    timeout: 3600
+  normal:
+    when: "Quick questions, simple tasks, conversational"
+    how: "Default model without Extended suffix"
+    timeout: 1800
+
 element_hints:
   input_role: textbox
   send_role: push button

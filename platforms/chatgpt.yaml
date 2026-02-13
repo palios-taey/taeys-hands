@@ -29,6 +29,16 @@ stop_patterns:
   - stop
   - stop generating
 
+mode_guidance:
+  search:
+    when: "Need current information, web search, news"
+    how: "Enable 'Search the web' tool"
+    timeout: 3600
+  normal:
+    when: "Reasoning, code, creative, conversational"
+    how: "Default - no tool selection needed"
+    timeout: 1800
+
 element_hints:
   input_role: textbox
   send_role: push button
