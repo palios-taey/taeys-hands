@@ -211,6 +211,104 @@ class MonitorDaemon:
         patterns = STOP_PATTERNS.get(self.platform, ['stop'])
         return any(p in name_lower for p in patterns)
 
+    def _is_canvas_stop(self, stop_obj) -> bool:
+        """Check if a stop button is ChatGPT's canvas stop (not generation stop).
+
+        Canvas has a persistent "Stop" + "Update" button pair. The generation
+        stop button is standalone. We detect canvas stop by checking if an
+        "Update" button exists at the same Y position (within 50px).
+        """
+        if self.platform != 'chatgpt':
+            return False
+
+        try:
+            stop_comp = stop_obj.get_component_iface()
+            if not stop_comp:
+                return False
+            stop_ext = stop_comp.get_extents(0)  # 0 = ATSPI_COORD_TYPE_SCREEN
+            stop_y = stop_ext.y
+
+            # Walk siblings looking for "Update" button at same Y
+            parent = stop_obj.get_parent()
+            if not parent:
+                return False
+
+            for i in range(parent.get_child_count()):
+                try:
+                    sibling = parent.get_child_at_index(i)
+                    if not sibling:
+                        continue
+                    sib_role = sibling.get_role_name() or ''
+                    sib_name = (sibling.get_name() or '').lower()
+                    if sib_role in ('push button', 'button') and 'update' in sib_name:
+                        sib_comp = sibling.get_component_iface()
+                        if sib_comp:
+                            sib_ext = sib_comp.get_extents(0)
+                            if abs(sib_ext.y - stop_y) < 50:
+                                self._log(f"Canvas stop filtered: Stop@y={stop_y} near Update@y={sib_ext.y}")
+                                return True
+                except Exception:
+                    continue
+
+            # Also check grandparent (button groups may be wrapped)
+            grandparent = parent.get_parent()
+            if grandparent:
+                for i in range(grandparent.get_child_count()):
+                    try:
+                        uncle = grandparent.get_child_at_index(i)
+                        if not uncle:
+                            continue
+                        # Check uncle's children for Update
+                        for j in range(uncle.get_child_count()):
+                            child = uncle.get_child_at_index(j)
+                            if not child:
+                                continue
+                            ch_role = child.get_role_name() or ''
+                            ch_name = (child.get_name() or '').lower()
+                            if ch_role in ('push button', 'button') and 'update' in ch_name:
+                                ch_comp = child.get_component_iface()
+                                if ch_comp:
+                                    ch_ext = ch_comp.get_extents(0)
+                                    if abs(ch_ext.y - stop_y) < 50:
+                                        self._log(f"Canvas stop filtered (grandparent): Stop@y={stop_y} near Update@y={ch_ext.y}")
+                                        return True
+                    except Exception:
+                        continue
+
+        except Exception as e:
+            self._log(f"Canvas stop check error: {e}")
+
+        return False
+
+    def _notify_tmux(self, platform: str):
+        """Send tmux status bar notification when response is ready.
+
+        Non-destructive: uses display-message (doesn't inject into input).
+        Tries common session names for Claude Code.
+        """
+        msg = f"[Taey] Response ready on {platform} - use taey_quick_extract('{platform}')"
+        sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+        for session in sessions_to_try:
+            try:
+                result = subprocess.run(
+                    ['tmux', 'display-message', '-t', session, '-d', '30000', msg],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    self._log(f"tmux notification sent to session '{session}'")
+                    return
+            except Exception:
+                continue
+        # Fallback: try without specifying session (uses current/default)
+        try:
+            subprocess.run(
+                ['tmux', 'display-message', '-d', '30000', msg],
+                capture_output=True, text=True, timeout=5,
+            )
+            self._log("tmux notification sent (default session)")
+        except Exception as e:
+            self._log(f"tmux notification failed: {e}")
+
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
         notification = {
@@ -226,6 +324,10 @@ class MonitorDaemon:
             notification.update(extra)
 
         notification_json = json.dumps(notification)
+
+        # tmux notification for response_ready (works even when Claude Code is idle)
+        if status == "response_ready":
+            self._notify_tmux(self.platform)
 
         if self.redis_client:
             try:
@@ -285,10 +387,11 @@ class MonitorDaemon:
 
         # Search for stop button in document
         all_buttons = []
+        stop_candidates = []
 
-        def find_stop(obj, depth=0):
+        def find_stops(obj, depth=0):
             if depth > 25:
-                return None
+                return
             try:
                 role = obj.get_role_name() or ''
                 name = obj.get_name() or ''
@@ -297,19 +400,23 @@ class MonitorDaemon:
                     if name and not self.verbose_logged:
                         all_buttons.append(name)
                     if self._is_stop_button(name):
-                        return obj
+                        stop_candidates.append(obj)
 
                 for i in range(obj.get_child_count()):
                     child = obj.get_child_at_index(i)
                     if child:
-                        result = find_stop(child, depth + 1)
-                        if result:
-                            return result
+                        find_stops(child, depth + 1)
             except Exception:
                 pass
-            return None
 
-        stop_button = find_stop(platform_doc)
+        find_stops(platform_doc)
+
+        # Filter out canvas stop buttons (ChatGPT-specific)
+        stop_button = None
+        for candidate in stop_candidates:
+            if not self._is_canvas_stop(candidate):
+                stop_button = candidate
+                break
 
         # Log buttons once for debugging
         if all_buttons and not self.verbose_logged:

@@ -22,6 +22,36 @@ PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 logger = logging.getLogger(__name__)
 
 
+def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
+    """Find a button by name in AT-SPI tree and click via do_action(0).
+
+    More reliable than xdotool coordinates for platforms like Gemini.
+    Returns True if the action was performed.
+    """
+    trigger_lower = trigger_name.lower()
+
+    def find_and_click(obj, depth=0):
+        if depth > max_depth:
+            return False
+        try:
+            name = (obj.get_name() or '').lower()
+            role = obj.get_role_name() or ''
+            if trigger_lower in name and 'button' in role:
+                action = obj.get_action_iface()
+                if action and action.get_n_actions() > 0:
+                    action.do_action(0)
+                    return True
+            for i in range(obj.get_child_count()):
+                child = obj.get_child_at_index(i)
+                if child and find_and_click(child, depth + 1):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    return find_and_click(doc)
+
+
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
@@ -41,10 +71,20 @@ def handle_select_dropdown(platform: str, dropdown: str,
     Returns:
         Success/failure with validation info.
     """
-    # Click dropdown trigger
-    click_result = handle_click(platform, dropdown, redis_client)
-    if not click_result.get("success"):
-        return {"error": f"Failed to click {dropdown}: {click_result.get('error')}", "success": False}
+    # Click dropdown trigger - prefer AT-SPI do_action(0) over xdotool coordinates
+    # (Gemini and others may not respond to xdotool clicks on their buttons)
+    trigger_clicked = False
+    firefox = atspi.find_firefox()
+    if firefox:
+        doc = atspi.get_platform_document(firefox, platform)
+        if doc:
+            trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+
+    if not trigger_clicked:
+        # Fallback to coordinate click from stored map
+        click_result = handle_click(platform, dropdown, redis_client)
+        if not click_result.get("success"):
+            return {"error": f"Failed to click {dropdown}: {click_result.get('error')}", "success": False}
 
     time.sleep(0.5)
 
@@ -110,12 +150,37 @@ def handle_select_dropdown(platform: str, dropdown: str,
                 elif e.get('role') in ('push button', 'toggle button'):
                     validated = True
 
+    if not validated:
+        # Re-inspect to provide current state for debugging
+        current_state = None
+        if doc:
+            for e in validation_elements:
+                name = e.get('name', '')
+                states = e.get('states', [])
+                if any(s in states for s in ['selected', 'checked', 'pressed', 'focused']):
+                    current_state = name
+                    break
+
+        return {
+            "success": True,  # Click succeeded
+            "platform": platform,
+            "dropdown": dropdown,
+            "selected": target_value,
+            "selection_validated": False,
+            "clicked_at": {"x": x, "y": y},
+            "warning": (
+                f"Could not validate that '{target_value}' is now active. "
+                f"Current detected state: {current_state}. "
+                "CALLER MUST re-inspect to verify before proceeding."
+            ),
+        }
+
     return {
         "success": True,
         "platform": platform,
         "dropdown": dropdown,
         "selected": target_value,
-        "selection_validated": validated,
+        "selection_validated": True,
         "clicked_at": {"x": x, "y": y},
     }
 

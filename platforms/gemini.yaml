@@ -11,7 +11,12 @@ capabilities:
     - 2.0 Flash
   modes: []
   tools:
-    - Thinking
+    - Deep Research
+    - Create videos (Veo 3.1)
+    - Create images
+    - Canvas
+    - Guided Learning
+    - Deep Think
   sources: []
 
 quirks:
@@ -24,9 +29,13 @@ stop_patterns:
   - cancel
 
 mode_guidance:
-  thinking:
-    when: "Complex reasoning, step-by-step analysis, math, code"
-    how: "Enable 'Thinking' tool toggle"
+  deep_think:
+    when: "Complex reasoning, step-by-step analysis, math, code audits"
+    how: "Click Tools button, select 'Deep Think' check menu item"
+    timeout: 3600
+  deep_research:
+    when: "Research questions, fact-finding, comprehensive analysis"
+    how: "Click Tools button, select 'Deep Research' check menu item"
     timeout: 3600
   normal:
     when: "Quick questions, creative writing, conversational"

@@ -199,7 +199,7 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
         'Inspect Accessibility Properties', 'Inspect',
     })
 
-    dropdown_roles = ('menu item', 'radio menu item', 'list item', 'option')
+    dropdown_roles = ('menu item', 'radio menu item', 'check menu item', 'list item', 'option')
 
     def search_menus(obj, depth=0, max_depth=15):
         items = []
@@ -245,13 +245,23 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
             pass
         return items
 
+    # Search platform_doc FIRST to avoid cross-tab contamination.
+    # Dropdowns from other tabs (e.g. Grok's model selector) appear in the
+    # Firefox root tree. By searching the active platform's document first,
+    # we find the correct dropdown menu for the current tab.
+    if platform_doc:
+        items = search_menus(platform_doc)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+
     if firefox:
         items = search_menus(firefox)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Fallback: search from document for upload-related buttons
+    # Final fallback: search document for upload-related buttons
     if platform_doc:
         all_elements = find_elements(
             platform_doc,

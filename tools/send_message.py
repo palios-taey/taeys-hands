@@ -35,6 +35,88 @@ def _reap_daemons():
     _daemon_processes = alive
 
 
+def _validate_plan_requirements(platform: str, redis_client) -> Optional[Dict]:
+    """Check if active plan has unmet requirements. Returns error dict or None.
+
+    This is a HARD GATE: if a plan exists with required_state, the current_state
+    MUST be set and MUST match. Otherwise send is blocked.
+
+    This prevents sending with wrong model/mode/tools on strategic consultations.
+    """
+    if not redis_client:
+        return None
+
+    plan_id = redis_client.get(f"taey:v4:plan:current:{platform}")
+    if not plan_id:
+        return None  # No plan = no gate (ad-hoc messages allowed)
+
+    plan_json = redis_client.get(f"taey:v4:plan:{plan_id}")
+    if not plan_json:
+        return None
+
+    try:
+        plan = json.loads(plan_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    required = plan.get('required_state', {})
+    if not required:
+        return None  # Plan has no requirements
+
+    current = plan.get('current_state')
+
+    # Gate 1: current_state must be set (inspect + update must have happened)
+    if current is None:
+        return {
+            "success": False,
+            "error": (
+                "VALIDATION GATE BLOCKED: Plan has required_state but current_state "
+                "was never set. You must: 1) taey_inspect, 2) taey_plan(update) with "
+                "current_state reflecting what you SEE, 3) fix any mismatches, "
+                "4) update current_state again, THEN send."
+            ),
+            "platform": platform,
+            "plan_id": plan_id,
+            "required_state": required,
+            "fix": "taey_plan(action='update', params={plan_id, current_state: {model, mode, tools}})",
+        }
+
+    # Gate 2: each requirement must be met
+    unmet = []
+    req_model = required.get('model')
+    cur_model = current.get('model')
+    if req_model and req_model not in ('N/A', 'any') and req_model != cur_model:
+        unmet.append(f"model: required='{req_model}', current='{cur_model}'")
+
+    req_mode = required.get('mode')
+    cur_mode = current.get('mode')
+    if req_mode and req_mode not in ('N/A', 'any') and req_mode != cur_mode:
+        unmet.append(f"mode: required='{req_mode}', current='{cur_mode}'")
+
+    req_tools = set(required.get('tools', []))
+    cur_tools = set(current.get('tools', []))
+    if req_tools:
+        missing_tools = req_tools - cur_tools
+        if missing_tools:
+            unmet.append(f"tools: missing={sorted(missing_tools)}")
+
+    if unmet:
+        return {
+            "success": False,
+            "error": (
+                "VALIDATION GATE BLOCKED: Plan requirements not met. "
+                "Fix the state before sending. Unmet: " + "; ".join(unmet)
+            ),
+            "platform": platform,
+            "plan_id": plan_id,
+            "unmet_requirements": unmet,
+            "required_state": required,
+            "current_state": current,
+        }
+
+    return None  # All requirements met
+
+
 def handle_send_message(platform: str, message: str,
                         redis_client, display: str,
                         attachments: List[str] = None,
@@ -42,6 +124,7 @@ def handle_send_message(platform: str, message: str,
                         purpose: str = None) -> Dict[str, Any]:
     """Send a message with full workflow.
 
+    0. VALIDATION GATE: Check plan requirements are met
     1. Get stored map, validate input control exists
     2. Switch to platform, get URL
     3. Count baseline copy buttons
@@ -62,6 +145,11 @@ def handle_send_message(platform: str, message: str,
     Returns:
         Success info with baseline copy count and monitor details.
     """
+    # Step 0: VALIDATION GATE - refuse to send if plan requirements unmet
+    gate_error = _validate_plan_requirements(platform, redis_client)
+    if gate_error:
+        return gate_error
+
     # Step 1: Get stored map
     map_data = get_map(platform, redis_client)
     if not map_data:
@@ -79,16 +167,15 @@ def handle_send_message(platform: str, message: str,
             "platform": platform,
         }
 
-    # Step 2: Switch to platform and get document
+    # Step 2: ALWAYS switch to platform tab first, then get document
+    # AT-SPI can see all tab documents even when they're not active,
+    # but click coordinates are screen-relative and hit the VISIBLE tab.
+    if not inp.switch_to_platform(platform):
+        return {"success": False, "error": f"Failed to switch to {platform}", "platform": platform}
+    time.sleep(0.5)
+
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
-
-    if not doc:
-        if not inp.switch_to_platform(platform):
-            return {"success": False, "error": f"Failed to switch to {platform}", "platform": platform}
-        time.sleep(0.3)
-        firefox = atspi.find_firefox()
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
 
     if not doc:
         return {"success": False, "error": f"Could not find {platform} document", "platform": platform}
