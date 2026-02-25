@@ -80,25 +80,56 @@ def handle_quick_extract(platform: str, redis_client,
             "hint": "Response may not be visible - try scrolling or waiting.",
         }
 
-    # Click newest (highest Y) copy button
-    newest = copy_buttons[-1]
+    # Prefer response-level "Copy" buttons over code block "Copy code" buttons.
+    # Response Copy buttons have name exactly "Copy"; code blocks have "Copy code".
+    response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
+    if response_copy:
+        # Use newest response-level Copy button (highest Y)
+        newest = response_copy[-1]
+    else:
+        # Fall back to newest copy button of any kind
+        newest = copy_buttons[-1]
+
     x, y = newest['x'], newest['y']
 
     clipboard.clear()
+    time.sleep(0.1)
     inp.click_at(x, y)
-    time.sleep(0.5)
+    time.sleep(0.8)
 
     content = clipboard.read()
+
+    # Retry once if clipboard empty (race condition with some platforms)
+    if not content:
+        time.sleep(0.5)
+        content = clipboard.read()
+
+    # Second attempt: try second-newest copy button if newest didn't work
+    if not content and len(copy_buttons) >= 2:
+        second = copy_buttons[-2]
+        clipboard.clear()
+        time.sleep(0.1)
+        inp.click_at(second['x'], second['y'])
+        time.sleep(0.8)
+        content = clipboard.read()
+
     if not content:
         return {
             "success": False,
             "error": "No response content in clipboard after clicking Copy",
             "platform": platform,
+            "copy_button_coords": {"x": x, "y": y},
+            "copy_buttons_found": len(copy_buttons),
+            "hint": "Copy button may not be functional. Try scrolling to make the response fully visible.",
         }
 
     has_artifacts = '```' in content or 'artifact' in content.lower()
 
-    # Handle completion
+    # ── Quality assessment (Step 1 of 2-step extraction) ──
+    # Caller MUST check these flags and take follow-up action if needed.
+    quality = _assess_extraction(content, platform, all_elements)
+
+    # Handle completion - only if caller explicitly says complete
     plan_consumed = False
     if complete and redis_client:
         redis_client.delete(f"taey:pending_prompt:{platform}")
@@ -119,7 +150,87 @@ def handle_quick_extract(platform: str, redis_client,
         "url": url,
         "copy_buttons_found": len(copy_buttons),
         "plan_consumed": plan_consumed,
+        # Quality assessment - caller MUST check these
+        "quality": quality,
     }
+
+
+def _assess_extraction(content: str, platform: str, elements: list) -> Dict[str, Any]:
+    """Assess whether the extracted content is the full response or just a summary.
+
+    Returns quality metadata so the caller can decide whether to take
+    follow-up action (e.g. Export/Download for Perplexity Deep Research,
+    scroll to find more for long responses, etc.)
+
+    This is Step 1 of a 2-step process:
+      Step 1: Extract and assess quality
+      Step 2: If incomplete, take corrective action (export, scroll, expand)
+    """
+    assessment = {
+        "likely_complete": True,
+        "needs_action": None,  # What follow-up action is needed
+        "reason": None,
+    }
+
+    # Check for truncation signals
+    word_count = len(content.split())
+
+    # Perplexity Deep Research: Copy button only copies the summary,
+    # not the full report. Look for Export button as signal.
+    if platform == 'perplexity':
+        has_export = any(
+            (e.get('name') or '').lower() in ('export', 'export to')
+            for e in elements
+            if e.get('role') in ('push button', 'link')
+        )
+        # Deep Research responses have sources and are long.
+        # If we got a short response but Export exists, it's a summary.
+        has_sources = 'sources' in content.lower() or '[' in content
+        if has_export and word_count < 500:
+            assessment['likely_complete'] = False
+            assessment['needs_action'] = 'export_markdown'
+            assessment['reason'] = (
+                'Perplexity Deep Research detected. Copy only gets summary. '
+                'Use Export > Download as Markdown for full report.'
+            )
+        elif has_export:
+            assessment['likely_complete'] = False
+            assessment['needs_action'] = 'export_markdown'
+            assessment['reason'] = (
+                'Perplexity Export button found. Full report available via '
+                'Export > Download as Markdown.'
+            )
+
+    # Claude: check for "Continue" button (truncated response)
+    if platform == 'claude':
+        has_continue = any(
+            'continue' in (e.get('name') or '').lower()
+            for e in elements
+            if e.get('role') == 'push button'
+        )
+        if has_continue:
+            assessment['likely_complete'] = False
+            assessment['needs_action'] = 'click_continue'
+            assessment['reason'] = 'Response was truncated. Click Continue to get the rest.'
+
+    # ChatGPT: very short response might be a "Show more" situation
+    if platform == 'chatgpt' and word_count < 50:
+        has_show_more = any(
+            'show more' in (e.get('name') or '').lower()
+            for e in elements
+        )
+        if has_show_more:
+            assessment['likely_complete'] = False
+            assessment['needs_action'] = 'click_show_more'
+            assessment['reason'] = 'Response collapsed. Click Show More to expand.'
+
+    # Generic: very short response is suspicious
+    if word_count < 20 and assessment['likely_complete']:
+        assessment['likely_complete'] = False
+        assessment['needs_action'] = 'verify_manually'
+        assessment['reason'] = f'Response very short ({word_count} words). May be incomplete.'
+
+    return assessment
 
 
 def handle_extract_history(platform: str, redis_client,
