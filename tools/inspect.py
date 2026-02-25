@@ -2,8 +2,12 @@
 taey_inspect - Scan platform AT-SPI tree and return visible elements.
 
 The foundation tool. Must be called before any other interaction.
-Switches to the platform tab, navigates if needed, scrolls to bottom,
+Switches to the platform tab, scans AT-SPI tree, scrolls to bottom,
 and returns all visible elements for Claude to interpret.
+
+Works with OR without a plan:
+- With plan: navigates to specific URL on first call, skips on subsequent
+- Without plan: switches to platform tab, scans what's already visible
 """
 
 import json
@@ -22,9 +26,9 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
     """Inspect a platform and return all visible elements.
 
     Flow:
-    1. Get URL from plan (or base URL for "new")
-    2. If not navigated: switch tab, navigate, wait, scroll
-    3. If already navigated: just switch tab
+    1. If plan exists with URL and not yet navigated: navigate to URL
+    2. Otherwise: just switch to platform tab (stateless mode)
+    3. Scroll to bottom, scan AT-SPI tree
     4. Find all elements, filter to useful ones
     5. Store in Redis
 
@@ -44,7 +48,7 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
         'controls': {},
     }
 
-    # Step 1: Get URL and navigation state from plan
+    # Step 1: Check if a plan exists (optional - inspect works without one)
     target_url = None
     already_navigated = False
     plan = None
@@ -67,17 +71,13 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
                 except json.JSONDecodeError:
                     pass
 
-    if not target_url:
-        result['error'] = f"No plan found for {platform}. Create a plan first with taey_plan."
-        return result
-
-    # Step 2: Navigate only if first time for this plan
-    if not already_navigated:
+    # Step 2: Navigate or just switch tab
+    if target_url and not already_navigated:
+        # Plan exists with URL - navigate to it
         if not inp.switch_to_platform(platform):
             result['error'] = f"Failed to switch to {platform} tab"
             return result
 
-        # Escape to unfocus any element before Ctrl+L
         inp.press_key('Escape')
         time.sleep(0.3)
         inp.press_key('ctrl+l')
@@ -96,10 +96,20 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
         inp.scroll_to_bottom()
         time.sleep(1.0)
 
-        # Mark as navigated
+        # Mark as navigated in plan
         if plan and redis_client and plan_id:
             plan['navigated'] = True
             redis_client.set(f"taey:v4:plan:{plan_id}", json.dumps(plan))
+    else:
+        # No plan or already navigated - just switch to platform tab
+        if not inp.switch_to_platform(platform):
+            result['error'] = f"Failed to switch to {platform} tab"
+            return result
+        time.sleep(0.5)
+
+        # Scroll to bottom to see latest content
+        inp.press_key('End')
+        time.sleep(0.5)
 
     # Step 3: Get Firefox and platform document
     firefox = atspi.find_firefox()
@@ -145,4 +155,44 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
         "Menu items (Back, Forward, Reload, etc.) are always in AT-SPI tree "
         "- NOT blocking context menus. Ignore them."
     )
+
+    # PLAN VALIDATION: If a plan exists, surface requirements so they can't be missed
+    if plan and plan.get('required_state'):
+        required = plan['required_state']
+        current = plan.get('current_state')
+        result['plan_requirements'] = {
+            'plan_id': plan_id,
+            'required_state': required,
+            'current_state': current,
+            'status': plan.get('status', 'unknown'),
+        }
+        if current is None:
+            result['plan_requirements']['WARNING'] = (
+                "PLAN EXISTS but current_state NOT SET. You MUST: "
+                "1) Read these elements to determine current model/mode/tools, "
+                "2) Call taey_plan(update) with current_state, "
+                "3) Fix any mismatches BEFORE sending."
+            )
+        else:
+            # Check for unmet requirements
+            unmet = []
+            req_model = required.get('model')
+            cur_model = current.get('model')
+            if req_model and req_model not in ('N/A', 'any') and req_model != cur_model:
+                unmet.append(f"model: need '{req_model}', have '{cur_model}'")
+            req_mode = required.get('mode')
+            cur_mode = current.get('mode')
+            if req_mode and req_mode not in ('N/A', 'any') and req_mode != cur_mode:
+                unmet.append(f"mode: need '{req_mode}', have '{cur_mode}'")
+            req_tools = set(required.get('tools', []))
+            cur_tools = set(current.get('tools', []))
+            if req_tools:
+                missing = req_tools - cur_tools
+                if missing:
+                    unmet.append(f"tools: need {sorted(missing)}")
+            if unmet:
+                result['plan_requirements']['UNMET'] = unmet
+            else:
+                result['plan_requirements']['VALIDATED'] = "All requirements met"
+
     return result
