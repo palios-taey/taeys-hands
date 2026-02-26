@@ -187,32 +187,43 @@ def handle_send_message(platform: str, message: str,
     all_elements = find_elements(doc)
     baseline_copy_count = len(find_copy_buttons(all_elements))
 
-    # Step 4: Focus input via AT-SPI grab_focus (primary) or stored coordinates (fallback)
-    # AT-SPI grab_focus is immune to UI shifts from file attachment, model changes, etc.
-    # Stored map coordinates go stale when the UI changes - only use as last resort.
+    # Step 4: Focus input field
+    # Strategy: Find entry via AT-SPI → click at its REAL coordinates → verify focus
+    # This handles UI shifts (file attach, model switch) because coordinates come from
+    # the live AT-SPI tree, not stored map data.
     entry_el = find_entry_element(doc, platform)
 
-    input_focused = False
     if entry_el:
         try:
             comp = entry_el.get_component_iface()
             if comp:
+                # First try grab_focus (works on Firefox <=145)
                 comp.grab_focus()
-                time.sleep(0.3)
-                input_focused = True
-                logger.info(f"Input focused via AT-SPI grab_focus for {platform}")
-        except Exception as e:
-            logger.warning(f"AT-SPI grab_focus failed: {e}")
+                time.sleep(0.2)
 
-    if not input_focused:
-        # Fallback: click stored coordinates (may be stale after file attach)
+                # Verify focus actually took (fails on Firefox >=147)
+                from gi.repository import Atspi as _Atspi
+                ss = entry_el.get_state_set()
+                if not ss.contains(_Atspi.StateType.FOCUSED):
+                    # grab_focus didn't work - click at the element's real coordinates
+                    rect = comp.get_extents(1)  # SCREEN coords
+                    click_x = rect.x + rect.width // 2
+                    click_y = rect.y + rect.height // 2
+                    logger.info(f"grab_focus didn't take, clicking entry at ({click_x},{click_y})")
+                    inp.click_at(click_x, click_y)
+                    time.sleep(0.3)
+                else:
+                    logger.info(f"Input focused via AT-SPI grab_focus for {platform}")
+        except Exception as e:
+            logger.warning(f"AT-SPI focus failed: {e}")
+
+    if not entry_el:
+        # No AT-SPI entry found - fall back to stored map coordinates
         input_coord = controls['input']
-        logger.warning(f"Using stored coordinates fallback for {platform} input ({input_coord})")
+        logger.warning(f"No entry element found, using stored coordinates for {platform}")
         if not inp.click_at(input_coord['x'], input_coord['y']):
             return {"success": False, "error": "Failed to focus input field", "platform": platform}
         time.sleep(0.3)
-        # Re-search for entry element after click
-        entry_el = find_entry_element(doc, platform)
 
     # Use smart_type with full message (handles multi-line via clipboard paste)
     type_result = smart_type(message, platform=platform, entry_element=entry_el)
