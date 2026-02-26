@@ -104,10 +104,12 @@ platforms/             # Platform configs (YAML)
 1. taey_inspect(platform)        # See what's on screen
 2. taey_set_map(platform, {...}) # Store control coordinates
 3. taey_attach(platform, path)   # Attach files if needed
-4. taey_send_message(platform, msg) # Stores in Neo4j, spawns daemon, presses Enter
+4. taey_send_message(platform, msg) # Focuses input via AT-SPI, types, stores, spawns daemon, Enter
 5. [monitor daemon detects response]
 6. taey_quick_extract(platform)  # Get response text, stores in Neo4j
 ```
+
+**RE-INSPECT AFTER UI CHANGES**: File attachment, model switching, and other actions shift element positions. `send_message` handles this automatically via AT-SPI `grab_focus()` (finds the entry element dynamically, doesn't rely on stored coordinates). But if `send_message` fails with a focus/typing error, RE-INSPECT and RE-SET MAP before retrying.
 
 ### Data Pipeline (CRITICAL)
 
