@@ -15,7 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from core import atspi, input as inp
-from core.smart_input import smart_type, find_entry_element
+from core.smart_input import smart_type
 from core.tree import find_elements, find_copy_buttons
 from tools.interact import get_map
 from storage import neo4j_client
@@ -188,43 +188,18 @@ def handle_send_message(platform: str, message: str,
     baseline_copy_count = len(find_copy_buttons(all_elements))
 
     # Step 4: Focus input field and type message
-    # Strategy: Find entry via AT-SPI → focus it → type via clipboard paste
-    entry_el = find_entry_element(doc, platform)
-
-    focus_method = 'none'
-    if entry_el:
-        try:
-            comp = entry_el.get_component_iface()
-            if comp:
-                rect = comp.get_extents(1)  # SCREEN coords
-                entry_role = entry_el.get_role_name()
-                entry_name = (entry_el.get_name() or '')[:50]
-                logger.info(f"[{platform}] Entry found: role={entry_role}, name={entry_name!r}, "
-                            f"pos=({rect.x},{rect.y}), size={rect.width}x{rect.height}")
-
-                # Always click at the entry's real coordinates (most reliable across Firefox versions)
-                click_x = rect.x + rect.width // 2
-                click_y = rect.y + rect.height // 2
-                logger.info(f"[{platform}] Clicking entry at ({click_x},{click_y})")
-                inp.click_at(click_x, click_y)
-                time.sleep(0.3)
-                focus_method = f'click_at({click_x},{click_y})'
-        except Exception as e:
-            logger.warning(f"[{platform}] AT-SPI focus failed: {e}")
-
-    if not entry_el:
-        # No AT-SPI entry found - fall back to stored map coordinates
-        input_coord = controls['input']
-        logger.warning(f"[{platform}] No entry element, using stored coords ({input_coord})")
-        if not inp.click_at(input_coord['x'], input_coord['y']):
-            return {"success": False, "error": "Failed to focus input field", "platform": platform}
-        time.sleep(0.3)
-        focus_method = f'stored_coords({input_coord})'
+    # Click at stored map coordinates (set by taey_set_map from inspect results).
+    # If coordinates are stale (e.g. after file attach), caller must re-inspect + re-set_map first.
+    input_coord = controls['input']
+    logger.info(f"[{platform}] Clicking input at stored coords ({input_coord['x']},{input_coord['y']})")
+    if not inp.click_at(input_coord['x'], input_coord['y']):
+        return {"success": False, "error": "Failed to focus input field", "platform": platform}
+    time.sleep(0.3)
 
     # Use smart_type with full message (handles multi-line via clipboard paste)
-    type_result = smart_type(message, platform=platform, entry_element=entry_el)
+    type_result = smart_type(message, platform=platform)
     logger.info(f"[{platform}] smart_type result: method={type_result.get('method')}, "
-                f"success={type_result.get('success')}, focus={focus_method}")
+                f"success={type_result.get('success')}")
     if not type_result['success']:
         return {
             "success": False,
