@@ -3,11 +3,7 @@
     "taeys-hands": {
       "type": "stdio",
       "command": "/usr/bin/python3",
-      "args": ["server.py"],
-      "cwd": "<OPERATOR_HOME>/taeys-hands",
-      "env": {
-        "PYTHONPATH": "<OPERATOR_HOME>/taeys-hands"
-      }
+      "args": ["server.py"]
     }
   }
 }
