@@ -281,33 +281,34 @@ class MonitorDaemon:
         return False
 
     def _notify_tmux(self, platform: str):
-        """Send tmux status bar notification when response is ready.
+        """Send notification to Claude Code input via tmux send-keys.
 
-        Non-destructive: uses display-message (doesn't inject into input).
-        Tries common session names for Claude Code.
+        Types the message into Claude's prompt and presses Enter so Claude
+        can act on it (e.g. extract the response).
         """
-        msg = f"[Taey] Response ready on {platform} - use taey_quick_extract('{platform}')"
+        msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
         sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
         for session in sessions_to_try:
             try:
+                # Send text (without Enter)
                 result = subprocess.run(
-                    ['tmux', 'display-message', '-t', session, '-d', '30000', msg],
+                    ['tmux', 'send-keys', '-t', session, '--', msg],
                     capture_output=True, text=True, timeout=5,
                 )
-                if result.returncode == 0:
-                    self._log(f"tmux notification sent to session '{session}'")
-                    return
+                if result.returncode != 0:
+                    continue
+                # Brief pause for text to render
+                time.sleep(0.5)
+                # Send Enter separately (avoids race condition)
+                subprocess.run(
+                    ['tmux', 'send-keys', '-t', session, 'Enter'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                self._log(f"tmux notification sent to session '{session}'")
+                return
             except Exception:
                 continue
-        # Fallback: try without specifying session (uses current/default)
-        try:
-            subprocess.run(
-                ['tmux', 'display-message', '-d', '30000', msg],
-                capture_output=True, text=True, timeout=5,
-            )
-            self._log("tmux notification sent (default session)")
-        except Exception as e:
-            self._log(f"tmux notification failed: {e}")
+        self._log("tmux notification failed: no session found")
 
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
