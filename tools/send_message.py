@@ -15,6 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from core import atspi, input as inp
+from core.smart_input import smart_type, find_entry_element
 from core.tree import find_elements, find_copy_buttons
 from tools.interact import get_map
 from storage import neo4j_client
@@ -186,21 +187,24 @@ def handle_send_message(platform: str, message: str,
     all_elements = find_elements(doc)
     baseline_copy_count = len(find_copy_buttons(all_elements))
 
-    # Step 4: Click input and type message
+    # Step 4: Click input and type message via smart_input cascade
     input_coord = controls['input']
     if not inp.click_at(input_coord['x'], input_coord['y']):
         return {"success": False, "error": "Failed to click input field", "platform": platform}
     time.sleep(0.2)
 
-    lines = message.split('\n')
-    for i, line in enumerate(lines):
-        if line:
-            if not inp.type_text(line):
-                return {"success": False, "error": f"Failed to type line {i}", "platform": platform}
-        if i < len(lines) - 1:
-            if not inp.press_key('shift+Return', timeout=5):
-                return {"success": False, "error": f"Failed to insert line break at line {i}", "platform": platform}
-            time.sleep(0.02)
+    # Find AT-SPI entry element for direct text injection
+    entry_el = find_entry_element(doc, platform)
+
+    # Use smart_type with full message (handles multi-line via clipboard paste)
+    type_result = smart_type(message, platform=platform, entry_element=entry_el)
+    if not type_result['success']:
+        return {
+            "success": False,
+            "error": f"Failed to type message: {type_result.get('error', 'unknown')}",
+            "platform": platform,
+            "input_method": type_result.get('method'),
+        }
 
     time.sleep(0.2)
 
