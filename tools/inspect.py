@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict
 
 from core import atspi, input as inp, clipboard
-from core.tree import find_elements, filter_useful_elements, find_copy_buttons
+from core.tree import find_elements, filter_useful_elements, find_copy_buttons, detect_chrome_y
 from core.platforms import BASE_URLS, SCREEN_HEIGHT
 
 logger = logging.getLogger(__name__)
@@ -126,8 +126,17 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
     result['url'] = url
 
     # Step 4: Find and filter elements
+    chrome_y = detect_chrome_y(doc)
     all_elements = find_elements(doc)
-    elements = filter_useful_elements(all_elements)
+    elements = filter_useful_elements(all_elements, chrome_y=chrome_y)
+
+    # Truncate long element names to prevent output overflow
+    # (Gemini sidebar items can have 200K+ char names from pasted content)
+    MAX_NAME_LEN = 200
+    for e in elements:
+        name = e.get('name', '')
+        if len(name) > MAX_NAME_LEN:
+            e['name'] = name[:MAX_NAME_LEN] + '...'
 
     copy_buttons = find_copy_buttons(all_elements)
     result['state']['copy_button_count'] = len(copy_buttons)

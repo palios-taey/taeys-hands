@@ -50,7 +50,8 @@ ACTIONABLE_ROLES = {
 IMPORTANT_STATE_NAMES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
 
 # Y threshold to skip Firefox chrome area (toolbar, tabs)
-FIREFOX_CHROME_Y = 147
+# Default is conservative (100px) - overridden at runtime by detect_chrome_y()
+FIREFOX_CHROME_Y = 100
 
 
 def find_elements(scope, max_depth: int = 25,
@@ -127,7 +128,31 @@ def find_elements(scope, max_depth: int = 25,
     return results
 
 
-def filter_useful_elements(elements: List[Dict]) -> List[Dict]:
+def detect_chrome_y(doc) -> int:
+    """Detect Firefox chrome height from document element position.
+
+    The document's top Y coordinate marks where content starts,
+    which varies by screen resolution and Firefox configuration
+    (bookmarks bar, etc.).
+
+    Args:
+        doc: AT-SPI document web element.
+
+    Returns:
+        Y pixel threshold for chrome area filtering.
+    """
+    try:
+        comp = doc.get_component_iface()
+        if comp:
+            rect = comp.get_extents(Atspi.CoordType.SCREEN)
+            if rect and rect.y > 0:
+                return rect.y
+    except Exception:
+        pass
+    return FIREFOX_CHROME_Y
+
+
+def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[Dict]:
     """Filter elements to only useful, actionable ones.
 
     Removes noise (unnamed sections, panels, Firefox chrome area)
@@ -135,12 +160,15 @@ def filter_useful_elements(elements: List[Dict]) -> List[Dict]:
 
     Args:
         elements: Raw element list from find_elements.
+        chrome_y: Y threshold for chrome area. Auto-detected if None.
 
     Returns:
         Filtered and Y-sorted element list.
     """
+    threshold = chrome_y if chrome_y is not None else FIREFOX_CHROME_Y
+
     def is_useful(e):
-        if e.get('y', 0) < FIREFOX_CHROME_Y:
+        if e.get('y', 0) < threshold:
             return False
 
         role = e.get('role', '')
