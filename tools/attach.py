@@ -1,8 +1,9 @@
 """
 taey_attach - File attachment workflow.
 
-Fully automated: click attach button, handle dropdown if it appears,
-navigate file dialog, attach file. ONE call does everything.
+Multi-step process: click attach button, detect what appeared
+(file dialog vs dropdown), handle accordingly. Claude stays
+in the loop for dropdown decisions.
 """
 
 import json
@@ -13,66 +14,9 @@ from typing import Any, Dict
 
 from core import atspi, input as inp
 from core.tree import find_elements, find_dropdown_menus
+from tools.interact import handle_click
 
 logger = logging.getLogger(__name__)
-
-# Known upload option names per platform (what appears in the dropdown)
-UPLOAD_OPTION_NAMES = {
-    "chatgpt": ["add photos", "add files", "upload"],
-    "claude": ["add files", "upload"],
-    "gemini": ["upload file", "upload"],
-    "grok": ["upload a file", "upload"],
-    "perplexity": ["upload file", "upload"],
-}
-
-# Attach button names - what to click to open the dropdown/dialog
-ATTACH_BUTTON_NAMES = {
-    "chatgpt": ["add files and more", "add files or tools", "attach"],
-    "claude": ["toggle menu"],
-    "gemini": ["open upload file menu"],
-    "grok": ["attach"],
-    "perplexity": ["add files or tools", "attach"],
-}
-
-
-def _click_via_atspi(doc, button_name: str, max_depth: int = 25) -> bool:
-    """Click a button by name using AT-SPI do_action(0).
-
-    More reliable than xdotool for Gemini and other React-based UIs.
-    """
-    target_lower = button_name.lower()
-
-    def find_and_click(obj, depth=0):
-        if depth > max_depth:
-            return False
-        try:
-            name = (obj.get_name() or '').lower()
-            role = obj.get_role_name() or ''
-            if target_lower in name and role in ('push button', 'toggle button', 'button'):
-                action = obj.get_action_iface()
-                if action and action.get_n_actions() > 0:
-                    action.do_action(0)
-                    return True
-            for i in range(obj.get_child_count()):
-                child = obj.get_child_at_index(i)
-                if child and find_and_click(child, depth + 1):
-                    return True
-        except Exception:
-            pass
-        return False
-
-    return find_and_click(doc)
-
-
-def _find_upload_option(dropdown_items, platform: str) -> Dict | None:
-    """Find the file upload option in dropdown items."""
-    patterns = UPLOAD_OPTION_NAMES.get(platform, ["upload"])
-    for item in dropdown_items:
-        name = (item.get('name') or '').lower()
-        for pattern in patterns:
-            if pattern in name:
-                return item
-    return None
 
 
 def _handle_file_dialog(platform: str, file_path: str,
@@ -150,33 +94,14 @@ def _handle_file_dialog(platform: str, file_path: str,
             redis_client.delete(f"taey:attach:pending:{platform}")
 
 
-def _click_attach_button(platform: str, doc, redis_client) -> bool:
-    """Click the attach button using AT-SPI first, xdotool fallback."""
-    # Try AT-SPI do_action first (works reliably on Gemini and others)
-    button_names = ATTACH_BUTTON_NAMES.get(platform, ["attach"])
-    for name in button_names:
-        if _click_via_atspi(doc, name):
-            logger.info(f"Clicked attach via AT-SPI: {name}")
-            return True
-
-    # Fallback to stored map coordinates (xdotool click)
-    from tools.interact import handle_click
-    click_result = handle_click(platform, "attach", redis_client)
-    if click_result.get("success"):
-        logger.info("Clicked attach via stored map coordinates")
-        return True
-
-    return False
-
-
 def handle_attach(platform: str, file_path: str,
                   redis_client) -> Dict[str, Any]:
     """Attach a file to the chat input.
 
-    Fully automated single-call flow:
-    1. Click attach button (AT-SPI first, xdotool fallback)
-    2. If file dialog opens → handle it
-    3. If dropdown opens → find upload option → click it → handle file dialog
+    Multi-step with Claude in the loop:
+    1. Click attach button
+    2. If file dialog opened → handle selection
+    3. If dropdown appeared → return items for Claude to decide
 
     Args:
         platform: Which platform.
@@ -184,83 +109,61 @@ def handle_attach(platform: str, file_path: str,
         redis_client: Redis client.
 
     Returns:
-        Success or failure with details.
+        Either success (file attached) or dropdown items for Claude.
     """
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}", "success": False}
 
     firefox = atspi.find_firefox()
-    if not firefox:
-        return {"error": "Firefox not found", "success": False}
 
-    # If file dialog is already open, handle it directly
-    if atspi.is_file_dialog_open(firefox):
+    # Check for pending attach (continuing after dropdown click)
+    pending = None
+    if redis_client:
+        pending_json = redis_client.get(f"taey:attach:pending:{platform}")
+        if pending_json:
+            try:
+                pending = json.loads(pending_json)
+            except json.JSONDecodeError:
+                pass
+
+    # If pending, wait for file dialog to appear
+    if pending:
+        for _ in range(15):
+            if atspi.is_file_dialog_open(firefox):
+                return _handle_file_dialog(platform, file_path, redis_client)
+            time.sleep(0.2)
+        if redis_client:
+            redis_client.delete(f"taey:attach:pending:{platform}")
+    elif atspi.is_file_dialog_open(firefox):
         return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Get platform document for AT-SPI operations
-    doc = atspi.get_platform_document(firefox, platform)
-    if not doc:
-        return {"error": f"Could not find {platform} document", "success": False}
-
-    # Step 1: Click the attach button
-    if not _click_attach_button(platform, doc, redis_client):
-        return {"error": "Failed to click attach button", "success": False}
+    # Click attach button
+    click_result = handle_click(platform, "attach", redis_client)
+    if not click_result.get("success"):
+        return {"error": f"Failed to click attach: {click_result.get('error')}", "success": False}
 
     time.sleep(1.0)
 
-    # Step 2: Check if file dialog opened directly (some platforms skip dropdown)
-    firefox = atspi.find_firefox()
+    # Check if file dialog opened
     if atspi.is_file_dialog_open(firefox):
         return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Step 3: Dropdown must have appeared - find and click the upload option
+    # Dropdown appeared - find items
+    firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     dropdown_items = find_dropdown_menus(firefox, doc)
 
-    if not dropdown_items:
-        # Brief wait and retry - dropdown might be rendering
-        time.sleep(0.5)
-        dropdown_items = find_dropdown_menus(firefox, doc)
+    # Store pending state for when Claude clicks an item
+    if redis_client:
+        redis_client.setex(f"taey:attach:pending:{platform}", 30, json.dumps({
+            'file_path': file_path,
+            'timestamp': time.time(),
+        }))
 
-    if not dropdown_items:
-        return {
-            "error": "No dropdown or file dialog appeared after clicking attach",
-            "success": False,
-            "hint": "The attach button click may not have triggered. Try taey_inspect to verify.",
-        }
-
-    # Find the upload/file option in the dropdown
-    upload_option = _find_upload_option(dropdown_items, platform)
-
-    if not upload_option:
-        return {
-            "error": "Could not find upload option in dropdown",
-            "success": False,
-            "dropdown_items": dropdown_items,
-            "hint": "Dropdown opened but no upload option matched. Check dropdown items above.",
-        }
-
-    # Click the upload option
-    x, y = upload_option['x'], upload_option['y']
-    logger.info(f"Clicking upload option '{upload_option.get('name')}' at ({x}, {y})")
-    inp.click_at(x, y)
-
-    # Step 4: Wait for file dialog to appear
-    firefox = atspi.find_firefox()
-    dialog_found = False
-    for _ in range(20):
-        time.sleep(0.3)
-        if atspi.is_file_dialog_open(firefox):
-            dialog_found = True
-            break
-
-    if not dialog_found:
-        return {
-            "error": "File dialog did not open after clicking upload option",
-            "success": False,
-            "clicked_option": upload_option.get('name'),
-            "hint": "Upload option was clicked but no file dialog appeared.",
-        }
-
-    # Step 5: Handle file dialog
-    return _handle_file_dialog(platform, file_path, redis_client)
+    return {
+        "success": True,
+        "status": "dropdown_open",
+        "message": "Dropdown opened. Select the file upload option with click_at, then call attach again.",
+        "file_path": file_path,
+        "dropdown_items": dropdown_items,
+    }
