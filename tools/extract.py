@@ -158,6 +158,26 @@ def handle_quick_extract(platform: str, redis_client,
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.warning(f"Failed to store response in Neo4j: {e}")
 
+    # ── HMM Weaviate triple-write ──
+    # If response looks like HMM enrichment JSON, forward to store endpoint.
+    # This patches Weaviate tiles + creates Neo4j HMMTile + updates Redis index.
+    # Non-blocking: extraction succeeds even if this fails.
+    if content and content.strip().startswith('{') and 'motif' in content.lower():
+        try:
+            import requests as _req
+            hmm_resp = _req.post(
+                "http://192.168.100.10:8095/hmm/store-response",
+                json={"platform": platform, "content": content},
+                timeout=60,
+            )
+            hmm_data = hmm_resp.json() if hmm_resp.ok else {}
+            if hmm_data.get("success"):
+                logger.info(f"HMM triple-write: stored {hmm_data.get('stored', 0)} items to Weaviate+Neo4j+Redis")
+            else:
+                logger.warning(f"HMM triple-write failed: {hmm_data.get('error', 'unknown')}")
+        except Exception as e:
+            logger.warning(f"HMM triple-write unavailable (response still in Neo4j): {e}")
+
     # Handle completion - only if caller explicitly says complete
     plan_consumed = False
     if complete and redis_client:
