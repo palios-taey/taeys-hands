@@ -129,6 +129,35 @@ def handle_quick_extract(platform: str, redis_client,
     # Caller MUST check these flags and take follow-up action if needed.
     quality = _assess_extraction(content, platform, all_elements)
 
+    # ── Store response in Neo4j ──
+    # Retrieve pending prompt to link response to the correct session/message.
+    neo4j_stored = None
+    if redis_client:
+        pending_json = redis_client.get(f"taey:pending_prompt:{platform}")
+        if pending_json:
+            try:
+                pending = json.loads(pending_json)
+                session_id = pending.get('session_id')
+                user_message_id = pending.get('message_id')
+                if session_id and neo4j_mod:
+                    response_id = neo4j_mod.add_message(
+                        session_id, 'assistant', content
+                    )
+                    # Create RESPONDS_TO edge if both message IDs exist
+                    if response_id and user_message_id:
+                        _link_response(neo4j_mod, response_id, user_message_id)
+                    neo4j_stored = {
+                        "session_id": session_id,
+                        "response_id": response_id,
+                        "user_message_id": user_message_id,
+                    }
+                    logger.info(
+                        f"Response stored in Neo4j: session={session_id}, "
+                        f"response={response_id}"
+                    )
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.warning(f"Failed to store response in Neo4j: {e}")
+
     # Handle completion - only if caller explicitly says complete
     plan_consumed = False
     if complete and redis_client:
@@ -150,9 +179,30 @@ def handle_quick_extract(platform: str, redis_client,
         "url": url,
         "copy_buttons_found": len(copy_buttons),
         "plan_consumed": plan_consumed,
+        "neo4j": neo4j_stored,
         # Quality assessment - caller MUST check these
         "quality": quality,
     }
+
+
+def _link_response(neo4j_mod, response_id: str, user_message_id: str):
+    """Create RESPONDS_TO edge between assistant response and user message.
+
+    Uses the neo4j driver directly since storage/ is FROZEN and doesn't
+    have this method. This is the only place we need graph edges from tools/.
+    """
+    try:
+        driver = neo4j_mod.get_driver()
+        if driver:
+            with driver.session() as s:
+                s.run("""
+                    MATCH (resp:Message {message_id: $response_id})
+                    MATCH (user:Message {message_id: $user_message_id})
+                    MERGE (resp)-[:RESPONDS_TO]->(user)
+                """, response_id=response_id, user_message_id=user_message_id)
+            logger.info(f"RESPONDS_TO edge: {response_id} -> {user_message_id}")
+    except Exception as e:
+        logger.warning(f"Failed to create RESPONDS_TO edge: {e}")
 
 
 def _assess_extraction(content: str, platform: str, elements: list) -> Dict[str, Any]:
