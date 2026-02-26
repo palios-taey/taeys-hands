@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 PLATFORM_STRATEGY = {
     'chatgpt': 'atspi',
     'claude': 'atspi',
-    'gemini': 'atspi',
+    'gemini': 'clipboard',    # AT-SPI verify can't read contenteditable, causes double-entry
     'grok': 'atspi',
     'perplexity': 'atspi',
     'x_twitter': 'clipboard',   # DraftJS ignores AT-SPI DOM insertion
