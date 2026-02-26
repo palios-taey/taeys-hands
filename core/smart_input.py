@@ -228,12 +228,13 @@ def _clipboard_read() -> Optional[str]:
 def find_entry_element(doc, platform: str = None):
     """Find the input/entry AT-SPI element in a platform document.
 
-    Searches for elements with the 'editable' state and 'entry' role,
-    or contenteditable elements that expose EditableText interface.
+    Searches for ANY element with the EDITABLE state that exposes
+    an EditableText interface. This catches all contenteditable
+    variants across platforms (entry role, section role, paragraph role, etc).
 
     Args:
         doc: AT-SPI document element from atspi.get_platform_document().
-        platform: Platform name (unused currently, for future per-platform hints).
+        platform: Platform name for logging.
 
     Returns:
         AT-SPI accessible element, or None if not found.
@@ -241,34 +242,45 @@ def find_entry_element(doc, platform: str = None):
     if doc is None:
         return None
 
+    candidates = []
+
     def _search(obj, depth=0):
-        if depth > 15:
-            return None
+        if depth > 20:
+            return
         try:
             role = obj.get_role_name() or ''
             state_set = obj.get_state_set()
 
-            # Look for editable entry elements
             is_editable = state_set.contains(Atspi.StateType.EDITABLE)
-            is_entry = role == 'entry'
-            is_focused = state_set.contains(Atspi.StateType.FOCUSED)
+            is_focusable = state_set.contains(Atspi.StateType.FOCUSABLE)
 
-            if is_editable and (is_entry or is_focused):
-                # Verify it has EditableText interface
+            if is_editable and is_focusable:
                 iface = obj.get_editable_text_iface()
                 if iface is not None:
-                    return obj
+                    is_entry = role == 'entry'
+                    is_focused = state_set.contains(Atspi.StateType.FOCUSED)
+                    # Priority: focused entry > entry > focused other > any editable
+                    priority = (2 if is_entry else 0) + (1 if is_focused else 0)
+                    candidates.append((priority, obj))
+                    logger.debug(f"Entry candidate: role={role}, priority={priority}")
 
             # Recurse into children
             n = obj.get_child_count()
             for i in range(n):
                 child = obj.get_child_at_index(i)
                 if child:
-                    result = _search(child, depth + 1)
-                    if result:
-                        return result
+                    _search(child, depth + 1)
         except Exception:
             pass
-        return None
 
-    return _search(doc)
+    _search(doc)
+
+    if candidates:
+        # Return highest priority candidate
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        winner = candidates[0][1]
+        logger.info(f"Found entry element: role={winner.get_role_name()}, "
+                    f"priority={candidates[0][0]}, total_candidates={len(candidates)}")
+        return winner
+
+    return None

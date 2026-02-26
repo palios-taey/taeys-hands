@@ -187,25 +187,32 @@ def handle_send_message(platform: str, message: str,
     all_elements = find_elements(doc)
     baseline_copy_count = len(find_copy_buttons(all_elements))
 
-    # Step 4: Click input and type message via smart_input cascade
-    input_coord = controls['input']
-    if not inp.click_at(input_coord['x'], input_coord['y']):
-        return {"success": False, "error": "Failed to click input field", "platform": platform}
-    time.sleep(0.2)
-
-    # Find AT-SPI entry element for direct text injection
+    # Step 4: Focus input via AT-SPI grab_focus (primary) or stored coordinates (fallback)
+    # AT-SPI grab_focus is immune to UI shifts from file attachment, model changes, etc.
+    # Stored map coordinates go stale when the UI changes - only use as last resort.
     entry_el = find_entry_element(doc, platform)
 
-    # grab_focus() on entry element - critical for Gemini where xdotool click
-    # doesn't reliably focus the contenteditable after file attachment
+    input_focused = False
     if entry_el:
         try:
             comp = entry_el.get_component_iface()
             if comp:
                 comp.grab_focus()
-                time.sleep(0.2)
-        except Exception:
-            pass  # Non-fatal, xdotool click may have worked
+                time.sleep(0.3)
+                input_focused = True
+                logger.info(f"Input focused via AT-SPI grab_focus for {platform}")
+        except Exception as e:
+            logger.warning(f"AT-SPI grab_focus failed: {e}")
+
+    if not input_focused:
+        # Fallback: click stored coordinates (may be stale after file attach)
+        input_coord = controls['input']
+        logger.warning(f"Using stored coordinates fallback for {platform} input ({input_coord})")
+        if not inp.click_at(input_coord['x'], input_coord['y']):
+            return {"success": False, "error": "Failed to focus input field", "platform": platform}
+        time.sleep(0.3)
+        # Re-search for entry element after click
+        entry_el = find_entry_element(doc, platform)
 
     # Use smart_type with full message (handles multi-line via clipboard paste)
     type_result = smart_type(message, platform=platform, entry_element=entry_el)
