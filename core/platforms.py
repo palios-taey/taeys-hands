@@ -6,6 +6,31 @@ Central registry for all supported platforms (chat AI and social).
 FROZEN once working - do not modify without approval.
 """
 
+import os
+import subprocess
+
+
+def _detect_screen_size() -> tuple:
+    """Detect screen dimensions from X display via xdpyinfo.
+
+    Returns:
+        (width, height) tuple. Falls back to (1920, 1080) if detection fails.
+    """
+    try:
+        result = subprocess.run(
+            ['xdpyinfo'], capture_output=True, text=True, timeout=5,
+            env={**os.environ},
+        )
+        for line in result.stdout.splitlines():
+            if 'dimensions:' in line:
+                parts = line.strip().split()
+                w, h = parts[1].split('x')
+                return int(w), int(h)
+    except Exception:
+        pass
+    return 1920, 1080
+
+
 # Tab shortcuts (Alt+N) configured in Firefox
 TAB_SHORTCUTS = {
     'chatgpt': 'alt+1',
@@ -49,6 +74,5 @@ SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
 # All platforms
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
-# Screen bounds (visible area - half-screen 1720x1440)
-SCREEN_WIDTH = 1720
-SCREEN_HEIGHT = 1440
+# Screen bounds (auto-detected from X display)
+SCREEN_WIDTH, SCREEN_HEIGHT = _detect_screen_size()
