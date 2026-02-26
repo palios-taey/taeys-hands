@@ -196,6 +196,17 @@ def handle_send_message(platform: str, message: str,
     # Find AT-SPI entry element for direct text injection
     entry_el = find_entry_element(doc, platform)
 
+    # grab_focus() on entry element - critical for Gemini where xdotool click
+    # doesn't reliably focus the contenteditable after file attachment
+    if entry_el:
+        try:
+            comp = entry_el.get_component_iface()
+            if comp:
+                comp.grab_focus()
+                time.sleep(0.2)
+        except Exception:
+            pass  # Non-fatal, xdotool click may have worked
+
     # Use smart_type with full message (handles multi-line via clipboard paste)
     type_result = smart_type(message, platform=platform, entry_element=entry_el)
     if not type_result['success']:
