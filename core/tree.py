@@ -3,6 +3,8 @@ AT-SPI tree traversal and element extraction.
 
 Provides BFS/DFS traversal of the accessibility tree, extracting
 visible elements with their names, roles, states, and coordinates.
+
+FROZEN once working - do not modify without approval.
 """
 
 import hashlib
