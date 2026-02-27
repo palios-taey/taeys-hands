@@ -101,6 +101,7 @@ def find_elements(scope, max_depth: int = 25,
                         'role': role,
                         'x': center_x,
                         'y': center_y,
+                        'atspi_obj': obj,
                     }
 
                     states = []
@@ -253,6 +254,7 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
                                         'role': child_role,
                                         'x': ext.x + ext.width // 2,
                                         'y': ext.y + ext.height // 2,
+                                        'atspi_obj': child,
                                     })
                         except Exception:
                             pass

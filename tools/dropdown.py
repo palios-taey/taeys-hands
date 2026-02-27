@@ -15,6 +15,7 @@ import yaml
 
 from core import atspi, input as inp
 from core.tree import find_elements, find_dropdown_menus
+from core.atspi_interact import atspi_click
 from tools.interact import handle_click
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
@@ -127,10 +128,20 @@ def handle_select_dropdown(platform: str, dropdown: str,
             "success": False,
         }
 
-    # Click target
+    # Click target - AT-SPI do_action first, xdotool fallback
     x, y = target_option['x'], target_option['y']
-    if not inp.click_at(x, y):
-        return {"error": "Failed to click option", "success": False}
+    click_method = 'xdotool'
+
+    if target_option.get('atspi_obj'):
+        if atspi_click(target_option):
+            click_method = 'atspi'
+        else:
+            # AT-SPI failed, fall back to xdotool
+            if not inp.click_at(x, y):
+                return {"error": "Failed to click option", "success": False}
+    else:
+        if not inp.click_at(x, y):
+            return {"error": "Failed to click option", "success": False}
 
     time.sleep(0.5)
 
@@ -168,6 +179,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
             "selected": target_value,
             "selection_validated": False,
             "clicked_at": {"x": x, "y": y},
+            "click_method": click_method,
             "warning": (
                 f"Could not validate that '{target_value}' is now active. "
                 f"Current detected state: {current_state}. "
@@ -182,6 +194,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "selected": target_value,
         "selection_validated": True,
         "clicked_at": {"x": x, "y": y},
+        "click_method": click_method,
     }
 
 
