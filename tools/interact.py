@@ -1,8 +1,8 @@
 """
 taey_set_map, taey_click, taey_click_at - Control map and clicking.
 
-Stores interpreted control coordinates and provides click operations
-using those stored coordinates or arbitrary screen positions.
+Stores interpreted control coordinates and provides click operations.
+Uses AT-SPI do_action(0) as primary click method with xdotool fallback.
 """
 
 import json
@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from core import input as inp
+from core.atspi_interact import find_element_at, atspi_click
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +72,16 @@ def handle_click(platform: str, target: str,
                  redis_client) -> Dict[str, Any]:
     """Click a named control using stored map coordinates.
 
+    Tries AT-SPI do_action(0) first via cached element lookup,
+    falls back to xdotool coordinate click.
+
     Args:
         platform: Which platform.
         target: Control name (input, send, attach, model, mode, copy).
         redis_client: Redis client.
 
     Returns:
-        Success/failure with click coordinates.
+        Success/failure with click coordinates and method used.
     """
     map_data = get_map(platform, redis_client)
     if not map_data:
@@ -100,6 +104,20 @@ def handle_click(platform: str, target: str,
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab", "success": False}
 
+    # Try AT-SPI click first via cached element lookup
+    element = find_element_at(platform, x, y)
+    if element:
+        if atspi_click(element):
+            time.sleep(0.2)
+            return {
+                "success": True,
+                "platform": platform,
+                "target": target,
+                "clicked_at": {"x": x, "y": y},
+                "method": "atspi",
+            }
+
+    # Fallback to xdotool coordinate click
     if not inp.click_at(x, y):
         return {"error": f"Click at ({x}, {y}) failed", "success": False}
 
@@ -109,13 +127,15 @@ def handle_click(platform: str, target: str,
         "platform": platform,
         "target": target,
         "clicked_at": {"x": x, "y": y},
+        "method": "xdotool",
     }
 
 
 def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
     """Click at specific screen coordinates.
 
-    Used after taey_attach returns dropdown items.
+    Tries AT-SPI do_action(0) first via cached element lookup,
+    falls back to xdotool coordinate click.
 
     Args:
         platform: Which platform (for tab switching).
@@ -123,11 +143,24 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
         y: Y coordinate.
 
     Returns:
-        Success/failure.
+        Success/failure with method used.
     """
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab", "success": False}
 
+    # Try AT-SPI click first via cached element lookup
+    element = find_element_at(platform, x, y)
+    if element:
+        if atspi_click(element):
+            time.sleep(0.3)
+            return {
+                "success": True,
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "atspi",
+            }
+
+    # Fallback to xdotool coordinate click
     if not inp.click_at(x, y):
         return {"error": f"Click at ({x}, {y}) failed", "success": False}
 
@@ -136,4 +169,5 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
         "success": True,
         "platform": platform,
         "clicked_at": {"x": x, "y": y},
+        "method": "xdotool",
     }
