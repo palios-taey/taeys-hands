@@ -8,7 +8,8 @@ to suppress doubled consonants) by using a priority cascade:
   2. Clipboard paste via xsel + Ctrl+V - always triggers full event chain
   3. xdotool type --delay 50 - last resort with safe delay
 
-Based on Perplexity Deep Research audit (Feb 2026).
+Based on Perplexity Deep Research audits (Feb 2026).
+Uses capability-based strategy detection - NO per-platform hardcoding.
 Does NOT modify frozen core/input.py.
 """
 
@@ -25,21 +26,25 @@ from core import input as inp
 
 logger = logging.getLogger(__name__)
 
-# Per-platform strategy overrides.
-# 'atspi' = try AT-SPI first, 'clipboard' = skip AT-SPI, go straight to paste.
-PLATFORM_STRATEGY = {
-    'chatgpt': 'atspi',
-    'claude': 'atspi',
-    'gemini': 'clipboard',    # AT-SPI verify can't read contenteditable, causes double-entry
-    'grok': 'atspi',
-    'perplexity': 'atspi',
-    'x_twitter': 'clipboard',   # DraftJS ignores AT-SPI DOM insertion
-    'linkedin': 'clipboard',
-}
-
 # Minimum xdotool delay to avoid X server repeat suppression.
 # xdotool halves this: 50ms -> 25ms gap between key-up and key-down.
 XDOTOOL_SAFE_DELAY_MS = 50
+
+
+def _detect_strategy(entry_element) -> str:
+    """Detect input strategy by probing AT-SPI interfaces.
+
+    No per-platform hardcoding. Checks what the element supports.
+    """
+    if entry_element is None:
+        return 'clipboard'
+    try:
+        iface = entry_element.get_editable_text_iface()
+        if iface is not None:
+            return 'atspi'
+    except Exception:
+        pass
+    return 'clipboard'
 
 
 def smart_type(text: str, platform: str = 'chatgpt',
@@ -48,24 +53,28 @@ def smart_type(text: str, platform: str = 'chatgpt',
 
     Args:
         text: Text to enter.
-        platform: Platform name for strategy selection.
+        platform: Platform name (for logging only).
         entry_element: AT-SPI accessible element for the input field.
                        If None, AT-SPI insert is skipped.
 
     Returns:
         Dict with 'success', 'method' used, and optional 'error'.
     """
-    strategy = PLATFORM_STRATEGY.get(platform, 'atspi')
+    strategy = _detect_strategy(entry_element)
 
     # Strategy 1: AT-SPI direct text injection
     if strategy == 'atspi' and entry_element is not None:
         result = _try_atspi_insert(entry_element, text)
         if result['success']:
-            # Verify text landed
-            if _verify_text(entry_element, text):
+            # Verify by character count only (not content comparison)
+            # to avoid false negatives on contenteditable transforms
+            if _verify_char_count(entry_element, text):
                 return {**result, 'verified': True}
             else:
-                logger.warning("AT-SPI insert succeeded but verification failed, falling back")
+                # Trust insert_text return value - don't retry (causes double-entry)
+                logger.warning("AT-SPI insert succeeded but char count check failed, "
+                               "trusting insert_text return value")
+                return {**result, 'verified': False}
 
     # Strategy 2: Clipboard paste (xsel + Ctrl+V)
     result = _try_clipboard_paste(text)
@@ -103,20 +112,17 @@ def _try_atspi_insert(element, text: str) -> dict:
         return {'success': False, 'method': 'atspi', 'error': str(e)}
 
 
-def _verify_text(element, expected: str) -> bool:
-    """Verify inserted text via AT-SPI Text interface (static methods).
+def _verify_char_count(element, expected: str) -> bool:
+    """Verify inserted text by character count only.
 
-    Critical because some contenteditable implementations silently
-    ignore AT-SPI insertion (React state out of sync with DOM).
-    Uses Atspi.Text static methods, not deprecated instance methods.
+    Content comparison is unreliable on contenteditable divs because
+    they may add formatting markup. Character count is sufficient to
+    detect total insertion failure without triggering false negatives
+    that cause the double-entry bug via retry.
     """
     try:
         char_count = Atspi.Text.get_character_count(element)
-        if char_count < len(expected):
-            return False
-        actual = Atspi.Text.get_text(element, 0, char_count)
-        # Check if expected text is present (may have existing text before it)
-        return expected in (actual or '')
+        return char_count >= len(expected)
     except Exception:
         return False
 
