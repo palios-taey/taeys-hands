@@ -5,7 +5,8 @@
       "command": "/usr/bin/python3",
       "args": ["server.py"],
       "env": {
-        "DISPLAY": ":0"
+        "DISPLAY": ":0",
+        "TAEY_NODE_ID": "taeys-hands"
       }
     }
   }
