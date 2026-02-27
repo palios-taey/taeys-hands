@@ -298,6 +298,7 @@ def handle_send_message(platform: str, message: str,
         logger.error(f"Daemon spawn failed: {e}")
         if 'daemon_log' in locals():
             daemon_log.close()
+        # Don't silently continue — caller needs to know there's no monitor
 
     # Step 7: Send via Enter key (daemon is already watching)
     if not inp.press_key('Return', timeout=5):
@@ -319,7 +320,7 @@ def handle_send_message(platform: str, message: str,
     if redis_client:
         redis_client.delete("taey:v4:current_map")
 
-    return {
+    result = {
         "success": True,
         "platform": platform,
         "url": url,
@@ -335,3 +336,8 @@ def handle_send_message(platform: str, message: str,
         "input_method": type_result.get('method'),
         "info": "Message sent. Map invalidated - re-inspect before further clicks.",
     }
+
+    if not daemon_spawned:
+        result["warning"] = "Monitor daemon FAILED to spawn. No response detection active. Use taey_quick_extract manually."
+
+    return result
