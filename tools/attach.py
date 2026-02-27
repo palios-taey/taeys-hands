@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
+from core.atspi_interact import extend_cache, strip_atspi_obj
 from tools.interact import handle_click
 from storage.redis_pool import node_key
 
@@ -215,6 +216,10 @@ def handle_attach(platform: str, file_path: str,
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     dropdown_items = find_menu_items(firefox, doc)
 
+    # Cache dropdown items so taey_click_at can use AT-SPI do_action
+    if dropdown_items:
+        extend_cache(platform, dropdown_items)
+
     # Store pending state for when Claude clicks an item (120s TTL)
     if redis_client:
         redis_client.setex(node_key(f"attach:pending:{platform}"), 120, json.dumps({
@@ -222,9 +227,12 @@ def handle_attach(platform: str, file_path: str,
             'timestamp': time.time(),
         }))
 
+    # Strip atspi_obj for JSON serialization (D-Bus proxies can't serialize)
+    serializable_items = strip_atspi_obj(dropdown_items) if dropdown_items else []
+
     return {
         "status": "dropdown_open",
         "message": "Dropdown opened. Select the file upload option with click_at, then call attach again.",
         "file_path": file_path,
-        "dropdown_items": dropdown_items,
+        "dropdown_items": serializable_items,
     }

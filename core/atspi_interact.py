@@ -33,6 +33,17 @@ def cache_elements(platform: str, elements: List[Dict]):
     _element_cache[platform] = elements
 
 
+def extend_cache(platform: str, elements: List[Dict]):
+    """Add elements to existing cache for a platform.
+
+    Used when new elements appear mid-workflow (e.g., dropdown items
+    after clicking a trigger). Prevents cache misses on subsequent
+    AT-SPI do_action clicks for these elements.
+    """
+    existing = _element_cache.get(platform, [])
+    _element_cache[platform] = existing + elements
+
+
 def find_element_at(platform: str, x: int, y: int,
                     tolerance: int = 30) -> Optional[Dict]:
     """Find cached element closest to given coordinates.

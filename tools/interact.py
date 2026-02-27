@@ -2,12 +2,11 @@
 taey_set_map, taey_click, taey_click_at - Control map and clicking.
 
 Stores interpreted control coordinates and provides click operations.
-Uses xdotool coordinate click as primary (generates real pointer events)
-with AT-SPI do_action(0) as fallback for specific platforms (Gemini).
-
-CRITICAL: AT-SPI do_action(0) returns True on ChatGPT/Grok buttons
-without actually triggering the React event handlers. Only real pointer
-events (xdotool mousemove+click) reliably open dropdowns on these platforms.
+Click strategy is platform-aware:
+- Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
+- ChatGPT/Grok: xdotool first (AT-SPI do_action lies - returns True
+  without actually triggering React event handlers)
+- Others: xdotool first, AT-SPI fallback
 """
 
 import json
@@ -93,15 +92,37 @@ def handle_click(platform: str, target: str,
 def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
     """Click at specific screen coordinates.
 
-    xdotool coordinate click is primary. AT-SPI do_action is fallback
-    (useful for Gemini where xdotool sometimes fails).
+    Strategy is platform-aware:
+    - Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
+    - ChatGPT/Grok: xdotool first (AT-SPI do_action lies on React)
+    - Others: xdotool first, AT-SPI fallback
 
     Returns what happened. Claude verifies by inspecting.
     """
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
-    # xdotool coordinate click is PRIMARY
+    # Gemini: AT-SPI do_action is more reliable than xdotool coordinates
+    if platform == 'gemini':
+        element = find_element_at(platform, x, y)
+        if element and atspi_click(element):
+            time.sleep(0.3)
+            return {
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "atspi",
+            }
+        # xdotool fallback for Gemini
+        if inp.click_at(x, y):
+            time.sleep(0.3)
+            return {
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "xdotool",
+            }
+        return {"error": f"Click at ({x}, {y}) failed via both AT-SPI and xdotool"}
+
+    # Other platforms: xdotool coordinate click is PRIMARY
     if inp.click_at(x, y):
         time.sleep(0.3)
         return {
@@ -110,7 +131,7 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
             "method": "xdotool",
         }
 
-    # AT-SPI fallback
+    # AT-SPI fallback for non-Gemini
     logger.warning(f"xdotool click failed at ({x},{y}), trying AT-SPI do_action")
     element = find_element_at(platform, x, y)
     if element and atspi_click(element):
