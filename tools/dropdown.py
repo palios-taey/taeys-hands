@@ -73,17 +73,19 @@ def handle_select_dropdown(platform: str, dropdown: str,
     Returns:
         Found items list for Claude to pick from.
     """
-    # Click dropdown trigger - prefer AT-SPI do_action(0) over xdotool
-    trigger_clicked = False
-    firefox = atspi.find_firefox()
-    if firefox:
-        doc = atspi.get_platform_document(firefox, platform)
-        if doc:
-            trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
-
-    if not trigger_clicked:
-        click_result = handle_click(platform, dropdown, redis_client)
-        if not click_result.get("success"):
+    # Click dropdown trigger via stored map (xdotool primary).
+    # AT-SPI do_action(0) lies on ChatGPT/Grok - returns True without
+    # actually opening the dropdown. Only use it as last resort.
+    click_result = handle_click(platform, dropdown, redis_client)
+    if not click_result.get("success"):
+        # Fallback: try AT-SPI do_action directly on named button
+        trigger_clicked = False
+        firefox = atspi.find_firefox()
+        if firefox:
+            doc = atspi.get_platform_document(firefox, platform)
+            if doc:
+                trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+        if not trigger_clicked:
             return {"error": f"Failed to click {dropdown}: {click_result.get('error')}", "success": False}
 
     time.sleep(0.5)
