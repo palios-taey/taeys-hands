@@ -30,7 +30,7 @@ def _handle_file_dialog(platform: str, file_path: str,
         time.sleep(0.2)
 
         # Clipboard paste - xdotool type_text drops doubled letters
-        clipboard.write(file_path)
+        clipboard.write_marker(file_path)
         time.sleep(0.1)
         if not inp.press_key('ctrl+v'):
             return {"error": "Failed to paste file path", "success": False}
