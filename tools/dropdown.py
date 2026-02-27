@@ -15,6 +15,7 @@ import yaml
 
 from core import atspi
 from core.tree import find_menu_items
+from core.atspi_interact import extend_cache
 from tools.interact import handle_click
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
@@ -89,6 +90,10 @@ def handle_select_dropdown(platform: str, dropdown: str,
         return {"error": f"Could not find {platform} document"}
 
     menu_items = find_menu_items(firefox, doc)
+
+    # Cache menu items so taey_click_at can use AT-SPI do_action
+    if menu_items:
+        extend_cache(platform, menu_items)
 
     if not menu_items:
         return {
