@@ -6,8 +6,10 @@ tab_shortcut: alt+4
 
 capabilities:
   models:
-    - Grok 3
-    - Grok 3 mini
+    - Grok 4.20 (Beta)
+    - Auto
+    - Fast
+    - Expert
   modes: []
   tools:
     - Think
@@ -16,6 +18,9 @@ capabilities:
 
 quirks:
   - sidebar: "Left sidebar OPEN, no right sidebar"
+  - attach: "Dropdown menu with 'Upload a file' item. Files persist across sessions - always check for stale attachments before attaching."
+  - model_default: "Grok 4.20 (Beta) is the default. Do NOT select it manually."
+  - keyboard_nav: "Dropdown menu items require keyboard navigation (Down+Enter) - xdotool coordinate clicks do not trigger React handlers."
 
 stop_patterns:
   - stop

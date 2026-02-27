@@ -14,7 +14,7 @@ from typing import Any, Dict
 import yaml
 
 from core import atspi
-from core.tree import find_elements, find_dropdown_menus
+from core.tree import find_menu_items
 from tools.interact import handle_click
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
@@ -57,27 +57,16 @@ def handle_select_dropdown(platform: str, dropdown: str,
                            redis_client) -> Dict[str, Any]:
     """Open a dropdown and return found items for Claude to pick from.
 
-    1. Click dropdown trigger via AT-SPI (xdotool fallback)
+    1. Click dropdown trigger via xdotool (AT-SPI fallback)
     2. Scan AT-SPI tree for menu items
     3. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click_at.
-
-    Args:
-        platform: Which platform.
-        dropdown: Which dropdown trigger to click.
-        target_value: What caller wants (passed through as context, NOT used for matching).
-        redis_client: Redis client.
-
-    Returns:
-        Found items list for Claude to pick from.
     """
-    # Click dropdown trigger via stored map (xdotool primary).
-    # AT-SPI do_action(0) lies on ChatGPT/Grok - returns True without
-    # actually opening the dropdown. Only use it as last resort.
+    # Click dropdown trigger via stored map (xdotool primary)
     click_result = handle_click(platform, dropdown, redis_client)
-    if not click_result.get("success"):
+    if click_result.get("error"):
         # Fallback: try AT-SPI do_action directly on named button
         trigger_clicked = False
         firefox = atspi.find_firefox()
@@ -86,26 +75,24 @@ def handle_select_dropdown(platform: str, dropdown: str,
             if doc:
                 trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
         if not trigger_clicked:
-            return {"error": f"Failed to click {dropdown}: {click_result.get('error')}", "success": False}
+            return {"error": f"Failed to click {dropdown}: {click_result.get('error')}"}
 
     time.sleep(0.5)
 
     # Find dropdown items
     firefox = atspi.find_firefox()
     if not firefox:
-        return {"error": "Firefox not found", "success": False}
+        return {"error": "Firefox not found"}
 
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
-        return {"error": f"Could not find {platform} document", "success": False}
+        return {"error": f"Could not find {platform} document"}
 
-    # Find active menu elements — no fallback to broad page scan
-    menu_items = find_dropdown_menus(firefox, doc)
+    menu_items = find_menu_items(firefox, doc)
 
     if not menu_items:
         return {
-            "success": False,
-            "error": f"Dropdown '{dropdown}' did not open — no menu items found after clicking trigger.",
+            "error": f"Dropdown '{dropdown}' did not open - no menu items found after clicking trigger.",
             "platform": platform,
             "hint": "The trigger click may not have worked. Try taey_inspect to verify screen state.",
         }
@@ -122,7 +109,6 @@ def handle_select_dropdown(platform: str, dropdown: str,
         })
 
     return {
-        "success": True,
         "platform": platform,
         "dropdown": dropdown,
         "target_requested": target_value,
@@ -132,12 +118,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
 
 def _load_platform_yaml(platform: str) -> Dict:
-    """Load platform YAML config.
-
-    Raises:
-        FileNotFoundError: If YAML config does not exist.
-        ValueError: If YAML is invalid.
-    """
+    """Load platform YAML config."""
     yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
     if not os.path.exists(yaml_path):
         raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
@@ -152,24 +133,15 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
     """Get available options for a platform before creating a plan.
 
     Reads from platform YAML config files (source of truth for capabilities).
-    These are manually maintained with accurate, current model/mode/tool names.
-
-    Args:
-        platform: Which platform.
-        redis_client: Redis client.
-
-    Returns:
-        Available options including models, modes, tools, quirks, and mode guidance.
     """
     try:
         config = _load_platform_yaml(platform)
     except (FileNotFoundError, ValueError) as e:
-        return {"success": False, "error": str(e), "platform": platform}
+        return {"error": str(e), "platform": platform}
     caps = config.get('capabilities', {})
     guidance = config.get('mode_guidance', {})
 
     return {
-        "success": True,
         "platform": platform,
         "models": caps.get('models', []),
         "modes": caps.get('modes', []),

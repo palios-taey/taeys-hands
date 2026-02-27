@@ -30,6 +30,49 @@ from core.platforms import BASE_URLS, SCREEN_HEIGHT
 
 logger = logging.getLogger(__name__)
 
+# File extensions that indicate an attached file chip
+_FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
+                    '.csv', '.json', '.xml', '.html', '.zip', '.docx')
+
+
+def _detect_attachments(elements: list) -> dict | None:
+    """Detect existing file attachments from element list.
+
+    Looks for "Remove" / "Remove file" buttons and nearby file chip
+    elements (headings/buttons with file-like names). Returns info
+    about attached files so Claude knows what's already there.
+    """
+    remove_buttons = []
+    file_chips = []
+
+    for e in elements:
+        name = (e.get('name') or '').strip()
+        role = e.get('role', '')
+
+        # "Remove" or "Remove file ..." buttons indicate attached files
+        if 'button' in role and name.lower().startswith('remove'):
+            remove_buttons.append(e)
+
+        # File chip: heading or button whose name looks like a filename
+        if name and any(name.lower().endswith(ext) for ext in _FILE_EXTENSIONS):
+            if role in ('heading', 'push button', 'toggle button', 'link'):
+                file_chips.append(name)
+
+    if not remove_buttons and not file_chips:
+        return None
+
+    result = {
+        'count': max(len(remove_buttons), len(file_chips)),
+        'files': file_chips,
+        'remove_buttons': [{'x': b['x'], 'y': b['y'], 'name': b.get('name', '')}
+                           for b in remove_buttons],
+        'WARNING': (
+            f"{max(len(remove_buttons), len(file_chips))} file(s) already attached. "
+            "Remove stale files before attaching new ones to avoid duplicates."
+        ),
+    }
+    return result
+
 
 def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs) -> Dict[str, Any]:
     """Inspect a platform and return all visible elements.
@@ -172,6 +215,12 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     result['state']['element_count'] = len(elements_json)
     result['state']['total_before_filter'] = len(all_elements)
     result['controls'] = elements_json
+
+    # Detect existing file attachments (Remove buttons + file chips)
+    # This prevents accidentally attaching multiple files
+    attached_files = _detect_attachments(elements_json)
+    if attached_files:
+        result['attachments'] = attached_files
 
     # Step 5: Store in Redis
     if redis_client:

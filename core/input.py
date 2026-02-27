@@ -3,8 +3,6 @@ System input operations via xdotool.
 
 Provides keyboard and mouse input for interacting with
 Firefox through the X11 windowing system.
-
-FROZEN once working - do not modify without approval.
 """
 
 import subprocess
@@ -189,3 +187,30 @@ def scroll_page_up():
     """Scroll up one page."""
     press_key('Page_Up')
     time.sleep(0.3)
+
+
+def clipboard_paste(text: str, timeout: float = 3.0) -> bool:
+    """Write text to clipboard via xsel and paste with Ctrl+V.
+
+    Uses xsel (no fork hang) + Ctrl+V for reliable text entry.
+    This is the primary text input method - avoids xdotool character
+    dropping on doubled letters (ss, ll, tt).
+
+    Args:
+        text: Text to paste.
+        timeout: Clipboard write timeout in seconds.
+
+    Returns:
+        True if clipboard write and paste succeeded.
+    """
+    from core import clipboard
+    try:
+        clipboard.write_marker(text)
+    except RuntimeError as e:
+        logger.error(f"Clipboard write failed: {e}")
+        return False
+
+    time.sleep(0.05)
+    paste_ok = press_key('ctrl+v', timeout=5)
+    time.sleep(0.1)
+    return paste_ok
