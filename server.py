@@ -33,7 +33,7 @@ DISPLAY = detect_display()
 os.environ['DISPLAY'] = DISPLAY
 
 # Now safe to import AT-SPI dependent modules
-from storage.redis_pool import get_client as get_redis
+from storage.redis_pool import get_client as get_redis, node_key
 from storage import neo4j_client
 
 from tools.inspect import handle_inspect
@@ -73,7 +73,7 @@ def get_pending_notifications(redis_client) -> List[Dict]:
         return notifications
     try:
         while len(notifications) < 10:
-            data = redis_client.lpop("taey:notifications")
+            data = redis_client.lpop(node_key("notifications"))
             if not data:
                 break
             try:
