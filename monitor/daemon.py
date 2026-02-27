@@ -206,8 +206,15 @@ class MonitorDaemon:
         return search(self.firefox_app)
 
     def _is_stop_button(self, name: str) -> bool:
-        """Check if button name matches stop patterns."""
-        name_lower = (name or '').lower()
+        """Check if button name matches stop patterns.
+
+        Real stop buttons have short names like "Stop" or "Stop generating".
+        Content buttons (e.g. Perplexity Deep Research) can have 19K+ char
+        names containing "stop" as a regular word. Filter by length.
+        """
+        if not name or len(name) > 50:
+            return False
+        name_lower = name.lower().strip()
         patterns = STOP_PATTERNS.get(self.platform, ['stop'])
         return any(p in name_lower for p in patterns)
 
