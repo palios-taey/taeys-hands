@@ -97,7 +97,7 @@ def inject_notifications(result: Dict, redis_client) -> Dict:
 # Tool definitions (JSON schemas for MCP)
 # =========================================================================
 
-ALL_PLATFORMS = ["chatgpt", "claude", "gemini", "grok", "perplexity"]
+ALL_PLATFORMS = ["chatgpt", "claude", "gemini", "grok", "perplexity", "x_twitter", "linkedin"]
 
 PLATFORM_PROP = {
     "type": "string",
