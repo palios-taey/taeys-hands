@@ -157,6 +157,69 @@ This is more reliable than copy button counting (which depends on scroll positio
 
 ---
 
+## Multi-Node Architecture & Escalation Protocol
+
+### Node Roles
+
+| Node | Hostname | Role | Can Edit Code? |
+|------|----------|------|----------------|
+| **Spark** | spark-78c6 | Coordinator. Writes code, commits, deploys. | YES |
+| **Jetson** | jetson | Worker. Runs HMM enrichment. | NO |
+| **Thor** | thor | Worker. Runs HMM enrichment. | NO |
+
+### STRICT: Workers NEVER Modify Code
+
+Worker nodes (Jetson, Thor) execute the HMM enrichment workflow using MCP tools. They do NOT:
+- Edit or Write any files (`.py`, `.json`, `.yaml`, `.md`, `.sh`)
+- Run `git commit`, `git add`, `git checkout`, or `git reset`
+- Modify code via Bash (`sed -i`, `echo >`, etc.)
+- Create "workaround" files or scripts
+- Hardcode coordinates, URLs, or magic numbers anywhere
+
+**Hooks enforce this** — Edit/Write/Bash commands that modify repo files are blocked on worker nodes. If you see a `BLOCKED` message from a hook, follow the escalation procedure below.
+
+### Escalation Procedure (When Stuck)
+
+When a worker node encounters a problem it cannot solve with existing MCP tools:
+
+```
+1. STOP immediately. Do not retry the failing operation.
+2. Document what happened:
+   - What tool/step failed
+   - The exact error or unexpected result
+   - What you already tried
+3. Escalate to Spark:
+   tmux-send spark1 taeys-hands "ESCALATION from $(hostname): <problem description>"
+4. WAIT for Spark's response. Check periodically:
+   tmux-send spark1 taeys-hands "ping"
+5. After Spark pushes a fix:
+   cd ~/taeys-hands && git pull
+6. Restart MCP: /exit then relaunch claude
+7. Resume the workflow from where it failed
+```
+
+### Node-Scoped Redis Keys
+
+Each node has isolated Redis state via `node_key()` in `storage/redis_pool.py`:
+- Keys are prefixed with `taey:{hostname}:` (e.g., `taey:jetson:current_map`)
+- Control maps, pending prompts, checkpoints, and notifications are per-node
+- Monitor keys (`taey:monitor:{uuid}`) are global (UUIDs are unique)
+
+This means Jetson and Thor can operate the same platforms simultaneously without key collision.
+
+### Communication Between Nodes
+
+```bash
+# Worker → Spark (escalation)
+tmux-send spark1 taeys-hands "ESCALATION from jetson: attach fails on Gemini, dropdown not found"
+
+# Spark → Worker (instructions)
+tmux-send jetson jetson-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
+tmux-send thor thor-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
+```
+
+---
+
 ## Operational Rules (ALL instances must follow)
 
 ### STRICT: One Platform at a Time (Sequential Workflow)
