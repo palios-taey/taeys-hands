@@ -46,11 +46,14 @@ def get_pool() -> redis.ConnectionPool:
     return _pool
 
 
-def get_client() -> Optional[redis.Redis]:
+def get_client() -> redis.Redis:
     """Get the shared Redis client using the connection pool.
 
     Returns:
-        Redis client or None if connection fails.
+        Redis client.
+
+    Raises:
+        ConnectionError: If Redis is not available.
     """
     global _client
     if _client is None:
@@ -58,6 +61,6 @@ def get_client() -> Optional[redis.Redis]:
             _client = redis.Redis(connection_pool=get_pool())
             _client.ping()
         except Exception as e:
-            logger.warning(f"Redis connection failed: {e}")
             _client = None
+            raise ConnectionError(f"Redis connection failed: {e}") from e
     return _client
