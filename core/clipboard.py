@@ -1,10 +1,10 @@
 """
-System clipboard operations via xclip.
+System clipboard operations via xsel.
 
 Provides read/write/clear operations for the X11 clipboard,
-used to extract AI responses from chat platforms.
+used to extract AI responses and paste text into chat platforms.
 
-FROZEN once working - do not modify without approval.
+Uses xsel (not xclip) to avoid fork-hang issues with subprocess.run().
 """
 
 import subprocess
@@ -13,7 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Environment with DISPLAY set (populated at import time)
 _ENV = None
 
 
@@ -39,10 +38,14 @@ def read() -> str | None:
     """
     try:
         result = subprocess.run(
-            ['xclip', '-selection', 'clipboard', '-o'],
-            capture_output=True, text=True, env=_get_env(),
+            ['xsel', '--clipboard', '--output'],
+            capture_output=True, text=True, timeout=3.0,
+            env=_get_env(),
         )
         return result.stdout if result.returncode == 0 else None
+    except subprocess.TimeoutExpired:
+        logger.error("Clipboard read timed out")
+        return None
     except Exception as e:
         logger.error(f"Clipboard read failed: {e}")
         return None
@@ -51,24 +54,20 @@ def read() -> str | None:
 def clear():
     """Clear the system clipboard.
 
-    Uses Popen pattern because subprocess.run with input= hangs on xclip.
-
     Raises:
         RuntimeError: If clipboard cannot be cleared.
     """
     try:
-        proc = subprocess.Popen(
-            ['xclip', '-selection', 'clipboard'],
-            stdin=subprocess.PIPE, env=_get_env(),
+        result = subprocess.run(
+            ['xsel', '--clipboard', '--input'],
+            input=b'',
+            capture_output=True, timeout=3.0,
+            env=_get_env(),
         )
-        proc.stdin.write(b'')
-        proc.stdin.close()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise RuntimeError("Clipboard clear timed out after 2s")
+        if result.returncode != 0:
+            raise RuntimeError(f"xsel clear failed: {result.stderr.decode()}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Clipboard clear timed out after 3s")
     except RuntimeError:
         raise
     except Exception as e:
@@ -85,18 +84,16 @@ def write_marker(marker: str):
         RuntimeError: If marker cannot be written to clipboard.
     """
     try:
-        proc = subprocess.Popen(
-            ['xclip', '-selection', 'clipboard'],
-            stdin=subprocess.PIPE, env=_get_env(),
+        result = subprocess.run(
+            ['xsel', '--clipboard', '--input'],
+            input=marker.encode('utf-8'),
+            capture_output=True, timeout=3.0,
+            env=_get_env(),
         )
-        proc.stdin.write(marker.encode())
-        proc.stdin.close()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise RuntimeError("Clipboard write_marker timed out after 2s")
+        if result.returncode != 0:
+            raise RuntimeError(f"xsel write failed: {result.stderr.decode()}")
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Clipboard write_marker timed out after 3s")
     except RuntimeError:
         raise
     except Exception as e:
