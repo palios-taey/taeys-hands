@@ -2,8 +2,16 @@
 taey_inspect - Scan platform AT-SPI tree and return visible elements.
 
 The foundation tool. Must be called before any other interaction.
-Switches to the platform tab, scans AT-SPI tree, scrolls to bottom,
-and returns all visible elements for Claude to interpret.
+Switches to the platform tab, scans AT-SPI tree, and returns all
+visible elements for Claude to interpret.
+
+Scroll behavior (controlled by `scroll` parameter):
+- "bottom" (default): Scroll to bottom before scanning. Best for normal
+  chat workflows where you want to see the latest messages.
+- "top": Scroll to top before scanning. Useful for seeing page headers.
+- "none": Don't scroll at all. Essential for multi-step extraction of
+  long content (e.g. Perplexity Deep Research reports) where scrolling
+  would disrupt the current viewport position.
 
 Works with OR without a plan:
 - With plan: navigates to specific URL on first call, skips on subsequent
@@ -22,19 +30,21 @@ from core.platforms import BASE_URLS, SCREEN_HEIGHT
 logger = logging.getLogger(__name__)
 
 
-def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
+def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs) -> Dict[str, Any]:
     """Inspect a platform and return all visible elements.
 
     Flow:
     1. If plan exists with URL and not yet navigated: navigate to URL
     2. Otherwise: just switch to platform tab (stateless mode)
-    3. Scroll to bottom, scan AT-SPI tree
+    3. Scroll according to `scroll` parameter, scan AT-SPI tree
     4. Find all elements, filter to useful ones
     5. Store in Redis
 
     Args:
         platform: Which platform to inspect.
         redis_client: Redis client for plan/state storage.
+        scroll: Where to scroll before scanning. "bottom" (default),
+                "top", or "none" (preserve current scroll position).
 
     Returns:
         Dict with success, url, state, controls, platform_context.
@@ -93,7 +103,11 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
         inp.press_key('Return')
         time.sleep(10.0)  # Wait for page load
 
-        inp.scroll_to_bottom()
+        # Scroll per parameter (navigation always needs some scroll for fresh page)
+        if scroll == 'top':
+            inp.press_key('Home')
+        elif scroll != 'none':
+            inp.scroll_to_bottom()
         time.sleep(1.0)
 
         # Mark as navigated in plan
@@ -107,9 +121,16 @@ def handle_inspect(platform: str, redis_client, **kwargs) -> Dict[str, Any]:
             return result
         time.sleep(0.5)
 
-        # Scroll to bottom to see latest content
-        inp.press_key('End')
-        time.sleep(0.5)
+        # Scroll per parameter
+        if scroll == 'top':
+            inp.press_key('Home')
+            time.sleep(0.5)
+        elif scroll == 'none':
+            pass  # Preserve current scroll position
+        else:
+            # Default: scroll to bottom to see latest content
+            inp.press_key('End')
+            time.sleep(0.5)
 
     # Step 3: Get Firefox and platform document
     firefox = atspi.find_firefox()
