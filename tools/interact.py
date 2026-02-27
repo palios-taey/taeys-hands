@@ -2,7 +2,12 @@
 taey_set_map, taey_click, taey_click_at - Control map and clicking.
 
 Stores interpreted control coordinates and provides click operations.
-Uses AT-SPI do_action(0) as primary click method with xdotool fallback.
+Uses xdotool coordinate click as primary (generates real pointer events)
+with AT-SPI do_action(0) as fallback for specific platforms (Gemini).
+
+CRITICAL: AT-SPI do_action(0) returns True on ChatGPT/Grok buttons
+without actually triggering the React event handlers. Only real pointer
+events (xdotool mousemove+click) reliably open dropdowns on these platforms.
 """
 
 import json
@@ -104,33 +109,33 @@ def handle_click(platform: str, target: str,
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab", "success": False}
 
-    # Try AT-SPI click first via cached element lookup
+    # xdotool coordinate click is PRIMARY - generates real pointer events
+    # that React/DraftJS event handlers actually respond to.
+    # AT-SPI do_action(0) lies on ChatGPT/Grok (returns True, does nothing).
+    if inp.click_at(x, y):
+        time.sleep(0.2)
+        return {
+            "success": True,
+            "platform": platform,
+            "target": target,
+            "clicked_at": {"x": x, "y": y},
+            "method": "xdotool",
+        }
+
+    # AT-SPI fallback - useful for Gemini where xdotool sometimes fails
+    logger.warning(f"xdotool click failed for '{target}' at ({x},{y}), trying AT-SPI do_action")
     element = find_element_at(platform, x, y)
-    if element:
-        if atspi_click(element):
-            time.sleep(0.2)
-            return {
-                "success": True,
-                "platform": platform,
-                "target": target,
-                "clicked_at": {"x": x, "y": y},
-                "method": "atspi",
-            }
+    if element and atspi_click(element):
+        time.sleep(0.2)
+        return {
+            "success": True,
+            "platform": platform,
+            "target": target,
+            "clicked_at": {"x": x, "y": y},
+            "method": "atspi",
+        }
 
-    # xdotool coordinate click — log WARNING so caller knows this is degraded
-    logger.warning(f"AT-SPI click failed for '{target}' at ({x},{y}), using xdotool coordinate click")
-    if not inp.click_at(x, y):
-        return {"error": f"Click at ({x}, {y}) failed via both AT-SPI and xdotool", "success": False}
-
-    time.sleep(0.2)
-    return {
-        "success": True,
-        "platform": platform,
-        "target": target,
-        "clicked_at": {"x": x, "y": y},
-        "method": "xdotool",
-        "warning": "AT-SPI failed, used xdotool coordinate click",
-    }
+    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI", "success": False}
 
 
 def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
@@ -150,28 +155,26 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab", "success": False}
 
-    # Try AT-SPI click first via cached element lookup
+    # xdotool coordinate click is PRIMARY
+    if inp.click_at(x, y):
+        time.sleep(0.3)
+        return {
+            "success": True,
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "xdotool",
+        }
+
+    # AT-SPI fallback
+    logger.warning(f"xdotool click failed at ({x},{y}), trying AT-SPI do_action")
     element = find_element_at(platform, x, y)
-    if element:
-        if atspi_click(element):
-            time.sleep(0.3)
-            return {
-                "success": True,
-                "platform": platform,
-                "clicked_at": {"x": x, "y": y},
-                "method": "atspi",
-            }
+    if element and atspi_click(element):
+        time.sleep(0.3)
+        return {
+            "success": True,
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "atspi",
+        }
 
-    # xdotool coordinate click — log WARNING so caller knows this is degraded
-    logger.warning(f"AT-SPI click failed at ({x},{y}), using xdotool coordinate click")
-    if not inp.click_at(x, y):
-        return {"error": f"Click at ({x}, {y}) failed via both AT-SPI and xdotool", "success": False}
-
-    time.sleep(0.3)
-    return {
-        "success": True,
-        "platform": platform,
-        "clicked_at": {"x": x, "y": y},
-        "method": "xdotool",
-        "warning": "AT-SPI failed, used xdotool coordinate click",
-    }
+    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI", "success": False}
