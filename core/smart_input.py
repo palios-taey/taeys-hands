@@ -1,12 +1,12 @@
 """
-Smart text entry with hybrid fallback cascade.
+Smart text entry — no fallback cascade.
 
-Bypasses xdotool's character-drop bug (delay /= 2 causes X server
-to suppress doubled consonants) by using a priority cascade:
+Two strategies, determined by element capabilities:
+  1. AT-SPI EditableText.insert_text() - for elements with EditableText interface
+  2. Clipboard paste via xsel + Ctrl+V - for all other elements
 
-  1. AT-SPI EditableText.insert_text() - direct DOM injection
-  2. Clipboard paste via xsel + Ctrl+V - always triggers full event chain
-  3. xdotool type --delay 50 - last resort with safe delay
+Each strategy either succeeds or returns failure. No silent cascading
+to lower-quality methods (xdotool type has character-drop bugs).
 
 Based on Perplexity Deep Research audits (Feb 2026).
 Uses capability-based strategy detection - NO per-platform hardcoding.
@@ -62,27 +62,28 @@ def smart_type(text: str, platform: str = 'chatgpt',
     """
     strategy = _detect_strategy(entry_element)
 
-    # Strategy 1: AT-SPI direct text injection
+    # AT-SPI direct text injection (when element supports EditableText)
     if strategy == 'atspi' and entry_element is not None:
         result = _try_atspi_insert(entry_element, text)
         if result['success']:
-            # Verify by character count only (not content comparison)
-            # to avoid false negatives on contenteditable transforms
             if _verify_char_count(entry_element, text):
                 return {**result, 'verified': True}
             else:
-                # Trust insert_text return value - don't retry (causes double-entry)
                 logger.warning("AT-SPI insert succeeded but char count check failed, "
                                "trusting insert_text return value")
                 return {**result, 'verified': False}
+        # AT-SPI failed — return failure, no cascade
+        logger.error(f"AT-SPI insert_text FAILED: {result.get('error', 'unknown')}")
+        return result
 
-    # Strategy 2: Clipboard paste (xsel + Ctrl+V)
+    # Clipboard paste (when element doesn't support EditableText)
     result = _try_clipboard_paste(text)
     if result['success']:
         return result
 
-    # Strategy 3: xdotool with safe delay (last resort)
-    return _try_xdotool_safe(text)
+    # Clipboard failed — return failure, no cascade to xdotool
+    logger.error(f"Clipboard paste FAILED: {result.get('error', 'unknown')}")
+    return result
 
 
 def _try_atspi_insert(element, text: str) -> dict:
@@ -139,9 +140,6 @@ def _try_clipboard_paste(text: str) -> dict:
 
         # Write new text via xsel
         write_ok = _clipboard_write_xsel(text)
-        if not write_ok:
-            # Fallback to xclip pipe if xsel fails
-            write_ok = _clipboard_write_xclip(text)
 
         if not write_ok:
             return {'success': False, 'method': 'clipboard', 'error': 'Failed to write to clipboard'}

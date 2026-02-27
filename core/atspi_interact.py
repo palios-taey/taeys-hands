@@ -77,19 +77,17 @@ def clear_cache(platform: str = None):
 # =========================================================================
 
 def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
-    """Universal click: AT-SPI do_action first, xdotool fallback.
+    """Click element via AT-SPI do_action only.
 
-    Strategy hierarchy:
-    1. AT-SPI do_action(0) - D-Bus, bypasses X11 entirely
-    2. AT-SPI grab_focus() + Enter key - for focusable elements
-    3. xdotool coordinate click - last resort
+    No fallback cascade. If AT-SPI do_action fails, returns False.
+    Caller (interact.py) decides whether to use xdotool as alternative.
 
     Args:
         element: Element dict with 'atspi_obj' key.
         timeout: Post-click delay for UI to respond.
 
     Returns:
-        True if click succeeded via any method.
+        True if AT-SPI do_action succeeded.
     """
     obj = element.get('atspi_obj')
 
@@ -98,27 +96,14 @@ def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
         logger.debug(f"Skipping defunct element: '{element.get('name', '')[:50]}'")
         return False
 
-    # Strategy 1: AT-SPI do_action (most reliable for buttons/links)
     if obj and _try_do_action(obj):
         logger.info(f"AT-SPI do_action click: '{element.get('name', '')[:50]}' "
                      f"[{element.get('role', '')}]")
         time.sleep(timeout)
         return True
 
-    # Strategy 2: AT-SPI grab_focus + activate key
-    if obj and _try_focus_and_activate(obj):
-        logger.info(f"AT-SPI focus+Enter click: '{element.get('name', '')[:50]}' "
-                     f"[{element.get('role', '')}]")
-        time.sleep(timeout)
-        return True
-
-    # Strategy 3: xdotool coordinate click (fallback)
-    x, y = element.get('x', 0), element.get('y', 0)
-    if x > 0 and y > 0:
-        logger.info(f"xdotool fallback click at ({x}, {y}): "
-                     f"'{element.get('name', '')[:50]}'")
-        return _xdotool_click(x, y)
-
+    logger.warning(f"AT-SPI do_action FAILED for '{element.get('name', '')[:50]}' "
+                   f"[{element.get('role', '')}]")
     return False
 
 

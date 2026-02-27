@@ -117,9 +117,10 @@ def handle_click(platform: str, target: str,
                 "method": "atspi",
             }
 
-    # Fallback to xdotool coordinate click
+    # xdotool coordinate click — log WARNING so caller knows this is degraded
+    logger.warning(f"AT-SPI click failed for '{target}' at ({x},{y}), using xdotool coordinate click")
     if not inp.click_at(x, y):
-        return {"error": f"Click at ({x}, {y}) failed", "success": False}
+        return {"error": f"Click at ({x}, {y}) failed via both AT-SPI and xdotool", "success": False}
 
     time.sleep(0.2)
     return {
@@ -128,6 +129,7 @@ def handle_click(platform: str, target: str,
         "target": target,
         "clicked_at": {"x": x, "y": y},
         "method": "xdotool",
+        "warning": "AT-SPI failed, used xdotool coordinate click",
     }
 
 
@@ -160,9 +162,10 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
                 "method": "atspi",
             }
 
-    # Fallback to xdotool coordinate click
+    # xdotool coordinate click — log WARNING so caller knows this is degraded
+    logger.warning(f"AT-SPI click failed at ({x},{y}), using xdotool coordinate click")
     if not inp.click_at(x, y):
-        return {"error": f"Click at ({x}, {y}) failed", "success": False}
+        return {"error": f"Click at ({x}, {y}) failed via both AT-SPI and xdotool", "success": False}
 
     time.sleep(0.3)
     return {
@@ -170,4 +173,5 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
         "platform": platform,
         "clicked_at": {"x": x, "y": y},
         "method": "xdotool",
+        "warning": "AT-SPI failed, used xdotool coordinate click",
     }
