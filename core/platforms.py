@@ -77,5 +77,52 @@ SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
 # All platforms
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
-# Screen bounds (auto-detected from X display)
-SCREEN_WIDTH, SCREEN_HEIGHT = _detect_screen_size()
+# Screen bounds (lazy-detected from X display on first access)
+_screen_size = None
+
+
+def get_screen_size() -> tuple:
+    """Get screen dimensions, detecting on first call.
+
+    Returns:
+        (width, height) tuple.
+
+    Raises:
+        RuntimeError: If screen size cannot be detected.
+    """
+    global _screen_size
+    if _screen_size is None:
+        _screen_size = _detect_screen_size()
+    return _screen_size
+
+
+# Module-level aliases for backward compat - these are properties
+# that raise on access if DISPLAY is unavailable.
+class _LazyScreenDim:
+    def __init__(self, index):
+        self._index = index
+
+    def __int__(self):
+        return get_screen_size()[self._index]
+
+    def __eq__(self, other):
+        return int(self) == other
+
+    def __lt__(self, other):
+        return int(self) < other
+
+    def __le__(self, other):
+        return int(self) <= other
+
+    def __gt__(self, other):
+        return int(self) > other
+
+    def __ge__(self, other):
+        return int(self) >= other
+
+    def __repr__(self):
+        return str(int(self))
+
+
+SCREEN_WIDTH = _LazyScreenDim(0)
+SCREEN_HEIGHT = _LazyScreenDim(1)

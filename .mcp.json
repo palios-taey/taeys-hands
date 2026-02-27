@@ -3,7 +3,10 @@
     "taeys-hands": {
       "type": "stdio",
       "command": "/usr/bin/python3",
-      "args": ["server.py"]
+      "args": ["server.py"],
+      "env": {
+        "DISPLAY": ":0"
+      }
     }
   }
 }
