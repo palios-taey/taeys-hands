@@ -99,20 +99,8 @@ def handle_quick_extract(platform: str, redis_client,
 
     content = clipboard.read()
 
-    # Retry once if clipboard empty (race condition with some platforms)
-    if not content:
-        time.sleep(0.5)
-        content = clipboard.read()
-
-    # Second attempt: try second-newest copy button if newest didn't work
-    if not content and len(copy_buttons) >= 2:
-        second = copy_buttons[-2]
-        clipboard.clear()
-        time.sleep(0.1)
-        inp.click_at(second['x'], second['y'])
-        time.sleep(0.8)
-        content = clipboard.read()
-
+    # No retry, no second-button fallback. If clipboard is empty, the Copy
+    # button didn't work. Return failure — caller decides what to do.
     if not content:
         return {
             "success": False,

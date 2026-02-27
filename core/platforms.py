@@ -14,7 +14,10 @@ def _detect_screen_size() -> tuple:
     """Detect screen dimensions from X display via xdpyinfo.
 
     Returns:
-        (width, height) tuple. Falls back to (1920, 1080) if detection fails.
+        (width, height) tuple.
+
+    Raises:
+        RuntimeError: If screen size cannot be detected.
     """
     try:
         result = subprocess.run(
@@ -26,9 +29,9 @@ def _detect_screen_size() -> tuple:
                 parts = line.strip().split()
                 w, h = parts[1].split('x')
                 return int(w), int(h)
-    except Exception:
-        pass
-    return 1920, 1080
+    except Exception as e:
+        raise RuntimeError(f"Screen size detection failed (xdpyinfo error): {e}")
+    raise RuntimeError("Screen size detection failed: no 'dimensions:' line in xdpyinfo output")
 
 
 # Tab shortcuts (Alt+N) configured in Firefox
