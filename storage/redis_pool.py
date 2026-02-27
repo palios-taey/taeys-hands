@@ -28,9 +28,11 @@ else:
 
 DEFAULT_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
-# Node identity for key scoping.
-# Each machine (node-1, jetson, thor) gets isolated Redis keys.
-# Override with TAEY_NODE_ID env var if needed.
+# Instance identity for key scoping.
+# Set TAEY_NODE_ID in each MCP server's env config to isolate instances.
+# Multiple sessions on the same machine MUST have different TAEY_NODE_ID
+# values (e.g., "taeys-hands" vs "taey-ed") or they'll share Redis state.
+# Defaults to hostname — only safe when one instance per machine.
 NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
 
 _pool: Optional[redis.ConnectionPool] = None
@@ -38,15 +40,17 @@ _client: Optional[redis.Redis] = None
 
 
 def node_key(suffix: str) -> str:
-    """Return a node-scoped Redis key.
+    """Return an instance-scoped Redis key.
 
-    Prevents key collision when multiple machines share one Redis.
+    Prevents key collision between MCP server instances sharing Redis.
+    Works across machines (Spark/Jetson/Thor) and across sessions on
+    the same machine (taeys-hands/taey-ed).
 
     Args:
         suffix: Key suffix (e.g., 'current_map', 'pending_prompt:claude').
 
     Returns:
-        Full key like 'taey:jetson:current_map'.
+        Full key like 'taey:taeys-hands:current_map'.
     """
     return f"taey:{NODE_ID}:{suffix}"
 
