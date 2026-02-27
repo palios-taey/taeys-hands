@@ -142,9 +142,11 @@ def focus_firefox(timeout: int = 5) -> bool:
 
 
 def switch_to_platform(platform: str) -> bool:
-    """Switch to a platform tab using Alt+N shortcut.
+    """Switch to a platform tab.
 
-    Activates Firefox window and presses the platform's tab shortcut.
+    Tries Alt+N shortcut first. If that fails to land on the correct
+    platform (verified via AT-SPI URL), falls back to Ctrl+Tab cycling.
+    Alt+N is intercepted by some window managers (e.g. GNOME Shell on Jetson).
 
     Args:
         platform: Platform name (e.g., 'claude').
@@ -152,17 +154,61 @@ def switch_to_platform(platform: str) -> bool:
     Returns:
         True if switch succeeded.
     """
-    from core.platforms import TAB_SHORTCUTS
-    shortcut = TAB_SHORTCUTS.get(platform)
-    if not shortcut:
+    from core.platforms import TAB_SHORTCUTS, URL_PATTERNS
+    from core import atspi
+
+    if platform not in URL_PATTERNS:
         return False
 
     if not focus_firefox():
         return False
 
-    press_key(shortcut)
-    time.sleep(0.5)
-    return True
+    # Frame title keywords for each platform
+    _FRAME_KEYWORDS = {
+        'chatgpt': 'chatgpt', 'claude': 'claude', 'gemini': 'gemini',
+        'grok': 'grok', 'perplexity': 'perplexity',
+        'x_twitter': '/ x', 'linkedin': 'linkedin',
+    }
+
+    def _on_target() -> bool:
+        """Check if Firefox frame title matches target platform."""
+        firefox = atspi.find_firefox()
+        if not firefox:
+            return False
+        try:
+            for j in range(firefox.get_child_count()):
+                frame = firefox.get_child_at_index(j)
+                if frame:
+                    title = (frame.get_name() or '').lower()
+                    keyword = _FRAME_KEYWORDS.get(platform, '')
+                    if keyword and keyword in title:
+                        return True
+        except Exception:
+            pass
+        return False
+
+    # Already on the right tab?
+    if _on_target():
+        return True
+
+    # Try Alt+N shortcut first (works on some machines)
+    shortcut = TAB_SHORTCUTS.get(platform)
+    if shortcut:
+        press_key(shortcut)
+        time.sleep(0.5)
+        if _on_target():
+            return True
+
+    # Fallback: Ctrl+Tab cycling (works everywhere)
+    max_tabs = 8
+    for _ in range(max_tabs):
+        press_key('ctrl+Tab')
+        time.sleep(0.4)
+        if _on_target():
+            return True
+
+    logger.warning(f"Could not switch to {platform} after Alt+N and Ctrl+Tab cycling")
+    return False
 
 
 def scroll_to_bottom():
