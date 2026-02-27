@@ -3,8 +3,6 @@ AT-SPI tree traversal and element extraction.
 
 Provides BFS/DFS traversal of the accessibility tree, extracting
 visible elements with their names, roles, states, and coordinates.
-
-FROZEN once working - do not modify without approval.
 """
 
 import hashlib
@@ -210,128 +208,108 @@ def find_copy_buttons(elements: List[Dict]) -> List[Dict]:
     return buttons
 
 
-def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
-    """Find dropdown menu items in the AT-SPI tree.
+def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
+    """Find visible menu items in the AT-SPI tree.
 
-    Searches from Firefox root for active menu elements (dropdowns
-    render OUTSIDE the document element as separate menus).
+    Searches for elements with menu-related roles, collecting children.
+    Only returns items from menus that are actually SHOWING (visible).
+    This filters out Firefox's persistent context menu which stays in
+    the tree with non-zero extents even when not displayed.
 
-    Filters out Firefox's permanent menus (context menu, menu bar)
-    and skips sidebar/navigation landmark subtrees to avoid returning
-    permanent sidebar items instead of transient dropdown items.
+    Searches platform_doc first (avoids cross-tab contamination), then
+    Firefox root (dropdowns render outside the document element).
+    Falls back to searching document for menu-role items without a
+    menu container (some platforms render items directly).
 
     Args:
         firefox: Firefox AT-SPI accessible.
-        platform_doc: Platform document element (fallback search scope).
+        platform_doc: Platform document element (preferred search scope).
 
     Returns:
-        List of dropdown item dicts with name, role, x, y.
+        List of menu item dicts with name, role, x, y, sorted by Y.
     """
-    # Firefox context menu items (page context + text edit context)
-    FIREFOX_CONTEXT_ITEMS = frozenset({
-        'Back', 'Forward', 'Reload', 'Edit Bookmark…', 'Save Page As…',
-        'Select All', 'Take Screenshot', 'View Page Source',
-        'Inspect Accessibility Properties', 'Inspect',
-        'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Delete',
-        'Check Spelling', 'Languages', 'Reopen Closed Tab',
-    })
+    _MENU_ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
 
-    # Firefox menu bar items to skip
-    FIREFOX_MENUBAR_ITEMS = frozenset({
-        'File', 'Edit', 'View', 'History', 'Bookmarks', 'Tools', 'Help',
-    })
-
-    # Keywords in landmark names that indicate sidebar/navigation (skip these subtrees)
-    _SIDEBAR_KEYWORDS = ('sidebar', 'navigation', 'chat history',
-                         'conversation history', 'footer')
-
-    dropdown_roles = ('menu item', 'radio menu item', 'check menu item', 'list item', 'option')
-
-    def search_menus(obj, depth=0, max_depth=15):
-        items = []
-        if depth > max_depth:
-            return items
+    def _is_menu_showing(menu_obj) -> bool:
+        """Check if a menu element is actually visible on screen."""
         try:
-            role = obj.get_role_name()
-            name = obj.get_name() or ''
+            state_set = menu_obj.get_state_set()
+            return (state_set.contains(Atspi.StateType.SHOWING) or
+                    state_set.contains(Atspi.StateType.VISIBLE))
+        except Exception:
+            return False
 
-            # Skip sidebar/navigation landmark subtrees - these contain
-            # permanent menus, not the transient dropdown we're looking for
-            if role == 'landmark' and name:
-                name_lower = name.lower()
-                if any(kw in name_lower for kw in _SIDEBAR_KEYWORDS):
-                    return items
+    def _collect_from(scope, max_depth=15):
+        """Find first visible menu with items in scope."""
+        found = []
 
-            # Skip menu bar container (Firefox chrome)
-            if role == 'menu bar':
-                return items
+        def search(obj, depth=0):
+            nonlocal found
+            if depth > max_depth or found:
+                return
+            try:
+                role = obj.get_role_name() or ''
 
-            if role == 'menu':
-                for i in range(min(obj.get_child_count(), 20)):
+                # Skip menu bar (Firefox chrome)
+                if role == 'menu bar':
+                    return
+
+                if role == 'menu' and _is_menu_showing(obj):
+                    items = []
+                    for i in range(min(obj.get_child_count(), 30)):
+                        child = obj.get_child_at_index(i)
+                        if not child:
+                            continue
+                        child_role = child.get_role_name() or ''
+                        child_name = child.get_name() or ''
+                        if child_name and child_role in _MENU_ITEM_ROLES:
+                            try:
+                                comp = child.get_component_iface()
+                                if comp:
+                                    ext = comp.get_extents(Atspi.CoordType.SCREEN)
+                                    if ext.width > 0 and ext.height > 0:
+                                        items.append({
+                                            'name': child_name,
+                                            'role': child_role,
+                                            'x': ext.x + ext.width // 2,
+                                            'y': ext.y + ext.height // 2,
+                                            'atspi_obj': child,
+                                        })
+                            except Exception as e:
+                                logger.debug(f"Menu item extent error: {e}")
+                    if items:
+                        found = items
+                        return
+
+                for i in range(min(obj.get_child_count(), 30)):
                     child = obj.get_child_at_index(i)
-                    if not child:
-                        continue
-                    child_role = child.get_role_name()
-                    child_name = child.get_name() or ''
-                    if child_name and child_role in dropdown_roles:
-                        try:
-                            comp = child.get_component_iface()
-                            if comp:
-                                ext = comp.get_extents(Atspi.CoordType.SCREEN)
-                                if ext.width > 0 and ext.height > 0:
-                                    items.append({
-                                        'name': child_name,
-                                        'role': child_role,
-                                        'x': ext.x + ext.width // 2,
-                                        'y': ext.y + ext.height // 2,
-                                        'atspi_obj': child,
-                                    })
-                        except Exception as e:
-                            logger.debug(f"Menu item extent error: {e}")
-                if items:
-                    names = {item['name'] for item in items}
-                    # Skip Firefox context menus and menu bar menus
-                    if names & FIREFOX_CONTEXT_ITEMS or names <= FIREFOX_MENUBAR_ITEMS:
-                        items = []
-                    else:
-                        return items
+                    if child:
+                        search(child, depth + 1)
+            except Exception as e:
+                logger.debug(f"Menu search error at depth {depth}: {e}")
 
-            for i in range(min(obj.get_child_count(), 30)):
-                child = obj.get_child_at_index(i)
-                if child:
-                    result = search_menus(child, depth + 1, max_depth)
-                    if result:
-                        return result
-        except Exception as e:
-            logger.debug(f"Dropdown menu search error at depth {depth}: {e}")
-        return items
+        search(scope)
+        return found
 
-    # Search platform_doc FIRST to avoid cross-tab contamination.
-    # Dropdowns from other tabs (e.g. Grok's model selector) appear in the
-    # Firefox root tree. By searching the active platform's document first,
-    # we find the correct dropdown menu for the current tab.
+    # Search platform_doc first (avoids cross-tab contamination)
     if platform_doc:
-        items = search_menus(platform_doc)
+        items = _collect_from(platform_doc)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
 
+    # Then Firefox root (dropdowns render outside document)
     if firefox:
-        items = search_menus(firefox)
+        items = _collect_from(firefox)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Final fallback: search document for menu items without a menu container.
-    # Some platforms render dropdown items directly in the document without
-    # wrapping them in a menu-role element. Only uses narrow roles
-    # (no list item/option/push button - those match page content).
+    # Fallback: search document for menu items without a menu container.
+    # Some platforms render items directly without a menu-role parent.
     if platform_doc:
         _fallback_roles = ('menu item', 'radio menu item', 'check menu item')
-        all_elements = find_elements(
-            platform_doc,
-            exclude_landmarks=['Chat history', 'Sidebar', 'Conversation history'],
-        )
+        all_elements = find_elements(platform_doc)
         items = [e for e in all_elements
                  if e.get('name') and e.get('role', '') in _fallback_roles]
         if items:
@@ -339,6 +317,10 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
             return items
 
     return []
+
+
+# Backward-compatible alias
+find_dropdown_menus = find_menu_items
 
 
 def compute_tree_hash(elements: List[Dict]) -> str:

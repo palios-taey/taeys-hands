@@ -27,21 +27,13 @@ def handle_set_map(platform: str, controls: Dict[str, Dict],
 
     Maps are ephemeral - only ONE map exists at a time.
     TTL of 30 minutes as safety net.
-
-    Args:
-        platform: Which platform these controls are for.
-        controls: Dict of control names to {x, y} coordinates.
-        redis_client: Redis client.
-
-    Returns:
-        Success/failure with stored control names.
     """
     if not redis_client:
-        return {"error": "Redis not available", "success": False}
+        return {"error": "Redis not available"}
 
     for key, coord in controls.items():
         if 'x' not in coord or 'y' not in coord:
-            return {"error": f"Control '{key}' missing x or y", "success": False}
+            return {"error": f"Control '{key}' missing x or y"}
 
     redis_client.setex("taey:v4:current_map", 1800, json.dumps({
         'platform': platform,
@@ -55,7 +47,6 @@ def handle_set_map(platform: str, controls: Dict[str, Dict],
     }))
 
     return {
-        "success": True,
         "platform": platform,
         "controls_stored": list(controls.keys()),
     }
@@ -77,22 +68,12 @@ def handle_click(platform: str, target: str,
                  redis_client) -> Dict[str, Any]:
     """Click a named control using stored map coordinates.
 
-    Tries AT-SPI do_action(0) first via cached element lookup,
-    falls back to xdotool coordinate click.
-
-    Args:
-        platform: Which platform.
-        target: Control name (input, send, attach, model, mode, copy).
-        redis_client: Redis client.
-
-    Returns:
-        Success/failure with click coordinates and method used.
+    Looks up coordinates from map, delegates to handle_click_at.
     """
     map_data = get_map(platform, redis_client)
     if not map_data:
         return {
             "error": f"No current map for {platform}. Run taey_inspect + taey_set_map first.",
-            "success": False,
         }
 
     controls = map_data.get('controls', {})
@@ -100,66 +81,29 @@ def handle_click(platform: str, target: str,
         return {
             "error": f"Control '{target}' not found in {platform} map",
             "available": list(controls.keys()),
-            "success": False,
         }
 
     coord = controls[target]
-    x, y = coord['x'], coord['y']
-
-    if not inp.switch_to_platform(platform):
-        return {"error": f"Failed to switch to {platform} tab", "success": False}
-
-    # xdotool coordinate click is PRIMARY - generates real pointer events
-    # that React/DraftJS event handlers actually respond to.
-    # AT-SPI do_action(0) lies on ChatGPT/Grok (returns True, does nothing).
-    if inp.click_at(x, y):
-        time.sleep(0.2)
-        return {
-            "success": True,
-            "platform": platform,
-            "target": target,
-            "clicked_at": {"x": x, "y": y},
-            "method": "xdotool",
-        }
-
-    # AT-SPI fallback - useful for Gemini where xdotool sometimes fails
-    logger.warning(f"xdotool click failed for '{target}' at ({x},{y}), trying AT-SPI do_action")
-    element = find_element_at(platform, x, y)
-    if element and atspi_click(element):
-        time.sleep(0.2)
-        return {
-            "success": True,
-            "platform": platform,
-            "target": target,
-            "clicked_at": {"x": x, "y": y},
-            "method": "atspi",
-        }
-
-    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI", "success": False}
+    result = handle_click_at(platform, coord['x'], coord['y'])
+    result['target'] = target
+    return result
 
 
 def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
     """Click at specific screen coordinates.
 
-    Tries AT-SPI do_action(0) first via cached element lookup,
-    falls back to xdotool coordinate click.
+    xdotool coordinate click is primary. AT-SPI do_action is fallback
+    (useful for Gemini where xdotool sometimes fails).
 
-    Args:
-        platform: Which platform (for tab switching).
-        x: X coordinate.
-        y: Y coordinate.
-
-    Returns:
-        Success/failure with method used.
+    Returns what happened. Claude verifies by inspecting.
     """
     if not inp.switch_to_platform(platform):
-        return {"error": f"Failed to switch to {platform} tab", "success": False}
+        return {"error": f"Failed to switch to {platform} tab"}
 
     # xdotool coordinate click is PRIMARY
     if inp.click_at(x, y):
         time.sleep(0.3)
         return {
-            "success": True,
             "platform": platform,
             "clicked_at": {"x": x, "y": y},
             "method": "xdotool",
@@ -171,10 +115,9 @@ def handle_click_at(platform: str, x: int, y: int) -> Dict[str, Any]:
     if element and atspi_click(element):
         time.sleep(0.3)
         return {
-            "success": True,
             "platform": platform,
             "clicked_at": {"x": x, "y": y},
             "method": "atspi",
         }
 
-    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI", "success": False}
+    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI"}

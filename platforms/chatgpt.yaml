@@ -24,6 +24,8 @@ quirks:
   - interference: "ChatGPT has active countermeasures against accessibility automation"
   - workaround: "Assume interference first, try action anyway, trust verification"
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
+  - attach: "Dropdown with 'Upload a file' item. Use keyboard nav (Down+Enter) - xdotool coordinate clicks fail on React menu items."
+  - model_default: "GPT-5.2 on temporary chats. Use ?temporary-chat=true URL."
 
 stop_patterns:
   - stop

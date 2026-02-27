@@ -23,6 +23,8 @@ quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
   - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"
   - artifacts: "Use export_menu or tile_then_export for artifact extraction"
+  - attach: "Button 'Open upload file menu' -> dropdown with 'Upload files' item. File attach shifts input Y - always re-inspect after attach."
+  - model_default: "Ultra (2.5 Pro) is default."
 
 stop_patterns:
   - stop

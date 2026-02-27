@@ -254,7 +254,9 @@ def get_tools() -> List[Dict]:
             "name": "taey_send_message",
             "description": (
                 "Send a message with full workflow: type, store in Neo4j, send, spawn monitor.\n\n"
-                "IMPORTANT: Requires taey_inspect + taey_set_map first to have input/send coordinates.\n\n"
+                "IMPORTANT: Requires taey_inspect + taey_set_map first to have input/send coordinates.\n"
+                "Claude must click the input field via taey_click BEFORE calling this.\n"
+                "send_message pastes into whatever is focused, presses Enter, records, spawns daemon.\n\n"
                 "The background monitor daemon will detect response completion and send\n"
                 "a notification via Redis (injected into future tool responses)."
             ),
