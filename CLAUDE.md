@@ -95,6 +95,17 @@ platforms/             # Platform configs (YAML)
 | Redis | 192.168.100.10:6379 |
 | Neo4j | bolt://192.168.100.10:7689 (no auth) |
 
+### MCP Server Hot-Reload
+
+**Python MCP servers do NOT hot-reload code.** `git pull` updates files on disk but the running process keeps old code in memory. **Must restart Claude Code** (`/exit` then `claude`) for code changes to take effect.
+
+### SSH Access (Jetson/Thor)
+
+| Machine | SSH | DISPLAY | tmux session |
+|---------|-----|---------|-------------|
+| Jetson | `ssh jetson` (10.0.0.8) | `:1` | `jetson-claude` |
+| Thor | `ssh thor` (10.0.0.197) | `:1` | `thor-claude` |
+
 ---
 
 ## Workflow
@@ -231,6 +242,12 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 ### Dismiss Before Action
 - Press Escape before any operation to dismiss promo dialogs/popups
 - Platforms constantly push promos that block input fields
+
+### Inspect Scroll Parameter
+- `taey_inspect(scroll="bottom"|"top"|"none")` controls pre-scan scroll behavior
+- `"bottom"` (default): scrolls to bottom before scanning - see latest messages
+- `"none"`: preserves scroll position - needed for multi-step extraction of long content (Deep Research reports)
+- `"top"`: scrolls to page top first - useful for finding elements at top of page
 
 ---
 
@@ -409,3 +426,23 @@ No hardcoded screen values - works on any display size.
 - **`core/clipboard.py`**: xsel-based read/write/clear (unified, no xclip)
 - **`core/atspi_interact.py`**: AT-SPI do_action click, element cache, focus, state checks
 - No smart_input.py or fallback cascades. One input path: clipboard paste.
+
+### AT-SPI Click Strategy (3-tier)
+- **Tier 1**: `do_action(0)` via D-Bus - bypasses X11 entirely, works on all React UIs
+- **Tier 2**: `grab_focus() + Enter` - for focusable elements without Action interface
+- **Tier 3**: `xdotool click` - last resort, coordinate-based
+- Element cache: `_element_cache[platform]` stores last scan with live `atspi_obj` refs
+- `find_element_at()` looks up cached elements by coordinates (Manhattan distance, 30px tolerance)
+
+### X/Twitter Posts and Articles
+- **Posts**: Click "Post" sidebar link → compose modal → paste text (DraftJS: clipboard only) → click Post button
+- **Articles**: Click "Articles" sidebar link (use AT-SPI `do_action(0)`, coordinate click doesn't navigate)
+- **Article editor**: Title entry ("Add a title"), Body entry ("Start writing"), Cover image ("Add photos or video")
+- **Article publish**: Click Publish → confirmation dialog → click Publish again
+- **Reply targeting**: Navigate to the SPECIFIC POST URL to reply to, not the thread root. The reply field replies to whichever post is the "main" post on the page.
+
+### ISMA Knowledge Graph
+- **Weaviate class**: `ISMA_Quantum` (not `ConversationTile`)
+- Properties: `rosetta_summary`, `dominant_motifs`, `motif_data_json`, `hmm_enriched`
+- **Neo4j labels**: `HMMTile`, `HMMMotif`, `Message`, `ChatSession`, `ISMAExchange`, etc.
+- Search HMMTile rosetta_summary fields for enriched content across all platforms
