@@ -121,7 +121,18 @@ def get_tools() -> List[Dict]:
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {"platform": {**PLATFORM_PROP, "description": "Which chat platform to inspect"}},
+                "properties": {
+                    "platform": {**PLATFORM_PROP, "description": "Which chat platform to inspect"},
+                    "scroll": {
+                        "type": "string",
+                        "enum": ["bottom", "top", "none"],
+                        "description": (
+                            "Where to scroll before scanning. Default 'bottom' (see latest chat). "
+                            "Use 'none' for extraction workflows on long content (Deep Research reports) "
+                            "to avoid disrupting scroll position. Use 'top' to scroll to page top first."
+                        ),
+                    },
+                },
                 "required": ["platform"],
             },
         },
@@ -386,7 +397,8 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
         platform = args.get("platform")
         if not platform:
             return {"error": "platform is required"}
-        return handle_inspect(platform, redis_client)
+        scroll = args.get("scroll", "bottom")
+        return handle_inspect(platform, redis_client, scroll=scroll)
 
     if name == "taey_set_map":
         platform = args.get("platform")
