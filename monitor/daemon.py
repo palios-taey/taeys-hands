@@ -18,11 +18,20 @@ Detection strategy:
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any
+
+# Node-scoped key prefix (must match storage/redis_pool.py logic)
+_NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
+
+
+def _node_key(suffix: str) -> str:
+    """Node-scoped Redis key (matches storage.redis_pool.node_key)."""
+    return f"taey:{_NODE_ID}:{suffix}"
 
 # =========================================================================
 # Set DISPLAY before AT-SPI import
@@ -339,7 +348,7 @@ class MonitorDaemon:
 
         if self.redis_client:
             try:
-                self.redis_client.rpush("taey:notifications", notification_json)
+                self.redis_client.rpush(_node_key("notifications"), notification_json)
                 self.redis_client.setex(
                     f"taey:monitor:{self.monitor_id}",
                     3600,

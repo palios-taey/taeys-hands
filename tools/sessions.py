@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from storage import neo4j_client
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ def handle_list_sessions(platform: Optional[str],
             'chatgpt', 'claude', 'gemini', 'grok', 'perplexity',
         ]
         for plat in platforms_to_check:
-            pending = redis_client.get(f"taey:pending_prompt:{plat}")
+            pending = redis_client.get(node_key(f"pending_prompt:{plat}"))
             if pending:
                 try:
                     data = json.loads(pending)

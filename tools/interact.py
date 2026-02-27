@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 
 from core import input as inp
 from core.atspi_interact import find_element_at, atspi_click
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ def handle_set_map(platform: str, controls: Dict[str, Dict],
         if 'x' not in coord or 'y' not in coord:
             return {"error": f"Control '{key}' missing x or y"}
 
-    redis_client.setex("taey:v4:current_map", 1800, json.dumps({
+    redis_client.setex(node_key("current_map"), 1800, json.dumps({
         'platform': platform,
         'controls': controls,
         'timestamp': time.time(),
     }))
 
-    redis_client.setex(f"taey:checkpoint:{platform}:set_map", 1800, json.dumps({
+    redis_client.setex(node_key(f"checkpoint:{platform}:set_map"), 1800, json.dumps({
         'controls': list(controls.keys()),
         'timestamp': time.time(),
     }))
@@ -56,7 +57,7 @@ def get_map(platform: str, redis_client) -> Optional[Dict]:
     """Get stored control map, validating it matches the requested platform."""
     if not redis_client:
         return None
-    data = redis_client.get("taey:v4:current_map")
+    data = redis_client.get(node_key("current_map"))
     if data:
         map_data = json.loads(data)
         if map_data.get('platform') == platform:
