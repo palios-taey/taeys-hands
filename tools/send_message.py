@@ -314,6 +314,11 @@ def handle_send_message(platform: str, message: str,
             "neo4j": neo4j_result,
         }
 
+    # Invalidate stored map - UI mutated after send (response area appears,
+    # input shifts, etc.). Caller MUST re-inspect before further clicks.
+    if redis_client:
+        redis_client.delete("taey:v4:current_map")
+
     return {
         "success": True,
         "platform": platform,
@@ -328,5 +333,5 @@ def handle_send_message(platform: str, message: str,
             "log": daemon_log_path,
         },
         "input_method": type_result.get('method'),
-        "info": "Message sent. Monitor daemon was pre-spawned to catch fast responses.",
+        "info": "Message sent. Map invalidated - re-inspect before further clicks.",
     }

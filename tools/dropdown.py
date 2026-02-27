@@ -1,8 +1,8 @@
 """
-taey_select_dropdown, taey_prepare - Dropdown selection and capabilities.
+taey_select_dropdown, taey_prepare - Dropdown opening and capabilities.
 
-Handles model/mode selection via dropdown menus and returns
-platform capabilities for planning.
+Opens dropdown menus and returns found items for Claude to pick from.
+Claude is the intelligence - no matching logic in tool code.
 """
 
 import json
@@ -13,9 +13,8 @@ from typing import Any, Dict
 
 import yaml
 
-from core import atspi, input as inp
+from core import atspi
 from core.tree import find_elements, find_dropdown_menus
-from core.atspi_interact import atspi_click
 from tools.interact import handle_click
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
@@ -56,24 +55,25 @@ def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> boo
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
-    """Select an item from a dropdown menu.
+    """Open a dropdown and return found items for Claude to pick from.
 
-    1. Click dropdown trigger (model, mode, etc.)
-    2. Re-inspect to find dropdown items
-    3. Click target option
-    4. Re-inspect to validate selection
+    1. Click dropdown trigger via AT-SPI (xdotool fallback)
+    2. Scan AT-SPI tree for menu items
+    3. Return all items with names, roles, coordinates, states
+
+    NO matching logic. NO auto-clicking items. NO validation.
+    Claude reads the items, picks the right one, clicks via taey_click_at.
 
     Args:
         platform: Which platform.
-        dropdown: Which dropdown to open (from map).
-        target_value: Value to select.
+        dropdown: Which dropdown trigger to click.
+        target_value: What caller wants (passed through as context, NOT used for matching).
         redis_client: Redis client.
 
     Returns:
-        Success/failure with validation info.
+        Found items list for Claude to pick from.
     """
-    # Click dropdown trigger - prefer AT-SPI do_action(0) over xdotool coordinates
-    # (Gemini and others may not respond to xdotool clicks on their buttons)
+    # Click dropdown trigger - prefer AT-SPI do_action(0) over xdotool
     trigger_clicked = False
     firefox = atspi.find_firefox()
     if firefox:
@@ -82,15 +82,13 @@ def handle_select_dropdown(platform: str, dropdown: str,
             trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
 
     if not trigger_clicked:
-        # Fallback to coordinate click from stored map
         click_result = handle_click(platform, dropdown, redis_client)
         if not click_result.get("success"):
             return {"error": f"Failed to click {dropdown}: {click_result.get('error')}", "success": False}
 
     time.sleep(0.5)
 
-    # Find dropdown items - search for MENU elements specifically,
-    # not all page elements (which returns marketing text, page content, etc.)
+    # Find dropdown items
     firefox = atspi.find_firefox()
     if not firefox:
         return {"error": "Firefox not found", "success": False}
@@ -99,102 +97,34 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document", "success": False}
 
-    # Primary: find active menu elements (dropdowns render as separate AT-SPI menus)
+    # Primary: find active menu elements
     menu_items = find_dropdown_menus(firefox, doc)
 
-    # Fallback: scan document for actionable elements if no menu found
+    # Fallback: scan for actionable elements if no menu found
     if not menu_items:
         elements = find_elements(doc)
         actionable_roles = ('menu item', 'radio button', 'radio menu item',
                             'push button', 'toggle button', 'check menu item')
         menu_items = [e for e in elements if e.get('role', '') in actionable_roles]
 
-    # Search for target in menu items
-    target_lower = target_value.lower()
-    target_option = None
-    candidates = []
-
+    # Return items - strip atspi_obj (D-Bus proxies can't serialize)
+    items = []
     for e in menu_items:
-        name = (e.get('name') or '').lower()
-        candidates.append(e)
-        if target_lower in name or name in target_lower:
-            target_option = e
-            break
-
-    if not target_option:
-        return {
-            "error": f"Could not find '{target_value}' in dropdown",
-            "available_options": [{"name": e.get('name'), "role": e.get('role')} for e in candidates[:15]],
-            "success": False,
-        }
-
-    # Click target - AT-SPI do_action first, xdotool fallback
-    x, y = target_option['x'], target_option['y']
-    click_method = 'xdotool'
-
-    if target_option.get('atspi_obj'):
-        if atspi_click(target_option):
-            click_method = 'atspi'
-        else:
-            # AT-SPI failed, fall back to xdotool
-            if not inp.click_at(x, y):
-                return {"error": "Failed to click option", "success": False}
-    else:
-        if not inp.click_at(x, y):
-            return {"error": "Failed to click option", "success": False}
-
-    time.sleep(0.5)
-
-    # Validate selection
-    firefox = atspi.find_firefox()
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    validated = False
-
-    if doc:
-        validation_elements = find_elements(doc)
-        for e in validation_elements:
-            name = e.get('name', '')
-            states = e.get('states', [])
-            if target_lower in name.lower():
-                if any(s in states for s in ['selected', 'checked', 'pressed']):
-                    validated = True
-                elif e.get('role') in ('push button', 'toggle button'):
-                    validated = True
-
-    if not validated:
-        # Re-inspect to provide current state for debugging
-        current_state = None
-        if doc:
-            for e in validation_elements:
-                name = e.get('name', '')
-                states = e.get('states', [])
-                if any(s in states for s in ['selected', 'checked', 'pressed', 'focused']):
-                    current_state = name
-                    break
-
-        return {
-            "success": True,  # Click succeeded
-            "platform": platform,
-            "dropdown": dropdown,
-            "selected": target_value,
-            "selection_validated": False,
-            "clicked_at": {"x": x, "y": y},
-            "click_method": click_method,
-            "warning": (
-                f"Could not validate that '{target_value}' is now active. "
-                f"Current detected state: {current_state}. "
-                "CALLER MUST re-inspect to verify before proceeding."
-            ),
-        }
+        items.append({
+            'name': e.get('name', ''),
+            'role': e.get('role', ''),
+            'x': e.get('x'),
+            'y': e.get('y'),
+            'states': e.get('states', []),
+        })
 
     return {
         "success": True,
         "platform": platform,
         "dropdown": dropdown,
-        "selected": target_value,
-        "selection_validated": True,
-        "clicked_at": {"x": x, "y": y},
-        "click_method": click_method,
+        "target_requested": target_value,
+        "items": items,
+        "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click_at.",
     }
 
 

@@ -52,6 +52,8 @@ def find_element_at(platform: str, x: int, y: int,
     for e in elements:
         if not e.get('atspi_obj'):
             continue
+        if is_defunct(e):
+            continue
         dx = abs(e.get('x', 0) - x)
         dy = abs(e.get('y', 0) - y)
         dist = dx + dy
@@ -90,6 +92,11 @@ def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
         True if click succeeded via any method.
     """
     obj = element.get('atspi_obj')
+
+    # Reject defunct D-Bus proxies immediately (DOM node destroyed)
+    if is_defunct(element):
+        logger.debug(f"Skipping defunct element: '{element.get('name', '')[:50]}'")
+        return False
 
     # Strategy 1: AT-SPI do_action (most reliable for buttons/links)
     if obj and _try_do_action(obj):
@@ -199,6 +206,9 @@ def atspi_focus(element: Dict) -> bool:
     """
     obj = element.get('atspi_obj')
     if not obj:
+        return False
+
+    if is_defunct(element):
         return False
 
     try:
