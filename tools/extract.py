@@ -13,6 +13,7 @@ from typing import Any, Dict
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, find_copy_buttons
 from core.platforms import SCREEN_HEIGHT
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def handle_quick_extract(platform: str, redis_client,
     # Retrieve pending prompt to link response to the correct session/message.
     neo4j_stored = None
     if redis_client:
-        pending_json = redis_client.get(f"taey:pending_prompt:{platform}")
+        pending_json = redis_client.get(node_key(f"pending_prompt:{platform}"))
         if pending_json:
             try:
                 pending = json.loads(pending_json)
@@ -169,13 +170,13 @@ def handle_quick_extract(platform: str, redis_client,
     # Handle completion - only if caller explicitly says complete
     plan_consumed = False
     if complete and redis_client:
-        redis_client.delete(f"taey:pending_prompt:{platform}")
-        deleted = redis_client.delete(f"taey:plan:{platform}")
-        redis_client.delete(f"taey:v4:plan:current:{platform}")
-        redis_client.delete(f"taey:checkpoint:{platform}:inspect")
-        redis_client.delete(f"taey:checkpoint:{platform}:set_map")
-        redis_client.delete(f"taey:checkpoint:{platform}:attach")
-        redis_client.delete(f"taey:response_reviewed:{platform}")
+        redis_client.delete(node_key(f"pending_prompt:{platform}"))
+        deleted = redis_client.delete(node_key(f"plan:{platform}"))
+        redis_client.delete(node_key(f"plan:current:{platform}"))
+        redis_client.delete(node_key(f"checkpoint:{platform}:inspect"))
+        redis_client.delete(node_key(f"checkpoint:{platform}:set_map"))
+        redis_client.delete(node_key(f"checkpoint:{platform}:attach"))
+        redis_client.delete(node_key(f"response_reviewed:{platform}"))
         plan_consumed = deleted > 0
 
     return {

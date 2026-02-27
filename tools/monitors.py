@@ -12,6 +12,8 @@ import subprocess
 import logging
 from typing import Any, Dict
 
+from storage.redis_pool import node_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,7 +98,7 @@ def handle_kill_monitors(redis_client) -> Dict[str, Any]:
                 break
 
         # Clear notification queue
-        redis_client.delete("taey:notifications")
+        redis_client.delete(node_key("notifications"))
 
     return {
         "success": True,
