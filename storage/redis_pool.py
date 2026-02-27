@@ -10,6 +10,7 @@ Node-scoped keys prevent collision when multiple machines
 
 import os
 import socket
+import subprocess
 import platform as _platform
 import logging
 from typing import Optional
@@ -28,12 +29,35 @@ else:
 
 DEFAULT_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
-# Instance identity for key scoping.
-# Set TAEY_NODE_ID in each MCP server's env config to isolate instances.
-# Multiple sessions on the same machine MUST have different TAEY_NODE_ID
-# values (e.g., "taeys-hands" vs "taey-ed") or they'll share Redis state.
-# Defaults to hostname — only safe when one instance per machine.
-NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
+
+def _detect_node_id() -> str:
+    """Auto-detect a unique instance ID for Redis key scoping.
+
+    Priority:
+    1. TAEY_NODE_ID env var (explicit override)
+    2. tmux session name (auto-isolates per tmux session)
+    3. hostname (fallback — one instance per machine only)
+    """
+    explicit = os.environ.get('TAEY_NODE_ID')
+    if explicit:
+        return explicit
+
+    # tmux session name: each Claude session runs in its own tmux,
+    # so this naturally isolates taeys-hands vs taey-ed on same machine.
+    try:
+        result = subprocess.run(
+            ['tmux', 'display-message', '-p', '#S'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+
+    return socket.gethostname()
+
+
+NODE_ID = _detect_node_id()
 
 _pool: Optional[redis.ConnectionPool] = None
 _client: Optional[redis.Redis] = None

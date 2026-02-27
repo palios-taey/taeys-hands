@@ -25,12 +25,28 @@ import time
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-# Node-scoped key prefix (must match storage/redis_pool.py logic)
-_NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
+# Instance-scoped key prefix (must match storage/redis_pool.py logic)
+def _detect_node_id() -> str:
+    """Auto-detect instance ID: TAEY_NODE_ID > tmux session > hostname."""
+    explicit = os.environ.get('TAEY_NODE_ID')
+    if explicit:
+        return explicit
+    try:
+        result = subprocess.run(
+            ['tmux', 'display-message', '-p', '#S'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return socket.gethostname()
+
+_NODE_ID = _detect_node_id()
 
 
 def _node_key(suffix: str) -> str:
-    """Node-scoped Redis key (matches storage.redis_pool.node_key)."""
+    """Instance-scoped Redis key (matches storage.redis_pool.node_key)."""
     return f"taey:{_NODE_ID}:{suffix}"
 
 # =========================================================================
