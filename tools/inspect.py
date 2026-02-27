@@ -25,6 +25,7 @@ from typing import Any, Dict
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, find_copy_buttons, detect_chrome_y
+from core.atspi_interact import cache_elements, strip_atspi_obj
 from core.platforms import BASE_URLS, SCREEN_HEIGHT
 
 logger = logging.getLogger(__name__)
@@ -151,26 +152,33 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     all_elements = find_elements(doc)
     elements = filter_useful_elements(all_elements, chrome_y=chrome_y)
 
+    # Cache elements WITH atspi_obj for AT-SPI-first interaction
+    # (tools/interact.py, tools/dropdown.py look up elements by coordinates)
+    cache_elements(platform, all_elements)
+
+    # Strip atspi_obj for JSON serialization (D-Bus proxies can't serialize)
+    elements_json = strip_atspi_obj(elements)
+
     # Truncate long element names to prevent output overflow
     # (Gemini sidebar items can have 200K+ char names from pasted content)
     MAX_NAME_LEN = 200
-    for e in elements:
+    for e in elements_json:
         name = e.get('name', '')
         if len(name) > MAX_NAME_LEN:
             e['name'] = name[:MAX_NAME_LEN] + '...'
 
     copy_buttons = find_copy_buttons(all_elements)
     result['state']['copy_button_count'] = len(copy_buttons)
-    result['state']['element_count'] = len(elements)
+    result['state']['element_count'] = len(elements_json)
     result['state']['total_before_filter'] = len(all_elements)
-    result['controls'] = elements
+    result['controls'] = elements_json
 
     # Step 5: Store in Redis
     if redis_client:
         redis_client.set(f"taey:v4:inspect:{platform}", json.dumps({
             'url': url,
             'state': result['state'],
-            'controls': elements,
+            'controls': elements_json,
             'timestamp': time.time(),
         }))
         redis_client.setex(f"taey:checkpoint:{platform}:inspect", 1800, json.dumps({
