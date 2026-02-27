@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
 from tools.interact import handle_click
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def _handle_file_dialog(platform: str, file_path: str,
 
         # Update attachment checkpoint
         if redis_client:
-            existing = redis_client.get(f"taey:checkpoint:{platform}:attach")
+            existing = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
             if existing:
                 try:
                     data = json.loads(existing)
@@ -71,7 +72,7 @@ def _handle_file_dialog(platform: str, file_path: str,
             else:
                 count, files = 1, [file_path]
 
-            redis_client.set(f"taey:checkpoint:{platform}:attach", json.dumps({
+            redis_client.set(node_key(f"checkpoint:{platform}:attach"), json.dumps({
                 'attached_count': count,
                 'attached_files': files,
                 'last_file': file_path,
@@ -80,7 +81,7 @@ def _handle_file_dialog(platform: str, file_path: str,
 
         # Invalidate stored map - file chip shifts input position
         if redis_client:
-            redis_client.delete("taey:v4:current_map")
+            redis_client.delete(node_key("current_map"))
 
         return {
             "status": "file_attached",
@@ -96,7 +97,7 @@ def _handle_file_dialog(platform: str, file_path: str,
 
     finally:
         if redis_client:
-            redis_client.delete(f"taey:attach:pending:{platform}")
+            redis_client.delete(node_key(f"attach:pending:{platform}"))
 
 
 def _detect_existing_attachments(doc) -> List[Dict]:
@@ -180,7 +181,7 @@ def handle_attach(platform: str, file_path: str,
     # Check for pending attach (continuing after dropdown click)
     pending = None
     if redis_client:
-        pending_json = redis_client.get(f"taey:attach:pending:{platform}")
+        pending_json = redis_client.get(node_key(f"attach:pending:{platform}"))
         if pending_json:
             try:
                 pending = json.loads(pending_json)
@@ -194,7 +195,7 @@ def handle_attach(platform: str, file_path: str,
                 return _handle_file_dialog(platform, file_path, redis_client)
             time.sleep(0.2)
         if redis_client:
-            redis_client.delete(f"taey:attach:pending:{platform}")
+            redis_client.delete(node_key(f"attach:pending:{platform}"))
     elif atspi.is_file_dialog_open(firefox):
         return _handle_file_dialog(platform, file_path, redis_client)
 
@@ -216,7 +217,7 @@ def handle_attach(platform: str, file_path: str,
 
     # Store pending state for when Claude clicks an item (120s TTL)
     if redis_client:
-        redis_client.setex(f"taey:attach:pending:{platform}", 120, json.dumps({
+        redis_client.setex(node_key(f"attach:pending:{platform}"), 120, json.dumps({
             'file_path': file_path,
             'timestamp': time.time(),
         }))

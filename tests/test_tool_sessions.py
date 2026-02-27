@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.sessions import handle_list_sessions
+from storage.redis_pool import node_key
 
 
 def test_list_sessions_empty(mock_redis):
@@ -18,7 +19,7 @@ def test_list_sessions_empty(mock_redis):
 
 
 def test_list_sessions_with_pending(mock_redis):
-    mock_redis._store["taey:pending_prompt:claude"] = json.dumps({
+    mock_redis._store[node_key("pending_prompt:claude")] = json.dumps({
         "sent_at": "2026-01-01T00:00:00",
         "content": "Test message",
     })

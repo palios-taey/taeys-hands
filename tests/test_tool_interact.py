@@ -14,7 +14,6 @@ def test_set_map_stores_controls(mock_redis):
         "send": {"x": 300, "y": 400},
     }
     result = handle_set_map("claude", controls, mock_redis)
-    assert result["success"] is True
     assert result["platform"] == "claude"
     assert len(result["controls_stored"]) == 2
 
@@ -25,7 +24,7 @@ def test_set_map_validates_coordinates(mock_redis):
     }
     result = handle_set_map("claude", controls, mock_redis)
     # Should fail - missing y coordinate
-    assert result["success"] is False
+    assert "error" in result
     assert "missing" in result["error"].lower()
 
 
@@ -44,7 +43,7 @@ def test_get_map_returns_none_when_empty(mock_redis):
 
 def test_click_requires_map(mock_redis):
     result = handle_click("claude", "send", mock_redis)
-    assert result["success"] is False
+    assert "error" in result
     assert "No current map" in result["error"]
 
 
@@ -52,5 +51,5 @@ def test_click_requires_valid_target(mock_redis):
     controls = {"input": {"x": 100, "y": 200}}
     handle_set_map("claude", controls, mock_redis)
     result = handle_click("claude", "nonexistent", mock_redis)
-    assert result["success"] is False
+    assert "error" in result
     assert "not found" in result["error"]

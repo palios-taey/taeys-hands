@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 
 from core import atspi, input as inp
 from storage import neo4j_client
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def handle_send_message(platform: str, message: str,
 
     # Step 4: Store pending_prompt in Redis for extract linkage
     if redis_client:
-        redis_client.setex(f"taey:pending_prompt:{platform}", 3600, json.dumps({
+        redis_client.setex(node_key(f"pending_prompt:{platform}"), 3600, json.dumps({
             'content': message,
             'attachments': attachments or [],
             'session_url': url,
@@ -144,7 +145,7 @@ def handle_send_message(platform: str, message: str,
 
     # Step 7: Invalidate stored map (UI mutated after send)
     if redis_client:
-        redis_client.delete("taey:v4:current_map")
+        redis_client.delete(node_key("current_map"))
 
     result = {
         "platform": platform,

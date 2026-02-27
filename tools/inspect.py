@@ -27,6 +27,7 @@ from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, find_copy_buttons, detect_chrome_y
 from core.atspi_interact import cache_elements, strip_atspi_obj
 from core.platforms import BASE_URLS, SCREEN_HEIGHT
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +110,9 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     plan_id = None
 
     if redis_client:
-        plan_id = redis_client.get(f"taey:v4:plan:current:{platform}")
+        plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
         if plan_id:
-            plan_json = redis_client.get(f"taey:v4:plan:{plan_id}")
+            plan_json = redis_client.get(node_key(f"plan:{plan_id}"))
             if plan_json:
                 try:
                     plan = json.loads(plan_json)
@@ -157,7 +158,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
         # Mark as navigated in plan
         if plan and redis_client and plan_id:
             plan['navigated'] = True
-            redis_client.set(f"taey:v4:plan:{plan_id}", json.dumps(plan))
+            redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
     else:
         # No plan or already navigated - just switch to platform tab
         if not inp.switch_to_platform(platform):
@@ -224,13 +225,13 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
 
     # Step 5: Store in Redis
     if redis_client:
-        redis_client.set(f"taey:v4:inspect:{platform}", json.dumps({
+        redis_client.set(node_key(f"inspect:{platform}"), json.dumps({
             'url': url,
             'state': result['state'],
             'controls': elements_json,
             'timestamp': time.time(),
         }))
-        redis_client.setex(f"taey:checkpoint:{platform}:inspect", 1800, json.dumps({
+        redis_client.setex(node_key(f"checkpoint:{platform}:inspect"), 1800, json.dumps({
             'url': url,
             'copy_button_count': len(copy_buttons),
             'element_count': len(elements),

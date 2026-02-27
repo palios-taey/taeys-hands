@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict, List
 
 from core.platforms import BASE_URLS
+from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
@@ -105,11 +106,11 @@ def _create_plan(platform: str, action: str, params: Dict,
         'created_at': time.time(),
     }
 
-    redis_client.set(f"taey:v4:plan:{plan_id}", json.dumps(plan))
-    redis_client.set(f"taey:v4:plan:current:{platform}", plan_id)
+    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
+    redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
 
     # Hook-compatible format
-    redis_client.setex(f"taey:plan:{platform}", 1800, json.dumps({
+    redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
         'id': plan_id, 'platform': platform, 'action': action,
         'session': session, 'message': message,
         'model': model, 'mode': mode,
@@ -119,7 +120,7 @@ def _create_plan(platform: str, action: str, params: Dict,
 
     # Clear stale checkpoints
     for suffix in ['inspect', 'set_map', 'attach']:
-        redis_client.delete(f"taey:checkpoint:{platform}:{suffix}")
+        redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
     return {
         "success": True,
@@ -139,12 +140,12 @@ def _get_plan(plan_id: str, platform: str, redis_client) -> Dict[str, Any]:
         return {"error": "Redis not available", "success": False}
 
     if not plan_id and platform:
-        plan_id = redis_client.get(f"taey:v4:plan:current:{platform}")
+        plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
 
     if not plan_id:
         return {"error": "No plan found", "success": False}
 
-    data = redis_client.get(f"taey:v4:plan:{plan_id}")
+    data = redis_client.get(node_key(f"plan:{plan_id}"))
     if not data:
         return {"error": f"Plan {plan_id} not found", "success": False}
 
@@ -156,7 +157,7 @@ def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
     if not redis_client:
         return {"error": "Redis not available", "success": False}
 
-    data = redis_client.get(f"taey:v4:plan:{plan_id}")
+    data = redis_client.get(node_key(f"plan:{plan_id}"))
     if not data:
         return {"error": f"Plan {plan_id} not found", "success": False}
 
@@ -174,7 +175,7 @@ def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
         plan['status'] = 'ready'
 
     plan['updated_at'] = time.time()
-    redis_client.set(f"taey:v4:plan:{plan_id}", json.dumps(plan))
+    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
 
     return {
         "success": True,
