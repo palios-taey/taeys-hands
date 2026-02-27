@@ -52,6 +52,9 @@ def clear():
     """Clear the system clipboard.
 
     Uses Popen pattern because subprocess.run with input= hangs on xclip.
+
+    Raises:
+        RuntimeError: If clipboard cannot be cleared.
     """
     try:
         proc = subprocess.Popen(
@@ -65,8 +68,11 @@ def clear():
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+            raise RuntimeError("Clipboard clear timed out after 2s")
+    except RuntimeError:
+        raise
     except Exception as e:
-        logger.error(f"Clipboard clear failed: {e}")
+        raise RuntimeError(f"Clipboard clear failed: {e}") from e
 
 
 def write_marker(marker: str):
@@ -74,6 +80,9 @@ def write_marker(marker: str):
 
     Args:
         marker: Text to write as a detection marker.
+
+    Raises:
+        RuntimeError: If marker cannot be written to clipboard.
     """
     try:
         proc = subprocess.Popen(
@@ -87,5 +96,8 @@ def write_marker(marker: str):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+            raise RuntimeError("Clipboard write_marker timed out after 2s")
+    except RuntimeError:
+        raise
     except Exception as e:
-        logger.error(f"Clipboard write marker failed: {e}")
+        raise RuntimeError(f"Clipboard write_marker failed: {e}") from e

@@ -3,16 +3,17 @@ AT-SPI tree traversal and element extraction.
 
 Provides BFS/DFS traversal of the accessibility tree, extracting
 visible elements with their names, roles, states, and coordinates.
-
-FROZEN once working - do not modify without approval.
 """
 
 import hashlib
+import logging
 from typing import Dict, List, Optional
 
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
+
+logger = logging.getLogger(__name__)
 
 # States worth reporting on elements
 IMPORTANT_STATES = [
@@ -122,8 +123,8 @@ def find_elements(scope, max_depth: int = 25,
                 child = obj.get_child_at_index(i)
                 if child:
                     traverse(child, depth + 1)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"AT-SPI traversal error at depth {depth}: {e}")
 
     traverse(scope)
     return results
@@ -148,8 +149,8 @@ def detect_chrome_y(doc) -> int:
             rect = comp.get_extents(Atspi.CoordType.SCREEN)
             if rect and rect.y > 0:
                 return rect.y
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Chrome Y detection failed: {e}")
     return FIREFOX_CHROME_Y
 
 
@@ -283,8 +284,8 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
                                         'y': ext.y + ext.height // 2,
                                         'atspi_obj': child,
                                     })
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Menu item extent error: {e}")
                 if items:
                     names = {item['name'] for item in items}
                     # Skip Firefox context menus and menu bar menus
@@ -299,8 +300,8 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
                     result = search_menus(child, depth + 1, max_depth)
                     if result:
                         return result
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Dropdown menu search error at depth {depth}: {e}")
         return items
 
     # Search platform_doc FIRST to avoid cross-tab contamination.

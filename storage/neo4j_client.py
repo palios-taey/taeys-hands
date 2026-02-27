@@ -34,7 +34,11 @@ class Neo4jJSONEncoder(json.JSONEncoder):
 
 
 def get_driver():
-    """Get or create the Neo4j driver (singleton)."""
+    """Get or create the Neo4j driver (singleton).
+
+    Raises:
+        ConnectionError: If Neo4j is not reachable.
+    """
     global _driver
     if _driver is None:
         try:
@@ -43,8 +47,8 @@ def get_driver():
             _driver.verify_connectivity()
             logger.info("Neo4j connected")
         except Exception as e:
-            logger.warning(f"Neo4j connection failed: {e}")
             _driver = None
+            raise ConnectionError(f"Neo4j connection failed: {e}") from e
     return _driver
 
 
@@ -61,25 +65,21 @@ def create_session(platform: str, url: str,
         return None
 
     session_id = str(uuid.uuid4())[:12]
-    try:
-        with driver.session() as s:
-            s.run("""
-                CREATE (sess:ChatSession {
-                    session_id: $session_id,
-                    platform: $platform,
-                    url: $url,
-                    session_type: $session_type,
-                    purpose: $purpose,
-                    created_at: datetime(),
-                    last_activity: datetime(),
-                    message_count: 0
-                })
-            """, session_id=session_id, platform=platform, url=url,
-                 session_type=session_type, purpose=purpose)
-        return session_id
-    except Exception as e:
-        logger.error(f"Create session failed: {e}")
-        return None
+    with driver.session() as s:
+        s.run("""
+            CREATE (sess:ChatSession {
+                session_id: $session_id,
+                platform: $platform,
+                url: $url,
+                session_type: $session_type,
+                purpose: $purpose,
+                created_at: datetime(),
+                last_activity: datetime(),
+                message_count: 0
+            })
+        """, session_id=session_id, platform=platform, url=url,
+             session_type=session_type, purpose=purpose)
+    return session_id
 
 
 def get_or_create_session(platform: str, url: str) -> Optional[str]:
@@ -126,29 +126,25 @@ def add_message(session_id: str, role: str, content: str,
         return None
 
     message_id = str(uuid.uuid4())[:12]
-    try:
-        with driver.session() as s:
-            s.run("""
-                MATCH (sess:ChatSession {session_id: $session_id})
-                CREATE (msg:Message {
-                    message_id: $message_id,
-                    role: $role,
-                    content: $content,
-                    attachments: $attachments,
-                    created_at: datetime(),
-                    handled: $handled
-                })
-                CREATE (sess)-[:HAS_MESSAGE]->(msg)
-                SET sess.message_count = sess.message_count + 1,
-                    sess.last_activity = datetime()
-            """, session_id=session_id, message_id=message_id,
-                 role=role, content=content,
-                 attachments=json.dumps(attachments or []),
-                 handled=(role == 'user'))
-        return message_id
-    except Exception as e:
-        logger.error(f"Add message failed: {e}")
-        return None
+    with driver.session() as s:
+        s.run("""
+            MATCH (sess:ChatSession {session_id: $session_id})
+            CREATE (msg:Message {
+                message_id: $message_id,
+                role: $role,
+                content: $content,
+                attachments: $attachments,
+                created_at: datetime(),
+                handled: $handled
+            })
+            CREATE (sess)-[:HAS_MESSAGE]->(msg)
+            SET sess.message_count = sess.message_count + 1,
+                sess.last_activity = datetime()
+        """, session_id=session_id, message_id=message_id,
+             role=role, content=content,
+             attachments=json.dumps(attachments or []),
+             handled=(role == 'user'))
+    return message_id
 
 
 def update_session(session_id: str, updates: Dict[str, Any]) -> bool:

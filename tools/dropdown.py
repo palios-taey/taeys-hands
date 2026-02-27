@@ -97,15 +97,16 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document", "success": False}
 
-    # Primary: find active menu elements
+    # Find active menu elements — no fallback to broad page scan
     menu_items = find_dropdown_menus(firefox, doc)
 
-    # Fallback: scan for actionable elements if no menu found
     if not menu_items:
-        elements = find_elements(doc)
-        actionable_roles = ('menu item', 'radio button', 'radio menu item',
-                            'push button', 'toggle button', 'check menu item')
-        menu_items = [e for e in elements if e.get('role', '') in actionable_roles]
+        return {
+            "success": False,
+            "error": f"Dropdown '{dropdown}' did not open — no menu items found after clicking trigger.",
+            "platform": platform,
+            "hint": "The trigger click may not have worked. Try taey_inspect to verify screen state.",
+        }
 
     # Return items - strip atspi_obj (D-Bus proxies can't serialize)
     items = []
@@ -129,16 +130,20 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
 
 def _load_platform_yaml(platform: str) -> Dict:
-    """Load platform YAML config. Returns empty dict on failure."""
+    """Load platform YAML config.
+
+    Raises:
+        FileNotFoundError: If YAML config does not exist.
+        ValueError: If YAML is invalid.
+    """
     yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
     if not os.path.exists(yaml_path):
-        return {}
-    try:
-        with open(yaml_path) as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.error(f"Failed to load {yaml_path}: {e}")
-        return {}
+        raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+    if not data:
+        raise ValueError(f"Platform YAML is empty: {yaml_path}")
+    return data
 
 
 def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
@@ -154,7 +159,10 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
     Returns:
         Available options including models, modes, tools, quirks, and mode guidance.
     """
-    config = _load_platform_yaml(platform)
+    try:
+        config = _load_platform_yaml(platform)
+    except (FileNotFoundError, ValueError) as e:
+        return {"success": False, "error": str(e), "platform": platform}
     caps = config.get('capabilities', {})
     guidance = config.get('mode_guidance', {})
 
