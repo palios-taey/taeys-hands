@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 from core import atspi, input as inp
 from storage import neo4j_client
-from storage.redis_pool import node_key
+from storage.redis_pool import node_key, NODE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,7 @@ def handle_send_message(platform: str, message: str,
         '--monitor-id', monitor_id,
         '--baseline-copy-count', '0',
         '--timeout', str(daemon_timeout),
+        '--tmux-session', NODE_ID,
     ]
     if session_id:
         daemon_cmd.extend(['--session-id', session_id])

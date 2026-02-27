@@ -124,13 +124,15 @@ class MonitorDaemon:
                  baseline_copy_count: int,
                  session_id: Optional[str] = None,
                  user_message_id: Optional[str] = None,
-                 timeout_seconds: int = 3600):
+                 timeout_seconds: int = 3600,
+                 tmux_session: Optional[str] = None):
         self.platform = platform.lower()
         self.monitor_id = monitor_id
         self.baseline_copy_count = baseline_copy_count
         self.session_id = session_id
         self.user_message_id = user_message_id
         self.timeout_seconds = timeout_seconds
+        self.tmux_session = tmux_session
 
         self.state = "IDLE"
         self.start_time = time.time()
@@ -313,13 +315,20 @@ class MonitorDaemon:
         return False
 
     def _notify_tmux(self, platform: str):
-        """Send notification to Claude Code input via tmux send-keys.
+        """Send notification to the spawning Claude session via tmux send-keys.
 
-        Types the message into Claude's prompt and presses Enter so Claude
-        can act on it (e.g. extract the response).
+        Uses the tmux session name passed by send_message (--tmux-session).
+        Falls back to hostname-based guessing if not provided.
         """
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
-        sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+
+        # Use explicit session from spawner (correct instance isolation)
+        if self.tmux_session:
+            sessions_to_try = [self.tmux_session]
+        else:
+            # Legacy fallback: guess session name
+            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+
         for session in sessions_to_try:
             try:
                 # Send text (without Enter)
@@ -518,6 +527,7 @@ def main():
     parser.add_argument('--session-id')
     parser.add_argument('--user-message-id')
     parser.add_argument('--timeout', type=int, default=3600)
+    parser.add_argument('--tmux-session', help='tmux session to notify on completion')
 
     args = parser.parse_args()
 
@@ -528,6 +538,7 @@ def main():
         session_id=args.session_id,
         user_message_id=args.user_message_id,
         timeout_seconds=args.timeout,
+        tmux_session=args.tmux_session,
     )
     daemon.start()
 
