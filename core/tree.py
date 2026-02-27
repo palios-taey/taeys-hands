@@ -213,7 +213,9 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
     Searches from Firefox root for active menu elements (dropdowns
     render OUTSIDE the document element as separate menus).
 
-    Filters out Firefox's permanent context menu items.
+    Filters out Firefox's permanent menus (context menu, menu bar)
+    and skips sidebar/navigation landmark subtrees to avoid returning
+    permanent sidebar items instead of transient dropdown items.
 
     Args:
         firefox: Firefox AT-SPI accessible.
@@ -222,11 +224,23 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
     Returns:
         List of dropdown item dicts with name, role, x, y.
     """
+    # Firefox context menu items (page context + text edit context)
     FIREFOX_CONTEXT_ITEMS = frozenset({
         'Back', 'Forward', 'Reload', 'Edit Bookmark…', 'Save Page As…',
         'Select All', 'Take Screenshot', 'View Page Source',
         'Inspect Accessibility Properties', 'Inspect',
+        'Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Delete',
+        'Check Spelling', 'Languages', 'Reopen Closed Tab',
     })
+
+    # Firefox menu bar items to skip
+    FIREFOX_MENUBAR_ITEMS = frozenset({
+        'File', 'Edit', 'View', 'History', 'Bookmarks', 'Tools', 'Help',
+    })
+
+    # Keywords in landmark names that indicate sidebar/navigation (skip these subtrees)
+    _SIDEBAR_KEYWORDS = ('sidebar', 'navigation', 'chat history',
+                         'conversation history', 'footer')
 
     dropdown_roles = ('menu item', 'radio menu item', 'check menu item', 'list item', 'option')
 
@@ -236,6 +250,19 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
             return items
         try:
             role = obj.get_role_name()
+            name = obj.get_name() or ''
+
+            # Skip sidebar/navigation landmark subtrees - these contain
+            # permanent menus, not the transient dropdown we're looking for
+            if role == 'landmark' and name:
+                name_lower = name.lower()
+                if any(kw in name_lower for kw in _SIDEBAR_KEYWORDS):
+                    return items
+
+            # Skip menu bar container (Firefox chrome)
+            if role == 'menu bar':
+                return items
+
             if role == 'menu':
                 for i in range(min(obj.get_child_count(), 20)):
                     child = obj.get_child_at_index(i)
@@ -260,7 +287,8 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
                             pass
                 if items:
                     names = {item['name'] for item in items}
-                    if names & FIREFOX_CONTEXT_ITEMS:
+                    # Skip Firefox context menus and menu bar menus
+                    if names & FIREFOX_CONTEXT_ITEMS or names <= FIREFOX_MENUBAR_ITEMS:
                         items = []
                     else:
                         return items
@@ -291,23 +319,21 @@ def find_dropdown_menus(firefox, platform_doc=None) -> List[Dict]:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Final fallback: search document for upload-related buttons
+    # Final fallback: search document for menu items without a menu container.
+    # Some platforms render dropdown items directly in the document without
+    # wrapping them in a menu-role element. Only uses narrow roles
+    # (no list item/option/push button - those match page content).
     if platform_doc:
+        _fallback_roles = ('menu item', 'radio menu item', 'check menu item')
         all_elements = find_elements(
             platform_doc,
             exclude_landmarks=['Chat history', 'Sidebar', 'Conversation history'],
         )
-        items = []
-        for e in all_elements:
-            role = e.get('role', '')
-            name = e.get('name', '')
-            if (role in dropdown_roles or
-                (role == 'push button' and any(
-                    kw in name.lower() for kw in ['upload', 'file', 'drive']
-                ))) and name:
-                items.append(e)
-        items.sort(key=lambda x: x['y'])
-        return items
+        items = [e for e in all_elements
+                 if e.get('name') and e.get('role', '') in _fallback_roles]
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
 
     return []
 
