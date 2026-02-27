@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, find_copy_buttons
+from core.atspi_interact import atspi_click
 from core.platforms import SCREEN_HEIGHT
 from storage.redis_pool import node_key
 
@@ -38,19 +39,11 @@ def handle_quick_extract(platform: str, redis_client,
     Returns:
         Dict with content, length, has_artifacts, etc.
     """
-    # Focus Firefox and switch to platform
-    inp.focus_firefox()
-    time.sleep(0.3)
+    # Switch to platform tab (handles focus, Alt+N, Ctrl+Tab fallback)
+    if not inp.switch_to_platform(platform):
+        return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
-    from core.platforms import TAB_SHORTCUTS
-    shortcut = TAB_SHORTCUTS.get(platform)
-    if shortcut:
-        inp.press_key(shortcut)
-        time.sleep(0.3)
-
-    # Click in content area and scroll to bottom
-    inp.click_at(900, 600)
-    time.sleep(0.1)
+    # Scroll to bottom (Firefox is already focused after tab switch)
     inp.press_key('End')
     time.sleep(0.5)
 
@@ -95,7 +88,13 @@ def handle_quick_extract(platform: str, redis_client,
 
     clipboard.clear()
     time.sleep(0.1)
-    inp.click_at(x, y)
+
+    # Try AT-SPI do_action first (works even off-screen), fall back to xdotool
+    if newest.get('atspi_obj') and atspi_click(newest):
+        logger.info(f"Copy clicked via AT-SPI do_action at ({x}, {y})")
+    else:
+        logger.info(f"Copy clicked via xdotool at ({x}, {y})")
+        inp.click_at(x, y)
     time.sleep(0.8)
 
     content = clipboard.read()
@@ -313,14 +312,9 @@ def handle_extract_history(platform: str, redis_client,
     max_scroll = 100
     consecutive_no_new = 0
 
-    # Focus and switch
-    inp.focus_firefox()
-    time.sleep(0.3)
-    from core.platforms import TAB_SHORTCUTS
-    shortcut = TAB_SHORTCUTS.get(platform)
-    if shortcut:
-        inp.press_key(shortcut)
-        time.sleep(0.3)
+    # Switch to platform tab (handles focus, Alt+N, Ctrl+Tab fallback)
+    if not inp.switch_to_platform(platform):
+        return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
     inp.scroll_to_top()
     time.sleep(1.0)
@@ -365,7 +359,11 @@ def handle_extract_history(platform: str, redis_client,
             marker = f"__MARKER_{scroll_iterations}_{len(messages)}__"
             clipboard.write_marker(marker)
 
-            inp.click_at(btn['x'], btn['y'])
+            # AT-SPI do_action first (works off-screen), fall back to xdotool
+            if btn.get('atspi_obj') and atspi_click(btn):
+                pass
+            else:
+                inp.click_at(btn['x'], btn['y'])
             time.sleep(0.3)
 
             content = clipboard.read()
