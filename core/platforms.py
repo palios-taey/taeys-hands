@@ -38,8 +38,8 @@ TAB_SHORTCUTS = {
     'gemini': 'alt+3',
     'grok': 'alt+4',
     'perplexity': 'alt+5',
-    # Social platforms - assign as tabs are set up
-    # 'x_twitter': 'alt+6',
+    # Social platforms
+    'x_twitter': 'alt+6',
     # 'linkedin': 'alt+7',
 }
 

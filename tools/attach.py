@@ -12,7 +12,7 @@ import time
 import logging
 from typing import Any, Dict
 
-from core import atspi, input as inp
+from core import atspi, input as inp, clipboard
 from core.tree import find_elements, find_dropdown_menus
 from tools.interact import handle_click
 
@@ -29,8 +29,11 @@ def _handle_file_dialog(platform: str, file_path: str,
             return {"error": "Failed to focus location bar", "success": False}
         time.sleep(0.2)
 
-        if not inp.type_text(file_path, timeout=15):
-            return {"error": "Failed to type file path", "success": False}
+        # Clipboard paste - xdotool type_text drops doubled letters
+        clipboard.write(file_path)
+        time.sleep(0.1)
+        if not inp.press_key('ctrl+v'):
+            return {"error": "Failed to paste file path", "success": False}
         time.sleep(0.2)
 
         # First Return - navigate to path
@@ -77,12 +80,17 @@ def _handle_file_dialog(platform: str, file_path: str,
                 'timestamp': time.time(),
             }))
 
+        # Invalidate stored map - file chip shifts input position
+        if redis_client:
+            redis_client.delete("taey:v4:current_map")
+
         return {
             "success": True,
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
             "filename": os.path.basename(file_path),
+            "info": "Map invalidated - re-inspect before further clicks.",
         }
 
     except Exception as e:
