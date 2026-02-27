@@ -1,7 +1,7 @@
 # Taey's Hands - Operational Guide
 *AT-SPI-based chat and social platform automation*
 
-**Version**: 5.0 (February 2026 - Clean Rebuild)
+**Version**: 5.1 (February 2026 - Simplification Audit)
 
 ---
 
@@ -18,16 +18,16 @@ Not browser automation (no CDP/WebDriver) - genuine accessibility tree perceptio
 
 ```
 server.py              # MCP router (~600 lines) - LOCKED
-core/                  # AT-SPI primitives - FROZEN
+core/                  # AT-SPI primitives
   atspi.py             # Firefox/desktop discovery
-  tree.py              # BFS traversal, element filtering
-  clipboard.py         # xclip read/write
-  input.py             # xdotool key/mouse/type
+  atspi_interact.py    # Element cache, AT-SPI click/focus/state
+  tree.py              # BFS traversal, element filtering, menu items
+  clipboard.py         # xsel read/write/clear
+  input.py             # xdotool key/mouse/type + clipboard_paste
   platforms.py         # URL patterns, tab shortcuts
-storage/               # Data persistence - FROZEN
+storage/               # Data persistence
   redis_pool.py        # Connection pool singleton
   neo4j_client.py      # Session/message CRUD
-  models.py            # Dataclasses
 tools/                 # MCP tool handlers - one per file
   inspect.py           # taey_inspect
   interact.py          # taey_set_map, taey_click, taey_click_at
@@ -47,7 +47,6 @@ platforms/             # Platform configs (YAML)
 
 | Status | Meaning |
 |--------|---------|
-| **FROZEN** | Do not modify. Working as-is. |
 | **LOCKED** | Requires explicit approval to change contract. |
 
 ---
@@ -104,12 +103,17 @@ platforms/             # Platform configs (YAML)
 1. taey_inspect(platform)        # See what's on screen
 2. taey_set_map(platform, {...}) # Store control coordinates
 3. taey_attach(platform, path)   # Attach files if needed
-4. taey_send_message(platform, msg) # Focuses input via AT-SPI, types, stores, spawns daemon, Enter
-5. [monitor daemon detects response]
-6. taey_quick_extract(platform)  # Get response text, stores in Neo4j
+4. taey_click(platform, "input") # Click input field (Claude verifies focus)
+5. taey_send_message(platform, msg) # Pastes into focused input, Enter, stores, spawns daemon
+6. [monitor daemon detects response]
+7. taey_quick_extract(platform)  # Get response text, stores in Neo4j
 ```
 
-**RE-INSPECT AFTER UI CHANGES**: File attachment, model switching, and other actions shift element positions. `send_message` handles this automatically via AT-SPI `grab_focus()` (finds the entry element dynamically, doesn't rely on stored coordinates). But if `send_message` fails with a focus/typing error, RE-INSPECT and RE-SET MAP before retrying.
+**PARADIGM**: Tools report what they did. Claude verifies by inspecting. Tools never say "success" - they return action details and Claude decides if it worked.
+
+**RE-INSPECT AFTER UI CHANGES**: File attachment, model switching, and other actions shift element positions. RE-INSPECT and RE-SET MAP before further clicks.
+
+**send_message does NOT click the input field.** Claude must click it first via `taey_click(platform, "input")`. send_message pastes into whatever is focused and presses Enter.
 
 ### Data Pipeline (CRITICAL)
 
@@ -153,12 +157,19 @@ Setting a map for platform B **destroys** platform A's map.
 ```
 1. Pick ONE platform
 2. taey_inspect(platform)           # Switch tab + scan
-3. taey_set_map(platform, {...})    # Store controls
-4. taey_attach(platform, file)      # Attach if needed
-5. taey_send_message(platform, msg) # Type + send + daemon spawn
-6. DONE with this platform - daemon monitors in background
-7. Move to NEXT platform, repeat from step 1
+3. CHECK inspect result for 'attachments' field - remove stale files FIRST
+4. taey_set_map(platform, {...})    # Store controls
+5. taey_click(platform, "input")   # Focus input (send_message doesn't click input)
+6. taey_attach(platform, file)      # Attach if needed - tool detects existing files
+7. RE-INSPECT after attach (file chip shifts input Y)
+8. taey_set_map(platform, {...})    # Update map with new positions
+9. taey_click(platform, "input")   # Focus input again
+10. taey_send_message(platform, msg) # Paste + Enter + daemon spawn
+11. DONE with this platform - daemon monitors in background
+12. Move to NEXT platform, repeat from step 1
 ```
+
+**ATTACHMENT SAFETY**: `taey_inspect` now returns an `attachments` field when files are already present. `taey_attach` detects existing files and returns `stale_attachments` status with Remove button coordinates. ALWAYS remove stale files before attaching new ones.
 
 **NEVER batch** - do NOT inspect all platforms, then set maps for all, then attach to all.
 Each platform must complete steps 1-6 before starting the next.
@@ -186,21 +197,22 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 4. **Pipeline pattern**: inspect → set_map → attach (if needed) → send_message → move on → extract when `response_ready`
 
 ### Text Entry
-- **Short text (<100 chars)**: `taey_send_message` types it (uses xdotool internally)
-- **Long text (>100 chars)**: Write to clipboard first, then Ctrl+V paste, then Enter
-- **xdotool drops doubled characters** (ss, ll, tt) - root cause: `delay /= 2` splits between keydown/keyup, X server suppresses second identical keystroke
-- **Clipboard paste**: `echo "text" | timeout 3 xclip -selection clipboard -i` via bash pipe (NOT subprocess.run, which hangs)
-- **Future fix**: AT-SPI `EditableText.insert_text()` bypasses keystroke simulation entirely. X/Twitter (DraftJS) won't accept it though - clipboard paste mandatory there.
+- **All text**: `taey_send_message` uses clipboard paste (xsel + Ctrl+V) for all text, regardless of length
+- **xdotool drops doubled characters** (ss, ll, tt) - that's why clipboard paste is always used
+- **Clipboard uses xsel** (not xclip) to avoid fork-hang issues with subprocess.run()
+- **X/Twitter and LinkedIn**: Forced to clipboard paste (DraftJS ignores AT-SPI DOM mutations)
 
 ### Platform-Specific Notes
 
-| Platform | Send | Attach | Deep Research/Thinking | Notes |
-|----------|------|--------|----------------------|-------|
-| ChatGPT | Enter | "Add files and more" dropdown | N/A | Developer Mode breaks attach |
-| Claude | Enter | Dropdown → "Add files or photos" | Extended thinking auto | Slow with big packages (3-4min) |
-| Gemini | Enter | "Open upload file menu" → "Upload files" | Tools dropdown → Deep Think | File attach moves input Y - use `grab_focus()` |
-| Grok | Enter | Dropdown → "Upload a file" | N/A | Processes large files poorly |
-| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Same dropdown → "Deep research" radio item | Copy=summary only; Export>Download for full |
+| Platform | Send | Attach | Default Model | Notes |
+|----------|------|--------|---------------|-------|
+| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | GPT-5.2 (temp chat) | xdotool fails on dropdown items - use keyboard nav |
+| Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | xdotool works on Claude dropdowns |
+| Gemini | Enter | "Open upload file menu" → "Upload files" | Ultra (2.5 Pro) | File attach moves input Y - always re-inspect |
+| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Grok 4.20 Beta | Files persist across sessions! Check for stale files. |
+| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Copy=summary only; Export>Download for full |
+
+**Dropdown Menu Item Clicks**: ChatGPT and Grok dropdown items do NOT respond to xdotool coordinate clicks (React event handlers). Use keyboard navigation: click the dropdown trigger, then `Down` arrow + `Enter` to select the first item. Claude and Gemini dropdowns DO respond to xdotool clicks.
 
 ### Perplexity Deep Research
 1. Open "Add files or tools" dropdown
@@ -225,23 +237,29 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 ## HMM Enrichment Workflow (Jetson/Thor Primary Task)
 
 HMM (Harmonic Motif Memory) enrichment sends conversation packages to AI platforms for motif analysis.
-Packages are built by `~/hmm/scripts/hmm_package_builder.py` and stored in Redis (`hmm:pkg:queue`).
+
+**Package Builder**: `/home/spark/embedding-server/isma/scripts/hmm_package_builder.py`
+- Commands: `next --platform <name>`, `complete`, `fail`, `stats`, `reset`, `prompt`
+- Output: `/tmp/hmm_packages/`
+- Get the analysis prompt: `python3 <builder> prompt`
 
 ### Enrichment Loop (one cycle)
 
 For EACH platform (ChatGPT, Claude, Gemini, Grok - one at a time):
 
 ```
-1. Get next package from Redis queue
-2. Write package to /tmp/hmm_package_{platform}.md
+1. Build package: python3 <builder> next --platform <name>
+2. Get prompt: python3 <builder> prompt
 3. taey_inspect(platform)                    # Switch tab, scan tree
-4. Read inspect results → identify input, attach button, model selector
-5. taey_set_map(platform, {input: {x,y}, attach: {x,y}, ...})
-6. taey_attach(platform, "/tmp/hmm_package_{platform}.md")
-7. taey_send_message(platform, "Analyze the attached file...")
-8. Daemon monitors in background → move to next platform
-9. When "Response ready" notification arrives:
-   taey_quick_extract(platform) → parse JSON → store in Neo4j/Redis
+4. CHECK for 'attachments' in result         # Remove stale files first!
+5. taey_set_map(platform, {input, attach, ...})
+6. taey_attach(platform, "/tmp/hmm_packages/<pkg_file>.md")
+7. RE-INSPECT + RE-SET MAP after attach (file chip shifts input Y)
+8. taey_click(platform, "input")             # Focus input
+9. taey_send_message(platform, "<prompt>")   # Paste + Enter + daemon
+10. Daemon monitors → move to next platform
+11. On "Response ready": taey_quick_extract(platform) → parse JSON
+12. Mark complete: python3 <builder> complete --platform <name> --response-file <path>
 ```
 
 ### Package Format
@@ -335,7 +353,7 @@ No hardcoded screen values - works on any display size.
 | Click Submit/Send buttons | Press Enter (universal) |
 | Wait/block for AI responses | Daemon notifies, move on |
 | Use xdotool for long text | Clipboard paste + Ctrl+V |
-| Use xclip in subprocess.run | Pipe via bash: `echo | timeout 3 xclip -selection clipboard -i` |
+| Use xclip (fork hangs) | Use xsel (no fork hang) |
 | Manually orchestrate send flow | Use `taey_send_message` (handles Enter + daemon) |
 | Use raw Python AT-SPI scripts | Always use MCP tools (taey_inspect, etc.) |
 | Open new Firefox windows/tabs | Use existing pre-configured tabs only |
@@ -386,8 +404,8 @@ No hardcoded screen values - works on any display size.
 - If AT-SPI returns elements from the wrong platform, check for extra Firefox windows first.
 - Tab order must match `core/platforms.py` TAB_SHORTCUTS. If tabs are wrong, fix manually - do NOT create new ones.
 
-### Smart Input System (`core/smart_input.py`)
-- **Cascade**: AT-SPI `insert_text()` → clipboard paste (xsel) → xdotool (≥50ms delay)
-- **xsel** preferred over xclip for clipboard (no fork hang). Must be installed: `apt install xsel`
-- **xdotool character dropping root cause**: `delay /= 2` in xdo.c splits delay between keydown/keyup. X server suppresses second identical keystroke for doubled consonants (ss, ll, tt).
-- **X/Twitter and LinkedIn**: Forced to clipboard paste (DraftJS ignores AT-SPI DOM mutations).
+### Input Architecture
+- **`core/input.py`**: xdotool key/mouse/type + `clipboard_paste()` (xsel + Ctrl+V)
+- **`core/clipboard.py`**: xsel-based read/write/clear (unified, no xclip)
+- **`core/atspi_interact.py`**: AT-SPI do_action click, element cache, focus, state checks
+- No smart_input.py or fallback cascades. One input path: clipboard paste.

@@ -1,15 +1,10 @@
 """
-Universal AT-SPI interaction layer.
+AT-SPI interaction layer.
 
-Provides AT-SPI-first click, focus, scroll, and text input with
-xdotool fallback. Eliminates per-platform hardcoding by probing
-element capabilities at interaction time.
-
-Based on Perplexity Deep Research architecture audit (Feb 2026).
-Does NOT modify frozen core/input.py - wraps it as fallback.
+Element cache, AT-SPI do_action click, focus, state checks,
+and serialization helpers for cross-MCP-call element persistence.
 """
 
-import subprocess
 import time
 import logging
 from typing import Dict, List, Optional
@@ -64,16 +59,8 @@ def find_element_at(platform: str, x: int, y: int,
     return best
 
 
-def clear_cache(platform: str = None):
-    """Clear element cache. If platform is None, clears all."""
-    if platform:
-        _element_cache.pop(platform, None)
-    else:
-        _element_cache.clear()
-
-
 # =========================================================================
-# Click: 3-tier strategy
+# Click: AT-SPI do_action
 # =========================================================================
 
 def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
@@ -134,52 +121,6 @@ def _try_do_action(obj) -> bool:
         return False
 
 
-def _try_focus_and_activate(obj) -> bool:
-    """Focus element via AT-SPI, then send Enter to activate."""
-    try:
-        state_set = obj.get_state_set()
-        if not state_set.contains(Atspi.StateType.FOCUSABLE):
-            return False
-
-        comp = obj.get_component_iface()
-        if not comp:
-            return False
-
-        result = comp.grab_focus()
-        if not result:
-            return False
-
-        time.sleep(0.1)
-
-        # Verify focus was acquired
-        state_set = obj.get_state_set()
-        if not state_set.contains(Atspi.StateType.FOCUSED):
-            return False
-
-        # Send Enter key via xdotool to activate
-        subprocess.run(
-            ['xdotool', 'key', 'Return'],
-            capture_output=True, timeout=3
-        )
-        return True
-    except Exception as e:
-        logger.debug(f"focus+activate failed: {e}")
-        return False
-
-
-def _xdotool_click(x: int, y: int) -> bool:
-    """Fallback: coordinate-based xdotool click."""
-    try:
-        result = subprocess.run(
-            ['xdotool', 'mousemove', str(x), str(y), 'click', '1'],
-            capture_output=True, timeout=5
-        )
-        return result.returncode == 0
-    except Exception as e:
-        logger.debug(f"xdotool click failed: {e}")
-        return False
-
-
 # =========================================================================
 # Focus management
 # =========================================================================
@@ -212,22 +153,6 @@ def atspi_focus(element: Dict) -> bool:
         return state_set.contains(Atspi.StateType.FOCUSED)
     except Exception as e:
         logger.debug(f"grab_focus failed: {e}")
-        return False
-
-
-def atspi_scroll_into_view(element: Dict) -> bool:
-    """Scroll element into view using AT-SPI Component.scroll_to()."""
-    obj = element.get('atspi_obj')
-    if not obj:
-        return False
-
-    try:
-        comp = obj.get_component_iface()
-        if not comp:
-            return False
-        return bool(comp.scroll_to(Atspi.ScrollType.ANYWHERE))
-    except Exception as e:
-        logger.debug(f"scroll_to failed: {e}")
         return False
 
 

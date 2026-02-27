@@ -19,6 +19,8 @@ capabilities:
 quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
+  - attach: "Dropdown with 'Add files or photos' item. xdotool coordinate clicks work on Claude menu items."
+  - model_default: "Sonnet 4.6 Extended is default."
 
 stop_patterns:
   - stop
