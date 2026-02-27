@@ -142,11 +142,11 @@ def focus_firefox(timeout: int = 5) -> bool:
 
 
 def switch_to_platform(platform: str) -> bool:
-    """Switch to a platform tab.
+    """Switch to a platform tab via Alt+N shortcut.
 
-    Tries Alt+N shortcut first. If that fails to land on the correct
-    platform (verified via AT-SPI URL), falls back to Ctrl+Tab cycling.
-    Alt+N is intercepted by some window managers (e.g. GNOME Shell on Jetson).
+    Alt+N is the primary and trusted mechanism (tab order is pre-configured).
+    Verification uses AT-SPI document URL + SHOWING state, not frame titles
+    (tabs show conversation titles like "New chat", not platform names).
 
     Args:
         platform: Platform name (e.g., 'claude').
@@ -163,43 +163,40 @@ def switch_to_platform(platform: str) -> bool:
     if not focus_firefox():
         return False
 
-    # Frame title keywords for each platform
-    _FRAME_KEYWORDS = {
-        'chatgpt': 'chatgpt', 'claude': 'claude', 'gemini': 'gemini',
-        'grok': 'grok', 'perplexity': 'perplexity',
-        'x_twitter': '/ x', 'linkedin': 'linkedin',
-    }
-
     def _on_target() -> bool:
-        """Check if Firefox frame title matches target platform."""
+        """Check if the platform's document is active (SHOWING) via URL match."""
         firefox = atspi.find_firefox()
         if not firefox:
             return False
+        doc = atspi.get_platform_document(firefox, platform)
+        if not doc:
+            return False
+        # SHOWING = active tab. Documents in background tabs exist
+        # in the tree but lack SHOWING state.
         try:
-            for j in range(firefox.get_child_count()):
-                frame = firefox.get_child_at_index(j)
-                if frame:
-                    title = (frame.get_name() or '').lower()
-                    keyword = _FRAME_KEYWORDS.get(platform, '')
-                    if keyword and keyword in title:
-                        return True
+            state_set = doc.get_state_set()
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+            return state_set.contains(_Atspi.StateType.SHOWING)
         except Exception:
-            pass
-        return False
+            # If state check fails, document exists — trust it
+            return True
 
     # Already on the right tab?
     if _on_target():
         return True
 
-    # Try Alt+N shortcut first (works on some machines)
+    # Alt+N shortcut — primary mechanism, trusted
     shortcut = TAB_SHORTCUTS.get(platform)
     if shortcut:
         press_key(shortcut)
         time.sleep(0.5)
-        if _on_target():
-            return True
+        # Trust Alt+N — return True without heavy verification.
+        # Callers (inspect, extract) do their own document lookup.
+        return True
 
-    # Fallback: Ctrl+Tab cycling (works everywhere)
+    # No shortcut: Ctrl+Tab cycling with URL verification
     max_tabs = 8
     for _ in range(max_tabs):
         press_key('ctrl+Tab')
@@ -207,7 +204,7 @@ def switch_to_platform(platform: str) -> bool:
         if _on_target():
             return True
 
-    logger.warning(f"Could not switch to {platform} after Alt+N and Ctrl+Tab cycling")
+    logger.warning(f"Could not switch to {platform} via Ctrl+Tab cycling")
     return False
 
 
