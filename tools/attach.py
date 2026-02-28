@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
 from core.atspi_interact import extend_cache, strip_atspi_obj
-from tools.interact import handle_click
+from tools.interact import handle_click, get_map
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
@@ -221,6 +221,26 @@ def handle_attach(platform: str, file_path: str,
             break
         logger.info(f"Menu items not found (attempt {attempt + 1}/3), waiting...")
         time.sleep(0.5)
+
+    # AT-SPI click succeeded but no dropdown appeared — retry with xdotool
+    if not dropdown_items and click_result.get("method") == "atspi":
+        logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
+        map_data = get_map(platform, redis_client)
+        if map_data:
+            coord = map_data.get('controls', {}).get('attach', {})
+            if coord:
+                inp.click_at(coord['x'], coord['y'])
+                time.sleep(1.0)
+                # Check file dialog first
+                if atspi.is_file_dialog_open(firefox):
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                for attempt in range(3):
+                    firefox = atspi.find_firefox()
+                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                    dropdown_items = find_menu_items(firefox, doc)
+                    if dropdown_items:
+                        break
+                    time.sleep(0.5)
 
     # Cache dropdown items so taey_click_at can use AT-SPI do_action
     if dropdown_items:
