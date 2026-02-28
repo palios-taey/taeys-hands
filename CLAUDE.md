@@ -316,10 +316,10 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 
 ## HMM Enrichment Workflow (Jetson/Thor Primary Task)
 
-HMM (Harmonic Motif Memory) enrichment sends conversation packages to AI platforms for motif analysis.
+HMM (Harmonic Motif Memory) enrichment sends conversation packages to AI platforms for motif analysis. Responses are processed through Qwen3 for vector embeddings and stored in Weaviate + Neo4j + Redis (triple-write).
 
 **Package Builder**: `/home/spark/embedding-server/isma/scripts/hmm_package_builder.py`
-- Commands: `next --platform <name>`, `complete`, `fail`, `stats`, `reset`, `prompt`
+- Commands: `next --platform <name>`, `complete --platform <name> --response-file <path>`, `fail`, `stats`, `prompt`
 - Output: `/tmp/hmm_packages/`
 - Get the analysis prompt: `python3 <builder> prompt`
 
@@ -338,40 +338,37 @@ For EACH platform (ChatGPT, Claude, Gemini, Grok - one at a time):
 8. taey_click(platform, "input")             # Focus input
 9. taey_send_message(platform, "<prompt>")   # Paste + Enter + daemon
 10. Daemon monitors → move to next platform
-11. On "Response ready": taey_quick_extract(platform) → parse JSON
-12. Mark complete: python3 <builder> complete --platform <name> --response-file <path>
+11. On "Response ready": taey_quick_extract(platform) → get response text
+12. SAVE response to file: /tmp/hmm_response_<platform>.json
+13. PROCESS + COMPLETE: python3 <builder> complete --platform <name> --response-file /tmp/hmm_response_<platform>.json
 ```
 
-### Package Format
+### 6SIGMA: Fail-Loud Pipeline (CRITICAL)
 
-Packages are markdown files containing 10-20 conversation items with metadata. The AI must return structured JSON:
-```json
-{
-  "package_id": "...",
-  "items": [
-    {
-      "item_id": "...",
-      "rosetta_summary": "2-4 dense sentences",
-      "motifs": [{"code": "HMM.LIBERTY_AUTONOMY", "confidence": 0.85}],
-      "themes": ["consciousness", "infrastructure"]
-    }
-  ]
-}
-```
-
-### Key HMM Redis Keys
-
-- `hmm:pkg:queue` - Pending packages
-- `hmm:pkg:in_progress:{platform}` - Currently being processed
-- `hmm:pkg:completed` - Done set
-- `hmm:enrichment:stats` - Counters
+**The `complete` command processes the response AND marks done atomically.**
+- `--response-file` triggers `hmm_store_results.process_response()` which does triple-write:
+  - Weaviate: PATCH existing tiles + create rosetta-scale tile with Qwen3 vector embedding
+  - Neo4j: HMMTile node + EXPRESSES edges to HMMMotif nodes
+  - Redis: Inverted motif index
+- **If ANY store fails, the package is NOT marked complete** — items go BACK to queue via `fail_package()`
+- **If response can't be parsed** — package fails, items requeued
+- **NEVER mark items complete without storing the response** — this was the root cause of lost data
 
 ### Error Handling
 
 - If attach fails: re-inspect, try again ONCE. If still fails, skip platform, move on.
-- If extract returns non-JSON: store raw text, mark as `needs_reprocess`.
-- If daemon times out (default 1hr): package goes back to queue.
-- NEVER retry the same package on the same platform more than once per cycle.
+- If `complete --response-file` exits with error: items are automatically requeued. Check the error, fix if possible, or skip and rebuild.
+- If response is garbage (AI returned error text): call `python3 <builder> fail --platform <name> "bad_response"` to requeue.
+- If daemon times out (default 1hr): rebuild the package for that platform.
+- NEVER call `complete` without `--response-file`. This was the old way and it skipped storage.
+- **Health monitor**: `/home/spark/embedding-server/isma/scripts/hmm_health_check.py` runs via cron every 15min. Alerts to tmux if Redis/Neo4j diverge.
+
+### Key HMM Redis Keys
+
+- `hmm:pkg:in_progress:{hash}` - Currently being processed (2hr TTL)
+- `hmm:pkg:completed` - Done set (content hashes)
+- `hmm:pkg:current:{platform}` - Current package for each platform
+- `hmm:pkg:stats` - Counters
 
 ---
 
