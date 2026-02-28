@@ -139,26 +139,10 @@ If extraction happens without a pending prompt (manual/ad-hoc), response is stil
 ### Multi-Step Extractions
 
 Some responses require more than just clicking Copy:
-- **Perplexity Deep Research**: Copy = summary only. Full content is in **artifact tiles** (see below)
+- **Perplexity Deep Research**: Copy = summary only. Must Export > Download as Markdown for full report
 - **Claude truncated**: Look for "Continue" button, click it, extract again
 - **ChatGPT collapsed**: Look for "Show more", expand first
 - **Quality flags**: `quality.needs_action` tells you what to do. ALWAYS check it.
-
-### Perplexity Artifact Tiles (Code/JSON/File Outputs)
-
-When Perplexity returns structured output (JSON, code files, etc.), it renders them as **artifact tiles** — small clickable cards in the response, NOT inline text. The Copy button only returns a text summary.
-
-**How to extract artifacts:**
-1. After response completes, **take a screenshot** if tiles aren't visible in AT-SPI tree (they often get filtered)
-2. Artifact tiles appear as small cards between "N steps completed" and the summary text
-3. **Click the tile** to open a split-panel view with the artifact content on the right
-4. In the panel: "Load more (N KB total)" loads full content, "Export" downloads the file
-5. Click **Export** in the artifact panel header to download the file directly
-6. The downloaded file is the actual structured output (JSON, code, etc.)
-
-**AT-SPI visibility**: Artifact tiles may NOT appear in `taey_inspect` results due to filtering. When you expect structured output but only see a summary, **always take a screenshot** (`gnome-screenshot -w -f /tmp/check.png`) to visually verify what's on screen.
-
-**This applies to ALL platforms** that render artifacts/attachments in responses — not just Perplexity. Always check for visual elements that AT-SPI filtering might miss.
 
 ---
 
@@ -279,6 +263,7 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 | Click Submit/Send buttons | Unreliable across platforms | Press Enter (universal) |
 | Wait/block for AI responses | Wastes time, daemon handles it | Move to next platform immediately |
 | Use xdotool for long text (>100 chars) | Character dropping bug | Clipboard paste + Ctrl+V |
+| Kill/restart taey-ed API (uvicorn) | Crashes ALL connected Mac automation instances | API reads new files on next request via mtime cache |
 
 ### Sending Messages
 1. **ALWAYS press Enter to send** - never click Submit/Send buttons. Enter is universal.
@@ -305,15 +290,13 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 **Dropdown Menu Item Clicks**: ChatGPT and Grok dropdown items do NOT respond to xdotool coordinate clicks (React event handlers). Use keyboard navigation: click the dropdown trigger, then `Down` arrow + `Enter` to select the first item. Claude and Gemini dropdowns DO respond to xdotool clicks.
 
 ### Perplexity Deep Research
-1. Open "Add files or tools" dropdown
-2. Click "Deep research New" radio menu item - verify `checked` state (may already be checked by default)
+1. **CHECK first**: "Deep research" may already be enabled by default on new threads. Open "Add files or tools" dropdown and check if "Deep research New" radio item shows `checked` state. Do NOT click the standalone "Deep research" button — it's a TOGGLE that will turn it OFF if already on.
+2. If not checked: click "Deep research New" radio menu item to enable
 3. Attach files via same dropdown → "Upload files or images"
 4. Paste text, press Enter (NOT click Submit)
 5. Spawn daemon or use `taey_send_message`
 6. Deep Research takes 5-10 minutes - daemon notifies when done
-7. **Copy button returns summary only** — structured outputs (JSON, code) are in **artifact tiles**
-8. Click the artifact tile → opens split panel → click **Export** to download the file
-9. If tiles aren't visible in AT-SPI, **take a screenshot** to find them visually
+7. **Copy button returns summary only** - use Export > Download as Markdown for full report
 
 ### Display Environment
 - **Spark**: `DISPLAY=:0`
