@@ -241,12 +241,11 @@ def handle_attach(platform: str, file_path: str,
 
     firefox = atspi.find_firefox()
 
-    # Pre-check: detect existing file attachments
+    # Pre-check: skip if this exact file is already attached
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     existing = _detect_existing_attachments(doc)
     if existing:
         target_basename = os.path.basename(file_path)
-        # If the target file is already attached, skip re-attaching
         already_has_target = any(target_basename in f.get('file', '') for f in existing)
         if already_has_target:
             return {
@@ -257,18 +256,6 @@ def handle_attach(platform: str, file_path: str,
                 "existing_attachments": existing,
                 "info": f"{target_basename} is already attached. No action needed.",
             }
-        # Other files attached - warn Claude to remove them first
-        return {
-            "status": "stale_attachments",
-            "platform": platform,
-            "file_path": file_path,
-            "existing_attachments": existing,
-            "WARNING": (
-                f"Found {len(existing)} existing file(s) attached. "
-                "Remove them first using the Remove button coordinates, "
-                "then call taey_attach again."
-            ),
-        }
 
     # Check for pending attach (continuing after dropdown click)
     pending = None
