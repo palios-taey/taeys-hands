@@ -256,8 +256,10 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, list, popup menu
-                _MENU_CONTAINERS = {'menu', 'listbox', 'list', 'popup menu', 'panel'}
+                # Match menu containers: menu, listbox, popup menu
+                # NOTE: 'list' excluded — matches sidebar History on Gemini/ChatGPT,
+                # preventing dropdown detection. Real dropdowns use menu/listbox/popup.
+                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
                 if role in _MENU_CONTAINERS and _is_menu_showing(obj):
                     items = []
                     for i in range(min(obj.get_child_count(), 30)):
