@@ -182,7 +182,9 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
         if name and role in ACTIONABLE_ROLES:
             return True
         if role in NOISE_ROLES:
-            return False
+            # Only filter unnamed noise elements — named ones may be
+            # actual content (e.g. Perplexity knowledge tiles, artifact panels)
+            return bool(name)
         return bool(name)
 
     filtered = [e for e in elements if is_useful(e)]
