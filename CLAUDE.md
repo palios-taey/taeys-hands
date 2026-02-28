@@ -231,19 +231,18 @@ Setting a map for platform B **destroys** platform A's map.
 ```
 1. Pick ONE platform
 2. taey_inspect(platform)           # Switch tab + scan
-3. CHECK inspect result for 'attachments' field - remove stale files FIRST
-4. taey_set_map(platform, {...})    # Store controls
-5. taey_click(platform, "input")   # Focus input (send_message doesn't click input)
-6. taey_attach(platform, file)      # Attach if needed - tool detects existing files
-7. RE-INSPECT after attach (file chip shifts input Y)
-8. taey_set_map(platform, {...})    # Update map with new positions
-9. taey_click(platform, "input")   # Focus input again
-10. taey_send_message(platform, msg) # Paste + Enter + daemon spawn
-11. DONE with this platform - daemon monitors in background
-12. Move to NEXT platform, repeat from step 1
+3. taey_set_map(platform, {...})    # Store controls
+4. taey_click(platform, "input")   # Focus input (send_message doesn't click input)
+5. taey_attach(platform, file)      # Attach if needed - skips if same file already attached
+6. RE-INSPECT after attach (file chip shifts input Y)
+7. taey_set_map(platform, {...})    # Update map with new positions
+8. taey_click(platform, "input")   # Focus input again
+9. taey_send_message(platform, msg) # Paste + Enter + daemon spawn
+10. DONE with this platform - daemon monitors in background
+11. Move to NEXT platform, repeat from step 1
 ```
 
-**ATTACHMENT SAFETY**: `taey_inspect` now returns an `attachments` field when files are already present. `taey_attach` detects existing files and returns `stale_attachments` status with Remove button coordinates. ALWAYS remove stale files before attaching new ones.
+**ATTACHMENT SAFETY**: `taey_attach` detects if the target file is already attached and skips re-attaching. Other existing attachments do NOT block new attachments (multi-file workflows are supported).
 
 **NEVER batch** - do NOT inspect all platforms, then set maps for all, then attach to all.
 Each platform must complete steps 1-6 before starting the next.
@@ -332,14 +331,13 @@ For EACH platform (ChatGPT, Claude, Gemini, Grok - one at a time):
 1. Build package: python3 <builder> next --platform <name>
 2. Get prompt: python3 <builder> prompt
 3. taey_inspect(platform)                    # Switch tab, scan tree
-4. CHECK for 'attachments' in result         # Remove stale files first!
-5. taey_set_map(platform, {input, attach, ...})
-6. taey_attach(platform, "/tmp/hmm_packages/<pkg_file>.md")
-7. RE-INSPECT + RE-SET MAP after attach (file chip shifts input Y)
-8. taey_click(platform, "input")             # Focus input
-9. taey_send_message(platform, "<prompt>")   # Paste + Enter + daemon
-10. Daemon monitors → move to next platform
-11. On "Response ready": taey_quick_extract(platform) → get response text
+4. taey_set_map(platform, {input, attach, ...})
+5. taey_attach(platform, "/tmp/hmm_packages/<pkg_file>.md")
+6. RE-INSPECT + RE-SET MAP after attach (file chip shifts input Y)
+7. taey_click(platform, "input")             # Focus input
+8. taey_send_message(platform, "<prompt>")   # Paste + Enter + daemon
+9. Daemon monitors → move to next platform
+10. On "Response ready": taey_quick_extract(platform) → get response text
 12. SAVE response to file: /tmp/hmm_response_<platform>.json
 13. PROCESS + COMPLETE: python3 <builder> complete --platform <name> --response-file /tmp/hmm_response_<platform>.json
 ```
