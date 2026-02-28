@@ -99,8 +99,23 @@ def handle_quick_extract(platform: str, redis_client,
 
     content = clipboard.read()
 
-    # No retry, no second-button fallback. If clipboard is empty, the Copy
-    # button didn't work. Return failure — caller decides what to do.
+    # ChatGPT toggle buttons: do_action(0) returns True but doesn't fire
+    # the React onClick handler. Retry with grab_focus + Enter, then xdotool.
+    if not content and newest.get('atspi_obj'):
+        logger.info("Clipboard empty after do_action — retrying with focus+Enter")
+        from core.atspi_interact import atspi_focus
+        clipboard.clear()
+        if atspi_focus(newest):
+            inp.press_key('Return')
+            time.sleep(0.8)
+            content = clipboard.read()
+        if not content:
+            logger.info("Focus+Enter failed — retrying with xdotool click")
+            clipboard.clear()
+            inp.click_at(x, y)
+            time.sleep(0.8)
+            content = clipboard.read()
+
     if not content:
         return {
             "success": False,
