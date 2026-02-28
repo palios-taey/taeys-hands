@@ -297,47 +297,50 @@ def handle_attach(platform: str, file_path: str,
     if platform == 'grok' and doc:
         _activate_grok_compose(doc)
 
-    # Click attach button
+    # Click attach button (may fail if no stored map — fallbacks handle it)
     click_result = handle_click(platform, "attach", redis_client)
-    if click_result.get("error"):
-        return {"error": f"Failed to click attach: {click_result.get('error')}"}
+    click_failed = bool(click_result.get("error"))
 
-    time.sleep(1.0)
+    if not click_failed:
+        time.sleep(1.0)
 
-    # Check if file dialog opened
-    if atspi.is_file_dialog_open(firefox):
-        return _handle_file_dialog(platform, file_path, redis_client)
+        # Check if file dialog opened
+        if atspi.is_file_dialog_open(firefox):
+            return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Dropdown appeared - find items (retry up to 3 times for slow renders)
-    dropdown_items = []
-    for attempt in range(3):
-        firefox = atspi.find_firefox()
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        dropdown_items = find_menu_items(firefox, doc)
-        if dropdown_items:
-            break
-        logger.info(f"Menu items not found (attempt {attempt + 1}/3), waiting...")
-        time.sleep(0.5)
+        # Dropdown appeared - find items (retry up to 3 times for slow renders)
+        dropdown_items = []
+        for attempt in range(3):
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            dropdown_items = find_menu_items(firefox, doc)
+            if dropdown_items:
+                break
+            logger.info(f"Menu items not found (attempt {attempt + 1}/3), waiting...")
+            time.sleep(0.5)
 
-    # AT-SPI click succeeded but no dropdown appeared — retry with xdotool
-    if not dropdown_items and click_result.get("method") == "atspi":
-        logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
-        map_data = get_map(platform, redis_client)
-        if map_data:
-            coord = map_data.get('controls', {}).get('attach', {})
-            if coord:
-                inp.click_at(coord['x'], coord['y'])
-                time.sleep(1.0)
-                # Check file dialog first
-                if atspi.is_file_dialog_open(firefox):
-                    return _handle_file_dialog(platform, file_path, redis_client)
-                for attempt in range(3):
-                    firefox = atspi.find_firefox()
-                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                    dropdown_items = find_menu_items(firefox, doc)
-                    if dropdown_items:
-                        break
-                    time.sleep(0.5)
+        # AT-SPI click succeeded but no dropdown appeared — retry with xdotool
+        if not dropdown_items and click_result.get("method") == "atspi":
+            logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
+            map_data = get_map(platform, redis_client)
+            if map_data:
+                coord = map_data.get('controls', {}).get('attach', {})
+                if coord:
+                    inp.click_at(coord['x'], coord['y'])
+                    time.sleep(1.0)
+                    # Check file dialog first
+                    if atspi.is_file_dialog_open(firefox):
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    for attempt in range(3):
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        dropdown_items = find_menu_items(firefox, doc)
+                        if dropdown_items:
+                            break
+                        time.sleep(0.5)
+    else:
+        logger.info(f"Map click failed ({click_result.get('error')}), skipping to AT-SPI tree search")
+        dropdown_items = []
 
     # Fallback: Direct AT-SPI tree search for attach button (bypasses element cache)
     # Needed when find_element_at cache miss causes xdotool fallback on Gemini,
