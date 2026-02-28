@@ -211,10 +211,16 @@ def handle_attach(platform: str, file_path: str,
     if atspi.is_file_dialog_open(firefox):
         return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Dropdown appeared - find items
-    firefox = atspi.find_firefox()
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    dropdown_items = find_menu_items(firefox, doc)
+    # Dropdown appeared - find items (retry up to 3 times for slow renders)
+    dropdown_items = []
+    for attempt in range(3):
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        dropdown_items = find_menu_items(firefox, doc)
+        if dropdown_items:
+            break
+        logger.info(f"Menu items not found (attempt {attempt + 1}/3), waiting...")
+        time.sleep(0.5)
 
     # Cache dropdown items so taey_click_at can use AT-SPI do_action
     if dropdown_items:
