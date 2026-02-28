@@ -9,6 +9,7 @@ in the loop for dropdown decisions.
 import json
 import os
 import re
+import subprocess
 import time
 import logging
 from typing import Any, Dict, List
@@ -27,6 +28,30 @@ def _handle_file_dialog(platform: str, file_path: str,
     """Handle GTK file picker - type path and select file."""
     try:
         time.sleep(0.3)
+
+        # Focus the file dialog window FIRST — otherwise Ctrl+L goes to Firefox address bar
+        try:
+            # Try common file dialog titles
+            dialog_wids = []
+            for title in ['File Upload', 'Open', 'Open File']:
+                result = subprocess.run(
+                    ['xdotool', 'search', '--name', title],
+                    capture_output=True, text=True, timeout=2,
+                    env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')},
+                )
+                if result.stdout.strip():
+                    dialog_wids = result.stdout.strip().split('\n')
+                    break
+            if dialog_wids and dialog_wids[0]:
+                subprocess.run(
+                    ['xdotool', 'windowactivate', '--sync', dialog_wids[0]],
+                    capture_output=True, timeout=3,
+                    env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')},
+                )
+                time.sleep(0.3)
+                logger.info(f"Focused file dialog window {dialog_wids[0]}")
+        except Exception as e:
+            logger.warning(f"Could not focus file dialog window: {e}")
 
         if not inp.press_key('ctrl+l'):
             return {"error": "Failed to focus location bar"}
