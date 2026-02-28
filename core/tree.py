@@ -254,7 +254,9 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                if role == 'menu' and _is_menu_showing(obj):
+                # Match menu containers: menu, listbox, list, popup menu
+                _MENU_CONTAINERS = {'menu', 'listbox', 'list', 'popup menu', 'panel'}
+                if role in _MENU_CONTAINERS and _is_menu_showing(obj):
                     items = []
                     for i in range(min(obj.get_child_count(), 30)):
                         child = obj.get_child_at_index(i)
