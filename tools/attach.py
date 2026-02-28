@@ -14,6 +14,10 @@ import time
 import logging
 from typing import Any, Dict, List
 
+import gi
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi
+
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
 from core.atspi_interact import extend_cache, strip_atspi_obj
@@ -124,6 +128,44 @@ def _handle_file_dialog(platform: str, file_path: str,
     finally:
         if redis_client:
             redis_client.delete(node_key(f"attach:pending:{platform}"))
+
+
+def _find_attach_button(doc):
+    """Search AT-SPI tree for the attach/upload button by name.
+
+    Bypasses element cache — does a fresh tree search. Returns the
+    raw AT-SPI accessible object (with action interface) or None.
+    """
+    _ATTACH_NAMES = [
+        'open upload file menu',  # Gemini
+        'attach',                 # Grok
+        'add files and more',     # ChatGPT
+        'toggle menu',            # Claude (attach trigger)
+    ]
+
+    def search(obj, depth=0, max_depth=15):
+        if depth > max_depth:
+            return None
+        try:
+            role = obj.get_role_name() or ''
+            name = (obj.get_name() or '').strip().lower()
+            if 'button' in role and name in _ATTACH_NAMES:
+                comp = obj.get_component_iface()
+                if comp:
+                    ext = comp.get_extents(Atspi.CoordType.SCREEN)
+                    if ext.width > 0 and ext.height > 0:
+                        return obj
+            for i in range(min(obj.get_child_count(), 50)):
+                child = obj.get_child_at_index(i)
+                if child:
+                    result = search(child, depth + 1)
+                    if result:
+                        return result
+        except Exception:
+            pass
+        return None
+
+    return search(doc)
 
 
 def _detect_existing_attachments(doc) -> List[Dict]:
@@ -266,6 +308,64 @@ def handle_attach(platform: str, file_path: str,
                     if dropdown_items:
                         break
                     time.sleep(0.5)
+
+    # Fallback: Direct AT-SPI tree search for attach button (bypasses element cache)
+    # Needed when find_element_at cache miss causes xdotool fallback on Gemini,
+    # where xdotool coordinate clicks don't trigger React event handlers.
+    if not dropdown_items and not atspi.is_file_dialog_open(firefox):
+        logger.info("Trying direct AT-SPI tree search for attach button")
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        attach_btn = _find_attach_button(doc) if doc else None
+        if attach_btn:
+            # Escape first to dismiss any half-opened state
+            inp.press_key('Escape')
+            time.sleep(0.3)
+            action_iface = attach_btn.get_action_iface()
+            if action_iface and action_iface.get_n_actions() > 0:
+                logger.info(f"Direct AT-SPI do_action on attach button")
+                action_iface.do_action(0)
+                time.sleep(1.5)
+                # Check file dialog
+                if atspi.is_file_dialog_open(firefox):
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                # Scan for dropdown items
+                for attempt in range(3):
+                    firefox = atspi.find_firefox()
+                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                    dropdown_items = find_menu_items(firefox, doc)
+                    if dropdown_items:
+                        break
+                    time.sleep(0.5)
+
+    # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
+    # Grok/ChatGPT dropdowns render via React portals invisible to AT-SPI.
+    # xdotool click opens the dropdown, Down selects first item, Enter activates.
+    if not dropdown_items and not atspi.is_file_dialog_open(firefox):
+        logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
+        # The dropdown should already be open from the initial click.
+        # If not, re-click via xdotool to ensure it's open.
+        map_data = get_map(platform, redis_client)
+        if map_data:
+            coord = map_data.get('controls', {}).get('attach', {})
+            if coord:
+                # Escape any stale state, then re-click via xdotool
+                inp.press_key('Escape')
+                time.sleep(0.3)
+                inp.click_at(coord['x'], coord['y'])
+                time.sleep(1.0)
+                # Check file dialog (some platforms skip dropdown)
+                if atspi.is_file_dialog_open(firefox):
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                # Keyboard nav: Down selects first item, Enter activates
+                inp.press_key('Down')
+                time.sleep(0.2)
+                inp.press_key('Return')
+                time.sleep(1.5)
+                # Check if file dialog opened
+                if atspi.is_file_dialog_open(firefox):
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                logger.warning("Keyboard nav fallback did not open file dialog")
 
     # Cache dropdown items so taey_click_at can use AT-SPI do_action
     if dropdown_items:
