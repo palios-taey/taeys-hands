@@ -130,6 +130,30 @@ def _handle_file_dialog(platform: str, file_path: str,
             redis_client.delete(node_key(f"attach:pending:{platform}"))
 
 
+def _activate_grok_compose(doc):
+    """Click the Grok compose area to activate it before attaching.
+
+    On the Grok landing page, the Attach button dropdown doesn't work
+    until the contenteditable compose area is focused. This finds the
+    editable section/paragraph and clicks it.
+    """
+    try:
+        all_elements = find_elements(doc, max_depth=15)
+        # Look for editable section/paragraph (the compose area)
+        for e in all_elements:
+            states = e.get('states', [])
+            if 'editable' in states and e.get('role') in ('section', 'paragraph'):
+                x, y = e.get('x', 0), e.get('y', 0)
+                if x > 0 and y > 0:
+                    logger.info(f"Activating Grok compose area at ({x},{y})")
+                    inp.click_at(x, y)
+                    time.sleep(0.5)
+                    return
+        logger.debug("No editable compose area found for Grok")
+    except Exception as e:
+        logger.debug(f"Grok compose activation failed: {e}")
+
+
 def _find_attach_button(doc):
     """Search AT-SPI tree for the attach/upload button by name.
 
@@ -266,6 +290,12 @@ def handle_attach(platform: str, file_path: str,
             redis_client.delete(node_key(f"attach:pending:{platform}"))
     elif atspi.is_file_dialog_open(firefox):
         return _handle_file_dialog(platform, file_path, redis_client)
+
+    # Grok: activate compose area before clicking Attach.
+    # On the Grok landing page, the Attach dropdown doesn't work until
+    # the contenteditable compose area is focused/activated.
+    if platform == 'grok' and doc:
+        _activate_grok_compose(doc)
 
     # Click attach button
     click_result = handle_click(platform, "attach", redis_client)
