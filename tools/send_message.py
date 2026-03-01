@@ -31,6 +31,57 @@ def _reap_daemons():
     _daemon_processes = [p for p in _daemon_processes if p.poll() is None]
 
 
+def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
+                         session_id: str = None, user_message_id: str = None,
+                         timeout: int = 3600, settle_seconds: int = 0) -> Dict[str, Any]:
+    """Spawn a monitor daemon as a detached subprocess.
+
+    Reusable by monitors.py for respawn scenarios (Gemini Deep Research,
+    Claude Continue, ChatGPT Show More).
+
+    Returns:
+        Dict with spawned, pid, log path, or error.
+    """
+    daemon_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'monitor', 'daemon.py',
+    )
+    daemon_cmd = [
+        '/usr/bin/python3', daemon_path,
+        '--platform', platform,
+        '--monitor-id', monitor_id,
+        '--baseline-copy-count', '0',
+        '--timeout', str(timeout),
+        '--tmux-session', NODE_ID,
+    ]
+    if session_id:
+        daemon_cmd.extend(['--session-id', session_id])
+    if user_message_id:
+        daemon_cmd.extend(['--user-message-id', user_message_id])
+    if settle_seconds > 0:
+        daemon_cmd.extend(['--settle-seconds', str(settle_seconds)])
+
+    _reap_daemons()
+
+    daemon_env = os.environ.copy()
+    daemon_env['DISPLAY'] = display
+
+    try:
+        log_file = f"/tmp/taey_daemon_{monitor_id}.log"
+        daemon_log = open(log_file, 'w')
+        proc = subprocess.Popen(
+            daemon_cmd, env=daemon_env,
+            stdout=daemon_log, stderr=daemon_log,
+            start_new_session=True,
+        )
+        daemon_log.close()
+        _daemon_processes.append(proc)
+        return {"spawned": True, "pid": proc.pid, "log": log_file}
+    except Exception as e:
+        logger.error(f"Daemon spawn failed: {e}")
+        return {"spawned": False, "error": str(e)}
+
+
 def handle_send_message(platform: str, message: str,
                         redis_client, display: str,
                         attachments: List[str] = None,
@@ -95,52 +146,23 @@ def handle_send_message(platform: str, message: str,
 
     # Step 5: Spawn monitor daemon BEFORE Enter
     monitor_id = str(uuid.uuid4())[:8]
-    daemon_timeout = 3600  # 1 hour default
-
-    daemon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'monitor', 'daemon.py')
-    daemon_cmd = [
-        '/usr/bin/python3', daemon_path,
-        '--platform', platform,
-        '--monitor-id', monitor_id,
-        '--baseline-copy-count', '0',
-        '--timeout', str(daemon_timeout),
-        '--tmux-session', NODE_ID,
-    ]
-    if session_id:
-        daemon_cmd.extend(['--session-id', session_id])
-    if message_id:
-        daemon_cmd.extend(['--user-message-id', message_id])
-
-    _reap_daemons()
-
-    daemon_env = os.environ.copy()
-    daemon_env['DISPLAY'] = display
-    daemon_spawned = False
-    daemon_pid = None
-    daemon_log_path = None
-
-    try:
-        log_file = f"/tmp/taey_daemon_{monitor_id}.log"
-        daemon_log = open(log_file, 'w')
-        proc = subprocess.Popen(
-            daemon_cmd, env=daemon_env,
-            stdout=daemon_log, stderr=daemon_log,
-            start_new_session=True,
-        )
-        daemon_log.close()
-        daemon_spawned = True
-        daemon_pid = proc.pid
-        daemon_log_path = log_file
-        _daemon_processes.append(proc)
-    except Exception as e:
-        logger.error(f"Daemon spawn failed: {e}")
+    spawn_result = spawn_monitor_daemon(
+        platform=platform,
+        monitor_id=monitor_id,
+        display=display,
+        session_id=session_id,
+        user_message_id=message_id,
+    )
+    daemon_spawned = spawn_result.get("spawned", False)
+    daemon_pid = spawn_result.get("pid")
+    daemon_log_path = spawn_result.get("log")
 
     # Step 6: Press Enter to send
     if not inp.press_key('Return', timeout=5):
-        if daemon_spawned and proc.poll() is None:
+        if daemon_spawned and daemon_pid:
             try:
-                proc.terminate()
-            except Exception:
+                os.kill(daemon_pid, 15)  # SIGTERM
+            except (ProcessLookupError, OSError):
                 pass
         return {"error": "Send (Enter key) failed", "platform": platform, "neo4j": neo4j_result}
 
