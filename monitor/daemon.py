@@ -116,8 +116,10 @@ class MonitorDaemon:
 
     State machine:
         IDLE -> GENERATING (stop button appears)
-        GENERATING -> NOTIFYING (stop button disappears)
-        NOTIFYING -> COMPLETE (notification sent, exit)
+        GENERATING -> SETTLING (stop disappears, settle > 0, cycle 1)
+        SETTLING -> GENERATING (new stop button appears during settle)
+        SETTLING -> COMPLETE (settle expires, no new stop button)
+        GENERATING -> COMPLETE (stop disappears, final cycle or settle == 0)
     """
 
     def __init__(self, platform: str, monitor_id: str,
@@ -125,7 +127,8 @@ class MonitorDaemon:
                  session_id: Optional[str] = None,
                  user_message_id: Optional[str] = None,
                  timeout_seconds: int = 3600,
-                 tmux_session: Optional[str] = None):
+                 tmux_session: Optional[str] = None,
+                 settle_seconds: int = 0):
         self.platform = platform.lower()
         self.monitor_id = monitor_id
         self.baseline_copy_count = baseline_copy_count
@@ -133,10 +136,13 @@ class MonitorDaemon:
         self.user_message_id = user_message_id
         self.timeout_seconds = timeout_seconds
         self.tmux_session = tmux_session
+        self.settle_seconds = settle_seconds
 
         self.state = "IDLE"
         self.start_time = time.time()
         self.stop_button_seen = False
+        self.cycle_count = 0
+        self.settle_start = None
 
         self.poll_interval_ms = 3000
         self.initial_delay_ms = 3000  # Reduced from 10s - fast responses missed at 10s
@@ -314,13 +320,16 @@ class MonitorDaemon:
 
         return False
 
-    def _notify_tmux(self, platform: str):
+    def _notify_tmux(self, platform: str, intermediate: bool = False):
         """Send notification to the spawning Claude session via tmux send-keys.
 
         Uses the tmux session name passed by send_message (--tmux-session).
         Falls back to hostname-based guessing if not provided.
         """
-        msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
+        if intermediate:
+            msg = f"Intermediate response on {platform}. Daemon still monitoring for next cycle."
+        else:
+            msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
         # Use explicit session from spawner (correct instance isolation)
         if self.tmux_session:
@@ -367,9 +376,11 @@ class MonitorDaemon:
 
         notification_json = json.dumps(notification)
 
-        # tmux notification for response_ready (works even when Claude Code is idle)
+        # tmux notification (works even when Claude Code is idle)
         if status == "response_ready":
             self._notify_tmux(self.platform)
+        elif status == "intermediate_ready":
+            self._notify_tmux(self.platform, intermediate=True)
 
         if self.redis_client:
             try:
@@ -465,6 +476,28 @@ class MonitorDaemon:
             self._log(f"Buttons in doc (sample): {all_buttons[:10]}")
             self.verbose_logged = True
 
+        # Handle SETTLING state: waiting between cycles for new stop button
+        if self.state == "SETTLING":
+            if stop_button:
+                self._log("Stop button reappeared during settle - new generation cycle")
+                self.state = "GENERATING"
+                self.stop_button_seen = True
+                self.settle_start = None
+                return True
+            settle_elapsed = time.time() - self.settle_start
+            if settle_elapsed > self.settle_seconds:
+                self._log(f"Settle period expired ({settle_elapsed:.1f}s). Final completion.")
+                self.state = "NOTIFYING"
+                self._notify_agent(
+                    "response_ready",
+                    f"Response complete on {self.platform} - switch to tab and extract",
+                    {"cycle": self.cycle_count, "requires_action": True},
+                )
+                self.state = "COMPLETE"
+                self.main_loop.quit()
+                return False
+            return True  # Keep polling during settle
+
         if stop_button:
             if self.state == "IDLE":
                 self.state = "GENERATING"
@@ -472,12 +505,28 @@ class MonitorDaemon:
                 self._log("Stop button appeared - response generating")
         else:
             if self.stop_button_seen:
-                self._log("Completion detected: stop button disappeared")
+                self.cycle_count += 1
+
+                if self.settle_seconds > 0 and self.cycle_count == 1:
+                    # First cycle done, enter settling period for possible second cycle
+                    self._log(f"Cycle {self.cycle_count} complete. Settling for {self.settle_seconds}s...")
+                    self.state = "SETTLING"
+                    self.settle_start = time.time()
+                    self.stop_button_seen = False  # Reset for next cycle
+                    self._notify_agent(
+                        "intermediate_ready",
+                        f"Intermediate response on {self.platform} (cycle {self.cycle_count}). Daemon still monitoring.",
+                        {"cycle": self.cycle_count, "requires_action": True},
+                    )
+                    return True  # Keep polling
+
+                # Final cycle (or no settling configured)
+                self._log(f"Completion detected (cycle {self.cycle_count}): stop button disappeared")
                 self.state = "NOTIFYING"
                 self._notify_agent(
                     "response_ready",
                     f"Response complete on {self.platform} - switch to tab and extract",
-                    {"requires_action": True},
+                    {"cycle": self.cycle_count, "requires_action": True},
                 )
                 self.state = "COMPLETE"
                 self.main_loop.quit()
@@ -528,6 +577,9 @@ def main():
     parser.add_argument('--user-message-id')
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--tmux-session', help='tmux session to notify on completion')
+    parser.add_argument('--settle-seconds', type=int, default=0,
+                        help='Seconds to wait after first cycle before exiting. '
+                             'If new stop button appears during settle, monitors second cycle.')
 
     args = parser.parse_args()
 
@@ -539,6 +591,7 @@ def main():
         user_message_id=args.user_message_id,
         timeout_seconds=args.timeout,
         tmux_session=args.tmux_session,
+        settle_seconds=args.settle_seconds,
     )
     daemon.start()
 
