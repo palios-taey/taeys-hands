@@ -44,7 +44,7 @@ from tools.attach import handle_attach
 from tools.dropdown import handle_select_dropdown, handle_prepare
 from tools.plan import handle_plan
 from tools.sessions import handle_list_sessions
-from tools.monitors import handle_list_monitors, handle_kill_monitors
+from tools.monitors import handle_list_monitors, handle_kill_monitors, handle_respawn_monitor
 
 
 # =========================================================================
@@ -378,6 +378,22 @@ def get_tools() -> List[Dict]:
                 "required": [],
             },
         },
+        {
+            "name": "taey_respawn_monitor",
+            "description": (
+                "Spawn a fresh monitor daemon for multi-step response flows.\n\n"
+                "Use after clicking 'Start research' (Gemini), 'Continue' (Claude),\n"
+                "or 'Show more' (ChatGPT) to monitor the next generation cycle.\n\n"
+                "Reuses the existing session/message from pending_prompt."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "platform": PLATFORM_PROP,
+                },
+                "required": ["platform"],
+            },
+        },
     ]
 
 
@@ -513,6 +529,12 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 
     if name == "taey_kill_monitors":
         return handle_kill_monitors(redis_client)
+
+    if name == "taey_respawn_monitor":
+        platform = args.get("platform")
+        if not platform:
+            return {"error": "platform is required"}
+        return handle_respawn_monitor(platform, redis_client, DISPLAY)
 
     return {"error": f"Unknown tool: {name}"}
 

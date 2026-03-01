@@ -69,6 +69,7 @@ platforms/             # Platform configs (YAML)
 | `taey_list_sessions` | Show active sessions and pending responses |
 | `taey_list_monitors` | List background monitor daemons |
 | `taey_kill_monitors` | Emergency stop all monitors |
+| `taey_respawn_monitor` | Spawn fresh daemon for multi-step response flows |
 
 ---
 
@@ -143,6 +144,29 @@ Some responses require more than just clicking Copy:
 - **Claude truncated**: Look for "Continue" button, click it, extract again
 - **ChatGPT collapsed**: Look for "Show more", expand first
 - **Quality flags**: `quality.needs_action` tells you what to do. ALWAYS check it.
+
+### Multi-Step Response Flows (Deep Research, Continue, Show More)
+
+Some platforms require user action mid-generation:
+- **Gemini Deep Research**: Shows plan card → click "Start research" → actual research (5-10 min)
+- **Claude**: Truncated response → click "Continue" → rest of response
+- **ChatGPT**: Collapsed response → click "Show more" → full content
+
+The daemon exits after the first stop-button cycle. After taking the mid-generation action (clicking the trigger button), call:
+
+```
+taey_respawn_monitor(platform)
+```
+
+This spawns a fresh daemon to detect the second generation cycle. The original `pending_prompt` is preserved for session linkage — do NOT call `quick_extract(complete=True)` until the final response is ready.
+
+**Gemini Deep Research workflow:**
+1. `taey_send_message(platform, msg)` → daemon spawns
+2. Daemon detects plan card complete → sends notification
+3. Inspect Gemini → find "Start research" button → click it
+4. `taey_respawn_monitor("gemini")` → fresh daemon monitors actual research
+5. Daemon detects research complete → sends `response_ready`
+6. Extract via Share & Export > Copy Content (Copy button only gets closing line)
 
 ---
 
