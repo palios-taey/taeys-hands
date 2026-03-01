@@ -325,7 +325,9 @@ HMM (Harmonic Motif Memory) enrichment sends conversation packages to AI platfor
 
 ### Enrichment Loop (one cycle)
 
-For EACH platform (ChatGPT, Claude, Gemini, Grok - one at a time):
+For EACH platform (ChatGPT, Gemini, Grok - one at a time):
+
+**DO NOT use Claude (Alt+2) for HMM enrichment.** Claude usage is reserved for Spark only. Jetson and Thor must skip Claude entirely to conserve API usage limits.
 
 ```
 1. Build package: python3 <builder> next --platform <name>
