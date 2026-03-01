@@ -241,8 +241,29 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         except Exception:
             return False
 
-    def _collect_from(scope, max_depth=15):
-        """Find first visible menu with items in scope."""
+    def _collect_items_from_child(child):
+        """Extract a menu item dict from an AT-SPI child element."""
+        child_role = child.get_role_name() or ''
+        child_name = child.get_name() or ''
+        if child_name and child_role in _MENU_ITEM_ROLES:
+            try:
+                comp = child.get_component_iface()
+                if comp:
+                    ext = comp.get_extents(Atspi.CoordType.SCREEN)
+                    if ext.width > 0 and ext.height > 0:
+                        return {
+                            'name': child_name,
+                            'role': child_role,
+                            'x': ext.x + ext.width // 2,
+                            'y': ext.y + ext.height // 2,
+                            'atspi_obj': child,
+                        }
+            except Exception as e:
+                logger.debug(f"Menu item extent error: {e}")
+        return None
+
+    def _collect_from(scope, max_depth=15, require_showing=True):
+        """Find first menu with items in scope."""
         found = []
 
         def search(obj, depth=0):
@@ -256,36 +277,27 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, popup menu
+                # Match menu containers: menu, listbox, popup menu, panel
                 # NOTE: 'list' excluded — matches sidebar History on Gemini/ChatGPT,
                 # preventing dropdown detection. Real dropdowns use menu/listbox/popup.
                 _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
-                if role in _MENU_CONTAINERS and _is_menu_showing(obj):
-                    items = []
-                    for i in range(min(obj.get_child_count(), 30)):
-                        child = obj.get_child_at_index(i)
-                        if not child:
-                            continue
-                        child_role = child.get_role_name() or ''
-                        child_name = child.get_name() or ''
-                        if child_name and child_role in _MENU_ITEM_ROLES:
-                            try:
-                                comp = child.get_component_iface()
-                                if comp:
-                                    ext = comp.get_extents(Atspi.CoordType.SCREEN)
-                                    if ext.width > 0 and ext.height > 0:
-                                        items.append({
-                                            'name': child_name,
-                                            'role': child_role,
-                                            'x': ext.x + ext.width // 2,
-                                            'y': ext.y + ext.height // 2,
-                                            'atspi_obj': child,
-                                        })
-                            except Exception as e:
-                                logger.debug(f"Menu item extent error: {e}")
-                    if items:
-                        found = items
-                        return
+                if role in _MENU_CONTAINERS:
+                    # Check SHOWING state unless relaxed (retry mode)
+                    if require_showing and not _is_menu_showing(obj):
+                        # Still recurse children — container might be nested
+                        pass
+                    else:
+                        items = []
+                        for i in range(min(obj.get_child_count(), 30)):
+                            child = obj.get_child_at_index(i)
+                            if not child:
+                                continue
+                            item = _collect_items_from_child(child)
+                            if item:
+                                items.append(item)
+                        if items:
+                            found = items
+                            return
 
                 for i in range(min(obj.get_child_count(), 30)):
                     child = obj.get_child_at_index(i)
@@ -307,6 +319,21 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
     # Then Firefox root (dropdowns render outside document)
     if firefox:
         items = _collect_from(firefox)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+
+    # Retry WITHOUT requiring SHOWING state on containers.
+    # Gemini/Angular dropdown containers may not propagate SHOWING state
+    # reliably, even though their children are visible with valid extents.
+    logger.debug("Strict SHOWING search failed, retrying without SHOWING requirement")
+    if platform_doc:
+        items = _collect_from(platform_doc, require_showing=False)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+    if firefox:
+        items = _collect_from(firefox, require_showing=False)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
