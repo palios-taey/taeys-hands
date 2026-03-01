@@ -2,23 +2,24 @@
 Neo4j client for session and message persistence.
 
 Provides CRUD operations for chat sessions and messages.
-Uses the NCCL fabric network for high-speed access.
-
 Sessions and messages form a graph:
   (ChatSession)-[:HAS_MESSAGE]->(Message)
   (Message)-[:RESPONDS_TO]->(Message)
+
+Configure via NEO4J_URI environment variable.
 """
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Neo4j configuration - no auth, NCCL network
-NEO4J_URI = "bolt://192.168.x.10:7689"
+# Neo4j configuration — override via environment variable
+NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
 
 _driver = None
 
