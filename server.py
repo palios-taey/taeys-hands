@@ -6,7 +6,7 @@ AT-SPI-based chat and social platform automation.
 Simple JSON-RPC over stdio (no mcp library) for AT-SPI compatibility
 with system Python + gi.repository.
 
-Run: python3 server.py
+Run: python3 /home/spark/taeys-hands/server.py
 """
 
 import sys
@@ -15,6 +15,16 @@ import json
 import logging
 import traceback
 from typing import Any, Dict, List
+
+# Load .env file (NCCL endpoints, Neo4j URI, etc.)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _val = _line.split('=', 1)
+                os.environ.setdefault(_key.strip(), _val.strip())
 
 # Logging to file (stderr reserved for JSON-RPC)
 logging.basicConfig(
@@ -33,29 +43,18 @@ DISPLAY = detect_display()
 os.environ['DISPLAY'] = DISPLAY
 
 # Now safe to import AT-SPI dependent modules
-
-# Storage backends (optional - graceful degradation if not available)
-try:
-    from storage.redis_pool import get_client as get_redis, node_key
-    _redis_client = get_redis()
-except Exception:
-    _redis_client = None
-    def node_key(suffix): return f"taey:local:{suffix}"
-
-try:
-    from storage import neo4j_client
-except Exception:
-    neo4j_client = None
+from storage.redis_pool import get_client as get_redis, node_key
+from storage import neo4j_client
 
 from tools.inspect import handle_inspect
-from tools.interact import handle_set_map, handle_click, handle_click_at
+from tools.interact import handle_click
 from tools.send_message import handle_send_message
 from tools.extract import handle_quick_extract, handle_extract_history
 from tools.attach import handle_attach
 from tools.dropdown import handle_select_dropdown, handle_prepare
 from tools.plan import handle_plan
 from tools.sessions import handle_list_sessions
-from tools.monitors import handle_list_monitors, handle_kill_monitors, handle_respawn_monitor
+from tools.monitors import handle_monitors, handle_respawn_monitor
 
 
 # =========================================================================
@@ -148,57 +147,11 @@ def get_tools() -> List[Dict]:
             },
         },
         {
-            "name": "taey_set_map",
-            "description": (
-                "Store the interpreted control map for a platform.\n\n"
-                "After calling taey_inspect, Claude interprets the raw elements and stores\n"
-                "structured coordinates with standard keys:\n"
-                "- input: where to type the message\n"
-                "- send: submit button\n"
-                "- attach: file attachment button\n"
-                "- model: model selector (if exists)\n"
-                "- mode: mode selector (if exists)\n"
-                "- copy: copy response button"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "controls": {
-                        "type": "object",
-                        "description": "Map of control names to {x, y} coordinates",
-                        "additionalProperties": {
-                            "type": "object",
-                            "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
-                            "required": ["x", "y"],
-                        },
-                    },
-                },
-                "required": ["platform", "controls"],
-            },
-        },
-        {
             "name": "taey_click",
             "description": (
-                "Click on a control using stored map coordinates.\n\n"
-                "Requires taey_set_map to have been called first for this platform.\n\n"
-                "Standard targets: input, send, attach, model, mode, copy"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "target": {"type": "string", "description": "Control name to click"},
-                },
-                "required": ["platform", "target"],
-            },
-        },
-        {
-            "name": "taey_click_at",
-            "description": (
-                "Click at specific coordinates on a platform.\n\n"
-                "Use this after taey_attach returns dropdown items - click the coordinates\n"
-                "of the dropdown item you choose."
+                "Click at coordinates from inspect results.\n\n"
+                "AT-SPI first (cached then fresh scan), xdotool fallback.\n"
+                "Use coordinates from taey_inspect element list."
             ),
             "inputSchema": {
                 "type": "object",
@@ -265,7 +218,7 @@ def get_tools() -> List[Dict]:
             "name": "taey_send_message",
             "description": (
                 "Send a message with full workflow: type, store in Neo4j, send, spawn monitor.\n\n"
-                "IMPORTANT: Requires taey_inspect + taey_set_map first to have input/send coordinates.\n"
+                "IMPORTANT: Requires taey_inspect first to identify input/send coordinates.\n"
                 "Claude must click the input field via taey_click BEFORE calling this.\n"
                 "send_message pastes into whatever is focused, presses Enter, records, spawns daemon.\n\n"
                 "The background monitor daemon will detect response completion and send\n"
@@ -320,10 +273,10 @@ def get_tools() -> List[Dict]:
             "description": (
                 "Attach a file to the chat input - multi-step with Claude in the loop.\n\n"
                 "Flow:\n"
-                "1. Clicks attach button (from stored map)\n"
+                "1. Clicks attach button via AT-SPI tree search\n"
                 "2. If file dialog opened -> handles file selection automatically\n"
                 "3. If dropdown appeared -> returns dropdown items for Claude to decide\n\n"
-                "When dropdown returned, use taey_click_at to select the upload option,\n"
+                "When dropdown returned, use taey_click to select the upload option,\n"
                 "then call taey_attach again to complete the file selection."
             ),
             "inputSchema": {
@@ -365,28 +318,22 @@ def get_tools() -> List[Dict]:
             },
         },
         {
-            "name": "taey_list_monitors",
+            "name": "taey_monitors",
             "description": (
-                "List all active background monitor daemons.\n\n"
-                "Shows platform, monitor ID, status, and elapsed time."
+                "List or kill background monitor daemons.\n\n"
+                "action='list': Show all active monitors with platform, ID, status, elapsed time.\n"
+                "action='kill': EMERGENCY STOP — kill all daemons, clear all Redis monitor entries."
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-        {
-            "name": "taey_kill_monitors",
-            "description": (
-                "EMERGENCY STOP: Kill ALL background monitor daemons.\n\n"
-                "Kills all tracked daemon processes, orphaned monitors,\n"
-                "and clears all monitor entries from Redis."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": [],
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "kill"],
+                        "description": "list: show monitors | kill: stop all monitors",
+                    },
+                },
+                "required": ["action"],
             },
         },
         {
@@ -429,25 +376,7 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
         scroll = args.get("scroll", "bottom")
         return handle_inspect(platform, redis_client, scroll=scroll)
 
-    if name == "taey_set_map":
-        platform = args.get("platform")
-        controls = args.get("controls")
-        if not platform:
-            return {"error": "platform is required"}
-        if not controls:
-            return {"error": "controls is required"}
-        return handle_set_map(platform, controls, redis_client)
-
     if name == "taey_click":
-        platform = args.get("platform")
-        target = args.get("target")
-        if not platform:
-            return {"error": "platform is required"}
-        if not target:
-            return {"error": "target is required"}
-        return handle_click(platform, target, redis_client)
-
-    if name == "taey_click_at":
         platform = args.get("platform")
         x = args.get("x")
         y = args.get("y")
@@ -455,7 +384,7 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
             return {"error": "platform is required"}
         if x is None or y is None:
             return {"error": "x and y are required"}
-        return handle_click_at(platform, x, y)
+        return handle_click(platform, x, y)
 
     if name == "taey_prepare":
         platform = args.get("platform")
@@ -535,11 +464,11 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
     if name == "taey_list_sessions":
         return handle_list_sessions(args.get("platform"), redis_client)
 
-    if name == "taey_list_monitors":
-        return handle_list_monitors(redis_client)
-
-    if name == "taey_kill_monitors":
-        return handle_kill_monitors(redis_client)
+    if name == "taey_monitors":
+        action = args.get("action")
+        if not action:
+            return {"error": "action is required"}
+        return handle_monitors(action, redis_client)
 
     if name == "taey_respawn_monitor":
         platform = args.get("platform")
@@ -556,7 +485,7 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 
 def run_server():
     """Run the MCP server over stdio."""
-    redis_client = _redis_client
+    redis_client = get_redis()
 
     def read_message():
         """Read a JSON-RPC message from stdin."""
