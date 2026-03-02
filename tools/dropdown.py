@@ -13,10 +13,9 @@ from typing import Any, Dict
 
 import yaml
 
-from core import atspi
+from core import atspi, input as inp
 from core.tree import find_menu_items
 from core.atspi_interact import extend_cache
-from tools.interact import handle_click
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
@@ -26,7 +25,6 @@ logger = logging.getLogger(__name__)
 def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
     """Find a button by name in AT-SPI tree and click via do_action(0).
 
-    More reliable than xdotool coordinates for platforms like Gemini.
     Returns True if the action was performed.
     """
     trigger_lower = trigger_name.lower()
@@ -58,25 +56,31 @@ def handle_select_dropdown(platform: str, dropdown: str,
                            redis_client) -> Dict[str, Any]:
     """Open a dropdown and return found items for Claude to pick from.
 
-    1. Click dropdown trigger via xdotool (AT-SPI fallback)
+    1. Click dropdown trigger via AT-SPI tree search (primary)
     2. Scan AT-SPI tree for menu items
     3. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
-    Claude reads the items, picks the right one, clicks via taey_click_at.
+    Claude reads the items, picks the right one, clicks via taey_click.
     """
-    # Click dropdown trigger via stored map (xdotool primary)
-    click_result = handle_click(platform, dropdown, redis_client)
-    if click_result.get("error"):
-        # Fallback: try AT-SPI do_action directly on named button
-        trigger_clicked = False
-        firefox = atspi.find_firefox()
-        if firefox:
-            doc = atspi.get_platform_document(firefox, platform)
-            if doc:
-                trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
-        if not trigger_clicked:
-            return {"error": f"Failed to click {dropdown}: {click_result.get('error')}"}
+    # Switch to platform tab first
+    if not inp.switch_to_platform(platform):
+        return {"error": f"Failed to switch to {platform} tab"}
+
+    # Primary: AT-SPI tree search for dropdown trigger button
+    trigger_clicked = False
+    firefox = atspi.find_firefox()
+    if firefox:
+        doc = atspi.get_platform_document(firefox, platform)
+        if doc:
+            trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+
+    if not trigger_clicked:
+        return {
+            "error": f"Failed to click dropdown trigger '{dropdown}' via AT-SPI tree search.",
+            "platform": platform,
+            "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
+        }
 
     time.sleep(0.5)
 
@@ -91,7 +95,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
     menu_items = find_menu_items(firefox, doc)
 
-    # Cache menu items so taey_click_at can use AT-SPI do_action
+    # Cache menu items so taey_click can use AT-SPI do_action
     if menu_items:
         extend_cache(platform, menu_items)
 
@@ -118,7 +122,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "dropdown": dropdown,
         "target_requested": target_value,
         "items": items,
-        "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click_at.",
+        "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
     }
 
 

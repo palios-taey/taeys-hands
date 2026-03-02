@@ -1,8 +1,8 @@
 """
-taey_list_monitors, taey_kill_monitors, taey_respawn_monitor - Monitor daemon management.
+taey_monitors, taey_respawn_monitor - Monitor daemon management.
 
-Lists running background monitor daemons, provides emergency
-stop capability, and respawns monitors for multi-step response flows.
+Lists/kills background monitor daemons and respawns monitors
+for multi-step response flows.
 """
 
 import json
@@ -18,94 +18,85 @@ from storage.redis_pool import node_key
 logger = logging.getLogger(__name__)
 
 
-def handle_list_monitors(redis_client) -> Dict[str, Any]:
-    """List all active background monitor daemons.
-
-    Checks Redis for monitor status entries.
+def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
+    """List or kill background monitor daemons.
 
     Args:
+        action: "list" to show active monitors, "kill" to stop all.
         redis_client: Redis client.
 
     Returns:
-        List of monitor statuses.
+        For "list": list of monitor statuses.
+        For "kill": count of processes killed and Redis entries cleared.
     """
-    monitors = []
+    if action == "list":
+        monitors = []
 
-    if redis_client:
-        # Scan for monitor keys
-        cursor = 0
-        while True:
-            cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
-            for key in keys:
-                try:
-                    data = redis_client.get(key)
-                    if data:
-                        monitor = json.loads(data)
-                        monitors.append(monitor)
-                except (json.JSONDecodeError, Exception):
-                    pass
-            if cursor == 0:
-                break
+        if redis_client:
+            # Scan for monitor keys
+            cursor = 0
+            while True:
+                cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
+                for key in keys:
+                    try:
+                        data = redis_client.get(key)
+                        if data:
+                            monitor = json.loads(data)
+                            monitors.append(monitor)
+                    except (json.JSONDecodeError, Exception):
+                        pass
+                if cursor == 0:
+                    break
 
-    return {
-        "success": True,
-        "monitors": monitors,
-        "count": len(monitors),
-    }
+        return {
+            "success": True,
+            "monitors": monitors,
+            "count": len(monitors),
+        }
 
+    elif action == "kill":
+        killed = 0
+        cleared = 0
 
-def handle_kill_monitors(redis_client) -> Dict[str, Any]:
-    """Emergency stop: kill ALL background monitor daemons.
+        # Kill orphaned monitor_daemon.py processes
+        try:
+            result = subprocess.run(
+                ['pgrep', '-f', 'monitor.*daemon'],
+                capture_output=True, text=True,
+            )
+            if result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), signal.SIGTERM)
+                        killed += 1
+                    except (ProcessLookupError, ValueError):
+                        pass
+        except Exception as e:
+            logger.warning(f"pgrep failed: {e}")
 
-    1. Kill tracked daemon processes
-    2. Kill orphaned monitor_daemon.py processes
-    3. Clear all monitor entries from Redis
+        # Clear Redis monitor entries
+        if redis_client:
+            cursor = 0
+            while True:
+                cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
+                for key in keys:
+                    redis_client.delete(key)
+                    cleared += 1
+                if cursor == 0:
+                    break
 
-    Args:
-        redis_client: Redis client.
+            # Clear notification queue
+            redis_client.delete(node_key("notifications"))
 
-    Returns:
-        Count of processes killed and Redis entries cleared.
-    """
-    killed = 0
-    cleared = 0
+        return {
+            "success": True,
+            "processes_killed": killed,
+            "redis_entries_cleared": cleared,
+        }
 
-    # Kill orphaned monitor_daemon.py processes
-    try:
-        result = subprocess.run(
-            ['pgrep', '-f', 'monitor.*daemon'],
-            capture_output=True, text=True,
-        )
-        if result.stdout.strip():
-            pids = result.stdout.strip().split('\n')
-            for pid in pids:
-                try:
-                    os.kill(int(pid), signal.SIGTERM)
-                    killed += 1
-                except (ProcessLookupError, ValueError):
-                    pass
-    except Exception as e:
-        logger.warning(f"pgrep failed: {e}")
-
-    # Clear Redis monitor entries
-    if redis_client:
-        cursor = 0
-        while True:
-            cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
-            for key in keys:
-                redis_client.delete(key)
-                cleared += 1
-            if cursor == 0:
-                break
-
-        # Clear notification queue
-        redis_client.delete(node_key("notifications"))
-
-    return {
-        "success": True,
-        "processes_killed": killed,
-        "redis_entries_cleared": cleared,
-    }
+    else:
+        return {"error": f"Unknown action '{action}'. Use 'list' or 'kill'."}
 
 
 def handle_respawn_monitor(platform: str, redis_client, display: str) -> Dict[str, Any]:
