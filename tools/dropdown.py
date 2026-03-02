@@ -8,7 +8,7 @@ Dropdown option tracking:
 - When a dropdown is opened, compares found items against YAML capabilities
 - Flags new items (in dropdown but not in YAML) and missing items
   (in YAML but not in dropdown)
-- Gemini decides what the changes mean - no thresholds, no special cases
+- Claude decides what the changes mean - no thresholds, no special cases
 """
 
 import json

@@ -182,7 +182,7 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
         if name and role in ACTIONABLE_ROLES:
             return True
         if role in NOISE_ROLES:
-            # Only filter unnamed noise elements - named ones may be
+            # Only filter unnamed noise elements — named ones may be
             # actual content (e.g. Perplexity knowledge tiles, artifact panels)
             return bool(name)
         return bool(name)
@@ -278,13 +278,13 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                     return
 
                 # Match menu containers: menu, listbox, popup menu, panel
-                # NOTE: 'list' excluded - matches sidebar History on Gemini/ChatGPT,
+                # NOTE: 'list' excluded — matches sidebar History on Gemini/ChatGPT,
                 # preventing dropdown detection. Real dropdowns use menu/listbox/popup.
                 _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
                 if role in _MENU_CONTAINERS:
                     # Check SHOWING state unless relaxed (retry mode)
                     if require_showing and not _is_menu_showing(obj):
-                        # Still recurse children - container might be nested
+                        # Still recurse children — container might be nested
                         pass
                     else:
                         items = []
@@ -386,8 +386,9 @@ def compute_structure_hash(elements: List[Dict], screen_height: int = 1080,
     new controls appear, layout shifts) while being stable across
     normal content changes (new messages, different text).
 
-    Sidebar content (list items with 'link' role in the left 20% of
-    screen) is excluded since sidebar sessions change constantly.
+    Content-variable roles (links, list items, headings, static text)
+    are excluded entirely — these change with conversation history and
+    sidebar state, not UI structure.
 
     Args:
         elements: Element list from find_elements or filter_useful_elements.
@@ -399,22 +400,18 @@ def compute_structure_hash(elements: List[Dict], screen_height: int = 1080,
     """
     band_height = max(screen_height // grid_rows, 1)
 
-    # Collect role+band pairs, excluding sidebar session links
-    # Sidebar is typically in the left ~20% of screen (< 300px on 1920w)
+    # Roles that represent content, not UI structure — these change with
+    # conversation history, sidebar sessions, and page content
+    _CONTENT_ROLES = {'link', 'list item', 'heading', 'static', 'label',
+                      'paragraph', 'text', 'section'}
+
     structure_pairs = []
     for e in elements:
         role = e.get('role', '')
-        if not role:
+        if not role or role in _CONTENT_ROLES:
             continue
 
-        x = e.get('x', 0)
         y = e.get('y', 0)
-
-        # Skip sidebar content: links/list items in the left gutter
-        # These are session history items that change constantly
-        if x < 300 and role in ('link', 'list item', 'heading'):
-            continue
-
         band = y // band_height
         structure_pairs.append(f"{role}@{band}")
 

@@ -97,8 +97,9 @@ def _check_structure_change(platform: str, elements: list,
 
     stored = redis_client.get(fingerprint_key)
 
-    # Always update the stored fingerprint (24h TTL)
-    redis_client.setex(fingerprint_key, 86400, current_hash)
+    # Always update the stored fingerprint (no expiry — baseline persists
+    # across sessions so UI redesigns are detected even after downtime)
+    redis_client.set(fingerprint_key, current_hash)
 
     if stored is None:
         # First time seeing this platform - baseline stored, no comparison
@@ -133,8 +134,8 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     2. Otherwise: just switch to platform tab (stateless mode)
     3. Scroll according to `scroll` parameter, scan AT-SPI tree
     4. Find all elements, filter to useful ones
-    5. Store in Redis
-    6. Check for structure changes (layout fingerprinting)
+    5. Check for structure changes (layout fingerprinting)
+    6. Store in Redis
 
     Args:
         platform: Which platform to inspect.
