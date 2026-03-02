@@ -3,13 +3,19 @@ taey_select_dropdown, taey_prepare - Dropdown opening and capabilities.
 
 Opens dropdown menus and returns found items for Claude to pick from.
 Claude is the intelligence - no matching logic in tool code.
+
+Dropdown option tracking:
+- When a dropdown is opened, compares found items against YAML capabilities
+- Flags new items (in dropdown but not in YAML) and missing items
+  (in YAML but not in dropdown)
+- Gemini decides what the changes mean - no thresholds, no special cases
 """
 
 import json
 import os
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
@@ -51,6 +57,90 @@ def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> boo
     return find_and_click(doc)
 
 
+def _load_platform_yaml(platform: str) -> Dict:
+    """Load platform YAML config."""
+    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+    if not os.path.exists(yaml_path):
+        raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+    if not data:
+        raise ValueError(f"Platform YAML is empty: {yaml_path}")
+    return data
+
+
+def _compare_dropdown_to_yaml(platform: str,
+                              dropdown_items: List[Dict]) -> Dict[str, Any] | None:
+    """Compare dropdown items against YAML capabilities.
+
+    Checks all capability lists (models, tools, modes, sources) to find
+    items that exist in the dropdown but not in YAML (new) or in YAML
+    but not in the dropdown (missing).
+
+    Returns a dict with comparison results, or None if YAML can't be loaded
+    or there are no differences.
+    """
+    try:
+        config = _load_platform_yaml(platform)
+    except (FileNotFoundError, ValueError) as e:
+        logger.debug(f"Could not load YAML for comparison: {e}")
+        return None
+
+    caps = config.get('capabilities', {})
+
+    # Build a set of all known capability names (lowercased for comparison)
+    known_names = set()
+    capability_lists = {}
+    for cap_type in ('models', 'tools', 'modes', 'sources'):
+        items = caps.get(cap_type, [])
+        capability_lists[cap_type] = items
+        for item in items:
+            known_names.add(item.lower())
+
+    # Get dropdown item names (lowercased for comparison)
+    dropdown_names = set()
+    dropdown_name_original = {}  # lowercase -> original case
+    for item in dropdown_items:
+        name = item.get('name', '').strip()
+        if name:
+            lower = name.lower()
+            dropdown_names.add(lower)
+            dropdown_name_original[lower] = name
+
+    # Find items in dropdown that aren't in any YAML capability list
+    new_items = []
+    for lower_name in sorted(dropdown_names - known_names):
+        original = dropdown_name_original.get(lower_name, lower_name)
+        new_items.append(original)
+
+    # Find items in YAML capabilities that aren't in the dropdown
+    missing_items = []
+    for lower_name in sorted(known_names - dropdown_names):
+        # Find original-case name from capabilities
+        for cap_type, items in capability_lists.items():
+            for item in items:
+                if item.lower() == lower_name:
+                    missing_items.append(item)
+                    break
+            else:
+                continue
+            break
+
+    if not new_items and not missing_items:
+        return None
+
+    result = {}
+    if new_items:
+        result['new_items'] = new_items
+        result['new_count'] = len(new_items)
+    if missing_items:
+        result['missing_items'] = missing_items
+        result['missing_count'] = len(missing_items)
+    result['known_capabilities'] = {k: v for k, v in capability_lists.items() if v}
+
+    return result
+
+
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
@@ -58,7 +148,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
     1. Click dropdown trigger via AT-SPI tree search (primary)
     2. Scan AT-SPI tree for menu items
-    3. Return all items with names, roles, coordinates, states
+    3. Compare items against YAML capabilities (flag new/missing)
+    4. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
@@ -117,7 +208,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
             'states': e.get('states', []),
         })
 
-    return {
+    result = {
         "platform": platform,
         "dropdown": dropdown,
         "target_requested": target_value,
@@ -125,17 +216,17 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
     }
 
+    # Compare dropdown items against YAML capabilities
+    capability_diff = _compare_dropdown_to_yaml(platform, items)
+    if capability_diff:
+        result['capability_changes'] = capability_diff
+        logger.warning(
+            f"Dropdown capability changes on {platform}/{dropdown}: "
+            f"new={capability_diff.get('new_items', [])}, "
+            f"missing={capability_diff.get('missing_items', [])}"
+        )
 
-def _load_platform_yaml(platform: str) -> Dict:
-    """Load platform YAML config."""
-    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
-    if not os.path.exists(yaml_path):
-        raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
-    with open(yaml_path) as f:
-        data = yaml.safe_load(f)
-    if not data:
-        raise ValueError(f"Platform YAML is empty: {yaml_path}")
-    return data
+    return result
 
 
 def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
