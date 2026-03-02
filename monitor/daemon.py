@@ -174,7 +174,7 @@ class MonitorDaemon:
             return None
         try:
             client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', '192.168.100.10'),
+                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                 port=int(os.environ.get('REDIS_PORT', 6379)),
                 decode_responses=True,
             )
@@ -190,7 +190,7 @@ class MonitorDaemon:
         if not NEO4J_AVAILABLE:
             return None
         try:
-            uri = os.environ.get('NEO4J_URI', 'bolt://192.168.100.10:7689')
+            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
             driver = GraphDatabase.driver(uri, auth=None)
             driver.verify_connectivity()
             self._log("Neo4j connected")

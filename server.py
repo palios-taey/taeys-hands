@@ -6,7 +6,7 @@ AT-SPI-based chat and social platform automation.
 Simple JSON-RPC over stdio (no mcp library) for AT-SPI compatibility
 with system Python + gi.repository.
 
-Run: python3 /home/spark/taeys-hands/server.py
+Run: python3 server.py
 """
 
 import sys
@@ -33,8 +33,19 @@ DISPLAY = detect_display()
 os.environ['DISPLAY'] = DISPLAY
 
 # Now safe to import AT-SPI dependent modules
-from storage.redis_pool import get_client as get_redis, node_key
-from storage import neo4j_client
+
+# Storage backends (optional - graceful degradation if not available)
+try:
+    from storage.redis_pool import get_client as get_redis, node_key
+    _redis_client = get_redis()
+except Exception:
+    _redis_client = None
+    def node_key(suffix): return f"taey:local:{suffix}"
+
+try:
+    from storage import neo4j_client
+except Exception:
+    neo4j_client = None
 
 from tools.inspect import handle_inspect
 from tools.interact import handle_set_map, handle_click, handle_click_at
@@ -545,7 +556,7 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 
 def run_server():
     """Run the MCP server over stdio."""
-    redis_client = get_redis()
+    redis_client = _redis_client
 
     def read_message():
         """Read a JSON-RPC message from stdin."""
