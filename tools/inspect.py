@@ -16,6 +16,12 @@ Scroll behavior (controlled by `scroll` parameter):
 Works with OR without a plan:
 - With plan: navigates to specific URL on first call, skips on subsequent
 - Without plan: switches to platform tab, scans what's already visible
+
+Structure change detection:
+- Computes a structure_hash on each inspect (roles + layout grid, not names)
+- Compares against last stored fingerprint in Redis
+- Flags structure_changed: true if the platform UI layout has changed
+- Stable across normal content changes (new messages, different text)
 """
 
 import json
@@ -24,7 +30,8 @@ import logging
 from typing import Any, Dict
 
 from core import atspi, input as inp, clipboard
-from core.tree import find_elements, filter_useful_elements, find_copy_buttons, detect_chrome_y
+from core.tree import (find_elements, filter_useful_elements, find_copy_buttons,
+                       detect_chrome_y, compute_structure_hash)
 from core.atspi_interact import cache_elements, strip_atspi_obj
 from core.platforms import BASE_URLS, SCREEN_HEIGHT
 from storage.redis_pool import node_key
@@ -75,6 +82,50 @@ def _detect_attachments(elements: list) -> dict | None:
     return result
 
 
+def _check_structure_change(platform: str, elements: list,
+                            redis_client) -> dict | None:
+    """Compute structure fingerprint and compare against stored baseline.
+
+    Returns a dict with change info if structure changed, None if stable
+    or if no baseline exists yet (first run just stores the fingerprint).
+    """
+    if not redis_client:
+        return None
+
+    current_hash = compute_structure_hash(elements, screen_height=SCREEN_HEIGHT)
+    fingerprint_key = node_key(f"structure_fingerprint:{platform}")
+
+    stored = redis_client.get(fingerprint_key)
+
+    # Always update the stored fingerprint (no expiry — baseline persists
+    # across sessions so UI redesigns are detected even after downtime)
+    redis_client.set(fingerprint_key, current_hash)
+
+    if stored is None:
+        # First time seeing this platform - baseline stored, no comparison
+        logger.info(f"Structure fingerprint baseline stored for {platform}: {current_hash}")
+        return None
+
+    if stored == current_hash:
+        return None
+
+    # Structure changed - flag it
+    logger.warning(
+        f"Structure change detected on {platform}: {stored} -> {current_hash}"
+    )
+    return {
+        'structure_changed': True,
+        'previous_hash': stored,
+        'current_hash': current_hash,
+        'platform': platform,
+        'WARNING': (
+            f"Platform UI structure has changed since last inspect. "
+            f"Element layout is different - buttons, controls, or page "
+            f"structure may have moved. Verify before relying on cached positions."
+        ),
+    }
+
+
 def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs) -> Dict[str, Any]:
     """Inspect a platform and return all visible elements.
 
@@ -83,7 +134,8 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     2. Otherwise: just switch to platform tab (stateless mode)
     3. Scroll according to `scroll` parameter, scan AT-SPI tree
     4. Find all elements, filter to useful ones
-    5. Store in Redis
+    5. Check for structure changes (layout fingerprinting)
+    6. Store in Redis
 
     Args:
         platform: Which platform to inspect.
@@ -223,7 +275,15 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     if attached_files:
         result['attachments'] = attached_files
 
-    # Step 5: Store in Redis
+    # Step 5: Structure change detection
+    # Compute layout fingerprint and compare to stored baseline.
+    # Uses roles + Y-grid bands (not names/content) so it's stable
+    # across normal usage but detects actual UI redesigns.
+    structure_change = _check_structure_change(platform, elements_json, redis_client)
+    if structure_change:
+        result['structure_change'] = structure_change
+
+    # Step 6: Store in Redis
     if redis_client:
         redis_client.set(node_key(f"inspect:{platform}"), json.dumps({
             'url': url,

@@ -372,3 +372,50 @@ def compute_tree_hash(elements: List[Dict]) -> str:
                    if e.get('role') or e.get('name'))
     content = "|".join(pairs)
     return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def compute_structure_hash(elements: List[Dict], screen_height: int = 1080,
+                           grid_rows: int = 12) -> str:
+    """Compute a structure-only fingerprint of the UI layout.
+
+    Unlike compute_tree_hash (which includes element names and changes
+    with every conversation message), this captures only the structural
+    skeleton: which roles appear in which vertical band of the screen.
+
+    This detects when a platform redesigns their UI (buttons move,
+    new controls appear, layout shifts) while being stable across
+    normal content changes (new messages, different text).
+
+    Content-variable roles (links, list items, headings, static text)
+    are excluded entirely — these change with conversation history and
+    sidebar state, not UI structure.
+
+    Args:
+        elements: Element list from find_elements or filter_useful_elements.
+        screen_height: Screen height in pixels for grid calculation.
+        grid_rows: Number of vertical bands to bucket elements into.
+
+    Returns:
+        16-character hex digest representing the structural fingerprint.
+    """
+    band_height = max(screen_height // grid_rows, 1)
+
+    # Roles that represent content, not UI structure — these change with
+    # conversation history, sidebar sessions, and page content
+    _CONTENT_ROLES = {'link', 'list item', 'heading', 'static', 'label',
+                      'paragraph', 'text', 'section'}
+
+    structure_pairs = []
+    for e in elements:
+        role = e.get('role', '')
+        if not role or role in _CONTENT_ROLES:
+            continue
+
+        y = e.get('y', 0)
+        band = y // band_height
+        structure_pairs.append(f"{role}@{band}")
+
+    # Sort for deterministic hashing
+    structure_pairs.sort()
+    content = "|".join(structure_pairs)
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
