@@ -99,7 +99,6 @@ def handle_send_message(platform: str, message: str,
     4. Redis: store pending_prompt
     5. Spawn monitor daemon BEFORE Enter (avoids race condition)
     6. Press Enter to send
-    7. Invalidate stored map (UI mutated)
     """
     # Step 1: Switch to platform, get document + URL
     if not inp.switch_to_platform(platform):
@@ -165,10 +164,6 @@ def handle_send_message(platform: str, message: str,
             except (ProcessLookupError, OSError):
                 pass
         return {"error": "Send (Enter key) failed", "platform": platform, "neo4j": neo4j_result}
-
-    # Step 7: Invalidate stored map (UI mutated after send)
-    if redis_client:
-        redis_client.delete(node_key("current_map"))
 
     result = {
         "platform": platform,

@@ -6,7 +6,6 @@ History extraction scrolls through the entire conversation.
 """
 
 import json
-import os
 import time
 import logging
 from typing import Any, Dict
@@ -170,7 +169,7 @@ def handle_quick_extract(platform: str, redis_client,
         try:
             import requests as _req
             hmm_resp = _req.post(
-                os.environ.get('HMM_STORE_URL', 'http://localhost:8095/hmm/store-response'),
+                "http://192.168.100.10:8095/hmm/store-response",
                 json={"platform": platform, "content": content},
                 timeout=60,
             )
@@ -189,7 +188,6 @@ def handle_quick_extract(platform: str, redis_client,
         deleted = redis_client.delete(node_key(f"plan:{platform}"))
         redis_client.delete(node_key(f"plan:current:{platform}"))
         redis_client.delete(node_key(f"checkpoint:{platform}:inspect"))
-        redis_client.delete(node_key(f"checkpoint:{platform}:set_map"))
         redis_client.delete(node_key(f"checkpoint:{platform}:attach"))
         redis_client.delete(node_key(f"response_reviewed:{platform}"))
         plan_consumed = deleted > 0
@@ -230,81 +228,34 @@ def _link_response(neo4j_mod, response_id: str, user_message_id: str):
 
 
 def _assess_extraction(content: str, platform: str, elements: list) -> Dict[str, Any]:
-    """Assess whether the extracted content is the full response or just a summary.
+    """Assess extraction quality with platform-agnostic signals.
 
-    Returns quality metadata so the caller can decide whether to take
-    follow-up action (e.g. Export/Download for Perplexity Deep Research,
-    scroll to find more for long responses, etc.)
-
-    This is Step 1 of a 2-step process:
-      Step 1: Extract and assess quality
-      Step 2: If incomplete, take corrective action (export, scroll, expand)
+    Returns raw signals for Claude to interpret. No platform-specific
+    logic — Claude sees the signals and decides what action to take.
     """
-    assessment = {
-        "likely_complete": True,
-        "needs_action": None,  # What follow-up action is needed
-        "reason": None,
-    }
-
-    # Check for truncation signals
     word_count = len(content.split())
 
-    # Perplexity Deep Research: Copy button only copies the summary,
-    # not the full report. Look for Export button as signal.
-    if platform == 'perplexity':
-        has_export = any(
-            (e.get('name') or '').lower() in ('export', 'export to')
-            for e in elements
-            if e.get('role') in ('push button', 'link')
-        )
-        # Deep Research responses have sources and are long.
-        # If we got a short response but Export exists, it's a summary.
-        has_sources = 'sources' in content.lower() or '[' in content
-        if has_export and word_count < 500:
-            assessment['likely_complete'] = False
-            assessment['needs_action'] = 'export_markdown'
-            assessment['reason'] = (
-                'Perplexity Deep Research detected. Copy only gets summary. '
-                'Use Export > Download as Markdown for full report.'
-            )
-        elif has_export:
-            assessment['likely_complete'] = False
-            assessment['needs_action'] = 'export_markdown'
-            assessment['reason'] = (
-                'Perplexity Export button found. Full report available via '
-                'Export > Download as Markdown.'
-            )
+    # Scan for actionable buttons that might indicate incomplete response
+    _ACTION_KEYWORDS = ['continue', 'show more', 'expand', 'export', 'download', 'load more']
+    action_buttons = []
+    for e in elements:
+        name = (e.get('name') or '').strip().lower()
+        role = e.get('role', '')
+        if not name or 'button' not in role and role != 'link':
+            continue
+        if any(kw in name for kw in _ACTION_KEYWORDS):
+            action_buttons.append({
+                'name': e.get('name', '').strip(),
+                'role': role,
+                'x': e.get('x'),
+                'y': e.get('y'),
+            })
 
-    # Claude: check for "Continue" button (truncated response)
-    if platform == 'claude':
-        has_continue = any(
-            'continue' in (e.get('name') or '').lower()
-            for e in elements
-            if e.get('role') == 'push button'
-        )
-        if has_continue:
-            assessment['likely_complete'] = False
-            assessment['needs_action'] = 'click_continue'
-            assessment['reason'] = 'Response was truncated. Click Continue to get the rest.'
-
-    # ChatGPT: very short response might be a "Show more" situation
-    if platform == 'chatgpt' and word_count < 50:
-        has_show_more = any(
-            'show more' in (e.get('name') or '').lower()
-            for e in elements
-        )
-        if has_show_more:
-            assessment['likely_complete'] = False
-            assessment['needs_action'] = 'click_show_more'
-            assessment['reason'] = 'Response collapsed. Click Show More to expand.'
-
-    # Generic: very short response is suspicious
-    if word_count < 20 and assessment['likely_complete']:
-        assessment['likely_complete'] = False
-        assessment['needs_action'] = 'verify_manually'
-        assessment['reason'] = f'Response very short ({word_count} words). May be incomplete.'
-
-    return assessment
+    return {
+        "word_count": word_count,
+        "action_buttons": action_buttons,
+        "likely_complete": len(action_buttons) == 0 and word_count >= 20,
+    }
 
 
 def handle_extract_history(platform: str, redis_client,
