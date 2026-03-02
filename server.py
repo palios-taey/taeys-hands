@@ -16,6 +16,16 @@ import logging
 import traceback
 from typing import Any, Dict, List
 
+# Load .env file (NCCL endpoints, Neo4j URI, etc.)
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _val = _line.split('=', 1)
+                os.environ.setdefault(_key.strip(), _val.strip())
+
 # Logging to file (stderr reserved for JSON-RPC)
 logging.basicConfig(
     level=logging.DEBUG,
