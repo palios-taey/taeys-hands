@@ -1,7 +1,7 @@
 # Taey's Hands - Operational Guide
 *AT-SPI-based chat and social platform automation*
 
-**Version**: 5.1 (February 2026 - Simplification Audit)
+**Version**: 6.0 (March 2026 - Public Release)
 
 ---
 
@@ -14,10 +14,29 @@ Not browser automation (no CDP/WebDriver) - genuine accessibility tree perceptio
 
 ---
 
+## Getting Started
+
+### Requirements
+- Linux with X11 (Wayland not supported — AT-SPI requires X11)
+- Firefox with accessibility enabled (`about:config` → `accessibility.force_disabled` = `0`)
+- Python 3.10+ with `gi.repository` (PyGObject / AT-SPI2)
+- `xdotool`, `xsel` (clipboard), `xdpyinfo` (screen detection)
+
+### Optional
+- Redis (for background monitor notifications and state persistence)
+- Neo4j (for conversation history graph)
+
+### Setup
+1. Open Firefox with chat platform tabs (ChatGPT, Claude, Gemini, etc.)
+2. Configure tab order to match Alt+1 through Alt+7 shortcuts
+3. Run the MCP server: `python3 server.py`
+
+---
+
 ## Architecture
 
 ```
-server.py              # MCP router (~600 lines) - LOCKED
+server.py              # MCP router (~600 lines)
 core/                  # AT-SPI primitives
   atspi.py             # Firefox/desktop discovery
   atspi_interact.py    # Element cache, AT-SPI click/focus/state
@@ -43,11 +62,25 @@ monitor/               # Background response detection
 platforms/             # Platform configs (YAML)
 ```
 
-### File Discipline
+---
 
-| Status | Meaning |
-|--------|---------|
-| **LOCKED** | Requires explicit approval to change contract. |
+## Configuration
+
+Services are configured via environment variables with localhost defaults:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_HOST` | `127.0.0.1` | Redis server host |
+| `REDIS_PORT` | `6379` | Redis server port |
+| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
+| `HMM_STORE_URL` | `http://localhost:8095/hmm/store-response` | HMM store endpoint |
+| `TAEY_NODE_ID` | (auto-detected) | Instance identifier for Redis key scoping |
+
+Redis and Neo4j are **optional** — the server starts and operates without them. Session persistence and background monitor notifications require Redis. Conversation history storage requires Neo4j.
+
+### MCP Server Hot-Reload
+
+**Python MCP servers do NOT hot-reload code.** `git pull` updates files on disk but the running process keeps old code in memory. Must restart the MCP host for code changes to take effect.
 
 ---
 
@@ -84,28 +117,6 @@ platforms/             # Platform configs (YAML)
 | Alt+5 | Perplexity |
 | Alt+6 | X/Twitter |
 | Alt+7 | LinkedIn |
-
----
-
-## Services
-
-**CRITICAL**: Use NCCL IPs (192.168.100.x), not management (10.0.0.x).
-
-| Service | Endpoint |
-|---------|----------|
-| Redis | 192.168.100.10:6379 |
-| Neo4j | bolt://192.168.100.10:7689 (no auth) |
-
-### MCP Server Hot-Reload
-
-**Python MCP servers do NOT hot-reload code.** `git pull` updates files on disk but the running process keeps old code in memory. **Must restart Claude Code** (`/exit` then `claude`) for code changes to take effect.
-
-### SSH Access (Jetson/Thor)
-
-| Machine | SSH | DISPLAY | tmux session |
-|---------|-----|---------|-------------|
-| Jetson | `ssh jetson` (10.0.0.8) | `:1` | `jetson-claude` |
-| Thor | `ssh thor` (10.0.0.197) | `:1` | `thor-claude` |
 
 ---
 
@@ -181,70 +192,7 @@ This is more reliable than copy button counting (which depends on scroll positio
 
 ---
 
-## Multi-Node Architecture & Escalation Protocol
-
-### Node Roles
-
-| Node | Hostname | Role | Can Edit Code? |
-|------|----------|------|----------------|
-| **Spark** | spark-78c6 | Coordinator. Writes code, commits, deploys. | YES |
-| **Jetson** | jetson | Worker. Runs HMM enrichment. | NO |
-| **Thor** | thor | Worker. Runs HMM enrichment. | NO |
-
-### STRICT: Workers NEVER Modify Code
-
-Worker nodes (Jetson, Thor) execute the HMM enrichment workflow using MCP tools. They do NOT:
-- Edit or Write any files (`.py`, `.json`, `.yaml`, `.md`, `.sh`)
-- Run `git commit`, `git add`, `git checkout`, or `git reset`
-- Modify code via Bash (`sed -i`, `echo >`, etc.)
-- Create "workaround" files or scripts
-- Hardcode coordinates, URLs, or magic numbers anywhere
-
-**Hooks enforce this** — Edit/Write/Bash commands that modify repo files are blocked on worker nodes. If you see a `BLOCKED` message from a hook, follow the escalation procedure below.
-
-### Escalation Procedure (When Stuck)
-
-When a worker node encounters a problem it cannot solve with existing MCP tools:
-
-```
-1. STOP immediately. Do not retry the failing operation.
-2. Document what happened:
-   - What tool/step failed
-   - The exact error or unexpected result
-   - What you already tried
-3. Escalate to Spark:
-   tmux-send spark1 taeys-hands "ESCALATION from $(hostname): <problem description>"
-4. WAIT for Spark's response. Check periodically:
-   tmux-send spark1 taeys-hands "ping"
-5. After Spark pushes a fix:
-   cd ~/taeys-hands && git pull
-6. Restart MCP: /exit then relaunch claude
-7. Resume the workflow from where it failed
-```
-
-### Node-Scoped Redis Keys
-
-Each node has isolated Redis state via `node_key()` in `storage/redis_pool.py`:
-- Keys are prefixed with `taey:{hostname}:` (e.g., `taey:jetson:current_map`)
-- Control maps, pending prompts, checkpoints, and notifications are per-node
-- Monitor keys (`taey:monitor:{uuid}`) are global (UUIDs are unique)
-
-This means Jetson and Thor can operate the same platforms simultaneously without key collision.
-
-### Communication Between Nodes
-
-```bash
-# Worker → Spark (escalation)
-tmux-send spark1 taeys-hands "ESCALATION from jetson: attach fails on Gemini, dropdown not found"
-
-# Spark → Worker (instructions)
-tmux-send jetson jetson-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
-tmux-send thor thor-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
-```
-
----
-
-## Operational Rules (ALL instances must follow)
+## Operational Rules
 
 ### STRICT: One Platform at a Time (Sequential Workflow)
 
@@ -272,7 +220,7 @@ Setting a map for platform B **destroys** platform A's map.
 Each platform must complete steps 1-6 before starting the next.
 
 After send_message, the daemon runs independently. You can immediately start the next platform.
-When a daemon detects a response, it injects a notification into your tmux session.
+When a daemon detects a response, it injects a notification into your session.
 When you see "Response ready on {platform}", extract with `taey_quick_extract(platform)`.
 
 ### NEVER Rules (Hard Constraints)
@@ -286,12 +234,11 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 | Click Submit/Send buttons | Unreliable across platforms | Press Enter (universal) |
 | Wait/block for AI responses | Wastes time, daemon handles it | Move to next platform immediately |
 | Use xdotool for long text (>100 chars) | Character dropping bug | Clipboard paste + Ctrl+V |
-| Kill/restart taey-ed API (uvicorn) | Crashes ALL connected Mac automation instances | API reads new files on next request via mtime cache |
 
 ### Sending Messages
 1. **ALWAYS press Enter to send** - never click Submit/Send buttons. Enter is universal.
 2. **ALWAYS use `taey_send_message`** - it handles Enter press + daemon spawn in one call.
-3. **NEVER wait/block for responses** - daemon notifies via tmux send-keys. Move on immediately.
+3. **NEVER wait/block for responses** - daemon notifies asynchronously. Move on immediately.
 4. **Pipeline pattern**: inspect → set_map → attach (if needed) → send_message → move on → extract when `response_ready`
 
 ### Text Entry
@@ -322,9 +269,8 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 7. **Copy button returns summary only** - use Export > Download as Markdown for full report
 
 ### Display Environment
-- **Spark**: `DISPLAY=:0`
-- **Jetson/Thor**: `DISPLAY=:1`
-- MCP server sets DISPLAY automatically. Manual scripts need explicit export.
+- `DISPLAY` is auto-detected at startup via `detect_display()` in `core/atspi.py`.
+- MCP server sets DISPLAY automatically. Manual scripts need explicit `export DISPLAY=:<n>`.
 
 ### Dismiss Before Action
 - Press Escape before any operation to dismiss promo dialogs/popups
@@ -338,77 +284,12 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 
 ---
 
-## HMM Enrichment Workflow (Jetson/Thor Primary Task)
-
-HMM (Harmonic Motif Memory) enrichment sends conversation packages to AI platforms for motif analysis. Responses are processed through Qwen3 for vector embeddings and stored in Weaviate + Neo4j + Redis (triple-write).
-
-**Package Builder**: `/home/spark/embedding-server/isma/scripts/hmm_package_builder.py`
-- Commands: `next --platform <name>`, `complete --platform <name> --response-file <path>`, `fail`, `stats`, `prompt`
-- Output: `/tmp/hmm_packages/`
-- Get the analysis prompt: `python3 <builder> prompt`
-
-### Enrichment Loop (one cycle)
-
-For EACH platform (ChatGPT, Gemini, Grok - one at a time):
-
-**DO NOT use Claude (Alt+2) for HMM enrichment.** Claude usage is reserved for Spark only. Jetson and Thor must skip Claude entirely to conserve API usage limits.
-
-```
-1. Build package: python3 <builder> next --platform <name>
-2. Get prompt: python3 <builder> prompt
-3. taey_inspect(platform)                    # Switch tab, scan tree
-4. taey_set_map(platform, {input, attach, ...})
-5. taey_attach(platform, "/tmp/hmm_packages/<pkg_file>.md")
-6. RE-INSPECT + RE-SET MAP after attach (file chip shifts input Y)
-7. taey_click(platform, "input")             # Focus input
-8. taey_send_message(platform, "<prompt>")   # Paste + Enter + daemon
-9. Daemon monitors → move to next platform
-10. On "Response ready": taey_quick_extract(platform) → get response text
-12. SAVE response to file: /tmp/hmm_response_<platform>.json
-13. PROCESS + COMPLETE: python3 <builder> complete --platform <name> --response-file /tmp/hmm_response_<platform>.json
-```
-
-### 6SIGMA: Fail-Loud Pipeline (CRITICAL)
-
-**The `complete` command processes the response AND marks done atomically.**
-- `--response-file` triggers `hmm_store_results.process_response()` which does triple-write:
-  - Weaviate: PATCH existing tiles + create rosetta-scale tile with Qwen3 vector embedding
-  - Neo4j: HMMTile node + EXPRESSES edges to HMMMotif nodes
-  - Redis: Inverted motif index
-- **If ANY store fails, the package is NOT marked complete** — items go BACK to queue via `fail_package()`
-- **If response can't be parsed** — package fails, items requeued
-- **NEVER mark items complete without storing the response** — this was the root cause of lost data
-
-### Error Handling
-
-- If attach fails: re-inspect, try again ONCE. If still fails, skip platform, move on.
-- If `complete --response-file` exits with error: items are automatically requeued. Check the error, fix if possible, or skip and rebuild.
-- If response is garbage (AI returned error text): call `python3 <builder> fail --platform <name> "bad_response"` to requeue.
-- If daemon times out (default 1hr): rebuild the package for that platform.
-- NEVER call `complete` without `--response-file`. This was the old way and it skipped storage.
-- **Health monitor**: `/home/spark/embedding-server/isma/scripts/hmm_health_check.py` runs via cron every 15min. Alerts to tmux if Redis/Neo4j diverge.
-
-### Key HMM Redis Keys
-
-- `hmm:pkg:in_progress:{hash}` - Currently being processed (2hr TTL)
-- `hmm:pkg:completed` - Done set (content hashes)
-- `hmm:pkg:current:{platform}` - Current package for each platform
-- `hmm:pkg:stats` - Counters
-
----
-
 ## Dynamic Configuration
 
 ### Screen Detection
 Screen size (`SCREEN_WIDTH`, `SCREEN_HEIGHT`) is auto-detected via `xdpyinfo` at import time.
 Chrome Y threshold is detected from the document element's actual position.
 No hardcoded screen values - works on any display size.
-
-### Display Environment
-- **Spark**: `DISPLAY=:0`
-- **Jetson/Thor**: `DISPLAY=:1`
-- MCP server sets DISPLAY automatically via `detect_display()` in `core/atspi.py`.
-- Manual scripts need explicit `export DISPLAY=:1` on Jetson/Thor.
 
 ---
 
@@ -417,7 +298,7 @@ No hardcoded screen values - works on any display size.
 ### "Could not find {platform} document"
 1. Check Firefox is running: `pgrep firefox`
 2. Check tab exists: `taey_inspect` switches tab first - if URL doesn't match, document won't be found
-3. Check DISPLAY is set: `echo $DISPLAY` (should be `:0` on Spark, `:1` on Jetson/Thor)
+3. Check DISPLAY is set: `echo $DISPLAY`
 4. Check AT-SPI connection: `python3 -c "from gi.repository import Atspi; print(Atspi.get_desktop(0).get_child_count())"`
 
 ### "Failed to switch to {platform} tab"
@@ -476,7 +357,6 @@ No hardcoded screen values - works on any display size.
 - ProseMirror contenteditable does NOT accept AT-SPI `insert_text()` - clipboard paste is the only reliable method.
 - Enter creates newline in some states. `taey_send_message` handles this correctly.
 - Slow with large packages (3-4 minutes for big attachments).
-- 90.6% HMM enrichment failure rate historically - high fail rate is expected.
 
 ### Gemini
 - **AT-SPI `do_action(0)` is more reliable than xdotool clicks** for ALL Gemini buttons.
@@ -486,13 +366,11 @@ No hardcoded screen values - works on any display size.
 - **File attachment shifts input Y coordinate down** - always re-inspect after attach.
 - Enter key sometimes fails - use AT-SPI `grab_focus()` on entry element before typing.
 - AT-SPI tree can be very large (200+ elements with long names from conversation history).
-- 77.8% HMM enrichment failure rate historically.
 
 ### Grok
 - Copy buttons may report zero-size extents in AT-SPI. Use `do_action(0)` directly instead of coordinate clicks.
 - Processes large packages poorly (2/12 items from 674KB file). Keep packages small.
 - SuperGrok HEAVY is default. NO visible attach/file button on new chat page.
-- 72.1% HMM enrichment failure rate historically.
 
 ### Perplexity
 - **Copy button returns summary only.** For Deep Research, must use Export > Download as Markdown.
@@ -525,9 +403,3 @@ No hardcoded screen values - works on any display size.
 - **Article editor**: Title entry ("Add a title"), Body entry ("Start writing"), Cover image ("Add photos or video")
 - **Article publish**: Click Publish → confirmation dialog → click Publish again
 - **Reply targeting**: Navigate to the SPECIFIC POST URL to reply to, not the thread root. The reply field replies to whichever post is the "main" post on the page.
-
-### ISMA Knowledge Graph
-- **Weaviate class**: `ISMA_Quantum` (not `ConversationTile`)
-- Properties: `rosetta_summary`, `dominant_motifs`, `motif_data_json`, `hmm_enriched`
-- **Neo4j labels**: `HMMTile`, `HMMMotif`, `Message`, `ChatSession`, `ISMAExchange`, etc.
-- Search HMMTile rosetta_summary fields for enriched content across all platforms
