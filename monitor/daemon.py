@@ -50,6 +50,18 @@ def _node_key(suffix: str) -> str:
     return f"taey:{_NODE_ID}:{suffix}"
 
 # =========================================================================
+# Load .env (daemon runs as subprocess, doesn't inherit server's env loading)
+# =========================================================================
+_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _key, _val = _line.split('=', 1)
+                os.environ.setdefault(_key.strip(), _val.strip())
+
+# =========================================================================
 # Set DISPLAY before AT-SPI import
 # =========================================================================
 
@@ -402,6 +414,29 @@ class MonitorDaemon:
             except Exception as e:
                 self._log(f"File notification failed: {e}")
 
+    def _count_copy_buttons(self, doc) -> int:
+        """Count copy buttons in document (for fast-response detection)."""
+        count = 0
+
+        def walk(obj, depth=0):
+            nonlocal count
+            if depth > 25:
+                return
+            try:
+                role = obj.get_role_name() or ''
+                name = (obj.get_name() or '').lower()
+                if role in ('push button', 'button') and name == 'copy':
+                    count += 1
+                for i in range(obj.get_child_count()):
+                    child = obj.get_child_at_index(i)
+                    if child:
+                        walk(child, depth + 1)
+            except Exception:
+                pass
+
+        walk(doc)
+        return count
+
     def _on_first_poll(self) -> bool:
         """First poll after initial delay."""
         self._log("Initial delay complete, starting regular polling")
@@ -504,6 +539,25 @@ class MonitorDaemon:
                 self.stop_button_seen = True
                 self._log("Stop button appeared - response generating")
         else:
+            # Fast-response detection: response completed before first poll
+            # (stop button appeared and disappeared within initial delay)
+            if self.state == "IDLE" and not self.stop_button_seen:
+                current_copy = self._count_copy_buttons(platform_doc)
+                if current_copy > self.baseline_copy_count:
+                    self._log(
+                        f"Fast response detected: copy buttons {self.baseline_copy_count} -> {current_copy}"
+                    )
+                    self.cycle_count = 1
+                    self.state = "NOTIFYING"
+                    self._notify_agent(
+                        "response_ready",
+                        f"Response complete on {self.platform} (fast) - switch to tab and extract",
+                        {"cycle": 1, "requires_action": True, "fast_response": True},
+                    )
+                    self.state = "COMPLETE"
+                    self.main_loop.quit()
+                    return False
+
             if self.stop_button_seen:
                 self.cycle_count += 1
 

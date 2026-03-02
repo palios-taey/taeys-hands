@@ -81,6 +81,7 @@ def _detect_node_id() -> str:
     return socket.gethostname()
 
 _NODE_ID = _detect_node_id()
+NODE_ID = _NODE_ID
 
 
 def node_key(suffix: str) -> str:

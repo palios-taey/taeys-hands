@@ -84,14 +84,12 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 
 ---
 
-## MCP Tools (14)
+## MCP Tools (12)
 
 | Tool | Description |
 |------|-------------|
-| `taey_inspect` | Switch to platform tab, scan AT-SPI tree, return elements |
-| `taey_set_map` | Store control coordinates from inspect results |
-| `taey_click` | Click named control from stored map |
-| `taey_click_at` | Click arbitrary x,y coordinates |
+| `taey_inspect` | Switch to platform tab, scan AT-SPI tree, return elements with x,y coordinates |
+| `taey_click` | Click at x,y coordinates (AT-SPI first, xdotool fallback) |
 | `taey_prepare` | Get platform capabilities (models/modes/tools) |
 | `taey_plan` | Create/get/update multi-step execution plans |
 | `taey_send_message` | Type, store, send, spawn monitor daemon |
@@ -100,8 +98,7 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 | `taey_attach` | File attachment (dialog or dropdown workflow) |
 | `taey_select_dropdown` | Select model/mode from dropdown |
 | `taey_list_sessions` | Show active sessions and pending responses |
-| `taey_list_monitors` | List background monitor daemons |
-| `taey_kill_monitors` | Emergency stop all monitors |
+| `taey_monitors` | List or kill background monitor daemons (action="list"\|"kill") |
 | `taey_respawn_monitor` | Spawn fresh daemon for multi-step response flows |
 
 ---
@@ -123,20 +120,20 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 ## Workflow
 
 ```
-1. taey_inspect(platform)        # See what's on screen
-2. taey_set_map(platform, {...}) # Store control coordinates
-3. taey_attach(platform, path)   # Attach files if needed
-4. taey_click(platform, "input") # Click input field (Claude verifies focus)
+1. taey_inspect(platform)           # See what's on screen — elements have x,y coords
+2. taey_attach(platform, path)      # Attach files if needed (finds button via AT-SPI tree)
+3. taey_inspect(platform)           # RE-INSPECT after attach (file chip shifts positions)
+4. taey_click(platform, x=N, y=N)  # Click input field using coordinates from inspect
 5. taey_send_message(platform, msg) # Pastes into focused input, Enter, stores, spawns daemon
 6. [monitor daemon detects response]
-7. taey_quick_extract(platform)  # Get response text, stores in Neo4j
+7. taey_quick_extract(platform)     # Get response text, stores in Neo4j
 ```
 
 **PARADIGM**: Tools report what they did. Claude verifies by inspecting. Tools never say "success" - they return action details and Claude decides if it worked.
 
-**RE-INSPECT AFTER UI CHANGES**: File attachment, model switching, and other actions shift element positions. RE-INSPECT and RE-SET MAP before further clicks.
+**RE-INSPECT AFTER UI CHANGES**: File attachment, model switching, and other actions shift element positions. RE-INSPECT before further clicks.
 
-**send_message does NOT click the input field.** Claude must click it first via `taey_click(platform, "input")`. send_message pastes into whatever is focused and presses Enter.
+**send_message does NOT click the input field.** Claude must click it first via `taey_click(platform, x, y)`. send_message pastes into whatever is focused and presses Enter.
 
 ### Data Pipeline (CRITICAL)
 
@@ -186,9 +183,10 @@ This spawns a fresh daemon to detect the second generation cycle. The original `
 The monitor daemon (spawned by send_message) watches for:
 1. **Stop button appears** -> AI is generating
 2. **Stop button disappears** -> response complete
-3. **Redis notification** -> injected into next tool call
+3. **Fast-response fallback** -> if no stop button seen but copy count increased above baseline, response completed before first poll
+4. **Redis notification** -> injected into next tool call
 
-This is more reliable than copy button counting (which depends on scroll position).
+The stop-button method is primary. The copy-button-count fallback catches instant responses (errors, very short replies) where the stop button appears and disappears in under 3 seconds.
 
 ---
 
@@ -196,28 +194,24 @@ This is more reliable than copy button counting (which depends on scroll positio
 
 ### STRICT: One Platform at a Time (Sequential Workflow)
 
-**Maps are single-platform.** Only ONE platform's control map exists at a time.
-Setting a map for platform B **destroys** platform A's map.
-
 **The ONLY correct workflow:**
 ```
 1. Pick ONE platform
-2. taey_inspect(platform)           # Switch tab + scan
-3. taey_set_map(platform, {...})    # Store controls
-4. taey_click(platform, "input")   # Focus input (send_message doesn't click input)
-5. taey_attach(platform, file)      # Attach if needed - skips if same file already attached
-6. RE-INSPECT after attach (file chip shifts input Y)
-7. taey_set_map(platform, {...})    # Update map with new positions
-8. taey_click(platform, "input")   # Focus input again
-9. taey_send_message(platform, msg) # Paste + Enter + daemon spawn
-10. DONE with this platform - daemon monitors in background
-11. Move to NEXT platform, repeat from step 1
+2. taey_inspect(platform)              # Switch tab + scan → elements with x,y
+3. taey_attach(platform, file)         # Attach if needed (finds button via AT-SPI tree)
+4. taey_inspect(platform)              # RE-INSPECT after attach (file chip shifts positions)
+5. taey_click(platform, x=N, y=N)     # Click input using coords from inspect
+6. taey_send_message(platform, msg)    # Paste + Enter + daemon spawn
+7. DONE with this platform - daemon monitors in background
+8. Move to NEXT platform, repeat from step 1
 ```
+
+**No set_map needed.** Coordinates come directly from inspect results — pass x,y to click.
 
 **ATTACHMENT SAFETY**: `taey_attach` detects if the target file is already attached and skips re-attaching. Other existing attachments do NOT block new attachments (multi-file workflows are supported).
 
-**NEVER batch** - do NOT inspect all platforms, then set maps for all, then attach to all.
-Each platform must complete steps 1-6 before starting the next.
+**NEVER batch** - do NOT inspect all platforms, then attach to all.
+Each platform must complete steps 1-7 before starting the next.
 
 After send_message, the daemon runs independently. You can immediately start the next platform.
 When a daemon detects a response, it injects a notification into your session.
