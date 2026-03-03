@@ -169,6 +169,11 @@ class MonitorDaemon:
         self.no_stop_warned = False
         self.verbose_logged = False
 
+        # Event-assisted adaptive polling state
+        self._last_event_time = 0.0       # timestamp of last AT-SPI event from Firefox
+        self._event_burst_times = []      # recent event timestamps for burst detection
+        self._event_listeners = []        # registered listeners (for cleanup)
+
         self.main_loop = GLib.MainLoop()
 
         # Connect services
@@ -256,6 +261,72 @@ class MonitorDaemon:
             return None
 
         return search(self.firefox_app)
+
+    def _setup_event_listeners(self):
+        """Register AT-SPI event listeners for activity detection.
+
+        Firefox doesn't emit children-changed or state-changed:showing for
+        in-page DOM mutations. But it does emit text-changed, state-changed:busy,
+        and window events. We use these as heartbeat signals to speed up polling
+        when Firefox is actively changing.
+        """
+        def on_event(event):
+            try:
+                app = event.source.get_application()
+                if app and 'firefox' in (app.get_name() or '').lower():
+                    now = time.time()
+                    self._last_event_time = now
+                    self._event_burst_times.append(now)
+                    # Trim burst window to last 2 seconds
+                    self._event_burst_times = [
+                        t for t in self._event_burst_times if now - t < 2.0
+                    ]
+            except Exception:
+                pass
+
+        for event_type in [
+            'object:state-changed:busy',
+            'object:text-changed:insert',
+            'window:activate',
+        ]:
+            listener = Atspi.EventListener.new(on_event)
+            listener.register(event_type)
+            self._event_listeners.append((listener, event_type))
+
+        self._log(f"Registered {len(self._event_listeners)} AT-SPI event listeners")
+
+    def _cleanup_event_listeners(self):
+        """Deregister AT-SPI event listeners."""
+        for listener, event_type in self._event_listeners:
+            try:
+                listener.deregister(event_type)
+            except Exception:
+                pass
+        self._event_listeners.clear()
+
+    def _get_poll_interval(self) -> int:
+        """Determine next poll interval based on state and event activity."""
+        now = time.time()
+        since_event = (now - self._last_event_time
+                       if self._last_event_time > 0 else float('inf'))
+        burst_count = len([
+            t for t in self._event_burst_times if now - t < 2.0
+        ])
+
+        if self.state == "SETTLING":
+            return 1000
+        if burst_count >= 3:
+            return 500
+        if since_event < 5.0:
+            return 1000
+        if self.state == "GENERATING":
+            return 2000
+        return 3000  # default
+
+    def _schedule_next_poll(self):
+        """Schedule next one-shot poll with adaptive interval."""
+        interval = self._get_poll_interval()
+        GLib.timeout_add(interval, self._on_poll_check)
 
     def _is_stop_button(self, name: str) -> bool:
         """Check if button name matches stop patterns.
@@ -476,10 +547,9 @@ class MonitorDaemon:
 
     def _on_first_poll(self) -> bool:
         """First poll after initial delay."""
-        self._log("Initial delay complete, starting regular polling")
+        self._log("Initial delay complete, starting adaptive polling")
         self._on_poll_check()
-        if self.state != "COMPLETE":
-            GLib.timeout_add(self.poll_interval_ms, self._on_poll_check)
+        # _on_poll_check schedules its own next poll via _schedule_next_poll
         return False
 
     def _on_poll_check(self) -> bool:
@@ -508,7 +578,8 @@ class MonitorDaemon:
         platform_doc = self._find_platform_document()
         if not platform_doc:
             self._log("WARNING: Platform document not found, skipping poll")
-            return True
+            self._schedule_next_poll()
+            return False
 
         # Search for stop button in document
         all_buttons = []
@@ -555,7 +626,8 @@ class MonitorDaemon:
                 self.state = "GENERATING"
                 self.stop_button_seen = True
                 self.settle_start = None
-                return True
+                self._schedule_next_poll()
+                return False
             settle_elapsed = time.time() - self.settle_start
             if settle_elapsed > self.settle_seconds:
                 self._log(f"Settle period expired ({settle_elapsed:.1f}s). Final completion.")
@@ -568,7 +640,8 @@ class MonitorDaemon:
                 self.state = "COMPLETE"
                 self.main_loop.quit()
                 return False
-            return True  # Keep polling during settle
+            self._schedule_next_poll()
+            return False  # Keep polling during settle
 
         if stop_button:
             if self.state == "IDLE":
@@ -609,7 +682,8 @@ class MonitorDaemon:
                         f"Intermediate response on {self.platform} (cycle {self.cycle_count}). Daemon still monitoring.",
                         {"cycle": self.cycle_count, "requires_action": True},
                     )
-                    return True  # Keep polling
+                    self._schedule_next_poll()
+                    return False  # Keep polling
 
                 # Final cycle (or no settling configured)
                 self._log(f"Completion detected (cycle {self.cycle_count}): stop button disappeared")
@@ -623,7 +697,8 @@ class MonitorDaemon:
                 self.main_loop.quit()
                 return False
 
-        return True
+        self._schedule_next_poll()
+        return False
 
     def start(self):
         """Start the monitoring loop."""
@@ -642,6 +717,9 @@ class MonitorDaemon:
                 }),
             )
 
+        # Register AT-SPI event listeners for adaptive polling
+        self._setup_event_listeners()
+
         self._log(f"Waiting {self.initial_delay_ms / 1000:.0f}s before first poll...")
         GLib.timeout_add(self.initial_delay_ms, self._on_first_poll)
 
@@ -651,6 +729,7 @@ class MonitorDaemon:
             self._log("Interrupted by user")
             self._notify_agent("interrupted", "Monitor stopped by user")
         finally:
+            self._cleanup_event_listeners()
             if self.neo4j_driver:
                 self.neo4j_driver.close()
             self._log("Monitor exited")
