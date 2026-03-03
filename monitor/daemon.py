@@ -342,8 +342,15 @@ class MonitorDaemon:
     def _tmux_send(self, msg: str, label: str = "notification"):
         """Send text + Enter to the target tmux session.
 
-        Handles copy-mode (exits it first) and uses explicit pane
-        targeting (:0.0) to avoid ambiguity.
+        Uses the 'escape sandwich' pattern for reliable delivery:
+        1. Exit copy-mode if active
+        2. Escape — dismiss autocomplete/modals in Claude Code TUI
+        3. send-keys -l — type the text
+        4. Escape — dismiss autocomplete triggered by typing
+        5. C-m — Enter now reaches submit handler, not autocomplete
+
+        Claude Code's Ink TUI autocomplete intercepts Enter if active.
+        The second Escape clears it before C-m is sent.
         """
         if self.tmux_session:
             sessions_to_try = [self.tmux_session]
@@ -351,9 +358,9 @@ class MonitorDaemon:
             sessions_to_try = ['claude', 'main']
 
         for session in sessions_to_try:
-            target = f"{session}:0.0"  # Explicit pane targeting
+            target = f"{session}:0.0"
             try:
-                # Check if pane is in copy-mode (blocks send-keys to app)
+                # Check if pane exists and exit copy-mode if active
                 mode_result = subprocess.run(
                     ['tmux', 'display-message', '-t', target, '-p', '#{pane_mode}'],
                     capture_output=True, text=True, timeout=3,
@@ -370,8 +377,13 @@ class MonitorDaemon:
                     )
                     time.sleep(0.3)
 
-                # Send text literally (-l prevents tmux from interpreting
-                # words as key names, e.g. "Enter" in message text)
+                # Escape sandwich: dismiss → type → dismiss autocomplete → Enter
+                subprocess.run(
+                    ['tmux', 'send-keys', '-t', target, 'Escape'],
+                    capture_output=True, text=True, timeout=3,
+                )
+                time.sleep(0.1)
+
                 result = subprocess.run(
                     ['tmux', 'send-keys', '-t', target, '-l', msg],
                     capture_output=True, text=True, timeout=5,
@@ -379,18 +391,20 @@ class MonitorDaemon:
                 if result.returncode != 0:
                     self._log(f"tmux send-keys to '{target}' failed: {result.stderr.strip()}")
                     continue
-
-                # Brief pause for text to render
                 time.sleep(0.3)
 
-                # Send Enter separately (C-m is carriage return — more
-                # reliable than 'Enter' key name, especially over SSH)
+                subprocess.run(
+                    ['tmux', 'send-keys', '-t', target, 'Escape'],
+                    capture_output=True, text=True, timeout=3,
+                )
+                time.sleep(0.2)
+
                 enter_result = subprocess.run(
                     ['tmux', 'send-keys', '-t', target, 'C-m'],
                     capture_output=True, text=True, timeout=5,
                 )
                 if enter_result.returncode != 0:
-                    self._log(f"tmux Enter to '{target}' failed: {enter_result.stderr.strip()}")
+                    self._log(f"tmux C-m to '{target}' failed: {enter_result.stderr.strip()}")
                     continue
 
                 self._log(f"tmux {label} sent to '{target}'")
