@@ -9,9 +9,9 @@ Scroll behavior (controlled by `scroll` parameter):
 - "bottom" (default): Scroll to bottom before scanning. Best for normal
   chat workflows where you want to see the latest messages.
 - "top": Scroll to top before scanning. Useful for seeing page headers.
-- "none": Don't scroll at all. Essential for multi-step extraction of
-  long content (e.g. Perplexity Deep Research reports) where scrolling
-  would disrupt the current viewport position.
+- "none": Pure scan — no tab switch, no scroll. Essential for mid-workflow
+  inspection when a dropdown/menu is open, or during multi-step extraction
+  of long content. Does NOT switch tabs or press any keys.
 
 Works with OR without a plan:
 - With plan: navigates to specific URL on first call, skips on subsequent
@@ -212,22 +212,25 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
             plan['navigated'] = True
             redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
     else:
-        # No plan or already navigated - just switch to platform tab
-        if not inp.switch_to_platform(platform):
-            result['error'] = f"Failed to switch to {platform} tab"
-            return result
-        time.sleep(0.5)
-
-        # Scroll per parameter
-        if scroll == 'top':
-            inp.press_key('Home')
-            time.sleep(0.5)
-        elif scroll == 'none':
-            pass  # Preserve current scroll position
+        # No plan or already navigated
+        if scroll == 'none':
+            # Pure scan: no tab switch, no scroll. Use when a dropdown/menu
+            # is open or you're mid-workflow and don't want to disturb state.
+            pass
         else:
-            # Default: scroll to bottom to see latest content
-            inp.press_key('End')
+            # Switch to platform tab
+            if not inp.switch_to_platform(platform):
+                result['error'] = f"Failed to switch to {platform} tab"
+                return result
             time.sleep(0.5)
+
+            if scroll == 'top':
+                inp.press_key('Home')
+                time.sleep(0.5)
+            else:
+                # Default: scroll to bottom to see latest content
+                inp.press_key('End')
+                time.sleep(0.5)
 
     # Step 3: Get Firefox and platform document
     firefox = atspi.find_firefox()
