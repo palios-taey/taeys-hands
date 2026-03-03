@@ -25,15 +25,15 @@ Taey's Hands provides 14 MCP (Model Context Protocol) tools that Claude Code use
 - Firefox with accessibility enabled
 - Python 3.10+
 - AT-SPI2 (`at-spi2-core`)
-- `xdotool`, `xclip`
-- Redis (for state management)
-- Neo4j (for conversation storage)
+- `xdotool`, `xsel`
+- Redis (optional - for state management and monitor notifications)
+- Neo4j (optional - for conversation history storage)
 
 ## Setup
 
 ```bash
 # System dependencies
-sudo apt install at-spi2-core xdotool xclip
+sudo apt install at-spi2-core xdotool xsel
 
 # Python dependencies
 pip install redis neo4j PyGObject
@@ -69,7 +69,7 @@ server.py           # MCP router (JSON-RPC over stdio)
 core/               # AT-SPI primitives (frozen)
   atspi.py          # Firefox/desktop discovery
   tree.py           # Accessibility tree traversal
-  clipboard.py      # System clipboard via xclip
+  clipboard.py      # System clipboard via xsel
   input.py          # Keyboard/mouse via xdotool
   platforms.py      # Platform registry
 storage/            # Redis + Neo4j persistence
