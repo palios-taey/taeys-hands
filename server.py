@@ -43,8 +43,18 @@ DISPLAY = detect_display()
 os.environ['DISPLAY'] = DISPLAY
 
 # Now safe to import AT-SPI dependent modules
-from storage.redis_pool import get_client as get_redis, node_key
-from storage import neo4j_client
+
+# Storage backends (optional - graceful degradation if not available)
+try:
+    from storage.redis_pool import get_client as get_redis, node_key
+except Exception:
+    get_redis = lambda: None
+    def node_key(suffix): return f"taey:local:{suffix}"
+
+try:
+    from storage import neo4j_client
+except Exception:
+    neo4j_client = None
 
 from tools.inspect import handle_inspect
 from tools.interact import handle_click
