@@ -410,72 +410,78 @@ class MonitorDaemon:
 
         return False
 
-    def _notify_tmux(self, platform: str, intermediate: bool = False):
-        """Send notification to the spawning Claude session via tmux send-keys.
+    def _tmux_send(self, msg: str, label: str = "notification"):
+        """Send text + Enter to the target tmux session.
 
-        Uses the tmux session name passed by send_message (--tmux-session).
-        Falls back to hostname-based guessing if not provided.
+        Handles copy-mode (exits it first) and uses explicit pane
+        targeting (:0.0) to avoid ambiguity.
         """
+        if self.tmux_session:
+            sessions_to_try = [self.tmux_session]
+        else:
+            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+
+        for session in sessions_to_try:
+            target = f"{session}:0.0"  # Explicit pane targeting
+            try:
+                # Check if pane is in copy-mode (blocks send-keys to app)
+                mode_result = subprocess.run(
+                    ['tmux', 'display-message', '-t', target, '-p', '#{pane_mode}'],
+                    capture_output=True, text=True, timeout=3,
+                )
+                if mode_result.returncode != 0:
+                    self._log(f"tmux target '{target}' not found, skipping")
+                    continue
+                pane_mode = mode_result.stdout.strip()
+                if pane_mode:
+                    # Exit copy-mode (q cancels it)
+                    self._log(f"Pane '{target}' in {pane_mode}, exiting first")
+                    subprocess.run(
+                        ['tmux', 'send-keys', '-t', target, 'q'],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    time.sleep(0.3)
+
+                # Send text literally
+                result = subprocess.run(
+                    ['tmux', 'send-keys', '-t', target, '-l', msg],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode != 0:
+                    self._log(f"tmux send-keys to '{target}' failed: {result.stderr.strip()}")
+                    continue
+
+                # Brief pause for text to render
+                time.sleep(0.3)
+
+                # Send Enter separately
+                enter_result = subprocess.run(
+                    ['tmux', 'send-keys', '-t', target, 'Enter'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if enter_result.returncode != 0:
+                    self._log(f"tmux Enter to '{target}' failed: {enter_result.stderr.strip()}")
+                    continue
+
+                self._log(f"tmux {label} sent to '{target}'")
+                return
+            except Exception as e:
+                self._log(f"tmux send to '{target}' exception: {e}")
+                continue
+        self._log(f"tmux {label} failed: no reachable session")
+
+    def _notify_tmux(self, platform: str, intermediate: bool = False):
+        """Send response notification to tmux session."""
         if intermediate:
             msg = f"Intermediate response on {platform}. Daemon still monitoring for next cycle."
         else:
             msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
-
-        # Use explicit session from spawner (correct instance isolation)
-        if self.tmux_session:
-            sessions_to_try = [self.tmux_session]
-        else:
-            # Legacy fallback: guess session name
-            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
-
-        for session in sessions_to_try:
-            try:
-                # Send text literally (-l prevents tmux from interpreting
-                # spaces as key separators or words as key names)
-                result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, '-l', msg],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode != 0:
-                    continue
-                # Brief pause for text to render
-                time.sleep(0.5)
-                # Send Enter separately (without -l so it IS the Enter key)
-                subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, 'Enter'],
-                    capture_output=True, text=True, timeout=5,
-                )
-                self._log(f"tmux notification sent to session '{session}'")
-                return
-            except Exception:
-                continue
-        self._log("tmux notification failed: no session found")
+        self._tmux_send(msg, "notification")
 
     def _notify_tmux_timeout(self, platform: str):
-        """Send timeout notification to tmux — tells worker to re-inspect instead of waiting."""
+        """Send timeout notification to tmux session."""
         msg = f"Daemon timed out on {platform}. Re-inspect with taey_inspect('{platform}') to check for response."
-        if self.tmux_session:
-            sessions_to_try = [self.tmux_session]
-        else:
-            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
-        for session in sessions_to_try:
-            try:
-                result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, '-l', msg],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode != 0:
-                    continue
-                time.sleep(0.5)
-                subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, 'Enter'],
-                    capture_output=True, text=True, timeout=5,
-                )
-                self._log(f"Timeout tmux notification sent to session '{session}'")
-                return
-            except Exception:
-                continue
-        self._log("Timeout tmux notification failed: no session found")
+        self._tmux_send(msg, "timeout")
 
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
