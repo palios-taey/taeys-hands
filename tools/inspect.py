@@ -19,15 +19,18 @@ Works with OR without a plan:
 
 Structure change detection:
 - Computes a structure_hash on each inspect (roles + layout grid, not names)
-- Compares against last stored fingerprint in Redis
+- Compares against baseline YAML first, then Redis fingerprint
 - Flags structure_changed: true if the platform UI layout has changed
 - Stable across normal content changes (new messages, different text)
 """
 
 import json
+import os
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
+import yaml
 
 from core import atspi, input as inp, clipboard
 from core.tree import (find_elements, filter_useful_elements, find_copy_buttons,
@@ -38,9 +41,28 @@ from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
+BASELINES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'baselines')
+
 # File extensions that indicate an attached file chip
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')
+
+
+def _load_baseline(platform: str) -> Optional[Dict]:
+    """Load baseline YAML for a platform.
+
+    Returns the baseline dict, or None if no baseline exists.
+    """
+    baseline_path = os.path.join(BASELINES_DIR, f'{platform}.yaml')
+    if not os.path.exists(baseline_path):
+        return None
+    try:
+        with open(baseline_path) as f:
+            data = yaml.safe_load(f)
+        return data if data else None
+    except Exception as e:
+        logger.debug(f"Could not load baseline for {platform}: {e}")
+        return None
 
 
 def _detect_attachments(elements: list) -> dict | None:
@@ -86,42 +108,55 @@ def _check_structure_change(platform: str, elements: list,
                             redis_client) -> dict | None:
     """Compute structure fingerprint and compare against stored baseline.
 
+    Checks baseline YAML first (persistent, version-controlled), then
+    falls back to Redis fingerprint (runtime cache).
+
     Returns a dict with change info if structure changed, None if stable
     or if no baseline exists yet (first run just stores the fingerprint).
     """
-    if not redis_client:
+    current_hash = compute_structure_hash(elements, screen_height=int(SCREEN_HEIGHT))
+
+    # Check baseline YAML first (canonical source)
+    baseline = _load_baseline(platform)
+    baseline_hash = baseline.get('structure_hash') if baseline else None
+
+    # Check Redis fingerprint (runtime cache)
+    stored_redis = None
+    if redis_client:
+        fingerprint_key = node_key(f"structure_fingerprint:{platform}")
+        stored_redis = redis_client.get(fingerprint_key)
+
+        # Always update Redis with current hash
+        redis_client.set(fingerprint_key, current_hash)
+
+    # Determine reference hash: baseline YAML takes priority
+    reference_hash = baseline_hash or stored_redis
+
+    if reference_hash is None:
+        # First time seeing this platform - no baseline yet
+        logger.info(f"Structure fingerprint stored for {platform}: {current_hash}")
         return None
 
-    current_hash = compute_structure_hash(elements, screen_height=SCREEN_HEIGHT)
-    fingerprint_key = node_key(f"structure_fingerprint:{platform}")
-
-    stored = redis_client.get(fingerprint_key)
-
-    # Always update the stored fingerprint (no expiry — baseline persists
-    # across sessions so UI redesigns are detected even after downtime)
-    redis_client.set(fingerprint_key, current_hash)
-
-    if stored is None:
-        # First time seeing this platform - baseline stored, no comparison
-        logger.info(f"Structure fingerprint baseline stored for {platform}: {current_hash}")
-        return None
-
-    if stored == current_hash:
+    if reference_hash == current_hash:
         return None
 
     # Structure changed - flag it
+    source = 'baseline_yaml' if baseline_hash and baseline_hash != current_hash else 'redis'
     logger.warning(
-        f"Structure change detected on {platform}: {stored} -> {current_hash}"
+        f"Structure change detected on {platform}: "
+        f"{reference_hash} -> {current_hash} (source: {source})"
     )
     return {
         'structure_changed': True,
-        'previous_hash': stored,
+        'previous_hash': reference_hash,
         'current_hash': current_hash,
+        'comparison_source': source,
         'platform': platform,
         'WARNING': (
-            f"Platform UI structure has changed since last inspect. "
+            f"Platform UI structure has changed since last baseline. "
             f"Element layout is different - buttons, controls, or page "
-            f"structure may have moved. Verify before relying on cached positions."
+            f"structure may have moved. Consider re-running taey_baseline_map "
+            f"to update the baseline."
         ),
     }
 
@@ -134,7 +169,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     2. Otherwise: just switch to platform tab (stateless mode)
     3. Scroll according to `scroll` parameter, scan AT-SPI tree
     4. Find all elements, filter to useful ones
-    5. Check for structure changes (layout fingerprinting)
+    5. Check for structure changes (layout fingerprinting vs baseline)
     6. Store in Redis
 
     Args:
@@ -279,6 +314,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
     # Compute layout fingerprint and compare to stored baseline.
     # Uses roles + Y-grid bands (not names/content) so it's stable
     # across normal usage but detects actual UI redesigns.
+    # Checks baseline YAML first (persistent), Redis second (runtime).
     structure_change = _check_structure_change(platform, elements_json, redis_client)
     if structure_change:
         result['structure_change'] = structure_change
