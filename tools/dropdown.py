@@ -3,18 +3,26 @@ taey_select_dropdown, taey_prepare - Dropdown opening and capabilities.
 
 Opens dropdown menus and returns found items for Claude to pick from.
 Claude is the intelligence - no matching logic in tool code.
+
+Dropdown baseline tracking:
+- First time a dropdown is opened: items become the baseline (stored in Redis)
+- Subsequent opens: compares current items against baseline
+- Flags new items (not in baseline) and missing items (in baseline but gone)
+- Claude decides what the changes mean - no thresholds, no special cases
 """
 
+import json
 import os
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
 from core import atspi, input as inp
 from core.tree import find_menu_items
 from core.atspi_interact import extend_cache
+from storage.redis_pool import node_key
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
@@ -92,6 +100,72 @@ def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Dict | N
     return find_button(doc)
 
 
+def _check_dropdown_baseline(platform: str, dropdown_name: str,
+                             dropdown_items: List[Dict],
+                             redis_client) -> Dict[str, Any] | None:
+    """Compare dropdown items against stored baseline.
+
+    First call for a platform+dropdown: stores current items as baseline
+    in Redis (no comparison, returns None).
+
+    Subsequent calls: compares current items against stored baseline.
+    Flags new items and missing items.
+
+    Returns a dict with comparison results, or None if this is the
+    first time (baseline just stored) or no differences found.
+    """
+    if not redis_client:
+        return None
+
+    baseline_key = node_key(f"dropdown_baseline:{platform}:{dropdown_name}")
+
+    # Get current item names
+    current_names = set()
+    current_name_original = {}  # lowercase -> original case
+    for item in dropdown_items:
+        name = item.get('name', '').strip()
+        if name:
+            lower = name.lower()
+            current_names.add(lower)
+            current_name_original[lower] = name
+
+    # Load stored baseline
+    stored_json = redis_client.get(baseline_key)
+
+    # Always update baseline with current state
+    redis_client.set(baseline_key, json.dumps(sorted(current_names)))
+
+    if stored_json is None:
+        # First time seeing this dropdown - baseline stored, no comparison
+        logger.info(
+            f"Dropdown baseline stored for {platform}/{dropdown_name}: "
+            f"{len(current_names)} items"
+        )
+        return None
+
+    try:
+        stored_names = set(json.loads(stored_json))
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    # Compare
+    new_items = [current_name_original[n] for n in sorted(current_names - stored_names)]
+    missing_items = sorted(stored_names - current_names)
+
+    if not new_items and not missing_items:
+        return None
+
+    result = {}
+    if new_items:
+        result['new_items'] = new_items
+        result['new_count'] = len(new_items)
+    if missing_items:
+        result['missing_items'] = missing_items
+        result['missing_count'] = len(missing_items)
+
+    return result
+
+
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
@@ -100,7 +174,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
     1. Switch to platform tab
     2. Click dropdown trigger via AT-SPI do_action (primary)
     3. If no items found, fall back to coordinate click
-    4. Return all items with names, roles, coordinates, states
+    4. Compare items against baseline (flag new/missing)
+    5. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
@@ -178,7 +253,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
             'states': e.get('states', []),
         })
 
-    return {
+    result = {
         "platform": platform,
         "dropdown": dropdown,
         "target_requested": target_value,
@@ -186,6 +261,18 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "item_count": len(items),
         "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
     }
+
+    # Compare dropdown items against Redis baseline (flag new/missing)
+    baseline_diff = _check_dropdown_baseline(platform, dropdown, items, redis_client)
+    if baseline_diff:
+        result['dropdown_changes'] = baseline_diff
+        logger.warning(
+            f"Dropdown changes on {platform}/{dropdown}: "
+            f"new={baseline_diff.get('new_items', [])}, "
+            f"missing={baseline_diff.get('missing_items', [])}"
+        )
+
+    return result
 
 
 def _load_platform_yaml(platform: str) -> Dict:
