@@ -5,26 +5,33 @@ base_url: https://www.perplexity.ai/
 tab_shortcut: alt+5
 
 capabilities:
-  # Feb 2026: Perplexity redesigned - now model-centric
+  # "Choose a model" button on main search page
   models:
     - Best
     - Sonar
-    - Sonar Huge
     - Gemini 3 Flash
-    - Gemini 3 Pro
+    - Gemini 3.1 Pro
     - GPT-5.2
-  modes: []
+    - Claude Sonnet 4.6
+    - Claude Opus 4.6 Max
+    - Grok 4.1
+    - Kimi K2.5
+  modes:
+    - Computer
   tools:
-    # Deep Research and Model Council are under "Add files or tools" button
-    - Deep Research
-    - Model Council
-  sources: []
+    # "Add files or tools" dropdown
+    - Deep research
+    - Model council
+  sources:
+    - Add files from cloud
+    - Connectors and sources
 
 quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
   - model_selector: "'Choose a model' button for model selection"
-  - tools_button: "'Add files or tools' opens dropdown with Upload files, Deep Research (radio), Model Council (radio)"
+  - tools_button: "'Add files or tools' opens dropdown with Upload files or images, Add files from cloud, Connectors and sources, Deep research (radio), Model council (radio), More"
   - deep_research: "Tools are radio menu items, NOT modes. Select via the dropdown."
+  - computer_mode: "'Computer' button toggles computer use mode (tasks view). Main chat is default search view."
 
 stop_patterns:
   - stop
@@ -33,7 +40,7 @@ stop_patterns:
 mode_guidance:
   deep_research:
     when: "Need facts, citations, multi-source synthesis, current events, documentation lookup"
-    how: "Click 'Add files or tools' button, select 'Deep Research' radio item"
+    how: "Click 'Add files or tools' button, select 'Deep research New' radio item"
     timeout: 7200
     note: "Can take 5-30 minutes. Uses multiple search passes."
   normal:

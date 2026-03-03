@@ -67,14 +67,21 @@ if os.path.exists(_env_path):
 
 
 def _detect_display() -> str:
-    """Detect active X display."""
+    """Detect active X display.
+
+    Checks DISPLAY env var first (set by spawner for multi-instance isolation),
+    then falls back to lock file detection.
+    """
+    env_display = os.environ.get('DISPLAY')
+    if env_display:
+        return env_display
     for d in [':0', ':1']:
         if os.path.exists(f'/tmp/.X{d[1:]}-lock'):
             return d
     for d in [':0', ':1']:
         if os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
             return d
-    return os.environ.get('DISPLAY', ':0')
+    return ':0'
 
 
 DISPLAY = _detect_display()
@@ -352,16 +359,17 @@ class MonitorDaemon:
 
         for session in sessions_to_try:
             try:
-                # Send text (without Enter)
+                # Send text literally (-l prevents tmux from interpreting
+                # spaces as key separators or words as key names)
                 result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, '--', msg],
+                    ['tmux', 'send-keys', '-t', session, '-l', msg],
                     capture_output=True, text=True, timeout=5,
                 )
                 if result.returncode != 0:
                     continue
                 # Brief pause for text to render
                 time.sleep(0.5)
-                # Send Enter separately (avoids race condition)
+                # Send Enter separately (without -l so it IS the Enter key)
                 subprocess.run(
                     ['tmux', 'send-keys', '-t', session, 'Enter'],
                     capture_output=True, text=True, timeout=5,
@@ -377,6 +385,7 @@ class MonitorDaemon:
         notification = {
             "monitor_id": self.monitor_id,
             "platform": self.platform,
+            "node_id": _NODE_ID,
             "status": status,
             "message": message,
             "timestamp": datetime.now().isoformat(),
@@ -398,7 +407,7 @@ class MonitorDaemon:
             try:
                 self.redis_client.rpush(_node_key("notifications"), notification_json)
                 self.redis_client.setex(
-                    f"taey:monitor:{self.monitor_id}",
+                    _node_key(f"monitor:{self.monitor_id}"),
                     3600,
                     notification_json,
                 )
@@ -594,11 +603,12 @@ class MonitorDaemon:
 
         if self.redis_client:
             self.redis_client.setex(
-                f"taey:monitor:{self.monitor_id}",
+                _node_key(f"monitor:{self.monitor_id}"),
                 self.timeout_seconds,
                 json.dumps({
                     "status": "monitoring",
                     "platform": self.platform,
+                    "node_id": _NODE_ID,
                     "started": datetime.now().isoformat(),
                     "baseline_copy_count": self.baseline_copy_count,
                 }),

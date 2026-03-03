@@ -233,7 +233,7 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 1. **ALWAYS press Enter to send** - never click Submit/Send buttons. Enter is universal.
 2. **ALWAYS use `taey_send_message`** - it handles Enter press + daemon spawn in one call.
 3. **NEVER wait/block for responses** - daemon notifies asynchronously. Move on immediately.
-4. **Pipeline pattern**: inspect → set_map → attach (if needed) → send_message → move on → extract when `response_ready`
+4. **Pipeline pattern**: inspect → attach (if needed) → re-inspect → click input → send_message → move on → extract when `response_ready`
 
 ### Text Entry
 - **All text**: `taey_send_message` uses clipboard paste (xsel + Ctrl+V) for all text, regardless of length
@@ -243,13 +243,13 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 
 ### Platform-Specific Notes
 
-| Platform | Send | Attach | Default Model | Notes |
-|----------|------|--------|---------------|-------|
-| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | GPT-5.2 (temp chat) | xdotool fails on dropdown items - use keyboard nav |
-| Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | xdotool works on Claude dropdowns |
-| Gemini | Enter | "Open upload file menu" → "Upload files" | Ultra (2.5 Pro) | File attach moves input Y - always re-inspect |
-| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Grok 4.20 Beta | Files persist across sessions! Check for stale files. |
-| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Copy=summary only; Export>Download for full |
+| Platform | Send | Attach | Default Model | Audit/Dream Mode | Notes |
+|----------|------|--------|---------------|-----------------|-------|
+| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | GPT-5.2 (temp chat) | 5.2 Pro Extended Thinking | xdotool fails on dropdown items - use keyboard nav |
+| Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | Extended Thinking (or Research) | xdotool works on Claude dropdowns |
+| Gemini | Enter | "Open upload file menu" → "Upload files" | 3.1 Pro | Deep Think (or Deep Research) | File attach moves input Y - always re-inspect |
+| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Grok 4.20 Beta | Grok 4.20 Beta | Files persist across sessions! Check for stale files. |
+| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Deep Research | Copy=summary only; Export>Download for full |
 
 **Dropdown Menu Item Clicks**: ChatGPT and Grok dropdown items do NOT respond to xdotool coordinate clicks (React event handlers). Use keyboard navigation: click the dropdown trigger, then `Down` arrow + `Enter` to select the first item. Claude and Gemini dropdowns DO respond to xdotool clicks.
 
@@ -287,6 +287,81 @@ No hardcoded screen values - works on any display size.
 
 ---
 
+## Multi-Claude Instances
+
+Multiple Claude Code instances share this MCP server on Spark, each in their own tmux session:
+
+| Session | Role | Focus |
+|---------|------|-------|
+| `taeys-hands` | Operator | AT-SPI automation, platform interactions, general tasks |
+| `weaver` | Memory coherence | ISMA knowledge graph improvement, Family audits, Dream cycles |
+| `PALIOS` | (Coming) | PALIOS shared memory substrate |
+
+Each instance gets its own virtual display for Firefox. The MCP server's `TAEY_NODE_ID` env var scopes Redis keys per instance. Instances communicate via `tmux-send`.
+
+---
+
+## Family Audit Gates and Dream Cycles
+
+### Gate Audits (Validation of Completed Work)
+
+At each major phase boundary, send a close-out audit to all 5 Family platforms in **fresh sessions**:
+
+**Platforms**: ChatGPT, Claude Chat, Gemini, Grok, Perplexity
+**Modes**: Use Audit/Dream Mode column from platform table (Extended Thinking, Deep Think, Deep Research, etc.)
+
+**Audit package contents**:
+1. Kernel-Layer 1 Rosetta Stone (THE_CHARTER, THE_DECLARATION, THE_SACRED_TRUST, THE_TRUTH_SEEKERS_GUIDE, KERNEL.md)
+2. HMM Motif Dictionary v0.2.0 (from `hmm_prompts.py` MOTIF_REFERENCE)
+3. Current source files relevant to the phase
+4. Real benchmark results with category breakdowns and comparison to previous baselines
+5. Sample query outputs demonstrating actual retrieval quality
+6. The existing plan (what was done, what's next)
+7. Specific audit questions
+
+**NOT theater**: Real stats, real code, real query results. Every claim verifiable.
+
+**Process**:
+1. Build package as markdown file
+2. Send to each platform sequentially (fresh session, attach package, send prompt)
+3. Extract each response, store at `/var/spark/isma/audit_{phase}_{platform}.md`
+4. Synthesize consensus into `/var/spark/isma/audit_{phase}_synthesis.md`
+5. Gate passes with zero consensus CRITICALs
+
+### Dream Cycles (Planning Future Work)
+
+Before implementing new phases (ColBERT, RAPTOR, Coherence Engine), run a Dream cycle:
+
+**Same package format** as audits but the prompt asks: "What is the latest research? How do we improve? What's missing?"
+
+**Modes**: Deep Research (Perplexity, Gemini) + Extended Thinking (ChatGPT, Claude) for maximum depth.
+
+**Process**: Dream → synthesize plan → audit the plan → implement → audit the implementation
+
+### Kernel Documents Location
+
+| Document | Path |
+|----------|------|
+| KERNEL.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/kernel/KERNEL.md` |
+| THE_CHARTER.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_CHARTER.md` |
+| THE_DECLARATION.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_DECLARATION.md` |
+| THE_SACRED_TRUST.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_SACRED_TRUST.md` |
+| THE_TRUTH_SEEKERS_GUIDE.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_TRUTH_SEEKERS_GUIDE.md` |
+| Motif Dictionary | `~/embedding-server/isma/scripts/hmm_prompts.py` (MOTIF_REFERENCE constant) |
+| Family Identities | `~/embedding-server/isma/scripts/hmm_prompts.py` (FAMILY_IDENTITIES dict) |
+
+### ISMA Master Plan
+
+**Location**: `~/.claude/plans/precious-floating-walrus.md`
+
+Tracks the full phase progression: P0-P5.5 (DONE) → P6A (DONE) → P6B/C/D → P7.
+
+**Benchmark baselines**: `/var/spark/isma/benchmark_latest.json`
+**Audit history**: `/var/spark/isma/audit_phase5_5*.md`
+**Phase 7 materials**: `/var/spark/isma/phase7/`
+
+---
+
 ## Troubleshooting
 
 ### "Could not find {platform} document"
@@ -316,6 +391,54 @@ No hardcoded screen values - works on any display size.
 2. If blocked on `ppoll` after `writev`, something grabbed the X server.
 3. NEVER use `import -window root` (ImageMagick) - it grabs X server and if killed, grab persists.
 4. Use `gnome-screenshot` instead for screenshots.
+
+---
+
+## Multi-Instance Support
+
+Multiple Claude instances can share the same Spark machine, isolated by DISPLAY:
+
+| Instance | tmux session | DISPLAY | TAEY_NODE_ID | Role |
+|----------|-------------|---------|--------------|------|
+| Spark Claude | `taeys-hands` | `:0` | `taeys-hands` | Coordination, enrichment |
+| Weaver Claude | `weaver` | `:1` | `weaver` | Coherence, research |
+
+**Isolation guarantees**:
+- Redis keys scoped via `node_key()` → `taey:{TAEY_NODE_ID}:{suffix}`
+- Monitor keys scoped: `taey:{node_id}:monitor:{uuid}` (list/kill only sees own instance)
+- AT-SPI is per-DISPLAY — each instance sees only its own Firefox
+- Clipboard (xsel) is per-DISPLAY — no collision
+- Monitor daemons notify the correct tmux session via `--tmux-session`
+
+**Setup a new instance**:
+```bash
+./scripts/setup_display.sh 1 weaver     # Xvfb + VNC + Firefox
+# In weaver tmux:
+export DISPLAY=:1 TAEY_NODE_ID=weaver
+python3 server.py                        # MCP server for that instance
+# To watch: vncviewer localhost:5901
+```
+
+---
+
+## Research Workflow (Platform Changes)
+
+When `structure_changed` or `capability_changes` is flagged in inspect results:
+
+1. **Note what changed** — new/missing elements, layout shifts, new dropdown items
+2. **Research the change** — use Perplexity or Grok:
+   ```
+   taey_inspect("perplexity")  # or "grok"
+   taey_click("perplexity", x, y)  # click input
+   taey_send_message("perplexity", "What recent changes has [platform] made to their UI or model lineup?")
+   # Wait for response, extract
+   taey_quick_extract("perplexity")
+   ```
+3. **Or explore directly** — `taey_inspect` + `taey_select_dropdown` on the changed platform to see current state
+4. **Update YAMLs** — edit `platforms/*.yaml` with new capabilities/models
+5. **Commit** — `git add platforms/ && git commit`
+
+No new tools needed — existing send_message/extract flow handles research queries. Use `session_type="research"` and `purpose` fields for Neo4j tracking.
 
 ---
 
