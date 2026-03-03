@@ -342,75 +342,35 @@ class MonitorDaemon:
     def _tmux_send(self, msg: str, label: str = "notification"):
         """Send text + Enter to the target tmux session.
 
-        Uses the 'escape sandwich' pattern for reliable delivery:
-        1. Exit copy-mode if active
-        2. Escape — dismiss autocomplete/modals in Claude Code TUI
-        3. send-keys -l — type the text
-        4. Escape — dismiss autocomplete triggered by typing
-        5. C-m — Enter now reaches submit handler, not autocomplete
-
-        Claude Code's Ink TUI autocomplete intercepts Enter if active.
-        The second Escape clears it before C-m is sent.
+        Matches the original working pattern: send-keys -l for text,
+        sleep, send-keys Enter. No copy-mode detection, no pane
+        targeting suffix, no Escape keys.
         """
         if self.tmux_session:
             sessions_to_try = [self.tmux_session]
         else:
-            sessions_to_try = ['claude', 'main']
+            sessions_to_try = ['taeys-hands', 'claude', 'main']
 
         for session in sessions_to_try:
-            target = f"{session}:0.0"
             try:
-                # Check if pane exists and exit copy-mode if active
-                mode_result = subprocess.run(
-                    ['tmux', 'display-message', '-t', target, '-p', '#{pane_mode}'],
-                    capture_output=True, text=True, timeout=3,
-                )
-                if mode_result.returncode != 0:
-                    self._log(f"tmux target '{target}' not found, skipping")
-                    continue
-                pane_mode = mode_result.stdout.strip()
-                if pane_mode:
-                    self._log(f"Pane '{target}' in {pane_mode}, exiting first")
-                    subprocess.run(
-                        ['tmux', 'send-keys', '-t', target, 'q'],
-                        capture_output=True, text=True, timeout=3,
-                    )
-                    time.sleep(0.3)
-
-                # Escape sandwich: dismiss → type → dismiss autocomplete → Enter
-                subprocess.run(
-                    ['tmux', 'send-keys', '-t', target, 'Escape'],
-                    capture_output=True, text=True, timeout=3,
-                )
-                time.sleep(0.1)
-
+                # Send text literally (-l prevents tmux from interpreting
+                # spaces as key separators or words as key names)
                 result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', target, '-l', msg],
+                    ['tmux', 'send-keys', '-t', session, '-l', msg],
                     capture_output=True, text=True, timeout=5,
                 )
                 if result.returncode != 0:
-                    self._log(f"tmux send-keys to '{target}' failed: {result.stderr.strip()}")
                     continue
-                time.sleep(0.3)
-
+                # Brief pause for text to render
+                time.sleep(0.5)
+                # Send Enter separately (without -l so it IS the Enter key)
                 subprocess.run(
-                    ['tmux', 'send-keys', '-t', target, 'Escape'],
-                    capture_output=True, text=True, timeout=3,
-                )
-                time.sleep(0.2)
-
-                enter_result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', target, 'C-m'],
+                    ['tmux', 'send-keys', '-t', session, 'Enter'],
                     capture_output=True, text=True, timeout=5,
                 )
-                if enter_result.returncode != 0:
-                    self._log(f"tmux C-m to '{target}' failed: {enter_result.stderr.strip()}")
-                    continue
-
-                self._log(f"tmux {label} sent to '{target}'")
+                self._log(f"tmux {label} sent to session '{session}'")
                 return
-            except Exception as e:
-                self._log(f"tmux send to '{target}' exception: {e}")
+            except Exception:
                 continue
         self._log(f"tmux {label} failed: no reachable session")
 
