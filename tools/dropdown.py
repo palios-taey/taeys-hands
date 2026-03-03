@@ -9,13 +9,19 @@ Dropdown baseline tracking:
 - Subsequent opens: compares current items against baseline
 - Flags new items (not in baseline) and missing items (in baseline but gone)
 - Claude decides what the changes mean - no thresholds, no special cases
+
+Context menu detection:
+- After AT-SPI do_action(0), checks if the resulting menu is a browser
+  context menu (Undo/Redo/Cut/Copy/Paste) instead of the actual dropdown
+- If detected, dismisses it and falls back to coordinate click on the
+  trigger button's position
 """
 
 import json
 import os
 import time
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -27,6 +33,72 @@ from storage.redis_pool import node_key
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 logger = logging.getLogger(__name__)
+
+# Items that indicate the browser's native context menu, not a platform dropdown
+_CONTEXT_MENU_ITEMS = {'undo', 'redo', 'cut', 'copy', 'paste', 'delete',
+                       'select all', 'select_all'}
+
+
+def _is_browser_context_menu(menu_items: List[Dict]) -> bool:
+    """Check if found menu items are the browser context menu.
+
+    The browser context menu has items like Undo, Redo, Cut, Copy, Paste.
+    If a majority of found items match these, it's a context menu, not
+    a platform dropdown.
+
+    Returns True if the menu appears to be the browser context menu.
+    """
+    if not menu_items:
+        return False
+
+    context_count = 0
+    for item in menu_items:
+        name = (item.get('name', '') or '').strip().lower()
+        if name in _CONTEXT_MENU_ITEMS:
+            context_count += 1
+
+    # If more than half the items are context menu items, it's a context menu
+    return context_count > len(menu_items) / 2
+
+
+def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Optional[Dict]:
+    """Find a button by name in AT-SPI tree and return its coordinates.
+
+    Returns dict with x, y, name, role if found, None otherwise.
+    """
+    trigger_lower = trigger_name.lower()
+
+    def find_button(obj, depth=0):
+        if depth > max_depth:
+            return None
+        try:
+            name = (obj.get_name() or '').lower()
+            role = obj.get_role_name() or ''
+            if trigger_lower in name and 'button' in role:
+                comp = obj.get_component_iface()
+                if comp:
+                    import gi
+                    gi.require_version('Atspi', '2.0')
+                    from gi.repository import Atspi as _Atspi
+                    rect = comp.get_extents(_Atspi.CoordType.SCREEN)
+                    if rect and rect.width > 0 and rect.height > 0:
+                        return {
+                            'x': rect.x + rect.width // 2,
+                            'y': rect.y + rect.height // 2,
+                            'name': obj.get_name() or '',
+                            'role': role,
+                        }
+            for i in range(obj.get_child_count()):
+                child = obj.get_child_at_index(i)
+                if child:
+                    result = find_button(child, depth + 1)
+                    if result:
+                        return result
+        except Exception:
+            pass
+        return None
+
+    return find_button(doc)
 
 
 def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
@@ -142,9 +214,11 @@ def handle_select_dropdown(platform: str, dropdown: str,
     """Open a dropdown and return found items for Claude to pick from.
 
     1. Click dropdown trigger via AT-SPI tree search (primary)
-    2. Scan AT-SPI tree for menu items
-    3. Compare items against baseline (flag new/missing)
-    4. Return all items with names, roles, coordinates, states
+    2. Detect if browser context menu appeared instead of dropdown
+    3. If context menu: dismiss, fall back to coordinate click
+    4. Scan AT-SPI tree for menu items
+    5. Compare items against baseline (flag new/missing)
+    6. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
@@ -153,24 +227,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
-    # Primary: AT-SPI tree search for dropdown trigger button
-    trigger_clicked = False
-    firefox = atspi.find_firefox()
-    if firefox:
-        doc = atspi.get_platform_document(firefox, platform)
-        if doc:
-            trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
-
-    if not trigger_clicked:
-        return {
-            "error": f"Failed to click dropdown trigger '{dropdown}' via AT-SPI tree search.",
-            "platform": platform,
-            "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
-        }
-
-    time.sleep(0.5)
-
-    # Find dropdown items
+    # Find dropdown trigger and get its coordinates (needed for fallback)
     firefox = atspi.find_firefox()
     if not firefox:
         return {"error": "Firefox not found"}
@@ -179,7 +236,83 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
+    # Get trigger coordinates before clicking (needed for fallback)
+    trigger_info = _get_trigger_coords(doc, dropdown)
+
+    # Snapshot menu items BEFORE clicking to detect persistent/stale items
+    pre_click_items = find_menu_items(firefox, doc)
+    pre_click_names = {(i.get('name', ''), i.get('y', 0)) for i in pre_click_items}
+
+    # Primary: AT-SPI do_action(0) on trigger button
+    trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+
+    if not trigger_clicked and not trigger_info:
+        return {
+            "error": f"Failed to click dropdown trigger '{dropdown}' via AT-SPI tree search.",
+            "platform": platform,
+            "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
+        }
+
+    if trigger_clicked:
+        time.sleep(0.5)
+
+    # Check what opened (or if nothing opened)
+    firefox = atspi.find_firefox()
+    if not firefox:
+        return {"error": "Firefox not found after click"}
+
+    doc = atspi.get_platform_document(firefox, platform)
+    if not doc:
+        return {"error": f"Could not find {platform} document after click"}
+
     menu_items = find_menu_items(firefox, doc)
+
+    # Detect if items are the same as before clicking (persistent/stale items)
+    post_click_names = {(i.get('name', ''), i.get('y', 0)) for i in menu_items}
+    items_unchanged = menu_items and post_click_names == pre_click_names
+
+    # Fallback to coordinate click if do_action didn't open anything,
+    # opened a browser context menu, or items are unchanged (stale).
+    need_coord_fallback = False
+    if menu_items and _is_browser_context_menu(menu_items):
+        logger.warning(
+            f"Browser context menu detected on {platform}/{dropdown}, "
+            f"dismissing and falling back to coordinate click"
+        )
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        need_coord_fallback = True
+    elif not menu_items or items_unchanged:
+        logger.info(
+            f"AT-SPI do_action {'found stale items' if items_unchanged else 'found no items'}, "
+            f"falling back to coordinate click"
+        )
+        need_coord_fallback = True
+
+    if need_coord_fallback and trigger_info:
+        inp.click_at(trigger_info['x'], trigger_info['y'])
+        time.sleep(0.5)
+
+        firefox = atspi.find_firefox()
+        if firefox:
+            doc = atspi.get_platform_document(firefox, platform)
+            if doc:
+                menu_items = find_menu_items(firefox, doc)
+
+                if menu_items and _is_browser_context_menu(menu_items):
+                    inp.press_key('Escape')
+                    return {
+                        "error": f"Dropdown '{dropdown}' opens browser context menu even with coordinate click.",
+                        "platform": platform,
+                        "trigger_coords": trigger_info,
+                        "hint": "The trigger may need a different interaction method. Try taey_inspect.",
+                    }
+    elif need_coord_fallback and not trigger_info:
+        return {
+            "error": f"Dropdown trigger '{dropdown}' not found for coordinate fallback.",
+            "platform": platform,
+            "hint": "Try taey_inspect to find the trigger button coordinates, then use taey_click.",
+        }
 
     # Cache menu items so taey_click can use AT-SPI do_action
     if menu_items:
@@ -208,10 +341,11 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "dropdown": dropdown,
         "target_requested": target_value,
         "items": items,
+        "item_count": len(items),
         "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
     }
 
-    # Compare dropdown items against baseline (first call stores, subsequent compare)
+    # Compare dropdown items against Redis baseline (flag new/missing)
     baseline_diff = _check_dropdown_baseline(platform, dropdown, items, redis_client)
     if baseline_diff:
         result['dropdown_changes'] = baseline_diff

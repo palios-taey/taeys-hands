@@ -278,13 +278,9 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                     return
 
                 # Match menu containers: menu, listbox, popup menu, panel
-                # NOTE: 'list' excluded — matches sidebar History on Gemini/ChatGPT,
-                # preventing dropdown detection. Real dropdowns use menu/listbox/popup.
                 _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
                 if role in _MENU_CONTAINERS:
-                    # Check SHOWING state unless relaxed (retry mode)
                     if require_showing and not _is_menu_showing(obj):
-                        # Still recurse children — container might be nested
                         pass
                     else:
                         items = []
@@ -296,10 +292,7 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                             if item:
                                 items.append(item)
                         if items:
-                            # Skip Firefox's permanent menus that persist in the
-                            # AT-SPI tree. These include: edit context menu
-                            # (Undo/Copy/Paste), tab context menu (Reload Tab,
-                            # Close Tab), page context menu (Back/Forward/Reload).
+                            # Skip Firefox's permanent browser menus
                             _BROWSER_MENU_NAMES = {
                                 'undo', 'redo', 'cut', 'copy', 'paste', 'delete',
                                 'select all', 'paste without formatting',
@@ -349,8 +342,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             return items
 
     # Retry WITHOUT requiring SHOWING state on containers.
-    # Gemini/Angular dropdown containers may not propagate SHOWING state
-    # reliably, even though their children are visible with valid extents.
     logger.debug("Strict SHOWING search failed, retrying without SHOWING requirement")
     if platform_doc:
         items = _collect_from(platform_doc, require_showing=False)
@@ -364,7 +355,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             return items
 
     # Fallback: search document for menu items without a menu container.
-    # Some platforms render items directly without a menu-role parent.
     if platform_doc:
         _fallback_roles = ('menu item', 'radio menu item', 'check menu item')
         all_elements = find_elements(platform_doc)
