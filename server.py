@@ -55,7 +55,6 @@ from tools.dropdown import handle_select_dropdown, handle_prepare
 from tools.plan import handle_plan
 from tools.sessions import handle_list_sessions
 from tools.monitors import handle_monitors, handle_respawn_monitor
-from tools.baseline import handle_baseline_map
 
 
 # =========================================================================
@@ -306,36 +305,6 @@ def get_tools() -> List[Dict]:
             },
         },
         {
-            "name": "taey_baseline_map",
-            "description": (
-                "Run a dedicated baseline mapping pass for a platform.\n\n"
-                "Maps all visible main-window elements (excluding sidebar sessions),\n"
-                "opens specified dropdowns to record their contents, and saves\n"
-                "everything to a persistent YAML baseline file.\n\n"
-                "The baseline becomes the canonical reference for structure change\n"
-                "detection. Run once per platform, re-run to refresh after confirmed\n"
-                "UI changes.\n\n"
-                "After mapping, taey_inspect and taey_select_dropdown will compare\n"
-                "current state against this baseline and flag differences."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": {**PLATFORM_PROP, "description": "Which platform to map"},
-                    "dropdowns": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": (
-                            "Dropdown trigger names to open and record. "
-                            "E.g. ['model', 'tools', 'mode']. "
-                            "Use the button name visible in taey_inspect results."
-                        ),
-                    },
-                },
-                "required": ["platform"],
-            },
-        },
-        {
             "name": "taey_list_sessions",
             "description": (
                 "Show active sessions, pending responses, and recommendations.\n\n"
@@ -492,13 +461,6 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
             return {"error": "target_value is required"}
         return handle_select_dropdown(platform, dropdown, target_value, redis_client)
 
-    if name == "taey_baseline_map":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        dropdowns = args.get("dropdowns", [])
-        return handle_baseline_map(platform, redis_client, dropdowns=dropdowns)
-
     if name == "taey_list_sessions":
         return handle_list_sessions(args.get("platform"), redis_client)
 
@@ -554,7 +516,7 @@ def run_server():
                     "jsonrpc": "2.0",
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "serverInfo": {"name": "taeys-hands", "version": "6.0.0"},
+                        "serverInfo": {"name": "taeys-hands", "version": "5.0.0"},
                         "capabilities": {"tools": {}},
                     },
                     "id": msg_id,
