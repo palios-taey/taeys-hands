@@ -6,7 +6,7 @@ AT-SPI-based chat and social platform automation.
 Simple JSON-RPC over stdio (no mcp library) for AT-SPI compatibility
 with system Python + gi.repository.
 
-Run: python3 <OPERATOR_HOME>/taeys-hands/server.py
+Run: python3 server.py
 """
 
 import sys

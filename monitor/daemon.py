@@ -348,7 +348,7 @@ class MonitorDaemon:
         if self.tmux_session:
             sessions_to_try = [self.tmux_session]
         else:
-            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+            sessions_to_try = ['claude', 'main']
 
         for session in sessions_to_try:
             target = f"{session}:0.0"  # Explicit pane targeting
