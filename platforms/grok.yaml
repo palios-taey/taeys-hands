@@ -5,21 +5,22 @@ base_url: https://grok.com/
 tab_shortcut: alt+4
 
 capabilities:
+  # "Model select" button near input area
   models:
-    - Grok 4.20 (Beta)
     - Auto
     - Fast
     - Expert
+    - Heavy
+    - Grok 4.20 (Beta) 4 Agents
   modes: []
-  tools:
-    - Think
-    - DeepSearch
+  tools: []
   sources: []
 
 quirks:
   - sidebar: "Left sidebar OPEN, no right sidebar"
-  - attach: "Dropdown menu with 'Upload a file' item. Files persist across sessions - always check for stale attachments before attaching."
-  - model_default: "Grok 4.20 (Beta) is the default. Do NOT select it manually."
+  - attach: "'Attach' button near input. Dropdown menu items require keyboard navigation (Down+Enter) - xdotool coordinate clicks do not trigger React handlers."
+  - model_default: "Auto mode is default. Chooses Fast or Expert based on query."
+  - model_selector: "'Model select' button. Click opens menu with Auto/Fast/Expert/Heavy/4.20 Beta options."
   - keyboard_nav: "Dropdown menu items require keyboard navigation (Down+Enter) - xdotool coordinate clicks do not trigger React handlers."
 
 stop_patterns:
@@ -27,18 +28,17 @@ stop_patterns:
   - stop generating
 
 mode_guidance:
-  think:
+  expert:
     when: "Complex reasoning, step-by-step analysis, math validation"
-    how: "Enable 'Think' tool toggle"
+    how: "Click 'Model select', choose 'Expert'"
     timeout: 3600
-  deepsearch:
-    when: "Need facts, current information, web search"
-    how: "Enable 'DeepSearch' tool toggle"
+  heavy:
+    when: "Maximum intelligence, powered by Grok 4.20 beta"
+    how: "Click 'Model select', choose 'Heavy'"
     timeout: 7200
-    note: "Can take several minutes. Uses multiple search passes."
   normal:
     when: "Quick questions, conversational, humor"
-    how: "Default - no tool selection needed"
+    how: "Default Auto mode - no selection needed"
     timeout: 1800
 
 element_hints:

@@ -5,22 +5,30 @@ base_url: https://claude.ai/new
 tab_shortcut: alt+2
 
 capabilities:
+  # Model shown in button text (e.g. "Opus 4.6 Extended")
+  # Click opens dropdown with "Extended thinking" toggle + "More models" link
   models:
-    - Claude 4.5 Sonnet
-    - Claude 4 Opus
-    - Claude 3.5 Haiku
-  modes: []
-  tools:
+    - Opus 4.6 Extended
+    - Sonnet 4.6 Extended
+    - Haiku 4.5
+  modes:
     - Extended thinking
+  tools:
+    # From "Toggle menu" dropdown
     - Research
+    - Web search
     - Artifacts
-  sources: []
+  sources:
+    - Add from Google Drive
+    - Add from GitHub
+    - Connectors
 
 quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
-  - attach: "Dropdown with 'Add files or photos' item. xdotool coordinate clicks work on Claude menu items."
-  - model_default: "Sonnet 4.6 Extended is default."
+  - attach: "'Toggle menu' button → 'Add files or photos' menu item. xdotool coordinate clicks work on Claude menu items."
+  - model_default: "Opus 4.6 Extended or Sonnet 4.6 Extended depending on plan."
+  - model_selector: "Button shows current model name. Click opens dropdown with Extended thinking toggle and More models link."
 
 stop_patterns:
   - stop
@@ -29,16 +37,19 @@ stop_patterns:
 mode_guidance:
   extended_thinking:
     when: "Complex reasoning, code generation, architectural review, multi-step analysis"
-    how: "Select model with 'Extended' suffix (e.g., 'Opus 4.6 Extended')"
+    how: "Click model button, toggle 'Extended thinking' on, or select model with 'Extended' suffix"
     timeout: 3600
-    note: "Thinking is built into model selection, not a separate toggle"
   research:
     when: "Need web search, current information, documentation lookup"
-    how: "Enable 'Research' tool toggle"
+    how: "Toggle menu → enable 'Research' check menu item"
     timeout: 3600
+  web_search:
+    when: "Quick web lookup, URL verification"
+    how: "Toggle menu → enable 'Web search' check menu item"
+    timeout: 1800
   normal:
     when: "Quick questions, simple tasks, conversational"
-    how: "Default model without Extended suffix"
+    how: "Default model without Extended thinking"
     timeout: 1800
 
 element_hints:

@@ -5,17 +5,16 @@ base_url: https://chatgpt.com/
 tab_shortcut: alt+1
 
 capabilities:
+  # Model selector button: "Model selector, current model is 5.2"
+  # Click opens mode picker, NOT traditional model list
   models:
-    - GPT-4o
-    - GPT-4o mini
-    - o1
-    - o1-mini
-    - o3-mini
+    - Auto
+    - Instant
+    - Thinking
+    - Pro
+    - Legacy models
   modes: []
-  tools:
-    - Search the web
-    - Create image
-    - Code
+  tools: []
   sources: []
 
 quirks:
@@ -25,21 +24,26 @@ quirks:
   - workaround: "Assume interference first, try action anyway, trust verification"
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - attach: "Dropdown with 'Upload a file' item. Use keyboard nav (Down+Enter) - xdotool coordinate clicks fail on React menu items."
-  - model_default: "GPT-5.2 on temporary chats. Use ?temporary-chat=true URL."
+  - model_selector: "Button 'Model selector, current model is 5.2'. AT-SPI do_action opens browser context menu — use xdotool coordinate click instead."
+  - model_default: "Auto mode on temporary chats. Use ?temporary-chat=true URL."
 
 stop_patterns:
   - stop
   - stop generating
 
 mode_guidance:
-  search:
-    when: "Need current information, web search, news"
-    how: "Enable 'Search the web' tool"
-    timeout: 3600
-  normal:
-    when: "Reasoning, code, creative, conversational"
-    how: "Default - no tool selection needed"
+  auto:
+    when: "General use — system decides Fast vs Thinking"
+    how: "Default mode, no selection needed"
     timeout: 1800
+  thinking:
+    when: "Complex reasoning, step-by-step analysis, math"
+    how: "Click model selector, select 'Thinking'"
+    timeout: 3600
+  pro:
+    when: "Research-grade intelligence, deep analysis"
+    how: "Click model selector, select 'Pro'"
+    timeout: 7200
 
 element_hints:
   input_role: textbox

@@ -36,7 +36,7 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
             # Scan for monitor keys
             cursor = 0
             while True:
-                cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
+                cursor, keys = redis_client.scan(cursor, match=node_key("monitor:") + "*", count=100)
                 for key in keys:
                     try:
                         data = redis_client.get(key)
@@ -79,7 +79,7 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
         if redis_client:
             cursor = 0
             while True:
-                cursor, keys = redis_client.scan(cursor, match="taey:monitor:*", count=100)
+                cursor, keys = redis_client.scan(cursor, match=node_key("monitor:") + "*", count=100)
                 for key in keys:
                     redis_client.delete(key)
                     cleared += 1
