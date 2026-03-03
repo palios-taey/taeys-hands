@@ -148,8 +148,9 @@ def get_tools() -> List[Dict]:
                         "enum": ["bottom", "top", "none"],
                         "description": (
                             "Where to scroll before scanning. Default 'bottom' (see latest chat). "
-                            "Use 'none' for extraction workflows on long content (Deep Research reports) "
-                            "to avoid disrupting scroll position. Use 'top' to scroll to page top first."
+                            "Use 'none' for PURE SCAN — no tab switch, no scroll, no keyboard input. "
+                            "Essential when a dropdown/menu is open or mid-workflow. "
+                            "Use 'top' to scroll to page top first."
                         ),
                     },
                 },
