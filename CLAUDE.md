@@ -493,7 +493,7 @@ No new tools needed — existing send_message/extract flow handles research quer
 - **Copy button returns summary only.** For Deep Research, must use Export > Download as Markdown.
 - "Add files or tools" dropdown contains both file upload AND Deep Research toggle.
 - Deep Research takes several minutes. Daemon notifies when done.
-- React portal renders dropdown menus deeply in DOM - `find_dropdown_menus()` handles this.
+- React portal renders dropdown menus deeply in DOM - AT-SPI may not see them. Use keyboard nav (Down+Enter).
 
 ### Browser State (CRITICAL)
 - Firefox tabs are PRE-CONFIGURED: ChatGPT=Alt+1, Claude=Alt+2, Gemini=Alt+3, Grok=Alt+4, Perplexity=Alt+5.

@@ -8,7 +8,6 @@ in the loop for dropdown decisions.
 
 import json
 import os
-import re
 import subprocess
 import time
 import logging
@@ -250,8 +249,6 @@ def handle_attach(platform: str, file_path: str,
         return _handle_file_dialog(platform, file_path, redis_client)
 
     # Primary: Direct AT-SPI tree search for attach button (bypasses element cache)
-    # Needed on Gemini (and others) where xdotool coordinate clicks don't trigger
-    # React event handlers reliably.
     dropdown_items = []
     logger.info("Trying direct AT-SPI tree search for attach button (primary path)")
     firefox = atspi.find_firefox()
@@ -279,14 +276,12 @@ def handle_attach(platform: str, file_path: str,
     # Fallback: coordinate-based click via handle_click
     if not dropdown_items and not atspi.is_file_dialog_open(firefox):
         logger.info("AT-SPI attach button not found, trying coordinate click fallback")
-        # Switch to platform and try to find attach button coords from AT-SPI tree
         if not inp.switch_to_platform(platform):
             logger.warning(f"Failed to switch to {platform} tab for coordinate click")
         else:
             firefox = atspi.find_firefox()
             doc = atspi.get_platform_document(firefox, platform) if firefox else None
             if doc:
-                # Re-search in case tree changed after tab switch
                 attach_btn = _find_attach_button(doc)
                 if attach_btn:
                     comp = attach_btn.get_component_iface()
@@ -308,12 +303,8 @@ def handle_attach(platform: str, file_path: str,
                             time.sleep(0.5)
 
     # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
-    # Grok/ChatGPT dropdowns render via React portals invisible to AT-SPI.
-    # xdotool click opens the dropdown, Down selects first item, Enter activates.
     if not dropdown_items and not atspi.is_file_dialog_open(firefox):
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
-        # The dropdown should already be open from the initial click.
-        # If not, re-search for the attach button coords via AT-SPI tree scan.
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         attach_btn = _find_attach_button(doc) if doc else None
@@ -323,20 +314,16 @@ def handle_attach(platform: str, file_path: str,
                 ext = comp.get_extents(Atspi.CoordType.SCREEN)
                 cx = ext.x + ext.width // 2
                 cy = ext.y + ext.height // 2
-                # Escape any stale state, then re-click via xdotool
                 inp.press_key('Escape')
                 time.sleep(0.3)
                 inp.click_at(cx, cy)
                 time.sleep(1.0)
-                # Check file dialog (some platforms skip dropdown)
                 if atspi.is_file_dialog_open(firefox):
                     return _handle_file_dialog(platform, file_path, redis_client)
-                # Keyboard nav: Down selects first item, Enter activates
                 inp.press_key('Down')
                 time.sleep(0.2)
                 inp.press_key('Return')
                 time.sleep(1.5)
-                # Check if file dialog opened
                 if atspi.is_file_dialog_open(firefox):
                     return _handle_file_dialog(platform, file_path, redis_client)
                 logger.warning("Keyboard nav fallback did not open file dialog")
