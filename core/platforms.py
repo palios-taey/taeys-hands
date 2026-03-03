@@ -120,6 +120,9 @@ class _LazyScreenDim:
     def __ge__(self, other):
         return int(self) >= other
 
+    def __floordiv__(self, other):
+        return int(self) // other
+
     def __repr__(self):
         return str(int(self))
 

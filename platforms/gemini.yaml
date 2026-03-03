@@ -5,18 +5,21 @@ base_url: https://gemini.google.com/app
 tab_shortcut: alt+3
 
 capabilities:
+  # "Open mode picker" button near input area
   models:
-    - 2.5 Flash
-    - 2.5 Pro
-    - 2.0 Flash
+    - Fast
+    - Thinking
+    - Pro
   modes: []
   tools:
-    - Deep Research
-    - Create videos (Veo 3.1)
-    - Create images
+    # "Tools" button → check menu items (AT-SPI do_action or xdotool click)
+    - Create image
     - Canvas
-    - Guided Learning
-    - Deep Think
+    - Deep research
+    - Create video
+    - Create music
+    - Guided learning
+    - Deep think
   sources: []
 
 quirks:
@@ -24,7 +27,9 @@ quirks:
   - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"
   - artifacts: "Use export_menu or tile_then_export for artifact extraction"
   - attach: "Button 'Open upload file menu' -> dropdown with 'Upload files' item. File attach shifts input Y - always re-inspect after attach."
-  - model_default: "Ultra (2.5 Pro) is default."
+  - model_default: "Pro (3.1 Pro) is default."
+  - mode_picker: "'Open mode picker' button near input. Radio menu items: Fast, Thinking, Pro."
+  - tools_button: "'Tools' button opens check menu item list. xdotool coordinate click may trigger browser context menu — use AT-SPI do_action or try clicking twice."
 
 stop_patterns:
   - stop
@@ -33,15 +38,19 @@ stop_patterns:
 mode_guidance:
   deep_think:
     when: "Complex reasoning, step-by-step analysis, math, code audits"
-    how: "Click Tools button, select 'Deep Think' check menu item"
+    how: "Click 'Tools' button, select 'Deep think' check menu item"
     timeout: 3600
   deep_research:
     when: "Research questions, fact-finding, comprehensive analysis"
-    how: "Click Tools button, select 'Deep Research' check menu item"
+    how: "Click 'Tools' button, select 'Deep research' check menu item"
+    timeout: 3600
+  thinking:
+    when: "Medium complexity reasoning"
+    how: "Click 'Open mode picker', select 'Thinking' radio item"
     timeout: 3600
   normal:
     when: "Quick questions, creative writing, conversational"
-    how: "Default - no tool selection needed"
+    how: "Click 'Open mode picker', select 'Fast' radio item"
     timeout: 1800
 
 element_hints:
