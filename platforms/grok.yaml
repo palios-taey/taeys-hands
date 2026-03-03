@@ -5,13 +5,14 @@ base_url: https://grok.com/
 tab_shortcut: alt+4
 
 capabilities:
-  # "Model select" button near input area
+  # "Model select" button — menu items with descriptions
   models:
-    - Auto
-    - Fast
-    - Expert
-    - Heavy
+    - Auto Chooses Fast or Expert
+    - Fast Quick responses by 4.1
+    - Expert Thinks hard
+    - Heavy Powered by Grok 4.20 (beta)
     - Grok 4.20 (Beta) 4 Agents
+    - Custom Instructions Not set Open Custom Instructions
   modes: []
   tools: []
   sources: []

@@ -5,26 +5,28 @@ base_url: https://www.perplexity.ai/
 tab_shortcut: alt+5
 
 capabilities:
-  # "Choose a model" button on main search page
+  # "Choose a model" button — menu items (some have suffixes)
   models:
-    - Best
+    - Best Selects your best available models
     - Sonar
     - Gemini 3 Flash
-    - Gemini 3.1 Pro
+    - Gemini 3.1 Pro New
     - GPT-5.2
-    - Claude Sonnet 4.6
+    - Claude Sonnet 4.6 New
     - Claude Opus 4.6 Max
     - Grok 4.1
-    - Kimi K2.5
+    - Kimi K2.5 Hosted in the US
   modes:
     - Computer
   tools:
     # "Add files or tools" dropdown
-    - Deep research
-    - Model council
-  sources:
+    - Upload files or images
     - Add files from cloud
     - Connectors and sources
+    - Deep research New
+    - Model council Max
+    - More
+  sources: []
 
 quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"

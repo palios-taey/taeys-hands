@@ -296,8 +296,33 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                             if item:
                                 items.append(item)
                         if items:
-                            found = items
-                            return
+                            # Skip Firefox's permanent menus that persist in the
+                            # AT-SPI tree. These include: edit context menu
+                            # (Undo/Copy/Paste), tab context menu (Reload Tab,
+                            # Close Tab), page context menu (Back/Forward/Reload).
+                            _BROWSER_MENU_NAMES = {
+                                'undo', 'redo', 'cut', 'copy', 'paste', 'delete',
+                                'select all', 'paste without formatting',
+                                'paste and go', 'copy clean link',
+                                'check spelling', 'inspect',
+                                'inspect accessibility properties',
+                                'reload tab', 'pin tab', 'mute tab',
+                                'close tab', 'duplicate tab', 'unload tab',
+                                'select all tabs', 'copy link',
+                                'new tab to right', 'close duplicate tabs',
+                                'reopen closed tab', 'add tab to new group',
+                                'back', 'forward', 'reload', 'save page as\u2026',
+                                'view page source', 'take screenshot',
+                                'edit bookmark\u2026', 'bookmark tab\u2026',
+                            }
+                            browser_count = sum(
+                                1 for i in items
+                                if i.get('name', '').strip().lower() in _BROWSER_MENU_NAMES)
+                            if browser_count > len(items) / 2:
+                                pass  # Skip this browser menu, keep searching
+                            else:
+                                found = items
+                                return
 
                 for i in range(min(obj.get_child_count(), 30)):
                     child = obj.get_child_at_index(i)
