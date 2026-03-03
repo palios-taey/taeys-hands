@@ -383,9 +383,10 @@ class MonitorDaemon:
                 # Brief pause for text to render
                 time.sleep(0.3)
 
-                # Send Enter separately (without -l so it IS the Enter key)
+                # Send Enter separately (C-m is carriage return — more
+                # reliable than 'Enter' key name, especially over SSH)
                 enter_result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', target, 'Enter'],
+                    ['tmux', 'send-keys', '-t', target, 'C-m'],
                     capture_output=True, text=True, timeout=5,
                 )
                 if enter_result.returncode != 0:
