@@ -1,9 +1,16 @@
 """
 taey_send_message - Paste text, send, record, spawn monitor.
 
-A primitive: pastes message into whatever is focused, presses Enter,
-records in Neo4j, spawns a monitor daemon. Claude must click the
-input field first via taey_click before calling this.
+A primitive: pastes message into whatever is focused, records in Neo4j,
+spawns a monitor daemon. Claude must click the input field first via
+taey_click before calling this.
+
+On CHAT platforms (ChatGPT, Claude, Gemini, Grok, Perplexity):
+  Presses Enter to send after pasting.
+
+On SOCIAL platforms (X/Twitter, LinkedIn):
+  Does NOT press Enter (Enter = newline in DraftJS compose).
+  Returns action_required flag — caller must click Post/Reply button.
 """
 
 import json
@@ -16,6 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from core import atspi, input as inp
+from core.platforms import SOCIAL_PLATFORMS
 from storage import neo4j_client
 from storage.redis_pool import node_key, NODE_ID
 
@@ -156,14 +164,17 @@ def handle_send_message(platform: str, message: str,
     daemon_pid = spawn_result.get("pid")
     daemon_log_path = spawn_result.get("log")
 
-    # Step 6: Press Enter to send
-    if not inp.press_key('Return', timeout=5):
-        if daemon_spawned and daemon_pid:
-            try:
-                os.kill(daemon_pid, 15)  # SIGTERM
-            except (ProcessLookupError, OSError):
-                pass
-        return {"error": "Send (Enter key) failed", "platform": platform, "neo4j": neo4j_result}
+    # Step 6: Press Enter to send (SKIP on social platforms where Enter = newline)
+    enter_pressed = False
+    if platform not in SOCIAL_PLATFORMS:
+        if not inp.press_key('Return', timeout=5):
+            if daemon_spawned and daemon_pid:
+                try:
+                    os.kill(daemon_pid, 15)  # SIGTERM
+                except (ProcessLookupError, OSError):
+                    pass
+            return {"error": "Send (Enter key) failed", "platform": platform, "neo4j": neo4j_result}
+        enter_pressed = True
 
     result = {
         "platform": platform,
@@ -177,6 +188,13 @@ def handle_send_message(platform: str, message: str,
             "log": daemon_log_path,
         },
     }
+
+    if not enter_pressed:
+        result["action_required"] = (
+            "Text pasted but NOT sent. On social platforms (X, LinkedIn), "
+            "Enter creates a newline. You MUST click the Post/Reply button "
+            "to submit. Use taey_inspect to find the button, then taey_click."
+        )
 
     if not daemon_spawned:
         result["warning"] = "Monitor daemon FAILED to spawn. Use taey_quick_extract manually."
