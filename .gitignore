@@ -19,6 +19,16 @@ venv/
 
 # Local overrides (not tracked)
 CLAUDE.local.md
+.claude/settings.local.json
+
+# Cluster-specific hooks (local customization)
+.claude/hooks/worker-*.sh
+
+# Test cache
+.pytest_cache/
+
+# Baselines (contain local state)
+baselines/
 
 # IDE
 .vscode/

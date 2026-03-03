@@ -6,6 +6,7 @@ History extraction scrolls through the entire conversation.
 """
 
 import json
+import os
 import time
 import logging
 from typing import Any, Dict
@@ -168,8 +169,9 @@ def handle_quick_extract(platform: str, redis_client,
     if content and content.strip().startswith('{') and 'motif' in content.lower():
         try:
             import requests as _req
+            hmm_url = os.environ.get('HMM_STORE_URL', 'http://localhost:8095/hmm/store-response')
             hmm_resp = _req.post(
-                "http://192.168.100.10:8095/hmm/store-response",
+                hmm_url,
                 json={"platform": platform, "content": content},
                 timeout=60,
             )
