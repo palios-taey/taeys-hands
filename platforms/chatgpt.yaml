@@ -5,13 +5,13 @@ base_url: https://chatgpt.com/
 tab_shortcut: alt+1
 
 capabilities:
-  # Model selector button: "Model selector, current model is 5.2"
-  # Click opens mode picker, NOT traditional model list
+  # "Model selector" button — opens mode picker
+  # Names are EXACT AT-SPI strings including descriptions
   models:
-    - Auto
-    - Instant
-    - Thinking
-    - Pro
+    - Auto Decides how long to think
+    - Instant Answers right away
+    - Thinking Thinks longer for better answers
+    - Pro Research-grade intelligence
     - Legacy models
   modes: []
   tools: []

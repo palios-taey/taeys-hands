@@ -5,22 +5,24 @@ base_url: https://claude.ai/new
 tab_shortcut: alt+2
 
 capabilities:
-  # Model shown in button text (e.g. "Opus 4.6 Extended")
-  # Click opens dropdown with "Extended thinking" toggle + "More models" link
+  # Model button shows current model name (e.g. "Opus 4.6 Extended")
+  # Click opens dropdown with Extended thinking toggle + More models link
+  # Actual model names are NOT in this dropdown — only toggle + link
   models:
-    - Opus 4.6 Extended
-    - Sonnet 4.6 Extended
-    - Haiku 4.5
-  modes:
-    - Extended thinking
+    - Extended thinking Think longer for complex tasks
+    - More models
+  # "Toggle menu" button dropdown items (check menu items are tools)
+  modes: []
   tools:
-    # From "Toggle menu" dropdown
     - Research
     - Web search
-    - Artifacts
   sources:
+    - Add files or photos Ctrl+U
+    - Take a screenshot
+    - Add to project
     - Add from Google Drive
     - Add from GitHub
+    - Use style
     - Connectors
 
 quirks:

@@ -5,19 +5,19 @@ base_url: https://gemini.google.com/app
 tab_shortcut: alt+3
 
 capabilities:
-  # "Open mode picker" button near input area
+  # "Open mode picker" button — radio menu items with descriptions
   models:
-    - Fast
-    - Thinking
-    - Pro
+    - Fast Answers quickly
+    - Thinking Solves complex problems
+    - Pro Advanced math and code with 3.1 Pro
   modes: []
   tools:
-    # "Tools" button → check menu items (AT-SPI do_action or xdotool click)
-    - Create image
+    # "Tools" button → check menu items (AT-SPI do_action opens dropdown)
+    - Create image New
     - Canvas
     - Deep research
     - Create video
-    - Create music
+    - Create music New
     - Guided learning
     - Deep think
   sources: []
@@ -29,7 +29,7 @@ quirks:
   - attach: "Button 'Open upload file menu' -> dropdown with 'Upload files' item. File attach shifts input Y - always re-inspect after attach."
   - model_default: "Pro (3.1 Pro) is default."
   - mode_picker: "'Open mode picker' button near input. Radio menu items: Fast, Thinking, Pro."
-  - tools_button: "'Tools' button opens check menu item list. xdotool coordinate click may trigger browser context menu — use AT-SPI do_action or try clicking twice."
+  - tools_button: "'Tools' button opens check menu item list. AT-SPI do_action(0) opens it reliably. Coordinate click does NOT work on landing page."
 
 stop_patterns:
   - stop
