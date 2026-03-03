@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__taeys-hands__taey_quick_extract|mcp__taeys-hands__taey_send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/worker-continue.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
