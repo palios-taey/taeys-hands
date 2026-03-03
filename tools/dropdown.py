@@ -3,68 +3,59 @@ taey_select_dropdown, taey_prepare - Dropdown opening and capabilities.
 
 Opens dropdown menus and returns found items for Claude to pick from.
 Claude is the intelligence - no matching logic in tool code.
-
-Dropdown baseline tracking:
-- First time a dropdown is opened: items become the baseline (stored in Redis)
-- Subsequent opens: compares current items against baseline
-- Flags new items (not in baseline) and missing items (in baseline but gone)
-- Claude decides what the changes mean - no thresholds, no special cases
-
-Context menu detection:
-- After AT-SPI do_action(0), checks if the resulting menu is a browser
-  context menu (Undo/Redo/Cut/Copy/Paste) instead of the actual dropdown
-- If detected, dismisses it and falls back to coordinate click on the
-  trigger button's position
 """
 
-import json
 import os
 import time
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import yaml
 
 from core import atspi, input as inp
 from core.tree import find_menu_items
 from core.atspi_interact import extend_cache
-from storage.redis_pool import node_key
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 logger = logging.getLogger(__name__)
 
-# Items that indicate the browser's native context menu, not a platform dropdown
-_CONTEXT_MENU_ITEMS = {'undo', 'redo', 'cut', 'copy', 'paste', 'delete',
-                       'select all', 'select_all'}
 
+def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
+    """Find a button by name in AT-SPI tree and click via do_action(0).
 
-def _is_browser_context_menu(menu_items: List[Dict]) -> bool:
-    """Check if found menu items are the browser context menu.
-
-    The browser context menu has items like Undo, Redo, Cut, Copy, Paste.
-    If a majority of found items match these, it's a context menu, not
-    a platform dropdown.
-
-    Returns True if the menu appears to be the browser context menu.
+    More reliable than xdotool coordinates for platforms like Gemini.
+    Returns True if the action was performed.
     """
-    if not menu_items:
+    trigger_lower = trigger_name.lower()
+
+    def find_and_click(obj, depth=0):
+        if depth > max_depth:
+            return False
+        try:
+            name = (obj.get_name() or '').lower()
+            role = obj.get_role_name() or ''
+            if trigger_lower in name and 'button' in role:
+                action = obj.get_action_iface()
+                if action and action.get_n_actions() > 0:
+                    action.do_action(0)
+                    return True
+            for i in range(obj.get_child_count()):
+                child = obj.get_child_at_index(i)
+                if child and find_and_click(child, depth + 1):
+                    return True
+        except Exception:
+            pass
         return False
 
-    context_count = 0
-    for item in menu_items:
-        name = (item.get('name', '') or '').strip().lower()
-        if name in _CONTEXT_MENU_ITEMS:
-            context_count += 1
-
-    # If more than half the items are context menu items, it's a context menu
-    return context_count > len(menu_items) / 2
+    return find_and_click(doc)
 
 
-def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Optional[Dict]:
-    """Find a button by name in AT-SPI tree and return its coordinates.
+def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Dict | None:
+    """Find a button by name in AT-SPI tree and return its center coordinates.
 
     Returns dict with x, y, name, role if found, None otherwise.
+    Used as coordinate click fallback when do_action doesn't open the dropdown.
     """
     trigger_lower = trigger_name.lower()
 
@@ -101,124 +92,15 @@ def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Optional
     return find_button(doc)
 
 
-def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
-    """Find a button by name in AT-SPI tree and click via do_action(0).
-
-    Returns True if the action was performed.
-    """
-    trigger_lower = trigger_name.lower()
-
-    def find_and_click(obj, depth=0):
-        if depth > max_depth:
-            return False
-        try:
-            name = (obj.get_name() or '').lower()
-            role = obj.get_role_name() or ''
-            if trigger_lower in name and 'button' in role:
-                action = obj.get_action_iface()
-                if action and action.get_n_actions() > 0:
-                    action.do_action(0)
-                    return True
-            for i in range(obj.get_child_count()):
-                child = obj.get_child_at_index(i)
-                if child and find_and_click(child, depth + 1):
-                    return True
-        except Exception:
-            pass
-        return False
-
-    return find_and_click(doc)
-
-
-def _load_platform_yaml(platform: str) -> Dict:
-    """Load platform YAML config."""
-    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
-    if not os.path.exists(yaml_path):
-        raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
-    with open(yaml_path) as f:
-        data = yaml.safe_load(f)
-    if not data:
-        raise ValueError(f"Platform YAML is empty: {yaml_path}")
-    return data
-
-
-def _check_dropdown_baseline(platform: str, dropdown_name: str,
-                             dropdown_items: List[Dict],
-                             redis_client) -> Dict[str, Any] | None:
-    """Compare dropdown items against stored baseline.
-
-    First call for a platform+dropdown: stores current items as baseline
-    in Redis (no comparison, returns None).
-
-    Subsequent calls: compares current items against stored baseline.
-    Flags new items and missing items.
-
-    Returns a dict with comparison results, or None if this is the
-    first time (baseline just stored) or no differences found.
-    """
-    if not redis_client:
-        return None
-
-    baseline_key = node_key(f"dropdown_baseline:{platform}:{dropdown_name}")
-
-    # Get current item names
-    current_names = set()
-    current_name_original = {}  # lowercase -> original case
-    for item in dropdown_items:
-        name = item.get('name', '').strip()
-        if name:
-            lower = name.lower()
-            current_names.add(lower)
-            current_name_original[lower] = name
-
-    # Load stored baseline
-    stored_json = redis_client.get(baseline_key)
-
-    # Always update baseline with current state
-    redis_client.set(baseline_key, json.dumps(sorted(current_names)))
-
-    if stored_json is None:
-        # First time seeing this dropdown - baseline stored, no comparison
-        logger.info(
-            f"Dropdown baseline stored for {platform}/{dropdown_name}: "
-            f"{len(current_names)} items"
-        )
-        return None
-
-    try:
-        stored_names = set(json.loads(stored_json))
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-    # Compare
-    new_items = [current_name_original[n] for n in sorted(current_names - stored_names)]
-    missing_items = sorted(stored_names - current_names)
-
-    if not new_items and not missing_items:
-        return None
-
-    result = {}
-    if new_items:
-        result['new_items'] = new_items
-        result['new_count'] = len(new_items)
-    if missing_items:
-        result['missing_items'] = missing_items
-        result['missing_count'] = len(missing_items)
-
-    return result
-
-
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
     """Open a dropdown and return found items for Claude to pick from.
 
-    1. Click dropdown trigger via AT-SPI tree search (primary)
-    2. Detect if browser context menu appeared instead of dropdown
-    3. If context menu: dismiss, fall back to coordinate click
-    4. Scan AT-SPI tree for menu items
-    5. Compare items against baseline (flag new/missing)
-    6. Return all items with names, roles, coordinates, states
+    1. Switch to platform tab
+    2. Click dropdown trigger via AT-SPI do_action (primary)
+    3. If no items found, fall back to coordinate click
+    4. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
@@ -227,7 +109,6 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
-    # Find dropdown trigger and get its coordinates (needed for fallback)
     firefox = atspi.find_firefox()
     if not firefox:
         return {"error": "Firefox not found"}
@@ -236,19 +117,15 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Get trigger coordinates before clicking (needed for fallback)
+    # Get trigger coordinates (needed for fallback)
     trigger_info = _get_trigger_coords(doc, dropdown)
-
-    # Snapshot menu items BEFORE clicking to detect persistent/stale items
-    pre_click_items = find_menu_items(firefox, doc)
-    pre_click_names = {(i.get('name', ''), i.get('y', 0)) for i in pre_click_items}
 
     # Primary: AT-SPI do_action(0) on trigger button
     trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
 
     if not trigger_clicked and not trigger_info:
         return {
-            "error": f"Failed to click dropdown trigger '{dropdown}' via AT-SPI tree search.",
+            "error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
             "platform": platform,
             "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
         }
@@ -256,7 +133,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if trigger_clicked:
         time.sleep(0.5)
 
-    # Check what opened (or if nothing opened)
+    # Scan for menu items
     firefox = atspi.find_firefox()
     if not firefox:
         return {"error": "Firefox not found after click"}
@@ -267,29 +144,9 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
     menu_items = find_menu_items(firefox, doc)
 
-    # Detect if items are the same as before clicking (persistent/stale items)
-    post_click_names = {(i.get('name', ''), i.get('y', 0)) for i in menu_items}
-    items_unchanged = menu_items and post_click_names == pre_click_names
-
-    # Fallback to coordinate click if do_action didn't open anything,
-    # opened a browser context menu, or items are unchanged (stale).
-    need_coord_fallback = False
-    if menu_items and _is_browser_context_menu(menu_items):
-        logger.warning(
-            f"Browser context menu detected on {platform}/{dropdown}, "
-            f"dismissing and falling back to coordinate click"
-        )
-        inp.press_key('Escape')
-        time.sleep(0.3)
-        need_coord_fallback = True
-    elif not menu_items or items_unchanged:
-        logger.info(
-            f"AT-SPI do_action {'found stale items' if items_unchanged else 'found no items'}, "
-            f"falling back to coordinate click"
-        )
-        need_coord_fallback = True
-
-    if need_coord_fallback and trigger_info:
+    # Fallback: coordinate click if do_action didn't open anything
+    if not menu_items and trigger_info:
+        logger.info(f"AT-SPI do_action found no items, falling back to coordinate click")
         inp.click_at(trigger_info['x'], trigger_info['y'])
         time.sleep(0.5)
 
@@ -298,21 +155,6 @@ def handle_select_dropdown(platform: str, dropdown: str,
             doc = atspi.get_platform_document(firefox, platform)
             if doc:
                 menu_items = find_menu_items(firefox, doc)
-
-                if menu_items and _is_browser_context_menu(menu_items):
-                    inp.press_key('Escape')
-                    return {
-                        "error": f"Dropdown '{dropdown}' opens browser context menu even with coordinate click.",
-                        "platform": platform,
-                        "trigger_coords": trigger_info,
-                        "hint": "The trigger may need a different interaction method. Try taey_inspect.",
-                    }
-    elif need_coord_fallback and not trigger_info:
-        return {
-            "error": f"Dropdown trigger '{dropdown}' not found for coordinate fallback.",
-            "platform": platform,
-            "hint": "Try taey_inspect to find the trigger button coordinates, then use taey_click.",
-        }
 
     # Cache menu items so taey_click can use AT-SPI do_action
     if menu_items:
@@ -336,7 +178,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
             'states': e.get('states', []),
         })
 
-    result = {
+    return {
         "platform": platform,
         "dropdown": dropdown,
         "target_requested": target_value,
@@ -345,17 +187,17 @@ def handle_select_dropdown(platform: str, dropdown: str,
         "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
     }
 
-    # Compare dropdown items against Redis baseline (flag new/missing)
-    baseline_diff = _check_dropdown_baseline(platform, dropdown, items, redis_client)
-    if baseline_diff:
-        result['dropdown_changes'] = baseline_diff
-        logger.warning(
-            f"Dropdown changes on {platform}/{dropdown}: "
-            f"new={baseline_diff.get('new_items', [])}, "
-            f"missing={baseline_diff.get('missing_items', [])}"
-        )
 
-    return result
+def _load_platform_yaml(platform: str) -> Dict:
+    """Load platform YAML config."""
+    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+    if not os.path.exists(yaml_path):
+        raise FileNotFoundError(f"Platform YAML not found: {yaml_path}")
+    with open(yaml_path) as f:
+        data = yaml.safe_load(f)
+    if not data:
+        raise ValueError(f"Platform YAML is empty: {yaml_path}")
+    return data
 
 
 def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
