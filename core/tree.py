@@ -319,15 +319,13 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Retry WITHOUT requiring SHOWING state on containers.
-    logger.debug("Strict SHOWING search failed, retrying without SHOWING requirement")
+    # Retry WITHOUT requiring SHOWING state — platform_doc only.
+    # NEVER retry on firefox root without SHOWING: persistent Firefox
+    # chrome menus (tab context menu) are always in the tree with
+    # non-zero extents even when not displayed.
+    logger.debug("Strict SHOWING search failed, retrying platform_doc without SHOWING requirement")
     if platform_doc:
         items = _collect_from(platform_doc, require_showing=False)
-        if items:
-            items.sort(key=lambda x: x['y'])
-            return items
-    if firefox:
-        items = _collect_from(firefox, require_showing=False)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
