@@ -342,54 +342,45 @@ class MonitorDaemon:
     def _notify_tmux(self, platform: str):
         """Send notification to the spawning Claude session via tmux send-keys.
 
-        Uses the tmux session name passed by send_message (--tmux-session).
-        Falls back to hostname-based guessing if not provided.
+        Requires --tmux-session to be set by the spawner (send_message passes
+        NODE_ID automatically). No fallbacks — misconfigured notifications
+        going to the wrong session can severely disrupt workflows.
 
-        Claude Code uses Ink (React TUI) with the Kitty keyboard protocol.
-        Enter is encoded as CSI u sequence (ESC[13u), not legacy 0x0D.
-        tmux send-keys Enter sends 0x0D which may not trigger submit.
-
-        Strategy (3-tier, each tier tried in sequence):
-          1. Escape + Enter: dismiss autocomplete, then legacy Enter
-          2. Raw CSI u: send ESC[13u via tmux send-keys -H (hex bytes)
-          3. Ctrl+J: send 0x0A (line feed) as alternative submit
+        Uses Escape-Enter pattern: Ink TUI autocomplete intercepts bare Enter,
+        so we dismiss it with Escape first, then send Enter to submit.
         See: github.com/anthropics/claude-code/issues/15553
         """
+        if not self.tmux_session:
+            self._log("ERROR: --tmux-session not set. Cannot send notification. "
+                       "Daemon must be spawned with explicit session target.")
+            return
+
+        session = self.tmux_session
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
-        # Use explicit session from spawner (correct instance isolation)
-        if self.tmux_session:
-            sessions_to_try = [self.tmux_session]
-        else:
-            # Legacy fallback: guess common session names
-            sessions_to_try = ['claude', 'main']
-
-        for session in sessions_to_try:
-            try:
-                # Send text
-                result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, '--', msg],
-                    capture_output=True, text=True, timeout=5,
-                )
-                if result.returncode != 0:
-                    continue
-
-                # Tier 1: Escape + Enter (dismiss autocomplete, then submit)
-                time.sleep(0.3)
-                subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, 'Escape'],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.1)
-                subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, 'Enter'],
-                    capture_output=True, text=True, timeout=5,
-                )
-                self._log(f"tmux notification sent to session '{session}'")
+        try:
+            result = subprocess.run(
+                ['tmux', 'send-keys', '-t', session, '--', msg],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
                 return
-            except Exception:
-                continue
-        self._log("tmux notification failed: no session found")
+
+            # Escape-Enter: dismiss autocomplete, then submit
+            time.sleep(0.3)
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'Escape'],
+                capture_output=True, text=True, timeout=5,
+            )
+            time.sleep(0.1)
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'Enter'],
+                capture_output=True, text=True, timeout=5,
+            )
+            self._log(f"tmux notification sent to session '{session}'")
+        except Exception as e:
+            self._log(f"tmux notification failed for session '{session}': {e}")
 
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
