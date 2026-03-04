@@ -579,19 +579,18 @@ class MonitorDaemon:
                 self.stop_button_seen = True
                 self.generating_since = time.time()
                 self._log("Stop button appeared - response generating")
-        else:
-            # Inactive tab refresh: if stuck in GENERATING for a while,
-            # the tab may be inactive (AT-SPI doesn't update background tabs).
-            # Switch to our tab to force a state refresh, then re-poll next cycle.
-            if (self.state == "GENERATING" and self.generating_since
-                    and self.stop_button_seen):
+            elif self.state == "GENERATING" and self.generating_since:
+                # Stop button STILL present after response should be done.
+                # Background tabs freeze AT-SPI — stop button stays "found"
+                # even after response completes. Switch to our tab to force
+                # Firefox to update the accessibility tree.
                 stuck_seconds = time.time() - self.generating_since
                 since_last_refresh = time.time() - self.last_tab_refresh
                 if (stuck_seconds > self.tab_refresh_after
                         and since_last_refresh > self.tab_refresh_interval):
-                    self._log(f"Stuck in GENERATING for {stuck_seconds:.0f}s - refreshing tab")
+                    self._log(f"Stop button persistent for {stuck_seconds:.0f}s - tab may be inactive, refreshing")
                     self._refresh_platform_tab()
-                    return True  # Re-poll after tab refresh
+        else:
             if self.stop_button_seen:
                 self.cycle_count += 1
 
