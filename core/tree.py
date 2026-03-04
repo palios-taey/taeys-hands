@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # States worth reporting on elements
 IMPORTANT_STATES = [
+    Atspi.StateType.SHOWING,    # must come first — used by filter_useful_elements
     Atspi.StateType.SELECTED,
     Atspi.StateType.CHECKED,
     Atspi.StateType.PRESSED,
