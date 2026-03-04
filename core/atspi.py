@@ -20,21 +20,24 @@ logger = logging.getLogger(__name__)
 
 
 def detect_display() -> str:
-    """Detect active X display by checking lock files and sockets.
+    """Detect active X display.
+
+    Priority: DISPLAY env var first (respects explicit configuration),
+    then lock files, then sockets.
 
     Raises:
         RuntimeError: If no X display can be detected.
     """
+    display = os.environ.get('DISPLAY')
+    if display:
+        return display
     for d in [':0', ':1']:
         if os.path.exists(f'/tmp/.X{d[1:]}-lock'):
             return d
     for d in [':0', ':1']:
         if os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
             return d
-    display = os.environ.get('DISPLAY')
-    if display:
-        return display
-    raise RuntimeError("No X display detected: no lock files, no sockets, DISPLAY not set")
+    raise RuntimeError("No X display detected: DISPLAY not set, no lock files, no sockets")
 
 
 def find_firefox():

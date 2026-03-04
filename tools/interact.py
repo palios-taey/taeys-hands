@@ -1,9 +1,10 @@
 """
 taey_click - Coordinate-based clicking.
 
-Click at specific screen coordinates using a unified strategy:
-AT-SPI cached element first, AT-SPI fresh tree scan second, xdotool fallback.
-No platform-specific branching.
+Click strategy is platform-aware:
+- Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
+- ChatGPT/Grok/others: xdotool first (AT-SPI do_action lies - returns True
+  without actually triggering React event handlers)
 """
 
 import time
@@ -75,15 +76,59 @@ def _fresh_atspi_find(platform: str, x: int, y: int,
 def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
     """Click at specific screen coordinates.
 
-    Unified strategy: AT-SPI cached first, AT-SPI fresh scan second,
-    xdotool fallback. No platform-specific branching.
+    Strategy is platform-aware:
+    - Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
+    - Others: xdotool first (AT-SPI do_action lies on React)
 
     Returns what happened. Claude verifies by inspecting.
     """
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
-    # Try cached AT-SPI element first
+    # Gemini: AT-SPI do_action is more reliable than xdotool coordinates
+    if platform == 'gemini':
+        element = find_element_at(platform, x, y)
+        if element and atspi_click(element):
+            time.sleep(0.3)
+            return {
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "atspi",
+            }
+
+        # Cache miss — fresh AT-SPI tree scan (still AT-SPI, not xdotool)
+        logger.info(f"Gemini cache miss at ({x},{y}), doing fresh AT-SPI scan")
+        element = _fresh_atspi_find(platform, x, y)
+        if element and atspi_click(element):
+            time.sleep(0.3)
+            return {
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "atspi_fresh",
+            }
+
+        # xdotool last resort for Gemini
+        logger.warning(f"Gemini fresh AT-SPI also missed at ({x},{y}), trying xdotool")
+        if inp.click_at(x, y):
+            time.sleep(0.3)
+            return {
+                "platform": platform,
+                "clicked_at": {"x": x, "y": y},
+                "method": "xdotool",
+            }
+        return {"error": f"Click at ({x}, {y}) failed via AT-SPI (cached+fresh) and xdotool"}
+
+    # Other platforms: xdotool coordinate click is PRIMARY
+    if inp.click_at(x, y):
+        time.sleep(0.3)
+        return {
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "xdotool",
+        }
+
+    # AT-SPI fallback for non-Gemini
+    logger.warning(f"xdotool click failed at ({x},{y}), trying AT-SPI do_action")
     element = find_element_at(platform, x, y)
     if element and atspi_click(element):
         time.sleep(0.3)
@@ -93,25 +138,4 @@ def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
             "method": "atspi",
         }
 
-    # Cache miss — stale D-Bus proxies. Do fresh AT-SPI tree scan.
-    logger.info(f"Cache miss at ({x},{y}), doing fresh AT-SPI scan")
-    element = _fresh_atspi_find(platform, x, y)
-    if element and atspi_click(element):
-        time.sleep(0.3)
-        return {
-            "platform": platform,
-            "clicked_at": {"x": x, "y": y},
-            "method": "atspi_fresh",
-        }
-
-    # xdotool fallback
-    logger.warning(f"Fresh AT-SPI also missed at ({x},{y}), trying xdotool")
-    if inp.click_at(x, y):
-        time.sleep(0.3)
-        return {
-            "platform": platform,
-            "clicked_at": {"x": x, "y": y},
-            "method": "xdotool",
-        }
-
-    return {"error": f"Click at ({x}, {y}) failed via AT-SPI (cached+fresh) and xdotool"}
+    return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI"}
