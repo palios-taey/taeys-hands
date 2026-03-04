@@ -35,17 +35,10 @@ POPUP_ROLES = {
     'dialog', 'alert', 'tool tip', 'window',
 }
 
-# Noise roles to filter out (containers, decorations)
-NOISE_ROLES = {
-    'section', 'panel', 'separator', 'image', 'static', 'paragraph',
-    'landmark', 'scroll pane', 'internal frame', 'tool bar', 'page tab list',
-}
-
-# Actionable roles to keep even without special states
-ACTIONABLE_ROLES = {
-    'push button', 'toggle button', 'radio button', 'entry',
-    'link', 'combo box', 'menu item', 'menu', 'check menu item',
-}
+# Purely decorative roles — filter when unnamed and lacking important states.
+# Structural containers (section, panel, form, etc.) are NOT in this list
+# so that file chips and other unnamed SHOWING containers remain visible.
+_DECORATIVE_ROLES = {'image', 'static', 'separator', 'paragraph'}
 
 # States that make an element interesting regardless of role
 IMPORTANT_STATE_NAMES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
@@ -155,10 +148,19 @@ def detect_chrome_y(doc) -> int:
 
 
 def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[Dict]:
-    """Filter elements to only useful, actionable ones.
+    """Filter elements to active main-window content.
 
-    Removes noise (unnamed sections, panels, Firefox chrome area)
-    and keeps actionable elements, named items, and stateful elements.
+    Strategy:
+    - Require SHOWING state for non-popup elements. AT-SPI's SHOWING means
+      "currently rendered and on screen". VISIBLE-only elements are sidebar
+      bleed-through or off-screen content — not part of the active main window.
+    - Drop unnamed purely decorative roles (images, static text, separators,
+      paragraphs) that carry no actionable or structural meaning.
+    - Keep everything else that is SHOWING, including unnamed containers
+      (sections, panels, forms) that wrap file chips or input widgets.
+
+    Popup roles (menus, tooltips, dialogs) bypass the SHOWING requirement
+    since they are transient and may lack that state.
 
     Args:
         elements: Raw element list from find_elements.
@@ -177,15 +179,20 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
         name = e.get('name', '').strip()
         states = set(s.lower() for s in e.get('states', []))
 
-        if states & IMPORTANT_STATE_NAMES:
-            return True
-        if name and role in ACTIONABLE_ROLES:
-            return True
-        if role in NOISE_ROLES:
-            # Only filter unnamed noise elements — named ones may be
-            # actual content (e.g. Perplexity knowledge tiles, artifact panels)
-            return bool(name)
-        return bool(name)
+        # Popups bypass SHOWING (transient menus, tooltips, dialogs)
+        if role in POPUP_ROLES:
+            return bool(name) or bool(states & IMPORTANT_STATE_NAMES)
+
+        # Non-popup must be SHOWING (VISIBLE-only = sidebar/inactive bleed-through)
+        if 'showing' not in states:
+            return False
+
+        # Drop unnamed decorative elements (icons, text spans, dividers)
+        if role in _DECORATIVE_ROLES and not name and not (states & IMPORTANT_STATE_NAMES):
+            return False
+
+        # Keep everything else that is SHOWING
+        return True
 
     filtered = [e for e in elements if is_useful(e)]
     filtered.sort(key=lambda x: x['y'])
