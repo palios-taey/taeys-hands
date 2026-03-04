@@ -304,6 +304,17 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
             return {"error": "GTK file dialog did not close after selection"}
 
         time.sleep(0.5)
+
+        # Wait for file chip to appear in AT-SPI tree (up to 2s).
+        # Chip renders asynchronously after dialog closes — polling here
+        # ensures _detect_existing_attachments() blocks a retry on return.
+        firefox = atspi.find_firefox()
+        for _ in range(10):
+            doc_check = atspi.get_platform_document(firefox, platform) if firefox else None
+            if doc_check and _detect_existing_attachments(doc_check):
+                break
+            time.sleep(0.2)
+
         _update_checkpoint(platform, file_path, redis_client)
 
         return {
