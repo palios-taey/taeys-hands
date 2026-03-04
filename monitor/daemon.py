@@ -260,26 +260,37 @@ class MonitorDaemon:
         return search(self.firefox_app)
 
     def _force_dbus_refresh(self, platform_doc):
-        """Force D-Bus round-trips to flush Firefox's stale AT-SPI cache.
+        """Bypass the AT-SPI client cache to force fresh D-Bus calls to Firefox.
 
         Firefox's NotificationController::WillRefresh() is throttled to ≤1 Hz
         for background tabs. DOM mutations (e.g. stop button removal) are queued
-        but WillRefresh() may stall under IPC backpressure, leaving the AT-SPI
-        tree stale.
+        but may not be flushed, leaving the AT-SPI tree stale.
 
-        Making synchronous D-Bus calls (get_child_count + get_child_at_index)
-        forces Firefox's content process to compute current state and flush
-        pending mutation events — without switching tabs. This is the same
-        mechanism taey_inspect() incidentally triggered during harvest cycles.
+        gi.repository.Atspi caches accessible objects locally (child lists,
+        properties). Without cache clearing, get_child_count() and
+        get_child_at_index() return CACHED data that never reflects DOM changes.
 
-        Research: Perplexity Deep Research 2026-03-04, Firefox accessibility
-        source: NotificationController::WillRefresh() in accessible/generic/.
+        clear_cache_single() clears the platform_doc's cached children list.
+        Subsequent get_child_at_index() calls then make real D-Bus round-trips
+        to Firefox's content process, which forces it to compute current state.
+
+        Research: Perplexity Deep Research 2026-03-04, gi.repository.Atspi
+        source: atspi_accessible_clear_cache_single() clears cached_properties
+        + children list, forcing cache miss on next access.
         """
         try:
-            count = platform_doc.get_child_count()
-            # Iterate top-level children to force D-Bus round-trips
+            # Clear this object's child cache — forces fresh D-Bus calls below
+            platform_doc.clear_cache_single()
+            count = platform_doc.get_child_count()  # Now a real D-Bus call
+            # Fetch top-level children (fresh from Firefox content process)
             for i in range(min(count, 5)):
-                platform_doc.get_child_at_index(i)
+                child = platform_doc.get_child_at_index(i)
+                # Also clear children's caches for 2-level freshness
+                if child:
+                    try:
+                        child.clear_cache_single()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
