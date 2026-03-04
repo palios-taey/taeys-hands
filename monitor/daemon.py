@@ -345,14 +345,14 @@ class MonitorDaemon:
         Uses the tmux session name passed by send_message (--tmux-session).
         Falls back to hostname-based guessing if not provided.
 
-        Claude Code uses Ink (React TUI) which intercepts Enter via
-        autocomplete. The Escape-Enter pattern dismisses autocomplete
-        first, allowing Enter to trigger submit:
-          1. send-keys text    (text appears in input)
-          2. sleep 0.3s        (autocomplete engages)
-          3. send-keys Escape  (dismiss autocomplete)
-          4. sleep 0.1s
-          5. send-keys Enter   (now triggers submit)
+        Claude Code uses Ink (React TUI) with the Kitty keyboard protocol.
+        Enter is encoded as CSI u sequence (ESC[13u), not legacy 0x0D.
+        tmux send-keys Enter sends 0x0D which may not trigger submit.
+
+        Strategy (3-tier, each tier tried in sequence):
+          1. Escape + Enter: dismiss autocomplete, then legacy Enter
+          2. Raw CSI u: send ESC[13u via tmux send-keys -H (hex bytes)
+          3. Ctrl+J: send 0x0A (line feed) as alternative submit
         See: github.com/anthropics/claude-code/issues/15553
         """
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
@@ -366,23 +366,21 @@ class MonitorDaemon:
 
         for session in sessions_to_try:
             try:
-                # Step 1: Send text
+                # Send text
                 result = subprocess.run(
                     ['tmux', 'send-keys', '-t', session, '--', msg],
                     capture_output=True, text=True, timeout=5,
                 )
                 if result.returncode != 0:
                     continue
-                # Step 2: Wait for autocomplete to engage
+
+                # Tier 1: Escape + Enter (dismiss autocomplete, then submit)
                 time.sleep(0.3)
-                # Step 3: Escape dismisses autocomplete
                 subprocess.run(
                     ['tmux', 'send-keys', '-t', session, 'Escape'],
                     capture_output=True, text=True, timeout=5,
                 )
-                # Step 4: Brief pause
                 time.sleep(0.1)
-                # Step 5: Enter now triggers submit (not swallowed by autocomplete)
                 subprocess.run(
                     ['tmux', 'send-keys', '-t', session, 'Enter'],
                     capture_output=True, text=True, timeout=5,
