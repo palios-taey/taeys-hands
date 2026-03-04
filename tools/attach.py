@@ -270,20 +270,24 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         except Exception as e:
             logger.warning(f"Could not focus GTK file dialog window: {e}")
 
-        if not inp.press_key('ctrl+l'):
-            return {"error": "Failed to focus location bar"}
+        # Use "/" to open GTK location entry — avoids Ctrl+L conflict
+        # where Firefox intercepts Ctrl+L for its URL bar.
+        # In GTK file choosers, typing "/" opens the path entry directly.
+        inp.type_text('/')
+        time.sleep(0.3)
+
+        # Clipboard paste rest of path (without leading /)
+        rest_of_path = file_path.lstrip('/')
+        inp.clipboard_paste(rest_of_path)
         time.sleep(0.2)
 
-        # Clipboard paste file path (xdotool drops doubled letters)
-        inp.clipboard_paste(file_path)
-        time.sleep(0.2)
-
-        # First Return - navigate to path
+        # Enter to navigate to file
         if not inp.press_key('Return'):
             return {"error": "Failed to press Return (navigate)"}
         time.sleep(0.3)
 
-        # Second Return - confirm selection
+        # For directory paths, need a second Return to confirm.
+        # For full file paths, this is harmless (confirms the selection).
         if not inp.press_key('Return'):
             return {"error": "Failed to press Return (confirm)"}
 
@@ -479,10 +483,23 @@ def handle_attach(platform: str, file_path: str,
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}"}
 
-    # ALWAYS clean up stale dialogs from previous failed attempts
-    _close_stale_file_dialogs()
-
     firefox = atspi.find_firefox()
+
+    # Check for pending attach FIRST (continuing after dropdown click)
+    # A pending attach means a dialog should be opening — don't close it!
+    pending = None
+    if redis_client:
+        pending_json = redis_client.get(node_key(f"attach:pending:{platform}"))
+        if pending_json:
+            try:
+                pending = json.loads(pending_json)
+            except json.JSONDecodeError:
+                pass
+
+    # Only clean up stale dialogs when there's NO pending attach
+    # (pending means we just triggered a dialog and need it open)
+    if not pending:
+        _close_stale_file_dialogs()
 
     # Pre-check: skip if this exact file is already attached
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
@@ -499,16 +516,6 @@ def handle_attach(platform: str, file_path: str,
                 "existing_attachments": existing,
                 "info": f"{target_basename} is already attached. No action needed.",
             }
-
-    # Check for pending attach (continuing after dropdown click)
-    pending = None
-    if redis_client:
-        pending_json = redis_client.get(node_key(f"attach:pending:{platform}"))
-        if pending_json:
-            try:
-                pending = json.loads(pending_json)
-            except json.JSONDecodeError:
-                pass
 
     # If pending, wait for file dialog to appear (GTK or portal)
     if pending:
