@@ -20,6 +20,8 @@ venv/
 # Local overrides (not tracked)
 CLAUDE.local.md
 .claude/settings.local.json
+.claude/weaver_transition.md
+.claude/plans/
 
 # Cluster-specific hooks (local customization)
 .claude/hooks/worker-*.sh

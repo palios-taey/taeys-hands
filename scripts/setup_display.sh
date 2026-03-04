@@ -2,7 +2,7 @@
 # Setup a virtual X display with VNC and Firefox for a taeys-hands instance.
 #
 # Usage: ./scripts/setup_display.sh <display_number> <instance_name>
-# Example: ./scripts/setup_display.sh 1 weaver
+# Example: ./scripts/setup_display.sh 1 my-instance
 #
 # Starts Xvfb, x11vnc, and Firefox with 5 platform tabs on :N.
 # Connect via VNC: vncviewer localhost:590N
