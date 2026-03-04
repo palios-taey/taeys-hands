@@ -22,6 +22,7 @@ import yaml
 from core import atspi, input as inp
 from core.tree import find_menu_items
 from core.atspi_interact import extend_cache
+from tools.interact import handle_click
 from storage.redis_pool import node_key
 
 PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
@@ -171,16 +172,17 @@ def handle_select_dropdown(platform: str, dropdown: str,
                            redis_client) -> Dict[str, Any]:
     """Open a dropdown and return found items for Claude to pick from.
 
-    1. Switch to platform tab
-    2. Click dropdown trigger via AT-SPI do_action (primary)
-    3. If no items found, fall back to coordinate click
+    1. Find trigger button via AT-SPI tree search
+    2. Click via handle_click (platform-aware: xdotool for non-Gemini,
+       AT-SPI for Gemini)
+    3. If handle_click fails, fall back to AT-SPI do_action by name
     4. Compare items against baseline (flag new/missing)
     5. Return all items with names, roles, coordinates, states
 
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
     """
-    # Switch to platform tab first
+    # Find trigger button coordinates via AT-SPI tree
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
@@ -192,17 +194,14 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Find trigger button coordinates via AT-SPI tree
+    # Primary: find button coords via AT-SPI, click via platform-aware handle_click
     trigger_info = _get_trigger_coords(doc, dropdown)
-
-    # Primary: xdotool coordinate click (real mouse event).
-    # Real X11 mouse events make Firefox register React portals in AT-SPI.
-    # AT-SPI do_action does not — portal items stay invisible.
     if trigger_info:
-        inp.click_at(trigger_info['x'], trigger_info['y'])
-        time.sleep(0.5)
+        click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
+        if click_result.get("error"):
+            logger.warning(f"handle_click failed for {dropdown}: {click_result.get('error')}")
     else:
-        # Fallback: AT-SPI do_action (when button has no valid extents)
+        # Fallback: AT-SPI do_action directly on named button
         trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
         if not trigger_clicked:
             return {
@@ -210,7 +209,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
                 "platform": platform,
                 "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
             }
-        time.sleep(0.5)
+
+    time.sleep(0.5)
 
     # Scan for menu items
     firefox = atspi.find_firefox()
