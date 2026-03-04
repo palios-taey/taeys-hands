@@ -325,6 +325,9 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
         # Check attach_menu
         if 'attach' in dropdown_name.lower():
             yaml_items = caps.get('attach_menu', [])
+        # Check for tool-like dropdown names (e.g. "Add files or tools")
+        elif 'tool' in dropdown_name.lower() or 'file' in dropdown_name.lower():
+            yaml_items = caps.get('tools', [])
         else:
             return None
     else:
