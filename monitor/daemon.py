@@ -346,8 +346,11 @@ class MonitorDaemon:
         NODE_ID automatically). No fallbacks — misconfigured notifications
         going to the wrong session can severely disrupt workflows.
 
-        Uses Escape-Enter pattern: Ink TUI autocomplete intercepts bare Enter,
-        so we dismiss it with Escape first, then send Enter to submit.
+        3-tier submit strategy for Claude Code's Ink TUI:
+          1. Escape — dismiss autocomplete overlay
+          2. Enter  — legacy 0x0D (works when autocomplete is gone)
+          3. CSI u  — ESC[13u via send-keys -H (Kitty protocol Enter)
+        All 3 fired in sequence for maximum reliability.
         See: github.com/anthropics/claude-code/issues/15553
         """
         if not self.tmux_session:
@@ -367,18 +370,29 @@ class MonitorDaemon:
                 self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
                 return
 
-            # Escape-Enter: dismiss autocomplete, then submit
-            time.sleep(0.3)
+            # Tier 1: Escape to dismiss autocomplete
+            time.sleep(0.5)
             subprocess.run(
                 ['tmux', 'send-keys', '-t', session, 'Escape'],
                 capture_output=True, text=True, timeout=5,
             )
-            time.sleep(0.1)
+
+            # Tier 2: Legacy Enter (0x0D)
+            time.sleep(0.2)
             subprocess.run(
                 ['tmux', 'send-keys', '-t', session, 'Enter'],
                 capture_output=True, text=True, timeout=5,
             )
-            self._log(f"tmux notification sent to session '{session}'")
+
+            # Tier 3: Kitty protocol Enter — ESC[13u (hex: 1b 5b 31 33 75)
+            time.sleep(0.1)
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, '-H',
+                 '1b', '5b', '31', '33', '75'],
+                capture_output=True, text=True, timeout=5,
+            )
+
+            self._log(f"tmux notification sent to session '{session}' (3-tier submit)")
         except Exception as e:
             self._log(f"tmux notification failed for session '{session}': {e}")
 
