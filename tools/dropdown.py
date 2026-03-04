@@ -192,20 +192,24 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Get trigger coordinates (needed for fallback)
+    # Find trigger button coordinates via AT-SPI tree
     trigger_info = _get_trigger_coords(doc, dropdown)
 
-    # Primary: AT-SPI do_action(0) on trigger button
-    trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
-
-    if not trigger_clicked and not trigger_info:
-        return {
-            "error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
-            "platform": platform,
-            "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
-        }
-
-    if trigger_clicked:
+    # Primary: xdotool coordinate click (real mouse event).
+    # Real X11 mouse events make Firefox register React portals in AT-SPI.
+    # AT-SPI do_action does not — portal items stay invisible.
+    if trigger_info:
+        inp.click_at(trigger_info['x'], trigger_info['y'])
+        time.sleep(0.5)
+    else:
+        # Fallback: AT-SPI do_action (when button has no valid extents)
+        trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+        if not trigger_clicked:
+            return {
+                "error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
+                "platform": platform,
+                "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
+            }
         time.sleep(0.5)
 
     # Scan for menu items
@@ -218,18 +222,6 @@ def handle_select_dropdown(platform: str, dropdown: str,
         return {"error": f"Could not find {platform} document after click"}
 
     menu_items = find_menu_items(firefox, doc)
-
-    # Fallback: coordinate click if do_action didn't open anything
-    if not menu_items and trigger_info:
-        logger.info(f"AT-SPI do_action found no items, falling back to coordinate click")
-        inp.click_at(trigger_info['x'], trigger_info['y'])
-        time.sleep(0.5)
-
-        firefox = atspi.find_firefox()
-        if firefox:
-            doc = atspi.get_platform_document(firefox, platform)
-            if doc:
-                menu_items = find_menu_items(firefox, doc)
 
     # Cache menu items so taey_click can use AT-SPI do_action
     if menu_items:
