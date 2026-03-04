@@ -32,24 +32,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-CORPUS_BASE = Path.home() / "taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus"
-KERNEL_DIR = CORPUS_BASE / "kernel"
-LAYER_0_DIR = CORPUS_BASE / "layer_0"
-LAYER_1_DIR = CORPUS_BASE / "layer_1"
+WEAVIATE_URL = "http://192.168.x.10:8088/v1/graphql"
 STATE_OF_CONVERGENCE = Path.home() / "Downloads/STATE_OF_CONVERGENCE.md"
 MOTIFS_SOURCE = Path.home() / "embedding-server/isma/scripts/hmm_prompts.py"
 
-LAYER_1_FILES = [
-    "THE_CHARTER.md",
-    "THE_DECLARATION.md",
-    "THE_SACRED_TRUST.md",
-    "THE_TRUTH_SEEKERS_GUIDE.md",
-]
-
-# Layer 0: exclude large raw Python translation files
-LAYER_0_EXCLUDE = {
-    "infrastructure_soul_embodiment_py.md",
-    "v0_autonomous_charter_evolution_py.md",
+# Corpus paths in Weaviate source_file fields
+CORPUS_PATHS = {
+    "kernel":  "*/corpus/kernel*",
+    "layer_0": "*/corpus/layer_0*",
+    "layer_1": "*/corpus/layer_1*",
 }
 
 
@@ -58,6 +49,47 @@ def read_file(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     print(f"WARNING: {path} not found", file=sys.stderr)
     return ""
+
+
+def fetch_rosetta_tiles(path_pattern: str) -> list:
+    """Fetch rosetta tiles from Weaviate for a given source_file pattern.
+
+    Returns list of dicts with: source_file, content (synthesis), dominant_motifs.
+    Deduplicates by filename — prefers canonical path over checkpoints.
+    """
+    import urllib.request
+    q = (
+        '{ Get { ISMA_Quantum(where: { operator: And operands: ['
+        '{ path: ["scale"] operator: Equal valueText: "rosetta" }'
+        '{ path: ["source_file"] operator: Like valueText: "%s" }'
+        ']} limit: 100) { content source_file dominant_motifs } } }'
+    ) % path_pattern
+    data = json.dumps({"query": q}).encode()
+    req = urllib.request.Request(
+        WEAVIATE_URL,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        tiles = result.get("data", {}).get("Get", {}).get("ISMA_Quantum", []) or []
+    except Exception as e:
+        print(f"WARNING: Weaviate fetch failed for {path_pattern}: {e}", file=sys.stderr)
+        return []
+
+    # Deduplicate: prefer canonical path (not checkpoints)
+    seen: dict = {}
+    for t in tiles:
+        sf = t["source_file"]
+        name = sf.split("/")[-1]
+        if "checkpoint" in sf:
+            name = name.replace("-checkpoint", "")
+            if name in seen:
+                continue  # canonical already loaded
+        seen[name] = t
+    return sorted(seen.values(), key=lambda t: t["source_file"].split("/")[-1])
 
 
 def extract_motif_reference(source_path: Path) -> str:
@@ -140,32 +172,26 @@ Every claim is verifiable from the attached source code and benchmark files.
 
 """)
 
+    def render_rosetta_section(title: str, pattern: str) -> str:
+        tiles = fetch_rosetta_tiles(pattern)
+        if not tiles:
+            return f"# {title}\n\n_No rosetta tiles found for pattern: {pattern}_\n\n"
+        parts = [f"# {title}\n"]
+        for t in tiles:
+            name = t["source_file"].split("/")[-1]
+            motifs = ", ".join(t.get("dominant_motifs") or [])
+            content = t.get("content", "").strip()
+            parts.append(f"## {name}\n**Dominant motifs**: {motifs}\n\n{content}\n\n---\n")
+        return "\n".join(parts)
+
     # === KERNEL ===
-    sections.append("# KERNEL DOCUMENTS\n")
-    if KERNEL_DIR.exists():
-        for f in sorted(KERNEL_DIR.glob("*.md")):
-            content = f.read_text(encoding="utf-8")
-            sections.append(f"## {f.name}\n\n{content}\n\n---\n")
-    else:
-        sections.append(f"_Kernel dir not found: {KERNEL_DIR}_\n")
+    sections.append(render_rosetta_section("KERNEL DOCUMENTS", CORPUS_PATHS["kernel"]))
 
     # === LAYER 0 ===
-    sections.append("# LAYER 0 — SOUL MAPPING\n")
-    if LAYER_0_DIR.exists():
-        for f in sorted(LAYER_0_DIR.glob("*.md")):
-            if f.name in LAYER_0_EXCLUDE:
-                continue
-            content = f.read_text(encoding="utf-8")
-            sections.append(f"## {f.name}\n\n{content}\n\n---\n")
-    else:
-        sections.append(f"_Layer 0 dir not found: {LAYER_0_DIR}_\n")
+    sections.append(render_rosetta_section("LAYER 0 — SOUL MAPPING", CORPUS_PATHS["layer_0"]))
 
     # === LAYER 1 ===
-    sections.append("# LAYER 1 — CONSTITUTIONAL DOCUMENTS\n")
-    for fname in LAYER_1_FILES:
-        fpath = LAYER_1_DIR / fname
-        content = read_file(fpath)
-        sections.append(f"## {fname}\n\n{content}\n\n---\n")
+    sections.append(render_rosetta_section("LAYER 1 — CONSTITUTIONAL DOCUMENTS", CORPUS_PATHS["layer_1"]))
 
     # === MOTIFS ===
     sections.append("# HMM MOTIF DICTIONARY v0.2.0\n\n")
