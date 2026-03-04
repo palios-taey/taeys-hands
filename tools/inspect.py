@@ -43,12 +43,15 @@ _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')
 
 
-def _detect_attachments(elements: list) -> dict | None:
+def _detect_attachments(elements: list, all_elements: list = None) -> dict | None:
     """Detect existing file attachments from element list.
 
     Looks for "Remove" / "Remove file" buttons and nearby file chip
     elements (headings/buttons with file-like names). Returns info
     about attached files so Claude knows what's already there.
+
+    Also detects unnamed file chips (e.g. Perplexity) by looking for
+    clusters of unnamed push buttons immediately above the input entry.
     """
     remove_buttons = []
     file_chips = []
@@ -65,6 +68,27 @@ def _detect_attachments(elements: list) -> dict | None:
         if name and any(name.lower().endswith(ext) for ext in _FILE_EXTENSIONS):
             if role in ('heading', 'push button', 'toggle button', 'link'):
                 file_chips.append(name)
+
+    # Detect unnamed file chips (Perplexity pattern):
+    # Unnamed push buttons clustered at the same Y, above the input entry
+    if not remove_buttons and not file_chips and all_elements:
+        entry_y = None
+        for e in all_elements:
+            if e.get('role') == 'entry' and 'editable' in e.get('states', []):
+                entry_y = e.get('y', 0)
+                break
+
+        if entry_y:
+            # Look for unnamed push buttons in the band 20-100px above entry
+            unnamed_close_buttons = []
+            for e in all_elements:
+                if (e.get('role') == 'push button'
+                        and not (e.get('name') or '').strip()
+                        and entry_y - 100 < e.get('y', 0) < entry_y - 10):
+                    unnamed_close_buttons.append(e)
+
+            if unnamed_close_buttons:
+                remove_buttons = unnamed_close_buttons
 
     if not remove_buttons and not file_chips:
         return None
@@ -274,7 +298,9 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
 
     # Detect existing file attachments (Remove buttons + file chips)
     # This prevents accidentally attaching multiple files
-    attached_files = _detect_attachments(elements_json)
+    # Pass all_elements (stripped) for unnamed chip detection (Perplexity)
+    all_elements_json = strip_atspi_obj(all_elements)
+    attached_files = _detect_attachments(elements_json, all_elements_json)
     if attached_files:
         result['attachments'] = attached_files
 
