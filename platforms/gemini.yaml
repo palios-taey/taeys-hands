@@ -6,13 +6,15 @@ tab_shortcut: alt+3
 
 capabilities:
   # "Open mode picker" button — radio menu items with descriptions
+  # Mode picker is SEPARATE from Tools menu
   models:
     - Fast Answers quickly
     - Thinking Solves complex problems
     - Pro Advanced math and code with 3.1 Pro
   modes: []
   tools:
-    # "Tools" button → check menu items (AT-SPI do_action opens dropdown)
+    # "Tools" button -> check menu items (AT-SPI do_action opens dropdown)
+    # Also accessible via @-mention in input field (type @ to see tool list)
     - Create image New
     - Canvas
     - Deep research
@@ -26,10 +28,12 @@ quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
   - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"
   - artifacts: "Use export_menu or tile_then_export for artifact extraction"
-  - attach: "Button 'Open upload file menu' -> dropdown with 'Upload files' item. File attach shifts input Y - always re-inspect after attach."
+  - attach: "Button 'Open upload file menu' -> dropdown with items: 'Upload files. Documents, data, code files', 'Add from Drive. Sheets, Docs, Slides', 'Import code', 'NotebookLM'. File attach shifts input Y - always re-inspect after attach. File dialog is Firefox-embedded GTK (Ctrl+L for path entry)."
   - model_default: "Pro (3.1 Pro) is default."
   - mode_picker: "'Open mode picker' button near input. Radio menu items: Fast, Thinking, Pro."
   - tools_button: "'Tools' button opens check menu item list. AT-SPI do_action(0) opens it reliably. Coordinate click does NOT work on landing page."
+  - at_mention: "Type '@' in input to see inline tool picker. Alternative to Tools button."
+  - deep_research_flow: "Deep Research is multi-step: sends plan card first -> click 'Start research' -> actual research (5-10 min). Must respawn_monitor after clicking Start research."
 
 stop_patterns:
   - stop
@@ -44,6 +48,7 @@ mode_guidance:
     when: "Research questions, fact-finding, comprehensive analysis"
     how: "Click 'Tools' button, select 'Deep research' check menu item"
     timeout: 3600
+    note: "Multi-step: plan card -> click 'Start research' -> respawn_monitor -> extract via Share & Export > Copy Content"
   thinking:
     when: "Medium complexity reasoning"
     how: "Click 'Open mode picker', select 'Thinking' radio item"

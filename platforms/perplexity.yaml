@@ -13,27 +13,38 @@ capabilities:
     - Gemini 3.1 Pro New
     - GPT-5.2
     - Claude Sonnet 4.6 New
+    - Claude Sonnet 4.6 Thinking Extended reasoning mode
     - Claude Opus 4.6 Max
     - Grok 4.1
     - Kimi K2.5 Hosted in the US
+    - Kimi K2.5 Thinking Extended reasoning mode
   modes:
-    - Computer
+    - Computer Agentic computer-use mode for multi-step tasks
   tools:
-    # "Add files or tools" dropdown
+    # "Add files or tools" dropdown (+ button)
+    # Deep research and Model council are radio items (exclusive)
+    # Upload/Cloud/Connectors are action items
     - Upload files or images
     - Add files from cloud
     - Connectors and sources
     - Deep research New
     - Model council Max
+    - Create files and apps
+    - Learn step by step
     - More
   sources: []
 
 quirks:
-  - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
-  - model_selector: "'Choose a model' button for model selection"
-  - tools_button: "'Add files or tools' opens dropdown with Upload files or images, Add files from cloud, Connectors and sources, Deep research (radio), Model council (radio), More"
-  - deep_research: "Tools are radio menu items, NOT modes. Select via the dropdown."
-  - computer_mode: "'Computer' button toggles computer use mode (tasks view). Main chat is default search view."
+  - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
+  - model_selector: "'Choose a model' button NOT visible in current UI (March 2026). Model selection may be behind 'Add files or tools' dropdown or removed. Models listed in YAML are from Perplexity's documented roster but selector button is not in AT-SPI tree."
+  - tools_button: "'Add files or tools' (+ button) opens dropdown with tools and file upload options"
+  - deep_research: "Deep research is a radio menu item in the tools dropdown, NOT a standalone mode. May be enabled by default on new threads — check state before toggling."
+  - deep_research_toggle: "Standalone 'Deep research' button near input is a TOGGLE. If already on (checked in dropdown), clicking it turns it OFF."
+  - computer_mode: "'Computer' button toggles computer use mode (agentic tasks view). Main chat is default search view."
+  - copy_summary_only: "Copy button returns summary only. For Deep Research full reports, use Export > Download as Markdown."
+  - file_dialog: "File upload dialog may open as Firefox-embedded GTK dialog OR Nautilus portal depending on session context. Firefox GTK dialog has Ctrl+L conflict (navigates URL bar). Nautilus portal: xdotool search --class Nautilus."
+  - tools_dropdown_click: "xdotool coordinate click opens 'Add files or tools' dropdown. taey_select_dropdown may hit Firefox tab context menu instead. Use xdotool click directly."
+  - model_selector_landing: "'Choose a model' button NOT visible on landing page. Only appears in thread context."
 
 stop_patterns:
   - stop
@@ -41,10 +52,19 @@ stop_patterns:
 
 mode_guidance:
   deep_research:
-    when: "Need facts, citations, multi-source synthesis, current events, documentation lookup"
+    when: "Need facts, citations, multi-source synthesis, current events, comprehensive documentation"
     how: "Click 'Add files or tools' button, select 'Deep research New' radio item"
     timeout: 7200
-    note: "Can take 5-30 minutes. Uses multiple search passes."
+    note: "Takes 5-30 minutes. Copy button = summary only. Use Export > Download as Markdown for full report."
+  model_council:
+    when: "Need consensus from multiple models, cross-validation of complex claims"
+    how: "Click 'Add files or tools' button, select 'Model council Max' radio item"
+    timeout: 7200
+    note: "Max plan feature. Sends query to multiple models and synthesizes."
+  computer:
+    when: "Multi-step agentic tasks requiring computer interaction"
+    how: "Click 'Computer' button to switch to tasks view"
+    timeout: 7200
   normal:
     when: "Quick questions, simple lookups, conversational queries"
     how: "Default - no tool selection needed"
