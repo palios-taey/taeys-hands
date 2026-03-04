@@ -367,6 +367,27 @@ No new tools needed — existing send_message/extract flow handles research quer
 
 ---
 
+## Local LLM Agent
+
+The `agents/` directory contains a generic agent that bridges any OpenAI-compatible local model to the MCP tools. This enables local models (llama.cpp, vLLM, Ollama) to autonomously interact with chat platforms.
+
+```bash
+# Run with a local model
+python3 agents/local_llm_agent.py "Inspect ChatGPT and describe what you see"
+
+# Task from file
+python3 agents/local_llm_agent.py --task-file /tmp/task.md
+
+# Interactive mode
+python3 agents/local_llm_agent.py --interactive
+```
+
+Configure via environment variables: `LLM_API_URL` (default `http://localhost:8080/v1`), `LLM_MODEL` (auto-detected), `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`. Set `TMUX_SUPERVISOR` to a tmux session name to enable escalation to a Claude Code supervisor when stuck.
+
+See `agents/README.md` for full configuration details.
+
+---
+
 ## Anti-Patterns
 
 | Don't | Do |
