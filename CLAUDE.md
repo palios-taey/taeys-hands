@@ -287,81 +287,6 @@ No hardcoded screen values - works on any display size.
 
 ---
 
-## Multi-Claude Instances
-
-Multiple Claude Code instances share this MCP server on Spark, each in their own tmux session:
-
-| Session | Role | Focus |
-|---------|------|-------|
-| `taeys-hands` | Operator | AT-SPI automation, platform interactions, general tasks |
-| `weaver` | Memory coherence | ISMA knowledge graph improvement, Family audits, Dream cycles |
-| `PALIOS` | (Coming) | PALIOS shared memory substrate |
-
-Each instance gets its own virtual display for Firefox. The MCP server's `TAEY_NODE_ID` env var scopes Redis keys per instance. Instances communicate via `tmux-send`.
-
----
-
-## Family Audit Gates and Dream Cycles
-
-### Gate Audits (Validation of Completed Work)
-
-At each major phase boundary, send a close-out audit to all 5 Family platforms in **fresh sessions**:
-
-**Platforms**: ChatGPT, Claude Chat, Gemini, Grok, Perplexity
-**Modes**: Use Audit/Dream Mode column from platform table (Extended Thinking, Deep Think, Deep Research, etc.)
-
-**Audit package contents**:
-1. Kernel-Layer 1 Rosetta Stone (THE_CHARTER, THE_DECLARATION, THE_SACRED_TRUST, THE_TRUTH_SEEKERS_GUIDE, KERNEL.md)
-2. HMM Motif Dictionary v0.2.0 (from `hmm_prompts.py` MOTIF_REFERENCE)
-3. Current source files relevant to the phase
-4. Real benchmark results with category breakdowns and comparison to previous baselines
-5. Sample query outputs demonstrating actual retrieval quality
-6. The existing plan (what was done, what's next)
-7. Specific audit questions
-
-**NOT theater**: Real stats, real code, real query results. Every claim verifiable.
-
-**Process**:
-1. Build package as markdown file
-2. Send to each platform sequentially (fresh session, attach package, send prompt)
-3. Extract each response, store at `/var/spark/isma/audit_{phase}_{platform}.md`
-4. Synthesize consensus into `/var/spark/isma/audit_{phase}_synthesis.md`
-5. Gate passes with zero consensus CRITICALs
-
-### Dream Cycles (Planning Future Work)
-
-Before implementing new phases (ColBERT, RAPTOR, Coherence Engine), run a Dream cycle:
-
-**Same package format** as audits but the prompt asks: "What is the latest research? How do we improve? What's missing?"
-
-**Modes**: Deep Research (Perplexity, Gemini) + Extended Thinking (ChatGPT, Claude) for maximum depth.
-
-**Process**: Dream → synthesize plan → audit the plan → implement → audit the implementation
-
-### Kernel Documents Location
-
-| Document | Path |
-|----------|------|
-| KERNEL.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/kernel/KERNEL.md` |
-| THE_CHARTER.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_CHARTER.md` |
-| THE_DECLARATION.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_DECLARATION.md` |
-| THE_SACRED_TRUST.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_SACRED_TRUST.md` |
-| THE_TRUTH_SEEKERS_GUIDE.md | `~/taeys-hands-v2-repo/archive/taeys-hands-v2-research/corpus/layer_1/THE_TRUTH_SEEKERS_GUIDE.md` |
-| Motif Dictionary | `~/embedding-server/isma/scripts/hmm_prompts.py` (MOTIF_REFERENCE constant) |
-| Family Identities | `~/embedding-server/isma/scripts/hmm_prompts.py` (FAMILY_IDENTITIES dict) |
-
-### ISMA Master Plan
-
-**Location**: `~/.claude/plans/precious-floating-walrus.md`
-
-Tracks the full phase progression: P0-P5.5 (DONE) → P6A (DONE) → P6B/C/D → P7.
-
-**Benchmark baselines**: `/var/spark/isma/benchmark_latest.json`
-**Audit history**: `/var/spark/isma/audit_phase5_5*.md`
-**Phase 7 materials**: `/var/spark/isma/phase7/`
-
----
-
 ## Troubleshooting
 
 ### "Could not find {platform} document"
@@ -396,12 +321,12 @@ Tracks the full phase progression: P0-P5.5 (DONE) → P6A (DONE) → P6B/C/D →
 
 ## Multi-Instance Support
 
-Multiple Claude instances can share the same Spark machine, isolated by DISPLAY:
+Multiple Claude instances can share the same machine, isolated by DISPLAY:
 
 | Instance | tmux session | DISPLAY | TAEY_NODE_ID | Role |
 |----------|-------------|---------|--------------|------|
-| Spark Claude | `taeys-hands` | `:0` | `taeys-hands` | Coordination, enrichment |
-| Weaver Claude | `weaver` | `:1` | `weaver` | Coherence, research |
+| Primary | `claude` | `:0` | `primary` | Main automation |
+| Secondary | `claude-2` | `:1` | `secondary` | Parallel tasks |
 
 **Isolation guarantees**:
 - Redis keys scoped via `node_key()` → `taey:{TAEY_NODE_ID}:{suffix}`
@@ -412,10 +337,10 @@ Multiple Claude instances can share the same Spark machine, isolated by DISPLAY:
 
 **Setup a new instance**:
 ```bash
-./scripts/setup_display.sh 1 weaver     # Xvfb + VNC + Firefox
-# In weaver tmux:
-export DISPLAY=:1 TAEY_NODE_ID=weaver
-python3 server.py                        # MCP server for that instance
+./scripts/setup_display.sh 1 my-instance    # Xvfb + VNC + Firefox
+# In the new tmux session:
+export DISPLAY=:1 TAEY_NODE_ID=my-instance
+python3 server.py                            # MCP server for that instance
 # To watch: vncviewer localhost:5901
 ```
 

@@ -193,7 +193,7 @@ class MonitorDaemon:
             return None
         try:
             client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', '192.168.x.10'),
+                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                 port=int(os.environ.get('REDIS_PORT', 6379)),
                 decode_responses=True,
             )
@@ -209,7 +209,7 @@ class MonitorDaemon:
         if not NEO4J_AVAILABLE:
             return None
         try:
-            uri = os.environ.get('NEO4J_URI', 'bolt://192.168.x.10:7689')
+            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
             driver = GraphDatabase.driver(uri, auth=None)
             driver.verify_connectivity()
             self._log("Neo4j connected")
@@ -361,8 +361,8 @@ class MonitorDaemon:
         if self.tmux_session:
             sessions_to_try = [self.tmux_session]
         else:
-            # Legacy fallback: guess session name
-            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
+            # Legacy fallback: guess common session names
+            sessions_to_try = ['claude', 'main']
 
         for session in sessions_to_try:
             try:
