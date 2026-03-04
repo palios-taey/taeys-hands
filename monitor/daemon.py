@@ -344,6 +344,16 @@ class MonitorDaemon:
 
         Uses the tmux session name passed by send_message (--tmux-session).
         Falls back to hostname-based guessing if not provided.
+
+        Claude Code uses Ink (React TUI) which intercepts Enter via
+        autocomplete. The Escape-Enter pattern dismisses autocomplete
+        first, allowing Enter to trigger submit:
+          1. send-keys text    (text appears in input)
+          2. sleep 0.3s        (autocomplete engages)
+          3. send-keys Escape  (dismiss autocomplete)
+          4. sleep 0.1s
+          5. send-keys Enter   (now triggers submit)
+        See: github.com/anthropics/claude-code/issues/15553
         """
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
@@ -356,16 +366,23 @@ class MonitorDaemon:
 
         for session in sessions_to_try:
             try:
-                # Send text (without Enter) — use '--' not '-l'
+                # Step 1: Send text
                 result = subprocess.run(
                     ['tmux', 'send-keys', '-t', session, '--', msg],
                     capture_output=True, text=True, timeout=5,
                 )
                 if result.returncode != 0:
                     continue
-                # Brief pause for text to render
-                time.sleep(0.5)
-                # Send Enter separately (avoids race condition)
+                # Step 2: Wait for autocomplete to engage
+                time.sleep(0.3)
+                # Step 3: Escape dismisses autocomplete
+                subprocess.run(
+                    ['tmux', 'send-keys', '-t', session, 'Escape'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                # Step 4: Brief pause
+                time.sleep(0.1)
+                # Step 5: Enter now triggers submit (not swallowed by autocomplete)
                 subprocess.run(
                     ['tmux', 'send-keys', '-t', session, 'Enter'],
                     capture_output=True, text=True, timeout=5,
