@@ -125,6 +125,15 @@ URL_PATTERNS = {
     'perplexity': 'perplexity.ai',
 }
 
+# Tab shortcuts for refreshing background tabs (must match core/platforms.py)
+TAB_SHORTCUTS = {
+    'chatgpt': 'alt+1',
+    'claude': 'alt+2',
+    'gemini': 'alt+3',
+    'grok': 'alt+4',
+    'perplexity': 'alt+5',
+}
+
 
 # =========================================================================
 # Monitor daemon
@@ -168,6 +177,14 @@ class MonitorDaemon:
         self.no_stop_warning_seconds = 45  # Increased to account for slower initial load
         self.no_stop_warned = False
         self.verbose_logged = False
+
+        # Inactive tab refresh: AT-SPI doesn't update element state for
+        # background Firefox tabs. When stuck in GENERATING, periodically
+        # switch to our platform tab to force an AT-SPI state refresh.
+        self.generating_since = None
+        self.last_tab_refresh = 0
+        self.tab_refresh_interval = 60  # seconds between tab refreshes
+        self.tab_refresh_after = 30  # start refreshing after this many seconds in GENERATING
 
         self.main_loop = GLib.MainLoop()
 
@@ -256,6 +273,29 @@ class MonitorDaemon:
             return None
 
         return search(self.firefox_app)
+
+    def _refresh_platform_tab(self):
+        """Switch to this platform's Firefox tab to refresh AT-SPI state.
+
+        AT-SPI does not reliably update element states (SHOWING, etc.) for
+        background Firefox tabs. When the daemon is stuck in GENERATING state
+        (stop button appeared but never disappeared), the tab is likely
+        inactive. Switching to it forces Firefox to update the AT-SPI tree.
+        """
+        shortcut = TAB_SHORTCUTS.get(self.platform)
+        if not shortcut:
+            return
+        try:
+            subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', shortcut],
+                capture_output=True, timeout=5,
+                env={**os.environ, 'DISPLAY': DISPLAY},
+            )
+            time.sleep(1.0)  # Give AT-SPI time to refresh
+            self.last_tab_refresh = time.time()
+            self._log(f"Tab refresh: switched to {self.platform} ({shortcut})")
+        except Exception as e:
+            self._log(f"Tab refresh failed: {e}")
 
     def _is_stop_button(self, name: str) -> bool:
         """Check if button name matches stop patterns.
@@ -537,8 +577,21 @@ class MonitorDaemon:
             if self.state == "IDLE":
                 self.state = "GENERATING"
                 self.stop_button_seen = True
+                self.generating_since = time.time()
                 self._log("Stop button appeared - response generating")
         else:
+            # Inactive tab refresh: if stuck in GENERATING for a while,
+            # the tab may be inactive (AT-SPI doesn't update background tabs).
+            # Switch to our tab to force a state refresh, then re-poll next cycle.
+            if (self.state == "GENERATING" and self.generating_since
+                    and self.stop_button_seen):
+                stuck_seconds = time.time() - self.generating_since
+                since_last_refresh = time.time() - self.last_tab_refresh
+                if (stuck_seconds > self.tab_refresh_after
+                        and since_last_refresh > self.tab_refresh_interval):
+                    self._log(f"Stuck in GENERATING for {stuck_seconds:.0f}s - refreshing tab")
+                    self._refresh_platform_tab()
+                    return True  # Re-poll after tab refresh
             if self.stop_button_seen:
                 self.cycle_count += 1
 
