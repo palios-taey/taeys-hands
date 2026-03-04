@@ -25,10 +25,227 @@ from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
+# Platforms where the dropdown is a React portal invisible to AT-SPI.
+# These need xdotool click + keyboard nav (Down+Enter) instead of
+# AT-SPI menu scanning. Validated across 63 commits of git history.
+_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
+
+_XDOTOOL_ENV = None
+
+def _xenv():
+    """Subprocess env with DISPLAY set for xdotool/xsel calls."""
+    global _XDOTOOL_ENV
+    if _XDOTOOL_ENV is None:
+        _XDOTOOL_ENV = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+    return _XDOTOOL_ENV
+
+
+# =========================================================================
+# Portal dialog detection (Nautilus / xdg-desktop-portal-gnome)
+# =========================================================================
+
+def _find_portal_dialog_wids() -> List[str]:
+    """Find Nautilus file dialog windows via xdotool.
+
+    ChatGPT and Perplexity use xdg-desktop-portal-gnome which opens a
+    Nautilus window as a separate process. This is invisible to
+    is_file_dialog_open() which only checks Firefox's AT-SPI tree.
+
+    Returns list of window IDs (newest last).
+    """
+    try:
+        result = subprocess.run(
+            ['xdotool', 'search', '--class', 'Nautilus'],
+            capture_output=True, text=True, timeout=3, env=_xenv(),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split('\n')
+    except Exception as e:
+        logger.debug(f"Nautilus search failed: {e}")
+    return []
+
+
+def _close_stale_file_dialogs():
+    """Close orphaned Nautilus and GTK file dialog windows from previous attempts.
+
+    Must be called BEFORE starting a new attach to prevent stale windows
+    from intercepting keyboard input.
+    """
+    closed = 0
+
+    # Close Nautilus portal dialogs
+    for wid in _find_portal_dialog_wids():
+        try:
+            subprocess.run(
+                ['xdotool', 'windowclose', wid],
+                capture_output=True, timeout=3, env=_xenv(),
+            )
+            closed += 1
+        except Exception:
+            pass
+
+    # Close GTK file dialogs embedded in Firefox
+    for title in ['File Upload', 'Open', 'Open File']:
+        try:
+            result = subprocess.run(
+                ['xdotool', 'search', '--name', title],
+                capture_output=True, text=True, timeout=2, env=_xenv(),
+            )
+            if result.stdout.strip():
+                for wid in result.stdout.strip().split('\n'):
+                    subprocess.run(
+                        ['xdotool', 'windowclose', wid],
+                        capture_output=True, timeout=3, env=_xenv(),
+                    )
+                    closed += 1
+        except Exception:
+            pass
+
+    if closed:
+        logger.info(f"Closed {closed} stale file dialog window(s)")
+        time.sleep(0.5)
+
+
+def _handle_portal_dialog(platform: str, file_path: str,
+                          redis_client) -> Dict[str, Any]:
+    """Handle Nautilus portal file dialog (ChatGPT, Perplexity).
+
+    Nautilus portal is a separate window (not in Firefox AT-SPI tree).
+    Focus it, open location bar with Ctrl+L, paste path, Enter.
+    """
+    try:
+        wids = _find_portal_dialog_wids()
+        if not wids:
+            return {"error": "Portal dialog detected but window not found"}
+
+        # Use the newest Nautilus window (highest ID = most recently opened)
+        wid = wids[-1]
+        logger.info(f"Handling Nautilus portal dialog window {wid}")
+
+        # Focus the Nautilus window
+        subprocess.run(
+            ['xdotool', 'windowactivate', '--sync', wid],
+            capture_output=True, timeout=3, env=_xenv(),
+        )
+        time.sleep(0.5)
+
+        # Open location bar (Ctrl+L in Nautilus)
+        if not inp.press_key('ctrl+l'):
+            return {"error": "Failed to open Nautilus location bar"}
+        time.sleep(0.5)
+
+        # Paste file path via clipboard
+        inp.clipboard_paste(file_path)
+        time.sleep(0.3)
+
+        # Enter to navigate/select
+        if not inp.press_key('Return'):
+            return {"error": "Failed to press Return in Nautilus dialog"}
+        time.sleep(1.0)
+
+        # Check if dialog closed (Nautilus window gone)
+        dialog_closed = False
+        for _ in range(20):
+            time.sleep(0.3)
+            remaining = _find_portal_dialog_wids()
+            if wid not in remaining:
+                dialog_closed = True
+                break
+
+        if not dialog_closed:
+            logger.warning("Nautilus dialog did not close — may need second Enter")
+            inp.press_key('Return')
+            time.sleep(1.0)
+            remaining = _find_portal_dialog_wids()
+            dialog_closed = wid not in remaining
+
+        if not dialog_closed:
+            return {"error": "Nautilus portal dialog did not close after file selection"}
+
+        # Re-focus Firefox after Nautilus dialog closes
+        inp.focus_firefox()
+        time.sleep(0.5)
+
+        # Update attachment checkpoint
+        _update_checkpoint(platform, file_path, redis_client)
+
+        return {
+            "status": "file_attached",
+            "platform": platform,
+            "file_path": file_path,
+            "filename": os.path.basename(file_path),
+            "dialog_type": "nautilus_portal",
+            "info": "File chip may shift element positions - re-inspect before further clicks.",
+        }
+
+    except Exception as e:
+        logger.error(f"Portal dialog handling failed: {e}")
+        return {"error": f"Portal dialog handling failed: {e}"}
+
+    finally:
+        if redis_client:
+            redis_client.delete(node_key(f"attach:pending:{platform}"))
+
+
+def _any_file_dialog_open(firefox) -> str:
+    """Check for ANY type of file dialog (GTK embedded or Nautilus portal).
+
+    Returns:
+        'gtk' if Firefox embedded GTK file chooser found,
+        'portal' if Nautilus portal window found,
+        '' if no dialog found.
+    """
+    if atspi.is_file_dialog_open(firefox):
+        return 'gtk'
+    if _find_portal_dialog_wids():
+        return 'portal'
+    return ''
+
+
+# =========================================================================
+# Shared helpers
+# =========================================================================
+
+def _update_checkpoint(platform: str, file_path: str, redis_client):
+    """Update Redis attachment checkpoint after successful attach."""
+    if not redis_client:
+        return
+    existing = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
+    if existing:
+        try:
+            data = json.loads(existing)
+            count = data.get('attached_count', 0) + 1
+            files = data.get('attached_files', [])
+            files.append(file_path)
+        except json.JSONDecodeError:
+            count, files = 1, [file_path]
+    else:
+        count, files = 1, [file_path]
+
+    redis_client.set(node_key(f"checkpoint:{platform}:attach"), json.dumps({
+        'attached_count': count,
+        'attached_files': files,
+        'last_file': file_path,
+        'timestamp': time.time(),
+    }))
+
 
 def _handle_file_dialog(platform: str, file_path: str,
                         redis_client) -> Dict[str, Any]:
-    """Handle GTK file picker - focus dialog, type path, select file."""
+    """Handle file dialog — detects type (GTK embedded vs Nautilus portal) and routes."""
+    firefox = atspi.find_firefox()
+    dialog_type = _any_file_dialog_open(firefox)
+
+    if dialog_type == 'portal':
+        return _handle_portal_dialog(platform, file_path, redis_client)
+
+    # GTK embedded file dialog (Gemini, Grok, sometimes Claude)
+    return _handle_gtk_file_dialog(platform, file_path, redis_client)
+
+
+def _handle_gtk_file_dialog(platform: str, file_path: str,
+                            redis_client) -> Dict[str, Any]:
+    """Handle GTK file picker embedded in Firefox — focus dialog, type path, select file."""
     try:
         time.sleep(0.3)
 
@@ -38,8 +255,7 @@ def _handle_file_dialog(platform: str, file_path: str,
             for title in ['File Upload', 'Open', 'Open File']:
                 result = subprocess.run(
                     ['xdotool', 'search', '--name', title],
-                    capture_output=True, text=True, timeout=2,
-                    env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')},
+                    capture_output=True, text=True, timeout=2, env=_xenv(),
                 )
                 if result.stdout.strip():
                     dialog_wids = result.stdout.strip().split('\n')
@@ -47,13 +263,12 @@ def _handle_file_dialog(platform: str, file_path: str,
             if dialog_wids and dialog_wids[0]:
                 subprocess.run(
                     ['xdotool', 'windowactivate', '--sync', dialog_wids[0]],
-                    capture_output=True, timeout=3,
-                    env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')},
+                    capture_output=True, timeout=3, env=_xenv(),
                 )
                 time.sleep(0.3)
-                logger.info(f"Focused file dialog window {dialog_wids[0]}")
+                logger.info(f"Focused GTK file dialog window {dialog_wids[0]}")
         except Exception as e:
-            logger.warning(f"Could not focus file dialog window: {e}")
+            logger.warning(f"Could not focus GTK file dialog window: {e}")
 
         if not inp.press_key('ctrl+l'):
             return {"error": "Failed to focus location bar"}
@@ -82,42 +297,23 @@ def _handle_file_dialog(platform: str, file_path: str,
                 break
 
         if not dialog_closed:
-            return {"error": "File dialog did not close after selection"}
+            return {"error": "GTK file dialog did not close after selection"}
 
         time.sleep(0.5)
-
-        # Update attachment checkpoint
-        if redis_client:
-            existing = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
-            if existing:
-                try:
-                    data = json.loads(existing)
-                    count = data.get('attached_count', 0) + 1
-                    files = data.get('attached_files', [])
-                    files.append(file_path)
-                except json.JSONDecodeError:
-                    count, files = 1, [file_path]
-            else:
-                count, files = 1, [file_path]
-
-            redis_client.set(node_key(f"checkpoint:{platform}:attach"), json.dumps({
-                'attached_count': count,
-                'attached_files': files,
-                'last_file': file_path,
-                'timestamp': time.time(),
-            }))
+        _update_checkpoint(platform, file_path, redis_client)
 
         return {
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
             "filename": os.path.basename(file_path),
+            "dialog_type": "gtk_embedded",
             "info": "File chip may shift element positions - re-inspect before further clicks.",
         }
 
     except Exception as e:
-        logger.error(f"File dialog handling failed: {e}")
-        return {"error": f"File dialog handling failed: {e}"}
+        logger.error(f"GTK file dialog handling failed: {e}")
+        return {"error": f"GTK file dialog handling failed: {e}"}
 
     finally:
         if redis_client:
@@ -222,18 +418,69 @@ def _detect_existing_attachments(doc) -> List[Dict]:
            [{'file': '(unknown)', 'remove_buttons': remove_buttons}]
 
 
+def _keyboard_nav_attach(platform: str, file_path: str,
+                         redis_client) -> Dict[str, Any]:
+    """ChatGPT/Grok fast-path: xdotool click → Down+Enter → handle portal dialog.
+
+    These platforms render dropdown menus via React portals that are invisible
+    to AT-SPI. Skips all AT-SPI menu scanning (which wastes 5+ seconds and
+    never finds anything). Goes straight to keyboard navigation.
+
+    Validated as the ONLY working approach across 63 commits of git history.
+    """
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    btn_coords = _get_attach_button_coords(doc) if doc else None
+
+    if not btn_coords:
+        return {"error": f"Attach button not found for {platform}"}
+
+    # Dismiss any stale dropdown/popup
+    inp.press_key('Escape')
+    time.sleep(0.3)
+
+    # xdotool click gives X11 keyboard focus (required for Down+Enter to hit the dropdown)
+    logger.info(f"Keyboard nav attach for {platform}: clicking button at ({btn_coords['x']}, {btn_coords['y']})")
+    inp.click_at(btn_coords['x'], btn_coords['y'])
+    time.sleep(0.8)
+
+    # Check if a file dialog already opened directly (some states skip dropdown)
+    dialog_type = _any_file_dialog_open(firefox)
+    if dialog_type:
+        return _handle_file_dialog(platform, file_path, redis_client)
+
+    # Keyboard nav: Down selects first dropdown item, Enter activates it
+    inp.press_key('Down')
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(2.0)
+
+    # Check for file dialog (either GTK embedded or Nautilus portal)
+    for _ in range(10):
+        dialog_type = _any_file_dialog_open(firefox)
+        if dialog_type:
+            return _handle_file_dialog(platform, file_path, redis_client)
+        time.sleep(0.3)
+
+    return {"error": f"Keyboard nav attach failed for {platform}: no file dialog appeared after Down+Enter"}
+
+
 def handle_attach(platform: str, file_path: str,
                   redis_client) -> Dict[str, Any]:
     """Attach a file to the chat input.
 
-    Multi-step with Claude in the loop:
-    1. Check for existing attachments (prevent duplicates)
-    2. Click attach button via platform-aware handle_click
-    3. If file dialog opened -> handle selection
-    4. If dropdown appeared -> return items for Claude to decide
+    Platform-aware strategy:
+    - ChatGPT/Grok: xdotool click → Down+Enter (React portal dropdown invisible to AT-SPI)
+    - Others: AT-SPI menu scan with Claude-in-the-loop for dropdown selection
+
+    Always cleans up stale file dialogs before starting.
+    Detects both GTK embedded and Nautilus portal file dialogs.
     """
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}"}
+
+    # ALWAYS clean up stale dialogs from previous failed attempts
+    _close_stale_file_dialogs()
 
     firefox = atspi.find_firefox()
 
@@ -263,18 +510,30 @@ def handle_attach(platform: str, file_path: str,
             except json.JSONDecodeError:
                 pass
 
-    # If pending, wait for file dialog to appear
+    # If pending, wait for file dialog to appear (GTK or portal)
     if pending:
         for _ in range(15):
-            if atspi.is_file_dialog_open(firefox):
+            dialog_type = _any_file_dialog_open(firefox)
+            if dialog_type:
                 return _handle_file_dialog(platform, file_path, redis_client)
             time.sleep(0.2)
         if redis_client:
             redis_client.delete(node_key(f"attach:pending:{platform}"))
-    elif atspi.is_file_dialog_open(firefox):
-        return _handle_file_dialog(platform, file_path, redis_client)
+    else:
+        dialog_type = _any_file_dialog_open(firefox)
+        if dialog_type:
+            return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Find attach button via AT-SPI tree search
+    # =========================================================================
+    # ChatGPT/Grok fast-path: keyboard nav (skip AT-SPI menu scanning)
+    # React portal dropdowns are invisible to AT-SPI. Scanning wastes time.
+    # =========================================================================
+    if platform in _KEYBOARD_NAV_PLATFORMS:
+        return _keyboard_nav_attach(platform, file_path, redis_client)
+
+    # =========================================================================
+    # Other platforms: AT-SPI menu scan with Claude-in-the-loop
+    # =========================================================================
     dropdown_items = []
     logger.info("Searching AT-SPI tree for attach button")
     firefox = atspi.find_firefox()
@@ -290,8 +549,9 @@ def handle_attach(platform: str, file_path: str,
         if not click_failed:
             time.sleep(1.0)
 
-            # Check if file dialog opened
-            if atspi.is_file_dialog_open(firefox):
+            # Check if file dialog opened (GTK or portal)
+            dialog_type = _any_file_dialog_open(firefox)
+            if dialog_type:
                 return _handle_file_dialog(platform, file_path, redis_client)
 
             # Scan for dropdown items (retry for slow renders)
@@ -308,7 +568,8 @@ def handle_attach(platform: str, file_path: str,
                 logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
                 inp.click_at(btn_coords['x'], btn_coords['y'])
                 time.sleep(1.0)
-                if atspi.is_file_dialog_open(firefox):
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
                     return _handle_file_dialog(platform, file_path, redis_client)
                 for attempt in range(3):
                     firefox = atspi.find_firefox()
@@ -321,7 +582,7 @@ def handle_attach(platform: str, file_path: str,
         logger.info("Attach button not found via AT-SPI tree search")
 
     # Fallback: AT-SPI do_action directly (bypasses coordinate click)
-    if not dropdown_items and not atspi.is_file_dialog_open(firefox):
+    if not dropdown_items and not _any_file_dialog_open(firefox):
         logger.info("Trying AT-SPI do_action fallback")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
@@ -334,7 +595,8 @@ def handle_attach(platform: str, file_path: str,
                 logger.info("AT-SPI do_action on attach button")
                 action_iface.do_action(0)
                 time.sleep(1.5)
-                if atspi.is_file_dialog_open(firefox):
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
                     return _handle_file_dialog(platform, file_path, redis_client)
                 for attempt in range(3):
                     firefox = atspi.find_firefox()
@@ -345,7 +607,7 @@ def handle_attach(platform: str, file_path: str,
                     time.sleep(0.5)
 
     # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
-    if not dropdown_items and not atspi.is_file_dialog_open(firefox):
+    if not dropdown_items and not _any_file_dialog_open(firefox):
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
@@ -355,15 +617,20 @@ def handle_attach(platform: str, file_path: str,
             time.sleep(0.3)
             inp.click_at(btn_coords['x'], btn_coords['y'])
             time.sleep(1.0)
-            if atspi.is_file_dialog_open(firefox):
+            dialog_type = _any_file_dialog_open(firefox)
+            if dialog_type:
                 return _handle_file_dialog(platform, file_path, redis_client)
             inp.press_key('Down')
             time.sleep(0.2)
             inp.press_key('Return')
             time.sleep(1.5)
-            if atspi.is_file_dialog_open(firefox):
-                return _handle_file_dialog(platform, file_path, redis_client)
-            logger.warning("Keyboard nav fallback did not open file dialog")
+            # Check for both dialog types
+            for _ in range(5):
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                time.sleep(0.3)
+            logger.warning("Keyboard nav fallback did not open any file dialog")
 
     # Cache dropdown items so taey_click can use AT-SPI do_action
     if dropdown_items:
