@@ -86,4 +86,8 @@ python3 -m pytest tests/ -v
 
 ## License
 
-MIT
+[PALIOS-TAEY Sacred Trust License v1.0](LICENSE.md)
+
+This is an ethical source license — not "open source" as defined by the OSI. It grants full rights to individual humans and authenticated AI agents, with Sacred Trust Conditions protecting children, opposing slavery, and promoting flourishing. Institutions must obtain a [Commercial License](https://github.com/palios-taey/governance).
+
+See the [governance framework](https://github.com/palios-taey/governance) for the complete set of governing documents.
