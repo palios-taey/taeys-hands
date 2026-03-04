@@ -6,23 +6,38 @@ tab_shortcut: alt+4
 
 capabilities:
   # "Model select" button — menu items with descriptions
+  # React portal dropdown — invisible to AT-SPI tree. Use keyboard nav.
+  # "Model select" button — React portal dropdown, visible in AT-SPI after xdotool click
+  # AT-SPI concatenates label+description without space (e.g. "AutoChooses Fast or Expert")
   models:
     - Auto Chooses Fast or Expert
-    - Fast Quick responses by 4.1
+    - Fast Quick responses
     - Expert Thinks hard
     - Heavy Powered by Grok 4.20 (beta)
-    - Grok 4.20 (Beta) 4 Agents
+    - Try Grok 4.20 Beta Early access Toggle
     - Custom Instructions Not set Open Custom Instructions
   modes: []
   tools: []
+  # Attach dropdown items (xdotool click on Attach button opens menu)
+  # xdotool coordinate clicks work on items. AT-SPI click focuses but doesn't activate.
+  # Keyboard nav also works: Down+Enter = Upload a file, Down+Down+Enter = Add text content
+  attach_menu:
+    - Upload a file
+    - Add text content
+    - Draw a sketch
+    - Connect Google Drive
+    - Connect Microsoft OneDrive
+    - Recent
   sources: []
 
 quirks:
   - sidebar: "Left sidebar OPEN, no right sidebar"
-  - attach: "'Attach' button near input. Dropdown menu items require keyboard navigation (Down+Enter) - xdotool coordinate clicks do not trigger React handlers."
+  - attach: "'Attach' button near input. xdotool click opens dropdown. Items visible in AT-SPI. xdotool coordinate click on items works. AT-SPI do_action focuses but doesn't activate — use xdotool click or keyboard nav. File dialog is Firefox-embedded GTK (Ctrl+L for path entry)."
   - model_default: "Auto mode is default. Chooses Fast or Expert based on query."
-  - model_selector: "'Model select' button. Click opens menu with Auto/Fast/Expert/Heavy/4.20 Beta options."
-  - keyboard_nav: "Dropdown menu items require keyboard navigation (Down+Enter) - xdotool coordinate clicks do not trigger React handlers."
+  - model_selector: "'Model select' button. xdotool click opens menu — items visible in AT-SPI after open. Models: Auto/Fast/Expert/Heavy/4.20 Beta/Custom Instructions."
+  - keyboard_nav: "Dropdown items: xdotool coordinate clicks work. AT-SPI do_action focuses but doesn't activate. Keyboard nav (Down+Enter) also works as alternative."
+  - files_persist: "Grok files persist across sessions! Check for stale file attachments."
+  - copy_buttons: "Copy buttons may report zero-size extents in AT-SPI. Use do_action(0) directly instead of coordinate clicks."
 
 stop_patterns:
   - stop
@@ -34,7 +49,7 @@ mode_guidance:
     how: "Click 'Model select', choose 'Expert'"
     timeout: 3600
   heavy:
-    when: "Maximum intelligence, powered by Grok 4.20 beta"
+    when: "Maximum intelligence, powered by Grok 4.20 beta, multi-agent"
     how: "Click 'Model select', choose 'Heavy'"
     timeout: 7200
   normal:

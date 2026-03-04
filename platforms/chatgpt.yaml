@@ -5,16 +5,31 @@ base_url: https://chatgpt.com/
 tab_shortcut: alt+1
 
 capabilities:
-  # "Model selector" button — opens mode picker
-  # Names are EXACT AT-SPI strings including descriptions
+  # "Model selector, current model is {name}" button — opens mode picker (React portal, invisible to AT-SPI)
+  # Modes are mutually exclusive (radio behavior). Names include description text.
   models:
     - Auto Decides how long to think
-    - Instant Answers right away
-    - Thinking Thinks longer for better answers
-    - Pro Research-grade intelligence
+    - Instant 5.3 Answers right away
+    - Thinking 5.2 Thinks longer for better answers
+    - Pro 5.2 Research-grade intelligence
     - Legacy models
   modes: []
-  tools: []
+  # Thinking time sub-modes — shown as "Extended Pro" / "Light" / etc. buttons near input
+  # Only visible when Thinking or Pro mode is active. Behavior: radio (exclusive).
+  thinking_time:
+    - Light Fastest thinking
+    - Standard Default thinking depth
+    - Extended Deeper analysis
+    - Heavy Maximum thinking time
+  # "+" button or sidebar tools — accessible via sidebar links or compose area
+  tools:
+    - Create image Generate images from text descriptions
+    - Deep research Multi-source research with citations
+    - Shopping Research Product comparison and recommendations
+    - Canvas Interactive document/code editing workspace
+    - Study & Learn Educational tutoring mode
+    - Web Search Real-time web information retrieval
+    - Explore Apps Browse ChatGPT plugins/apps
   sources: []
 
 quirks:
@@ -24,8 +39,11 @@ quirks:
   - workaround: "Assume interference first, try action anyway, trust verification"
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - attach: "Dropdown with 'Upload a file' item. Use keyboard nav (Down+Enter) - xdotool coordinate clicks fail on React menu items."
-  - model_selector: "Button 'Model selector, current model is 5.2'. AT-SPI do_action opens browser context menu — use xdotool coordinate click instead."
+  - model_selector: "Button 'Model selector, current model is {name}'. React portal dropdown — AT-SPI do_action opens browser context menu. Use xdotool coordinate click to open, then keyboard nav to select."
   - model_default: "Auto mode on temporary chats. Use ?temporary-chat=true URL."
+  - thinking_time: "'Extended Pro, click to remove' button toggles thinking depth. Click 'Extended Pro' button to change level (Light/Standard/Extended/Heavy)."
+  - sidebar_tools: "Sidebar has: Pulse, Images, Apps, Deep research, Codex, GPTs, Projects links."
+  - dropdown_invisible: "Model selector and attach dropdowns render via React portals — invisible to AT-SPI tree. Must use keyboard navigation (Down+Enter) after opening."
 
 stop_patterns:
   - stop
@@ -33,15 +51,19 @@ stop_patterns:
 
 mode_guidance:
   auto:
-    when: "General use — system decides Fast vs Thinking"
+    when: "General use — system decides thinking depth automatically"
     how: "Default mode, no selection needed"
     timeout: 1800
+  instant:
+    when: "Quick answers, no reasoning needed, fastest response"
+    how: "Click model selector, select 'Instant'"
+    timeout: 600
   thinking:
     when: "Complex reasoning, step-by-step analysis, math"
     how: "Click model selector, select 'Thinking'"
     timeout: 3600
   pro:
-    when: "Research-grade intelligence, deep analysis"
+    when: "Research-grade intelligence, deep analysis, extended thinking"
     how: "Click model selector, select 'Pro'"
     timeout: 7200
 

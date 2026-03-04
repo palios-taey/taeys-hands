@@ -198,34 +198,45 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Primary: find button coords via AT-SPI, click via platform-aware handle_click
-    trigger_info = _get_trigger_coords(doc, dropdown)
-    if trigger_info:
-        click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
-        if click_result.get("error"):
-            logger.warning(f"handle_click failed for {dropdown}: {click_result.get('error')}")
-    else:
-        # Fallback: AT-SPI do_action directly on named button
-        trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
-        if not trigger_clicked:
+    # Strategy: AT-SPI do_action FIRST (most reliable for opening dropdowns),
+    # then coordinate click via handle_click as fallback.
+    # AT-SPI do_action triggers the element's default action via D-Bus,
+    # bypassing X11 coordinate issues that cause Firefox context menus.
+    menu_items = []
+
+    # Primary: AT-SPI do_action directly on named button
+    trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+    if trigger_clicked:
+        time.sleep(0.5)
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if doc:
+            menu_items = find_menu_items(firefox, doc)
+
+    # Fallback: coordinate click via platform-aware handle_click
+    if not menu_items:
+        trigger_info = _get_trigger_coords(doc or atspi.get_platform_document(
+            atspi.find_firefox(), platform), dropdown)
+        if trigger_info:
+            # Dismiss any stale menu from failed AT-SPI attempt
+            if trigger_clicked:
+                inp.press_key('Escape')
+                time.sleep(0.3)
+            click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
+            if click_result.get("error"):
+                logger.warning(f"handle_click also failed for {dropdown}: {click_result.get('error')}")
+            else:
+                time.sleep(0.5)
+                firefox = atspi.find_firefox()
+                doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                if doc:
+                    menu_items = find_menu_items(firefox, doc)
+        elif not trigger_clicked:
             return {
                 "error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
                 "platform": platform,
                 "hint": "The trigger button may not be visible. Try taey_inspect to verify screen state.",
             }
-
-    time.sleep(0.5)
-
-    # Scan for menu items
-    firefox = atspi.find_firefox()
-    if not firefox:
-        return {"error": "Firefox not found after click"}
-
-    doc = atspi.get_platform_document(firefox, platform)
-    if not doc:
-        return {"error": f"Could not find {platform} document after click"}
-
-    menu_items = find_menu_items(firefox, doc)
 
     # Cache menu items so taey_click can use AT-SPI do_action
     if menu_items:
@@ -268,6 +279,96 @@ def handle_select_dropdown(platform: str, dropdown: str,
             f"missing={baseline_diff.get('missing_items', [])}"
         )
 
+    # Compare dropdown items against YAML capabilities (flag stale config)
+    yaml_diff = _check_yaml_mismatch(platform, dropdown, items)
+    if yaml_diff:
+        result['yaml_mismatch'] = yaml_diff
+        logger.warning(
+            f"YAML mismatch on {platform}/{dropdown}: "
+            f"live_only={yaml_diff.get('live_only', [])}, "
+            f"yaml_only={yaml_diff.get('yaml_only', [])}"
+        )
+
+    return result
+
+
+def _check_yaml_mismatch(platform: str, dropdown_name: str,
+                         dropdown_items: List[Dict]) -> Dict[str, Any] | None:
+    """Compare live dropdown items against YAML capabilities.
+
+    Uses case-insensitive substring matching since AT-SPI names
+    may differ slightly from YAML (e.g. "Deep research New" vs
+    "Deep research").
+
+    Returns dict with live_only and yaml_only lists, or None if matched.
+    """
+    try:
+        config = _load_platform_yaml(platform)
+    except (FileNotFoundError, ValueError):
+        return None
+
+    caps = config.get('capabilities', {})
+
+    # Map dropdown name to YAML capability key
+    yaml_key_map = {
+        'model': 'models',
+        'models': 'models',
+        'mode': 'modes',
+        'modes': 'modes',
+        'tool': 'tools',
+        'tools': 'tools',
+        'source': 'sources',
+        'sources': 'sources',
+    }
+    yaml_key = yaml_key_map.get(dropdown_name.lower())
+    if not yaml_key:
+        # Check attach_menu
+        if 'attach' in dropdown_name.lower():
+            yaml_items = caps.get('attach_menu', [])
+        else:
+            return None
+    else:
+        yaml_items = caps.get(yaml_key, [])
+
+    if not yaml_items:
+        return None
+
+    # Normalize: lowercase, strip whitespace
+    live_names = set()
+    for item in dropdown_items:
+        name = item.get('name', '').strip().lower()
+        if name:
+            live_names.add(name)
+
+    yaml_names = set()
+    for item in yaml_items:
+        name = str(item).strip().lower()
+        if name:
+            yaml_names.add(name)
+
+    # Substring matching: a live item matches a YAML item if either contains the other
+    matched_live = set()
+    matched_yaml = set()
+    for live in live_names:
+        for yml in yaml_names:
+            if live in yml or yml in live:
+                matched_live.add(live)
+                matched_yaml.add(yml)
+
+    live_only = sorted(live_names - matched_live)
+    yaml_only = sorted(yaml_names - matched_yaml)
+
+    if not live_only and not yaml_only:
+        return None
+
+    result = {}
+    if live_only:
+        result['live_only'] = live_only
+        result['live_only_count'] = len(live_only)
+    if yaml_only:
+        result['yaml_only'] = yaml_only
+        result['yaml_only_count'] = len(yaml_only)
+    result['WARNING'] = 'Platform YAML may be stale. Update platforms/*.yaml to match live state.'
     return result
 
 

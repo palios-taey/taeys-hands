@@ -5,17 +5,17 @@ base_url: https://claude.ai/new
 tab_shortcut: alt+2
 
 capabilities:
-  # Model button shows current model name (e.g. "Opus 4.6 Extended")
+  # Model button shows current model name (e.g. "Opus 4.6 Extended", "Sonnet 4.6")
   # Click opens dropdown with Extended thinking toggle + More models link
-  # Actual model names are NOT in this dropdown — only toggle + link
+  # Available models (via More models): Opus 4.6, Sonnet 4.6, Haiku 4.5
   models:
     - Extended thinking Think longer for complex tasks
     - More models
-  # "Toggle menu" button dropdown items (check menu items are tools)
+  # "Toggle menu" button dropdown — contains both tools and sources
   modes: []
   tools:
-    - Research
-    - Web search
+    - Research Deep web research with multiple search passes
+    - Web search Quick web lookup for current information
   sources:
     - Add files or photos Ctrl+U
     - Take a screenshot
@@ -28,9 +28,11 @@ capabilities:
 quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
-  - attach: "'Toggle menu' button → 'Add files or photos' menu item. xdotool coordinate clicks work on Claude menu items."
-  - model_default: "Opus 4.6 Extended or Sonnet 4.6 Extended depending on plan."
+  - attach: "'Toggle menu' button -> 'Add files or photos' menu item. xdotool coordinate clicks work on Claude menu items."
+  - model_default: "Sonnet 4.6 is default for Pro plans. Opus 4.6 Extended for Max plans."
   - model_selector: "Button shows current model name. Click opens dropdown with Extended thinking toggle and More models link."
+  - paste_as_document: "Large clipboard pastes (>5KB) auto-convert to 'Pasted Text' document chip. Workaround for broken file dialog."
+  - prosemirror: "ProseMirror contenteditable does NOT accept AT-SPI insert_text(). Clipboard paste is the only reliable input method."
 
 stop_patterns:
   - stop
@@ -42,12 +44,12 @@ mode_guidance:
     how: "Click model button, toggle 'Extended thinking' on, or select model with 'Extended' suffix"
     timeout: 3600
   research:
-    when: "Need web search, current information, documentation lookup"
-    how: "Toggle menu → enable 'Research' check menu item"
+    when: "Need multi-pass web research, current events, comprehensive documentation lookup"
+    how: "Toggle menu -> enable 'Research' check menu item"
     timeout: 3600
   web_search:
-    when: "Quick web lookup, URL verification"
-    how: "Toggle menu → enable 'Web search' check menu item"
+    when: "Quick web lookup, URL verification, single-query search"
+    how: "Toggle menu -> enable 'Web search' check menu item"
     timeout: 1800
   normal:
     when: "Quick questions, simple tasks, conversational"
