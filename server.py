@@ -16,7 +16,7 @@ import logging
 import traceback
 from typing import Any, Dict, List
 
-# Load .env file (NCCL endpoints, Neo4j URI, etc.)
+# Load .env file (Redis host, Neo4j URI, etc.)
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
