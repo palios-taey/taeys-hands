@@ -193,7 +193,7 @@ class MonitorDaemon:
             return None
         try:
             client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                host=os.environ.get('REDIS_HOST', '192.168.x.10'),
                 port=int(os.environ.get('REDIS_PORT', 6379)),
                 decode_responses=True,
             )
@@ -209,7 +209,7 @@ class MonitorDaemon:
         if not NEO4J_AVAILABLE:
             return None
         try:
-            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+            uri = os.environ.get('NEO4J_URI', 'bolt://192.168.x.10:7689')
             driver = GraphDatabase.driver(uri, auth=None)
             driver.verify_connectivity()
             self._log("Neo4j connected")
@@ -339,53 +339,42 @@ class MonitorDaemon:
 
         return False
 
-    def _tmux_send(self, msg: str, label: str = "notification"):
-        """Send text + Enter to the target tmux session.
+    def _notify_tmux(self, platform: str):
+        """Send notification to the spawning Claude session via tmux send-keys.
 
-        Matches the original working pattern: send-keys -l for text,
-        sleep, send-keys Enter. No copy-mode detection, no pane
-        targeting suffix, no Escape keys.
+        Uses the tmux session name passed by send_message (--tmux-session).
+        Falls back to hostname-based guessing if not provided.
         """
+        msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
+
+        # Use explicit session from spawner (correct instance isolation)
         if self.tmux_session:
             sessions_to_try = [self.tmux_session]
         else:
-            sessions_to_try = ['taeys-hands', 'claude', 'main']
+            # Legacy fallback: guess session name
+            sessions_to_try = ['jetson-claude', 'thor-claude', 'taeys-hands', 'claude', 'main']
 
         for session in sessions_to_try:
             try:
-                # Send text literally (-l prevents tmux from interpreting
-                # spaces as key separators or words as key names)
+                # Send text (without Enter) — use '--' not '-l'
                 result = subprocess.run(
-                    ['tmux', 'send-keys', '-t', session, '-l', msg],
+                    ['tmux', 'send-keys', '-t', session, '--', msg],
                     capture_output=True, text=True, timeout=5,
                 )
                 if result.returncode != 0:
                     continue
                 # Brief pause for text to render
                 time.sleep(0.5)
-                # Send Enter separately (without -l so it IS the Enter key)
+                # Send Enter separately (avoids race condition)
                 subprocess.run(
                     ['tmux', 'send-keys', '-t', session, 'Enter'],
                     capture_output=True, text=True, timeout=5,
                 )
-                self._log(f"tmux {label} sent to session '{session}'")
+                self._log(f"tmux notification sent to session '{session}'")
                 return
             except Exception:
                 continue
-        self._log(f"tmux {label} failed: no reachable session")
-
-    def _notify_tmux(self, platform: str, intermediate: bool = False):
-        """Send response notification to tmux session."""
-        if intermediate:
-            msg = f"Intermediate response on {platform}. Daemon still monitoring for next cycle."
-        else:
-            msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
-        self._tmux_send(msg, "notification")
-
-    def _notify_tmux_timeout(self, platform: str):
-        """Send timeout notification to tmux session."""
-        msg = f"Daemon timed out on {platform}. Re-inspect with taey_inspect('{platform}') to check for response."
-        self._tmux_send(msg, "timeout")
+        self._log("tmux notification failed: no session found")
 
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
@@ -404,13 +393,9 @@ class MonitorDaemon:
 
         notification_json = json.dumps(notification)
 
-        # tmux notification (works even when Claude Code is idle)
+        # tmux notification for response_ready (works even when Claude Code is idle)
         if status == "response_ready":
             self._notify_tmux(self.platform)
-        elif status == "intermediate_ready":
-            self._notify_tmux(self.platform, intermediate=True)
-        elif status == "timeout":
-            self._notify_tmux_timeout(self.platform)
 
         if self.redis_client:
             try:

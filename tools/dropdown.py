@@ -182,6 +182,10 @@ def handle_select_dropdown(platform: str, dropdown: str,
     NO matching logic. NO auto-clicking items. NO validation.
     Claude reads the items, picks the right one, clicks via taey_click.
     """
+    # Dismiss any stale menus/popups before operating
+    inp.press_key('Escape')
+    time.sleep(0.2)
+
     # Find trigger button coordinates via AT-SPI tree
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
