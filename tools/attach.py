@@ -415,11 +415,31 @@ def _detect_existing_attachments(doc) -> List[Dict]:
 
     # Require remove buttons to confirm real attachments.
     # Sidebar history items match file extensions but never have Remove buttons.
-    if not remove_buttons:
-        return []
+    if remove_buttons:
+        return [{'file': fn, 'remove_buttons': remove_buttons} for fn in file_names] or \
+               [{'file': '(unknown)', 'remove_buttons': remove_buttons}]
 
-    return [{'file': fn, 'remove_buttons': remove_buttons} for fn in file_names] or \
-           [{'file': '(unknown)', 'remove_buttons': remove_buttons}]
+    # Detect unnamed file chips (Grok/Perplexity pattern):
+    # Unnamed push buttons clustered just above the input entry field.
+    entry_y = None
+    for e in all_elements:
+        if e.get('role') == 'entry' and 'editable' in (e.get('states') or []):
+            entry_y = e.get('y', 0)
+            break
+
+    if entry_y:
+        unnamed_chips = [
+            e for e in all_elements
+            if (e.get('role') == 'push button'
+                and not (e.get('name') or '').strip()
+                and entry_y - 100 < e.get('y', 0) < entry_y - 10)
+        ]
+        if unnamed_chips:
+            return [{'file': '(unknown)', 'remove_buttons': [
+                {'x': b.get('x'), 'y': b.get('y'), 'name': ''} for b in unnamed_chips
+            ]}]
+
+    return []
 
 
 def _keyboard_nav_attach(platform: str, file_path: str,
