@@ -73,7 +73,7 @@ Services are configured via environment variables with localhost defaults:
 | `REDIS_HOST` | `127.0.0.1` | Redis server host |
 | `REDIS_PORT` | `6379` | Redis server port |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
-| `HMM_STORE_URL` | `http://localhost:8095/hmm/store-response` | HMM store endpoint |
+| `HMM_STORE_URL` | `http://localhost:8095/hmm/store-response` | Optional webhook for custom response post-processing |
 | `TAEY_NODE_ID` | (auto-detected) | Instance identifier for Redis key scoping |
 
 Redis and Neo4j are **optional** — the server starts and operates without them. Session persistence and background monitor notifications require Redis. Conversation history storage requires Neo4j.
@@ -350,53 +350,32 @@ python3 server.py                            # MCP server for that instance
 
 `scripts/tmux-send` is the **only** sanctioned way for Claude instances to communicate with each other. It is critical infrastructure — every node must have it installed.
 
+See `scripts/README.md` for full documentation and the multi-Claude coordination pattern.
+
 ### Install
 
 ```bash
 bash scripts/install-node.sh   # installs tmux-send + system deps on current node
 ```
 
-Or manually:
-```bash
-sudo install -m 755 scripts/tmux-send /usr/local/bin/tmux-send
-```
-
 ### Usage
 
 ```bash
-# Local (2-arg): send to a session on the same machine
+# Local — send to a session on this machine
 tmux-send <session> "message"
 
-# Remote (3-arg): send to a session on another node via SSH
+# Remote — send to a session on another machine via SSH
 tmux-send <host> <session> "message"
-```
-
-Examples:
-```bash
-tmux-send taeys-hands "Resume HMM enrichment"                         # local
-tmux-send jetson jetson-claude "Fix deployed. Run: git pull"          # remote
-tmux-send thor thor-claude "ESCALATION from spark: DB is down"        # remote
 ```
 
 ### Rules (NEVER violate)
 
 | Rule | Why |
 |------|-----|
-| **ALWAYS use `tmux-send`** for Claude-to-Claude messages | Ensures base64 encoding, session verification, audit trail |
+| **ALWAYS use `tmux-send`** for Claude-to-Claude messages | Base64 encoding, session verification, fail-loud |
 | **NEVER use raw SSH** to send messages | Shell expansion corrupts special chars; no verification |
 | **NEVER target human-operated sessions** | Messages arrive as user input — only target Claude Code instances |
-| **Target session must exist** | Script verifies before sending; fail loudly if missing |
-
-### Node Registry
-
-| Node | Hostname | Default Session | Install Path |
-|------|----------|-----------------|--------------|
-| Spark 1 | spark-78c6 | `taeys-hands` | `/home/spark/bin/tmux-send` → `/usr/local/bin/tmux-send` |
-| Jetson | jetson | `jetson-claude` | `/usr/local/bin/tmux-send` |
-| Thor | thor | `thor-claude` | `/usr/local/bin/tmux-send` |
-| Spark 3 (PALIOS) | spark-e4b2 | `claw` | `/usr/local/bin/tmux-send` |
-
-**New nodes**: run `bash scripts/install-node.sh` after cloning the repo.
+| **Target session must exist** | Script exits with error if session not found |
 
 ---
 

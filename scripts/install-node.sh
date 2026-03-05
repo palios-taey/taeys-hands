@@ -2,7 +2,7 @@
 # install-node.sh: Install taeys-hands node dependencies on a new machine.
 #
 # Installs system tools and the tmux-send script to /usr/local/bin.
-# Run as a user with sudo access on each node (Spark, Jetson, Thor, etc.).
+# Run as a user with sudo access on the target machine.
 #
 # Usage:
 #   bash scripts/install-node.sh
