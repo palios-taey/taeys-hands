@@ -459,14 +459,14 @@ class MonitorDaemon:
             except Exception as e:
                 self._log(f"File notification failed: {e}")
 
-        # tmux notification for response_ready — runs in background thread so
-        # it never blocks the Redis notification path. The 2-second delay in
-        # _notify_tmux gives Claude Code time to finish any in-progress tool
+        # tmux notification for response_ready — runs in a non-daemon thread so
+        # the process stays alive until send-keys completes. The 2-second delay
+        # in _notify_tmux gives Claude Code time to finish any in-progress tool
         # before keystrokes are injected into the PTY.
         if status == "response_ready":
             import threading
             t = threading.Thread(
-                target=self._notify_tmux, args=(self.platform,), daemon=True
+                target=self._notify_tmux, args=(self.platform,), daemon=False
             )
             t.start()
 
