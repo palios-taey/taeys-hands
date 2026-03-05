@@ -380,78 +380,37 @@ class MonitorDaemon:
         """Send notification to the spawning Claude session via tmux send-keys.
 
         Requires --tmux-session to be set by the spawner (send_message passes
-        NODE_ID automatically). No fallbacks — misconfigured notifications
-        going to the wrong session can severely disrupt workflows.
+        NODE_ID automatically).
 
-        3-tier submit strategy for Claude Code's Ink TUI:
-          1. Escape — dismiss autocomplete overlay
-          2. Enter  — legacy 0x0D (works when autocomplete is gone)
-          3. CSI u  — ESC[13u via send-keys -H (Kitty protocol Enter)
-        All 3 fired in sequence for maximum reliability.
-        See: github.com/anthropics/claude-code/issues/15553
+        Original working pattern: send-keys -l (literal) for text, brief sleep,
+        send-keys Enter. No Escape, no Kitty protocol — these disrupt the TUI.
         """
         if not self.tmux_session:
-            self._log("ERROR: --tmux-session not set. Cannot send notification. "
-                       "Daemon must be spawned with explicit session target.")
+            self._log("ERROR: --tmux-session not set. Cannot send notification.")
             return
 
         session = self.tmux_session
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
-        # Only send if the target pane is running Claude Code, not a shell.
-        # Sending to a bash/zsh prompt would execute the text as a shell command.
         try:
+            # -l sends text literally (no key-name lookup, no word splitting)
             result = subprocess.run(
-                ['tmux', 'display-message', '-t', session, '-p', '#{pane_current_command}'],
-                capture_output=True, text=True, timeout=3,
+                ['tmux', 'send-keys', '-t', session, '-l', msg],
+                capture_output=True, text=True, timeout=5,
             )
-            pane_cmd = result.stdout.strip()
-            if pane_cmd not in ('claude', ''):
-                self._log(
-                    f"tmux notification skipped: pane is running '{pane_cmd}' not 'claude'. "
-                    f"Redis notification will still be injected."
-                )
-                return
-        except Exception as e:
-            self._log(f"Could not check pane command for '{session}': {e} — skipping tmux notify")
-            return
-
-        def _send(keys, is_hex=False, timeout=3):
-            """Fire send-keys, returning True on success. Ignores TimeoutExpired."""
-            cmd = ['tmux', 'send-keys', '-t', session]
-            if is_hex:
-                cmd += ['-H'] + list(keys)
-            else:
-                cmd += ['--'] + [keys]
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-                return r.returncode == 0
-            except subprocess.TimeoutExpired:
-                # Text may already be in the pty buffer — continue to Enter steps.
-                self._log(f"tmux send-keys slow (>{timeout}s) for '{session}' — continuing to Enter")
-                return True  # optimistically assume text was deposited
-            except Exception as e:
-                self._log(f"tmux send-keys error for '{session}': {e}")
-                return False
-
-        try:
-            if not _send(msg):
-                self._log(f"tmux send-keys failed for session '{session}'")
+            if result.returncode != 0:
+                self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
                 return
 
-            # Tier 1: Escape to dismiss autocomplete
+            # Brief pause for text to land in the input buffer
             time.sleep(0.5)
-            _send('Escape')
 
-            # Tier 2: Legacy Enter (0x0D)
-            time.sleep(0.2)
-            _send('Enter')
-
-            # Tier 3: Kitty protocol Enter — ESC[13u (hex: 1b 5b 31 33 75)
-            time.sleep(0.1)
-            _send(('1b', '5b', '31', '33', '75'), is_hex=True)
-
-            self._log(f"tmux notification sent to session '{session}' (3-tier submit)")
+            # Send Enter to submit
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'Enter'],
+                capture_output=True, text=True, timeout=5,
+            )
+            self._log(f"tmux notification sent to session '{session}'")
         except Exception as e:
             self._log(f"tmux notification failed for session '{session}': {e}")
 
