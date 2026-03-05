@@ -25,6 +25,7 @@ NODE_ID="${TAEY_NODE_ID:-$(hostname)}"
 
 # DB settings
 export NEO4J_URI="${NEO4J_URI:-bolt://10.0.0.163:7689}"
+export WEAVIATE_URL="${WEAVIATE_URL:-http://10.0.0.163:8088}"
 export REDIS_HOST="${REDIS_HOST:-192.168.100.10}"
 export REDIS_PORT="${REDIS_PORT:-6379}"
 
