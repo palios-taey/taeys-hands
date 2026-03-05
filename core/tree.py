@@ -359,7 +359,7 @@ def compute_tree_hash(elements: List[Dict]) -> str:
     """Compute SHA256 hash of element role:name pairs for state comparison.
 
     Used to detect whether an action actually changed the UI.
-    Same algorithm as taey-ed-v7's compute_tree_hash for consistency.
+    Stable algorithm — do not change without updating all callers.
 
     Args:
         elements: Element list from find_elements.
