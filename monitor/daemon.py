@@ -398,6 +398,24 @@ class MonitorDaemon:
         session = self.tmux_session
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
+        # Only send if the target pane is running Claude Code, not a shell.
+        # Sending to a bash/zsh prompt would execute the text as a shell command.
+        try:
+            result = subprocess.run(
+                ['tmux', 'display-message', '-t', session, '-p', '#{pane_current_command}'],
+                capture_output=True, text=True, timeout=3,
+            )
+            pane_cmd = result.stdout.strip()
+            if pane_cmd not in ('claude', ''):
+                self._log(
+                    f"tmux notification skipped: pane is running '{pane_cmd}' not 'claude'. "
+                    f"Redis notification will still be injected."
+                )
+                return
+        except Exception as e:
+            self._log(f"Could not check pane command for '{session}': {e} — skipping tmux notify")
+            return
+
         def _send(keys, is_hex=False, timeout=3):
             """Fire send-keys, returning True on success. Ignores TimeoutExpired."""
             cmd = ['tmux', 'send-keys', '-t', session]
