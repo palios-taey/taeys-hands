@@ -16,11 +16,16 @@ Usage:
     python3 build_consultation.py \\
         --type architecture_reasoning \\
         --codebase /path/to/file1.py /path/to/file2.py \\
-        --benchmarks /var/spark/isma/benchmark_option_e.json \\
+        --benchmarks /path/to/benchmark.json \\
         --questions /tmp/questions.md \\
         --output /tmp/family_consultation.md
 
 The output file is ready to attach and send to all 5 platforms.
+
+Environment variables:
+    WEAVIATE_URL        Weaviate GraphQL endpoint (default: http://localhost:8088/v1/graphql)
+    STATE_OF_CONVERGENCE_PATH  Path to STATE_OF_CONVERGENCE.md (default: ~/Downloads/STATE_OF_CONVERGENCE.md)
+    MOTIFS_SOURCE_PATH  Path to motif_reference.py containing MOTIF_REFERENCE constant (default: ~/motifs/motif_reference.py)
 """
 
 import argparse
@@ -32,9 +37,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-WEAVIATE_URL = "http://192.168.x.10:8088/v1/graphql"
-STATE_OF_CONVERGENCE = Path.home() / "Downloads/STATE_OF_CONVERGENCE.md"
-MOTIFS_SOURCE = Path.home() / "embedding-server/isma/scripts/hmm_prompts.py"
+WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://localhost:8088/v1/graphql")
+WEAVIATE_CLASS = os.environ.get("WEAVIATE_CLASS", "Document")
+STATE_OF_CONVERGENCE = Path(os.environ.get("STATE_OF_CONVERGENCE_PATH",
+                            str(Path.home() / "Downloads/STATE_OF_CONVERGENCE.md")))
+MOTIFS_SOURCE = Path(os.environ.get("MOTIFS_SOURCE_PATH",
+                     str(Path.home() / "motifs/motif_reference.py")))
 
 # Corpus paths in Weaviate source_file fields
 CORPUS_PATHS = {
@@ -59,7 +67,7 @@ def fetch_rosetta_tiles(path_pattern: str) -> list:
     """
     import urllib.request
     q = (
-        '{ Get { ISMA_Quantum(where: { operator: And operands: ['
+        '{ Get { ' + WEAVIATE_CLASS + '(where: { operator: And operands: ['
         '{ path: ["scale"] operator: Equal valueText: "rosetta" }'
         '{ path: ["source_file"] operator: Like valueText: "%s" }'
         ']} limit: 100) { content source_file dominant_motifs } } }'
@@ -74,7 +82,7 @@ def fetch_rosetta_tiles(path_pattern: str) -> list:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
-        tiles = result.get("data", {}).get("Get", {}).get("ISMA_Quantum", []) or []
+        tiles = result.get("data", {}).get("Get", {}).get(WEAVIATE_CLASS, []) or []
     except Exception as e:
         print(f"WARNING: Weaviate fetch failed for {path_pattern}: {e}", file=sys.stderr)
         return []

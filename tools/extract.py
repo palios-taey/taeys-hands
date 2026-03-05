@@ -162,9 +162,8 @@ def handle_quick_extract(platform: str, redis_client,
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.warning(f"Failed to store response in Neo4j: {e}")
 
-    # ── HMM Weaviate triple-write ──
-    # If response looks like HMM enrichment JSON, forward to store endpoint.
-    # This patches Weaviate tiles + creates Neo4j HMMTile + updates Redis index.
+    # ── Optional post-processing webhook ──
+    # If response looks like structured JSON with motifs, forward to store endpoint.
     # Non-blocking: extraction succeeds even if this fails.
     if content and content.strip().startswith('{') and 'motif' in content.lower():
         try:
