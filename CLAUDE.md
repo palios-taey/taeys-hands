@@ -346,6 +346,60 @@ python3 server.py                            # MCP server for that instance
 
 ---
 
+## Claude-to-Claude Messaging (tmux-send)
+
+`scripts/tmux-send` is the **only** sanctioned way for Claude instances to communicate with each other. It is critical infrastructure — every node must have it installed.
+
+### Install
+
+```bash
+bash scripts/install-node.sh   # installs tmux-send + system deps on current node
+```
+
+Or manually:
+```bash
+sudo install -m 755 scripts/tmux-send /usr/local/bin/tmux-send
+```
+
+### Usage
+
+```bash
+# Local (2-arg): send to a session on the same machine
+tmux-send <session> "message"
+
+# Remote (3-arg): send to a session on another node via SSH
+tmux-send <host> <session> "message"
+```
+
+Examples:
+```bash
+tmux-send taeys-hands "Resume HMM enrichment"                         # local
+tmux-send jetson jetson-claude "Fix deployed. Run: git pull"          # remote
+tmux-send thor thor-claude "ESCALATION from spark: DB is down"        # remote
+```
+
+### Rules (NEVER violate)
+
+| Rule | Why |
+|------|-----|
+| **ALWAYS use `tmux-send`** for Claude-to-Claude messages | Ensures base64 encoding, session verification, audit trail |
+| **NEVER use raw SSH** to send messages | Shell expansion corrupts special chars; no verification |
+| **NEVER target human-operated sessions** | Messages arrive as user input — only target Claude Code instances |
+| **Target session must exist** | Script verifies before sending; fail loudly if missing |
+
+### Node Registry
+
+| Node | Hostname | Default Session | Install Path |
+|------|----------|-----------------|--------------|
+| Spark 1 | spark-78c6 | `taeys-hands` | `/home/spark/bin/tmux-send` → `/usr/local/bin/tmux-send` |
+| Jetson | jetson | `jetson-claude` | `/usr/local/bin/tmux-send` |
+| Thor | thor | `thor-claude` | `/usr/local/bin/tmux-send` |
+| Spark 3 (PALIOS) | spark-e4b2 | `claw` | `/usr/local/bin/tmux-send` |
+
+**New nodes**: run `bash scripts/install-node.sh` after cloning the repo.
+
+---
+
 ## Research Workflow (Platform Changes)
 
 When `structure_changed` or `capability_changes` is flagged in inspect results:
