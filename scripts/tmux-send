@@ -1,0 +1,87 @@
+#!/bin/bash
+# tmux-send: Send text + Enter to a local or remote tmux session.
+#
+# This is Claude-to-Claude communication infrastructure for taeys-hands.
+# All Claude instances (Spark, Jetson, Thor, PALIOS, etc.) that run
+# AT-SPI automation use this script to exchange instructions.
+#
+# Usage:
+#   tmux-send <session> "message"              # local (2-arg)
+#   tmux-send <host> <session> "message"       # remote via SSH (3-arg)
+#
+# Examples:
+#   tmux-send taeys-hands "Resume HMM enrichment"
+#   tmux-send jetson jetson-claude "ESCALATION from spark: fix deployed, git pull"
+#   tmux-send thor thor-claude "Next phase: run enrichment loop"
+#
+# Rules:
+#   - Target sessions MUST be Claude Code instances (worker Claudes)
+#   - NEVER target human-operated sessions
+#   - NEVER use raw SSH instead of this script
+#   - Messages arrive as user input to Claude — this is the intended design
+#   - Script verifies the target session exists before sending
+#
+# Install: scripts/install-node.sh (or copy to /usr/local/bin/tmux-send)
+
+set -euo pipefail
+
+# Support 2-arg local shorthand: tmux-send <session> <message>
+if [ $# -eq 2 ]; then
+    HOST="local"
+    SESSION="$1"
+    MSG="$2"
+elif [ $# -ge 3 ]; then
+    HOST="$1"
+    SESSION="$2"
+    shift 2
+    MSG="$*"
+else
+    echo "Usage: tmux-send <host> <session> <message>" >&2
+    echo "       tmux-send <session> <message>  (local)" >&2
+    exit 1
+fi
+
+# Base64-encode: survives SSH shell expansion and special chars
+B64=$(printf '%s' "$MSG" | base64 -w0)
+
+# Local send
+if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "$(hostname -s)" ]; then
+    if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+        echo "ERROR: tmux session '$SESSION' not found on local" >&2
+        exit 1
+    fi
+    CMD=$(tmux display-message -t "$SESSION" -p '#{pane_current_command}' 2>/dev/null || echo "unknown")
+    if [ "$CMD" != "claude" ] && [ "$CMD" != "bash" ] && [ "$CMD" != "sh" ]; then
+        echo "WARN: target pane running '$CMD' not 'claude' — message may not land as intended" >&2
+    fi
+    tmux send-keys -t "$SESSION" -l "$MSG"
+    sleep 0.5
+    tmux send-keys -t "$SESSION" Enter
+    echo "OK: $SESSION (local, target_cmd=$CMD)"
+    exit 0
+fi
+
+# Remote send via SSH
+RESULT=$(ssh "$HOST" "
+SESSION='${SESSION}'
+B64='${B64}'
+
+if ! tmux has-session -t \"\$SESSION\" 2>/dev/null; then
+    echo \"ERROR: tmux session '\$SESSION' not found on \$(hostname -s)\"
+    exit 1
+fi
+
+CMD=\$(tmux display-message -t \"\$SESSION\" -p '#{pane_current_command}' 2>/dev/null || echo unknown)
+MSG=\$(printf '%s' \"\$B64\" | base64 -d)
+
+tmux send-keys -t \"\$SESSION\" -l \"\$MSG\"
+sleep 0.5
+tmux send-keys -t \"\$SESSION\" Enter
+echo \"OK: \$SESSION (remote=\$(hostname -s), target_cmd=\$CMD)\"
+")
+
+echo "$RESULT"
+
+if echo "$RESULT" | grep -q "ERROR:"; then
+    exit 1
+fi
