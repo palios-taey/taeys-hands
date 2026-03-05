@@ -1,18 +1,17 @@
 #!/bin/bash
 # tmux-send: Send text + Enter to a local or remote tmux session.
 #
-# This is Claude-to-Claude communication infrastructure for taeys-hands.
-# All Claude instances (Spark, Jetson, Thor, PALIOS, etc.) that run
-# AT-SPI automation use this script to exchange instructions.
+# Claude-to-Claude communication for taeys-hands multi-node setups.
+# Use this whenever one Claude instance needs to send instructions to another.
 #
 # Usage:
 #   tmux-send <session> "message"              # local (2-arg)
 #   tmux-send <host> <session> "message"       # remote via SSH (3-arg)
 #
 # Examples:
-#   tmux-send taeys-hands "Resume HMM enrichment"
-#   tmux-send jetson jetson-claude "ESCALATION from spark: fix deployed, git pull"
-#   tmux-send thor thor-claude "Next phase: run enrichment loop"
+#   tmux-send claude-worker "Resume the task"
+#   tmux-send worker-node worker-claude "Fix deployed. Run: git pull"
+#   tmux-send supervisor-node supervisor "ESCALATION: task failed, need help"
 #
 # Rules:
 #   - Target sessions MUST be Claude Code instances (worker Claudes)
