@@ -498,4 +498,5 @@ See `agents/README.md` for full configuration details.
 - **Articles**: Click "Articles" sidebar link (use AT-SPI `do_action(0)`, coordinate click doesn't navigate)
 - **Article editor**: Title entry ("Add a title"), Body entry ("Start writing"), Cover image ("Add photos or video")
 - **Article publish**: Click Publish → confirmation dialog → click Publish again
+- **Replying to someone's reply**: Navigate to THEIR reply's URL (click their post article → URL changes to their status ID). At the bottom of that page there is a reply compose box. Click into it, type, press Enter. Do NOT click "N Replies. Reply" on the original parent post — that opens a modal for the parent, not their reply.
 - **Reply targeting**: Navigate to the SPECIFIC POST URL to reply to, not the thread root. The reply field replies to whichever post is the "main" post on the page.
