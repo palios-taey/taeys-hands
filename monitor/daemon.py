@@ -379,8 +379,12 @@ class MonitorDaemon:
     def _notify_tmux(self, platform: str):
         """Send notification to the spawning Claude session via tmux send-keys.
 
-        Requires --tmux-session to be set by the spawner (send_message passes
-        NODE_ID automatically).
+        Runs in a background thread (called from _notify_agent) so it never
+        blocks the Redis notification path.
+
+        Waits 2 seconds before sending to give Claude Code time to finish any
+        in-progress tool execution. Uses a 30-second timeout so it waits
+        patiently for the PTY to be ready (Claude Code idle between tool calls).
 
         Original working pattern: send-keys -l (literal) for text, brief sleep,
         send-keys Enter. No Escape, no Kitty protocol — these disrupt the TUI.
@@ -392,11 +396,15 @@ class MonitorDaemon:
         session = self.tmux_session
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
+        # Brief delay: give Claude Code time to finish any in-progress tool
+        # before we inject keystrokes into the PTY.
+        time.sleep(2)
+
         try:
-            # -l sends text literally (no key-name lookup, no word splitting)
+            # -l flag first for unambiguous parsing, sends text literally
             result = subprocess.run(
-                ['tmux', 'send-keys', '-t', session, '-l', msg],
-                capture_output=True, text=True, timeout=5,
+                ['tmux', 'send-keys', '-l', '-t', session, msg],
+                capture_output=True, text=True, timeout=30,
             )
             if result.returncode != 0:
                 self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
@@ -431,10 +439,6 @@ class MonitorDaemon:
 
         notification_json = json.dumps(notification)
 
-        # tmux notification for response_ready (works even when Claude Code is idle)
-        if status == "response_ready":
-            self._notify_tmux(self.platform)
-
         if self.redis_client:
             try:
                 self.redis_client.rpush(_node_key("notifications"), notification_json)
@@ -454,6 +458,17 @@ class MonitorDaemon:
                 self._log(f"Notification written to {path}")
             except Exception as e:
                 self._log(f"File notification failed: {e}")
+
+        # tmux notification for response_ready — runs in background thread so
+        # it never blocks the Redis notification path. The 2-second delay in
+        # _notify_tmux gives Claude Code time to finish any in-progress tool
+        # before keystrokes are injected into the PTY.
+        if status == "response_ready":
+            import threading
+            t = threading.Thread(
+                target=self._notify_tmux, args=(self.platform,), daemon=True
+            )
+            t.start()
 
     def _on_first_poll(self) -> bool:
         """First poll after initial delay."""
