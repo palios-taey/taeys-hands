@@ -25,9 +25,12 @@ Structure change detection:
 """
 
 import json
+import os
 import time
 import logging
 from typing import Any, Dict
+
+import yaml
 
 from core import atspi, input as inp, clipboard
 from core.tree import (find_elements, filter_useful_elements, find_copy_buttons,
@@ -37,6 +40,8 @@ from core.platforms import BASE_URLS, SCREEN_HEIGHT
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
+
+PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 # File extensions that indicate an attached file chip
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
@@ -289,6 +294,29 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
         name = e.get('name', '')
         if len(name) > MAX_NAME_LEN:
             e['name'] = name[:MAX_NAME_LEN] + '...'
+
+    # Platform-specific noise filtering (configured in platforms/*.yaml)
+    # Removes sidebar/footer elements that are never actionable (e.g. X/Twitter
+    # trending topics, relevant people, footer links).
+    try:
+        yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+        with open(yaml_path) as _f:
+            _pcfg = yaml.safe_load(_f) or {}
+        noise = _pcfg.get('inspect_noise', {})
+        if noise:
+            _excl_roles = set(noise.get('exclude_roles', []))
+            _excl_names = set(noise.get('exclude_names', []))
+            _excl_contains = noise.get('exclude_name_contains', [])
+            def _is_noise(e):
+                if e.get('role', '') in _excl_roles:
+                    return True
+                n = e.get('name', '')
+                if n in _excl_names:
+                    return True
+                return any(pat in n for pat in _excl_contains)
+            elements_json = [e for e in elements_json if not _is_noise(e)]
+    except Exception:
+        pass  # YAML missing or malformed — proceed without noise filter
 
     copy_buttons = find_copy_buttons(all_elements)
     result['state']['copy_button_count'] = len(copy_buttons)
