@@ -398,36 +398,40 @@ class MonitorDaemon:
         session = self.tmux_session
         msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
 
+        def _send(keys, is_hex=False, timeout=3):
+            """Fire send-keys, returning True on success. Ignores TimeoutExpired."""
+            cmd = ['tmux', 'send-keys', '-t', session]
+            if is_hex:
+                cmd += ['-H'] + list(keys)
+            else:
+                cmd += ['--'] + [keys]
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                return r.returncode == 0
+            except subprocess.TimeoutExpired:
+                # Text may already be in the pty buffer — continue to Enter steps.
+                self._log(f"tmux send-keys slow (>{timeout}s) for '{session}' — continuing to Enter")
+                return True  # optimistically assume text was deposited
+            except Exception as e:
+                self._log(f"tmux send-keys error for '{session}': {e}")
+                return False
+
         try:
-            result = subprocess.run(
-                ['tmux', 'send-keys', '-t', session, '--', msg],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
+            if not _send(msg):
+                self._log(f"tmux send-keys failed for session '{session}'")
                 return
 
             # Tier 1: Escape to dismiss autocomplete
             time.sleep(0.5)
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'Escape'],
-                capture_output=True, text=True, timeout=5,
-            )
+            _send('Escape')
 
             # Tier 2: Legacy Enter (0x0D)
             time.sleep(0.2)
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'Enter'],
-                capture_output=True, text=True, timeout=5,
-            )
+            _send('Enter')
 
             # Tier 3: Kitty protocol Enter — ESC[13u (hex: 1b 5b 31 33 75)
             time.sleep(0.1)
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, '-H',
-                 '1b', '5b', '31', '33', '75'],
-                capture_output=True, text=True, timeout=5,
-            )
+            _send(('1b', '5b', '31', '33', '75'), is_hex=True)
 
             self._log(f"tmux notification sent to session '{session}' (3-tier submit)")
         except Exception as e:
