@@ -495,10 +495,43 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # xdotool click gives X11 keyboard focus (required for Down+Enter to hit the dropdown)
-    logger.info(f"Keyboard nav attach for {platform}: clicking button at ({btn_coords['x']}, {btn_coords['y']})")
+    # Try AT-SPI do_action first — works even when button is visually hidden
+    # (Grok homepage hides the Attach button until input is focused, but AT-SPI
+    # still has the element with a valid action interface)
+    atspi_obj = btn_coords.get('atspi_obj')
+    if atspi_obj:
+        try:
+            action_iface = atspi_obj.get_action_iface()
+            if action_iface and action_iface.get_n_actions() > 0:
+                logger.info(f"Keyboard nav attach for {platform}: AT-SPI do_action on button at ({btn_coords['x']}, {btn_coords['y']})")
+                action_iface.do_action(0)
+                time.sleep(1.5)
+
+                # Check if file dialog opened directly
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
+                    return _handle_file_dialog(platform, file_path, redis_client)
+
+                # AT-SPI may have opened dropdown — try Down+Enter
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key('Return')
+                time.sleep(2.5)
+
+                for _ in range(10):
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    time.sleep(0.3)
+
+                logger.info("AT-SPI do_action didn't produce file dialog, falling back to xdotool click")
+        except Exception as e:
+            logger.debug(f"AT-SPI do_action attempt failed: {e}")
+
+    # Fallback: xdotool click (gives X11 keyboard focus for Down+Enter)
+    logger.info(f"Keyboard nav attach for {platform}: xdotool click at ({btn_coords['x']}, {btn_coords['y']})")
     inp.click_at(btn_coords['x'], btn_coords['y'])
-    time.sleep(1.5)  # Dropdown needs time to render (0.8s too fast on Thor/Jetson)
+    time.sleep(1.5)
 
     # Check if a file dialog already opened directly (some states skip dropdown)
     dialog_type = _any_file_dialog_open(firefox)
