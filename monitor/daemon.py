@@ -393,37 +393,14 @@ class MonitorDaemon:
         return False
 
     def _notify_tmux(self, platform: str):
-        """Show notification in the spawning Claude session's tmux status bar.
+        """No-op. tmux notification disabled.
 
-        Uses 'tmux display-message' which shows a non-intrusive status bar
-        message. Does NOT inject keystrokes (send-keys) — that approach was
-        fragile because Claude Code processes injected text as user input,
-        causing messages to be swallowed during busy periods or rating prompts.
-
-        The primary notification channel is Redis piggybacking (injected into
-        MCP tool results via inject_notifications). tmux display-message is
-        a visual complement so the user sees something happened.
+        Previous approaches (send-keys, display-message) all interfered with
+        Claude Code's TUI. Redis piggybacking via inject_notifications() in
+        server.py is the reliable notification channel — notifications appear
+        in the next MCP tool call response.
         """
-        if not self.tmux_session:
-            self._log("ERROR: --tmux-session not set. Cannot send notification.")
-            return
-
-        session = self.tmux_session
-        msg = f"[taey] Response ready on {platform} — extract with taey_quick_extract('{platform}')"
-
-        time.sleep(1)
-
-        try:
-            result = subprocess.run(
-                ['tmux', 'display-message', '-t', session, '-d', '10000', msg],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                self._log(f"tmux display-message failed for session '{session}': {result.stderr.strip()}")
-                return
-            self._log(f"tmux display-message sent to session '{session}'")
-        except Exception as e:
-            self._log(f"tmux notification failed for session '{session}': {e}")
+        self._log(f"Redis notification set for {platform} (tmux disabled)")
 
     def _notify_agent(self, status: str, message: str, extra: Dict = None):
         """Write notification to Redis for agent injection."""
