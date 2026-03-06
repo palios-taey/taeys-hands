@@ -498,7 +498,7 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     # xdotool click gives X11 keyboard focus (required for Down+Enter to hit the dropdown)
     logger.info(f"Keyboard nav attach for {platform}: clicking button at ({btn_coords['x']}, {btn_coords['y']})")
     inp.click_at(btn_coords['x'], btn_coords['y'])
-    time.sleep(0.8)
+    time.sleep(1.5)  # Dropdown needs time to render (0.8s too fast on Thor/Jetson)
 
     # Check if a file dialog already opened directly (some states skip dropdown)
     dialog_type = _any_file_dialog_open(firefox)
@@ -507,9 +507,9 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
     # Keyboard nav: Down selects first dropdown item, Enter activates it
     inp.press_key('Down')
-    time.sleep(0.3)
+    time.sleep(0.5)
     inp.press_key('Return')
-    time.sleep(2.0)
+    time.sleep(2.5)
 
     # Check for file dialog (either GTK embedded or Nautilus portal)
     for _ in range(10):
