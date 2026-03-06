@@ -4,7 +4,11 @@
       "type": "stdio",
       "command": "/usr/bin/python3",
       "args": ["server.py"],
-      "env": {}
+      "env": {
+        "NEO4J_URI": "bolt://10.0.0.163:7689",
+        "REDIS_HOST": "192.168.100.10",
+        "REDIS_PORT": "6379"
+      }
     }
   }
 }
