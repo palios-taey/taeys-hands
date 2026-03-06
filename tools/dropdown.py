@@ -283,10 +283,19 @@ def handle_select_dropdown(platform: str, dropdown: str,
     yaml_diff = _check_yaml_mismatch(platform, dropdown, items)
     if yaml_diff:
         result['yaml_mismatch'] = yaml_diff
+        # Make mismatch highly visible — override instruction to force attention
+        live_only = yaml_diff.get('live_only', [])
+        yaml_only = yaml_diff.get('yaml_only', [])
+        mismatch_msg = (
+            f"ACTION REQUIRED: Platform YAML is out of sync with live dropdown.\n"
+            f"  Live items not in YAML: {live_only}\n"
+            f"  YAML items not found live: {yaml_only}\n"
+            f"  Update platforms/{platform}.yaml to match live state before proceeding."
+        )
+        result['instruction'] = mismatch_msg
         logger.warning(
             f"YAML mismatch on {platform}/{dropdown}: "
-            f"live_only={yaml_diff.get('live_only', [])}, "
-            f"yaml_only={yaml_diff.get('yaml_only', [])}"
+            f"live_only={live_only}, yaml_only={yaml_only}"
         )
 
     return result
@@ -371,7 +380,10 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
     if yaml_only:
         result['yaml_only'] = yaml_only
         result['yaml_only_count'] = len(yaml_only)
-    result['WARNING'] = 'Platform YAML may be stale. Update platforms/*.yaml to match live state.'
+    result['WARNING'] = (
+        'Platform YAML is out of sync with live dropdown. '
+        'Update platforms/*.yaml to match live state before selecting.'
+    )
     return result
 
 
