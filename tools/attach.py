@@ -495,38 +495,29 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Try AT-SPI do_action first — works even when button is visually hidden
-    # (Grok homepage hides the Attach button until input is focused, but AT-SPI
-    # still has the element with a valid action interface)
+    # Grok homepage: Attach button has 0 actions until input field is focused.
+    # Click the input field first to activate the Attach button.
     atspi_obj = btn_coords.get('atspi_obj')
     if atspi_obj:
         try:
             action_iface = atspi_obj.get_action_iface()
-            if action_iface and action_iface.get_n_actions() > 0:
-                logger.info(f"Keyboard nav attach for {platform}: AT-SPI do_action on button at ({btn_coords['x']}, {btn_coords['y']})")
-                action_iface.do_action(0)
-                time.sleep(1.5)
-
-                # Check if file dialog opened directly
-                dialog_type = _any_file_dialog_open(firefox)
-                if dialog_type:
-                    return _handle_file_dialog(platform, file_path, redis_client)
-
-                # AT-SPI may have opened dropdown — try Down+Enter
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key('Return')
-                time.sleep(2.5)
-
-                for _ in range(10):
-                    dialog_type = _any_file_dialog_open(firefox)
-                    if dialog_type:
-                        return _handle_file_dialog(platform, file_path, redis_client)
-                    time.sleep(0.3)
-
-                logger.info("AT-SPI do_action didn't produce file dialog, falling back to xdotool click")
+            if not action_iface or action_iface.get_n_actions() == 0:
+                logger.info(f"Attach button has 0 actions — clicking input field to activate")
+                from core.atspi_interact import _element_cache
+                for e in _element_cache.get(platform, []):
+                    if 'editable' in str(e.get('states', [])):
+                        inp.click_at(e['x'], e['y'])
+                        time.sleep(1.0)
+                        # Re-fetch button coords (actions may have changed)
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+                        if not btn_coords:
+                            return {"error": f"Attach button lost after focusing input for {platform}"}
+                        atspi_obj = btn_coords.get('atspi_obj')
+                        break
         except Exception as e:
-            logger.debug(f"AT-SPI do_action attempt failed: {e}")
+            logger.debug(f"Attach activation check failed: {e}")
 
     # Fallback: xdotool click (gives X11 keyboard focus for Down+Enter)
     logger.info(f"Keyboard nav attach for {platform}: xdotool click at ({btn_coords['x']}, {btn_coords['y']})")
