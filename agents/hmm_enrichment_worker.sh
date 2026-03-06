@@ -75,23 +75,11 @@ while true; do
     CYCLE=$((CYCLE + 1))
     log "=== CYCLE $CYCLE START ==="
 
-    # Check queue
+    # Note: stats only counts theme index items. The sweep fallback finds 200K+
+    # additional tiles from Weaviate that stats doesn't know about.
+    # Always attempt to build — if nothing found, THEN sleep.
     STATS=$($BUILDER stats 2>/dev/null || echo "stats unavailable")
-    REMAINING=$(echo "$STATS" | grep -oP 'Remaining:\s*\K[0-9]+' || echo "0")
-    log "Queue: remaining=$REMAINING"
-
-    if [[ "${REMAINING:-0}" -le 0 ]]; then
-        log "Queue empty. Sleeping 5min then checking."
-        escalate "Queue empty on $NODE_ID — all items done. Sleeping 5min."
-        sleep 300
-        # Re-check stats after sleep
-        STATS=$($BUILDER stats 2>/dev/null || echo "")
-        REMAINING=$(echo "$STATS" | grep -oP 'Remaining:\s*\K[0-9]+' || echo "0")
-        if [[ "${REMAINING:-0}" -le 0 ]]; then
-            log "Still empty. Continuing to wait."
-            continue
-        fi
-    fi
+    log "Queue stats: $(echo "$STATS" | grep -E 'Remaining|Completed' | tr '\n' ' ' | tr -s ' ')"
 
     # ── Phase 1: BUILD & SEND ─────────────────────────────────────────────────
     declare -A PKG_FILES
@@ -155,10 +143,11 @@ TASKEOF
     # ── Wait for responses ─────────────────────────────────────────────────────
     SENT_COUNT=${#SENT[@]}
     if [[ "$SENT_COUNT" -eq 0 ]]; then
-        log "Nothing sent this cycle. Sleeping 30s."
+        log "Nothing sent this cycle — queue may truly be empty. Sleeping 5min."
+        escalate "No packages built on $NODE_ID — queue empty or Weaviate unreachable. Sleeping 5min."
         unset PKG_FILES; declare -A PKG_FILES
         unset SENT; declare -A SENT
-        sleep 30
+        sleep 300
         continue
     fi
 
