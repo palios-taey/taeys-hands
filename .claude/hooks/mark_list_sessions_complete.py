@@ -28,17 +28,16 @@ def main():
 
     tool_result = data.get("tool_result", {})
 
-    # Only store checkpoint if list_sessions succeeded
+    # Only store checkpoint if list_sessions succeeded (no error key)
     if isinstance(tool_result, str):
         try:
             result_data = json.loads(tool_result)
         except Exception:
-            result_data = {}
+            result_data = {"error": "parse_failed"}
     else:
         result_data = tool_result if isinstance(tool_result, dict) else {}
 
-    success = result_data.get("success", False)
-    if not success:
+    if "error" in result_data:
         sys.exit(0)
 
     r = get_redis()
