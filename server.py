@@ -44,16 +44,18 @@ os.environ['DISPLAY'] = DISPLAY
 
 # Now safe to import AT-SPI dependent modules
 
-# Storage backends (optional - graceful degradation if not available)
+# Storage backends (optional - server works without them but persistence is disabled)
 try:
     from storage.redis_pool import get_client as get_redis, node_key
-except Exception:
+except Exception as e:
+    logger.warning("Redis unavailable: %s. Monitor notifications and state persistence disabled.", e)
     get_redis = lambda: None
     def node_key(suffix): return f"taey:local:{suffix}"
 
 try:
     from storage import neo4j_client
-except Exception:
+except Exception as e:
+    logger.warning("Neo4j unavailable: %s. Conversation history persistence disabled.", e)
     neo4j_client = None
 
 from tools.inspect import handle_inspect
