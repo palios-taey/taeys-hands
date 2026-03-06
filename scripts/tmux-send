@@ -53,9 +53,14 @@ if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "$(hostname
     if [ "$CMD" != "claude" ] && [ "$CMD" != "bash" ] && [ "$CMD" != "sh" ]; then
         echo "WARN: target pane running '$CMD' not 'claude' — message may not land as intended" >&2
     fi
+    tmux send-keys -t "$SESSION" Escape
+    sleep 0.2
     tmux send-keys -t "$SESSION" -l "$MSG"
     sleep 0.5
+    # Enter (legacy 0x0D) + C-j (0x0A) — Kitty keyboard protocol fallback
+    # Claude Code's Ink TUI may need C-j when Kitty protocol makes 0x0D not submit
     tmux send-keys -t "$SESSION" Enter
+    tmux send-keys -t "$SESSION" C-j
     echo "OK: $SESSION (local, target_cmd=$CMD)"
     exit 0
 fi
@@ -73,9 +78,12 @@ fi
 CMD=\$(tmux display-message -t \"\$SESSION\" -p '#{pane_current_command}' 2>/dev/null || echo unknown)
 MSG=\$(printf '%s' \"\$B64\" | base64 -d)
 
+tmux send-keys -t \"\$SESSION\" Escape
+sleep 0.2
 tmux send-keys -t \"\$SESSION\" -l \"\$MSG\"
 sleep 0.5
 tmux send-keys -t \"\$SESSION\" Enter
+tmux send-keys -t \"\$SESSION\" C-j
 echo \"OK: \$SESSION (remote=\$(hostname -s), target_cmd=\$CMD)\"
 ")
 
