@@ -27,10 +27,26 @@ from typing import Optional, Dict, Any
 
 # Instance-scoped key prefix (must match storage/redis_pool.py logic)
 def _detect_node_id() -> str:
-    """Auto-detect instance ID: TAEY_NODE_ID > tmux session > hostname."""
+    """Auto-detect instance ID: TAEY_NODE_ID > parent TTY tmux session > hostname.
+
+    Must match storage/redis_pool.py detection logic.
+    """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
+    try:
+        parent_tty = os.readlink(f'/proc/{os.getppid()}/fd/0')
+        result = subprocess.run(
+            ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                parts = line.split(' ', 1)
+                if len(parts) == 2 and parts[0] == parent_tty:
+                    return parts[1]
+    except Exception:
+        pass
     try:
         result = subprocess.run(
             ['tmux', 'display-message', '-p', '#S'],
