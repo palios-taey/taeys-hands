@@ -16,7 +16,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def deny(reason: str):
@@ -64,7 +64,7 @@ def main():
         deny(f"Redis connection failed: {e}")
 
     # Check for active plan
-    plan_json = r.get(f"taey:plan:{platform}")
+    plan_json = r.get(node_key(f"plan:{platform}"))
     if not plan_json:
         deny(f"No plan found for {platform}. Call taey_plan first.")
 
@@ -76,14 +76,14 @@ def main():
     plan_id = plan.get("id", plan.get("plan_id", "unknown"))
 
     # Check inspect completed
-    inspect_json = r.get(f"taey:checkpoint:{platform}:inspect")
+    inspect_json = r.get(node_key(f"checkpoint:{platform}:inspect"))
     if not inspect_json:
         deny(f"Inspect not completed for {platform}. Run taey_inspect first.")
 
     # Check attachments if declared in plan
     required_attachments = plan.get("attachments", [])
     if required_attachments:
-        attach_json = r.get(f"taey:checkpoint:{platform}:attach")
+        attach_json = r.get(node_key(f"checkpoint:{platform}:attach"))
         if not attach_json:
             deny(f"Plan requires {len(required_attachments)} attachment(s). Run taey_attach first.")
 
