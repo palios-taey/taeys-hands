@@ -393,48 +393,35 @@ class MonitorDaemon:
         return False
 
     def _notify_tmux(self, platform: str):
-        """Send notification to the spawning Claude session via tmux send-keys.
+        """Show notification in the spawning Claude session's tmux status bar.
 
-        Runs in a background thread (called from _notify_agent) so it never
-        blocks the Redis notification path.
+        Uses 'tmux display-message' which shows a non-intrusive status bar
+        message. Does NOT inject keystrokes (send-keys) — that approach was
+        fragile because Claude Code processes injected text as user input,
+        causing messages to be swallowed during busy periods or rating prompts.
 
-        Waits 2 seconds before sending to give Claude Code time to finish any
-        in-progress tool execution. Uses a 30-second timeout so it waits
-        patiently for the PTY to be ready (Claude Code idle between tool calls).
-
-        Original working pattern: send-keys -l (literal) for text, brief sleep,
-        send-keys Enter. No Escape, no Kitty protocol — these disrupt the TUI.
+        The primary notification channel is Redis piggybacking (injected into
+        MCP tool results via inject_notifications). tmux display-message is
+        a visual complement so the user sees something happened.
         """
         if not self.tmux_session:
             self._log("ERROR: --tmux-session not set. Cannot send notification.")
             return
 
         session = self.tmux_session
-        msg = f"Response ready on {platform}. Extract it now with taey_quick_extract('{platform}')"
+        msg = f"[taey] Response ready on {platform} — extract with taey_quick_extract('{platform}')"
 
-        # Brief delay: give Claude Code time to finish any in-progress tool
-        # before we inject keystrokes into the PTY.
-        time.sleep(2)
+        time.sleep(1)
 
         try:
-            # -l flag first for unambiguous parsing, sends text literally
             result = subprocess.run(
-                ['tmux', 'send-keys', '-l', '-t', session, msg],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                self._log(f"tmux send-keys failed for session '{session}': {result.stderr.strip()}")
-                return
-
-            # Brief pause for text to land in the input buffer
-            time.sleep(0.5)
-
-            # Send Enter to submit
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'Enter'],
+                ['tmux', 'display-message', '-t', session, '-d', '10000', msg],
                 capture_output=True, text=True, timeout=5,
             )
-            self._log(f"tmux notification sent to session '{session}'")
+            if result.returncode != 0:
+                self._log(f"tmux display-message failed for session '{session}': {result.stderr.strip()}")
+                return
+            self._log(f"tmux display-message sent to session '{session}'")
         except Exception as e:
             self._log(f"tmux notification failed for session '{session}': {e}")
 
