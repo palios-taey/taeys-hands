@@ -142,6 +142,29 @@ def get_redis():
         return None
 
 
+def detect_node_id() -> str:
+    """Auto-detect instance ID: TAEY_NODE_ID > tmux session > hostname."""
+    explicit = os.environ.get('TAEY_NODE_ID')
+    if explicit:
+        return explicit
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['tmux', 'display-message', '-p', '#S'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return socket.gethostname()
+
+
+def node_key(suffix: str) -> str:
+    """Instance-scoped Redis key: taey:{node_id}:{suffix}."""
+    return f"taey:{detect_node_id()}:{suffix}"
+
+
 def get_neo4j_driver():
     """Get configured Neo4j driver."""
     try:

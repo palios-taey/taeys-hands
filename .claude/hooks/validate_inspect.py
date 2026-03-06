@@ -11,7 +11,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def deny(reason: str):
@@ -59,7 +59,7 @@ def main():
         deny(f"Redis connection failed: {e}")
 
     # Check for plan (plans are consumption-based - deleted after successful send)
-    plan_json = r.get(f"taey:plan:{platform}")
+    plan_json = r.get(node_key(f"plan:{platform}"))
     if not plan_json:
         deny(f"No plan found for {platform}. Call taey_plan first to create a plan.")
 
