@@ -53,6 +53,29 @@ fi
 # ── Ensure directories ──────────────────────────────────────────────────────
 mkdir -p /tmp/hmm_packages /tmp/hmm_responses /tmp/hmm_worker_logs
 
+# ── Navigate all platforms to fresh pages ─────────────────────────────────
+# Stale page state (existing conversations, preference dialogs) breaks
+# the attach workflow. Start every cycle from a clean slate.
+echo "Navigating platforms to fresh pages..."
+navigate_to() {
+    local shortcut="$1" url="$2" name="$3"
+    xdotool key "$shortcut"
+    sleep 1
+    xdotool key ctrl+l
+    sleep 0.3
+    echo -n "$url" | xsel --clipboard --input
+    xdotool key ctrl+v
+    sleep 0.2
+    xdotool key Return
+    sleep 2
+    echo "  $name → $url"
+}
+navigate_to "alt+1" "https://chatgpt.com/?temporary-chat=true" "ChatGPT"
+navigate_to "alt+4" "https://grok.com" "Grok"
+navigate_to "alt+3" "https://gemini.google.com/app" "Gemini"
+echo "All platforms on fresh pages."
+sleep 2
+
 # ── Launch continuous agent ──────────────────────────────────────────────────
 AGENT_DIR="${HOME}/taeys-hands"
 SYSTEM_PROMPT="${AGENT_DIR}/agents/hmm_system_prompt.md"

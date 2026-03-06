@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 # AT-SPI menu scanning. Validated across 63 commits of git history.
 _KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
 
+# Button names for attach/upload triggers across platforms.
+# Used by both cache lookup and tree search.
+_ATTACH_NAMES = [
+    'open upload file menu',  # Gemini
+    'attach',                 # Grok
+    'add files and more',     # ChatGPT
+    'add files or tools',     # Perplexity
+    'toggle menu',            # Claude (attach trigger)
+]
+
 _XDOTOOL_ENV = None
 
 def _xenv():
@@ -335,21 +345,30 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
             redis_client.delete(node_key(f"attach:pending:{platform}"))
 
 
-def _find_attach_button(doc):
-    """Search AT-SPI tree for the attach/upload button by name.
+def _find_attach_button(doc, platform: str = None):
+    """Search for the attach/upload button by name.
 
-    Bypasses element cache — does a fresh tree search. Returns the
-    raw AT-SPI accessible object (with action interface) or None.
+    Checks element cache first (populated by taey_inspect), which has
+    no child-per-node limit and reliably finds buttons even on pages
+    with extensive conversation history. Falls back to fresh DFS if
+    cache miss.
+
+    Returns the raw AT-SPI accessible object (with action interface) or None.
     """
-    _ATTACH_NAMES = [
-        'open upload file menu',  # Gemini
-        'attach',                 # Grok
-        'add files and more',     # ChatGPT
-        'add files or tools',     # Perplexity
-        'toggle menu',            # Claude (attach trigger)
-    ]
+    # Check element cache first — inspect already found this button
+    if platform:
+        from core.atspi_interact import _element_cache, is_defunct
+        for e in _element_cache.get(platform, []):
+            name = (e.get('name') or '').strip().lower()
+            role = e.get('role', '')
+            if 'button' in role and name in _ATTACH_NAMES:
+                obj = e.get('atspi_obj')
+                if obj and not is_defunct(e):
+                    logger.info(f"Found attach button in cache: '{e.get('name')}' at ({e.get('x')}, {e.get('y')})")
+                    return obj
 
-    def search(obj, depth=0, max_depth=15):
+    # Fall back to fresh tree search (50-child limit may miss on large pages)
+    def search(obj, depth=0, max_depth=25):
         if depth > max_depth:
             return None
         try:
@@ -359,7 +378,9 @@ def _find_attach_button(doc):
                 comp = obj.get_component_iface()
                 if comp:
                     ext = comp.get_extents(Atspi.CoordType.SCREEN)
-                    if ext.width > 0 and ext.height > 0:
+                    # Accept buttons with valid position (width/height
+                    # may be 0 on some AT-SPI implementations)
+                    if ext and ext.x >= 0 and ext.y >= 0:
                         return obj
             for i in range(min(obj.get_child_count(), 50)):
                 child = obj.get_child_at_index(i)
@@ -374,22 +395,22 @@ def _find_attach_button(doc):
     return search(doc)
 
 
-def _get_attach_button_coords(doc) -> Dict | None:
+def _get_attach_button_coords(doc, platform: str = None) -> Dict | None:
     """Find attach button and return its center coordinates.
 
     Returns dict with x, y if found, None otherwise.
     """
-    btn = _find_attach_button(doc)
+    btn = _find_attach_button(doc, platform=platform)
     if not btn:
         return None
     try:
         comp = btn.get_component_iface()
         if comp:
             ext = comp.get_extents(Atspi.CoordType.SCREEN)
-            if ext.width > 0 and ext.height > 0:
+            if ext and ext.x >= 0 and ext.y >= 0:
                 return {
-                    'x': ext.x + ext.width // 2,
-                    'y': ext.y + ext.height // 2,
+                    'x': ext.x + (ext.width // 2 if ext.width else 0),
+                    'y': ext.y + (ext.height // 2 if ext.height else 0),
                     'atspi_obj': btn,
                 }
     except Exception:
@@ -453,6 +474,55 @@ def _detect_existing_attachments(doc) -> List[Dict]:
     return []
 
 
+def _click_editable_input(doc, platform: str):
+    """Click the editable input field to activate non-functional buttons.
+
+    On some platforms (Grok fresh homepage), UI elements like the Attach
+    button have 0 AT-SPI actions until the input field is focused.
+    """
+    # Check element cache first (populated by taey_inspect)
+    from core.atspi_interact import _element_cache
+    for e in _element_cache.get(platform, []):
+        if e.get('role') == 'entry' and 'editable' in (e.get('states') or []):
+            x, y = e.get('x'), e.get('y')
+            if x and y:
+                logger.info(f"Clicking editable input from cache at ({x}, {y})")
+                inp.click_at(x, y)
+                return
+
+    # Fallback: search AT-SPI tree for editable entry
+    if not doc:
+        return
+
+    def find_entry(obj, depth=0):
+        if depth > 15:
+            return None
+        try:
+            role = obj.get_role_name() or ''
+            if role == 'entry':
+                state_set = obj.get_state_set()
+                if state_set and state_set.contains(Atspi.StateType.EDITABLE):
+                    comp = obj.get_component_iface()
+                    if comp:
+                        ext = comp.get_extents(Atspi.CoordType.SCREEN)
+                        if ext and ext.x >= 0 and ext.y >= 0:
+                            return (ext.x + ext.width // 2, ext.y + ext.height // 2)
+            for i in range(min(obj.get_child_count(), 50)):
+                child = obj.get_child_at_index(i)
+                if child:
+                    result = find_entry(child, depth + 1)
+                    if result:
+                        return result
+        except Exception:
+            pass
+        return None
+
+    coords = find_entry(doc)
+    if coords:
+        logger.info(f"Clicking editable input from tree at ({coords[0]}, {coords[1]})")
+        inp.click_at(coords[0], coords[1])
+
+
 def _keyboard_nav_attach(platform: str, file_path: str,
                          redis_client) -> Dict[str, Any]:
     """ChatGPT/Grok fast-path: xdotool click → Down+Enter → handle portal dialog.
@@ -465,7 +535,7 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     """
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    btn_coords = _get_attach_button_coords(doc) if doc else None
+    btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}"}
@@ -474,10 +544,59 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # xdotool click gives X11 keyboard focus (required for Down+Enter to hit the dropdown)
-    logger.info(f"Keyboard nav attach for {platform}: clicking button at ({btn_coords['x']}, {btn_coords['y']})")
+    # Grok fresh homepage: Attach button exists but has 0 actions until
+    # the input field is clicked/focused. Click the editable input first
+    # to activate the button, then re-fetch coordinates.
+    atspi_obj = btn_coords.get('atspi_obj')
+    if atspi_obj:
+        try:
+            action_iface = atspi_obj.get_action_iface()
+            if not action_iface or action_iface.get_n_actions() == 0:
+                logger.info(f"Attach button has 0 actions on {platform} — clicking input to activate")
+                _click_editable_input(doc, platform)
+                time.sleep(1.0)
+                # Re-fetch button (may have new action interface after activation)
+                doc = atspi.get_platform_document(firefox, platform) if firefox else doc
+                btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else btn_coords
+                atspi_obj = btn_coords.get('atspi_obj') if btn_coords else atspi_obj
+        except Exception as e:
+            logger.debug(f"Attach button action check failed: {e}")
+
+    # Try AT-SPI do_action first — works when button has actions
+    atspi_obj = btn_coords.get('atspi_obj') if btn_coords else None
+    if atspi_obj:
+        try:
+            action_iface = atspi_obj.get_action_iface()
+            if action_iface and action_iface.get_n_actions() > 0:
+                logger.info(f"Keyboard nav attach for {platform}: AT-SPI do_action on button at ({btn_coords['x']}, {btn_coords['y']})")
+                action_iface.do_action(0)
+                time.sleep(1.5)
+
+                # Check if file dialog opened directly
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
+                    return _handle_file_dialog(platform, file_path, redis_client)
+
+                # AT-SPI may have opened dropdown — try Down+Enter
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key('Return')
+                time.sleep(2.5)
+
+                for _ in range(10):
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    time.sleep(0.3)
+
+                logger.info("AT-SPI do_action didn't produce file dialog, falling back to xdotool click")
+        except Exception as e:
+            logger.debug(f"AT-SPI do_action attempt failed: {e}")
+
+    # Fallback: xdotool click (gives X11 keyboard focus for Down+Enter)
+    logger.info(f"Keyboard nav attach for {platform}: xdotool click at ({btn_coords['x']}, {btn_coords['y']})")
     inp.click_at(btn_coords['x'], btn_coords['y'])
-    time.sleep(0.8)
+    time.sleep(1.5)
 
     # Check if a file dialog already opened directly (some states skip dropdown)
     dialog_type = _any_file_dialog_open(firefox)
@@ -486,9 +605,9 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
     # Keyboard nav: Down selects first dropdown item, Enter activates it
     inp.press_key('Down')
-    time.sleep(0.3)
+    time.sleep(0.5)
     inp.press_key('Return')
-    time.sleep(2.0)
+    time.sleep(2.5)
 
     # Check for file dialog (either GTK embedded or Nautilus portal)
     for _ in range(10):
@@ -576,7 +695,7 @@ def handle_attach(platform: str, file_path: str,
     logger.info("Searching AT-SPI tree for attach button")
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    btn_coords = _get_attach_button_coords(doc) if doc else None
+    btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
     if btn_coords:
         # Click via platform-aware handle_click (xdotool for non-Gemini,
@@ -624,7 +743,7 @@ def handle_attach(platform: str, file_path: str,
         logger.info("Trying AT-SPI do_action fallback")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        attach_btn = _find_attach_button(doc) if doc else None
+        attach_btn = _find_attach_button(doc, platform=platform) if doc else None
         if attach_btn:
             inp.press_key('Escape')
             time.sleep(0.3)
@@ -649,7 +768,7 @@ def handle_attach(platform: str, file_path: str,
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        btn_coords = _get_attach_button_coords(doc) if doc else None
+        btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
         if btn_coords:
             inp.press_key('Escape')
             time.sleep(0.3)
