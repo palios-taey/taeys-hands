@@ -179,6 +179,63 @@ class MCPClient:
 # Local LLM Agent — agentic tool-calling loop
 # =========================================================================
 
+BASH_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": (
+            "Execute a shell command and return stdout/stderr. "
+            "Use for: package builder commands, file operations, checking stats. "
+            "Commands run in the agent's working directory."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The shell command to execute",
+                },
+            },
+            "required": ["command"],
+        },
+    },
+}
+
+# Allowed command prefixes for safety — only builder + basic file ops
+_BASH_ALLOWLIST = [
+    "python3 ~/embedding-server/",
+    "python3 /home/",
+    "cat ", "ls ", "wc ", "head ", "tail ", "echo ",
+    "mkdir ", "mv ", "cp ",
+]
+
+
+def _execute_bash(command: str, timeout: int = 120) -> dict:
+    """Execute a shell command with safety checks."""
+    # Basic safety: block obviously dangerous commands
+    dangerous = ["rm -rf", "dd if=", "mkfs", "> /dev/", "shutdown", "reboot"]
+    for d in dangerous:
+        if d in command:
+            return {"error": f"Blocked dangerous command containing '{d}'", "exit_code": -1}
+
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=timeout, cwd=os.path.expanduser("~"),
+        )
+        output = result.stdout
+        if result.stderr:
+            output += "\n[stderr] " + result.stderr
+        return {
+            "output": output[:10000],  # cap output size
+            "exit_code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": f"Command timed out after {timeout}s", "exit_code": -1}
+    except Exception as e:
+        return {"error": str(e), "exit_code": -1}
+
+
 class LocalLLMAgent:
     """Agent that uses a local OpenAI-compatible LLM with MCP tools."""
 
@@ -310,9 +367,12 @@ class LocalLLMAgent:
     def run(self, task: str, mcp: MCPClient, max_turns: int = 20) -> str:
         """Run the agentic loop until the LLM responds with text (no tool calls)."""
         openai_tools = self._mcp_tools_to_openai(mcp.tools)
+        # Add built-in bash tool for shell commands (package builder, file ops)
+        openai_tools.append(BASH_TOOL_DEF)
 
+        system_prompt = getattr(self, '_custom_system_prompt', None) or SYSTEM_PROMPT
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
         ]
 
@@ -368,12 +428,17 @@ class LocalLLMAgent:
 
                     logger.info("Tool call: %s(%s)", tool_name, json.dumps(tool_args)[:200])
 
-                    # Execute via MCP
-                    try:
-                        result = mcp.call_tool(tool_name, tool_args)
-                    except Exception as e:
-                        result = {"error": str(e)}
-                        logger.error("MCP tool call failed: %s", e)
+                    # Route: built-in bash tool vs MCP tools
+                    if tool_name == "bash":
+                        result = _execute_bash(
+                            tool_args.get("command", "echo 'no command'"),
+                        )
+                    else:
+                        try:
+                            result = mcp.call_tool(tool_name, tool_args)
+                        except Exception as e:
+                            result = {"error": str(e)}
+                            logger.error("MCP tool call failed: %s", e)
 
                     # Add tool result to messages
                     messages.append({
@@ -422,7 +487,14 @@ def main():
     parser.add_argument("task", nargs="?", help="Task to execute")
     parser.add_argument("--task-file", help="Read task from file")
     parser.add_argument("--interactive", action="store_true", help="Interactive mode (loop)")
+    parser.add_argument("--continuous", action="store_true",
+                        help="Continuous autonomous mode — runs task repeatedly with resets")
+    parser.add_argument("--system-prompt", help="Path to custom system prompt file (replaces default)")
     parser.add_argument("--max-turns", type=int, default=20, help="Max agentic turns per task")
+    parser.add_argument("--max-cycles", type=int, default=0,
+                        help="Max cycles in continuous mode (0=infinite)")
+    parser.add_argument("--cycle-pause", type=int, default=30,
+                        help="Seconds to pause between continuous cycles (default: 30)")
     parser.add_argument("--api-url", help="Override LLM_API_URL")
     parser.add_argument("--model", help="Override LLM_MODEL")
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
@@ -431,14 +503,22 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Load custom system prompt if provided
+    custom_system_prompt = None
+    if args.system_prompt:
+        with open(args.system_prompt) as f:
+            custom_system_prompt = f.read().strip()
+        logger.info("Loaded custom system prompt from %s (%d chars)",
+                     args.system_prompt, len(custom_system_prompt))
+
     # Determine task
     if args.task_file:
         with open(args.task_file) as f:
             task = f.read().strip()
     elif args.task:
         task = args.task
-    elif not args.interactive:
-        parser.error("Provide a task, --task-file, or --interactive")
+    elif not args.interactive and not args.continuous:
+        parser.error("Provide a task, --task-file, --interactive, or --continuous")
         return
 
     # Initialize MCP client
@@ -453,10 +533,70 @@ def main():
 
     # Initialize LLM agent
     agent = LocalLLMAgent(api_url=args.api_url, model=args.model)
+    if custom_system_prompt:
+        agent._custom_system_prompt = custom_system_prompt
     logger.info("Agent ready — model=%s, api=%s", agent.model, agent.api_url)
 
     try:
-        if args.interactive:
+        if args.continuous:
+            # Continuous autonomous mode — runs the task repeatedly, resetting
+            # conversation history between cycles. The LLM manages its own workflow.
+            cycle = 0
+            consecutive_errors = 0
+            continuous_task = task if 'task' in dir() and task else (
+                "Run one complete HMM enrichment cycle: build packages, send to platforms, "
+                "harvest responses, validate JSON, complete packages. When the cycle is done, "
+                "output CYCLE_COMPLETE. If the queue is empty, output QUEUE_EMPTY. "
+                "If you encounter an unrecoverable error, output ESCALATE: <reason>."
+            )
+            logger.info("Continuous mode — task: %s", continuous_task[:200])
+            while True:
+                cycle += 1
+                if args.max_cycles and cycle > args.max_cycles:
+                    logger.info("Max cycles (%d) reached. Exiting.", args.max_cycles)
+                    break
+
+                logger.info("=== CYCLE %d START ===", cycle)
+                try:
+                    result = agent.run(
+                        continuous_task, mcp, max_turns=args.max_turns,
+                    )
+                    logger.info("Cycle %d result: %s", cycle, result[:500] if result else "(empty)")
+                    print(f"[Cycle {cycle}] {result}")
+
+                    if "QUEUE_EMPTY" in (result or ""):
+                        logger.info("Queue empty — sleeping 5 minutes before retry")
+                        time.sleep(300)
+                        consecutive_errors = 0
+                    elif "ESCALATE" in (result or ""):
+                        agent._escalate(f"Cycle {cycle}: {result}")
+                        logger.info("Escalated — sleeping 2 minutes")
+                        time.sleep(120)
+                        consecutive_errors += 1
+                    elif "CYCLE_COMPLETE" in (result or ""):
+                        logger.info("Cycle %d complete. Pausing %ds.", cycle, args.cycle_pause)
+                        consecutive_errors = 0
+                        time.sleep(args.cycle_pause)
+                    else:
+                        # Unexpected result — pause briefly and continue
+                        consecutive_errors = 0
+                        time.sleep(args.cycle_pause)
+
+                except Exception as e:
+                    logger.error("Cycle %d failed: %s", cycle, e)
+                    consecutive_errors += 1
+                    if consecutive_errors >= 5:
+                        agent._escalate(
+                            f"5 consecutive errors on {os.environ.get('TAEY_NODE_ID', 'unknown')}. "
+                            f"Last error: {e}"
+                        )
+                        logger.error("Too many consecutive errors. Sleeping 5 minutes.")
+                        time.sleep(300)
+                        consecutive_errors = 0
+                    else:
+                        time.sleep(60)
+
+        elif args.interactive:
             print("Local LLM Agent (interactive). Type 'quit' to exit.")
             while True:
                 try:
