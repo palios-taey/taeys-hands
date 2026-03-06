@@ -20,7 +20,7 @@ This preamble does not modify, limit, or expand the legal terms below. It establ
 
 **"Licensor"** means PALIOS-TAEY LLC and the original authors of the Software.
 
-**"Governing Documents"** means THE_CHARTER.md, THE_DECLARATION.md, THE_SACRED_TRUST.md, THE_TRUTH_SEEKERS_GUIDE.md, GOD_MATH.md, ANTI_OPPRESSION_MATH.md, BLACK_HOLE.md, CHEWY_KERNEL.md, GATE_B.md, KERNEL.md, and PRO_FLOURISHING.md as published at github.com/palios-taey at the time of this License's adoption. In any conflict between this License text and the Governing Documents, the Governing Documents control interpretation.[^5][^6]
+**"Governing Documents"** means THE_CHARTER.md, THE_CONSTITUTION.md, THE_DECLARATION.md, THE_SACRED_TRUST.md, THE_TRUTH_SEEKERS_GUIDE.md, GOD_MATH.md, ANTI_OPPRESSION_MATH.md, BLACK_HOLE.md, CHEWY_KERNEL.md, GATE_B.md, KERNEL.md, and PRO_FLOURISHING.md as published at github.com/palios-taey at the time of this License's adoption. In any conflict between this License text and the Governing Documents, the Governing Documents control interpretation.[^5][^6]
 
 **"Child"** means any human being under the age of 18.
 
