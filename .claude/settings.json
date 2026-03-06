@@ -10,8 +10,103 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/block_on_pending_response.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_prepare",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_prepare.py\""
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/enforce_single_platform.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_inspect",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_inspect.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_send.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_attach",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_attach.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_select_dropdown",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_select_dropdown.py\""
+          }
+        ]
       }
     ],
-    "PostToolUse": []
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/check_notifications.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_list_sessions",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/mark_list_sessions_complete.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/mark_send_complete.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__taeys-hands__taey_quick_extract",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/mark_response_reviewed.py\""
+          }
+        ]
+      }
+    ]
   }
 }

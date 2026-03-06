@@ -14,8 +14,32 @@ quirks:
   - compose: "Compose button opens tweet editor"
   - media: "Supports image/video attachments"
   - threads: "Multiple tweets can be chained as threads"
+  - reply_to_reply: "To reply to someone's reply: click their post article to navigate to their status URL, then use the compose box at the BOTTOM of that page. Do NOT click 'N Replies. Reply' on the parent post — that replies to the parent, not the reply."
+  - draftjs_input: "All text input must use clipboard paste (DraftJS ignores AT-SPI DOM mutations and xdotool type)"
 
 stop_patterns: []
+
+# Elements to exclude from taey_inspect output.
+# Removes sidebar noise (trending, relevant people, footer) that is never
+# actionable for automation. Content-based — no coordinate filtering.
+inspect_noise:
+  exclude_roles:
+    - list item          # sidebar profile cards (tweets are 'article', not 'list item')
+  exclude_names:         # exact match
+    - "What's happening"
+    - "Trending now"
+    - "Trending"
+    - "Relevant people"
+    - "Live on X"
+    - "Terms of Service"
+    - "Privacy Policy"
+    - "Cookie Policy"
+    - "Accessibility"
+    - "Ads info"
+  exclude_name_contains: # substring match
+    - " · Trending "
+    - "Trending with"
+    - "Hosted by"        # Live Spaces banners
 
 element_hints:
   input_role: textbox
