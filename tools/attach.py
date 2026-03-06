@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 # AT-SPI menu scanning. Validated across 63 commits of git history.
 _KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
 
+# Button names for attach/upload triggers across platforms.
+# Used by both cache lookup and tree search.
+_ATTACH_NAMES = [
+    'open upload file menu',  # Gemini
+    'attach',                 # Grok
+    'add files and more',     # ChatGPT
+    'add files or tools',     # Perplexity
+    'toggle menu',            # Claude (attach trigger)
+]
+
 _XDOTOOL_ENV = None
 
 def _xenv():
@@ -335,20 +345,29 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
             redis_client.delete(node_key(f"attach:pending:{platform}"))
 
 
-def _find_attach_button(doc):
-    """Search AT-SPI tree for the attach/upload button by name.
+def _find_attach_button(doc, platform: str = None):
+    """Search for the attach/upload button by name.
 
-    Bypasses element cache — does a fresh tree search. Returns the
-    raw AT-SPI accessible object (with action interface) or None.
+    Checks element cache first (populated by taey_inspect), which has
+    no child-per-node limit and reliably finds buttons even on pages
+    with extensive conversation history. Falls back to fresh DFS if
+    cache miss.
+
+    Returns the raw AT-SPI accessible object (with action interface) or None.
     """
-    _ATTACH_NAMES = [
-        'open upload file menu',  # Gemini
-        'attach',                 # Grok
-        'add files and more',     # ChatGPT
-        'add files or tools',     # Perplexity
-        'toggle menu',            # Claude (attach trigger)
-    ]
+    # Check element cache first — inspect already found this button
+    if platform:
+        from core.atspi_interact import _element_cache, is_defunct
+        for e in _element_cache.get(platform, []):
+            name = (e.get('name') or '').strip().lower()
+            role = e.get('role', '')
+            if 'button' in role and name in _ATTACH_NAMES:
+                obj = e.get('atspi_obj')
+                if obj and not is_defunct(e):
+                    logger.info(f"Found attach button in cache: '{e.get('name')}' at ({e.get('x')}, {e.get('y')})")
+                    return obj
 
+    # Fall back to fresh tree search (50-child limit may miss on large pages)
     def search(obj, depth=0, max_depth=25):
         if depth > max_depth:
             return None
@@ -376,12 +395,12 @@ def _find_attach_button(doc):
     return search(doc)
 
 
-def _get_attach_button_coords(doc) -> Dict | None:
+def _get_attach_button_coords(doc, platform: str = None) -> Dict | None:
     """Find attach button and return its center coordinates.
 
     Returns dict with x, y if found, None otherwise.
     """
-    btn = _find_attach_button(doc)
+    btn = _find_attach_button(doc, platform=platform)
     if not btn:
         return None
     try:
@@ -467,7 +486,7 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     """
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    btn_coords = _get_attach_button_coords(doc) if doc else None
+    btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}"}
@@ -578,7 +597,7 @@ def handle_attach(platform: str, file_path: str,
     logger.info("Searching AT-SPI tree for attach button")
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    btn_coords = _get_attach_button_coords(doc) if doc else None
+    btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
     if btn_coords:
         # Click via platform-aware handle_click (xdotool for non-Gemini,
@@ -626,7 +645,7 @@ def handle_attach(platform: str, file_path: str,
         logger.info("Trying AT-SPI do_action fallback")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        attach_btn = _find_attach_button(doc) if doc else None
+        attach_btn = _find_attach_button(doc, platform=platform) if doc else None
         if attach_btn:
             inp.press_key('Escape')
             time.sleep(0.3)
@@ -651,7 +670,7 @@ def handle_attach(platform: str, file_path: str,
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        btn_coords = _get_attach_button_coords(doc) if doc else None
+        btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
         if btn_coords:
             inp.press_key('Escape')
             time.sleep(0.3)
