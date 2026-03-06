@@ -81,6 +81,15 @@
         ]
       },
       {
+        "matcher": "mcp__taeys-hands__taey_list_sessions",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/mark_list_sessions_complete.py\""
+          }
+        ]
+      },
+      {
         "matcher": "mcp__taeys-hands__taey_send_message",
         "hooks": [
           {
