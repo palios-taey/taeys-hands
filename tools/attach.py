@@ -349,7 +349,7 @@ def _find_attach_button(doc):
         'toggle menu',            # Claude (attach trigger)
     ]
 
-    def search(obj, depth=0, max_depth=15):
+    def search(obj, depth=0, max_depth=25):
         if depth > max_depth:
             return None
         try:
