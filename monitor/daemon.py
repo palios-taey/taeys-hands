@@ -395,15 +395,23 @@ class MonitorDaemon:
     def _notify_tmux(self, platform: str):
         """Send notification to the spawning Claude session via tmux send-keys.
 
-        Exact same pattern as the tmux-send script (which works for
-        Claude-to-Claude communication):
+        Pattern:
           1. Verify session exists
-          2. tmux send-keys -t SESSION -l "msg"   (literal text, -l flag)
-          3. sleep 0.5
-          4. tmux send-keys -t SESSION Enter       (submit)
+          2. Escape (dismiss any modal/rating prompt that would consume Enter)
+          3. tmux send-keys -t SESSION -l "msg"   (literal text, -l flag)
+          4. sleep 0.5
+          5. tmux send-keys -t SESSION Enter       (legacy 0x0D)
+          6. tmux send-keys -t SESSION C-j         (0x0A fallback for Kitty protocol)
 
-        The message arrives as user input to Claude Code, which processes it
-        as a new request. Redis piggybacking is the backup notification channel.
+        Claude Code uses Ink TUI with Kitty keyboard protocol (ESC[13u for Enter).
+        tmux send-keys Enter sends legacy 0x0D which may not submit in Kitty mode.
+        C-j sends 0x0A (line feed) which is the recommended universal fallback
+        per Perplexity Deep Research on Kitty protocol + tmux incompatibility.
+        Sending both Enter and C-j ensures at least one submits regardless of
+        Kitty protocol state.
+
+        The message arrives as user input to Claude Code. Redis piggybacking
+        is the backup notification channel.
         """
         if not self.tmux_session:
             self._log("No --tmux-session set, skipping tmux notification")
@@ -416,7 +424,7 @@ class MonitorDaemon:
         time.sleep(2)
 
         try:
-            # Verify session exists (same as tmux-send script)
+            # Verify session exists
             check = subprocess.run(
                 ['tmux', 'has-session', '-t', session],
                 capture_output=True, timeout=5,
@@ -425,7 +433,14 @@ class MonitorDaemon:
                 self._log(f"tmux session '{session}' not found, skipping notification")
                 return
 
-            # Send literal text (same as tmux-send: -l flag for literal)
+            # Dismiss any modal/rating prompt that would swallow the Enter
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'Escape'],
+                capture_output=True, timeout=5,
+            )
+            time.sleep(0.3)
+
+            # Send literal text (-l flag for literal, same as tmux-send)
             result = subprocess.run(
                 ['tmux', 'send-keys', '-t', session, '-l', msg],
                 capture_output=True, text=True, timeout=5,
@@ -434,17 +449,19 @@ class MonitorDaemon:
                 self._log(f"send-keys text failed: {result.stderr.strip()}")
                 return
 
-            # Same 0.5s pause as tmux-send between text and Enter
             time.sleep(0.5)
 
-            # Submit with Enter (same as tmux-send)
-            result = subprocess.run(
+            # Submit: Enter (legacy 0x0D) then C-j (0x0A Kitty fallback)
+            # One of these will submit depending on Kitty protocol state.
+            # If both fire, Claude Code ignores the empty second submission.
+            subprocess.run(
                 ['tmux', 'send-keys', '-t', session, 'Enter'],
                 capture_output=True, text=True, timeout=5,
             )
-            if result.returncode != 0:
-                self._log(f"send-keys Enter failed: {result.stderr.strip()}")
-                return
+            subprocess.run(
+                ['tmux', 'send-keys', '-t', session, 'C-j'],
+                capture_output=True, text=True, timeout=5,
+            )
 
             self._log(f"tmux notification sent to session '{session}'")
         except subprocess.TimeoutExpired:
