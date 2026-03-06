@@ -65,10 +65,31 @@ def get_client() -> redis.Redis:
 
 
 def _detect_node_id() -> str:
-    """Auto-detect instance ID: TAEY_NODE_ID > tmux session > hostname."""
+    """Auto-detect instance ID: TAEY_NODE_ID > parent TTY tmux session > hostname.
+
+    'tmux display-message -p #S' is unreliable for MCP subprocesses — it
+    returns whichever tmux client was most recently active, not the one that
+    spawned this process.  Instead, map the parent process's TTY to a tmux
+    session via 'tmux list-panes', which is deterministic.
+    """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
+    try:
+        # Map parent's TTY → tmux session name (reliable for MCP subprocesses)
+        parent_tty = os.readlink(f'/proc/{os.getppid()}/fd/0')
+        result = subprocess.run(
+            ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                parts = line.split(' ', 1)
+                if len(parts) == 2 and parts[0] == parent_tty:
+                    return parts[1]
+    except Exception:
+        pass
+    # Fallback: try tmux display-message (works in interactive tmux shells)
     try:
         result = subprocess.run(
             ['tmux', 'display-message', '-p', '#S'],
