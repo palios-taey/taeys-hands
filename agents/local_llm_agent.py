@@ -237,6 +237,10 @@ class LocalLLMAgent:
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            # Disable thinking mode for tool-calling — thinking tokens interfere
+            # with JSON parsing and waste context. Works with llama.cpp and most
+            # OpenAI-compatible servers that support chat_template_kwargs.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             payload["tools"] = tools
