@@ -36,9 +36,8 @@ def main():
     else:
         result_data = tool_result
 
-    # Only mark complete if send was successful
-    success = result_data.get("success", False)
-    if not success:
+    # Only mark complete if send was successful (no error key in result)
+    if "error" in result_data:
         sys.exit(0)
 
     r = get_redis()
