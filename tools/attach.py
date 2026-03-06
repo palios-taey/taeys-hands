@@ -359,7 +359,9 @@ def _find_attach_button(doc):
                 comp = obj.get_component_iface()
                 if comp:
                     ext = comp.get_extents(Atspi.CoordType.SCREEN)
-                    if ext.width > 0 and ext.height > 0:
+                    # Accept buttons with valid position (width/height
+                    # may be 0 on some AT-SPI implementations)
+                    if ext and ext.x >= 0 and ext.y >= 0:
                         return obj
             for i in range(min(obj.get_child_count(), 50)):
                 child = obj.get_child_at_index(i)
@@ -386,10 +388,10 @@ def _get_attach_button_coords(doc) -> Dict | None:
         comp = btn.get_component_iface()
         if comp:
             ext = comp.get_extents(Atspi.CoordType.SCREEN)
-            if ext.width > 0 and ext.height > 0:
+            if ext and ext.x >= 0 and ext.y >= 0:
                 return {
-                    'x': ext.x + ext.width // 2,
-                    'y': ext.y + ext.height // 2,
+                    'x': ext.x + (ext.width // 2 if ext.width else 0),
+                    'y': ext.y + (ext.height // 2 if ext.height else 0),
                     'atspi_obj': btn,
                 }
     except Exception:
