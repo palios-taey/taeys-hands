@@ -474,6 +474,55 @@ def _detect_existing_attachments(doc) -> List[Dict]:
     return []
 
 
+def _click_editable_input(doc, platform: str):
+    """Click the editable input field to activate non-functional buttons.
+
+    On some platforms (Grok fresh homepage), UI elements like the Attach
+    button have 0 AT-SPI actions until the input field is focused.
+    """
+    # Check element cache first (populated by taey_inspect)
+    from core.atspi_interact import _element_cache
+    for e in _element_cache.get(platform, []):
+        if e.get('role') == 'entry' and 'editable' in (e.get('states') or []):
+            x, y = e.get('x'), e.get('y')
+            if x and y:
+                logger.info(f"Clicking editable input from cache at ({x}, {y})")
+                inp.click_at(x, y)
+                return
+
+    # Fallback: search AT-SPI tree for editable entry
+    if not doc:
+        return
+
+    def find_entry(obj, depth=0):
+        if depth > 15:
+            return None
+        try:
+            role = obj.get_role_name() or ''
+            if role == 'entry':
+                state_set = obj.get_state_set()
+                if state_set and state_set.contains(Atspi.StateType.EDITABLE):
+                    comp = obj.get_component_iface()
+                    if comp:
+                        ext = comp.get_extents(Atspi.CoordType.SCREEN)
+                        if ext and ext.x >= 0 and ext.y >= 0:
+                            return (ext.x + ext.width // 2, ext.y + ext.height // 2)
+            for i in range(min(obj.get_child_count(), 50)):
+                child = obj.get_child_at_index(i)
+                if child:
+                    result = find_entry(child, depth + 1)
+                    if result:
+                        return result
+        except Exception:
+            pass
+        return None
+
+    coords = find_entry(doc)
+    if coords:
+        logger.info(f"Clicking editable input from tree at ({coords[0]}, {coords[1]})")
+        inp.click_at(coords[0], coords[1])
+
+
 def _keyboard_nav_attach(platform: str, file_path: str,
                          redis_client) -> Dict[str, Any]:
     """ChatGPT/Grok fast-path: xdotool click → Down+Enter → handle portal dialog.
@@ -495,10 +544,26 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Try AT-SPI do_action first — works even when button is visually hidden
-    # (Grok homepage hides the Attach button until input is focused, but AT-SPI
-    # still has the element with a valid action interface)
+    # Grok fresh homepage: Attach button exists but has 0 actions until
+    # the input field is clicked/focused. Click the editable input first
+    # to activate the button, then re-fetch coordinates.
     atspi_obj = btn_coords.get('atspi_obj')
+    if atspi_obj:
+        try:
+            action_iface = atspi_obj.get_action_iface()
+            if not action_iface or action_iface.get_n_actions() == 0:
+                logger.info(f"Attach button has 0 actions on {platform} — clicking input to activate")
+                _click_editable_input(doc, platform)
+                time.sleep(1.0)
+                # Re-fetch button (may have new action interface after activation)
+                doc = atspi.get_platform_document(firefox, platform) if firefox else doc
+                btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else btn_coords
+                atspi_obj = btn_coords.get('atspi_obj') if btn_coords else atspi_obj
+        except Exception as e:
+            logger.debug(f"Attach button action check failed: {e}")
+
+    # Try AT-SPI do_action first — works when button has actions
+    atspi_obj = btn_coords.get('atspi_obj') if btn_coords else None
     if atspi_obj:
         try:
             action_iface = atspi_obj.get_action_iface()
