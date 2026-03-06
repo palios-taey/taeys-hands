@@ -237,6 +237,10 @@ class LocalLLMAgent:
             "messages": messages,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            # Disable thinking mode for tool-calling — thinking tokens interfere
+            # with JSON parsing and waste context. Works with llama.cpp and most
+            # OpenAI-compatible servers that support chat_template_kwargs.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             payload["tools"] = tools
@@ -322,7 +326,9 @@ class LocalLLMAgent:
                     f"[NOTIFICATION] {n.get('type', 'unknown')}: {json.dumps(n)}"
                     for n in notifs
                 )
-                messages.append({"role": "system", "content": notif_text})
+                # Use "user" role — some models (Qwen3.5) reject system messages
+                # anywhere except position 0 in the conversation.
+                messages.append({"role": "user", "content": notif_text})
 
             # Call LLM
             try:
