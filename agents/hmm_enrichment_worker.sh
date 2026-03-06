@@ -71,9 +71,13 @@ check_llm || { escalate "LLM not ready after 5min"; exit 1; }
 log "LLM ready"
 
 CYCLE=0
+declare -A PKG_FILES=()
+declare -A SENT=()
 while true; do
     CYCLE=$((CYCLE + 1))
     log "=== CYCLE $CYCLE START ==="
+    PKG_FILES=()
+    SENT=()
 
     # Note: stats only counts theme index items. The sweep fallback finds 200K+
     # additional tiles from Weaviate that stats doesn't know about.
@@ -82,8 +86,6 @@ while true; do
     log "Queue stats: $(echo "$STATS" | grep -E 'Remaining|Completed' | tr '\n' ' ' | tr -s ' ')"
 
     # ── Phase 1: BUILD & SEND ─────────────────────────────────────────────────
-    declare -A PKG_FILES
-    declare -A SENT
 
     for platform in "${PLATFORMS[@]}"; do
         log "--- Building package for $platform ---"
@@ -145,8 +147,6 @@ TASKEOF
     if [[ "$SENT_COUNT" -eq 0 ]]; then
         log "Nothing sent this cycle — queue may truly be empty. Sleeping 5min."
         escalate "No packages built on $NODE_ID — queue empty or Weaviate unreachable. Sleeping 5min."
-        unset PKG_FILES; declare -A PKG_FILES
-        unset SENT; declare -A SENT
         sleep 300
         continue
     fi
@@ -209,9 +209,6 @@ HARVESTEOF
 
         sleep 3
     done
-
-    unset PKG_FILES; declare -A PKG_FILES
-    unset SENT; declare -A SENT
 
     log "=== CYCLE $CYCLE DONE === Sleeping 30s"
     sleep 30
