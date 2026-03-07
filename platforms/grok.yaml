@@ -5,17 +5,15 @@ base_url: https://grok.com/
 tab_shortcut: alt+4
 
 capabilities:
-  # "Model select" button — menu items with descriptions
-  # React portal dropdown — invisible to AT-SPI tree. Use keyboard nav.
   # "Model select" button — React portal dropdown, visible in AT-SPI after xdotool click
-  # AT-SPI concatenates label+description without space (e.g. "AutoChooses Fast or Expert")
+  # AT-SPI concatenates label+description WITHOUT space (e.g. "AutoChooses Fast or Expert")
+  # Verified live March 7 2026
   models:
-    - Auto Chooses Fast or Expert
-    - Fast Quick responses
-    - Expert Thinks hard
-    - Heavy Powered by Grok 4.20 (beta)
-    - Try Grok 4.20 Beta Early access Toggle
-    - Custom Instructions Not set Open Custom Instructions
+    - AutoChooses Fast or Expert
+    - FastQuick responses
+    - ExpertThinks hard
+    - HeavyPowered by Grok 4.20 (beta)
+    - Try Grok 4.20 BetaEarly access Toggle
   modes: []
   tools: []
   # Attach dropdown items (xdotool click on Attach button opens menu)
