@@ -31,15 +31,20 @@ AGENT_SESSIONS: Dict[str, Dict[str, str]] = {
     "claude-claw": {
         "machine": "spark3",
         "tmux_session": "claw",
-        "ssh": "spark@192.168.100.12",
+        "ssh": "spark@10.0.0.10",
     },
     "gemini-cli": {
         "machine": "spark1",
-        "tmux_session": "gemini",
+        "tmux_session": "gemini-cli",
     },
     "codex-cli": {
         "machine": "spark1",
-        "tmux_session": "codex",
+        "tmux_session": "codex-cli",
+    },
+    "qwen-local": {
+        "machine": "thor",
+        "tmux_session": "thor-claude",
+        "ssh": "thor@10.0.0.197",
     },
 }
 
