@@ -49,7 +49,7 @@ def get_pending_notifications():
 
     try:
         notifications = []
-        # Pop up to 10 notifications per tool call
+        # Pop up to 10 notifications per tool call from taey queue
         for _ in range(10):
             notification_json = r.lpop("taey:notifications")
             if not notification_json:
@@ -62,6 +62,25 @@ def get_pending_notifications():
             except json.JSONDecodeError as e:
                 log_debug(f"JSON decode error: {e}")
                 notifications.append({"raw": notification_json})
+
+        # Also check orchestration notifications (orch:notify:<agent_id>)
+        try:
+            from config import detect_node_id
+            node_id = detect_node_id()
+            orch_key = f"orch:notify:{node_id}"
+            for _ in range(5):
+                orch_json = r.lpop(orch_key)
+                if not orch_json:
+                    break
+                try:
+                    parsed = json.loads(orch_json)
+                    parsed["_source"] = "orchestration"
+                    notifications.append(parsed)
+                    log_debug(f"Orch notification: {parsed}")
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            log_debug(f"Orch notify check error: {e}")
 
         return notifications
     except ImportError:
