@@ -539,6 +539,82 @@ async def agent_status_update(body: dict):
     return JSONResponse({"ok": True, "agent_id": agent_id})
 
 
+@app.get("/api/hmm/tiles")
+async def get_hmm_tiles(q: str = "", limit: int = 50):
+    """Get HMM tile motif data from Redis. Keys: hmm:tile:<hash>:motifs."""
+    r = get_redis_sync(config)
+    motif_counts = {}
+    motif_amplitudes = {}
+    total_scanned = 0
+
+    try:
+        cursor = 0
+        while total_scanned < 5000:
+            cursor, keys = r.scan(cursor, match="hmm:tile:*:motifs", count=500)
+            for key in keys:
+                val = r.get(key)
+                if not val:
+                    continue
+                try:
+                    motifs = json.loads(val)
+                    for m in motifs:
+                        m_id = m.get("motif_id", "")
+                        amp = m.get("amp", 0)
+                        if q and q.lower() not in m_id.lower():
+                            continue
+                        motif_counts[m_id] = motif_counts.get(m_id, 0) + 1
+                        motif_amplitudes[m_id] = motif_amplitudes.get(m_id, 0) + amp
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            total_scanned += len(keys)
+            if cursor == 0:
+                break
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+
+    result = []
+    for m_id, freq in motif_counts.items():
+        result.append({
+            "motif_id": m_id,
+            "frequency": freq,
+            "avg_amplitude": round(motif_amplitudes[m_id] / freq, 3),
+        })
+    result.sort(key=lambda x: x["frequency"], reverse=True)
+
+    return JSONResponse({
+        "total_scanned": total_scanned,
+        "motifs": result[:limit],
+    })
+
+
+@app.get("/api/hmm/motifs")
+async def get_hmm_motifs():
+    """Get top motifs from Neo4j HMMMotif nodes."""
+    try:
+        driver = get_neo4j_driver(config)
+        with driver.session(database=config.neo4j_db) as session:
+            result = session.run("""
+                MATCH (m:HMMMotif)
+                OPTIONAL MATCH (m)<-[:EXPRESSES]-(t:HMMTile)
+                RETURN m.name AS name, m.description AS description, count(t) AS tile_count
+                ORDER BY tile_count DESC LIMIT 50
+            """)
+            motifs = [{"name": r["name"], "description": r["description"], "tile_count": r["tile_count"]} for r in result]
+        driver.close()
+        return JSONResponse({"motifs": motifs})
+    except Exception as e:
+        return JSONResponse({"motifs": [], "error": str(e)[:100]})
+
+
+@app.get("/hmm")
+async def serve_hmm():
+    hmm_file = STATIC_DIR / "hmm.html"
+    if hmm_file.exists():
+        return FileResponse(hmm_file)
+    return JSONResponse({"error": "HMM interface not yet created"}, status_code=404)
+
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
