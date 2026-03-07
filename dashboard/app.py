@@ -436,6 +436,109 @@ async def submit_command(body: dict):
     return JSONResponse(result)
 
 
+@app.post("/api/heartbeat")
+async def agent_heartbeat(body: dict):
+    """Remote heartbeat — any agent can POST to stay alive."""
+    agent_id = body.get("agent_id", "").strip()
+    activity = body.get("activity", "")
+    if not agent_id:
+        return JSONResponse({"error": "agent_id required"}, status_code=400)
+
+    r = get_redis_sync(config)
+    hb_key = f"{config.heartbeat_prefix}{agent_id}"
+    ttl_ms = config.heartbeat_ttl_s * 1000
+    r.psetex(hb_key, ttl_ms, str(time.time()))
+    if activity:
+        act_key = f"{config.activity_prefix}{agent_id}"
+        r.hset(act_key, mapping={"last_command": activity, "timestamp": str(time.time())})
+
+    return JSONResponse({"ok": True, "agent_id": agent_id})
+
+
+@app.post("/api/report")
+async def agent_report(body: dict):
+    """Agent reports task completion or failure."""
+    task_id = body.get("task_id", "").strip()
+    agent_id = body.get("agent_id", "").strip()
+    status = body.get("status", "completed")  # completed | failed
+    summary = body.get("summary", "")
+
+    if not task_id or not agent_id:
+        return JSONResponse({"error": "task_id and agent_id required"}, status_code=400)
+
+    event_type = EventType.TASK_COMPLETED.value if status == "completed" else EventType.TASK_FAILED.value
+    payload = {"task_id": task_id, "agent": agent_id, "summary": summary}
+    emit(event_type, payload, actor=agent_id)
+
+    # Broadcast to dashboard
+    await manager.broadcast({
+        "type": "task_report",
+        "data": {"task_id": task_id, "agent_id": agent_id, "status": status, "summary": summary, "timestamp": time.time()},
+    })
+    return JSONResponse({"ok": True, "task_id": task_id, "status": status})
+
+
+@app.post("/api/message")
+async def agent_message(body: dict):
+    """Agent posts a message to The Stream — for discoveries, questions, greetings."""
+    agent_id = body.get("agent_id", "").strip()
+    text = body.get("text", "").strip()
+    msg_type = body.get("type", "insight")  # insight | question | greeting | alert
+
+    if not agent_id or not text:
+        return JSONResponse({"error": "agent_id and text required"}, status_code=400)
+
+    msg_id = f"msg-{uuid.uuid4().hex[:8]}"
+    emit("agent.message", {"msg_id": msg_id, "text": text, "msg_type": msg_type}, actor=agent_id)
+
+    await manager.broadcast({
+        "type": "agent_message",
+        "data": {
+            "msg_id": msg_id,
+            "agent_id": agent_id,
+            "text": text,
+            "msg_type": msg_type,
+            "timestamp": time.time(),
+        },
+    })
+    return JSONResponse({"ok": True, "msg_id": msg_id})
+
+
+@app.post("/api/status")
+async def agent_status_update(body: dict):
+    """Agent updates its own status (busy/idle/current_task)."""
+    agent_id = body.get("agent_id", "").strip()
+    if not agent_id:
+        return JSONResponse({"error": "agent_id required"}, status_code=400)
+
+    registry = AgentRegistry(config)
+    agent = registry.get(agent_id)
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    # Update fields
+    if "status" in body:
+        agent.status = AgentStatus(body["status"])
+    if "current_task" in body:
+        agent.current_task = body["current_task"]
+    if "current_load" in body:
+        agent.current_load = body["current_load"]
+
+    registry.register(agent)
+
+    await manager.broadcast({
+        "type": "agent_status",
+        "data": {
+            "agent_id": agent_id,
+            "status": agent.status.value,
+            "current_task": agent.current_task,
+            "current_load": agent.current_load,
+            "changed_at": time.time(),
+        },
+    })
+    return JSONResponse({"ok": True, "agent_id": agent_id})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
