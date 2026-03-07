@@ -37,6 +37,8 @@ def handle_plan(platform: str, action: str, params: Dict,
         return _update_plan(params.get('plan_id'), params, redis_client)
     elif action == 'send_message':
         return _create_plan(platform, action, params, redis_client)
+    elif action == 'extract_response':
+        return _create_extract_plan(platform, params, redis_client)
     else:
         return {"error": f"Unknown plan action: {action}", "success": False}
 
@@ -131,6 +133,54 @@ def _create_plan(platform: str, action: str, params: Dict,
         "required_state": plan['required_state'],
         "attachments": attachments_list,
         "next_step": f"Call taey_inspect to see current state",
+    }
+
+
+def _create_extract_plan(platform: str, params: Dict,
+                         redis_client) -> Dict[str, Any]:
+    """Create an extraction-only plan (no send_message).
+
+    Used when a response is already pending on a platform and just needs
+    to be extracted. Simpler than send_message plans — only needs platform.
+    """
+    if not redis_client:
+        return {"error": "Redis not available", "success": False}
+
+    plan_id = str(uuid.uuid4())[:8]
+
+    plan = {
+        'plan_id': plan_id,
+        'platform': platform,
+        'action': 'extract_response',
+        'session': params.get('session', 'current'),
+        'message': None,
+        'attachments': [],
+        'required_state': {},
+        'current_state': None,
+        'steps': [{"action": "extract", "platform": platform}],
+        'status': 'ready',
+        'navigated': False,
+        'created_at': time.time(),
+    }
+
+    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
+    redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
+
+    redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
+        'id': plan_id, 'platform': platform, 'action': 'extract_response',
+        'session': plan['session'], 'message': None,
+        'model': None, 'mode': None,
+        'tools': [], 'attachments': [],
+        'validated': True, 'created_at': time.time(),
+    }))
+
+    return {
+        "success": True,
+        "plan_id": plan_id,
+        "platform": platform,
+        "action": "extract_response",
+        "steps": plan['steps'],
+        "next_step": f"Call taey_quick_extract('{platform}') to extract the response",
     }
 
 
