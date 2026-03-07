@@ -60,10 +60,16 @@ def _detect_node_id() -> str:
 
 _NODE_ID = _detect_node_id()
 
+# Overridden by --tmux-session in main() to match the spawning MCP server's
+# node_id. The auto-detect above is unreliable for background daemon processes
+# because tmux display-message returns whichever session was most recently
+# active, not the one that spawned this daemon.
+_EFFECTIVE_NODE_ID = _NODE_ID
+
 
 def _node_key(suffix: str) -> str:
     """Instance-scoped Redis key (matches storage.redis_pool.node_key)."""
-    return f"taey:{_NODE_ID}:{suffix}"
+    return f"taey:{_EFFECTIVE_NODE_ID}:{suffix}"
 
 # =========================================================================
 # Load .env (daemon runs as subprocess, doesn't inherit server's env loading)
@@ -706,6 +712,14 @@ def main():
                              'If new stop button appears during settle, monitors second cycle.')
 
     args = parser.parse_args()
+
+    # Use --tmux-session as authoritative node_id for Redis key scoping.
+    # The MCP server resolves this correctly via parent TTY → tmux session mapping.
+    # The daemon's own _detect_node_id() is unreliable (background process,
+    # parent fd/0 is a socket, display-message is non-deterministic).
+    if args.tmux_session:
+        global _EFFECTIVE_NODE_ID
+        _EFFECTIVE_NODE_ID = args.tmux_session
 
     daemon = MonitorDaemon(
         platform=args.platform,
