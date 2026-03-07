@@ -34,6 +34,9 @@ capabilities:
     - More
   sources: []
 
+# Click strategy: xdotool_first (xdotool coordinate clicks work on Perplexity dropdowns)
+click_strategy: xdotool_first
+
 quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
   - model_selector: "'Model' button visible in search landing page input area (role=push button). Opens model selector. NOT visible in Computer mode."

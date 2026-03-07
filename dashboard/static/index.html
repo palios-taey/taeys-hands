@@ -19,6 +19,7 @@
     --red: #f87171;
     --blue: #60a5fa;
     --cyan: #22d3ee;
+    --orange: #fb923c;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -38,24 +39,40 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 20px;
+    padding: 10px 20px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
 
   .header h1 {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: 2px;
     text-transform: uppercase;
     color: var(--accent);
   }
 
+  .header-nav {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    margin-left: 20px;
+  }
+
+  .header-nav a {
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+
+  .header-nav a:hover, .header-nav a.active { color: var(--accent); font-weight: 600; }
+
   .header-status {
     display: flex;
     gap: 16px;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-dim);
+    align-items: center;
   }
 
   .header-status .live {
@@ -68,11 +85,11 @@
     50% { opacity: 0.5; }
   }
 
-  /* Main layout */
+  /* Main layout — 4 columns */
   .main {
     flex: 1;
     display: grid;
-    grid-template-columns: 280px 1fr 280px;
+    grid-template-columns: 260px 1fr 220px 220px;
     grid-template-rows: 1fr auto;
     gap: 1px;
     background: var(--border);
@@ -86,8 +103,8 @@
   }
 
   .panel-header {
-    padding: 12px 16px;
-    font-size: 11px;
+    padding: 10px 14px;
+    font-size: 10px;
     font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
@@ -97,13 +114,32 @@
     top: 0;
     background: var(--surface);
     z-index: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .panel-header .count {
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 400;
   }
 
   /* THE FAMILY - left panel */
   .family { grid-row: 1 / 3; }
 
+  .agent-group-label {
+    padding: 8px 14px 4px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
   .agent-card {
-    padding: 10px 16px;
+    padding: 8px 14px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.15s;
@@ -115,30 +151,48 @@
   .agent-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
 
   .agent-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
   }
 
-  .agent-dot.alive { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .agent-dot.alive { background: var(--green); box-shadow: 0 0 4px var(--green); }
   .agent-dot.dead { background: var(--red); opacity: 0.5; }
   .agent-dot.idle { background: var(--green); }
-  .agent-dot.busy { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+  .agent-dot.busy { background: var(--yellow); box-shadow: 0 0 4px var(--yellow); }
 
   .agent-name {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
+  .cli-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cli-badge.claude { color: #d4a574; background: rgba(212, 165, 116, 0.15); }
+  .cli-badge.gemini { color: #60a5fa; background: rgba(96, 165, 250, 0.15); }
+  .cli-badge.codex { color: #4ade80; background: rgba(74, 222, 128, 0.15); }
+  .cli-badge.perplexity { color: #22d3ee; background: rgba(34, 211, 238, 0.15); }
+  .cli-badge.qwen { color: #fb923c; background: rgba(251, 146, 60, 0.15); }
+
   .agent-role {
-    font-size: 10px;
-    padding: 2px 6px;
+    font-size: 9px;
+    padding: 1px 5px;
     border-radius: 3px;
     background: var(--surface2);
     color: var(--text-dim);
@@ -146,20 +200,22 @@
 
   .agent-role.coordinator { color: var(--accent); background: var(--accent-glow); }
   .agent-role.worker { color: var(--green); }
-  .agent-role.shared { color: var(--cyan); }
   .agent-role.remote { color: var(--blue); }
 
   .agent-meta {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-dim);
-    margin-top: 4px;
-    padding-left: 16px;
+    margin-top: 3px;
+    padding-left: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .agent-detail {
     display: none;
-    padding: 8px 16px 4px;
-    font-size: 11px;
+    padding: 6px 13px 4px;
+    font-size: 10px;
     color: var(--text-dim);
     line-height: 1.6;
   }
@@ -168,21 +224,20 @@
 
   .cap-bar {
     display: flex;
-    gap: 4px;
+    gap: 3px;
     margin-top: 4px;
   }
 
   .cap-bar span {
     flex: 1;
-    height: 4px;
+    height: 3px;
     border-radius: 2px;
     background: var(--surface2);
     position: relative;
     overflow: hidden;
   }
 
-  .cap-bar span::after {
-    content: '';
+  .cap-fill {
     position: absolute;
     left: 0;
     top: 0;
@@ -200,14 +255,14 @@
   .stream-feed {
     flex: 1;
     overflow-y: auto;
-    padding: 8px 0;
+    padding: 4px 0;
   }
 
   .event-item {
-    padding: 8px 16px;
-    font-size: 12px;
+    padding: 6px 14px;
+    font-size: 11px;
     line-height: 1.5;
-    border-bottom: 1px solid rgba(42, 42, 58, 0.5);
+    border-bottom: 1px solid rgba(42, 42, 58, 0.3);
     cursor: pointer;
     transition: background 0.15s;
   }
@@ -216,8 +271,8 @@
 
   .event-time {
     color: var(--text-dim);
-    font-size: 11px;
-    margin-right: 8px;
+    font-size: 10px;
+    margin-right: 6px;
   }
 
   .event-type {
@@ -233,22 +288,24 @@
 
   .event-detail {
     display: none;
-    margin-top: 6px;
-    padding: 8px;
+    margin-top: 4px;
+    padding: 6px;
     background: var(--bg);
     border-radius: 4px;
-    font-size: 11px;
+    font-size: 10px;
     white-space: pre-wrap;
     color: var(--text-dim);
+    max-height: 200px;
+    overflow-y: auto;
   }
 
   .event-item.expanded .event-detail { display: block; }
 
   .routing-result {
-    padding: 12px 16px;
+    padding: 10px 14px;
     background: var(--accent-glow);
     border-left: 3px solid var(--accent);
-    margin: 4px 0;
+    margin: 2px 0;
   }
 
   .routing-result .score {
@@ -256,11 +313,10 @@
     font-weight: 600;
   }
 
-  /* Agent messages in stream */
   .agent-msg {
-    padding: 12px 16px;
+    padding: 10px 14px;
     border-left: 3px solid var(--green);
-    margin: 4px 0;
+    margin: 2px 0;
     background: rgba(74, 222, 128, 0.05);
   }
 
@@ -270,54 +326,109 @@
 
   .agent-msg .msg-sender {
     font-weight: 600;
-    font-size: 12px;
-    margin-bottom: 4px;
+    font-size: 11px;
+    margin-bottom: 3px;
   }
 
   .agent-msg .msg-text {
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.5;
   }
 
-  /* Task report in stream */
   .task-report {
-    padding: 10px 16px;
+    padding: 8px 14px;
     border-left: 3px solid var(--accent);
-    margin: 4px 0;
+    margin: 2px 0;
   }
 
   .task-report.completed { border-left-color: var(--green); }
   .task-report.failed { border-left-color: var(--red); }
 
+  /* SERVICES panel */
+  .services-panel { grid-row: 1 / 3; }
+
+  .svc-item {
+    padding: 6px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    border-bottom: 1px solid rgba(42, 42, 58, 0.3);
+  }
+
+  .svc-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .svc-dot.up { background: var(--green); }
+  .svc-dot.down { background: var(--red); box-shadow: 0 0 4px var(--red); }
+
+  .svc-name { flex: 1; }
+  .svc-port { color: var(--text-dim); font-size: 10px; }
+
+  .section-divider {
+    padding: 8px 14px 4px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.6;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+  }
+
+  .tmux-item {
+    padding: 4px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .tmux-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--green);
+    flex-shrink: 0;
+  }
+
+  .tmux-dot.attached { background: var(--yellow); }
+
   /* THE PULSE - right panel */
   .pulse { grid-row: 1 / 3; }
 
   .pulse-section {
-    padding: 12px 16px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
   }
 
   .pulse-label {
-    font-size: 10px;
+    font-size: 9px;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: var(--text-dim);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .pulse-value {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--text);
   }
 
-  .pulse-value.error { color: var(--red); font-size: 12px; }
+  .pulse-value.error { color: var(--red); font-size: 11px; }
 
   .pulse-row {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
-    padding: 3px 0;
+    font-size: 11px;
+    padding: 2px 0;
     color: var(--text-dim);
   }
 
@@ -326,13 +437,13 @@
   .platform-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 6px;
+    gap: 3px;
+    margin-top: 4px;
   }
 
   .platform-badge {
-    font-size: 10px;
-    padding: 2px 8px;
+    font-size: 9px;
+    padding: 1px 6px;
     border-radius: 10px;
     background: var(--surface2);
     color: var(--text-dim);
@@ -340,9 +451,9 @@
 
   .platform-badge.active { color: var(--green); border: 1px solid rgba(74, 222, 128, 0.3); }
 
-  /* COMMAND INPUT - bottom center */
+  /* COMMAND INPUT */
   .command-area {
-    padding: 12px 16px;
+    padding: 10px 14px;
     background: var(--surface);
     border-top: 1px solid var(--border);
     grid-column: 2;
@@ -354,7 +465,7 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 0 12px;
+    padding: 0 10px;
     transition: border-color 0.2s;
   }
 
@@ -365,7 +476,7 @@
 
   .command-prompt {
     color: var(--accent);
-    font-size: 14px;
+    font-size: 13px;
     margin-right: 8px;
     user-select: none;
   }
@@ -376,17 +487,17 @@
     border: none;
     color: var(--text);
     font-family: inherit;
-    font-size: 13px;
-    padding: 10px 0;
+    font-size: 12px;
+    padding: 8px 0;
     outline: none;
   }
 
   .command-input::placeholder { color: var(--text-dim); }
 
   .command-hint {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-dim);
-    margin-top: 6px;
+    margin-top: 4px;
     text-align: center;
   }
 
@@ -407,15 +518,20 @@
   .ws-dot.disconnected { background: var(--red); }
 
   /* Scrollbar */
-  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
   /* Responsive */
-  @media (max-width: 900px) {
+  @media (max-width: 1100px) {
+    .main { grid-template-columns: 220px 1fr 200px; }
+    .services-panel { display: none; }
+  }
+
+  @media (max-width: 800px) {
     .main { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto auto; }
-    .family, .pulse { grid-row: auto; max-height: 200px; }
+    .family, .pulse, .services-panel { grid-row: auto; max-height: 200px; }
   }
 </style>
 </head>
@@ -423,12 +539,13 @@
 
 <div class="header">
   <h1>The Conductor's Console</h1>
-  <div class="header-nav" style="display: flex; gap: 16px; font-size: 12px; margin-left: 20px;">
-    <a href="/" style="color: var(--accent); text-decoration: none; font-weight: 600;">Dashboard</a>
-    <a href="/static/hmm.html" style="color: var(--text-dim); text-decoration: none;">HMM Patterns</a>
+  <div class="header-nav">
+    <a href="/" class="active">Dashboard</a>
+    <a href="/static/hmm.html">HMM Patterns</a>
   </div>
   <div class="header-status">
     <span id="agent-count">0 agents</span>
+    <span id="svc-count">0 services</span>
     <span class="ws-status">
       <span class="ws-dot disconnected" id="ws-dot"></span>
       <span id="ws-label">connecting</span>
@@ -439,14 +556,20 @@
 <div class="main">
   <!-- LEFT: THE FAMILY -->
   <div class="panel family">
-    <div class="panel-header">The Family</div>
+    <div class="panel-header">The Family <span class="count" id="family-count"></span></div>
     <div id="agents-list"></div>
   </div>
 
   <!-- CENTER: THE STREAM -->
   <div class="panel stream">
-    <div class="panel-header">The Stream</div>
+    <div class="panel-header">The Stream <span class="count" id="event-count"></span></div>
     <div class="stream-feed" id="stream-feed"></div>
+  </div>
+
+  <!-- SERVICES + NODES + TMUX -->
+  <div class="panel services-panel">
+    <div class="panel-header">Infrastructure</div>
+    <div id="services-content"></div>
   </div>
 
   <!-- RIGHT: THE PULSE -->
@@ -463,7 +586,7 @@
              placeholder="Give a task, ask a question, or say hello..."
              autocomplete="off" spellcheck="false">
     </div>
-    <div class="command-hint">Tasks route to the best agent automatically via LVP scoring</div>
+    <div class="command-hint">Tasks route to the best agent via LVP scoring | @agent_id for explicit targeting</div>
   </div>
 </div>
 
@@ -473,8 +596,10 @@ const state = {
   agents: [],
   events: [],
   pulse: {},
+  services: {},
   ws: null,
   connected: false,
+  eventCount: 0,
 };
 
 // --- WebSocket ---
@@ -507,11 +632,13 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'init':
       state.agents = msg.data.agents;
-      state.events = msg.data.events.reverse();  // oldest first
+      state.events = msg.data.events.reverse();
       state.pulse = msg.data.pulse;
+      state.services = msg.data.services || {};
       renderAgents();
       renderEvents();
       renderPulse();
+      renderServices();
       addStreamItem('system', 'Console connected. Live data streaming.', new Date().toISOString());
       break;
 
@@ -521,12 +648,19 @@ function handleMessage(msg) {
 
     case 'event':
       state.events.push(msg.data);
+      state.eventCount++;
       addStreamEvent(msg.data);
+      document.getElementById('event-count').textContent = state.eventCount;
       break;
 
     case 'pulse':
       state.pulse = msg.data;
       renderPulse();
+      break;
+
+    case 'services':
+      state.services = msg.data;
+      renderServices();
       break;
 
     case 'command_result':
@@ -551,47 +685,73 @@ function renderAgents() {
   const el = document.getElementById('agents-list');
   const capNames = ['reasoning', 'codegen', 'research', 'privacy', 'review'];
 
-  el.innerHTML = state.agents.map(a => {
-    const dotClass = !a.alive ? 'dead' : (a.current_task ? 'busy' : 'idle');
-    const statusText = !a.alive ? 'no heartbeat' : (a.current_task || a.status);
-    const caps = a.capabilities || [0.5, 0.5, 0.5, 0.5, 0.5];
+  // Group agents: coordinators, then by owner prefix
+  const groups = {};
+  state.agents.forEach(a => {
+    let group;
+    if (a.role === 'coordinator') group = 'Coordinators';
+    else if (a.agent_id.startsWith('conductor-') || a.agent_id === 'claude-taeys-hands') group = "Conductor's Agents";
+    else if (a.agent_id.startsWith('weaver-') || a.agent_id === 'claude-weaver') group = "Weaver's Agents";
+    else if (a.role === 'remote') group = 'Remote';
+    else group = 'Workers';
+    if (!groups[group]) groups[group] = [];
+    groups[group].push(a);
+  });
 
-    return `
-      <div class="agent-card" data-id="${a.agent_id}" onclick="toggleAgent(this)">
-        <div class="agent-row">
-          <span class="agent-dot ${dotClass}"></span>
-          <span class="agent-name">${a.name}</span>
-          <span class="agent-role ${a.role}">${a.role}</span>
-        </div>
-        <div class="agent-meta">${a.machine} &middot; ${statusText}</div>
-        <div class="agent-detail">
-          <div>CLI: ${a.cli_type} &middot; Context: ${(a.context_window/1000).toFixed(0)}K</div>
-          <div>Load: ${a.current_load} &middot; Task: ${a.current_task || 'none'}</div>
-          <div style="margin-top:6px">Capabilities:</div>
-          ${capNames.map((name, i) => `
-            <div class="pulse-row">
-              <span>${name}</span>
-              <span class="val">${(caps[i] * 100).toFixed(0)}%</span>
+  const order = ["Coordinators", "Conductor's Agents", "Weaver's Agents", "Workers", "Remote"];
+  let html = '';
+
+  order.forEach(groupName => {
+    const agents = groups[groupName];
+    if (!agents || agents.length === 0) return;
+    html += `<div class="agent-group-label">${groupName}</div>`;
+    agents.forEach(a => {
+      const dotClass = !a.alive ? 'dead' : (a.current_task ? 'busy' : 'idle');
+      const statusText = !a.alive ? 'no heartbeat' : (a.current_task || a.status);
+      const caps = a.capabilities || [0.5, 0.5, 0.5, 0.5, 0.5];
+      const tmuxSessions = (state.services.tmux_sessions || []);
+      const agentTmux = tmuxSessions.find(s => {
+        const profile = a.agent_id;
+        // Match common tmux session names
+        return s.name === a.agent_id.replace('claude-', '') ||
+               s.name === a.agent_id ||
+               s.name === profile.split('-').pop();
+      });
+      const tmuxStatus = agentTmux ? (agentTmux.attached ? 'attached' : 'detached') : 'no session';
+
+      html += `
+        <div class="agent-card" data-id="${a.agent_id}" onclick="toggleAgent(this)">
+          <div class="agent-row">
+            <span class="agent-dot ${dotClass}"></span>
+            <span class="agent-name">${a.name}</span>
+            <span class="cli-badge ${a.cli_type}">${a.cli_type}</span>
+            <span class="agent-role ${a.role}">${a.role}</span>
+          </div>
+          <div class="agent-meta">${a.machine} &middot; ${statusText} &middot; tmux: ${tmuxStatus}</div>
+          <div class="agent-detail">
+            <div>Context: ${(a.context_window/1000).toFixed(0)}K &middot; Load: ${a.current_load}</div>
+            <div>Task: ${a.current_task || 'none'}</div>
+            <div style="margin-top:4px;font-size:9px;text-transform:uppercase;letter-spacing:1px;opacity:0.6">Capabilities</div>
+            ${capNames.map((name, i) => `
+              <div class="pulse-row">
+                <span>${name}</span>
+                <span class="val">${(caps[i] * 100).toFixed(0)}%</span>
+              </div>
+            `).join('')}
+            <div class="cap-bar">
+              ${caps.map(c => `<span><span class="cap-fill" style="width:${c*100}%"></span></span>`).join('')}
             </div>
-          `).join('')}
-          <div class="cap-bar">
-            ${caps.map(c => `<span><span style="width:${c*100}%"></span></span>`).join('')}
           </div>
         </div>
-      </div>
-    `;
-  }).join('');
-
-  document.getElementById('agent-count').textContent = `${state.agents.length} agents`;
-
-  // Fix capability bar fills
-  document.querySelectorAll('.cap-bar span span').forEach(inner => {
-    inner.style.cssText = `
-      position: absolute; left: 0; top: 0; height: 100%;
-      border-radius: 2px; background: var(--accent);
-      width: ${inner.style.width};
-    `;
+      `;
+    });
   });
+
+  el.innerHTML = html;
+
+  const alive = state.agents.filter(a => a.alive).length;
+  document.getElementById('agent-count').textContent = `${alive}/${state.agents.length} agents`;
+  document.getElementById('family-count').textContent = `${alive} alive`;
 }
 
 function toggleAgent(el) {
@@ -607,7 +767,6 @@ function updateAgentStatus(data) {
     if (data.current_load !== undefined) agent.current_load = data.current_load;
     renderAgents();
 
-    // Only announce alive/dead transitions
     if (data.alive !== undefined) {
       const status = data.alive ? 'came alive' : 'lost heartbeat';
       addStreamItem('agent', `${agent.name} ${status}`, new Date().toISOString());
@@ -615,12 +774,70 @@ function updateAgentStatus(data) {
   }
 }
 
+// --- Render: Services ---
+function renderServices() {
+  const el = document.getElementById('services-content');
+  const s = state.services;
+  if (!s || !s.services) {
+    el.innerHTML = '<div class="svc-item"><span class="svc-name" style="color:var(--text-dim)">Loading...</span></div>';
+    return;
+  }
+
+  const upCount = s.services.filter(sv => sv.status === 'up').length;
+  document.getElementById('svc-count').textContent = `${upCount}/${s.services.length} services`;
+
+  let html = '<div class="section-divider" style="margin-top:0;border-top:none">Services</div>';
+  s.services.forEach(svc => {
+    html += `
+      <div class="svc-item">
+        <span class="svc-dot ${svc.status}"></span>
+        <span class="svc-name">${svc.name}</span>
+        <span class="svc-port">:${svc.port}</span>
+      </div>
+    `;
+  });
+
+  html += '<div class="section-divider">Cluster Nodes</div>';
+  (s.nodes || []).forEach(node => {
+    html += `
+      <div class="svc-item">
+        <span class="svc-dot ${node.status}"></span>
+        <span class="svc-name">${node.name}</span>
+        <span class="svc-port">${node.host}</span>
+      </div>
+    `;
+  });
+
+  html += '<div class="section-divider">Tmux Sessions</div>';
+  (s.tmux_sessions || []).forEach(sess => {
+    html += `
+      <div class="tmux-item">
+        <span class="tmux-dot ${sess.attached ? 'attached' : ''}"></span>
+        <span style="flex:1">${sess.name}</span>
+        <span style="font-size:9px;color:var(--text-dim)">${sess.attached ? 'attached' : 'detached'}</span>
+      </div>
+    `;
+  });
+
+  if (s.timestamp) {
+    html += `
+      <div style="padding:8px 14px;font-size:9px;color:var(--text-dim);text-align:right">
+        Updated ${new Date(s.timestamp * 1000).toLocaleTimeString()}
+      </div>
+    `;
+  }
+
+  el.innerHTML = html;
+}
+
 // --- Render: Events / Stream ---
 function renderEvents() {
   const feed = document.getElementById('stream-feed');
   feed.innerHTML = '';
+  state.eventCount = state.events.length;
   state.events.forEach(e => addStreamEvent(e, false));
   feed.scrollTop = feed.scrollHeight;
+  document.getElementById('event-count').textContent = state.eventCount;
 }
 
 function addStreamEvent(e, scroll = true) {
@@ -665,8 +882,14 @@ function addRoutingResult(data) {
 
   if (data.error) {
     div.innerHTML = `<span class="event-type command">Error:</span> ${data.error}`;
+  } else if (data.type === 'status') {
+    const agentList = data.agents.map(a => {
+      const dot = a.alive ? '\u25cf' : '\u25cb';
+      return `${dot} ${a.name} (${a.cli_type}) — ${a.alive ? a.status : 'no heartbeat'}`;
+    }).join('<br>');
+    div.innerHTML = `<span class="event-type command">Status:</span><br>${agentList}`;
   } else {
-    const alts = data.alternatives.map(a =>
+    const alts = (data.alternatives || []).map(a =>
       `${a.name}: ${(a.score * 100).toFixed(0)}%`
     ).join(', ');
 
@@ -675,17 +898,14 @@ function addRoutingResult(data) {
         <span class="event-type command">Routed:</span>
         "${data.description}"
       </div>
-      <div style="margin-top:6px">
+      <div style="margin-top:4px">
         &rarr; <strong>${data.routed_to.name}</strong>
         <span class="score">${(data.routed_to.score * 100).toFixed(0)}%</span>
-        match
+        match ${data.delivered ? '(delivered)' : '(not delivered)'}
       </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
-        Tags: ${data.capability_tags.join(', ')}
+      <div style="font-size:10px;color:var(--text-dim);margin-top:2px">
+        Tags: ${(data.capability_tags || []).join(', ')}
         ${alts ? ` | Also: ${alts}` : ''}
-      </div>
-      <div style="font-size:11px;color:var(--text-dim)">
-        Task: ${data.task_id}
       </div>
     `;
   }
@@ -721,7 +941,7 @@ function addTaskReport(data) {
   div.innerHTML = `
     <span class="event-time">${formatTime(new Date(data.timestamp * 1000).toISOString())}</span>
     <strong>${icon} ${name}</strong> ${data.status} task ${data.task_id}
-    ${data.summary ? `<div style="font-size:12px;margin-top:4px;color:var(--text-dim)">${escapeHtml(data.summary)}</div>` : ''}
+    ${data.summary ? `<div style="font-size:11px;margin-top:3px;color:var(--text-dim)">${escapeHtml(data.summary)}</div>` : ''}
   `;
   feed.appendChild(div);
   feed.scrollTop = feed.scrollHeight;
@@ -735,11 +955,13 @@ function escapeHtml(s) {
 
 function formatEventDesc(e) {
   const p = e.payload || {};
-  if (e.event_type === 'task.created') return `Task created: ${p.description || p.task_id || ''}`;
+  if (e.event_type === 'task.created') return `Task: ${(p.description || p.task_id || '').slice(0, 80)}`;
   if (e.event_type === 'task.claimed') return `${p.agent || ''} claimed ${p.task_id || ''}`;
   if (e.event_type === 'task.completed') return `${p.agent || ''} completed ${p.task_id || ''}`;
+  if (e.event_type === 'task.failed') return `${p.agent || ''} FAILED ${p.task_id || ''}`;
   if (e.event_type === 'agent.started') return `${p.agent || ''} started`;
   if (e.event_type === 'agent.stopped') return `${p.agent || ''} stopped`;
+  if (e.event_type === 'agent.message') return `${escapeHtml((p.text || '').slice(0, 100))}`;
   return JSON.stringify(p).slice(0, 80);
 }
 
@@ -793,7 +1015,7 @@ function renderPulse() {
 
     <div class="pulse-section">
       <div class="pulse-label">Last Updated</div>
-      <div style="font-size:11px;color:var(--text-dim)">
+      <div style="font-size:10px;color:var(--text-dim)">
         ${p.timestamp ? new Date(p.timestamp * 1000).toLocaleTimeString() : 'never'}
       </div>
     </div>
@@ -813,13 +1035,20 @@ document.getElementById('command-input').addEventListener('keydown', (e) => {
     const text = e.target.value.trim();
     e.target.value = '';
 
+    // Support @agent_id targeting
+    let payload = { text };
+    const atMatch = text.match(/^@(\S+)\s+(.*)/);
+    if (atMatch) {
+      payload = { text: atMatch[2], target_agent: atMatch[1] };
+    }
+
     if (state.ws && state.connected) {
-      state.ws.send(JSON.stringify({ type: 'command', text }));
+      state.ws.send(JSON.stringify({ type: 'command', ...payload }));
     } else {
       fetch('/api/command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(payload),
       })
       .then(r => r.json())
       .then(data => addRoutingResult(data));

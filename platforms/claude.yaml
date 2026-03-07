@@ -25,6 +25,9 @@ capabilities:
     - Use style
     - Connectors
 
+# Click strategy: xdotool_first (xdotool coordinate clicks work reliably on Claude menus)
+click_strategy: xdotool_first
+
 quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"

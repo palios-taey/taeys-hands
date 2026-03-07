@@ -196,6 +196,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(heartbeat_monitor_loop()),
         asyncio.create_task(event_stream_loop()),
         asyncio.create_task(pulse_updater_loop()),
+        asyncio.create_task(services_monitor_loop()),
         asyncio.create_task(conductor_heartbeat.run()),  # Beat my heart
     ]
 
@@ -874,6 +875,135 @@ async def manage_consent(request: Request, body: dict):
 ISMA_API = "http://192.168.100.10:8095"
 
 
+# --- Services health ---
+import socket
+import subprocess
+
+SERVICES = [
+    {"name": "Redis", "host": "192.168.100.10", "port": 6379, "type": "tcp"},
+    {"name": "Neo4j", "host": "192.168.100.10", "port": 7687, "type": "tcp"},
+    {"name": "Weaviate (Mira)", "host": "10.0.0.163", "port": 8088, "type": "http", "path": "/v1/.well-known/ready"},
+    {"name": "ISMA Query API", "host": "192.168.100.10", "port": 8095, "type": "http", "path": "/health"},
+    {"name": "Embedding LB", "host": "192.168.100.10", "port": 8091, "type": "http", "path": "/health"},
+    {"name": "Dashboard", "host": "127.0.0.1", "port": 5001, "type": "self"},
+]
+
+NODES = [
+    {"name": "Spark 1 (me)", "host": "10.0.0.68"},
+    {"name": "Spark 2", "host": "10.0.0.80"},
+    {"name": "Spark 3", "host": "10.0.0.10"},
+    {"name": "Spark 4", "host": "10.0.0.19"},
+    {"name": "Thor", "host": "10.0.0.197"},
+    {"name": "CCM Mac", "host": "10.0.0.12"},
+]
+
+# Cached services/nodes status (updated by background loop)
+_services_cache: Dict[str, Any] = {"services": [], "nodes": [], "tmux_sessions": [], "timestamp": 0}
+
+
+def _check_tcp(host: str, port: int, timeout: float = 2.0) -> bool:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+
+def _check_http(host: str, port: int, path: str = "/", timeout: float = 3.0) -> bool:
+    try:
+        import urllib.request
+        url = f"http://{host}:{port}{path}"
+        req = urllib.request.Request(url, method='GET')
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        return resp.status < 500
+    except Exception:
+        return False
+
+
+def _check_node(host: str, timeout: float = 1.0) -> bool:
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "1", "-W", str(int(timeout)), host],
+            capture_output=True, timeout=timeout + 1,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _get_tmux_sessions() -> List[Dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}:#{session_windows}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        sessions = []
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) >= 3:
+                sessions.append({
+                    "name": parts[0],
+                    "attached": parts[1] == "1",
+                    "windows": int(parts[2]) if parts[2].isdigit() else 1,
+                })
+        return sessions
+    except Exception:
+        return []
+
+
+def _get_services_data() -> Dict[str, Any]:
+    services = []
+    for svc in SERVICES:
+        if svc["type"] == "self":
+            services.append({"name": svc["name"], "status": "up", "host": svc["host"], "port": svc["port"]})
+        elif svc["type"] == "tcp":
+            up = _check_tcp(svc["host"], svc["port"])
+            services.append({"name": svc["name"], "status": "up" if up else "down", "host": svc["host"], "port": svc["port"]})
+        elif svc["type"] == "http":
+            up = _check_http(svc["host"], svc["port"], svc.get("path", "/"))
+            services.append({"name": svc["name"], "status": "up" if up else "down", "host": svc["host"], "port": svc["port"]})
+
+    nodes = []
+    for node in NODES:
+        if node["host"] == "10.0.0.68":
+            nodes.append({"name": node["name"], "host": node["host"], "status": "up"})
+        else:
+            up = _check_node(node["host"])
+            nodes.append({"name": node["name"], "host": node["host"], "status": "up" if up else "down"})
+
+    return {
+        "services": services,
+        "nodes": nodes,
+        "tmux_sessions": _get_tmux_sessions(),
+        "timestamp": time.time(),
+    }
+
+
+async def services_monitor_loop():
+    """Check services health every 15s, push to WebSocket."""
+    global _services_cache
+    while True:
+        try:
+            data = _get_services_data()
+            _services_cache = data
+            await manager.broadcast({"type": "services", "data": data})
+        except Exception:
+            pass
+        await asyncio.sleep(15)
+
+
+@app.get("/api/services")
+async def get_services():
+    if _services_cache["timestamp"] > 0:
+        return JSONResponse(_services_cache)
+    return JSONResponse(_get_services_data())
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await manager.connect(ws)
@@ -885,6 +1015,7 @@ async def websocket_endpoint(ws: WebSocket):
                 "agents": _get_agents_data(),
                 "events": _get_events_data(20),
                 "pulse": _get_pulse_sync(),
+                "services": _services_cache if _services_cache["timestamp"] > 0 else _get_services_data(),
             }
         })
         # Keep alive — receive pings or commands
@@ -894,7 +1025,7 @@ async def websocket_endpoint(ws: WebSocket):
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "command":
-                    result = _route_command(msg.get("text", ""))
+                    result = _route_command(msg.get("text", ""), target_agent=msg.get("target_agent", ""))
                     await ws.send_json({"type": "command_result", "data": result})
                 elif msg.get("type") == "ping":
                     await ws.send_json({"type": "pong", "data": {"time": time.time()}})
