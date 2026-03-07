@@ -5,8 +5,8 @@
       "command": "/usr/bin/python3",
       "args": ["server.py"],
       "env": {
-        "NEO4J_URI": "bolt://10.0.0.163:7689",
-        "REDIS_HOST": "192.168.100.10",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "REDIS_HOST": "127.0.0.1",
         "REDIS_PORT": "6379"
       }
     }
