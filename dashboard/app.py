@@ -327,25 +327,29 @@ def _get_pulse_sync() -> Dict[str, Any]:
 
 # Keyword → capability tag mapping for command routing
 KEYWORD_TAGS = {
-    "research": ["research"],
-    "find": ["research"],
-    "look up": ["research"],
-    "search": ["research"],
+    "research": ["reasoning", "large_context"],  # Routes to Gemini (large context) or Claude agents
+    "find": ["reasoning"],
+    "look up": ["reasoning"],
+    "search": ["reasoning"],
     "review": ["review", "reasoning"],
     "audit": ["review", "reasoning"],
     "check": ["review"],
+    "verify": ["review", "reasoning"],           # Truth verification
+    "validate": ["review", "reasoning"],          # Validation tasks
+    "fact-check": ["review", "reasoning"],        # Fact-checking
     "build": ["codegen", "architecture"],
     "implement": ["codegen", "architecture"],
     "add": ["codegen"],
     "create": ["codegen"],
     "write": ["codegen"],
     "test": ["testing", "codegen"],
-    "verify": ["testing"],
     "security": ["security", "privacy"],
     "privacy": ["security", "privacy"],
     "refactor": ["codegen", "architecture", "multi_file"],
     "large": ["large_context"],
     "codebase": ["large_context", "review"],
+    "map": ["large_context", "architecture"],     # Mapping tasks → Gemini
+    "analyze": ["reasoning", "large_context"],    # Analysis → reasoning agents
 }
 
 
@@ -398,8 +402,12 @@ def _handle_query(text: str) -> Optional[Dict[str, Any]]:
     return None  # Not a query — route as task
 
 
-def _route_command(text: str) -> Dict[str, Any]:
-    """Route a command to the best agent via LVP, or answer queries directly."""
+def _route_command(text: str, target_agent: str = "") -> Dict[str, Any]:
+    """Route a command to the best agent via LVP, or answer queries directly.
+
+    If target_agent is specified, bypasses LVP and routes directly to that agent.
+    This is how agents delegate to shared resources (Codex, Gemini) or specific agents.
+    """
     # Check if it's a query first
     query_result = _handle_query(text)
     if query_result is not None:
@@ -416,15 +424,25 @@ def _route_command(text: str) -> Dict[str, Any]:
         estimated_tokens=50_000,
     )
 
-    # Score all agents
     registry = AgentRegistry(config)
-    agents = registry.get_all()
-    ranked = rank_agents_for_task(agents, task)
 
-    if not ranked:
-        return {"error": "No agents available for this task"}
+    # Explicit targeting: bypass LVP, send directly to specified agent
+    if target_agent:
+        best_agent_info = registry.get(target_agent)
+        if not best_agent_info:
+            return {"error": f"Agent not found: {target_agent}"}
+        best_agent = best_agent_info
+        best_score = 1.0  # Explicit routing = perfect score
+        ranked = [(best_agent, best_score)]
+    else:
+        # Auto-route via LVP scoring
+        agents = registry.get_all()
+        ranked = rank_agents_for_task(agents, task)
 
-    best_agent, best_score = ranked[0]
+        if not ranked:
+            return {"error": "No agents available for this task"}
+
+        best_agent, best_score = ranked[0]
 
     # Publish to task stream
     queue = TaskQueue(config)
@@ -531,8 +549,11 @@ async def submit_command(request: Request, body: dict):
     if not text:
         return JSONResponse({"error": "Empty command"}, status_code=400)
 
+    # Optional: explicitly target an agent (bypasses LVP auto-routing)
+    target_agent = body.get("target_agent", "").strip()
+
     # Route and broadcast
-    result = _route_command(text)
+    result = _route_command(text, target_agent=target_agent)
     await manager.broadcast({
         "type": "command_result",
         "data": result,

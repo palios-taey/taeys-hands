@@ -189,8 +189,11 @@ AGENT_PROFILES: Dict[str, Dict[str, Any]] = {
         "role": "remote",
         "worktree_path": "",
         "tmux_session": "",
-        "context_window": 200_000,  # Orchestrates 19 models including Opus 4.6
-        "capabilities": [0.85, 0.80, 0.99, 0.10, 0.80],
+        "context_window": 200_000,  # Full agentic tool: E2B sandboxes, 19 models, web search
+        # Clarity/TRUTH role: truth verification, fact-checking, validation, standards compliance.
+        # NOT generic research. Pierces confusion, validates claims against external reality.
+        # Also capable of code execution (E2B) and multi-model orchestration.
+        "capabilities": [0.85, 0.80, 0.70, 0.10, 0.90],
     },
     "qwen-local": {
         "name": "Qwen Local",
