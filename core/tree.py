@@ -249,12 +249,23 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         except Exception:
             return False
 
-    def _collect_items_from_child(child):
-        """Extract a menu item dict from an AT-SPI child element."""
+    def _collect_items_from_child(child, require_item_showing=False):
+        """Extract a menu item dict from an AT-SPI child element.
+
+        Args:
+            child: AT-SPI accessible child element.
+            require_item_showing: If True, item must have SHOWING state.
+                Use True when searching Firefox root to prevent cross-tab
+                contamination (inactive tab items have extents but no SHOWING).
+        """
         child_role = child.get_role_name() or ''
         child_name = child.get_name() or ''
         if child_name and child_role in _MENU_ITEM_ROLES:
             try:
+                if require_item_showing:
+                    state_set = child.get_state_set()
+                    if not state_set.contains(Atspi.StateType.SHOWING):
+                        return None
                 comp = child.get_component_iface()
                 if comp:
                     ext = comp.get_extents(Atspi.CoordType.SCREEN)
@@ -270,8 +281,18 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 logger.debug(f"Menu item extent error: {e}")
         return None
 
-    def _collect_from(scope, max_depth=15, require_showing=True):
-        """Find first menu with items in scope."""
+    def _collect_from(scope, max_depth=15, require_showing=True,
+                      require_item_showing=False):
+        """Find first menu with items in scope.
+
+        Args:
+            scope: AT-SPI accessible to search from.
+            max_depth: Maximum traversal depth.
+            require_showing: Require menu CONTAINER to be SHOWING/VISIBLE.
+            require_item_showing: Require individual ITEMS to be SHOWING.
+                Critical for Firefox root searches to prevent cross-tab
+                contamination from inactive tab menus.
+        """
         found = []
 
         def search(obj, depth=0):
@@ -296,7 +317,8 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                             child = obj.get_child_at_index(i)
                             if not child:
                                 continue
-                            item = _collect_items_from_child(child)
+                            item = _collect_items_from_child(
+                                child, require_item_showing=require_item_showing)
                             if item:
                                 items.append(item)
                         if items:
@@ -320,9 +342,11 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Then Firefox root (dropdowns render outside document)
+    # Then Firefox root (dropdowns render outside document).
+    # REQUIRE item-level SHOWING to prevent cross-tab contamination:
+    # inactive tab menus have non-zero extents but items lack SHOWING.
     if firefox:
-        items = _collect_from(firefox)
+        items = _collect_from(firefox, require_item_showing=True)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
