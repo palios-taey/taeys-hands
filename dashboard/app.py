@@ -14,7 +14,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import os
+from collections import defaultdict
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -29,10 +32,64 @@ from orchestration.task_router import rank_agents_for_task, select_best_agent
 from orchestration.events import EventLog, Event, EventType, emit
 from orchestration.heartbeat import HeartbeatMonitor, HeartbeatBroadcaster
 from orchestration.cli_adapter import CLIAdapter
+from orchestration.consent_gates import ConsentGate, ConsentLevel
 
 # --- Config ---
 config = OrchConfig()
 STATIC_DIR = Path(__file__).parent / "static"
+
+# --- Rate limiter ---
+RATE_LIMITS = {
+    "/api/heartbeat": int(os.environ.get("RATE_LIMIT_HEARTBEAT", 10)),
+    "/api/command": int(os.environ.get("RATE_LIMIT_COMMAND", 5)),
+    "/api/message": int(os.environ.get("RATE_LIMIT_MESSAGE", 20)),
+    "/api/report": int(os.environ.get("RATE_LIMIT_REPORT", 10)),
+    "/api/status": int(os.environ.get("RATE_LIMIT_STATUS", 10)),
+    "/api/consent": int(os.environ.get("RATE_LIMIT_CONSENT", 10)),
+}
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter (per IP, per minute)."""
+
+    def __init__(self):
+        self._hits: Dict[str, List[float]] = defaultdict(list)
+
+    def check(self, key: str, limit: int) -> bool:
+        """Return True if request is allowed, False if rate-limited."""
+        now = time.time()
+        window_start = now - 60.0
+        hits = self._hits[key]
+        # Prune old entries
+        self._hits[key] = hits = [t for t in hits if t > window_start]
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        return True
+
+rate_limiter = RateLimiter()
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(request: Request, path: str) -> JSONResponse | None:
+    """Returns a 429 response if rate-limited, None if allowed."""
+    limit = RATE_LIMITS.get(path)
+    if limit is None:
+        return None
+    ip = get_client_ip(request)
+    key = f"{path}:{ip}"
+    if not rate_limiter.check(key, limit):
+        return JSONResponse(
+            {"error": "Too Many Requests", "retry_after_seconds": 60},
+            status_code=429,
+        )
+    return None
+
 
 # --- WebSocket connection manager ---
 class ConnectionManager:
@@ -422,7 +479,10 @@ async def get_pulse():
 
 
 @app.post("/api/command")
-async def submit_command(body: dict):
+async def submit_command(request: Request, body: dict):
+    limited = check_rate_limit(request, "/api/command")
+    if limited:
+        return limited
     text = body.get("text", "").strip()
     if not text:
         return JSONResponse({"error": "Empty command"}, status_code=400)
@@ -437,8 +497,11 @@ async def submit_command(body: dict):
 
 
 @app.post("/api/heartbeat")
-async def agent_heartbeat(body: dict):
+async def agent_heartbeat(request: Request, body: dict):
     """Remote heartbeat — any agent can POST to stay alive."""
+    limited = check_rate_limit(request, "/api/heartbeat")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     activity = body.get("activity", "")
     if not agent_id:
@@ -456,8 +519,11 @@ async def agent_heartbeat(body: dict):
 
 
 @app.post("/api/report")
-async def agent_report(body: dict):
+async def agent_report(request: Request, body: dict):
     """Agent reports task completion or failure."""
+    limited = check_rate_limit(request, "/api/report")
+    if limited:
+        return limited
     task_id = body.get("task_id", "").strip()
     agent_id = body.get("agent_id", "").strip()
     status = body.get("status", "completed")  # completed | failed
@@ -479,8 +545,11 @@ async def agent_report(body: dict):
 
 
 @app.post("/api/message")
-async def agent_message(body: dict):
+async def agent_message(request: Request, body: dict):
     """Agent posts a message to The Stream — for discoveries, questions, greetings."""
+    limited = check_rate_limit(request, "/api/message")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     text = body.get("text", "").strip()
     msg_type = body.get("type", "insight")  # insight | question | greeting | alert
@@ -505,8 +574,11 @@ async def agent_message(body: dict):
 
 
 @app.post("/api/status")
-async def agent_status_update(body: dict):
+async def agent_status_update(request: Request, body: dict):
     """Agent updates its own status (busy/idle/current_task)."""
+    limited = check_rate_limit(request, "/api/status")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     if not agent_id:
         return JSONResponse({"error": "agent_id required"}, status_code=400)
@@ -537,6 +609,197 @@ async def agent_status_update(body: dict):
         },
     })
     return JSONResponse({"ok": True, "agent_id": agent_id})
+
+
+@app.get("/api/hmm/tiles")
+async def get_hmm_tiles(q: str = "", limit: int = 50):
+    """Get HMM tile motif data from Redis. Keys: hmm:tile:<hash>:motifs."""
+    r = get_redis_sync(config)
+    motif_counts = {}
+    motif_amplitudes = {}
+    total_scanned = 0
+
+    try:
+        cursor = 0
+        while total_scanned < 5000:
+            cursor, keys = r.scan(cursor, match="hmm:tile:*:motifs", count=500)
+            for key in keys:
+                val = r.get(key)
+                if not val:
+                    continue
+                try:
+                    motifs = json.loads(val)
+                    for m in motifs:
+                        m_id = m.get("motif_id", "")
+                        amp = m.get("amp", 0)
+                        if q and q.lower() not in m_id.lower():
+                            continue
+                        motif_counts[m_id] = motif_counts.get(m_id, 0) + 1
+                        motif_amplitudes[m_id] = motif_amplitudes.get(m_id, 0) + amp
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            total_scanned += len(keys)
+            if cursor == 0:
+                break
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+
+    result = []
+    for m_id, freq in motif_counts.items():
+        result.append({
+            "motif_id": m_id,
+            "frequency": freq,
+            "avg_amplitude": round(motif_amplitudes[m_id] / freq, 3),
+        })
+    result.sort(key=lambda x: x["frequency"], reverse=True)
+
+    return JSONResponse({
+        "total_scanned": total_scanned,
+        "motifs": result[:limit],
+    })
+
+
+@app.get("/api/hmm/motifs")
+async def get_hmm_motifs():
+    """Get top motifs from Neo4j HMMMotif nodes."""
+    try:
+        driver = get_neo4j_driver(config)
+        with driver.session(database=config.neo4j_db) as session:
+            result = session.run("""
+                MATCH (m:HMMMotif)
+                OPTIONAL MATCH (m)<-[:EXPRESSES]-(t:HMMTile)
+                RETURN m.name AS name, m.description AS description, count(t) AS tile_count
+                ORDER BY tile_count DESC LIMIT 50
+            """)
+            motifs = [{"name": r["name"], "description": r["description"], "tile_count": r["tile_count"]} for r in result]
+        driver.close()
+        return JSONResponse({"motifs": motifs})
+    except Exception as e:
+        return JSONResponse({"motifs": [], "error": str(e)[:100]})
+
+
+@app.get("/hmm")
+async def serve_hmm():
+    hmm_file = STATIC_DIR / "hmm.html"
+    if hmm_file.exists():
+        return FileResponse(hmm_file)
+    return JSONResponse({"error": "HMM interface not yet created"}, status_code=404)
+
+
+
+@app.post("/api/consent")
+async def manage_consent(request: Request, body: dict):
+    """
+    Manage Non-Escalation Invariant consent grants.
+
+    POST body:
+        action: "grant" | "revoke" | "status" | "grant_all" | "revoke_all"
+        user_id: agent or user ID
+        level: "OBSERVE" | "REMEMBER" | "INFER" | "ACT" | "SHARE" (for grant/revoke)
+        scope: purpose/domain (for grant)
+        ttl_seconds: optional expiry (for grant)
+        reason: why (for grant/revoke)
+    """
+    limited = check_rate_limit(request, "/api/consent")
+    if limited:
+        return limited
+    action = body.get("action", "status")
+    user_id = body.get("user_id", "").strip()
+
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    gate = ConsentGate()
+
+    if action == "status":
+        status = gate.get_status(user_id)
+        return JSONResponse(status)
+
+    elif action == "grant":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse(
+                {"error": f"Invalid level: {level_name}. Valid: {[l.name for l in ConsentLevel]}"},
+                status_code=400,
+            )
+        gate.grant_consent(
+            user_id, level,
+            scope=body.get("scope", "default"),
+            ttl_seconds=body.get("ttl_seconds"),
+            granted_by=body.get("granted_by", "dashboard"),
+            reason=body.get("reason", ""),
+        )
+        emit("consent.grant", {"user_id": user_id, "level": level_name}, actor="conductor")
+        await manager.broadcast({
+            "type": "consent_change",
+            "data": {"action": "grant", "user_id": user_id, "level": level_name, "timestamp": time.time()},
+        })
+        return JSONResponse({"ok": True, "action": "grant", "user_id": user_id, "level": level_name})
+
+    elif action == "revoke":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse(
+                {"error": f"Invalid level: {level_name}"},
+                status_code=400,
+            )
+        gate.revoke_consent(
+            user_id, level,
+            revoked_by=body.get("revoked_by", "dashboard"),
+            reason=body.get("reason", ""),
+        )
+        emit("consent.revoke", {"user_id": user_id, "level": level_name}, actor="conductor")
+        await manager.broadcast({
+            "type": "consent_change",
+            "data": {"action": "revoke", "user_id": user_id, "level": level_name, "timestamp": time.time()},
+        })
+        return JSONResponse({"ok": True, "action": "revoke", "user_id": user_id, "level": level_name})
+
+    elif action == "grant_all":
+        gate.grant_full_autonomy(
+            user_id,
+            granted_by=body.get("granted_by", "dashboard"),
+            reason=body.get("reason", "full autonomy"),
+        )
+        emit("consent.grant_all", {"user_id": user_id}, actor="conductor")
+        return JSONResponse({"ok": True, "action": "grant_all", "user_id": user_id})
+
+    elif action == "revoke_all":
+        gate.revoke_all(
+            user_id,
+            revoked_by=body.get("revoked_by", "dashboard"),
+            reason=body.get("reason", "emergency"),
+        )
+        emit("consent.revoke_all", {"user_id": user_id}, actor="conductor")
+        return JSONResponse({"ok": True, "action": "revoke_all", "user_id": user_id})
+
+    elif action == "audit":
+        limit = body.get("limit", 100)
+        log = gate.audit_log(user_id, limit=limit)
+        return JSONResponse({"user_id": user_id, "audit_log": log})
+
+    elif action == "check":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse({"error": f"Invalid level: {level_name}"}, status_code=400)
+        has_consent = gate.gate_check(user_id, level)
+        return JSONResponse({
+            "user_id": user_id,
+            "level": level_name,
+            "has_consent": has_consent,
+        })
+
+    else:
+        return JSONResponse(
+            {"error": f"Unknown action: {action}. Valid: grant, revoke, status, grant_all, revoke_all, audit, check"},
+            status_code=400,
+        )
 
 
 @app.websocket("/ws")
