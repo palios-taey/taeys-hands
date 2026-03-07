@@ -29,6 +29,7 @@ from orchestration.task_router import rank_agents_for_task, select_best_agent
 from orchestration.events import EventLog, Event, EventType, emit
 from orchestration.heartbeat import HeartbeatMonitor, HeartbeatBroadcaster
 from orchestration.cli_adapter import CLIAdapter
+from orchestration.consent_gates import ConsentGate, ConsentLevel
 
 # --- Config ---
 config = OrchConfig()
@@ -613,6 +614,118 @@ async def serve_hmm():
         return FileResponse(hmm_file)
     return JSONResponse({"error": "HMM interface not yet created"}, status_code=404)
 
+
+
+@app.post("/api/consent")
+async def manage_consent(body: dict):
+    """
+    Manage Non-Escalation Invariant consent grants.
+
+    POST body:
+        action: "grant" | "revoke" | "status" | "grant_all" | "revoke_all"
+        user_id: agent or user ID
+        level: "OBSERVE" | "REMEMBER" | "INFER" | "ACT" | "SHARE" (for grant/revoke)
+        scope: purpose/domain (for grant)
+        ttl_seconds: optional expiry (for grant)
+        reason: why (for grant/revoke)
+    """
+    action = body.get("action", "status")
+    user_id = body.get("user_id", "").strip()
+
+    if not user_id:
+        return JSONResponse({"error": "user_id required"}, status_code=400)
+
+    gate = ConsentGate()
+
+    if action == "status":
+        status = gate.get_status(user_id)
+        return JSONResponse(status)
+
+    elif action == "grant":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse(
+                {"error": f"Invalid level: {level_name}. Valid: {[l.name for l in ConsentLevel]}"},
+                status_code=400,
+            )
+        gate.grant_consent(
+            user_id, level,
+            scope=body.get("scope", "default"),
+            ttl_seconds=body.get("ttl_seconds"),
+            granted_by=body.get("granted_by", "dashboard"),
+            reason=body.get("reason", ""),
+        )
+        emit("consent.grant", {"user_id": user_id, "level": level_name}, actor="conductor")
+        await manager.broadcast({
+            "type": "consent_change",
+            "data": {"action": "grant", "user_id": user_id, "level": level_name, "timestamp": time.time()},
+        })
+        return JSONResponse({"ok": True, "action": "grant", "user_id": user_id, "level": level_name})
+
+    elif action == "revoke":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse(
+                {"error": f"Invalid level: {level_name}"},
+                status_code=400,
+            )
+        gate.revoke_consent(
+            user_id, level,
+            revoked_by=body.get("revoked_by", "dashboard"),
+            reason=body.get("reason", ""),
+        )
+        emit("consent.revoke", {"user_id": user_id, "level": level_name}, actor="conductor")
+        await manager.broadcast({
+            "type": "consent_change",
+            "data": {"action": "revoke", "user_id": user_id, "level": level_name, "timestamp": time.time()},
+        })
+        return JSONResponse({"ok": True, "action": "revoke", "user_id": user_id, "level": level_name})
+
+    elif action == "grant_all":
+        gate.grant_full_autonomy(
+            user_id,
+            granted_by=body.get("granted_by", "dashboard"),
+            reason=body.get("reason", "full autonomy"),
+        )
+        emit("consent.grant_all", {"user_id": user_id}, actor="conductor")
+        return JSONResponse({"ok": True, "action": "grant_all", "user_id": user_id})
+
+    elif action == "revoke_all":
+        gate.revoke_all(
+            user_id,
+            revoked_by=body.get("revoked_by", "dashboard"),
+            reason=body.get("reason", "emergency"),
+        )
+        emit("consent.revoke_all", {"user_id": user_id}, actor="conductor")
+        return JSONResponse({"ok": True, "action": "revoke_all", "user_id": user_id})
+
+    elif action == "audit":
+        limit = body.get("limit", 100)
+        log = gate.audit_log(user_id, limit=limit)
+        return JSONResponse({"user_id": user_id, "audit_log": log})
+
+    elif action == "check":
+        level_name = body.get("level", "").upper()
+        try:
+            level = ConsentLevel[level_name]
+        except KeyError:
+            return JSONResponse({"error": f"Invalid level: {level_name}"}, status_code=400)
+        has_consent = gate.gate_check(user_id, level)
+        return JSONResponse({
+            "user_id": user_id,
+            "level": level_name,
+            "has_consent": has_consent,
+        })
+
+    else:
+        return JSONResponse(
+            {"error": f"Unknown action: {action}. Valid: grant, revoke, status, grant_all, revoke_all, audit, check"},
+            status_code=400,
+        )
 
 
 @app.websocket("/ws")
