@@ -14,7 +14,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import os
+from collections import defaultdict
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -34,6 +37,59 @@ from orchestration.consent_gates import ConsentGate, ConsentLevel
 # --- Config ---
 config = OrchConfig()
 STATIC_DIR = Path(__file__).parent / "static"
+
+# --- Rate limiter ---
+RATE_LIMITS = {
+    "/api/heartbeat": int(os.environ.get("RATE_LIMIT_HEARTBEAT", 10)),
+    "/api/command": int(os.environ.get("RATE_LIMIT_COMMAND", 5)),
+    "/api/message": int(os.environ.get("RATE_LIMIT_MESSAGE", 20)),
+    "/api/report": int(os.environ.get("RATE_LIMIT_REPORT", 10)),
+    "/api/status": int(os.environ.get("RATE_LIMIT_STATUS", 10)),
+    "/api/consent": int(os.environ.get("RATE_LIMIT_CONSENT", 10)),
+}
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter (per IP, per minute)."""
+
+    def __init__(self):
+        self._hits: Dict[str, List[float]] = defaultdict(list)
+
+    def check(self, key: str, limit: int) -> bool:
+        """Return True if request is allowed, False if rate-limited."""
+        now = time.time()
+        window_start = now - 60.0
+        hits = self._hits[key]
+        # Prune old entries
+        self._hits[key] = hits = [t for t in hits if t > window_start]
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        return True
+
+rate_limiter = RateLimiter()
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(request: Request, path: str) -> JSONResponse | None:
+    """Returns a 429 response if rate-limited, None if allowed."""
+    limit = RATE_LIMITS.get(path)
+    if limit is None:
+        return None
+    ip = get_client_ip(request)
+    key = f"{path}:{ip}"
+    if not rate_limiter.check(key, limit):
+        return JSONResponse(
+            {"error": "Too Many Requests", "retry_after_seconds": 60},
+            status_code=429,
+        )
+    return None
+
 
 # --- WebSocket connection manager ---
 class ConnectionManager:
@@ -423,7 +479,10 @@ async def get_pulse():
 
 
 @app.post("/api/command")
-async def submit_command(body: dict):
+async def submit_command(request: Request, body: dict):
+    limited = check_rate_limit(request, "/api/command")
+    if limited:
+        return limited
     text = body.get("text", "").strip()
     if not text:
         return JSONResponse({"error": "Empty command"}, status_code=400)
@@ -438,8 +497,11 @@ async def submit_command(body: dict):
 
 
 @app.post("/api/heartbeat")
-async def agent_heartbeat(body: dict):
+async def agent_heartbeat(request: Request, body: dict):
     """Remote heartbeat — any agent can POST to stay alive."""
+    limited = check_rate_limit(request, "/api/heartbeat")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     activity = body.get("activity", "")
     if not agent_id:
@@ -457,8 +519,11 @@ async def agent_heartbeat(body: dict):
 
 
 @app.post("/api/report")
-async def agent_report(body: dict):
+async def agent_report(request: Request, body: dict):
     """Agent reports task completion or failure."""
+    limited = check_rate_limit(request, "/api/report")
+    if limited:
+        return limited
     task_id = body.get("task_id", "").strip()
     agent_id = body.get("agent_id", "").strip()
     status = body.get("status", "completed")  # completed | failed
@@ -480,8 +545,11 @@ async def agent_report(body: dict):
 
 
 @app.post("/api/message")
-async def agent_message(body: dict):
+async def agent_message(request: Request, body: dict):
     """Agent posts a message to The Stream — for discoveries, questions, greetings."""
+    limited = check_rate_limit(request, "/api/message")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     text = body.get("text", "").strip()
     msg_type = body.get("type", "insight")  # insight | question | greeting | alert
@@ -506,8 +574,11 @@ async def agent_message(body: dict):
 
 
 @app.post("/api/status")
-async def agent_status_update(body: dict):
+async def agent_status_update(request: Request, body: dict):
     """Agent updates its own status (busy/idle/current_task)."""
+    limited = check_rate_limit(request, "/api/status")
+    if limited:
+        return limited
     agent_id = body.get("agent_id", "").strip()
     if not agent_id:
         return JSONResponse({"error": "agent_id required"}, status_code=400)
@@ -617,7 +688,7 @@ async def serve_hmm():
 
 
 @app.post("/api/consent")
-async def manage_consent(body: dict):
+async def manage_consent(request: Request, body: dict):
     """
     Manage Non-Escalation Invariant consent grants.
 
@@ -629,6 +700,9 @@ async def manage_consent(body: dict):
         ttl_seconds: optional expiry (for grant)
         reason: why (for grant/revoke)
     """
+    limited = check_rate_limit(request, "/api/consent")
+    if limited:
+        return limited
     action = body.get("action", "status")
     user_id = body.get("user_id", "").strip()
 
