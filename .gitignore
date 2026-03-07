@@ -30,11 +30,8 @@ CLAUDE.local.md
 .claude/hooks/task_reporter.py
 .claude/agent_operations.md
 
-# Local infrastructure (contains IPs, usernames, paths)
-# These are deployment-specific — not part of the public tool
+# Local infrastructure config
 .mcp.json
-orchestration/
-dashboard/
 agents/hmm_enrichment_worker.sh
 agents/hmm_worker.sh
 agents/hmm_worker_start.sh
