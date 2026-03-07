@@ -130,14 +130,12 @@ def _check_dropdown_baseline(platform: str, dropdown_name: str,
             current_names.add(lower)
             current_name_original[lower] = name
 
-    # Load stored baseline (previous state)
+    # Load stored baseline (first-seen state, never overwritten)
     stored_json = redis_client.get(baseline_key)
 
-    # Always update to current state — tracks drift over time
-    redis_client.set(baseline_key, json.dumps(sorted(current_names)))
-
     if stored_json is None:
-        # First time seeing this dropdown - stored, no comparison yet
+        # First time seeing this dropdown - store baseline, no comparison yet
+        redis_client.set(baseline_key, json.dumps(sorted(current_names)))
         logger.info(
             f"Dropdown baseline stored for {platform}/{dropdown_name}: "
             f"{len(current_names)} items"

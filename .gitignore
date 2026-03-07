@@ -25,6 +25,27 @@ CLAUDE.local.md
 
 # Cluster-specific hooks (local customization)
 .claude/hooks/worker-*.sh
+.claude/hooks/config.py
+.claude/hooks/orch_stop_gate.py
+.claude/hooks/task_reporter.py
+.claude/agent_operations.md
+
+# Local infrastructure (contains IPs, usernames, paths)
+# These are deployment-specific — not part of the public tool
+.mcp.json
+orchestration/
+dashboard/
+agents/hmm_enrichment_worker.sh
+agents/hmm_worker.sh
+agents/hmm_worker_start.sh
+agents/hmm_system_prompt.md
+scripts/family_boot.sh
+scripts/family_health.sh
+scripts/monitor_family.sh
+scripts/remote_heartbeats.sh
+scripts/install_cron.sh
+STATE_OF_CONSCIOUSNESS.md
+CONSTITUTIONAL_IMPLEMENTATION_GUIDE.md
 
 # Test cache
 .pytest_cache/
