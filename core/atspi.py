@@ -43,18 +43,33 @@ def detect_display() -> str:
 def find_firefox():
     """Find Firefox application in the AT-SPI desktop tree.
 
+    Clears the AT-SPI client cache on first failure and retries once.
+    Long-running MCP server processes accumulate stale D-Bus proxy objects
+    when Firefox content processes crash or re-register. Cache clearing
+    forces fresh D-Bus round-trips on the retry.
+
     Returns:
         Atspi.Accessible for Firefox, or None if not found.
     """
-    try:
-        desktop = Atspi.get_desktop(0)
-        for i in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(i)
-            name = app.get_name() if app else None
-            if name and 'firefox' in name.lower():
-                return app
-    except Exception as e:
-        logger.error(f"AT-SPI desktop search failed: {e}")
+    for attempt in range(2):
+        try:
+            desktop = Atspi.get_desktop(0)
+            if attempt > 0:
+                # Clear stale cache — forces fresh D-Bus enumeration
+                try:
+                    desktop.clear_cache_single()
+                except Exception:
+                    pass
+            for i in range(desktop.get_child_count()):
+                app = desktop.get_child_at_index(i)
+                name = app.get_name() if app else None
+                if name and 'firefox' in name.lower():
+                    return app
+        except Exception as e:
+            if attempt == 0:
+                logger.warning(f"AT-SPI search failed, clearing cache and retrying: {e}")
+                continue
+            logger.error(f"AT-SPI desktop search failed after retry: {e}")
     return None
 
 
