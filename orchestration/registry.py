@@ -212,10 +212,10 @@ AGENT_PROFILES: Dict[str, Dict[str, Any]] = {
         "worktree_path": "",
         "tmux_session": "",
         "context_window": 200_000,  # Full agentic tool: E2B sandboxes, 19 models, web search
-        # Clarity/TRUTH role: truth verification, fact-checking, validation, standards compliance.
-        # NOT generic research. Pierces confusion, validates claims against external reality.
-        # Also capable of code execution (E2B) and multi-model orchestration.
-        "capabilities": [0.85, 0.80, 0.70, 0.10, 0.90],
+        # Clarity/TRUTH role: research, fact-checking, validation.
+        # Strong at research and verification. NOT a code reviewer or code generator.
+        # [reasoning, codegen, research, privacy, review]
+        "capabilities": [0.50, 0.20, 0.99, 0.10, 0.30],
     },
     "qwen-local": {
         "name": "Qwen Local",
