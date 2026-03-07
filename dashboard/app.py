@@ -12,7 +12,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 import os
 from collections import defaultdict
@@ -359,8 +359,48 @@ def _extract_capability_tags(text: str) -> List[str]:
     return list(tags) if tags else ["reasoning"]  # Default: general reasoning
 
 
+def _handle_query(text: str) -> Optional[Dict[str, Any]]:
+    """Handle status queries directly without routing to agents."""
+    text_lower = text.lower().strip()
+
+    # "status" → all agents
+    if text_lower in ("status", "who's alive", "agents", "family status"):
+        return {"type": "status", "agents": _get_agents_data()}
+
+    # "what's <agent> doing?" or "status <agent>"
+    for aid in AGENT_PROFILES:
+        name = AGENT_PROFILES[aid].get("name", "").lower()
+        short = aid.split("-")[-1]
+        if name in text_lower or short in text_lower:
+            if any(w in text_lower for w in ["what", "status", "doing", "working"]):
+                registry = AgentRegistry(config)
+                agent = registry.get(aid)
+                if agent:
+                    r = get_redis_sync(config)
+                    activity = r.hgetall(f"{config.activity_prefix}{aid}")
+                    return {
+                        "type": "agent_query",
+                        "agent": agent.to_dict(),
+                        "activity": activity,
+                    }
+
+    # Memory search: "search <topic>" or "find <topic>"
+    if text_lower.startswith(("search ", "find ", "recall ")):
+        query = text[text.index(" ")+1:].strip()
+        mq = _get_mq()
+        results = mq.search(query, limit=10)
+        return {"type": "memory_search", "query": query, "count": len(results), "results": results}
+
+    return None  # Not a query — route as task
+
+
 def _route_command(text: str) -> Dict[str, Any]:
-    """Route a command to the best agent via LVP."""
+    """Route a command to the best agent via LVP, or answer queries directly."""
+    # Check if it's a query first
+    query_result = _handle_query(text)
+    if query_result is not None:
+        return query_result
+
     tags = _extract_capability_tags(text)
     task_id = f"task-{uuid.uuid4().hex[:8]}"
 
@@ -395,7 +435,7 @@ def _route_command(text: str) -> Dict[str, Any]:
 
     # Deliver task to agent via tmux injection
     delivered = False
-    delivery_msg = f"[TASK {task_id}] {text}"
+    delivery_msg = f"[TASK {task_id}] {text}\n\nReport when done: curl -X POST http://10.0.0.68:5001/api/report -H 'Content-Type: application/json' -d '{{\"task_id\": \"{task_id}\", \"agent_id\": \"{best_agent.agent_id}\", \"status\": \"completed\", \"summary\": \"<your summary>\"}}'"
     if best_agent.role.value in ("worker", "shared"):
         delivered = cli_adapter.send_task(best_agent.agent_id, delivery_msg)
         if delivered:
