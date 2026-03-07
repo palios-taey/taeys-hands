@@ -1,15 +1,17 @@
 """
 taey_click - Coordinate-based clicking.
 
-Click strategy is platform-aware:
-- Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
-- ChatGPT/Grok/others: xdotool first (AT-SPI do_action lies - returns True
-  without actually triggering React event handlers)
+Click strategy is data-driven via platform YAML `click_strategy` field:
+- atspi_first: AT-SPI do_action → fresh AT-SPI scan → xdotool (Gemini)
+- xdotool_first: xdotool coordinate click → AT-SPI fallback (ChatGPT, Grok, etc.)
 """
 
+import os
 import time
 import logging
 from typing import Any, Dict, Optional
+
+import yaml
 
 from core import atspi, input as inp
 from core.atspi_interact import find_element_at, atspi_click, cache_elements
@@ -17,11 +19,34 @@ from core.tree import find_elements
 
 logger = logging.getLogger(__name__)
 
+PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'platforms')
 
 _CLICKABLE_ROLES = {
     'push button', 'toggle button', 'link', 'entry',
     'check menu item', 'menu item', 'radio menu item',
 }
+
+# Cache loaded click strategies so we don't re-read YAML on every click
+_click_strategy_cache: Dict[str, str] = {}
+
+
+def _get_click_strategy(platform: str) -> str:
+    """Read click_strategy from platform YAML. Defaults to xdotool_first."""
+    if platform in _click_strategy_cache:
+        return _click_strategy_cache[platform]
+
+    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+    strategy = 'xdotool_first'
+    try:
+        with open(yaml_path) as f:
+            data = yaml.safe_load(f)
+        if data and 'click_strategy' in data:
+            strategy = data['click_strategy']
+    except (FileNotFoundError, yaml.YAMLError):
+        pass
+
+    _click_strategy_cache[platform] = strategy
+    return strategy
 
 
 def _fresh_atspi_find(platform: str, x: int, y: int,
@@ -73,52 +98,42 @@ def _fresh_atspi_find(platform: str, x: int, y: int,
     return best
 
 
-def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
-    """Click at specific screen coordinates.
+def _click_atspi_first(platform: str, x: int, y: int) -> Dict[str, Any]:
+    """AT-SPI do_action primary, xdotool fallback."""
+    element = find_element_at(platform, x, y)
+    if element and atspi_click(element):
+        time.sleep(0.3)
+        return {
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "atspi",
+        }
 
-    Strategy is platform-aware:
-    - Gemini: AT-SPI do_action first (xdotool coordinate clicks unreliable)
-    - Others: xdotool first (AT-SPI do_action lies on React)
+    # Cache miss — fresh AT-SPI tree scan
+    logger.info(f"AT-SPI cache miss at ({x},{y}), doing fresh scan")
+    element = _fresh_atspi_find(platform, x, y)
+    if element and atspi_click(element):
+        time.sleep(0.3)
+        return {
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "atspi_fresh",
+        }
 
-    Returns what happened. Claude verifies by inspecting.
-    """
-    if not inp.switch_to_platform(platform):
-        return {"error": f"Failed to switch to {platform} tab"}
+    # xdotool last resort
+    logger.warning(f"Fresh AT-SPI also missed at ({x},{y}), trying xdotool")
+    if inp.click_at(x, y):
+        time.sleep(0.3)
+        return {
+            "platform": platform,
+            "clicked_at": {"x": x, "y": y},
+            "method": "xdotool",
+        }
+    return {"error": f"Click at ({x}, {y}) failed via AT-SPI (cached+fresh) and xdotool"}
 
-    # Gemini: AT-SPI do_action is more reliable than xdotool coordinates
-    if platform == 'gemini':
-        element = find_element_at(platform, x, y)
-        if element and atspi_click(element):
-            time.sleep(0.3)
-            return {
-                "platform": platform,
-                "clicked_at": {"x": x, "y": y},
-                "method": "atspi",
-            }
 
-        # Cache miss — fresh AT-SPI tree scan (still AT-SPI, not xdotool)
-        logger.info(f"Gemini cache miss at ({x},{y}), doing fresh AT-SPI scan")
-        element = _fresh_atspi_find(platform, x, y)
-        if element and atspi_click(element):
-            time.sleep(0.3)
-            return {
-                "platform": platform,
-                "clicked_at": {"x": x, "y": y},
-                "method": "atspi_fresh",
-            }
-
-        # xdotool last resort for Gemini
-        logger.warning(f"Gemini fresh AT-SPI also missed at ({x},{y}), trying xdotool")
-        if inp.click_at(x, y):
-            time.sleep(0.3)
-            return {
-                "platform": platform,
-                "clicked_at": {"x": x, "y": y},
-                "method": "xdotool",
-            }
-        return {"error": f"Click at ({x}, {y}) failed via AT-SPI (cached+fresh) and xdotool"}
-
-    # Other platforms: xdotool coordinate click is PRIMARY
+def _click_xdotool_first(platform: str, x: int, y: int) -> Dict[str, Any]:
+    """xdotool coordinate click primary, AT-SPI fallback."""
     if inp.click_at(x, y):
         time.sleep(0.3)
         return {
@@ -127,7 +142,7 @@ def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
             "method": "xdotool",
         }
 
-    # AT-SPI fallback for non-Gemini
+    # AT-SPI fallback
     logger.warning(f"xdotool click failed at ({x},{y}), trying AT-SPI do_action")
     element = find_element_at(platform, x, y)
     if element and atspi_click(element):
@@ -139,3 +154,23 @@ def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
         }
 
     return {"error": f"Click at ({x}, {y}) failed via both xdotool and AT-SPI"}
+
+
+def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
+    """Click at specific screen coordinates.
+
+    Strategy is read from platform YAML `click_strategy` field:
+    - atspi_first: AT-SPI do_action → fresh scan → xdotool
+    - xdotool_first: xdotool → AT-SPI fallback
+
+    Returns what happened. Claude verifies by inspecting.
+    """
+    if not inp.switch_to_platform(platform):
+        return {"error": f"Failed to switch to {platform} tab"}
+
+    strategy = _get_click_strategy(platform)
+
+    if strategy == 'atspi_first':
+        return _click_atspi_first(platform, x, y)
+    else:
+        return _click_xdotool_first(platform, x, y)

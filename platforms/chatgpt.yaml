@@ -32,6 +32,9 @@ capabilities:
     - Explore Apps Browse ChatGPT plugins/apps
   sources: []
 
+# Click strategy: xdotool_first (React portals hide elements from AT-SPI do_action)
+click_strategy: xdotool_first
+
 quirks:
   # OpenAI has AI countermeasures detecting AT-SPI patterns
   # AT-SPI may show garbage elements, tabs may navigate elsewhere
