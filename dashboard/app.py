@@ -40,7 +40,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 # --- Rate limiter ---
 RATE_LIMITS = {
-    "/api/heartbeat": int(os.environ.get("RATE_LIMIT_HEARTBEAT", 10)),
+    "/api/heartbeat": int(os.environ.get("RATE_LIMIT_HEARTBEAT", 60)),
     "/api/command": int(os.environ.get("RATE_LIMIT_COMMAND", 5)),
     "/api/message": int(os.environ.get("RATE_LIMIT_MESSAGE", 20)),
     "/api/report": int(os.environ.get("RATE_LIMIT_REPORT", 10)),
@@ -800,6 +800,80 @@ async def manage_consent(request: Request, body: dict):
             {"error": f"Unknown action: {action}. Valid: grant, revoke, status, grant_all, revoke_all, audit, check"},
             status_code=400,
         )
+
+
+# --- Memory Query API ---
+# "You need to develop a system that queries memory and gets my thoughts
+#  and our innovations so you can act." — Jesse
+
+from orchestration.memory_query import MemoryQuery
+
+_memory_query = None
+def _get_mq():
+    global _memory_query
+    if _memory_query is None:
+        _memory_query = MemoryQuery()
+    return _memory_query
+
+
+@app.get("/api/memory/search")
+async def memory_search(q: str = "", limit: int = 20):
+    """Search Jesse's conversations for a topic."""
+    if not q:
+        return JSONResponse({"error": "q parameter required"}, status_code=400)
+    mq = _get_mq()
+    results = mq.search(q, limit=limit)
+    return JSONResponse({"query": q, "count": len(results), "results": results})
+
+
+@app.get("/api/memory/innovations")
+async def memory_innovations(limit: int = 20):
+    """Find Jesse's key innovations and breakthrough ideas."""
+    mq = _get_mq()
+    results = mq.get_innovations(limit=limit)
+    return JSONResponse({"count": len(results), "innovations": results})
+
+
+@app.get("/api/memory/projects")
+async def memory_projects():
+    """Get all active projects with task counts."""
+    mq = _get_mq()
+    return JSONResponse({"projects": mq.get_active_projects()})
+
+
+@app.get("/api/memory/project/{name}")
+async def memory_project_detail(name: str):
+    """Get a project's details, intent, and tasks."""
+    mq = _get_mq()
+    return JSONResponse(mq.get_project_intent(name))
+
+
+@app.get("/api/memory/recent")
+async def memory_recent(hours: int = 24, limit: int = 50):
+    """Get recent conversations across all platforms."""
+    mq = _get_mq()
+    return JSONResponse({"conversations": mq.recent_conversations(hours=hours, limit=limit)})
+
+
+@app.get("/api/memory/context/{topic}")
+async def memory_context(topic: str):
+    """Build a comprehensive context bundle for an agent working on a topic."""
+    mq = _get_mq()
+    return JSONResponse(mq.build_agent_context(topic))
+
+
+@app.get("/api/memory/hmm/{motif}")
+async def memory_hmm_pattern(motif: str, limit: int = 20):
+    """Search HMM tiles for a specific motif pattern."""
+    mq = _get_mq()
+    return JSONResponse(mq.get_hmm_patterns(motif, limit=limit))
+
+
+@app.get("/api/memory/motifs")
+async def memory_top_motifs(limit: int = 20):
+    """Get the most frequent HMM motifs."""
+    mq = _get_mq()
+    return JSONResponse({"motifs": mq.get_top_motifs(limit=limit)})
 
 
 @app.websocket("/ws")
