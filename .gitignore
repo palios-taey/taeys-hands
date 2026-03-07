@@ -25,9 +25,6 @@ CLAUDE.local.md
 
 # Cluster-specific hooks (local customization)
 .claude/hooks/worker-*.sh
-.claude/hooks/config.py
-.claude/hooks/orch_stop_gate.py
-.claude/hooks/task_reporter.py
 .claude/agent_operations.md
 
 # Local infrastructure config
