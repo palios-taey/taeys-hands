@@ -245,10 +245,10 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 
 | Platform | Send | Attach | Default Model | Audit/Dream Mode | Notes |
 |----------|------|--------|---------------|-----------------|-------|
-| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | GPT-5.2 (temp chat) | 5.2 Pro Extended Thinking | xdotool fails on dropdown items - use keyboard nav |
+| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | Auto (GPT-5.2 on temp chats) | 5.2 Pro Extended Thinking | xdotool fails on dropdown items - use keyboard nav |
 | Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | Extended Thinking (or Research) | xdotool works on Claude dropdowns |
 | Gemini | Enter | "Open upload file menu" → "Upload files" | 3.1 Pro | Deep Think (or Deep Research) | File attach moves input Y - always re-inspect |
-| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Grok 4.20 Beta | Grok 4.20 Beta | Files persist across sessions! Check for stale files. |
+| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Auto (chooses Fast/Expert) | Grok 4.20 Beta (Heavy mode) | Files persist across sessions! Check for stale files. |
 | Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Deep Research | Copy=summary only; Export>Download for full |
 
 **Dropdown Menu Item Clicks**: ChatGPT and Grok dropdown items do NOT respond to xdotool coordinate clicks (React event handlers). Use keyboard navigation: click the dropdown trigger, then `Down` arrow + `Enter` to select the first item. Claude and Gemini dropdowns DO respond to xdotool clicks.
@@ -455,6 +455,7 @@ See `agents/README.md` for full configuration details.
 - Slow with large packages (3-4 minutes for big attachments).
 
 ### Gemini
+- **Current model is Gemini 3.1 Pro** (not 2.5 Pro — that is deprecated).
 - **AT-SPI `do_action(0)` is more reliable than xdotool clicks** for ALL Gemini buttons.
 - Mode picker (Fast Answers/Thinking/Pro) is SEPARATE from Tools menu.
 - Tools dropdown items use `check menu item` role (not regular `menu item`).
@@ -466,7 +467,8 @@ See `agents/README.md` for full configuration details.
 ### Grok
 - Copy buttons may report zero-size extents in AT-SPI. Use `do_action(0)` directly instead of coordinate clicks.
 - Processes large packages poorly (2/12 items from 674KB file). Keep packages small.
-- SuperGrok HEAVY is default. NO visible attach/file button on new chat page.
+- Default mode is Auto (chooses Fast or Expert). Heavy mode uses Grok 4.20 Beta.
+- 72.1% HMM enrichment failure rate historically.
 
 ### Perplexity
 - **Copy button returns summary only.** For Deep Research, must use Export > Download as Markdown.
