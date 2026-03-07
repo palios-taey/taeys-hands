@@ -33,13 +33,21 @@ AGENT_SESSIONS: Dict[str, Dict[str, str]] = {
         "tmux_session": "claw",
         "ssh": "spark@10.0.0.10",
     },
-    "gemini-cli": {
+    "conductor-gemini": {
         "machine": "spark1",
-        "tmux_session": "gemini-cli",
+        "tmux_session": "conductor-gemini",
     },
-    "codex-cli": {
+    "conductor-codex": {
         "machine": "spark1",
-        "tmux_session": "codex-cli",
+        "tmux_session": "conductor-codex",
+    },
+    "weaver-gemini": {
+        "machine": "spark1",
+        "tmux_session": "weaver-gemini",
+    },
+    "weaver-codex": {
+        "machine": "spark1",
+        "tmux_session": "weaver-codex",
     },
     "qwen-local": {
         "machine": "thor",
