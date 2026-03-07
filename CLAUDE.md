@@ -243,13 +243,17 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 
 ### Platform-Specific Notes
 
-| Platform | Send | Attach | Default Model | Audit/Dream Mode | Notes |
-|----------|------|--------|---------------|-----------------|-------|
-| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | Auto (GPT-5.2 on temp chats) | 5.2 Pro Extended Thinking | xdotool fails on dropdown items - use keyboard nav |
-| Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | Extended Thinking (or Research) | xdotool works on Claude dropdowns |
-| Gemini | Enter | "Open upload file menu" → "Upload files" | 3.1 Pro | Deep Think (or Deep Research) | File attach moves input Y - always re-inspect |
-| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Auto (chooses Fast/Expert) | Grok 4.20 Beta (Heavy mode) | Files persist across sessions! Check for stale files. |
-| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Deep Research | Copy=summary only; Export>Download for full |
+| Platform | Send | Attach | Default Model | Audit/Dream Setup | Notes |
+|----------|------|--------|---------------|-------------------|-------|
+| ChatGPT | Enter | "Add files and more" → Down+Enter for "Upload a file" | Auto | 1. Select "Pro" model 2. Enable "Extended Thinking" | xdotool fails on dropdown items - use keyboard nav |
+| Claude | Enter | "Toggle menu" → click "Add files or photos" | Sonnet 4.6 Extended | Select "Opus 4.6 Extended" (extended thinking) | xdotool works on Claude dropdowns |
+| Gemini | Enter | "Open upload file menu" → "Upload files" | Default | 1. Mode picker → "Pro" 2. Tools → enable "Deep Think" | Deep Think is a TOOL (not a mode). File attach shifts input Y |
+| Grok | Enter | "Attach" → Down+Enter for "Upload a file" | Auto | Grok 4.20 Beta (Heavy mode) | Files persist across sessions! Check for stale files. |
+| Perplexity | Enter | "Add files or tools" → "Upload files or images" | Default | Deep Research (check if already enabled before toggling) | Copy=summary only; Export>Download for full |
+
+**Gemini Deep Think vs Thinking**: "Thinking" is a MODE (via mode picker). "Deep Think" is a TOOL (via Tools dropdown). For consultations, use **Pro mode + Deep Think tool**, NOT Thinking mode.
+
+**ChatGPT Extended Thinking**: Must select "Pro" model FIRST, then Extended Thinking becomes available. It's a two-step process.
 
 **Dropdown Menu Item Clicks**: ChatGPT and Grok dropdown items do NOT respond to xdotool coordinate clicks (React event handlers). Use keyboard navigation: click the dropdown trigger, then `Down` arrow + `Enter` to select the first item. Claude and Gemini dropdowns DO respond to xdotool clicks.
 
