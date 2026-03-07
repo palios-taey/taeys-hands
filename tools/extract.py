@@ -20,6 +20,78 @@ from storage.redis_pool import node_key
 logger = logging.getLogger(__name__)
 
 
+def _scroll_copy_into_view(platform: str, target_btn: dict,
+                           original_buttons: list) -> tuple:
+    """Scroll until the target copy button is within the viewport.
+
+    ChatGPT (and other platforms) virtualize DOM elements far from the
+    viewport. AT-SPI reports them with document-coordinate Y values
+    (e.g. y=28216) but do_action(0) fails because the React component
+    is detached. Scrolling brings the element back into the live DOM.
+
+    Strategy: press End aggressively to reach page bottom, then re-scan
+    for copy buttons. The button we want is the newest (last) response
+    copy button — same selection logic as the caller.
+
+    Returns:
+        (button_dict, x, y) — the re-scanned button with viewport coordinates.
+    """
+    # Aggressive scroll to absolute bottom
+    for _ in range(5):
+        inp.press_key('End')
+        time.sleep(0.3)
+    time.sleep(0.5)
+
+    # Re-scan for copy buttons after scroll
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        return target_btn, target_btn['x'], target_btn['y']
+
+    all_elements = find_elements(doc)
+    copy_buttons = find_copy_buttons(all_elements)
+    if not copy_buttons:
+        return target_btn, target_btn['x'], target_btn['y']
+
+    # Same selection: prefer response-level "Copy" over "Copy code"
+    response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
+    candidates = response_copy if response_copy else copy_buttons
+    newest = candidates[-1]
+    x, y = newest['x'], newest['y']
+
+    if y <= SCREEN_HEIGHT:
+        logger.info(f"Copy button now in viewport at y={y} after End scroll")
+        return newest, x, y
+
+    # Still off-screen — try Page Up from bottom to find it
+    # (response might be just above the bottom fold)
+    for attempt in range(10):
+        inp.press_key('Page_Up')
+        time.sleep(0.4)
+
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if not doc:
+            break
+        all_elements = find_elements(doc)
+        copy_buttons = find_copy_buttons(all_elements)
+        if not copy_buttons:
+            continue
+
+        response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
+        candidates = response_copy if response_copy else copy_buttons
+        # Find visible copy buttons
+        visible = [b for b in candidates if 0 < b.get('y', 0) <= SCREEN_HEIGHT]
+        if visible:
+            newest = visible[-1]
+            logger.info(f"Copy button found in viewport at y={newest['y']} after {attempt+1} Page_Up(s)")
+            return newest, newest['x'], newest['y']
+
+    # Last resort: return whatever we have, caller will try anyway
+    logger.warning(f"Could not scroll copy button into viewport (last y={y})")
+    return newest, x, y
+
+
 def handle_quick_extract(platform: str, redis_client,
                          neo4j_mod=None,
                          complete: bool = False) -> Dict[str, Any]:
@@ -86,6 +158,14 @@ def handle_quick_extract(platform: str, redis_client,
         newest = copy_buttons[-1]
 
     x, y = newest['x'], newest['y']
+
+    # If copy button is off-screen (y > screen height), scroll it into view.
+    # ChatGPT virtualizes DOM elements far from viewport — do_action(0) fires
+    # but the React handler is detached, so clipboard stays empty. Must scroll
+    # the button into the viewport for the click to actually copy content.
+    if y > SCREEN_HEIGHT:
+        logger.info(f"Copy button at y={y} is off-screen (screen={SCREEN_HEIGHT}), scrolling into view")
+        newest, x, y = _scroll_copy_into_view(platform, newest, copy_buttons)
 
     clipboard.clear()
     time.sleep(0.1)
