@@ -9,8 +9,7 @@ WorkingDirectory=/home/spark/taeys-hands
 ExecStart=/home/spark/.local/bin/uvicorn dashboard.app:app --host 0.0.0.0 --port 5001
 Restart=on-failure
 RestartSec=5
-Environment=PYTHONPATH=/home/spark/taeys-hands
-Environment=DISPLAY=:0
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
