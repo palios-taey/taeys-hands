@@ -36,15 +36,15 @@ capabilities:
 
 quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
-  - model_selector: "'Choose a model' button NOT visible in current UI (March 2026). Model selection may be behind 'Add files or tools' dropdown or removed. Models listed in YAML are from Perplexity's documented roster but selector button is not in AT-SPI tree."
+  - model_selector: "'Model' button visible in search landing page input area (role=push button). Opens model selector. NOT visible in Computer mode."
   - tools_button: "'Add files or tools' (+ button) opens dropdown with tools and file upload options"
   - deep_research: "Deep research is a radio menu item in the tools dropdown, NOT a standalone mode. May be enabled by default on new threads — check state before toggling."
   - deep_research_toggle: "Standalone 'Deep research' button near input is a TOGGLE. If already on (checked in dropdown), clicking it turns it OFF."
-  - computer_mode: "'Computer' button toggles computer use mode (agentic tasks view). Main chat is default search view."
+  - computer_mode: "Two ways to enter Computer mode: (1) 'Computer' link in sidebar (role=link, always visible), (2) 'Computer' push button in search input area (role=push button, search mode only). URL becomes /computer/tasks. Task input is standard entry field with 'Add files or tools' button. Task table shows Status/Task/Files/Updated columns. Sidebar changes: Search mode has New Thread/History/Discover/Spaces/Finance/More. Computer mode has New Task/Tasks/Files/Connectors/Skills/Gallery."
   - copy_summary_only: "Copy button returns summary only. For Deep Research full reports, use Export > Download as Markdown."
   - file_dialog: "File upload dialog may open as Firefox-embedded GTK dialog OR Nautilus portal depending on session context. Firefox GTK dialog has Ctrl+L conflict (navigates URL bar). Nautilus portal: xdotool search --class Nautilus."
   - tools_dropdown_click: "xdotool coordinate click opens 'Add files or tools' dropdown. taey_select_dropdown may hit Firefox tab context menu instead. Use xdotool click directly."
-  - model_selector_landing: "'Choose a model' button NOT visible on landing page. Only appears in thread context."
+  - model_selector_landing: "'Model' button IS visible on search landing page (March 2026 update). Located in input area alongside 'Add files or tools', 'Computer', 'Dictation', 'Voice mode'."
 
 stop_patterns:
   - stop
@@ -62,8 +62,10 @@ mode_guidance:
     timeout: 7200
     note: "Max plan feature. Sends query to multiple models and synthesizes."
   computer:
-    when: "Multi-step agentic tasks requiring computer interaction"
-    how: "Click 'Computer' button to switch to tasks view"
+    when: "Multi-step agentic tasks requiring computer interaction, code generation across 19 models, E2B sandbox execution"
+    how: "Click 'Computer' link in sidebar (role=link). URL becomes /computer/tasks. Input is standard entry field. 'Add files or tools' button available. Task table shows Status/Task/Files/Updated."
+    sidebar_links: "New Task, Tasks, Files, Connectors, Skills, Gallery"
+    url_pattern: "/computer/tasks"
     timeout: 7200
   normal:
     when: "Quick questions, simple lookups, conversational queries"
