@@ -307,7 +307,14 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
             _excl_roles = set(noise.get('exclude_roles', []))
             _excl_names = set(noise.get('exclude_names', []))
             _excl_contains = noise.get('exclude_name_contains', [])
+            _excl_x_max = noise.get('exclude_x_max')
+            _excl_x_min = noise.get('exclude_x_min')
             def _is_noise(e):
+                x = e.get('x', 0)
+                if _excl_x_max and x <= _excl_x_max:
+                    return True
+                if _excl_x_min and x >= _excl_x_min:
+                    return True
                 if e.get('role', '') in _excl_roles:
                     return True
                 n = e.get('name', '')
