@@ -24,6 +24,9 @@ capabilities:
     - Deep think
   sources: []
 
+# Click strategy: atspi_first (AT-SPI do_action reliable) or xdotool_first (default for React portals)
+click_strategy: atspi_first
+
 quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
   - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"

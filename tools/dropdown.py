@@ -130,14 +130,12 @@ def _check_dropdown_baseline(platform: str, dropdown_name: str,
             current_names.add(lower)
             current_name_original[lower] = name
 
-    # Load stored baseline
+    # Load stored baseline (first-seen state, never overwritten)
     stored_json = redis_client.get(baseline_key)
 
-    # Always update baseline with current state
-    redis_client.set(baseline_key, json.dumps(sorted(current_names)))
-
     if stored_json is None:
-        # First time seeing this dropdown - baseline stored, no comparison
+        # First time seeing this dropdown - store baseline, no comparison yet
+        redis_client.set(baseline_key, json.dumps(sorted(current_names)))
         logger.info(
             f"Dropdown baseline stored for {platform}/{dropdown_name}: "
             f"{len(current_names)} items"
@@ -358,17 +356,10 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
         if name:
             yaml_names.add(name)
 
-    # Substring matching: a live item matches a YAML item if either contains the other
-    matched_live = set()
-    matched_yaml = set()
-    for live in live_names:
-        for yml in yaml_names:
-            if live in yml or yml in live:
-                matched_live.add(live)
-                matched_yaml.add(yml)
-
-    live_only = sorted(live_names - matched_live)
-    yaml_only = sorted(yaml_names - matched_yaml)
+    # Exact matching: drift must be explicit, not hidden by substring overlap
+    matched = live_names & yaml_names
+    live_only = sorted(live_names - matched)
+    yaml_only = sorted(yaml_names - matched)
 
     if not live_only and not yaml_only:
         return None

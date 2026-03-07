@@ -336,9 +336,6 @@ class MonitorDaemon:
         stop button is standalone. We detect canvas stop by checking if an
         "Update" button exists at the same Y position (within 50px).
         """
-        if self.platform != 'chatgpt':
-            return False
-
         try:
             stop_comp = stop_obj.get_component_iface()
             if not stop_comp:
