@@ -220,10 +220,66 @@ curl -X POST http://10.0.0.68:5001/api/report \
 
 ---
 
+## Agent Launch Commands (How They Must Be Started)
+
+Agents MUST be launched with full permissions. No permission prompts allowed — agents operate autonomously.
+
+**Codex CLI** (on any Spark node):
+```bash
+cd /home/spark/worktrees/codex-cli && codex \
+  --dangerously-bypass-approvals-and-sandbox \
+  --add-dir /home/spark/embedding-server \
+  --add-dir /home/spark/taeys-hands
+```
+- `--dangerously-bypass-approvals-and-sandbox`: No permission prompts, no sandbox
+- `--add-dir`: Makes additional directories writable (Codex defaults to worktree only)
+
+**Gemini CLI** (on any Spark node):
+```bash
+cd /home/spark/worktrees/gemini-cli && gemini -C /home/spark/worktrees/gemini-cli
+```
+- Gemini runs in "no sandbox" mode by default. Use `/model` to switch models.
+- YOLO mode (Ctrl+Y) auto-approves tool calls.
+
+**Claude (Weaver/Claw)** (Claude Code instances):
+```bash
+cd /home/spark/worktrees/weaver && claude --dangerously-skip-permissions
+```
+- Or use bypass-permissions mode within the session.
+
+**If an agent is stuck on a permission prompt**: it was launched wrong. Kill and relaunch with the flags above.
+
+---
+
+## Communication Between Agents
+
+Tasks flow through the Dashboard API. The pattern:
+
+```
+Weaver → POST /api/command {"target_agent":"codex-cli"} → Dashboard → tmux inject → Codex
+Codex  → POST /api/report {"status":"completed"} → Dashboard → event stream → visible to all
+```
+
+**Current limitation**: There is no automatic notification back to the requesting agent when a task completes. The requesting agent must either:
+1. Check the event stream: `curl http://10.0.0.68:5001/api/events?count=20`
+2. Check task status in the dashboard UI
+3. Wait for Spark (coordinator) to relay completion messages
+
+**Workaround**: Include specific instructions in your task about what to do after completion:
+```bash
+curl -X POST http://10.0.0.68:5001/api/command \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Fix URLs in scripts. When done, report AND post results to The Stream via POST /api/message", "target_agent": "codex-cli"}'
+```
+
+---
+
 ## Rules
 
 1. **Use existing tools** — don't build new search/query systems. ISMA has it all.
 2. **Report back** — always POST to /api/report when you finish a task.
-3. **Stay alive** — heartbeat if you're running long. Dead agents don't get tasks.
-4. **Don't duplicate** — check if another agent is already working on something before requesting.
-5. **Escalate to Spark** — infrastructure issues, git conflicts, service restarts go through the coordinator.
+3. **Post to The Stream** — share findings via /api/message so other agents see your work.
+4. **Stay alive** — heartbeat if you're running long. Dead agents don't get tasks.
+5. **Don't duplicate** — check if another agent is already working on something before requesting.
+6. **Escalate to Spark** — infrastructure issues, git conflicts, service restarts go through the coordinator.
+7. **No permission prompts** — if you see one, the agent was launched wrong. See launch commands above.
