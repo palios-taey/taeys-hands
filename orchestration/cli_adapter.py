@@ -57,6 +57,7 @@ class CLIAdapter:
         Send keys to an agent's tmux session.
 
         For remote agents (spark3), uses SSH. For local, direct tmux.
+        Uses subprocess list args (no shell=True) to prevent command injection.
         """
         session_info = AGENT_SESSIONS.get(agent_id)
         if not session_info:
@@ -65,20 +66,18 @@ class CLIAdapter:
         tmux_session = session_info["tmux_session"]
         ssh_target = session_info.get("ssh")
 
-        flag = "-l" if literal else ""
-
         try:
-            if ssh_target:
-                cmd = (
-                    f"ssh -o ConnectTimeout=5 {ssh_target} "
-                    f"'tmux send-keys -t {tmux_session} {flag} {repr(keys)}'"
-                )
-            else:
-                cmd = f"tmux send-keys -t {tmux_session} {flag} {repr(keys)}"
+            tmux_cmd = ["tmux", "send-keys", "-t", tmux_session]
+            if literal:
+                tmux_cmd.append("-l")
+            tmux_cmd.append(keys)
 
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, timeout=10,
-            )
+            if ssh_target:
+                cmd = ["ssh", "-o", "ConnectTimeout=5", ssh_target] + tmux_cmd
+            else:
+                cmd = tmux_cmd
+
+            result = subprocess.run(cmd, capture_output=True, timeout=10)
             return result.returncode == 0
         except Exception:
             return False
@@ -88,6 +87,7 @@ class CLIAdapter:
         Inject a message into an agent's tmux session via load-buffer.
 
         Uses file-based injection (bulletproof, no escaping issues).
+        No shell=True — all subprocess calls use list args.
         """
         session_info = AGENT_SESSIONS.get(agent_id)
         if not session_info:
@@ -104,42 +104,61 @@ class CLIAdapter:
                 with open(tmp_file, "w") as f:
                     f.write(message)
 
-                scp_cmd = f"scp -o ConnectTimeout=5 {tmp_file} {ssh_target}:{tmp_file}"
-                result = subprocess.run(scp_cmd, shell=True, capture_output=True, timeout=15)
+                result = subprocess.run(
+                    ["scp", "-o", "ConnectTimeout=5", tmp_file, f"{ssh_target}:{tmp_file}"],
+                    capture_output=True, timeout=15,
+                )
                 if result.returncode != 0:
                     return False
 
-                paste_cmd = (
-                    f"ssh -o ConnectTimeout=5 {ssh_target} "
-                    f"'tmux load-buffer {tmp_file} && tmux paste-buffer -t {tmux_session}'"
+                # Remote: load-buffer then paste-buffer (two separate SSH calls)
+                result = subprocess.run(
+                    ["ssh", "-o", "ConnectTimeout=5", ssh_target,
+                     "tmux", "load-buffer", tmp_file],
+                    capture_output=True, timeout=15,
                 )
-                result = subprocess.run(paste_cmd, shell=True, capture_output=True, timeout=15)
+                if result.returncode != 0:
+                    return False
+
+                result = subprocess.run(
+                    ["ssh", "-o", "ConnectTimeout=5", ssh_target,
+                     "tmux", "paste-buffer", "-t", tmux_session],
+                    capture_output=True, timeout=15,
+                )
                 if result.returncode != 0:
                     return False
 
                 time.sleep(1)
-                enter_cmd = (
-                    f"ssh -o ConnectTimeout=5 {ssh_target} "
-                    f"'tmux send-keys -t {tmux_session} Enter'"
+                subprocess.run(
+                    ["ssh", "-o", "ConnectTimeout=5", ssh_target,
+                     "tmux", "send-keys", "-t", tmux_session, "Enter"],
+                    capture_output=True, timeout=10,
                 )
-                subprocess.run(enter_cmd, shell=True, capture_output=True, timeout=10)
                 return True
             else:
                 # Local injection
                 with open(tmp_file, "w") as f:
                     f.write(message)
 
-                paste_cmd = (
-                    f"tmux load-buffer {tmp_file} && "
-                    f"tmux paste-buffer -t {tmux_session}"
+                result = subprocess.run(
+                    ["tmux", "load-buffer", tmp_file],
+                    capture_output=True, timeout=10,
                 )
-                result = subprocess.run(paste_cmd, shell=True, capture_output=True, timeout=10)
+                if result.returncode != 0:
+                    return False
+
+                result = subprocess.run(
+                    ["tmux", "paste-buffer", "-t", tmux_session],
+                    capture_output=True, timeout=10,
+                )
                 if result.returncode != 0:
                     return False
 
                 time.sleep(0.5)
-                enter_cmd = f"tmux send-keys -t {tmux_session} Enter"
-                subprocess.run(enter_cmd, shell=True, capture_output=True, timeout=10)
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", tmux_session, "Enter"],
+                    capture_output=True, timeout=10,
+                )
                 return True
 
         except Exception:
