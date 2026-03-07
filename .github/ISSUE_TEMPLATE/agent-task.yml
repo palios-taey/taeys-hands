@@ -1,0 +1,47 @@
+name: Agent Task
+description: Structured task for Perplexity Computer or other remote agents
+labels: ["agent-task"]
+body:
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: Orchestration task identifier (e.g., orch-task-001)
+      placeholder: "orch-task-XXX"
+    validations:
+      required: true
+  - type: dropdown
+    id: task_type
+    attributes:
+      label: Task Type
+      options:
+        - research
+        - code_review
+        - documentation
+        - analysis
+        - architecture_review
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Task Description
+      description: Detailed description of the work to be done
+    validations:
+      required: true
+  - type: input
+    id: capability_tags
+    attributes:
+      label: Required Capabilities
+      description: Comma-separated capability tags
+      placeholder: "research, review"
+  - type: input
+    id: priority
+    attributes:
+      label: Priority (0-100)
+      placeholder: "50"
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Files, links, or context the agent needs
