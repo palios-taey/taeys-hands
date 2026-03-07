@@ -384,12 +384,15 @@ def _handle_query(text: str) -> Optional[Dict[str, Any]]:
                         "activity": activity,
                     }
 
-    # Memory search: "search <topic>" or "find <topic>"
+    # Memory search: "search <topic>" or "find <topic>" — delegates to ISMA API
     if text_lower.startswith(("search ", "find ", "recall ")):
         query = text[text.index(" ")+1:].strip()
-        mq = _get_mq()
-        results = mq.search(query, limit=10)
-        return {"type": "memory_search", "query": query, "count": len(results), "results": results}
+        try:
+            import aiohttp as _aio
+            # This is sync context, can't await — return marker for async handler
+            return {"type": "memory_search_pending", "query": query}
+        except ImportError:
+            return {"type": "error", "message": "aiohttp not available"}
 
     return None  # Not a query — route as task
 
@@ -529,6 +532,18 @@ async def submit_command(request: Request, body: dict):
 
     # Route and broadcast
     result = _route_command(text)
+
+    # Handle async memory search
+    if result.get("type") == "memory_search_pending":
+        query = result["query"]
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                async with session.post(f"{ISMA_API}/search", json={"query": query, "top_k": 10}) as resp:
+                    data = await resp.json()
+                    result = {"type": "memory_search", "query": query, **data}
+        except Exception as e:
+            result = {"type": "memory_search", "query": query, "error": str(e)[:100], "tiles": []}
+
     await manager.broadcast({
         "type": "command_result",
         "data": result,
@@ -842,78 +857,84 @@ async def manage_consent(request: Request, body: dict):
         )
 
 
-# --- Memory Query API ---
-# "You need to develop a system that queries memory and gets my thoughts
-#  and our innovations so you can act." — Jesse
+# --- Memory API (proxies to ISMA Query API at :8095) ---
+# The real memory system: 1.02M tiles, vector+BM25+HMM search, neural reranking.
+# Runs as isma-query-api.service. We proxy, not duplicate.
 
-from orchestration.memory_query import MemoryQuery
+import aiohttp
 
-_memory_query = None
-def _get_mq():
-    global _memory_query
-    if _memory_query is None:
-        _memory_query = MemoryQuery()
-    return _memory_query
+ISMA_API = "http://192.168.100.10:8095"
 
 
-@app.get("/api/memory/search")
-async def memory_search(q: str = "", limit: int = 20):
-    """Search Jesse's conversations for a topic."""
-    if not q:
-        return JSONResponse({"error": "q parameter required"}, status_code=400)
-    mq = _get_mq()
-    results = mq.search(q, limit=limit)
-    return JSONResponse({"query": q, "count": len(results), "results": results})
+async def _isma_proxy(method: str, path: str, body: dict = None, params: dict = None) -> JSONResponse:
+    """Proxy a request to the ISMA Query API."""
+    url = f"{ISMA_API}{path}"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            if method == "GET":
+                async with session.get(url, params=params) as resp:
+                    data = await resp.json()
+                    return JSONResponse(data, status_code=resp.status)
+            else:
+                async with session.post(url, json=body) as resp:
+                    data = await resp.json()
+                    return JSONResponse(data, status_code=resp.status)
+    except Exception as e:
+        return JSONResponse({"error": f"ISMA API unavailable: {str(e)[:100]}"}, status_code=502)
 
 
-@app.get("/api/memory/innovations")
-async def memory_innovations(limit: int = 20):
-    """Find Jesse's key innovations and breakthrough ideas."""
-    mq = _get_mq()
-    results = mq.get_innovations(limit=limit)
-    return JSONResponse({"count": len(results), "innovations": results})
+@app.get("/api/memory/health")
+async def memory_health():
+    """Check ISMA memory system health."""
+    return await _isma_proxy("GET", "/health")
 
 
-@app.get("/api/memory/projects")
-async def memory_projects():
-    """Get all active projects with task counts."""
-    mq = _get_mq()
-    return JSONResponse({"projects": mq.get_active_projects()})
+@app.get("/api/memory/stats")
+async def memory_stats():
+    """Get memory system stats (tile counts, HMM coverage, etc)."""
+    return await _isma_proxy("GET", "/stats")
 
 
-@app.get("/api/memory/project/{name}")
-async def memory_project_detail(name: str):
-    """Get a project's details, intent, and tasks."""
-    mq = _get_mq()
-    return JSONResponse(mq.get_project_intent(name))
+@app.post("/api/memory/search")
+async def memory_search(body: dict):
+    """Semantic search across 1M+ conversation tiles."""
+    return await _isma_proxy("POST", "/search", body=body)
 
 
-@app.get("/api/memory/recent")
-async def memory_recent(hours: int = 24, limit: int = 50):
-    """Get recent conversations across all platforms."""
-    mq = _get_mq()
-    return JSONResponse({"conversations": mq.recent_conversations(hours=hours, limit=limit)})
+@app.post("/api/memory/search/hmm")
+async def memory_search_hmm(body: dict):
+    """HMM-enhanced hybrid search (vector + motif resonance + reranking)."""
+    return await _isma_proxy("POST", "/search/hmm", body=body)
 
 
-@app.get("/api/memory/context/{topic}")
-async def memory_context(topic: str):
-    """Build a comprehensive context bundle for an agent working on a topic."""
-    mq = _get_mq()
-    return JSONResponse(mq.build_agent_context(topic))
+@app.post("/api/memory/search/motif")
+async def memory_search_motif(body: dict):
+    """Search by HMM motif pattern."""
+    return await _isma_proxy("POST", "/search/motif", body=body)
 
 
-@app.get("/api/memory/hmm/{motif}")
-async def memory_hmm_pattern(motif: str, limit: int = 20):
-    """Search HMM tiles for a specific motif pattern."""
-    mq = _get_mq()
-    return JSONResponse(mq.get_hmm_patterns(motif, limit=limit))
+@app.post("/api/memory/search/bm25")
+async def memory_search_bm25(body: dict):
+    """Keyword search (BM25)."""
+    return await _isma_proxy("POST", "/search/bm25", body=body)
 
 
 @app.get("/api/memory/motifs")
-async def memory_top_motifs(limit: int = 20):
-    """Get the most frequent HMM motifs."""
-    mq = _get_mq()
-    return JSONResponse({"motifs": mq.get_top_motifs(limit=limit)})
+async def memory_motifs():
+    """Get all HMM motifs."""
+    return await _isma_proxy("GET", "/motifs")
+
+
+@app.get("/api/memory/session/{session_id}")
+async def memory_session(session_id: str):
+    """Get a conversation session."""
+    return await _isma_proxy("GET", f"/session/{session_id}")
+
+
+@app.get("/api/memory/session/{session_id}/text")
+async def memory_session_text(session_id: str):
+    """Get a conversation as plain text."""
+    return await _isma_proxy("GET", f"/session/{session_id}/text")
 
 
 @app.websocket("/ws")
