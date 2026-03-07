@@ -14,7 +14,7 @@ import json
 import os
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import redis
@@ -109,7 +109,7 @@ class SidecarDaemon:
         *,
         caused_by: Optional[str] = None,
     ) -> None:
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(tz=timezone.utc).isoformat()
         actor = f"sidecar:{self.agent_id}"
         content = json.dumps(
             {

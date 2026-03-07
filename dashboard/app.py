@@ -456,18 +456,37 @@ def _route_command(text: str, target_agent: str = "") -> Dict[str, Any]:
         actor="conductor",
     )
 
-    # Deliver task to agent via tmux injection
+    # Deliver task to agent via Redis inbox stream (sidecar picks up)
     delivered = False
     dashboard_url = os.environ.get("ORCH_DASHBOARD_URL", "http://localhost:5001")
     delivery_msg = f"[TASK {task_id}] {text}\n\nReport when done: curl -X POST {dashboard_url}/api/report -H 'Content-Type: application/json' -d '{{\"task_id\": \"{task_id}\", \"agent_id\": \"{best_agent.agent_id}\", \"status\": \"completed\", \"summary\": \"<your summary>\"}}'"
-    if best_agent.role.value in ("worker", "shared"):
-        delivered = cli_adapter.send_task(best_agent.agent_id, delivery_msg)
-        if delivered:
-            emit(
-                EventType.TASK_CLAIMED.value,
-                {"task_id": task_id, "agent": best_agent.agent_id, "delivery": "tmux"},
-                actor=best_agent.agent_id,
-            )
+
+    # Write to agent's inbox stream for sidecar delivery
+    r = get_redis_sync(config)
+    inbox_stream = f"orch:inbox:{best_agent.agent_id}"
+    try:
+        r.xadd(inbox_stream, {
+            "task_id": task_id,
+            "message": delivery_msg,
+            "priority": str(task.priority),
+            "capability_tags": json.dumps(tags),
+        }, maxlen=10_000, approximate=True)
+        delivered = True
+        emit(
+            EventType.TASK_CLAIMED.value,
+            {"task_id": task_id, "agent": best_agent.agent_id, "delivery": "redis_inbox"},
+            actor=best_agent.agent_id,
+        )
+    except Exception:
+        # Fallback to tmux injection if Redis inbox write fails
+        if best_agent.role.value in ("worker", "shared"):
+            delivered = cli_adapter.send_task(best_agent.agent_id, delivery_msg)
+            if delivered:
+                emit(
+                    EventType.TASK_CLAIMED.value,
+                    {"task_id": task_id, "agent": best_agent.agent_id, "delivery": "tmux_fallback"},
+                    actor=best_agent.agent_id,
+                )
 
     return {
         "task_id": task_id,
