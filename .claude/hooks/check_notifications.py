@@ -22,7 +22,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_config, get_redis
+from config import get_config, get_redis, node_key
 
 CFG = get_config()
 
@@ -49,9 +49,10 @@ def get_pending_notifications():
 
     try:
         notifications = []
-        # Pop up to 10 notifications per tool call from taey queue
+        # Pop up to 10 notifications per tool call (node-scoped key)
+        notify_key = node_key("notifications")
         for _ in range(10):
-            notification_json = r.lpop("taey:notifications")
+            notification_json = r.lpop(notify_key)
             if not notification_json:
                 break
             log_debug(f"Raw notification: {repr(notification_json)}")
