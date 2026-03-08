@@ -41,7 +41,8 @@ else
 fi
 
 # Base64-encode: survives SSH shell expansion and special chars
-B64=$(printf '%s' "$MSG" | base64 -w0)
+# macOS base64 doesn't support -w0; use tr to strip newlines portably
+B64=$(printf '%s' "$MSG" | base64 | tr -d '\n')
 
 # Local send
 if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "$(hostname -s)" ]; then
@@ -64,22 +65,28 @@ if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "$(hostname
 fi
 
 # Remote send via SSH
+# Discover tmux binary on remote host (macOS: /opt/homebrew/bin, Linux: /usr/bin)
 RESULT=$(ssh "$HOST" "
 SESSION='${SESSION}'
 B64='${B64}'
 
-if ! tmux has-session -t \"\$SESSION\" 2>/dev/null; then
+TMUX_BIN=\$(command -v tmux 2>/dev/null || true)
+[ -z \"\$TMUX_BIN\" ] && [ -x /opt/homebrew/bin/tmux ] && TMUX_BIN=/opt/homebrew/bin/tmux
+[ -z \"\$TMUX_BIN\" ] && [ -x /usr/local/bin/tmux ] && TMUX_BIN=/usr/local/bin/tmux
+[ -z \"\$TMUX_BIN\" ] && { echo \"ERROR: tmux not found on \$(hostname -s)\"; exit 1; }
+
+if ! \"\$TMUX_BIN\" has-session -t \"\$SESSION\" 2>/dev/null; then
     echo \"ERROR: tmux session '\$SESSION' not found on \$(hostname -s)\"
     exit 1
 fi
 
-CMD=\$(tmux display-message -t \"\$SESSION\" -p '#{pane_current_command}' 2>/dev/null || echo unknown)
+CMD=\$(\"\$TMUX_BIN\" display-message -t \"\$SESSION\" -p '#{pane_current_command}' 2>/dev/null || echo unknown)
 MSG=\$(printf '%s' \"\$B64\" | base64 -d)
 
-tmux send-keys -t \"\$SESSION\" -l \"\$MSG\"
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" -l \"\$MSG\"
 sleep 0.5
-tmux send-keys -t \"\$SESSION\" Enter
-tmux send-keys -t \"\$SESSION\" C-j
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" Enter
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" C-j
 echo \"OK: \$SESSION (remote=\$(hostname -s), target_cmd=\$CMD)\"
 ")
 
