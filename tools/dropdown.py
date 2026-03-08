@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 taey_select_dropdown, taey_prepare - Dropdown opening and capabilities.
 
