@@ -60,3 +60,20 @@ baselines/
 
 # State
 .state.json
+
+# One-off debug/identity scripts (contain hardcoded paths)
+scripts/check_stop_buttons.py
+scripts/extract_*.py
+scripts/gather_identity_evidence.py
+scripts/list_buttons.py
+scripts/list_docs.py
+scripts/send_identity_prompts.py
+scripts/thorough_extract.py
+
+# Identity evidence artifacts
+identities/
+identity_evidence_*.json
+
+# Internal analysis docs
+dcm_*.md
+RELEASE_READINESS.md
