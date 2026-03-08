@@ -48,9 +48,10 @@ def _get_chrome_pid() -> int | None:
 
 
 def _get_chrome_tabs_jxa() -> list:
-    """Get Chrome tabs via JXA (no AX permissions needed).
+    """Get Chrome tabs via JXA (requires Chrome automation permission).
 
     Returns list of {window, tab, title, url} dicts.
+    Returns empty list if permission denied (-1743) or JXA unavailable.
     """
     script = '''
     var chrome = Application("Google Chrome");
@@ -71,6 +72,13 @@ def _get_chrome_tabs_jxa() -> list:
         )
         if result.returncode == 0 and result.stdout.strip():
             return json.loads(result.stdout.strip())
+        stderr = result.stderr.strip()
+        if '-1743' in stderr:
+            logger.info("JXA Chrome automation permission denied (-1743) — using fallback")
+        else:
+            logger.warning(f"JXA tab listing failed: {stderr}")
+    except json.JSONDecodeError as e:
+        logger.warning(f"JXA tab listing returned invalid JSON: {e}")
     except Exception as e:
         logger.error(f"JXA tab listing failed: {e}")
     return []
@@ -296,10 +304,11 @@ def detect_platform_from_url(url: str) -> str | None:
 def get_platform_document(browser, platform: str):
     """Find the document (tab) for a specific platform.
 
-    On macOS, uses JXA to find the tab by URL pattern (no AX needed).
-    Returns a dict with tab info including 'url', 'title', 'window', 'tab'.
-
-    For AX tree traversal, use get_platform_ax_tree() separately.
+    Strategy:
+    1. Try JXA to find the tab by URL pattern (most precise).
+    2. Fallback: return a synthetic document when JXA is unavailable
+       (permission denied). Tab switching uses keyboard shortcuts
+       instead (handled by input_mac.switch_to_platform).
 
     Args:
         browser: Browser dict from find_browser().
@@ -326,6 +335,24 @@ def get_platform_document(browser, platform: str):
                 'platform': platform,
                 'pid': browser.get('pid'),
             }
+
+    # JXA returned no matching tabs — either permission denied or tab
+    # doesn't exist. Return a synthetic document so downstream tools
+    # (inspect, click, etc.) can still work via AX tree + keyboard shortcuts.
+    if not tabs:
+        logger.info(
+            f"JXA unavailable for {platform} — returning synthetic document "
+            f"(tab switching will use keyboard shortcut)"
+        )
+        return {
+            'url': f'https://{url_pattern}/',
+            'title': platform,
+            'window': 0,
+            'tab': 0,
+            'platform': platform,
+            'pid': browser.get('pid'),
+            'synthetic': True,
+        }
     return None
 
 
