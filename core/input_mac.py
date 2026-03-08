@@ -324,8 +324,11 @@ def switch_to_platform(platform: str) -> bool:
 def _switch_tab_via_ax(url_pattern: str) -> bool:
     """Switch Chrome tab using AXUIElement API (Accessibility permission).
 
-    Searches Chrome's AX tree for tab elements whose title contains the
-    URL pattern (e.g., 'chatgpt.com'), then performs AXPress to switch.
+    Searches Chrome's AX tree for tab elements whose title matches the
+    platform. Chrome tabs show page titles (e.g., "ChatGPT", "Claude"),
+    not URLs, so we match against both the URL domain and common tab
+    title patterns.
+
     This works without Automation permission (JXA), only needs Accessibility.
     """
     try:
@@ -361,46 +364,67 @@ def _switch_tab_via_ax(url_pattern: str) -> bool:
         err, val = AXUIElementCopyAttributeValue(el, attr, None)
         return val if err == 0 else None
 
-    pattern_lower = url_pattern.lower()
+    # Build match patterns: URL domain + common page title keywords
+    # Chrome tabs show "ChatGPT" not "chatgpt.com", so we need both
+    _TAB_TITLE_PATTERNS = {
+        'chatgpt.com': ['chatgpt'],
+        'claude.ai': ['claude'],
+        'gemini.google.com': ['gemini'],
+        'grok.com': ['grok'],
+        'perplexity.ai': ['perplexity'],
+        'x.com': ['x.com', '/ x', 'home / x', 'twitter'],
+        'linkedin.com': ['linkedin'],
+    }
+    match_terms = [url_pattern.lower()]
+    for domain, terms in _TAB_TITLE_PATTERNS.items():
+        if domain == url_pattern or url_pattern in domain:
+            match_terms.extend(terms)
+            break
 
     # Search for tab elements in the AX tree
-    def find_tab(el, depth=0, max_depth=6):
-        """Search Chrome's top-level AX tree for matching tab."""
+    found_tabs = []
+
+    def collect_tabs(el, depth=0, max_depth=6):
+        """Collect all tab elements from Chrome's AX tree."""
         if depth > max_depth:
-            return None
+            return
         try:
             role = _get_attr(el, 'AXRole') or ''
-            title = (_get_attr(el, 'AXTitle') or '').lower()
 
-            # Chrome tabs have role AXRadioButton inside AXTabGroup
-            if role in ('AXRadioButton', 'AXTab') and pattern_lower in title:
-                return el
+            # Chrome tabs are AXRadioButton inside AXTabGroup
+            if role in ('AXRadioButton', 'AXTab'):
+                title = (_get_attr(el, 'AXTitle') or '').lower()
+                if title:
+                    found_tabs.append((el, title))
+                return  # Don't recurse into tab elements
 
             children = _get_attr(el, 'AXChildren')
             if children:
                 for child in children:
-                    result = find_tab(child, depth + 1)
-                    if result:
-                        return result
+                    collect_tabs(child, depth + 1)
         except Exception:
             pass
-        return None
 
-    tab = find_tab(ax_app)
-    if tab:
-        try:
-            # Get available actions
-            err, actions = AXUIElementCopyAttributeValue(tab, 'AXActions', None)
-            # Try AXPress to activate the tab
-            err = AXUIElementPerformAction(tab, 'AXPress')
-            if err == 0:
-                logger.info(f"Switched to tab via AX (pattern: {url_pattern})")
-                time.sleep(0.5)
-                return True
-        except Exception as e:
-            logger.debug(f"AX tab press failed: {e}")
+    collect_tabs(ax_app)
 
-    logger.info(f"AX tab switch failed for {url_pattern}")
+    if found_tabs:
+        logger.info(f"Found {len(found_tabs)} Chrome tabs: {[t for _, t in found_tabs]}")
+
+    # Find matching tab
+    for tab_el, title in found_tabs:
+        if any(term in title for term in match_terms):
+            try:
+                err = AXUIElementPerformAction(tab_el, 'AXPress')
+                if err == 0:
+                    logger.info(f"Switched to tab via AX: '{title}' (pattern: {url_pattern})")
+                    time.sleep(0.5)
+                    return True
+                else:
+                    logger.warning(f"AXPress failed (err={err}) for tab '{title}'")
+            except Exception as e:
+                logger.debug(f"AX tab press failed: {e}")
+
+    logger.info(f"AX tab switch: no matching tab for {match_terms} among {[t for _, t in found_tabs]}")
     return False
 
 
