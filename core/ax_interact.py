@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 macOS AX element interaction layer.
 

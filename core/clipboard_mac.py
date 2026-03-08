@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 macOS clipboard operations via pbcopy/pbpaste.
 
