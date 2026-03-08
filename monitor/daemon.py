@@ -106,12 +106,17 @@ def _detect_display() -> str:
     return ':0'
 
 
-DISPLAY = _detect_display()
-os.environ['DISPLAY'] = DISPLAY
+if sys.platform != 'darwin':
+    DISPLAY = _detect_display()
+    os.environ['DISPLAY'] = DISPLAY
 
-import gi
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi, GLib
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi, GLib
+else:
+    DISPLAY = None
+    Atspi = None
+    GLib = None
 
 # Optional dependencies
 try:

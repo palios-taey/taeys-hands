@@ -13,9 +13,13 @@ import time
 import logging
 from typing import Any, Dict, List
 
-import gi
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi
+import sys
+if sys.platform != 'darwin':
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi
+else:
+    Atspi = None  # macOS uses AXUIElement API instead
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
