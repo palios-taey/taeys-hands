@@ -106,12 +106,17 @@ def _detect_display() -> str:
     return ':0'
 
 
-DISPLAY = _detect_display()
-os.environ['DISPLAY'] = DISPLAY
+if sys.platform != 'darwin':
+    DISPLAY = _detect_display()
+    os.environ['DISPLAY'] = DISPLAY
 
-import gi
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi, GLib
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi, GLib
+else:
+    DISPLAY = None
+    Atspi = None
+    GLib = None
 
 # Optional dependencies
 try:
@@ -193,7 +198,7 @@ class MonitorDaemon:
 
         self.generating_since = None
 
-        self.main_loop = GLib.MainLoop()
+        self.main_loop = GLib.MainLoop() if GLib else None
 
         # Connect services
         self.redis_client = self._connect_redis()
@@ -695,6 +700,393 @@ class MonitorDaemon:
 # CLI entry point
 # =========================================================================
 
+class MacMonitorDaemon:
+    """macOS AXUIElement-based monitor for chat platform responses.
+
+    Same state machine as MonitorDaemon but uses AXUIElement API
+    with a simple time.sleep polling loop instead of AT-SPI/GLib.
+
+    State machine:
+        IDLE -> GENERATING (stop button appears)
+        GENERATING -> SETTLING (stop disappears, settle > 0, cycle 1)
+        SETTLING -> GENERATING (new stop button appears during settle)
+        SETTLING -> COMPLETE (settle expires, no new stop button)
+        GENERATING -> COMPLETE (stop disappears, final cycle or settle == 0)
+    """
+
+    def __init__(self, platform: str, monitor_id: str,
+                 baseline_copy_count: int,
+                 session_id: Optional[str] = None,
+                 user_message_id: Optional[str] = None,
+                 timeout_seconds: int = 3600,
+                 tmux_session: Optional[str] = None,
+                 settle_seconds: int = 0):
+        self.platform = platform.lower()
+        self.monitor_id = monitor_id
+        self.baseline_copy_count = baseline_copy_count
+        self.session_id = session_id
+        self.user_message_id = user_message_id
+        self.timeout_seconds = timeout_seconds
+        self.tmux_session = tmux_session
+        self.settle_seconds = settle_seconds
+
+        self.state = "IDLE"
+        self.start_time = time.time()
+        self.stop_button_seen = False
+        self.cycle_count = 0
+        self.settle_start = None
+
+        self.poll_interval = 3.0  # seconds
+        self.initial_delay = 3.0
+        self.no_stop_warning_seconds = 45
+        self.no_stop_warned = False
+        self.verbose_logged = False
+        self.generating_since = None
+
+        # Import macOS AX API
+        try:
+            from ApplicationServices import (
+                AXUIElementCreateApplication,
+                AXUIElementCopyAttributeValue,
+            )
+            self._AXCreate = AXUIElementCreateApplication
+            self._AXCopy = AXUIElementCopyAttributeValue
+            self._has_ax = True
+        except ImportError:
+            self._has_ax = False
+
+        # Find Chrome PID
+        self.chrome_pid = self._find_chrome_pid()
+
+        # Connect services
+        self.redis_client = self._connect_redis()
+        self.neo4j_driver = self._connect_neo4j()
+
+        if not self.chrome_pid:
+            self._log("ERROR: Chrome not found on macOS")
+            sys.exit(1)
+
+        self._log(f"Initialized for {platform} (macOS AX), baseline={baseline_copy_count}")
+
+    def _log(self, message: str):
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"[{ts}] [{self.monitor_id}] {message}", flush=True)
+
+    def _find_chrome_pid(self) -> Optional[int]:
+        """Find Chrome's PID via NSWorkspace."""
+        if not self._has_ax:
+            return None
+        try:
+            from AppKit import NSWorkspace
+            ws = NSWorkspace.sharedWorkspace()
+            for app in ws.runningApplications():
+                if app.localizedName() == 'Google Chrome':
+                    return app.processIdentifier()
+        except Exception as e:
+            self._log(f"Chrome PID lookup failed: {e}")
+        return None
+
+    def _connect_redis(self):
+        if not REDIS_AVAILABLE:
+            return None
+        try:
+            client = redis.Redis(
+                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                port=int(os.environ.get('REDIS_PORT', 6379)),
+                decode_responses=True,
+            )
+            client.ping()
+            self._log("Redis connected")
+            return client
+        except Exception as e:
+            self._log(f"Redis connection failed: {e}")
+            return None
+
+    def _connect_neo4j(self):
+        if not NEO4J_AVAILABLE:
+            return None
+        try:
+            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+            driver = GraphDatabase.driver(uri, auth=None)
+            driver.verify_connectivity()
+            self._log("Neo4j connected")
+            return driver
+        except Exception as e:
+            self._log(f"Neo4j connection failed: {e}")
+            return None
+
+    def _get_attr(self, el, attr):
+        err, val = self._AXCopy(el, attr, None)
+        return val if err == 0 else None
+
+    def _is_stop_button(self, name: str) -> bool:
+        if not name or len(name) > 50:
+            return False
+        name_lower = name.lower().strip()
+        patterns = STOP_PATTERNS.get(self.platform, ['stop'])
+        return any(p in name_lower for p in patterns)
+
+    def _find_stop_buttons(self) -> list:
+        """Search Chrome's AX tree for stop buttons on the active tab."""
+        if not self._has_ax or not self.chrome_pid:
+            return []
+
+        ax_app = self._AXCreate(self.chrome_pid)
+        stop_buttons = []
+        all_buttons = []
+
+        def search(el, depth=0, max_depth=25):
+            if depth > max_depth:
+                return
+            try:
+                role = self._get_attr(el, 'AXRole') or ''
+                if role in ('AXButton', 'AXMenuItem'):
+                    name = self._get_attr(el, 'AXTitle') or \
+                           self._get_attr(el, 'AXDescription') or ''
+                    if name and not self.verbose_logged:
+                        all_buttons.append(name)
+                    if self._is_stop_button(name):
+                        stop_buttons.append(name)
+
+                children = self._get_attr(el, 'AXChildren')
+                if children:
+                    for child in children:
+                        search(child, depth + 1)
+            except Exception:
+                pass
+
+        # Scope to focused window if possible
+        err, win = self._AXCopy(ax_app, 'AXFocusedWindow', None)
+        if err == 0 and win is not None:
+            search(win)
+        else:
+            search(ax_app)
+
+        if all_buttons and not self.verbose_logged:
+            self._log(f"Buttons in doc (sample): {all_buttons[:10]}")
+            self.verbose_logged = True
+
+        return stop_buttons
+
+    def _notify_tmux(self, platform: str):
+        """Send notification to spawning Claude session via tmux."""
+        if not self.tmux_session:
+            self._log("No --tmux-session set, skipping tmux notification")
+            return
+
+        session = self.tmux_session
+        msg = f"Response ready on {platform}. Extract with taey_quick_extract('{platform}')."
+        time.sleep(2)
+
+        # Find tmux binary (macOS: may be in /opt/homebrew/bin)
+        tmux_bin = None
+        for path in ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux']:
+            if os.path.isfile(path):
+                tmux_bin = path
+                break
+        if not tmux_bin:
+            # Try PATH
+            try:
+                result = subprocess.run(['which', 'tmux'], capture_output=True,
+                                        text=True, timeout=3)
+                if result.returncode == 0:
+                    tmux_bin = result.stdout.strip()
+            except Exception:
+                pass
+        if not tmux_bin:
+            self._log("tmux not found, skipping notification")
+            return
+
+        try:
+            check = subprocess.run(
+                [tmux_bin, 'has-session', '-t', session],
+                capture_output=True, timeout=5,
+            )
+            if check.returncode != 0:
+                self._log(f"tmux session '{session}' not found, skipping notification")
+                return
+
+            subprocess.run(
+                [tmux_bin, 'send-keys', '-t', session, 'Escape'],
+                capture_output=True, timeout=5,
+            )
+            time.sleep(0.3)
+
+            result = subprocess.run(
+                [tmux_bin, 'send-keys', '-t', session, '-l', msg],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                self._log(f"send-keys text failed: {result.stderr.strip()}")
+                return
+
+            time.sleep(0.5)
+            subprocess.run(
+                [tmux_bin, 'send-keys', '-t', session, 'Enter'],
+                capture_output=True, text=True, timeout=5,
+            )
+            subprocess.run(
+                [tmux_bin, 'send-keys', '-t', session, 'C-j'],
+                capture_output=True, text=True, timeout=5,
+            )
+
+            self._log(f"tmux notification sent to session '{session}'")
+        except subprocess.TimeoutExpired:
+            self._log(f"tmux notification timed out for session '{session}'")
+        except Exception as e:
+            self._log(f"tmux notification failed for session '{session}': {e}")
+
+    def _notify_agent(self, status: str, message: str, extra: Dict = None):
+        """Write notification to Redis for agent injection."""
+        notification = {
+            "monitor_id": self.monitor_id,
+            "platform": self.platform,
+            "node_id": _NODE_ID,
+            "status": status,
+            "message": message,
+            "timestamp": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "elapsed_seconds": int(time.time() - self.start_time),
+        }
+        if extra:
+            notification.update(extra)
+
+        notification_json = json.dumps(notification)
+
+        if self.redis_client:
+            try:
+                self.redis_client.rpush(_node_key("notifications"), notification_json)
+                self.redis_client.setex(
+                    _node_key(f"monitor:{self.monitor_id}"),
+                    3600,
+                    notification_json,
+                )
+                self._log(f"Notification sent: {status}")
+            except Exception as e:
+                self._log(f"Redis notification error: {e}")
+        else:
+            path = f"/tmp/taey_monitor_{self.monitor_id}.json"
+            try:
+                with open(path, 'w') as f:
+                    json.dump(notification, f)
+                self._log(f"Notification written to {path}")
+            except Exception as e:
+                self._log(f"File notification failed: {e}")
+
+        if status in ("response_ready", "timeout"):
+            import threading
+            t = threading.Thread(
+                target=self._notify_tmux, args=(self.platform,), daemon=False
+            )
+            t.start()
+
+    def _poll_check(self) -> bool:
+        """Single poll check. Returns True to continue, False to stop."""
+        elapsed = time.time() - self.start_time
+
+        if elapsed > self.timeout_seconds:
+            self._log(f"Timeout after {elapsed:.0f}s")
+            self._notify_agent("timeout", f"Timed out after {elapsed:.0f}s")
+            return False
+
+        if (not self.stop_button_seen and not self.no_stop_warned
+                and elapsed > self.no_stop_warning_seconds):
+            self._log("WARNING: No stop button detected - possible submission error")
+            self._notify_agent(
+                "warning",
+                f"No stop button detected after {elapsed:.0f}s - message may not have been sent",
+                {"warning_type": "no_stop_button"},
+            )
+            self.no_stop_warned = True
+
+        stop_buttons = self._find_stop_buttons()
+        has_stop = len(stop_buttons) > 0
+
+        # Handle SETTLING state
+        if self.state == "SETTLING":
+            if has_stop:
+                self._log("Stop button reappeared during settle - new generation cycle")
+                self.state = "GENERATING"
+                self.stop_button_seen = True
+                self.settle_start = None
+                return True
+            settle_elapsed = time.time() - self.settle_start
+            if settle_elapsed > self.settle_seconds:
+                self._log(f"Settle period expired ({settle_elapsed:.1f}s). Final completion.")
+                self._notify_agent(
+                    "response_ready",
+                    f"Response complete on {self.platform} - switch to tab and extract",
+                    {"cycle": self.cycle_count, "requires_action": True},
+                )
+                self.state = "COMPLETE"
+                return False
+            return True
+
+        if has_stop:
+            if self.state == "IDLE":
+                self.state = "GENERATING"
+                self.stop_button_seen = True
+                self.generating_since = time.time()
+                self._log(f"Stop button appeared ({stop_buttons[0]}) - response generating")
+        else:
+            if self.stop_button_seen:
+                self.cycle_count += 1
+
+                if self.settle_seconds > 0 and self.cycle_count == 1:
+                    self._log(f"Cycle {self.cycle_count} complete. Settling for {self.settle_seconds}s...")
+                    self.state = "SETTLING"
+                    self.settle_start = time.time()
+                    self.stop_button_seen = False
+                    self._notify_agent(
+                        "intermediate_ready",
+                        f"Intermediate response on {self.platform} (cycle {self.cycle_count}). Daemon still monitoring.",
+                        {"cycle": self.cycle_count, "requires_action": True},
+                    )
+                    return True
+
+                self._log(f"Completion detected (cycle {self.cycle_count}): stop button disappeared")
+                self._notify_agent(
+                    "response_ready",
+                    f"Response complete on {self.platform} - switch to tab and extract",
+                    {"cycle": self.cycle_count, "requires_action": True},
+                )
+                self.state = "COMPLETE"
+                return False
+
+        return True
+
+    def start(self):
+        """Start the monitoring loop."""
+        self._log(f"Starting macOS AX monitor for {self.platform}")
+
+        if self.redis_client:
+            self.redis_client.setex(
+                _node_key(f"monitor:{self.monitor_id}"),
+                self.timeout_seconds,
+                json.dumps({
+                    "status": "monitoring",
+                    "platform": self.platform,
+                    "node_id": _NODE_ID,
+                    "started": datetime.now().isoformat(),
+                    "baseline_copy_count": self.baseline_copy_count,
+                }),
+            )
+
+        self._log(f"Waiting {self.initial_delay:.0f}s before first poll...")
+        time.sleep(self.initial_delay)
+
+        try:
+            while self._poll_check():
+                time.sleep(self.poll_interval)
+        except KeyboardInterrupt:
+            self._log("Interrupted by user")
+            self._notify_agent("interrupted", "Monitor stopped by user")
+        finally:
+            if self.neo4j_driver:
+                self.neo4j_driver.close()
+            self._log("Monitor exited")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Background monitor daemon')
     parser.add_argument('--platform', required=True)
@@ -711,23 +1103,33 @@ def main():
     args = parser.parse_args()
 
     # Use --tmux-session as authoritative node_id for Redis key scoping.
-    # The MCP server resolves this correctly via parent TTY → tmux session mapping.
-    # The daemon's own _detect_node_id() is unreliable (background process,
-    # parent fd/0 is a socket, display-message is non-deterministic).
     if args.tmux_session:
         global _EFFECTIVE_NODE_ID
         _EFFECTIVE_NODE_ID = args.tmux_session
 
-    daemon = MonitorDaemon(
-        platform=args.platform,
-        monitor_id=args.monitor_id,
-        baseline_copy_count=args.baseline_copy_count,
-        session_id=args.session_id,
-        user_message_id=args.user_message_id,
-        timeout_seconds=args.timeout,
-        tmux_session=args.tmux_session,
-        settle_seconds=args.settle_seconds,
-    )
+    # Route to platform-appropriate daemon
+    if sys.platform == 'darwin' and Atspi is None:
+        daemon = MacMonitorDaemon(
+            platform=args.platform,
+            monitor_id=args.monitor_id,
+            baseline_copy_count=args.baseline_copy_count,
+            session_id=args.session_id,
+            user_message_id=args.user_message_id,
+            timeout_seconds=args.timeout,
+            tmux_session=args.tmux_session,
+            settle_seconds=args.settle_seconds,
+        )
+    else:
+        daemon = MonitorDaemon(
+            platform=args.platform,
+            monitor_id=args.monitor_id,
+            baseline_copy_count=args.baseline_copy_count,
+            session_id=args.session_id,
+            user_message_id=args.user_message_id,
+            timeout_seconds=args.timeout,
+            tmux_session=args.tmux_session,
+            settle_seconds=args.settle_seconds,
+        )
     daemon.start()
 
 

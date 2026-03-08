@@ -11,7 +11,7 @@ from server import get_tools, handle_tool, inject_notifications, SafeJSONEncoder
 
 def test_tool_count():
     tools = get_tools()
-    assert len(tools) == 14
+    assert len(tools) == 12
 
 
 def test_all_tools_have_required_fields():

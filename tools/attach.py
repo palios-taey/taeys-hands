@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 taey_attach - File attachment workflow.
 
@@ -13,13 +14,19 @@ import time
 import logging
 from typing import Any, Dict, List
 
-import gi
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi
+import sys
+IS_MACOS = sys.platform == 'darwin'
+
+if not IS_MACOS:
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi
+else:
+    Atspi = None  # macOS uses AXUIElement API instead
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y, find_menu_items
-from core.atspi_interact import extend_cache, strip_atspi_obj
+from core.atspi_interact import extend_cache, strip_atspi_obj, atspi_click, find_element_at
 from tools.interact import handle_click
 from storage.redis_pool import node_key
 
@@ -62,7 +69,10 @@ def _find_portal_dialog_wids() -> List[str]:
     is_file_dialog_open() which only checks Firefox's AT-SPI tree.
 
     Returns list of window IDs (newest last).
+    On macOS, returns empty (no Nautilus/xdotool).
     """
+    if IS_MACOS:
+        return []
     try:
         result = subprocess.run(
             ['xdotool', 'search', '--class', 'Nautilus'],
@@ -80,7 +90,11 @@ def _close_stale_file_dialogs():
 
     Must be called BEFORE starting a new attach to prevent stale windows
     from intercepting keyboard input.
+    On macOS, this is a no-op (native file dialogs are modal sheets).
     """
+    if IS_MACOS:
+        return
+
     closed = 0
 
     # Close Nautilus portal dialogs
@@ -122,7 +136,10 @@ def _handle_portal_dialog(platform: str, file_path: str,
 
     Nautilus portal is a separate window (not in Firefox AT-SPI tree).
     Focus it, open location bar with Ctrl+L, paste path, Enter.
+    Not used on macOS (Chrome uses native NSOpenPanel sheets).
     """
+    if IS_MACOS:
+        return {"error": "Portal dialog handling not supported on macOS"}
     try:
         wids = _find_portal_dialog_wids()
         if not wids:
@@ -242,7 +259,10 @@ def _update_checkpoint(platform: str, file_path: str, redis_client):
 
 def _handle_file_dialog(platform: str, file_path: str,
                         redis_client) -> Dict[str, Any]:
-    """Handle file dialog — detects type (GTK embedded vs Nautilus portal) and routes."""
+    """Handle file dialog — detects type and routes to platform-specific handler."""
+    if IS_MACOS:
+        return _handle_mac_file_dialog(platform, file_path, redis_client)
+
     firefox = atspi.find_firefox()
     dialog_type = _any_file_dialog_open(firefox)
 
@@ -253,9 +273,90 @@ def _handle_file_dialog(platform: str, file_path: str,
     return _handle_gtk_file_dialog(platform, file_path, redis_client)
 
 
+def _handle_mac_file_dialog(platform: str, file_path: str,
+                            redis_client) -> Dict[str, Any]:
+    """Handle macOS native file dialog (NSOpenPanel / Chrome sheet).
+
+    Uses Cmd+Shift+G to open Go to Folder, pastes path, confirms.
+    """
+    try:
+        time.sleep(0.5)
+
+        # Cmd+Shift+G opens "Go to Folder" in macOS file dialogs
+        inp.press_key('cmd+shift+g')
+        time.sleep(0.5)
+
+        # Paste the directory path
+        dir_path = os.path.dirname(file_path)
+        inp.clipboard_paste(dir_path)
+        time.sleep(0.3)
+
+        # Enter to navigate to directory
+        inp.press_key('Return')
+        time.sleep(1.0)
+
+        # Type the filename to select it
+        filename = os.path.basename(file_path)
+        inp.clipboard_paste(filename)
+        time.sleep(0.3)
+
+        # Enter to confirm selection
+        inp.press_key('Return')
+        time.sleep(1.0)
+
+        # Check if dialog closed by verifying file dialog state
+        browser = atspi.find_firefox()
+        dialog_closed = False
+        for _ in range(20):
+            time.sleep(0.3)
+            if not atspi.is_file_dialog_open(browser):
+                dialog_closed = True
+                break
+
+        if not dialog_closed:
+            # Try Enter again (some dialogs need Open button click)
+            inp.press_key('Return')
+            time.sleep(1.0)
+            browser = atspi.find_firefox()
+            for _ in range(10):
+                time.sleep(0.3)
+                if not atspi.is_file_dialog_open(browser):
+                    dialog_closed = True
+                    break
+
+        if not dialog_closed:
+            return {"error": "macOS file dialog did not close after selection"}
+
+        time.sleep(0.5)
+        _update_checkpoint(platform, file_path, redis_client)
+
+        return {
+            "status": "file_attached",
+            "platform": platform,
+            "file_path": file_path,
+            "filename": filename,
+            "dialog_type": "macos_native",
+            "info": "File chip may shift element positions - re-inspect before further clicks.",
+        }
+
+    except Exception as e:
+        logger.error(f"macOS file dialog handling failed: {e}")
+        return {"error": f"macOS file dialog handling failed: {e}"}
+
+    finally:
+        if redis_client:
+            redis_client.delete(node_key(f"attach:pending:{platform}"))
+
+
 def _handle_gtk_file_dialog(platform: str, file_path: str,
                             redis_client) -> Dict[str, Any]:
-    """Handle GTK file picker embedded in Firefox — focus dialog, type path, select file."""
+    """Handle GTK file picker embedded in Firefox — focus dialog, type path, select file.
+
+    Linux only. On macOS, use _handle_mac_file_dialog instead.
+    """
+    if IS_MACOS:
+        return _handle_mac_file_dialog(platform, file_path, redis_client)
+
     try:
         time.sleep(0.3)
 
@@ -367,7 +468,21 @@ def _find_attach_button(doc, platform: str = None):
                     logger.info(f"Found attach button in cache: '{e.get('name')}' at ({e.get('x')}, {e.get('y')})")
                     return obj
 
-    # Fall back to fresh tree search (50-child limit may miss on large pages)
+    # Fall back to fresh tree search
+    if IS_MACOS:
+        # macOS: search element list from AX tree (doc is a dict, not traversable)
+        all_elements = find_elements(doc)
+        for e in all_elements:
+            name = (e.get('name') or '').strip().lower()
+            role = e.get('role', '')
+            if 'button' in role and name in _ATTACH_NAMES:
+                obj = e.get('atspi_obj') or e.get('ax_ref')
+                if obj:
+                    logger.info(f"Found attach button in AX tree: '{e.get('name')}' at ({e.get('x')}, {e.get('y')})")
+                    return obj
+        return None
+
+    # Linux: DFS through raw AT-SPI tree (50-child limit may miss on large pages)
     def search(obj, depth=0, max_depth=25):
         if depth > max_depth:
             return None
@@ -398,11 +513,40 @@ def _find_attach_button(doc, platform: str = None):
 def _get_attach_button_coords(doc, platform: str = None) -> Dict | None:
     """Find attach button and return its center coordinates.
 
-    Returns dict with x, y if found, None otherwise.
+    Returns dict with x, y, atspi_obj if found, None otherwise.
+    On macOS, coordinates come from the element cache (already center coords).
     """
+    # Check element cache first — has coords directly (works on both platforms)
+    if platform:
+        from core.atspi_interact import _element_cache, is_defunct
+        for e in _element_cache.get(platform, []):
+            name = (e.get('name') or '').strip().lower()
+            role = e.get('role', '')
+            if 'button' in role and name in _ATTACH_NAMES:
+                obj = e.get('atspi_obj') or e.get('ax_ref')
+                if obj and not is_defunct(e):
+                    return {
+                        'x': e.get('x', 0),
+                        'y': e.get('y', 0),
+                        'atspi_obj': obj,
+                    }
+
     btn = _find_attach_button(doc, platform=platform)
     if not btn:
         return None
+
+    if IS_MACOS:
+        # On macOS, button found via AX tree scan — coords were in element dict.
+        # _find_attach_button returns the raw AXUIElement ref.
+        # Search through the tree elements for matching ref to get coords.
+        all_elements = find_elements(doc)
+        for e in all_elements:
+            ref = e.get('atspi_obj') or e.get('ax_ref')
+            if ref is btn:
+                return {'x': e.get('x', 0), 'y': e.get('y', 0), 'atspi_obj': btn}
+        return None
+
+    # Linux: get extents from raw AT-SPI component interface
     try:
         comp = btn.get_component_iface()
         if comp:
@@ -490,10 +634,23 @@ def _click_editable_input(doc, platform: str):
                 inp.click_at(x, y)
                 return
 
-    # Fallback: search AT-SPI tree for editable entry
+    # Fallback: search accessibility tree for editable entry
     if not doc:
         return
 
+    if IS_MACOS:
+        # macOS: search AX element list
+        all_elements = find_elements(doc)
+        for e in all_elements:
+            if e.get('role') == 'entry' and 'editable' in (e.get('states') or []):
+                x, y = e.get('x'), e.get('y')
+                if x and y:
+                    logger.info(f"Clicking editable input from AX tree at ({x}, {y})")
+                    inp.click_at(x, y)
+                    return
+        return
+
+    # Linux: DFS through raw AT-SPI tree
     def find_entry(obj, depth=0):
         if depth > 15:
             return None
@@ -547,51 +704,45 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     # Grok fresh homepage: Attach button exists but has 0 actions until
     # the input field is clicked/focused. Click the editable input first
     # to activate the button, then re-fetch coordinates.
-    atspi_obj = btn_coords.get('atspi_obj')
-    if atspi_obj:
-        try:
-            action_iface = atspi_obj.get_action_iface()
-            if not action_iface or action_iface.get_n_actions() == 0:
-                logger.info(f"Attach button has 0 actions on {platform} — clicking input to activate")
-                _click_editable_input(doc, platform)
-                time.sleep(1.0)
-                # Re-fetch button (may have new action interface after activation)
-                doc = atspi.get_platform_document(firefox, platform) if firefox else doc
-                btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else btn_coords
-                atspi_obj = btn_coords.get('atspi_obj') if btn_coords else atspi_obj
-        except Exception as e:
-            logger.debug(f"Attach button action check failed: {e}")
+    if not IS_MACOS:
+        atspi_obj = btn_coords.get('atspi_obj')
+        if atspi_obj:
+            try:
+                action_iface = atspi_obj.get_action_iface()
+                if not action_iface or action_iface.get_n_actions() == 0:
+                    logger.info(f"Attach button has 0 actions on {platform} — clicking input to activate")
+                    _click_editable_input(doc, platform)
+                    time.sleep(1.0)
+                    doc = atspi.get_platform_document(firefox, platform) if firefox else doc
+                    btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else btn_coords
+            except Exception as e:
+                logger.debug(f"Attach button action check failed: {e}")
 
-    # Try AT-SPI do_action first — works when button has actions
-    atspi_obj = btn_coords.get('atspi_obj') if btn_coords else None
-    if atspi_obj:
-        try:
-            action_iface = atspi_obj.get_action_iface()
-            if action_iface and action_iface.get_n_actions() > 0:
-                logger.info(f"Keyboard nav attach for {platform}: AT-SPI do_action on button at ({btn_coords['x']}, {btn_coords['y']})")
-                action_iface.do_action(0)
-                time.sleep(1.5)
+    # Try accessibility action first — AT-SPI do_action on Linux, AXPress on macOS
+    element_for_click = find_element_at(platform, btn_coords['x'], btn_coords['y'])
+    if element_for_click:
+        logger.info(f"Keyboard nav attach for {platform}: accessibility action on button at ({btn_coords['x']}, {btn_coords['y']})")
+        if atspi_click(element_for_click):
+            time.sleep(1.5)
 
-                # Check if file dialog opened directly
+            # Check if file dialog opened directly
+            dialog_type = _any_file_dialog_open(firefox)
+            if dialog_type:
+                return _handle_file_dialog(platform, file_path, redis_client)
+
+            # Accessibility action may have opened dropdown — try Down+Enter
+            inp.press_key('Down')
+            time.sleep(0.5)
+            inp.press_key('Return')
+            time.sleep(2.5)
+
+            for _ in range(10):
                 dialog_type = _any_file_dialog_open(firefox)
                 if dialog_type:
                     return _handle_file_dialog(platform, file_path, redis_client)
+                time.sleep(0.3)
 
-                # AT-SPI may have opened dropdown — try Down+Enter
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key('Return')
-                time.sleep(2.5)
-
-                for _ in range(10):
-                    dialog_type = _any_file_dialog_open(firefox)
-                    if dialog_type:
-                        return _handle_file_dialog(platform, file_path, redis_client)
-                    time.sleep(0.3)
-
-                logger.info("AT-SPI do_action didn't produce file dialog, falling back to xdotool click")
-        except Exception as e:
-            logger.debug(f"AT-SPI do_action attempt failed: {e}")
+            logger.info("Accessibility action didn't produce file dialog, falling back to coordinate click")
 
     # Fallback: xdotool click (gives X11 keyboard focus for Down+Enter)
     logger.info(f"Keyboard nav attach for {platform}: xdotool click at ({btn_coords['x']}, {btn_coords['y']})")
@@ -738,19 +889,19 @@ def handle_attach(platform: str, file_path: str,
     else:
         logger.info("Attach button not found via AT-SPI tree search")
 
-    # Fallback: AT-SPI do_action directly (bypasses coordinate click)
+    # Fallback: accessibility action directly (bypasses coordinate click)
     if not dropdown_items and not _any_file_dialog_open(firefox):
-        logger.info("Trying AT-SPI do_action fallback")
-        firefox = atspi.find_firefox()
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        attach_btn = _find_attach_button(doc, platform=platform) if doc else None
-        if attach_btn:
+        logger.info("Trying accessibility action fallback")
+        btn_coords_fb = _get_attach_button_coords(
+            atspi.get_platform_document(atspi.find_firefox(), platform),
+            platform=platform)
+        if btn_coords_fb:
             inp.press_key('Escape')
             time.sleep(0.3)
-            action_iface = attach_btn.get_action_iface()
-            if action_iface and action_iface.get_n_actions() > 0:
-                logger.info("AT-SPI do_action on attach button")
-                action_iface.do_action(0)
+            # Use the interact module's click (works on both platforms)
+            el = find_element_at(platform, btn_coords_fb['x'], btn_coords_fb['y'])
+            if el and atspi_click(el):
+                logger.info("Accessibility action on attach button")
                 time.sleep(1.5)
                 dialog_type = _any_file_dialog_open(firefox)
                 if dialog_type:
