@@ -54,8 +54,10 @@ def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'monitor', 'daemon.py',
     )
+    import sys as _sys
+    python_bin = _sys.executable or '/usr/bin/python3'
     daemon_cmd = [
-        '/usr/bin/python3', daemon_path,
+        python_bin, daemon_path,
         '--platform', platform,
         '--monitor-id', monitor_id,
         '--baseline-copy-count', '0',
