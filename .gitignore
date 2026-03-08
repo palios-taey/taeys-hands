@@ -63,6 +63,7 @@ baselines/
 
 # One-off debug/identity scripts (contain hardcoded paths)
 scripts/check_stop_buttons.py
+scripts/debug_chrome_ax.py
 scripts/extract_*.py
 scripts/gather_identity_evidence.py
 scripts/list_buttons.py
