@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 System clipboard operations via xsel.
 

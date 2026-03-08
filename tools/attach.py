@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 taey_attach - File attachment workflow.
 

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 taey_inspect - Scan platform AT-SPI tree and return visible elements.
 
