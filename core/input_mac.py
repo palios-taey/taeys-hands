@@ -210,14 +210,26 @@ def type_text(text: str, delay_ms: int = 5, timeout: int = 30) -> bool:
 def focus_browser(timeout: int = 5) -> bool:
     """Activate/focus Chrome (or Safari) window.
 
+    Uses `open -a` first (no automation permission needed), falls back
+    to AppleScript `activate` if that fails.
+
     Returns:
         True if browser was activated.
     """
-    script = '''
-tell application "Google Chrome"
-    activate
-end tell
-'''
+    # Primary: `open -a` works via LaunchServices — no TCC permission needed
+    try:
+        result = subprocess.run(
+            ['open', '-a', 'Google Chrome'],
+            capture_output=True, timeout=timeout,
+        )
+        if result.returncode == 0:
+            time.sleep(0.3)
+            return True
+    except Exception:
+        pass
+
+    # Fallback: AppleScript activate (needs automation permission)
+    script = 'tell application "Google Chrome" to activate'
     ok, _ = _run_applescript(script, timeout=timeout)
     if ok:
         time.sleep(0.3)
@@ -229,10 +241,12 @@ focus_firefox = focus_browser
 
 
 def switch_to_platform(platform: str) -> bool:
-    """Switch to a platform tab in Chrome via JXA.
+    """Switch to a platform tab in Chrome.
 
-    Uses Chrome's JavaScript for Automation API to set the active tab
-    by matching URL patterns. No accessibility permissions needed.
+    Strategy:
+    1. Try JXA (Chrome scripting API) — finds tab by URL, most precise.
+    2. Fallback: focus Chrome via `open -a` + Cmd+N keyboard shortcut.
+       This works without Chrome automation permission (TCC).
 
     Args:
         platform: Platform name (e.g., 'claude').
@@ -240,15 +254,14 @@ def switch_to_platform(platform: str) -> bool:
     Returns:
         True if switch succeeded.
     """
-    from core.platforms import URL_PATTERNS
+    from core.platforms import URL_PATTERNS, TAB_SHORTCUTS
 
     if platform not in URL_PATTERNS:
         return False
 
     url_pattern = URL_PATTERNS[platform]
 
-    # JXA script to find and activate the right tab.
-    # Note: JXA top-level scripts can't use `return` — use a function wrapper.
+    # Try JXA first (most precise — switches by URL match)
     script = f'''
     (function() {{
         var chrome = Application("Google Chrome");
@@ -275,14 +288,31 @@ def switch_to_platform(platform: str) -> bool:
         if result.returncode == 0 and 'true' in result.stdout.strip():
             time.sleep(0.5)
             return True
-        logger.warning(f"Tab switch to {platform} failed: {result.stderr.strip() or result.stdout.strip()}")
-        return False
+        stderr = result.stderr.strip()
+        # If permission denied (-1743), fall through to keyboard shortcut
+        if '-1743' not in stderr:
+            logger.warning(f"JXA tab switch to {platform} failed: {stderr or result.stdout.strip()}")
     except subprocess.TimeoutExpired:
-        logger.error(f"Tab switch to {platform} timed out")
-        return False
+        logger.error(f"JXA tab switch to {platform} timed out")
     except Exception as e:
-        logger.error(f"Tab switch to {platform} error: {e}")
+        logger.error(f"JXA tab switch to {platform} error: {e}")
+
+    # Fallback: focus Chrome + keyboard shortcut (no automation permission needed)
+    shortcut = TAB_SHORTCUTS.get(platform)
+    if not shortcut:
+        logger.error(f"No tab shortcut defined for {platform}")
         return False
+
+    logger.info(f"JXA unavailable, using keyboard shortcut {shortcut} for {platform}")
+    if not focus_browser():
+        logger.error(f"Could not focus Chrome for {platform}")
+        return False
+    time.sleep(0.3)
+    # press_key auto-remaps alt+N → cmd+N on macOS
+    if press_key(shortcut):
+        time.sleep(0.5)
+        return True
+    return False
 
 
 def scroll_to_bottom():
