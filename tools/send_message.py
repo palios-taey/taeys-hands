@@ -131,14 +131,17 @@ def handle_send_message(platform: str, message: str,
     message_id = None
 
     if url:
-        session_id = neo4j_client.get_or_create_session(platform, url)
-        if session_id:
-            if session_type or purpose:
-                neo4j_client.update_session(session_id, {
-                    k: v for k, v in {'session_type': session_type, 'purpose': purpose}.items() if v
-                })
-            message_id = neo4j_client.add_message(session_id, 'user', message, attachments)
-            neo4j_result = {"session_id": session_id, "message_id": message_id}
+        try:
+            session_id = neo4j_client.get_or_create_session(platform, url)
+            if session_id:
+                if session_type or purpose:
+                    neo4j_client.update_session(session_id, {
+                        k: v for k, v in {'session_type': session_type, 'purpose': purpose}.items() if v
+                    })
+                message_id = neo4j_client.add_message(session_id, 'user', message, attachments)
+                neo4j_result = {"session_id": session_id, "message_id": message_id}
+        except Exception as e:
+            logger.warning("Neo4j unavailable for session tracking: %s", e)
 
     # Step 4: Store pending_prompt in Redis for extract linkage
     if redis_client:
