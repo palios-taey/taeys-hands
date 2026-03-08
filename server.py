@@ -501,7 +501,11 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 
 def run_server():
     """Run the MCP server over stdio."""
-    redis_client = get_redis()
+    try:
+        redis_client = get_redis()
+    except Exception as e:
+        logger.warning("Redis unavailable at startup: %s. Running without Redis.", e)
+        redis_client = None
 
     def read_message():
         """Read a JSON-RPC message from stdin."""
