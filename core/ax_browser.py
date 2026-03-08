@@ -338,13 +338,13 @@ def get_platform_document(browser, platform: str):
                 'pid': browser.get('pid'),
             }
 
-    # JXA unavailable — find the platform window via AX tree.
-    # Chrome window titles include the active tab's page title.
+    # JXA unavailable — use AXFocusedWindow to scope the scan.
+    # switch_to_platform() already activated the right tab before this
+    # function is called, so the focused window contains the platform.
     pid = browser.get('pid')
     if not tabs and pid:
-        ax_window = _find_platform_window_ax(pid, platform, url_pattern)
+        ax_window = _get_focused_window_ax(pid)
         if ax_window:
-            # Return dict with ax_window so find_elements() can scope the scan
             active_url = _get_active_tab_url_ax(pid)
             return {
                 'url': active_url or f'https://{url_pattern}/',
@@ -356,9 +356,23 @@ def get_platform_document(browser, platform: str):
                 'ax_window': ax_window,
             }
 
-        # No matching window found — return synthetic document
+        # Fallback: try matching window by title
+        ax_window = _find_platform_window_ax(pid, platform, url_pattern)
+        if ax_window:
+            active_url = _get_active_tab_url_ax(pid)
+            return {
+                'url': active_url or f'https://{url_pattern}/',
+                'title': platform,
+                'window': 0,
+                'tab': 0,
+                'platform': platform,
+                'pid': pid,
+                'ax_window': ax_window,
+            }
+
+        # No matching window found — return synthetic with PID (full app scan)
         logger.info(
-            f"No Chrome window found for {platform} — returning synthetic document"
+            f"No Chrome window found for {platform} — full app scan"
         )
         return {
             'url': f'https://{url_pattern}/',
@@ -369,6 +383,27 @@ def get_platform_document(browser, platform: str):
             'pid': pid,
             'synthetic': True,
         }
+    return None
+
+
+def _get_focused_window_ax(pid: int):
+    """Get Chrome's currently focused/main window AXUIElement.
+
+    After tab switching, this should be the window containing the
+    platform tab. Returns None if no focused window found.
+    """
+    if not HAS_AX:
+        return None
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+        err, win = AXUIElementCopyAttributeValue(ax_app, 'AXFocusedWindow', None)
+        if err == 0 and win is not None:
+            # Log the window title for debugging
+            err2, title = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            logger.info(f"Focused Chrome window: '{title if err2 == 0 else 'unknown'}'")
+            return win
+    except Exception as e:
+        logger.debug(f"AXFocusedWindow lookup failed: {e}")
     return None
 
 
