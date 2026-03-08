@@ -77,10 +77,14 @@ def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Dict | N
             if trigger_lower in name and 'button' in role:
                 comp = obj.get_component_iface()
                 if comp:
-                    import gi
-                    gi.require_version('Atspi', '2.0')
-                    from gi.repository import Atspi as _Atspi
-                    rect = comp.get_extents(_Atspi.CoordType.SCREEN)
+                    import sys
+                    if sys.platform != 'darwin':
+                        import gi
+                        gi.require_version('Atspi', '2.0')
+                        from gi.repository import Atspi as _Atspi
+                        rect = comp.get_extents(_Atspi.CoordType.SCREEN)
+                    else:
+                        rect = None
                     if rect and rect.width > 0 and rect.height > 0:
                         return {
                             'x': rect.x + rect.width // 2,

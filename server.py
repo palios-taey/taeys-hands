@@ -35,14 +35,17 @@ logging.basicConfig(
 logger = logging.getLogger('taeys-hands')
 
 # =========================================================================
-# CRITICAL: Set DISPLAY BEFORE importing anything that uses AT-SPI
+# CRITICAL: Set DISPLAY on Linux BEFORE importing AT-SPI modules
+# On macOS, no DISPLAY needed — uses AXUIElement API instead
 # =========================================================================
-from core.atspi import detect_display
+if sys.platform != 'darwin':
+    from core.atspi import detect_display
+    DISPLAY = detect_display()
+    os.environ['DISPLAY'] = DISPLAY
+else:
+    DISPLAY = None  # macOS doesn't use X11
 
-DISPLAY = detect_display()
-os.environ['DISPLAY'] = DISPLAY
-
-# Now safe to import AT-SPI dependent modules
+# Now safe to import platform-dependent modules
 
 # Storage backends (optional - server works without them but persistence is disabled)
 try:
