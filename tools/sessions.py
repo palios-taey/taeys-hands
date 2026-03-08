@@ -39,7 +39,11 @@ def handle_list_sessions(platform: Optional[str],
     }
 
     # Get active sessions from Neo4j
-    sessions = neo4j_client.get_active_sessions(platform)
+    try:
+        sessions = neo4j_client.get_active_sessions(platform)
+    except Exception as e:
+        logger.warning("Neo4j unavailable: %s", e)
+        sessions = []
     result["sessions"] = [
         {
             "session_id": s.get("session_id"),
