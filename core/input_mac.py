@@ -247,32 +247,35 @@ def switch_to_platform(platform: str) -> bool:
 
     url_pattern = URL_PATTERNS[platform]
 
-    # JXA script to find and activate the right tab
+    # JXA script to find and activate the right tab.
+    # Note: JXA top-level scripts can't use `return` — use a function wrapper.
     script = f'''
-    var chrome = Application("Google Chrome");
-    chrome.activate();
-    var wins = chrome.windows();
-    for (var i = 0; i < wins.length; i++) {{
-        var tabs = wins[i].tabs();
-        for (var j = 0; j < tabs.length; j++) {{
-            if (tabs[j].url().indexOf("{url_pattern}") !== -1) {{
-                wins[i].activeTabIndex = j + 1;
-                wins[i].index = 1;
-                return true;
+    (function() {{
+        var chrome = Application("Google Chrome");
+        chrome.activate();
+        var wins = chrome.windows();
+        for (var i = 0; i < wins.length; i++) {{
+            var tabs = wins[i].tabs();
+            for (var j = 0; j < tabs.length; j++) {{
+                if (tabs[j].url().indexOf("{url_pattern}") !== -1) {{
+                    wins[i].activeTabIndex = j + 1;
+                    wins[i].index = 1;
+                    return "true";
+                }}
             }}
         }}
-    }}
-    return false;
+        return "false";
+    }})();
     '''
     try:
         result = subprocess.run(
             ['osascript', '-l', 'JavaScript', '-e', script],
             capture_output=True, text=True, timeout=5,
         )
-        if result.returncode == 0:
+        if result.returncode == 0 and 'true' in result.stdout.strip():
             time.sleep(0.5)
             return True
-        logger.warning(f"Tab switch to {platform} failed: {result.stderr.strip()}")
+        logger.warning(f"Tab switch to {platform} failed: {result.stderr.strip() or result.stdout.strip()}")
         return False
     except subprocess.TimeoutExpired:
         logger.error(f"Tab switch to {platform} timed out")
