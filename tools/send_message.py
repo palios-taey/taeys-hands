@@ -160,18 +160,25 @@ def handle_send_message(platform: str, message: str,
             'sent_at': datetime.now().isoformat(),
         }))
 
-    # Step 5: Spawn monitor daemon BEFORE Enter
+    # Step 5: Spawn monitor daemon BEFORE Enter (chat platforms only)
+    # Social platforms (X/Twitter, LinkedIn) don't generate AI responses —
+    # no stop button to detect, daemon would just timeout pointlessly.
     monitor_id = str(uuid.uuid4())[:8]
-    spawn_result = spawn_monitor_daemon(
-        platform=platform,
-        monitor_id=monitor_id,
-        display=display,
-        session_id=session_id,
-        user_message_id=message_id,
-    )
-    daemon_spawned = spawn_result.get("spawned", False)
-    daemon_pid = spawn_result.get("pid")
-    daemon_log_path = spawn_result.get("log")
+    daemon_spawned = False
+    daemon_pid = None
+    daemon_log_path = None
+
+    if platform not in SOCIAL_PLATFORMS:
+        spawn_result = spawn_monitor_daemon(
+            platform=platform,
+            monitor_id=monitor_id,
+            display=display,
+            session_id=session_id,
+            user_message_id=message_id,
+        )
+        daemon_spawned = spawn_result.get("spawned", False)
+        daemon_pid = spawn_result.get("pid")
+        daemon_log_path = spawn_result.get("log")
 
     # Step 6: Press Enter to send (SKIP on social platforms where Enter = newline)
     enter_pressed = False
