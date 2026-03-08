@@ -11,6 +11,7 @@ find_copy_buttons, find_menu_items, detect_chrome_y, compute_structure_hash.
 
 import hashlib
 import logging
+import re
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,30 @@ POPUP_ROLES = {
 
 # Default chrome Y (toolbar area to skip)
 BROWSER_CHROME_Y = 100
+
+
+def _parse_ax_point(val):
+    """Extract (x, y) from an AXValueRef CGPoint."""
+    if val is None:
+        return 0, 0
+    try:
+        return int(val.x), int(val.y)
+    except AttributeError:
+        pass
+    m = re.search(r'x:([\d.]+)\s+y:([\d.]+)', repr(val))
+    return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
+
+
+def _parse_ax_size(val):
+    """Extract (width, height) from an AXValueRef CGSize."""
+    if val is None:
+        return 0, 0
+    try:
+        return int(val.width), int(val.height)
+    except AttributeError:
+        pass
+    m = re.search(r'w:([\d.]+)\s+h:([\d.]+)', repr(val))
+    return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
 
 
 def find_elements(scope, max_depth: int = 25,
@@ -91,13 +116,8 @@ def find_elements(scope, max_depth: int = 25,
             pos = _get_attr(el, 'AXPosition')
             size = _get_attr(el, 'AXSize')
 
-            x, y, w, h = 0, 0, 0, 0
-            if pos:
-                x = int(pos.x)
-                y = int(pos.y)
-            if size:
-                w = int(size.width)
-                h = int(size.height)
+            x, y = _parse_ax_point(pos)
+            w, h = _parse_ax_size(size)
 
             center_x = x + w // 2
             center_y = y + h // 2
@@ -291,12 +311,14 @@ def find_menu_items(browser=None, platform_doc=None) -> List[Dict]:
                         if name:
                             pos = _get_attr(child, 'AXPosition')
                             size = _get_attr(child, 'AXSize')
-                            if pos and size and size.width > 0 and size.height > 0:
+                            cx, cy = _parse_ax_point(pos)
+                            cw, ch = _parse_ax_size(size)
+                            if cw > 0 and ch > 0:
                                 menu_items.append({
                                     'name': name,
                                     'role': _map_role(child_role),
-                                    'x': int(pos.x + size.width // 2),
-                                    'y': int(pos.y + size.height // 2),
+                                    'x': cx + cw // 2,
+                                    'y': cy + ch // 2,
                                     'ax_ref': child,
                                     'atspi_obj': child,
                                 })
