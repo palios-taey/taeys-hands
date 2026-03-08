@@ -198,7 +198,7 @@ class MonitorDaemon:
 
         self.generating_since = None
 
-        self.main_loop = GLib.MainLoop()
+        self.main_loop = GLib.MainLoop() if GLib else None
 
         # Connect services
         self.redis_client = self._connect_redis()
@@ -701,6 +701,14 @@ class MonitorDaemon:
 # =========================================================================
 
 def main():
+    if sys.platform == 'darwin' and Atspi is None:
+        # macOS: AT-SPI/GLib monitor not available.
+        # Fall back to a simple poll-based monitor using AX tree.
+        print("WARNING: Monitor daemon not yet implemented for macOS (AT-SPI/GLib required).",
+              file=sys.stderr, flush=True)
+        print("Response detection will rely on manual re-inspection.", file=sys.stderr, flush=True)
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description='Background monitor daemon')
     parser.add_argument('--platform', required=True)
     parser.add_argument('--monitor-id', required=True)

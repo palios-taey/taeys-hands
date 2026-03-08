@@ -20,9 +20,12 @@ from typing import Any, Dict, List
 
 import yaml
 
+import sys
+IS_MACOS = sys.platform == 'darwin'
+
 from core import atspi, input as inp
-from core.tree import find_menu_items
-from core.atspi_interact import extend_cache
+from core.tree import find_elements, find_menu_items
+from core.atspi_interact import extend_cache, atspi_click, find_element_at
 from tools.interact import handle_click
 from storage.redis_pool import node_key
 
@@ -31,14 +34,31 @@ PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 logger = logging.getLogger(__name__)
 
 
-def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> bool:
-    """Find a button by name in AT-SPI tree and click via do_action(0).
+def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25,
+                             platform: str = None) -> bool:
+    """Find a button by name in accessibility tree and click via action.
 
-    More reliable than xdotool coordinates for platforms like Gemini.
+    More reliable than coordinate clicks for platforms like Gemini.
     Returns True if the action was performed.
+    On macOS, uses AX tree element search + AXPress.
     """
     trigger_lower = trigger_name.lower()
 
+    if IS_MACOS:
+        # Search element cache first, then AX tree
+        from core.atspi_interact import _element_cache
+        search_elements = _element_cache.get(platform, []) if platform else []
+        if not search_elements:
+            search_elements = find_elements(doc) if doc else []
+        for e in search_elements:
+            name = (e.get('name') or '').lower()
+            role = e.get('role', '')
+            if trigger_lower in name and 'button' in role:
+                if atspi_click(e):
+                    return True
+        return False
+
+    # Linux: DFS through raw AT-SPI tree
     def find_and_click(obj, depth=0):
         if depth > max_depth:
             return False
@@ -61,14 +81,34 @@ def _click_trigger_via_atspi(doc, trigger_name: str, max_depth: int = 25) -> boo
     return find_and_click(doc)
 
 
-def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Dict | None:
-    """Find a button by name in AT-SPI tree and return its center coordinates.
+def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25,
+                         platform: str = None) -> Dict | None:
+    """Find a button by name in accessibility tree and return its center coordinates.
 
     Returns dict with x, y, name, role if found, None otherwise.
     Used as coordinate click fallback when do_action doesn't open the dropdown.
     """
     trigger_lower = trigger_name.lower()
 
+    if IS_MACOS:
+        # Search element cache first, then AX tree
+        from core.atspi_interact import _element_cache
+        search_elements = _element_cache.get(platform, []) if platform else []
+        if not search_elements:
+            search_elements = find_elements(doc) if doc else []
+        for e in search_elements:
+            name = (e.get('name') or '').lower()
+            role = e.get('role', '')
+            if trigger_lower in name and 'button' in role:
+                return {
+                    'x': e.get('x', 0),
+                    'y': e.get('y', 0),
+                    'name': e.get('name', ''),
+                    'role': role,
+                }
+        return None
+
+    # Linux: DFS through raw AT-SPI tree
     def find_button(obj, depth=0):
         if depth > max_depth:
             return None
@@ -78,14 +118,10 @@ def _get_trigger_coords(doc, trigger_name: str, max_depth: int = 25) -> Dict | N
             if trigger_lower in name and 'button' in role:
                 comp = obj.get_component_iface()
                 if comp:
-                    import sys
-                    if sys.platform != 'darwin':
-                        import gi
-                        gi.require_version('Atspi', '2.0')
-                        from gi.repository import Atspi as _Atspi
-                        rect = comp.get_extents(_Atspi.CoordType.SCREEN)
-                    else:
-                        rect = None
+                    import gi
+                    gi.require_version('Atspi', '2.0')
+                    from gi.repository import Atspi as _Atspi
+                    rect = comp.get_extents(_Atspi.CoordType.SCREEN)
                     if rect and rect.width > 0 and rect.height > 0:
                         return {
                             'x': rect.x + rect.width // 2,
@@ -207,8 +243,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
     # bypassing X11 coordinate issues that cause Firefox context menus.
     menu_items = []
 
-    # Primary: AT-SPI do_action directly on named button
-    trigger_clicked = _click_trigger_via_atspi(doc, dropdown)
+    # Primary: accessibility action directly on named button
+    trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
     if trigger_clicked:
         time.sleep(0.5)
         firefox = atspi.find_firefox()
@@ -219,7 +255,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     # Fallback: coordinate click via platform-aware handle_click
     if not menu_items:
         trigger_info = _get_trigger_coords(doc or atspi.get_platform_document(
-            atspi.find_firefox(), platform), dropdown)
+            atspi.find_firefox(), platform), dropdown, platform=platform)
         if trigger_info:
             # Dismiss any stale menu from failed AT-SPI attempt
             if trigger_clicked:
