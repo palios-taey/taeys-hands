@@ -337,12 +337,25 @@ def get_platform_document(browser, platform: str):
             }
 
     # JXA returned no matching tabs — either permission denied or tab
-    # doesn't exist. Return a synthetic document so downstream tools
-    # (inspect, click, etc.) can still work via AX tree + keyboard shortcuts.
+    # doesn't exist. Try AX tree to find active tab URL, then fall back
+    # to a synthetic document.
     if not tabs:
+        # Try to get active tab URL from AX tree (Accessibility permission)
+        active_url = _get_active_tab_url_ax(browser.get('pid'))
+        if active_url and url_pattern in active_url.lower():
+            return {
+                'url': active_url,
+                'title': platform,
+                'window': 0,
+                'tab': 0,
+                'platform': platform,
+                'pid': browser.get('pid'),
+            }
+
+        # Fall back to synthetic document
         logger.info(
             f"JXA unavailable for {platform} — returning synthetic document "
-            f"(tab switching will use keyboard shortcut)"
+            f"(tab switching will use AX or keyboard shortcut)"
         )
         return {
             'url': f'https://{url_pattern}/',
@@ -354,6 +367,52 @@ def get_platform_document(browser, platform: str):
             'synthetic': True,
         }
     return None
+
+
+def _get_active_tab_url_ax(pid: int | None) -> str | None:
+    """Get the URL of Chrome's active tab via AX tree.
+
+    Searches for AXTextField with role description 'address bar'
+    or similar, and reads its AXValue.
+
+    Returns URL string or None.
+    """
+    if not pid or not HAS_AX:
+        return None
+
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+
+        def _get_attr(el, attr):
+            err, val = AXUIElementCopyAttributeValue(el, attr, None)
+            return val if err == 0 else None
+
+        def find_address_bar(el, depth=0, max_depth=8):
+            if depth > max_depth:
+                return None
+            try:
+                role = _get_attr(el, 'AXRole') or ''
+                desc = (_get_attr(el, 'AXDescription') or '').lower()
+                role_desc = (_get_attr(el, 'AXRoleDescription') or '').lower()
+
+                # Chrome's address bar is AXTextField with description 'address'
+                if role == 'AXTextField' and ('address' in desc or 'address' in role_desc):
+                    return _get_attr(el, 'AXValue')
+
+                children = _get_attr(el, 'AXChildren')
+                if children:
+                    for child in children:
+                        result = find_address_bar(child, depth + 1)
+                        if result:
+                            return result
+            except Exception:
+                pass
+            return None
+
+        return find_address_bar(ax_app)
+    except Exception as e:
+        logger.debug(f"AX address bar lookup failed: {e}")
+        return None
 
 
 def get_platform_ax_tree(browser, max_depth: int = 20) -> list:
