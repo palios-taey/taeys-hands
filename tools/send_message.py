@@ -78,13 +78,17 @@ def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
 
     try:
         log_file = f"/tmp/taey_daemon_{monitor_id}.log"
-        daemon_log = open(log_file, 'w')
+        # Open with os.open so subprocess inherits the fd.
+        # Do NOT close in parent — Popen(..., close_fds=False) keeps it open
+        # for the child. On macOS, closing before the child writes = 0-byte log.
+        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
         proc = subprocess.Popen(
             daemon_cmd, env=daemon_env,
-            stdout=daemon_log, stderr=daemon_log,
+            stdout=log_fd, stderr=log_fd,
+            close_fds=False,
             start_new_session=True,
         )
-        daemon_log.close()
+        os.close(log_fd)  # Safe to close AFTER Popen has dup'd the fd
         _daemon_processes.append(proc)
         return {"spawned": True, "pid": proc.pid, "log": log_file}
     except Exception as e:

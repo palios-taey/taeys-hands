@@ -263,10 +263,15 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
 
 
 def find_copy_buttons(elements: List[Dict]) -> List[Dict]:
-    """Find copy buttons from element list, sorted by Y."""
+    """Find copy buttons from element list, sorted by Y.
+
+    On macOS Chrome, Copy buttons may have role 'check box' instead of
+    'push button' or 'toggle button' (differs from Linux Firefox).
+    """
+    _COPY_ROLES = {'push button', 'toggle button', 'check box', 'button'}
     buttons = [
         e for e in elements
-        if 'button' in e.get('role', '')
+        if (e.get('role', '') in _COPY_ROLES or 'button' in e.get('role', ''))
         and 'copy' in (e.get('name') or '').lower()
     ]
     buttons.sort(key=lambda b: b.get('y', 0))
