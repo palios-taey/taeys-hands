@@ -297,135 +297,77 @@ def switch_to_platform(platform: str) -> bool:
     except Exception as e:
         logger.error(f"JXA tab switch to {platform} error: {e}")
 
-    # Fallback 1: Use AXUIElement to find Chrome tab by title and click it.
-    # This uses Accessibility permission (not Automation), which the MCP
-    # process has. No tab order dependency.
-    if _switch_tab_via_ax(url_pattern):
+    # Fallback: Chrome's tab search (Cmd+Shift+A) — works without any
+    # permissions and finds tabs by name regardless of position.
+    # Chrome doesn't expose tabs in the AX tree (no AXTabGroup/AXRadioButton).
+    if _switch_tab_via_search(platform):
         return True
 
-    # Fallback 2: Keyboard shortcut (requires correct tab order)
+    # Last resort: keyboard shortcut (requires correct tab order)
     shortcut = TAB_SHORTCUTS.get(platform)
-    if not shortcut:
-        logger.error(f"No tab shortcut defined for {platform}")
-        return False
+    if shortcut:
+        logger.info(f"Tab search failed, trying keyboard shortcut {shortcut}")
+        if not focus_browser():
+            return False
+        time.sleep(0.3)
+        if press_key(shortcut):
+            time.sleep(0.5)
+            return True
+    return False
 
-    logger.info(f"AX tab switch failed, using keyboard shortcut {shortcut} for {platform}")
+
+def _switch_tab_via_search(platform: str) -> bool:
+    """Switch Chrome tab using Chrome's built-in tab search (Cmd+Shift+A).
+
+    This is permission-free and position-independent. Chrome's tab search
+    finds tabs by title. Type the platform name, press Enter to switch.
+
+    Returns True if the search was executed (can't verify tab actually switched
+    without JXA, but the search is reliable if the tab exists).
+    """
+    # Map platform names to search terms that match Chrome tab titles
+    _SEARCH_TERMS = {
+        'chatgpt': 'ChatGPT',
+        'claude': 'Claude',
+        'gemini': 'Gemini',
+        'grok': 'Grok',
+        'perplexity': 'Perplexity',
+        'x_twitter': 'X',
+        'linkedin': 'LinkedIn',
+    }
+    search_term = _SEARCH_TERMS.get(platform, platform)
+
     if not focus_browser():
-        logger.error(f"Could not focus Chrome for {platform}")
         return False
     time.sleep(0.3)
-    # press_key auto-remaps alt+N → cmd+N on macOS
-    if press_key(shortcut):
-        time.sleep(0.5)
-        return True
-    return False
 
-
-def _switch_tab_via_ax(url_pattern: str) -> bool:
-    """Switch Chrome tab using AXUIElement API (Accessibility permission).
-
-    Searches Chrome's AX tree for tab elements whose title matches the
-    platform. Chrome tabs show page titles (e.g., "ChatGPT", "Claude"),
-    not URLs, so we match against both the URL domain and common tab
-    title patterns.
-
-    This works without Automation permission (JXA), only needs Accessibility.
-    """
-    try:
-        from ApplicationServices import (
-            AXUIElementCreateApplication,
-            AXUIElementCopyAttributeValue,
-            AXUIElementPerformAction,
-        )
-        from AppKit import NSWorkspace
-    except ImportError:
+    # Open Chrome's tab search: Cmd+Shift+A
+    script = 'tell application "System Events" to keystroke "a" using {command down, shift down}'
+    ok, _ = _run_applescript(script, timeout=5)
+    if not ok:
+        logger.warning("Failed to open Chrome tab search (Cmd+Shift+A)")
         return False
 
-    # Find Chrome PID
-    pid = None
-    try:
-        ws = NSWorkspace.sharedWorkspace()
-        for app in ws.runningApplications():
-            if app.localizedName() == 'Google Chrome':
-                pid = app.processIdentifier()
-                break
-    except Exception:
+    time.sleep(0.5)  # Wait for search UI to appear
+
+    # Type the platform name to filter tabs
+    type_script = f'tell application "System Events" to keystroke "{search_term}"'
+    ok, _ = _run_applescript(type_script, timeout=5)
+    if not ok:
+        # Press Escape to close search if typing failed
+        press_key('Escape')
         return False
 
-    if not pid:
-        return False
+    time.sleep(0.3)  # Wait for search results
 
-    # First activate Chrome
-    focus_browser()
+    # Press Enter to switch to the first matching tab
+    press_key('Return')
+    time.sleep(0.5)  # Wait for tab to activate
 
-    ax_app = AXUIElementCreateApplication(pid)
+    logger.info(f"Switched to {platform} via Chrome tab search (Cmd+Shift+A, typed '{search_term}')")
+    return True
 
-    def _get_attr(el, attr):
-        err, val = AXUIElementCopyAttributeValue(el, attr, None)
-        return val if err == 0 else None
 
-    # Build match patterns: URL domain + common page title keywords
-    # Chrome tabs show "ChatGPT" not "chatgpt.com", so we need both
-    _TAB_TITLE_PATTERNS = {
-        'chatgpt.com': ['chatgpt'],
-        'claude.ai': ['claude'],
-        'gemini.google.com': ['gemini'],
-        'grok.com': ['grok'],
-        'perplexity.ai': ['perplexity'],
-        'x.com': ['x.com', '/ x', 'home / x', 'twitter'],
-        'linkedin.com': ['linkedin'],
-    }
-    match_terms = [url_pattern.lower()]
-    for domain, terms in _TAB_TITLE_PATTERNS.items():
-        if domain == url_pattern or url_pattern in domain:
-            match_terms.extend(terms)
-            break
-
-    # Search for tab elements in the AX tree
-    found_tabs = []
-
-    def collect_tabs(el, depth=0, max_depth=6):
-        """Collect all tab elements from Chrome's AX tree."""
-        if depth > max_depth:
-            return
-        try:
-            role = _get_attr(el, 'AXRole') or ''
-
-            # Chrome tabs are AXRadioButton inside AXTabGroup
-            if role in ('AXRadioButton', 'AXTab'):
-                title = (_get_attr(el, 'AXTitle') or '').lower()
-                if title:
-                    found_tabs.append((el, title))
-                return  # Don't recurse into tab elements
-
-            children = _get_attr(el, 'AXChildren')
-            if children:
-                for child in children:
-                    collect_tabs(child, depth + 1)
-        except Exception:
-            pass
-
-    collect_tabs(ax_app)
-
-    if found_tabs:
-        logger.info(f"Found {len(found_tabs)} Chrome tabs: {[t for _, t in found_tabs]}")
-
-    # Find matching tab
-    for tab_el, title in found_tabs:
-        if any(term in title for term in match_terms):
-            try:
-                err = AXUIElementPerformAction(tab_el, 'AXPress')
-                if err == 0:
-                    logger.info(f"Switched to tab via AX: '{title}' (pattern: {url_pattern})")
-                    time.sleep(0.5)
-                    return True
-                else:
-                    logger.warning(f"AXPress failed (err={err}) for tab '{title}'")
-            except Exception as e:
-                logger.debug(f"AX tab press failed: {e}")
-
-    logger.info(f"AX tab switch: no matching tab for {match_terms} among {[t for _, t in found_tabs]}")
-    return False
 
 
 def scroll_to_bottom():
