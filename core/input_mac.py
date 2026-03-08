@@ -297,13 +297,19 @@ def switch_to_platform(platform: str) -> bool:
     except Exception as e:
         logger.error(f"JXA tab switch to {platform} error: {e}")
 
-    # Fallback: focus Chrome + keyboard shortcut (no automation permission needed)
+    # Fallback 1: Use AXUIElement to find Chrome tab by title and click it.
+    # This uses Accessibility permission (not Automation), which the MCP
+    # process has. No tab order dependency.
+    if _switch_tab_via_ax(url_pattern):
+        return True
+
+    # Fallback 2: Keyboard shortcut (requires correct tab order)
     shortcut = TAB_SHORTCUTS.get(platform)
     if not shortcut:
         logger.error(f"No tab shortcut defined for {platform}")
         return False
 
-    logger.info(f"JXA unavailable, using keyboard shortcut {shortcut} for {platform}")
+    logger.info(f"AX tab switch failed, using keyboard shortcut {shortcut} for {platform}")
     if not focus_browser():
         logger.error(f"Could not focus Chrome for {platform}")
         return False
@@ -312,6 +318,89 @@ def switch_to_platform(platform: str) -> bool:
     if press_key(shortcut):
         time.sleep(0.5)
         return True
+    return False
+
+
+def _switch_tab_via_ax(url_pattern: str) -> bool:
+    """Switch Chrome tab using AXUIElement API (Accessibility permission).
+
+    Searches Chrome's AX tree for tab elements whose title contains the
+    URL pattern (e.g., 'chatgpt.com'), then performs AXPress to switch.
+    This works without Automation permission (JXA), only needs Accessibility.
+    """
+    try:
+        from ApplicationServices import (
+            AXUIElementCreateApplication,
+            AXUIElementCopyAttributeValue,
+            AXUIElementPerformAction,
+        )
+        from AppKit import NSWorkspace
+    except ImportError:
+        return False
+
+    # Find Chrome PID
+    pid = None
+    try:
+        ws = NSWorkspace.sharedWorkspace()
+        for app in ws.runningApplications():
+            if app.localizedName() == 'Google Chrome':
+                pid = app.processIdentifier()
+                break
+    except Exception:
+        return False
+
+    if not pid:
+        return False
+
+    # First activate Chrome
+    focus_browser()
+
+    ax_app = AXUIElementCreateApplication(pid)
+
+    def _get_attr(el, attr):
+        err, val = AXUIElementCopyAttributeValue(el, attr, None)
+        return val if err == 0 else None
+
+    pattern_lower = url_pattern.lower()
+
+    # Search for tab elements in the AX tree
+    def find_tab(el, depth=0, max_depth=6):
+        """Search Chrome's top-level AX tree for matching tab."""
+        if depth > max_depth:
+            return None
+        try:
+            role = _get_attr(el, 'AXRole') or ''
+            title = (_get_attr(el, 'AXTitle') or '').lower()
+
+            # Chrome tabs have role AXRadioButton inside AXTabGroup
+            if role in ('AXRadioButton', 'AXTab') and pattern_lower in title:
+                return el
+
+            children = _get_attr(el, 'AXChildren')
+            if children:
+                for child in children:
+                    result = find_tab(child, depth + 1)
+                    if result:
+                        return result
+        except Exception:
+            pass
+        return None
+
+    tab = find_tab(ax_app)
+    if tab:
+        try:
+            # Get available actions
+            err, actions = AXUIElementCopyAttributeValue(tab, 'AXActions', None)
+            # Try AXPress to activate the tab
+            err = AXUIElementPerformAction(tab, 'AXPress')
+            if err == 0:
+                logger.info(f"Switched to tab via AX (pattern: {url_pattern})")
+                time.sleep(0.5)
+                return True
+        except Exception as e:
+            logger.debug(f"AX tab press failed: {e}")
+
+    logger.info(f"AX tab switch failed for {url_pattern}")
     return False
 
 
