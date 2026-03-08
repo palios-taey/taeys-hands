@@ -73,6 +73,8 @@ def find_elements(scope, max_depth: int = 25,
 
     On macOS, `scope` can be:
     - A dict with 'pid' key (from ax_browser.find_browser/get_platform_document)
+      If the dict has an 'ax_window' key, scans only that window (not the
+      entire app). This prevents scanning elements from other Chrome windows.
     - An AXUIElement directly
 
     Args:
@@ -87,12 +89,18 @@ def find_elements(scope, max_depth: int = 25,
         logger.error("macOS AX API not available")
         return []
 
-    # If scope is a dict from our browser module, get the PID
+    # If scope is a dict from our browser module, get the AX root
     if isinstance(scope, dict):
-        pid = scope.get('pid')
-        if not pid:
-            return []
-        ax_root = AXUIElementCreateApplication(pid)
+        # Prefer scoped window (avoids scanning ALL Chrome windows)
+        ax_window = scope.get('ax_window')
+        if ax_window is not None:
+            ax_root = ax_window
+            logger.info("Scanning scoped AX window (not entire app)")
+        else:
+            pid = scope.get('pid')
+            if not pid:
+                return []
+            ax_root = AXUIElementCreateApplication(pid)
     else:
         ax_root = scope
 

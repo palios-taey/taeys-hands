@@ -306,16 +306,18 @@ def get_platform_document(browser, platform: str):
 
     Strategy:
     1. Try JXA to find the tab by URL pattern (most precise).
-    2. Fallback: return a synthetic document when JXA is unavailable
-       (permission denied). Tab switching uses keyboard shortcuts
-       instead (handled by input_mac.switch_to_platform).
+    2. Fallback: find Chrome window by title via AX tree.
+       Chrome window titles include the active tab's page title
+       (e.g., "ChatGPT - Google Chrome"). Returns the window's
+       AXUIElement so find_elements() scans only that window.
 
     Args:
         browser: Browser dict from find_browser().
         platform: Platform name (e.g., 'claude').
 
     Returns:
-        Tab info dict, or None if not found.
+        Tab info dict (with optional 'ax_window' for scoped scanning),
+        or None if not found.
     """
     if not browser:
         return None
@@ -336,26 +338,27 @@ def get_platform_document(browser, platform: str):
                 'pid': browser.get('pid'),
             }
 
-    # JXA returned no matching tabs — either permission denied or tab
-    # doesn't exist. Try AX tree to find active tab URL, then fall back
-    # to a synthetic document.
-    if not tabs:
-        # Try to get active tab URL from AX tree (Accessibility permission)
-        active_url = _get_active_tab_url_ax(browser.get('pid'))
-        if active_url and url_pattern in active_url.lower():
+    # JXA unavailable — find the platform window via AX tree.
+    # Chrome window titles include the active tab's page title.
+    pid = browser.get('pid')
+    if not tabs and pid:
+        ax_window = _find_platform_window_ax(pid, platform, url_pattern)
+        if ax_window:
+            # Return dict with ax_window so find_elements() can scope the scan
+            active_url = _get_active_tab_url_ax(pid)
             return {
-                'url': active_url,
+                'url': active_url or f'https://{url_pattern}/',
                 'title': platform,
                 'window': 0,
                 'tab': 0,
                 'platform': platform,
-                'pid': browser.get('pid'),
+                'pid': pid,
+                'ax_window': ax_window,
             }
 
-        # Fall back to synthetic document
+        # No matching window found — return synthetic document
         logger.info(
-            f"JXA unavailable for {platform} — returning synthetic document "
-            f"(tab switching will use AX or keyboard shortcut)"
+            f"No Chrome window found for {platform} — returning synthetic document"
         )
         return {
             'url': f'https://{url_pattern}/',
@@ -363,9 +366,58 @@ def get_platform_document(browser, platform: str):
             'window': 0,
             'tab': 0,
             'platform': platform,
-            'pid': browser.get('pid'),
+            'pid': pid,
             'synthetic': True,
         }
+    return None
+
+
+def _find_platform_window_ax(pid: int, platform: str, url_pattern: str):
+    """Find the Chrome window whose title matches the platform.
+
+    Chrome window titles show the active tab's page title followed by
+    "- Google Chrome" (e.g., "ChatGPT - Google Chrome").
+
+    Returns the AXUIElement for the matching window, or None.
+    """
+    if not HAS_AX:
+        return None
+
+    # Title patterns to match (case-insensitive)
+    _WINDOW_TITLE_PATTERNS = {
+        'chatgpt': ['chatgpt'],
+        'claude': ['claude'],
+        'gemini': ['gemini'],
+        'grok': ['grok'],
+        'perplexity': ['perplexity'],
+        'x_twitter': ['x.com', '/ x', 'twitter'],
+        'linkedin': ['linkedin'],
+    }
+    match_terms = _WINDOW_TITLE_PATTERNS.get(platform, [platform.lower()])
+
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+        err, windows = AXUIElementCopyAttributeValue(ax_app, 'AXWindows', None)
+        if err != 0 or not windows:
+            return None
+
+        for win in windows:
+            err, title = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            if err == 0 and title:
+                title_lower = title.lower()
+                if any(term in title_lower for term in match_terms):
+                    logger.info(f"Found Chrome window for {platform}: '{title}'")
+                    return win
+
+        # Log all windows for debugging
+        win_titles = []
+        for win in windows:
+            err, t = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            win_titles.append(t if err == 0 else '?')
+        logger.info(f"No Chrome window matched {platform}. Windows: {win_titles}")
+    except Exception as e:
+        logger.debug(f"AX window search failed: {e}")
+
     return None
 
 
