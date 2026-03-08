@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 macOS input operations via AppleScript and cliclick.
 
