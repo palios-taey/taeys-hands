@@ -44,9 +44,63 @@ _DECORATIVE_ROLES = {'image', 'static', 'separator', 'paragraph'}
 # States that make an element interesting regardless of role
 IMPORTANT_STATE_NAMES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
 
+# Roles whose unnamed instances should have text content extracted from children.
+# These are content containers on social/notification pages where the element
+# has no accessible name but children contain the actual text (tweets, etc.).
+_TEXT_EXTRACT_ROLES = {'article', 'section'}
+
+# Max characters to extract per element and max children to inspect
+_TEXT_EXTRACT_MAX_CHARS = 300
+_TEXT_EXTRACT_MAX_CHILDREN = 8
+
 # Y threshold to skip Firefox chrome area (toolbar, tabs)
 # Default is conservative (100px) - overridden at runtime by detect_chrome_y()
 FIREFOX_CHROME_Y = 100
+
+
+def _collect_child_text(obj, max_children: int = _TEXT_EXTRACT_MAX_CHILDREN,
+                        max_chars: int = _TEXT_EXTRACT_MAX_CHARS) -> str:
+    """Collect text from direct children of an unnamed element.
+
+    Used to surface tweet/notification content that lives in child
+    elements (author name, body text, timestamps) when the parent
+    container has no accessible name.
+
+    Only collects from children that have names — avoids deep recursion
+    and expensive text interface calls.
+    """
+    parts = []
+    chars = 0
+    try:
+        count = min(obj.get_child_count(), max_children)
+        for i in range(count):
+            child = obj.get_child_at_index(i)
+            if not child:
+                continue
+            child_name = child.get_name() or ''
+            if child_name:
+                parts.append(child_name.strip())
+                chars += len(child_name)
+                if chars >= max_chars:
+                    break
+            # One level deeper for nested containers
+            sub_count = min(child.get_child_count(), 4)
+            for j in range(sub_count):
+                sub = child.get_child_at_index(j)
+                if not sub:
+                    continue
+                sub_name = sub.get_name() or ''
+                if sub_name:
+                    parts.append(sub_name.strip())
+                    chars += len(sub_name)
+                    if chars >= max_chars:
+                        break
+            if chars >= max_chars:
+                break
+    except Exception:
+        pass
+    text = ' | '.join(parts)
+    return text[:max_chars] if text else ''
 
 
 def find_elements(scope, max_depth: int = 25,
@@ -109,6 +163,13 @@ def find_elements(scope, max_depth: int = 25,
                     desc = obj.get_description()
                     if desc:
                         element['description'] = desc
+
+                    # Extract child text for unnamed content containers
+                    # (tweet/notification content in social feeds)
+                    if not name and role in _TEXT_EXTRACT_ROLES:
+                        child_text = _collect_child_text(obj)
+                        if child_text:
+                            element['text'] = child_text
 
                     results.append(element)
 
