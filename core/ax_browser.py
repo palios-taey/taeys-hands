@@ -11,6 +11,7 @@ which uses JXA (Chrome's scripting API).
 """
 
 import logging
+import re
 import subprocess
 import json
 
@@ -98,6 +99,26 @@ def _get_ax_tree(pid: int, max_depth: int = 20) -> list:
         err, val = AXUIElementCopyAttributeValue(el, attr, None)
         return val if err == 0 else None
 
+    def _parse_point(val):
+        if val is None:
+            return 0, 0
+        try:
+            return int(val.x), int(val.y)
+        except AttributeError:
+            pass
+        m = re.search(r'x:([\d.]+)\s+y:([\d.]+)', repr(val))
+        return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
+
+    def _parse_size(val):
+        if val is None:
+            return 0, 0
+        try:
+            return int(val.width), int(val.height)
+        except AttributeError:
+            pass
+        m = re.search(r'w:([\d.]+)\s+h:([\d.]+)', repr(val))
+        return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
+
     def traverse(el, depth=0):
         if depth > max_depth:
             return
@@ -115,13 +136,8 @@ def _get_ax_tree(pid: int, max_depth: int = 20) -> list:
             pos = _get_attr(el, 'AXPosition')
             size = _get_attr(el, 'AXSize')
 
-            x, y, w, h = 0, 0, 0, 0
-            if pos:
-                x = int(pos.x)
-                y = int(pos.y)
-            if size:
-                w = int(size.width)
-                h = int(size.height)
+            x, y = _parse_point(pos)
+            w, h = _parse_size(size)
 
             # Compute center coordinates (matching AT-SPI convention)
             center_x = x + w // 2
