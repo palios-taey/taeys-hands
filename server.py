@@ -35,14 +35,17 @@ logging.basicConfig(
 logger = logging.getLogger('taeys-hands')
 
 # =========================================================================
-# CRITICAL: Set DISPLAY BEFORE importing anything that uses AT-SPI
+# CRITICAL: Set DISPLAY on Linux BEFORE importing AT-SPI modules
+# On macOS, no DISPLAY needed — uses AXUIElement API instead
 # =========================================================================
-from core.atspi import detect_display
+if sys.platform != 'darwin':
+    from core.atspi import detect_display
+    DISPLAY = detect_display()
+    os.environ['DISPLAY'] = DISPLAY
+else:
+    DISPLAY = None  # macOS doesn't use X11
 
-DISPLAY = detect_display()
-os.environ['DISPLAY'] = DISPLAY
-
-# Now safe to import AT-SPI dependent modules
+# Now safe to import platform-dependent modules
 
 # Storage backends (optional - server works without them but persistence is disabled)
 try:
@@ -498,7 +501,11 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 
 def run_server():
     """Run the MCP server over stdio."""
-    redis_client = get_redis()
+    try:
+        redis_client = get_redis()
+    except Exception as e:
+        logger.warning("Redis unavailable at startup: %s. Running without Redis.", e)
+        redis_client = None
 
     def read_message():
         """Read a JSON-RPC message from stdin."""

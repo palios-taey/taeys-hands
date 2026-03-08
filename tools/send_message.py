@@ -54,8 +54,10 @@ def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'monitor', 'daemon.py',
     )
+    import sys as _sys
+    python_bin = _sys.executable or '/usr/bin/python3'
     daemon_cmd = [
-        '/usr/bin/python3', daemon_path,
+        python_bin, daemon_path,
         '--platform', platform,
         '--monitor-id', monitor_id,
         '--baseline-copy-count', '0',
@@ -76,13 +78,17 @@ def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
 
     try:
         log_file = f"/tmp/taey_daemon_{monitor_id}.log"
-        daemon_log = open(log_file, 'w')
+        # Open with os.open so subprocess inherits the fd.
+        # Do NOT close in parent — Popen(..., close_fds=False) keeps it open
+        # for the child. On macOS, closing before the child writes = 0-byte log.
+        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
         proc = subprocess.Popen(
             daemon_cmd, env=daemon_env,
-            stdout=daemon_log, stderr=daemon_log,
+            stdout=log_fd, stderr=log_fd,
+            close_fds=False,
             start_new_session=True,
         )
-        daemon_log.close()
+        os.close(log_fd)  # Safe to close AFTER Popen has dup'd the fd
         _daemon_processes.append(proc)
         return {"spawned": True, "pid": proc.pid, "log": log_file}
     except Exception as e:
@@ -131,14 +137,17 @@ def handle_send_message(platform: str, message: str,
     message_id = None
 
     if url:
-        session_id = neo4j_client.get_or_create_session(platform, url)
-        if session_id:
-            if session_type or purpose:
-                neo4j_client.update_session(session_id, {
-                    k: v for k, v in {'session_type': session_type, 'purpose': purpose}.items() if v
-                })
-            message_id = neo4j_client.add_message(session_id, 'user', message, attachments)
-            neo4j_result = {"session_id": session_id, "message_id": message_id}
+        try:
+            session_id = neo4j_client.get_or_create_session(platform, url)
+            if session_id:
+                if session_type or purpose:
+                    neo4j_client.update_session(session_id, {
+                        k: v for k, v in {'session_type': session_type, 'purpose': purpose}.items() if v
+                    })
+                message_id = neo4j_client.add_message(session_id, 'user', message, attachments)
+                neo4j_result = {"session_id": session_id, "message_id": message_id}
+        except Exception as e:
+            logger.warning("Neo4j unavailable for session tracking: %s", e)
 
     # Step 4: Store pending_prompt in Redis for extract linkage
     if redis_client:
@@ -151,18 +160,25 @@ def handle_send_message(platform: str, message: str,
             'sent_at': datetime.now().isoformat(),
         }))
 
-    # Step 5: Spawn monitor daemon BEFORE Enter
+    # Step 5: Spawn monitor daemon BEFORE Enter (chat platforms only)
+    # Social platforms (X/Twitter, LinkedIn) don't generate AI responses —
+    # no stop button to detect, daemon would just timeout pointlessly.
     monitor_id = str(uuid.uuid4())[:8]
-    spawn_result = spawn_monitor_daemon(
-        platform=platform,
-        monitor_id=monitor_id,
-        display=display,
-        session_id=session_id,
-        user_message_id=message_id,
-    )
-    daemon_spawned = spawn_result.get("spawned", False)
-    daemon_pid = spawn_result.get("pid")
-    daemon_log_path = spawn_result.get("log")
+    daemon_spawned = False
+    daemon_pid = None
+    daemon_log_path = None
+
+    if platform not in SOCIAL_PLATFORMS:
+        spawn_result = spawn_monitor_daemon(
+            platform=platform,
+            monitor_id=monitor_id,
+            display=display,
+            session_id=session_id,
+            user_message_id=message_id,
+        )
+        daemon_spawned = spawn_result.get("spawned", False)
+        daemon_pid = spawn_result.get("pid")
+        daemon_log_path = spawn_result.get("log")
 
     # Step 6: Press Enter to send (SKIP on social platforms where Enter = newline)
     enter_pressed = False

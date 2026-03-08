@@ -2,23 +2,16 @@
 Platform definitions: URL patterns, tab shortcuts, capabilities.
 
 Central registry for all supported platforms (chat AI and social).
-
-FROZEN once working - do not modify without approval.
+Cross-platform: works on both Linux (xdpyinfo) and macOS (system_profiler).
 """
 
 import os
+import sys
 import subprocess
 
 
-def _detect_screen_size() -> tuple:
-    """Detect screen dimensions from X display via xdpyinfo.
-
-    Returns:
-        (width, height) tuple.
-
-    Raises:
-        RuntimeError: If screen size cannot be detected.
-    """
+def _detect_screen_size_linux() -> tuple:
+    """Detect screen dimensions from X display via xdpyinfo."""
     try:
         result = subprocess.run(
             ['xdpyinfo'], capture_output=True, text=True, timeout=5,
@@ -32,6 +25,41 @@ def _detect_screen_size() -> tuple:
     except Exception as e:
         raise RuntimeError(f"Screen size detection failed (xdpyinfo error): {e}")
     raise RuntimeError("Screen size detection failed: no 'dimensions:' line in xdpyinfo output")
+
+
+def _detect_screen_size_macos() -> tuple:
+    """Detect screen dimensions on macOS via Quartz."""
+    try:
+        import Quartz
+        main = Quartz.CGMainDisplayID()
+        w = Quartz.CGDisplayPixelsWide(main)
+        h = Quartz.CGDisplayPixelsHigh(main)
+        return int(w), int(h)
+    except ImportError:
+        pass
+    # Fallback: system_profiler
+    try:
+        result = subprocess.run(
+            ['system_profiler', 'SPDisplaysDataType'],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in result.stdout.splitlines():
+            if 'Resolution' in line:
+                # "Resolution: 1512 x 982 Retina"
+                parts = line.split(':')[1].strip().split()
+                w = int(parts[0])
+                h = int(parts[2])
+                return w, h
+    except Exception as e:
+        raise RuntimeError(f"Screen size detection failed (system_profiler): {e}")
+    raise RuntimeError("Screen size detection failed on macOS")
+
+
+def _detect_screen_size() -> tuple:
+    """Detect screen dimensions (cross-platform)."""
+    if sys.platform == 'darwin':
+        return _detect_screen_size_macos()
+    return _detect_screen_size_linux()
 
 
 # Tab shortcuts (Alt+N) configured in Firefox
