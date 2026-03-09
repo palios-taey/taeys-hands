@@ -306,8 +306,9 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, popup menu, panel
-                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
+                # Match menu containers: menu, listbox, popup menu, panel, list
+                # 'list' added for Gemini which renders dropdown as list/list item
+                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel', 'list'}
                 if role in _MENU_CONTAINERS:
                     if require_showing and not _is_menu_showing(obj):
                         pass
