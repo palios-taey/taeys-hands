@@ -444,21 +444,40 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         # Enter to navigate to file
         if not inp.press_key('Return'):
             return {"error": "Failed to press Return (navigate)"}
-        time.sleep(0.3)
 
-        # For directory paths, need a second Return to confirm.
-        # For full file paths, this is harmless (confirms the selection).
-        if not inp.press_key('Return'):
-            return {"error": "Failed to press Return (confirm)"}
+        # Wait briefly, then check if dialog is still open.
+        # For full file paths, the first Return selects the file and closes
+        # the dialog. A premature second Return would hit Firefox's chat
+        # input instead, disrupting the upload (GitHub issue #24).
+        time.sleep(0.8)
+        firefox = atspi.find_firefox()
+        dialog_still_open = atspi.is_file_dialog_open(firefox)
+
+        if dialog_still_open:
+            # Directory path or dialog needs confirmation — press Return again
+            if not inp.press_key('Return'):
+                return {"error": "Failed to press Return (confirm)"}
 
         # Wait for dialog to close
-        firefox = atspi.find_firefox()
-        dialog_closed = False
-        for _ in range(25):
-            time.sleep(0.2)
-            if not atspi.is_file_dialog_open(firefox):
-                dialog_closed = True
-                break
+        dialog_closed = not dialog_still_open or False
+        if not dialog_closed:
+            for _ in range(25):
+                time.sleep(0.2)
+                if not atspi.is_file_dialog_open(firefox):
+                    dialog_closed = True
+                    break
+        else:
+            # Dialog already closed after first Return — wait for upload to process
+            time.sleep(0.3)
+            dialog_closed = True
+            # Re-check to be sure
+            if atspi.is_file_dialog_open(firefox):
+                dialog_closed = False
+                for _ in range(25):
+                    time.sleep(0.2)
+                    if not atspi.is_file_dialog_open(firefox):
+                        dialog_closed = True
+                        break
 
         if not dialog_closed:
             return {"error": "GTK file dialog did not close after selection"}
