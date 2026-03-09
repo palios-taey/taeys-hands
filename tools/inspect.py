@@ -222,8 +222,8 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
         inp.press_key('ctrl+a')
         time.sleep(0.3)
 
-        if not inp.type_text(target_url, timeout=30):
-            result['error'] = f"URL typing timed out for: {target_url}"
+        if not inp.clipboard_paste(target_url):
+            result['error'] = f"URL paste failed for: {target_url}"
             return result
 
         time.sleep(0.1)

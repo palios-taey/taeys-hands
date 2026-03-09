@@ -15,7 +15,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def deny(reason: str):
@@ -63,7 +63,7 @@ def main():
         deny(f"Redis connection failed: {e}")
 
     # Check that taey_prepare was called for this platform
-    active_platform = r.get("taey:workflow:active_platform")
+    active_platform = r.get(node_key("workflow:active_platform"))
     if not active_platform:
         deny(
             f"taey_prepare not called for {platform}.\n\n"

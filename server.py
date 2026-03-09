@@ -536,7 +536,7 @@ def run_server():
                     "jsonrpc": "2.0",
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "serverInfo": {"name": "taeys-hands", "version": "5.0.0"},
+                        "serverInfo": {"name": "taeys-hands", "version": "6.0.0"},
                         "capabilities": {"tools": {}},
                     },
                     "id": msg_id,

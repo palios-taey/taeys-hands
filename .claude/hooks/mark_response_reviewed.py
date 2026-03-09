@@ -14,7 +14,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def main():
@@ -49,22 +49,22 @@ def main():
     try:
         if complete:
             # complete=True - clear all flags (workflow complete)
-            r.delete(f"taey:response_reviewed:{platform}")
-            r.delete("taey:workflow:active_platform")
-            r.delete("taey:workflow:active_status")
-            r.delete("taey:workflow:active_timestamp")
+            r.delete(node_key(f"response_reviewed:{platform}"))
+            r.delete(node_key("workflow:active_platform"))
+            r.delete(node_key("workflow:active_status"))
+            r.delete(node_key("workflow:active_timestamp"))
         else:
             # complete=False - set reviewed flag (enables complete=True)
-            r.set(f"taey:response_reviewed:{platform}", "true", ex=3600)
+            r.set(node_key(f"response_reviewed:{platform}"), "true", ex=3600)
 
             has_artifacts = tool_result.get("has_artifacts", False)
             content_length = tool_result.get("length", 0)
-            r.hset(f"taey:extraction_summary:{platform}", mapping={
+            r.hset(node_key(f"extraction_summary:{platform}"), mapping={
                 "has_artifacts": str(has_artifacts).lower(),
                 "content_length": str(content_length),
                 "platform": platform
             })
-            r.expire(f"taey:extraction_summary:{platform}", 3600)
+            r.expire(node_key(f"extraction_summary:{platform}"), 3600)
 
     except Exception:
         pass

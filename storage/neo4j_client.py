@@ -148,18 +148,27 @@ def add_message(session_id: str, role: str, content: str,
     return message_id
 
 
+_ALLOWED_SESSION_PROPS = {'session_type', 'purpose', 'last_activity'}
+
+
 def update_session(session_id: str, updates: Dict[str, Any]) -> bool:
     """Update session properties.
 
     Args:
         session_id: Session to update.
         updates: Dict of property names to new values.
+                 Keys must be in _ALLOWED_SESSION_PROPS (prevents Cypher injection).
 
     Returns:
         True on success.
     """
     driver = get_driver()
     if not driver:
+        return False
+
+    bad_keys = set(updates) - _ALLOWED_SESSION_PROPS
+    if bad_keys:
+        logger.error(f"Rejecting disallowed session properties: {bad_keys}")
         return False
 
     try:

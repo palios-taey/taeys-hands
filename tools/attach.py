@@ -917,6 +917,16 @@ def handle_attach(platform: str, file_path: str,
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}"}
 
+    # Path sandboxing: prevent exfiltration of sensitive files
+    real_path = os.path.realpath(file_path)
+    _ALLOWED_DIRS = [
+        os.path.expanduser('~'),
+        '/tmp',
+        '/var/spark',
+    ]
+    if not any(real_path.startswith(d) for d in _ALLOWED_DIRS):
+        return {"error": f"Path not in allowed directories: {real_path}"}
+
     firefox = atspi.find_firefox()
 
     # Check for pending attach FIRST (continuing after dropdown click)
