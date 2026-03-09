@@ -17,7 +17,7 @@ import time
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
     r = get_redis()
     if r:
         try:
-            r.set("taey:list_sessions_checkpoint", str(time.time()), ex=1800)  # 30 min TTL
+            r.set(node_key("list_sessions_checkpoint"), str(time.time()), ex=1800)  # 30 min TTL
         except Exception:
             pass
 
