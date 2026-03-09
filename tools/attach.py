@@ -267,10 +267,20 @@ def _handle_portal_dialog(platform: str, file_path: str,
         inp.focus_firefox()
         time.sleep(0.5)
 
+        # Verify file chip appeared in AT-SPI tree (up to 4s)
+        chip_found = False
+        firefox_check = atspi.find_firefox()
+        for _ in range(20):
+            doc_check = atspi.get_platform_document(firefox_check, platform) if firefox_check else None
+            if doc_check and _detect_existing_attachments(doc_check):
+                chip_found = True
+                break
+            time.sleep(0.2)
+
         # Update attachment checkpoint
         _update_checkpoint(platform, file_path, redis_client)
 
-        return {
+        result = {
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
@@ -278,6 +288,9 @@ def _handle_portal_dialog(platform: str, file_path: str,
             "dialog_type": "nautilus_portal",
             "info": "File chip may shift element positions - re-inspect before further clicks.",
         }
+        if not chip_found:
+            result["warning"] = "Dialog closed but NO file chip detected in AT-SPI tree. File may not have attached — re-inspect to verify."
+        return result
 
     except Exception as e:
         logger.error(f"Portal dialog handling failed: {e}")
@@ -519,19 +532,21 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
 
         time.sleep(0.5)
 
-        # Wait for file chip to appear in AT-SPI tree (up to 2s).
+        # Wait for file chip to appear in AT-SPI tree (up to 4s).
         # Chip renders asynchronously after dialog closes — polling here
-        # ensures _detect_existing_attachments() blocks a retry on return.
+        # verifies the file was actually attached (not just dialog dismissed).
+        chip_found = False
         firefox = atspi.find_firefox()
-        for _ in range(10):
+        for _ in range(20):
             doc_check = atspi.get_platform_document(firefox, platform) if firefox else None
             if doc_check and _detect_existing_attachments(doc_check):
+                chip_found = True
                 break
             time.sleep(0.2)
 
         _update_checkpoint(platform, file_path, redis_client)
 
-        return {
+        result = {
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
@@ -539,6 +554,9 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
             "dialog_type": "gtk_embedded",
             "info": "File chip may shift element positions - re-inspect before further clicks.",
         }
+        if not chip_found:
+            result["warning"] = "Dialog closed but NO file chip detected in AT-SPI tree. File may not have attached — re-inspect to verify."
+        return result
 
     except Exception as e:
         logger.error(f"GTK file dialog handling failed: {e}")
