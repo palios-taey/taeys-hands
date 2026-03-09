@@ -33,6 +33,9 @@ agents/hmm_enrichment_worker.sh
 agents/hmm_worker.sh
 agents/hmm_worker_start.sh
 agents/hmm_system_prompt.md
+agents/CODEX_WORKER.md
+agents/codex_enrichment_worker.sh
+agents/codex_worker_start.sh
 scripts/family_boot.sh
 scripts/family_health.sh
 scripts/monitor_family.sh
