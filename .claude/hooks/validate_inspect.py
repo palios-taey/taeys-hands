@@ -59,7 +59,9 @@ def main():
         deny(
             f"BLOCKED: {platform} is not available on {hostname}.\n"
             "Workers have ONLY ChatGPT (Alt+1) and Gemini (Alt+2).\n"
-            "Skip this platform and move to the next package."
+            "DO NOT ESCALATE. Skip this package immediately.\n"
+            "Build next package with: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform chatgpt\n"
+            "or: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform gemini"
         )
 
     if not platform:
