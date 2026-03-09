@@ -20,24 +20,12 @@ quirks:
 stop_patterns: []
 
 # Elements to exclude from taey_inspect output.
-# Removes sidebar noise (trending, relevant people, footer) that is never
-# actionable for automation. Uses both coordinate zones and name matching.
+# Name/role based only — NO coordinate exclusions (breaks on window resize).
+# Left sidebar is NOT excluded — it contains actionable links (Articles, Profile, etc.).
 inspect_noise:
-  exclude_x_max: 220       # left sidebar (nav links at x~156) — never actionable
-  exclude_x_min: 950       # right sidebar (trending, who to follow) — noise
   exclude_roles:
-    - list item          # sidebar profile cards (tweets are 'article', not 'list item')
+    - list item          # right sidebar profile/trending cards (tweets use 'article' role)
   exclude_names:         # exact match
-    # Left sidebar navigation
-    - "Home"
-    - "Search and explore"
-    - "Notifications"
-    - "Direct Messages"
-    - "SuperGrok"
-    - "Premium"
-    - "Verified Orgs"
-    - "Communities"
-    - "More menu items"
     # Right sidebar noise
     - "What's happening"
     - "Trending now"
