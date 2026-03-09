@@ -793,6 +793,12 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
     Validated as the ONLY working approach across 63 commits of git history.
     """
+    # Ensure the platform tab is actually focused in Firefox before clicking.
+    # Without this, xdotool clicks land on whichever tab is currently visible.
+    if not inp.switch_to_platform(platform):
+        logger.warning(f"Tab switch to {platform} may have failed")
+    time.sleep(0.5)
+
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None

@@ -143,12 +143,31 @@ def get_platform_document(firefox, platform: str):
 
     search(firefox)
 
+    # Match candidates by URL, prefer the SHOWING (active tab) document
+    # when multiple tabs for the same platform exist.
+    matches = []
     for candidate in candidates:
         url = get_document_url(candidate)
         if detect_platform_from_url(url) == platform:
-            return candidate
+            matches.append(candidate)
 
-    return None
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    # Multiple documents for same platform — prefer SHOWING (active tab)
+    for m in matches:
+        try:
+            state_set = m.get_state_set()
+            if state_set.contains(Atspi.StateType.SHOWING):
+                return m
+        except Exception:
+            pass
+
+    # Fallback: prefer document with more children (loaded page vs blank)
+    matches.sort(key=lambda m: m.get_child_count(), reverse=True)
+    return matches[0]
 
 
 def is_file_dialog_open(firefox) -> bool:
