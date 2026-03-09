@@ -70,19 +70,7 @@ def _gemini_navigate_fresh():
 
     Returns True if navigation was attempted.
     """
-    logger.info("Gemini follow-up detected — navigating to fresh page")
-    # Ctrl+L focuses URL bar, paste fresh URL, Enter
-    inp.press_key('Escape')
-    time.sleep(0.3)
-    inp.press_key('ctrl+l')
-    time.sleep(0.5)
-    if not inp.clipboard_paste('https://gemini.google.com/app'):
-        logger.error("Failed to paste Gemini URL")
-        return False
-    time.sleep(0.3)
-    inp.press_key('Return')
-    time.sleep(3.0)  # Wait for page load
-    return True
+    return _navigate_fresh_chat('gemini')
 
 
 def _is_gemini_dropdown_disabled(dropdown_items: list) -> bool:
@@ -94,6 +82,53 @@ def _is_gemini_dropdown_disabled(dropdown_items: list) -> bool:
         if any(phrase in name for phrase in _GEMINI_DISABLED_PHRASES):
             return True
     return False
+
+
+def _is_attach_button_disabled(atspi_obj) -> bool:
+    """Check if ChatGPT's 'Add files and more' button is disabled.
+
+    On stale/streaming ChatGPT pages, the attach button exists in the
+    AT-SPI tree but with ENABLED=False. Clicking it does nothing.
+    """
+    if IS_MACOS or not atspi_obj:
+        return False
+    try:
+        state_set = atspi_obj.get_state_set()
+        return not state_set.contains(Atspi.StateType.ENABLED)
+    except Exception:
+        return False
+
+
+def _navigate_fresh_chat(platform: str) -> bool:
+    """Navigate a chat platform tab to a fresh conversation page.
+
+    On stale conversations or during streaming, attach buttons may be
+    disabled or missing. Navigating to the platform's base URL gives
+    a clean input state.
+
+    Returns True if navigation was attempted.
+    """
+    from core.platforms import BASE_URLS
+    url = BASE_URLS.get(platform)
+    if not url:
+        logger.error(f"No base URL for {platform}")
+        return False
+    # ChatGPT: use temporary-chat to avoid Developer Mode
+    if platform == 'chatgpt':
+        url = 'https://chatgpt.com/?temporary-chat=true'
+
+    logger.info(f"{platform} attach recovery — navigating to fresh page: {url}")
+    inp.press_key('Escape')
+    time.sleep(0.3)
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
+    if not inp.clipboard_paste(url):
+        logger.error(f"Failed to paste {platform} URL")
+        return False
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(4.0)
+    return True
 
 
 # =========================================================================
@@ -762,8 +797,32 @@ def _keyboard_nav_attach(platform: str, file_path: str,
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
+    # ChatGPT/Grok: button not found → navigate to fresh page and retry
+    if not btn_coords and platform in _KEYBOARD_NAV_PLATFORMS and not IS_MACOS:
+        logger.info(f"{platform} attach button not found — trying fresh page")
+        if _navigate_fresh_chat(platform):
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}"}
+
+    # ChatGPT/Grok: disabled attach button → navigate to fresh page
+    if platform in _KEYBOARD_NAV_PLATFORMS and not IS_MACOS:
+        atspi_obj = btn_coords.get('atspi_obj')
+        if _is_attach_button_disabled(atspi_obj):
+            if _navigate_fresh_chat(platform):
+                firefox = atspi.find_firefox()
+                doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+                if not btn_coords:
+                    return {"error": f"{platform} attach button not found after fresh page navigation"}
+                new_obj = btn_coords.get('atspi_obj')
+                if _is_attach_button_disabled(new_obj):
+                    return {"error": f"{platform} attach button still disabled after fresh page navigation"}
+            else:
+                return {"error": f"Failed to navigate {platform} to fresh page"}
 
     # Dismiss any stale dropdown/popup
     inp.press_key('Escape')
