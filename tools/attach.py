@@ -273,16 +273,26 @@ def _any_file_dialog_open(firefox) -> str:
 # =========================================================================
 
 def _update_checkpoint(platform: str, file_path: str, redis_client):
-    """Update Redis attachment checkpoint after successful attach."""
+    """Update Redis attachment checkpoint after successful attach.
+
+    Deduplicates: if this exact file_path is already in the checkpoint,
+    don't increment the count or append again. This prevents the
+    double-count bug when taey_attach is called multiple times for the
+    same file (e.g., dropdown_open → click item → file_dialog).
+    """
     if not redis_client:
         return
     existing = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
     if existing:
         try:
             data = json.loads(existing)
-            count = data.get('attached_count', 0) + 1
             files = data.get('attached_files', [])
+            # Deduplicate: skip if this file is already recorded
+            if file_path in files:
+                logger.debug(f"Checkpoint already has {file_path}, skipping duplicate")
+                return
             files.append(file_path)
+            count = len(files)
         except json.JSONDecodeError:
             count, files = 1, [file_path]
     else:
