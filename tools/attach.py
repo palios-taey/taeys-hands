@@ -49,12 +49,51 @@ _ATTACH_NAMES = [
 
 _XDOTOOL_ENV = None
 
+# Gemini follow-up pages disable upload. Detect and auto-navigate to fresh page.
+_GEMINI_DISABLED_PHRASES = {'menu actions are disabled', 'disabled for follow'}
+
+
 def _xenv():
     """Subprocess env with DISPLAY set for xdotool/xsel calls."""
     global _XDOTOOL_ENV
     if _XDOTOOL_ENV is None:
         _XDOTOOL_ENV = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
     return _XDOTOOL_ENV
+
+
+def _gemini_navigate_fresh():
+    """Navigate Gemini tab to a fresh conversation page.
+
+    On follow-up conversations, Gemini disables file upload ("Menu actions
+    are disabled for follow ups"). This navigates to gemini.google.com/app
+    to get a clean input state.
+
+    Returns True if navigation was attempted.
+    """
+    logger.info("Gemini follow-up detected — navigating to fresh page")
+    # Ctrl+L focuses URL bar, paste fresh URL, Enter
+    inp.press_key('Escape')
+    time.sleep(0.3)
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
+    if not inp.clipboard_paste('https://gemini.google.com/app'):
+        logger.error("Failed to paste Gemini URL")
+        return False
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(3.0)  # Wait for page load
+    return True
+
+
+def _is_gemini_dropdown_disabled(dropdown_items: list) -> bool:
+    """Check if Gemini dropdown items indicate upload is disabled."""
+    if not dropdown_items:
+        return False
+    for item in dropdown_items:
+        name = (item.get('name') or '').lower()
+        if any(phrase in name for phrase in _GEMINI_DISABLED_PHRASES):
+            return True
+    return False
 
 
 # =========================================================================
@@ -913,6 +952,61 @@ def handle_attach(platform: str, file_path: str,
                     if dropdown_items:
                         break
                     time.sleep(0.5)
+
+    # =========================================================================
+    # Gemini follow-up recovery: disabled dropdown → navigate to fresh page
+    # =========================================================================
+    if platform == 'gemini' and _is_gemini_dropdown_disabled(dropdown_items):
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        if _gemini_navigate_fresh():
+            # Wait for fresh page, then retry attach from scratch (one attempt)
+            time.sleep(2.0)
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+            if btn_coords:
+                click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+                if not click_result.get("error"):
+                    time.sleep(1.0)
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    # Scan for dropdown items on fresh page
+                    for attempt in range(3):
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        dropdown_items = find_menu_items(firefox, doc)
+                        if dropdown_items and not _is_gemini_dropdown_disabled(dropdown_items):
+                            break
+                        dropdown_items = []
+                        time.sleep(0.5)
+
+    # Gemini no-items recovery: empty dropdown on fresh page → navigate fresh
+    if platform == 'gemini' and not dropdown_items and not _any_file_dialog_open(firefox):
+        logger.info("Gemini dropdown empty — trying fresh page navigation")
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        if _gemini_navigate_fresh():
+            time.sleep(2.0)
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+            if btn_coords:
+                click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+                if not click_result.get("error"):
+                    time.sleep(1.0)
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    for attempt in range(3):
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        dropdown_items = find_menu_items(firefox, doc)
+                        if dropdown_items and not _is_gemini_dropdown_disabled(dropdown_items):
+                            break
+                        dropdown_items = []
+                        time.sleep(0.5)
 
     # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
     if not dropdown_items and not _any_file_dialog_open(firefox):
