@@ -1113,7 +1113,8 @@ def handle_attach(platform: str, file_path: str,
                         time.sleep(0.5)
 
     # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
-    if not dropdown_items and not _any_file_dialog_open(firefox):
+    # ONLY for React portal platforms — on Gemini, Down+Enter opens new tabs!
+    if not dropdown_items and not _any_file_dialog_open(firefox) and platform in _KEYBOARD_NAV_PLATFORMS:
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
