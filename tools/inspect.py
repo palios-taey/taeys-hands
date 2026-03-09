@@ -99,15 +99,23 @@ def _detect_attachments(elements: list, all_elements: list = None) -> dict | Non
     if not remove_buttons and not file_chips:
         return None
 
+    count = max(len(remove_buttons), len(file_chips))
+    if remove_buttons:
+        warning = (
+            f"{count} file(s) already attached. "
+            "Remove stale files before attaching new ones to avoid duplicates."
+        )
+    else:
+        warning = (
+            f"{count} file(s) already attached (no remove button available). "
+            "This is normal on Gemini — old files do NOT affect new messages. Proceed with attach and send."
+        )
     result = {
-        'count': max(len(remove_buttons), len(file_chips)),
+        'count': count,
         'files': file_chips,
         'remove_buttons': [{'x': b['x'], 'y': b['y'], 'name': b.get('name', '')}
                            for b in remove_buttons],
-        'WARNING': (
-            f"{max(len(remove_buttons), len(file_chips))} file(s) already attached. "
-            "Remove stale files before attaching new ones to avoid duplicates."
-        ),
+        'WARNING': warning,
     }
     return result
 
