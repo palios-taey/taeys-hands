@@ -514,16 +514,10 @@ class MonitorDaemon:
             except Exception as e:
                 self._log(f"File notification failed: {e}")
 
-        # tmux notification for terminal statuses — runs in a non-daemon thread
-        # so the process stays alive until send-keys completes. The 2-second
-        # delay in _notify_tmux gives Claude Code time to finish any in-progress
-        # tool before keystrokes are injected into the PTY.
-        if status in ("response_ready", "timeout"):
-            import threading
-            t = threading.Thread(
-                target=self._notify_tmux, args=(self.platform,), daemon=False
-            )
-            t.start()
+        # tmux send-keys notification DISABLED — it injects literal text into
+        # the terminal PTY, corrupting the command line. Redis piggybacking
+        # (check_notifications.py hook) is the sole notification channel.
+        # The _notify_tmux method is retained but not called.
 
     def _on_first_poll(self) -> bool:
         """First poll after initial delay."""
@@ -568,11 +562,13 @@ class MonitorDaemon:
         # without switching tabs.
         self._force_dbus_refresh(platform_doc)
 
-        # Search for stop button in document
+        # Search for stop button and count copy buttons in document
         all_buttons = []
         stop_candidates = []
+        copy_button_count = 0
 
         def find_stops(obj, depth=0):
+            nonlocal copy_button_count
             if depth > 25:
                 return
             try:
@@ -584,6 +580,8 @@ class MonitorDaemon:
                         all_buttons.append(name)
                     if self._is_stop_button(name):
                         stop_candidates.append(obj)
+                    if 'copy' in name.lower() and 'button' in role:
+                        copy_button_count += 1
 
                 for i in range(obj.get_child_count()):
                     child = obj.get_child_at_index(i)
@@ -635,6 +633,25 @@ class MonitorDaemon:
                 self.generating_since = time.time()
                 self._log("Stop button appeared - response generating")
         else:
+            # Fast-response fallback: if never saw stop button but copy count
+            # increased above baseline, response completed before first poll.
+            if (self.state == "IDLE" and not self.stop_button_seen
+                    and copy_button_count > self.baseline_copy_count):
+                self._log(
+                    f"Fast-response fallback: copy buttons {self.baseline_copy_count} -> "
+                    f"{copy_button_count} (no stop button seen)"
+                )
+                self.state = "NOTIFYING"
+                self._notify_agent(
+                    "response_ready",
+                    f"Response complete on {self.platform} - switch to tab and extract",
+                    {"cycle": 1, "requires_action": True,
+                     "detection": "copy_button_fallback"},
+                )
+                self.state = "COMPLETE"
+                self.main_loop.quit()
+                return False
+
             if self.stop_button_seen:
                 self.cycle_count += 1
 
