@@ -42,11 +42,24 @@ def allow(reason: str):
     sys.exit(0)
 
 
+WORKER_HOSTNAMES = {'jetson', 'thor'}
+
+
 def main():
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError as e:
         deny(f"Invalid JSON input: {e}")
+
+    # Workers NEVER select dropdowns — they use default models only
+    import socket
+    hostname = socket.gethostname().lower()
+    if hostname in WORKER_HOSTNAMES:
+        deny(
+            f"BLOCKED: Worker nodes ({hostname}) must NOT call taey_select_dropdown.\n"
+            "Workers use DEFAULT models only. Do NOT call taey_prepare or taey_select_dropdown.\n"
+            "Workflow: taey_inspect → taey_attach → taey_inspect → taey_click → taey_send_message"
+        )
 
     tool_input = data.get("tool_input", {})
     platform = tool_input.get("platform", "")
