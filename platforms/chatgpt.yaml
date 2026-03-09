@@ -10,8 +10,8 @@ capabilities:
   models:
     - Auto Decides how long to think
     - Instant 5.3 Answers right away
-    - Thinking 5.2 Thinks longer for better answers
-    - Pro 5.2 Research-grade intelligence
+    - Thinking 5.4 Thinks longer for better answers
+    - Pro 5.4 Research-grade intelligence
     - Legacy models
   modes: []
   # Thinking time sub-modes — shown as "Extended Pro" / "Light" / etc. buttons near input
