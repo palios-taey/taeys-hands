@@ -38,11 +38,20 @@ def allow(reason: str):
     sys.exit(0)
 
 
+WORKER_HOSTNAMES = {'jetson', 'thor'}
+
+
 def main():
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError as e:
         deny(f"Invalid JSON input: {e}")
+
+    # Workers don't use plans — they run the HMM enrichment loop directly
+    import socket
+    hostname = socket.gethostname().lower()
+    if hostname in WORKER_HOSTNAMES:
+        allow(f"Worker node ({hostname}) — plan not required for enrichment")
 
     tool_input = data.get("tool_input", {})
     platform = tool_input.get("platform", "")
