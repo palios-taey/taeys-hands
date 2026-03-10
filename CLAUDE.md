@@ -31,6 +31,16 @@ Not browser automation (no CDP/WebDriver) - genuine accessibility tree perceptio
 2. Configure tab order to match Alt+1 through Alt+7 shortcuts
 3. Run the MCP server: `python3 server.py`
 
+### Using from another project directory
+
+Copy `.mcp.json.example` to your project's `.mcp.json` and replace paths. **CRITICAL**: Use the absolute path to `server.py` in `args` — Claude Code resolves relative paths from the project directory, not from `cwd`:
+
+```json
+"args": ["/absolute/path/to/taeys-hands/server.py"]
+```
+
+Environment variables can go in `taeys-hands/.env` (loaded by server.py at startup) or in the `env` field of `.mcp.json`.
+
 ---
 
 ## Architecture

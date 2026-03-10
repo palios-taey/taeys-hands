@@ -2,8 +2,9 @@
   "mcpServers": {
     "taeys-hands": {
       "type": "stdio",
-      "command": "/usr/bin/python3",
-      "args": ["server.py"],
+      "command": "python3",
+      "args": ["/absolute/path/to/taeys-hands/server.py"],
+      "cwd": "/absolute/path/to/taeys-hands",
       "env": {
         "NEO4J_URI": "bolt://localhost:7687",
         "REDIS_HOST": "127.0.0.1",

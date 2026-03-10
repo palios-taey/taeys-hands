@@ -25,7 +25,8 @@ declare -A MACHINES=(
 )
 
 deploy_local() {
-    echo "[local] Pulling latest..."
+    echo "[local] Ensuring main branch..."
+    git checkout main 2>&1 | tail -1
     git pull origin main 2>&1 | tail -3
 
     echo "[local] Killing MCP server processes..."
@@ -44,8 +45,9 @@ deploy_remote() {
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" "
         cd ${repo_path} 2>/dev/null || { echo 'REPO NOT FOUND: ${repo_path}'; exit 1; }
+        git checkout main 2>&1 | tail -1
         git pull origin main 2>&1 | tail -3
-        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP servers killed' || echo 'No MCP servers running'
+        pkill -f 'python3.*server\\.py' 2>/dev/null && echo 'MCP servers killed' || echo 'No MCP servers running'
         echo \"Done — commit: \$(git log --oneline -1)\"
     " 2>&1 | sed "s/^/  /" || echo "  [${host}] SSH FAILED"
 }
