@@ -258,7 +258,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
                     pass
 
     # Step 2: Navigate or just switch tab
-    if target_url and not already_navigated:
+    if target_url and not already_navigated and scroll != 'none':
         # Plan exists with URL - navigate to it
         if not inp.switch_to_platform(platform):
             result['error'] = f"Failed to switch to {platform} tab"
