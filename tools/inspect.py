@@ -108,7 +108,8 @@ def _detect_attachments(elements: list, all_elements: list = None) -> dict | Non
     else:
         warning = (
             f"{count} file(s) already attached (no remove button available). "
-            "This is normal on Gemini — old files do NOT affect new messages. Proceed with attach and send."
+            "Context BLEEDS between messages — start a FRESH session before sending. "
+            "Navigate to the platform's base URL to get a new chat."
         )
     result = {
         'count': count,
@@ -164,22 +165,25 @@ def _check_structure_change(platform: str, elements: list,
     }
 
 
-def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs) -> Dict[str, Any]:
+def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
+                    fresh_session: bool = False, **kwargs) -> Dict[str, Any]:
     """Inspect a platform and return all visible elements.
 
     Flow:
-    1. If plan exists with URL and not yet navigated: navigate to URL
-    2. Otherwise: just switch to platform tab (stateless mode)
-    3. Scroll according to `scroll` parameter, scan AT-SPI tree
-    4. Find all elements, filter to useful ones
-    5. Check for structure changes (layout fingerprinting)
-    6. Store in Redis
+    1. If fresh_session: navigate to platform's base URL for new chat
+    2. Elif plan exists with URL and not yet navigated: navigate to URL
+    3. Otherwise: just switch to platform tab (stateless mode)
+    4. Scroll according to `scroll` parameter, scan AT-SPI tree
+    5. Find all elements, filter to useful ones
+    6. Check for structure changes (layout fingerprinting)
+    7. Store in Redis
 
     Args:
         platform: Which platform to inspect.
         redis_client: Redis client for plan/state storage.
         scroll: Where to scroll before scanning. "bottom" (default),
                 "top", or "none" (preserve current scroll position).
+        fresh_session: Navigate to base URL for a new chat before scanning.
 
     Returns:
         Dict with success, url, state, controls, platform_context.
@@ -193,11 +197,48 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom", **kwargs
         'controls': {},
     }
 
+    # Step 0: fresh_session — navigate to base URL for a guaranteed new chat
+    if fresh_session:
+        base_url = BASE_URLS.get(platform)
+        if not base_url:
+            result['error'] = f"No base URL for {platform}"
+            return result
+
+        if not inp.switch_to_platform(platform):
+            result['error'] = f"Failed to switch to {platform} tab"
+            return result
+
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        inp.press_key('ctrl+l')
+        time.sleep(0.2)
+        inp.press_key('ctrl+a')
+        time.sleep(0.3)
+
+        if not inp.clipboard_paste(base_url):
+            result['error'] = f"URL paste failed for: {base_url}"
+            return result
+
+        time.sleep(0.1)
+        inp.press_key('Return')
+        time.sleep(8.0)  # Wait for page load
+
+        # Scroll to bottom to see latest content on fresh page
+        inp.press_key('End')
+        time.sleep(1.0)
+
+        result['fresh_session'] = True
+        result['navigated_to'] = base_url
+
     # Step 1: Check if a plan exists (optional - inspect works without one)
     target_url = None
     already_navigated = False
     plan = None
     plan_id = None
+
+    if fresh_session:
+        # Skip plan navigation — we already navigated to base URL
+        already_navigated = True
 
     if redis_client:
         plan_id = redis_client.get(node_key(f"plan:current:{platform}"))

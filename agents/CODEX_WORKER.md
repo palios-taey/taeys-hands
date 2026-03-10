@@ -27,14 +27,9 @@ For each platform (ChatGPT, Grok, Gemini — one at a time):
 2. Get the analysis prompt:
    python3 ~/embedding-server/isma/scripts/hmm_package_builder.py prompt
 
-3. taey_inspect(platform)                    # Switch tab, scan AT-SPI tree
-4. START NEW SESSION: Find and click "New chat" or equivalent button
-   - ChatGPT: Click "New chat" in sidebar (or look for plus icon)
-   - Gemini: Click "New chat" in sidebar
-   - Grok: Click "New chat" button
-   - This is CRITICAL: every package MUST go in a fresh session to prevent
-     context bleed between enrichment rounds
-5. taey_inspect(platform)                    # RE-INSPECT after new chat
+3. taey_inspect(platform, fresh_session=true)  # Navigate to base URL + scan
+   This navigates to the platform's base URL (new chat) automatically.
+   CRITICAL: fresh_session=true is REQUIRED — context bleeds without it.
 6. taey_attach(platform, "/tmp/hmm_packages/<pkg_file>.md")
 7. taey_inspect(platform)                    # RE-INSPECT after attach (positions shift)
 8. taey_click(platform, x, y)               # Click input field (coords from inspect)
