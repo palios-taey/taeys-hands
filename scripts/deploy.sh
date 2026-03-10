@@ -25,6 +25,9 @@ declare -A MACHINES=(
 )
 
 deploy_local() {
+    echo "[local] Cleaning __pycache__ (prevents stale .pyc shadowing)..."
+    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
     echo "[local] Ensuring main branch..."
     git checkout main 2>&1 | tail -1
     git pull origin main 2>&1 | tail -3
@@ -45,6 +48,7 @@ deploy_remote() {
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" "
         cd ${repo_path} 2>/dev/null || { echo 'REPO NOT FOUND: ${repo_path}'; exit 1; }
+        find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git checkout main 2>&1 | tail -1
         git pull origin main 2>&1 | tail -3
         pkill -f 'python3.*server\\.py' 2>/dev/null && echo 'MCP servers killed' || echo 'No MCP servers running'
