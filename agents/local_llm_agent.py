@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -82,7 +83,7 @@ class MCPClient:
         """Fork the MCP server subprocess."""
         logger.info("Starting MCP server: %s (cwd=%s)", self.cmd, REPO_ROOT)
         self.proc = subprocess.Popen(
-            self.cmd.split(),
+            shlex.split(self.cmd),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -205,8 +206,10 @@ BASH_TOOL_DEF = {
 _BASH_ALLOWLIST = [
     "python3 ~/embedding-server/",
     "python3 /home/",
-    "cat ", "ls ", "wc ", "head ", "tail ", "echo ",
-    "mkdir ", "mv ", "cp ",
+    "python3 -c ",
+    "cat ", "ls ", "wc ", "head ", "tail ",
+    "echo ",
+    "mkdir /tmp/",
     "tmux-send ",
 ]
 
