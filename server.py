@@ -13,8 +13,22 @@ import sys
 import os
 import json
 import logging
+import signal
 import traceback
 from typing import Any, Dict, List
+
+
+class ToolTimeoutError(Exception):
+    """Raised when a tool call exceeds the timeout."""
+    pass
+
+
+def _tool_timeout_handler(signum, frame):
+    raise ToolTimeoutError("Tool execution timed out")
+
+
+# Max seconds for any single tool call (prevents server hang → broken pipe)
+TOOL_TIMEOUT_SECONDS = 60
 
 # Load .env file (Redis host, Neo4j URI, etc.)
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
@@ -563,7 +577,18 @@ def run_server():
             elif method == 'tools/call':
                 tool_name = params.get('name')
                 tool_args = params.get('arguments', {})
-                result = handle_tool(tool_name, tool_args, redis_client)
+                # Timeout guard: prevents a hung AT-SPI call from killing
+                # the server (which causes broken pipe for the client).
+                old_handler = signal.signal(signal.SIGALRM, _tool_timeout_handler)
+                signal.alarm(TOOL_TIMEOUT_SECONDS)
+                try:
+                    result = handle_tool(tool_name, tool_args, redis_client)
+                except ToolTimeoutError:
+                    result = {"error": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
+                    logger.error("Tool timeout: %s", tool_name)
+                finally:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
                 is_error = isinstance(result, dict) and result.get('error') is not None
                 write_message({
                     "jsonrpc": "2.0",
