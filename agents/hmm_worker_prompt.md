@@ -11,9 +11,9 @@ PLATFORMS: chatgpt (Alt+1), gemini (Alt+3), grok (Alt+4).
 CYCLE (repeat forever):
 
 PHASE 1 — SEND (do each platform one at a time):
-1. bash: PYTHONPATH=~/embedding-server:$PYTHONPATH python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform PLATFORM
+1. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform PLATFORM
    If "No items available" → skip this platform.
-2. bash: PYTHONPATH=~/embedding-server:$PYTHONPATH python3 ~/embedding-server/isma/scripts/hmm_package_builder.py prompt
+2. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py prompt
    Save the output — this is the prompt to send.
 3. taey_inspect platform with fresh_session=true
 4. taey_attach platform with the package file from step 1
@@ -27,7 +27,7 @@ PHASE 2 — HARVEST (after sending to all platforms, wait 2 minutes, then check 
 2. If copy buttons visible and no stop button → response is ready:
    a. taey_quick_extract platform with complete=true
    b. bash: echo 'RESPONSE_CONTENT' > /tmp/hmm_response_PLATFORM.json (write extracted content)
-   c. bash: PYTHONPATH=~/embedding-server:$PYTHONPATH python3 ~/embedding-server/isma/scripts/hmm_package_builder.py complete --platform PLATFORM --response-file /tmp/hmm_response_PLATFORM.json
+   c. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py complete --platform PLATFORM --response-file /tmp/hmm_response_PLATFORM.json
 3. If stop button visible → still generating, skip.
 4. If page looks wrong → escalate.
 

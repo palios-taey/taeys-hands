@@ -207,6 +207,7 @@ _BASH_ALLOWLIST = [
     "python3 /home/",
     "cat ", "ls ", "wc ", "head ", "tail ", "echo ",
     "mkdir ", "mv ", "cp ",
+    "tmux-send ",
 ]
 
 
