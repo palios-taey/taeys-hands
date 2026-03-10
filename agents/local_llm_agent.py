@@ -370,8 +370,9 @@ class LocalLLMAgent:
             method="POST",
         )
 
+        api_timeout = int(os.environ.get("LLM_API_TIMEOUT", "300"))
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=api_timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             error_body = e.read().decode() if e.fp else ""
