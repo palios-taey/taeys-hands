@@ -9,6 +9,7 @@
 #
 # What it installs:
 #   - tmux-send -> /usr/local/bin/tmux-send  (Claude-to-Claude messaging)
+#   - notify-send -> /usr/local/bin/notify-send  (Redis-backed messaging)
 #   - System packages: xdotool, xsel, xdpyinfo (required for AT-SPI tools)
 
 set -euo pipefail
@@ -21,12 +22,17 @@ echo "Host: $(hostname -s)"
 echo ""
 
 # --- tmux-send ---
-echo "[1/2] Installing tmux-send..."
+echo "[1/3] Installing tmux-send..."
 sudo install -m 755 "$REPO_ROOT/scripts/tmux-send" /usr/local/bin/tmux-send
 echo "  -> /usr/local/bin/tmux-send"
 
+# --- notify-send ---
+echo "[2/3] Installing notify-send..."
+sudo install -m 755 "$REPO_ROOT/scripts/notify-send" /usr/local/bin/notify-send
+echo "  -> /usr/local/bin/notify-send (Redis-backed, replaces tmux-send for inter-Claude)"
+
 # --- System packages ---
-echo "[2/2] Installing system packages..."
+echo "[3/3] Installing system packages..."
 if command -v apt-get &>/dev/null; then
     sudo apt-get install -y xdotool xsel x11-utils 2>&1 | grep -E "^(Setting|Unpacking|already|E:)" || true
 else

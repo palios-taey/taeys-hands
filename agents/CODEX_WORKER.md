@@ -62,7 +62,7 @@ If platforms still generating, do another harvest pass. After 3 passes with no p
 3. If Weaviate unenriched > 0 → go to Phase 1. Theme queue may be exhausted
    but the builder's `next` command will use Weaviate sweep to find items.
 4. ONLY escalate if `next --platform <name>` prints "Sweep found no new items":
-   tmux-send spark1 weaver "ESCALATION from $(hostname): Weaviate sweep empty, truly done"
+   notify-send weaver "ESCALATION from $(hostname): Weaviate sweep empty, truly done" --type escalation
 ```
 
 **IMPORTANT**: "Theme queue: EXHAUSTED" does NOT mean done. It means the builder
@@ -110,7 +110,7 @@ If response is not valid JSON:
 - **"Driver closed" after process_response()**: Non-critical. Items stored successfully.
 - **Any infrastructure error**: DO NOT try to fix. Escalate to Spark immediately:
   ```
-  tmux-send spark1 weaver "ESCALATION from $(hostname): <problem>"
+  notify-send weaver "ESCALATION from $(hostname): <problem>" --type escalation --priority high
   ```
 
 ## NEVER DO
