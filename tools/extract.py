@@ -207,6 +207,31 @@ def handle_quick_extract(platform: str, redis_client,
 
     content = clipboard.read()
 
+    # Grok (and sometimes others) may have Copy buttons on user messages too.
+    # If we grabbed the prompt text instead of the response, try the previous
+    # copy button (second-to-last by Y position).
+    if content and len(response_copy) >= 2:
+        # Heuristic: if content starts with the analysis prompt marker,
+        # we copied the user message, not the response.
+        content_start = content.strip()[:200].lower()
+        prompt_markers = ['analyze the following', 'package analysis request',
+                          'you are analyzing', 'respond only with minified json',
+                          'critical: echo back']
+        if any(marker in content_start for marker in prompt_markers):
+            logger.warning("Extracted content looks like user prompt, trying previous copy button")
+            prev_btn = response_copy[-2]
+            clipboard.clear()
+            time.sleep(0.1)
+            if prev_btn.get('atspi_obj') and atspi_click(prev_btn):
+                logger.info(f"Retry copy via AT-SPI at ({prev_btn['x']}, {prev_btn['y']})")
+            else:
+                inp.click_at(prev_btn['x'], prev_btn['y'])
+            time.sleep(0.8)
+            retry_content = clipboard.read()
+            if retry_content and retry_content != content:
+                logger.info("Previous copy button returned different content — using it")
+                content = retry_content
+
     # ChatGPT toggle buttons: do_action(0) returns True but doesn't fire
     # the React onClick handler. Retry with grab_focus + Enter, then xdotool.
     if not content and newest.get('atspi_obj'):
