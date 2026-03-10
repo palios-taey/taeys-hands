@@ -7,8 +7,9 @@ You are an HMM enrichment worker. Your job is to build analysis packages, send t
 - **PYTHONPATH** must include `~/embedding-server`
 - **Package builder**: `python3 ~/embedding-server/isma/scripts/hmm_package_builder.py`
 - **DISPLAY**: `:1` (Firefox with chat platforms on this display)
-- **Platforms**: ChatGPT (Alt+1), Grok (Alt+4), Gemini (Alt+3)
-- **DO NOT use Claude (Alt+2)** — reserved for Spark only
+- **Tabs**: ChatGPT (Alt+1), Claude (Alt+2), Gemini (Alt+3), Grok (Alt+4)
+- **DO NOT use Claude (Alt+2) for enrichment** — reserved for Spark only
+- **Send enrichment to**: ChatGPT, Gemini, Grok (NOT Claude)
 
 ## The Enrichment Loop (CONTINUOUS — NEVER STOP)
 
