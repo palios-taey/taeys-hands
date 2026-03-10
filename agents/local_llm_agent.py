@@ -241,6 +241,59 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
         return {"error": str(e), "exit_code": -1}
 
 
+def _trim_tool_result(tool_name: str, result: dict) -> dict:
+    """Compress large MCP tool results to save LLM context.
+
+    taey_inspect returns full element lists (100+ items, 10K+ chars).
+    For the enrichment workflow, the LLM only needs: input field coords,
+    copy button count, stop button presence, and attach button location.
+    """
+    if tool_name != "taey_inspect" or not isinstance(result, dict):
+        return result
+
+    controls = result.get("controls", [])
+    if not controls:
+        return result
+
+    # Extract only what the LLM needs
+    summary = {
+        "platform": result.get("platform", ""),
+        "success": result.get("success", False),
+        "url": result.get("url", ""),
+        "copy_button_count": result.get("state", {}).get("copy_button_count", 0),
+        "element_count": result.get("state", {}).get("element_count", 0),
+    }
+
+    # Find key elements: input fields, attach buttons, stop buttons, copy buttons
+    key_elements = []
+    for el in controls:
+        name = (el.get("name") or "").lower()
+        role = (el.get("role") or "").lower()
+
+        is_input = role in ("entry", "text", "editbar") or "input" in name
+        is_attach = any(k in name for k in ["attach", "add files", "upload", "toggle menu", "open upload"])
+        is_stop = any(k in name for k in ["stop", "cancel"])
+        is_copy = "copy" in name and role in ("push button", "toggle button", "button")
+        is_send = "send" in name and role == "push button"
+
+        if is_input or is_attach or is_stop or is_copy or is_send:
+            key_elements.append({
+                "name": el.get("name", "")[:100],
+                "role": role,
+                "x": el.get("x"),
+                "y": el.get("y"),
+                "tag": "input" if is_input else "attach" if is_attach else "stop" if is_stop else "copy" if is_copy else "send",
+            })
+
+    summary["key_elements"] = key_elements
+    if result.get("attachments"):
+        summary["attachments"] = result["attachments"]
+    if result.get("structure_change"):
+        summary["structure_change"] = result["structure_change"]
+
+    return summary
+
+
 class LocalLLMAgent:
     """Agent that uses a local OpenAI-compatible LLM with MCP tools."""
 
@@ -444,6 +497,9 @@ class LocalLLMAgent:
                         except Exception as e:
                             result = {"error": str(e)}
                             logger.error("MCP tool call failed: %s", e)
+
+                    # Trim large tool results to save context
+                    result = _trim_tool_result(tool_name, result)
 
                     # Add tool result to messages
                     messages.append({
