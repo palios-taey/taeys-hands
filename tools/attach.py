@@ -821,6 +821,13 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
     Validated as the ONLY working approach across 63 commits of git history.
     """
+    # Short-circuit: if a file dialog is ALREADY open, handle it immediately.
+    firefox = atspi.find_firefox()
+    dialog_type = _any_file_dialog_open(firefox)
+    if dialog_type:
+        logger.info(f"File dialog already open ({dialog_type}) in keyboard nav — handling directly")
+        return _handle_file_dialog(platform, file_path, redis_client)
+
     # Ensure the platform tab is actually focused in Firefox before clicking.
     # Without this, xdotool clicks land on whichever tab is currently visible.
     if not inp.switch_to_platform(platform):
@@ -962,7 +969,15 @@ def handle_attach(platform: str, file_path: str,
 
     firefox = atspi.find_firefox()
 
-    # Check for pending attach FIRST (continuing after dropdown click)
+    # Short-circuit: if a file dialog is ALREADY open, handle it immediately.
+    # This prevents re-clicking the attach button when the caller (Claude)
+    # already opened the dialog via a dropdown item click.
+    dialog_type = _any_file_dialog_open(firefox)
+    if dialog_type:
+        logger.info(f"File dialog already open ({dialog_type}) — handling directly")
+        return _handle_file_dialog(platform, file_path, redis_client)
+
+    # Check for pending attach (continuing after dropdown click)
     # A pending attach means a dialog should be opening — don't close it!
     pending = None
     if redis_client:
