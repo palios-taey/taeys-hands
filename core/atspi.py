@@ -104,6 +104,12 @@ def detect_platform_from_url(url: str) -> str | None:
     if not url:
         return None
     url_lower = url.lower()
+    # Check extra (more specific) patterns first to avoid ambiguity
+    # (e.g., x.com/i/grok must match 'grok' not 'x_twitter')
+    from core.platforms import _EXTRA_URL_PATTERNS
+    for platform, pattern in _EXTRA_URL_PATTERNS.items():
+        if pattern in url_lower:
+            return platform
     for platform, domain in URL_PATTERNS.items():
         if domain in url_lower:
             return platform
