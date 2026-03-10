@@ -433,18 +433,30 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         search(scope)
         return found
 
-    # === Pass 1: Strict containers (menu, popup menu, listbox) ===
+    # === Pass 1: Strict containers in platform_doc (menu, popup menu, listbox) ===
     # These are real dropdown/menu elements. Searched first to avoid
     # false positives from page content list/panel containers.
-
-    # Search platform_doc first (avoids cross-tab contamination)
     if platform_doc:
         items = _collect_from(platform_doc, container_types=_STRICT_CONTAINERS)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Then Firefox root (dropdowns render outside document).
+    # === Pass 1b: Containerless menu items in platform_doc ===
+    # Some platforms (Perplexity) render menu items directly in the DOM
+    # without a menu/popup container. Check BEFORE searching Firefox root
+    # or loose containers, which often return wrong results.
+    if platform_doc:
+        _fallback_roles = ('menu item', 'radio menu item', 'check menu item')
+        all_elements = find_elements(platform_doc)
+        items = [e for e in all_elements
+                 if e.get('name') and e.get('role', '') in _fallback_roles]
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+
+    # === Pass 2: Strict containers in Firefox root ===
+    # Dropdowns may render outside the document element (React portals).
     # REQUIRE item-level SHOWING to prevent cross-tab contamination:
     # inactive tab menus have non-zero extents but items lack SHOWING.
     if firefox:
@@ -454,10 +466,9 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # === Pass 2: Loose containers (list, panel) ===
-    # Used by Gemini dropdowns. Only reached if no strict containers found,
-    # so page content lists don't shadow real menu containers.
-
+    # === Pass 3: Loose containers (list, panel) ===
+    # Used by Gemini dropdowns. Only reached if no strict containers
+    # or containerless items found, so page content doesn't shadow dropdowns.
     if platform_doc:
         items = _collect_from(platform_doc, container_types=_LOOSE_CONTAINERS)
         if items:
@@ -471,11 +482,11 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # === Pass 3: Retry without SHOWING requirement (platform_doc only) ===
+    # === Pass 4: Retry without SHOWING requirement (platform_doc only) ===
     # NEVER retry on firefox root without SHOWING: persistent Firefox
     # chrome menus (tab context menu) are always in the tree with
     # non-zero extents even when not displayed.
-    logger.debug("Strict SHOWING search failed, retrying platform_doc without SHOWING requirement")
+    logger.debug("All SHOWING searches failed, retrying platform_doc without SHOWING")
     if platform_doc:
         items = _collect_from(platform_doc, require_showing=False,
                               container_types=_STRICT_CONTAINERS)
@@ -484,16 +495,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             return items
         items = _collect_from(platform_doc, require_showing=False,
                               container_types=_LOOSE_CONTAINERS)
-        if items:
-            items.sort(key=lambda x: x['y'])
-            return items
-
-    # Fallback: search document for menu items without a menu container.
-    if platform_doc:
-        _fallback_roles = ('menu item', 'radio menu item', 'check menu item')
-        all_elements = find_elements(platform_doc)
-        items = [e for e in all_elements
-                 if e.get('name') and e.get('role', '') in _fallback_roles]
         if items:
             items.sort(key=lambda x: x['y'])
             return items
