@@ -62,7 +62,13 @@ tools/                 # MCP tool handlers - one per file
   interact.py          # taey_set_map, taey_click, taey_click_at
   send_message.py      # taey_send_message
   extract.py           # taey_quick_extract, taey_extract_history
-  attach.py            # taey_attach
+  attach/              # taey_attach (decomposed package)
+    __init__.py        #   Router: validation, dedup, platform dispatch
+    dialogs.py         #   GTK + Portal + macOS file dialog handlers
+    buttons.py         #   Button discovery: cache lookup + AT-SPI tree search
+    chips.py           #   Existing attachment detection
+    keyboard_nav.py    #   ChatGPT/Grok keyboard navigation path
+    checkpoint.py      #   Redis checkpoint CRUD
   dropdown.py          # taey_select_dropdown, taey_prepare
   plan.py              # taey_plan (create/get/update)
   sessions.py          # taey_list_sessions
@@ -219,6 +225,8 @@ The stop-button method is primary. The copy-button-count fallback catches instan
 **No set_map needed.** Coordinates come directly from inspect results — pass x,y to click.
 
 **ATTACHMENT SAFETY**: `taey_attach` detects if the target file is already attached and skips re-attaching. Other existing attachments do NOT block new attachments (multi-file workflows are supported).
+
+**ATTACHMENT ERRORS**: `taey_attach` does NOT auto-recover (no fresh page navigation, no disabled-button retry). If attach returns an error with `"button_state": "disabled"` or `"action": "button_not_found"`, Claude must decide what to do (e.g., `taey_inspect(platform, fresh_session=True)` then retry).
 
 **NEVER batch** - do NOT inspect all platforms, then attach to all.
 Each platform must complete steps 1-7 before starting the next.
