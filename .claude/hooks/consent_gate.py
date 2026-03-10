@@ -82,7 +82,7 @@ TOOL_CONSENT_MAP = {
     "Edit": ConsentLevel.ACT,
 
     # Share: cross-agent communication
-    # tmux-send, buddy system, external API calls
+    # taey-notify (Redis inbox), tmux-send (legacy), external API calls
 }
 
 

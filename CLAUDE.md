@@ -350,36 +350,51 @@ python3 server.py                            # MCP server for that instance
 
 ---
 
-## Claude-to-Claude Messaging (tmux-send)
+## Claude-to-Claude Messaging
 
-`scripts/tmux-send` is the **only** sanctioned way for Claude instances to communicate with each other. It is critical infrastructure — every node must have it installed.
+Two messaging tools, each with a specific role:
 
-See `scripts/README.md` for full documentation and the multi-Claude coordination pattern.
+### `taey-notify` — Redis inbox (PRIMARY for inter-Claude)
+
+Messages go to Redis, delivered by PostToolUse hook (active instances) or tmux fallback daemon (idle autonomous instances). Reliable, no command-line injection risk.
+
+```bash
+# Send to any node's inbox
+taey-notify <target-node> "message"
+taey-notify weaver "ESCALATION from $(hostname): Grok inspect failed" --type escalation
+taey-notify weaver "cycle done" --type heartbeat --priority low
+
+# Types: message, escalation, heartbeat, notification, response_ready, command
+# Priority: high, normal, low (escalations auto-promote to high)
+```
+
+**Delivery paths:**
+1. **PostToolUse hook** (primary) — drains inbox after every tool call, injects via `additionalContext`
+2. **tmux fallback daemon** (safety net) — only for autonomous instances, checks `tool_running` flag before injecting
+
+### `tmux-send` — Direct tmux injection (LEGACY / special cases)
+
+Still available for cases where Redis isn't reachable or for direct tmux session control. Uses base64 encoding, session verification.
+
+```bash
+tmux-send <session> "message"                    # Local
+tmux-send <host> <session> "message"             # Remote via SSH
+```
 
 ### Install
 
 ```bash
-bash scripts/install-node.sh   # installs tmux-send + system deps on current node
+bash scripts/install-node.sh   # installs taey-notify + tmux-send + system deps
 ```
 
-### Usage
-
-```bash
-# Local — send to a session on this machine
-tmux-send <session> "message"
-
-# Remote — send to a session on another machine via SSH
-tmux-send <host> <session> "message"
-```
-
-### Rules (NEVER violate)
+### Rules
 
 | Rule | Why |
 |------|-----|
-| **ALWAYS use `tmux-send`** for Claude-to-Claude messages | Base64 encoding, session verification, fail-loud |
+| **Use `taey-notify`** for inter-Claude messages | Redis-backed, PostToolUse delivery, no command-line issues |
+| **NEVER target human sessions** with tmux daemon | tmux injection is disruptive — daemon is for autonomous instances only |
 | **NEVER use raw SSH** to send messages | Shell expansion corrupts special chars; no verification |
-| **NEVER target human-operated sessions** | Messages arrive as user input — only target Claude Code instances |
-| **Target session must exist** | Script exits with error if session not found |
+| **`tmux-send` for direct wake-up only** | When Redis delivery isn't fast enough or Redis is down |
 
 ---
 

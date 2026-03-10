@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -82,7 +83,7 @@ class MCPClient:
         """Fork the MCP server subprocess."""
         logger.info("Starting MCP server: %s (cwd=%s)", self.cmd, REPO_ROOT)
         self.proc = subprocess.Popen(
-            self.cmd.split(),
+            shlex.split(self.cmd),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -205,15 +206,36 @@ BASH_TOOL_DEF = {
 _BASH_ALLOWLIST = [
     "python3 ~/embedding-server/",
     "python3 /home/",
-    "cat ", "ls ", "wc ", "head ", "tail ", "echo ",
-    "mkdir ", "mv ", "cp ",
+    "python3 -c ",
+    "cat ", "ls ", "wc ", "head ", "tail ",
+    "echo ",
+    "mkdir /tmp/",
+    "tmux-send ",
+    "taey-notify ",
 ]
 
 
 def _execute_bash(command: str, timeout: int = 120) -> dict:
     """Execute a shell command with safety checks."""
-    # Enforce allowlist: command must start with an approved prefix
     cmd_stripped = command.strip()
+
+    # Block command chaining/injection metacharacters.
+    # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
+    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), command groups ({}).
+    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(', '${', '{', '}']
+    for pat in _CHAIN_PATTERNS:
+        if pat in cmd_stripped:
+            return {"error": f"Shell chaining/injection pattern '{pat}' not allowed", "exit_code": -1}
+
+    # File redirection: only allow > to /tmp/ destinations
+    import re
+    redir_match = re.search(r'>\s*(/[^\s]+)', cmd_stripped)
+    if redir_match:
+        dest = redir_match.group(1)
+        if not dest.startswith('/tmp/'):
+            return {"error": f"File redirection only allowed to /tmp/, got: {dest}", "exit_code": -1}
+
+    # Enforce allowlist: command must start with an approved prefix
     if not any(cmd_stripped.startswith(prefix) for prefix in _BASH_ALLOWLIST):
         return {"error": f"Command not in allowlist. Allowed prefixes: {_BASH_ALLOWLIST}", "exit_code": -1}
 
@@ -239,6 +261,61 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
         return {"error": f"Command timed out after {timeout}s", "exit_code": -1}
     except Exception as e:
         return {"error": str(e), "exit_code": -1}
+
+
+def _trim_tool_result(tool_name: str, result: dict) -> dict:
+    """Compress large MCP tool results to save LLM context.
+
+    taey_inspect returns full element lists (100+ items, 10K+ chars).
+    For the enrichment workflow, the LLM only needs: input field coords,
+    copy button count, stop button presence, and attach button location.
+    """
+    if tool_name != "taey_inspect" or not isinstance(result, dict):
+        return result
+
+    controls = result.get("controls", [])
+    if not controls:
+        return result
+
+    # Extract only what the LLM needs
+    summary = {
+        "platform": result.get("platform", ""),
+        "success": result.get("success", False),
+        "url": result.get("url", ""),
+        "copy_button_count": result.get("state", {}).get("copy_button_count", 0),
+        "element_count": result.get("state", {}).get("element_count", 0),
+    }
+
+    # Find key elements: input fields, attach buttons, stop buttons, copy buttons
+    key_elements = []
+    for el in controls:
+        name = (el.get("name") or "").lower()
+        role = (el.get("role") or "").lower()
+
+        is_input = role in ("entry", "text", "editbar") or "input" in name
+        is_attach = any(k in name for k in ["attach", "add files", "upload", "toggle menu", "open upload"])
+        is_stop = any(k in name for k in ["stop", "cancel"])
+        is_copy = "copy" in name and role in ("push button", "toggle button", "button")
+        is_send = "send" in name and role == "push button"
+
+        if is_input or is_attach or is_stop or is_copy or is_send:
+            key_elements.append({
+                "name": el.get("name", "")[:100],
+                "role": role,
+                "x": el.get("x"),
+                "y": el.get("y"),
+                "tag": "input" if is_input else "attach" if is_attach else "stop" if is_stop else "copy" if is_copy else "send",
+            })
+
+    summary["key_elements"] = key_elements
+    if result.get("error"):
+        summary["error"] = result["error"]
+    if result.get("attachments"):
+        summary["attachments"] = result["attachments"]
+    if result.get("structure_change"):
+        summary["structure_change"] = result["structure_change"]
+
+    return summary
 
 
 class LocalLLMAgent:
@@ -316,8 +393,9 @@ class LocalLLMAgent:
             method="POST",
         )
 
+        api_timeout = int(os.environ.get("LLM_API_TIMEOUT", "300"))
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=api_timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             error_body = e.read().decode() if e.fp else ""
@@ -328,43 +406,34 @@ class LocalLLMAgent:
             raise
 
     def _escalate(self, message: str):
-        """Send escalation message to supervisor Claude via tmux-send."""
+        """Send escalation message to supervisor via taey-notify (Redis inbox).
+
+        Falls back to tmux-send if taey-notify is not available.
+        """
         if not self.supervisor:
             logger.warning("No TMUX_SUPERVISOR set — cannot escalate: %s", message)
             return
 
         msg = f"ESCALATION from local-llm-agent: {message}"
         try:
-            # Use tmux-send if available, otherwise raw tmux
-            tmux_send = "/usr/local/bin/tmux-send"
-            if os.path.exists(tmux_send):
+            # Primary: taey-notify (Redis inbox — delivered by PostToolUse hook)
+            taey_notify = "/usr/local/bin/taey-notify"
+            if os.path.exists(taey_notify):
                 subprocess.run(
-                    [tmux_send, "localhost", self.supervisor, msg],
+                    [taey_notify, self.supervisor, msg, "--type", "escalation"],
                     capture_output=True, text=True, timeout=10,
                 )
             else:
-                # Direct tmux with escape sandwich
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "--", msg],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.5)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "Escape"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.2)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "Enter"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.1)
-                # Kitty protocol Enter (CSI u)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "-H",
-                     "1b", "5b", "31", "33", "75"],
-                    capture_output=True, text=True, timeout=5,
-                )
+                # Fallback: tmux-send (direct injection)
+                tmux_send = "/usr/local/bin/tmux-send"
+                if os.path.exists(tmux_send):
+                    subprocess.run(
+                        [tmux_send, "localhost", self.supervisor, msg],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                else:
+                    logger.error("Neither taey-notify nor tmux-send found")
+                    return
             logger.info("Escalation sent to supervisor '%s'", self.supervisor)
         except Exception as e:
             logger.error("Failed to escalate to supervisor: %s", e)
@@ -444,6 +513,9 @@ class LocalLLMAgent:
                         except Exception as e:
                             result = {"error": str(e)}
                             logger.error("MCP tool call failed: %s", e)
+
+                    # Trim large tool results to save context
+                    result = _trim_tool_result(tool_name, result)
 
                     # Add tool result to messages
                     messages.append({
