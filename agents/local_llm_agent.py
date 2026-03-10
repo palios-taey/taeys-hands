@@ -213,8 +213,25 @@ _BASH_ALLOWLIST = [
 
 def _execute_bash(command: str, timeout: int = 120) -> dict:
     """Execute a shell command with safety checks."""
-    # Enforce allowlist: command must start with an approved prefix
     cmd_stripped = command.strip()
+
+    # Block command chaining/injection metacharacters.
+    # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
+    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), command groups ({}).
+    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(', '${', '{', '}']
+    for pat in _CHAIN_PATTERNS:
+        if pat in cmd_stripped:
+            return {"error": f"Shell chaining/injection pattern '{pat}' not allowed", "exit_code": -1}
+
+    # File redirection: only allow > to /tmp/ destinations
+    import re
+    redir_match = re.search(r'>\s*(/[^\s]+)', cmd_stripped)
+    if redir_match:
+        dest = redir_match.group(1)
+        if not dest.startswith('/tmp/'):
+            return {"error": f"File redirection only allowed to /tmp/, got: {dest}", "exit_code": -1}
+
+    # Enforce allowlist: command must start with an approved prefix
     if not any(cmd_stripped.startswith(prefix) for prefix in _BASH_ALLOWLIST):
         return {"error": f"Command not in allowlist. Allowed prefixes: {_BASH_ALLOWLIST}", "exit_code": -1}
 
@@ -287,6 +304,8 @@ def _trim_tool_result(tool_name: str, result: dict) -> dict:
             })
 
     summary["key_elements"] = key_elements
+    if result.get("error"):
+        summary["error"] = result["error"]
     if result.get("attachments"):
         summary["attachments"] = result["attachments"]
     if result.get("structure_change"):

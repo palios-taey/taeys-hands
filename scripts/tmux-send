@@ -40,6 +40,13 @@ else
     exit 1
 fi
 
+# Validate session name: alphanumeric, hyphens, underscores only.
+# Prevents shell injection when interpolated into SSH commands.
+if ! [[ "$SESSION" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "ERROR: session name '$SESSION' contains invalid characters (only a-zA-Z0-9_- allowed)" >&2
+    exit 1
+fi
+
 # Base64-encode: survives SSH shell expansion and special chars
 # macOS base64 doesn't support -w0; use tr to strip newlines portably
 B64=$(printf '%s' "$MSG" | base64 | tr -d '\n')
