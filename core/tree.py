@@ -327,7 +327,7 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
     Returns:
         List of menu item dicts with name, role, x, y, sorted by Y.
     """
-    _MENU_ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
+    _MENU_ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'option'}
 
     def _is_menu_showing(menu_obj) -> bool:
         """Check if a menu element is actually visible on screen."""
@@ -395,9 +395,8 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, popup menu, panel, list
-                # 'list' added for Gemini which renders dropdown as list/list item
-                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel', 'list'}
+                # Match menu containers: menu, listbox, popup menu, panel
+                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
                 if role in _MENU_CONTAINERS:
                     if require_showing and not _is_menu_showing(obj):
                         pass

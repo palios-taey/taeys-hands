@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Platforms where the dropdown is a React portal invisible to AT-SPI.
 # These need xdotool click + keyboard nav (Down+Enter) instead of
 # AT-SPI menu scanning. Validated across 63 commits of git history.
-_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
+_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok', 'perplexity'}
 
 # Button names for attach/upload triggers across platforms.
 # Used by both cache lookup and tree search.
