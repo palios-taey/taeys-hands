@@ -191,13 +191,22 @@ def is_file_dialog_open(firefox) -> bool:
     if not firefox:
         return False
 
+    _FILE_DIALOG_NAMES = ('file', 'upload', 'open', 'choose', 'select')
+
     def search_for_dialog(obj, depth=0):
-        if depth > 3:
+        if depth > 8:
             return False
         try:
-            if obj.get_role_name() == 'file chooser':
+            role = obj.get_role_name()
+            if role == 'file chooser':
                 return True
-            for j in range(min(obj.get_child_count(), 20)):
+            # GTK file dialogs sometimes report as 'dialog' with a
+            # file-related title (e.g., "File Upload", "Open File")
+            if role == 'dialog':
+                name = (obj.get_name() or '').lower()
+                if any(t in name for t in _FILE_DIALOG_NAMES):
+                    return True
+            for j in range(min(obj.get_child_count(), 50)):
                 child = obj.get_child_at_index(j)
                 if child and search_for_dialog(child, depth + 1):
                     return True
