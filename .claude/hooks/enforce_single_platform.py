@@ -26,7 +26,7 @@ import time
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def deny(reason: str):
@@ -74,15 +74,15 @@ def main():
         deny(f"Redis connection failed: {e}")
 
     # Check for active platform lock
-    active_platform = r.get("taey:workflow:active_platform")
-    active_status = r.get("taey:workflow:active_status")
-    active_timestamp = r.get("taey:workflow:active_timestamp")
+    active_platform = r.get(node_key("workflow:active_platform"))
+    active_status = r.get(node_key("workflow:active_status"))
+    active_timestamp = r.get(node_key("workflow:active_timestamp"))
 
     # No active platform - allow and set lock
     if not active_platform:
-        r.set("taey:workflow:active_platform", requested_platform)
-        r.set("taey:workflow:active_status", "preparing")
-        r.set("taey:workflow:active_timestamp", str(time.time()))
+        r.set(node_key("workflow:active_platform"), requested_platform)
+        r.set(node_key("workflow:active_status"), "preparing")
+        r.set(node_key("workflow:active_timestamp"), str(time.time()))
         allow(f"Workflow lock acquired for {requested_platform}")
 
     # Check if lock is stale (>30 minutes)
@@ -91,45 +91,45 @@ def main():
             age = time.time() - float(active_timestamp)
             if age > 1800:  # 30 minutes
                 # Clear stale lock
-                r.delete("taey:workflow:active_platform")
-                r.delete("taey:workflow:active_status")
-                r.delete("taey:workflow:active_timestamp")
+                r.delete(node_key("workflow:active_platform"))
+                r.delete(node_key("workflow:active_status"))
+                r.delete(node_key("workflow:active_timestamp"))
                 # Set new lock
-                r.set("taey:workflow:active_platform", requested_platform)
-                r.set("taey:workflow:active_status", "preparing")
-                r.set("taey:workflow:active_timestamp", str(time.time()))
+                r.set(node_key("workflow:active_platform"), requested_platform)
+                r.set(node_key("workflow:active_status"), "preparing")
+                r.set(node_key("workflow:active_timestamp"), str(time.time()))
                 allow(f"Stale lock cleared ({int(age/60)} min old). New lock for {requested_platform}")
         except Exception:
             pass
 
     # Same platform - allow re-prepare (refresh the workflow)
     if active_platform == requested_platform:
-        r.set("taey:workflow:active_status", "preparing")
-        r.set("taey:workflow:active_timestamp", str(time.time()))
+        r.set(node_key("workflow:active_status"), "preparing")
+        r.set(node_key("workflow:active_timestamp"), str(time.time()))
         allow(f"Re-preparing {requested_platform} (same platform)")
 
     # Different platform - check if previous is complete
     if active_status == "sent":
         # Previous platform sent its message - clear and allow new
-        r.set("taey:workflow:active_platform", requested_platform)
-        r.set("taey:workflow:active_status", "preparing")
-        r.set("taey:workflow:active_timestamp", str(time.time()))
+        r.set(node_key("workflow:active_platform"), requested_platform)
+        r.set(node_key("workflow:active_status"), "preparing")
+        r.set(node_key("workflow:active_timestamp"), str(time.time()))
         allow(f"Previous platform ({active_platform}) complete. Now locked to {requested_platform}")
 
     # Check if a monitor daemon is running for the active platform
     # If so, send_message already completed - the PostToolUse hook may have failed
     if active_status == "preparing":
         try:
-            monitor_keys = r.keys("taey:monitor:*")
+            monitor_keys = r.keys(node_key("monitor:*"))
             for key in monitor_keys:
                 monitor_json = r.get(key)
                 if monitor_json:
                     monitor_data = json.loads(monitor_json)
                     if monitor_data.get("platform") == active_platform:
                         # Monitor exists = send_message completed successfully
-                        r.set("taey:workflow:active_platform", requested_platform)
-                        r.set("taey:workflow:active_status", "preparing")
-                        r.set("taey:workflow:active_timestamp", str(time.time()))
+                        r.set(node_key("workflow:active_platform"), requested_platform)
+                        r.set(node_key("workflow:active_status"), "preparing")
+                        r.set(node_key("workflow:active_timestamp"), str(time.time()))
                         allow(f"Monitor running for {active_platform} (send complete). Now locked to {requested_platform}")
         except Exception:
             pass

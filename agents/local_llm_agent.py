@@ -212,7 +212,12 @@ _BASH_ALLOWLIST = [
 
 def _execute_bash(command: str, timeout: int = 120) -> dict:
     """Execute a shell command with safety checks."""
-    # Basic safety: block obviously dangerous commands
+    # Enforce allowlist: command must start with an approved prefix
+    cmd_stripped = command.strip()
+    if not any(cmd_stripped.startswith(prefix) for prefix in _BASH_ALLOWLIST):
+        return {"error": f"Command not in allowlist. Allowed prefixes: {_BASH_ALLOWLIST}", "exit_code": -1}
+
+    # Block obviously dangerous commands as secondary safeguard
     dangerous = ["rm -rf", "dd if=", "mkfs", "> /dev/", "shutdown", "reboot"]
     for d in dangerous:
         if d in command:

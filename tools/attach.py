@@ -49,12 +49,86 @@ _ATTACH_NAMES = [
 
 _XDOTOOL_ENV = None
 
+# Gemini follow-up pages disable upload. Detect and auto-navigate to fresh page.
+_GEMINI_DISABLED_PHRASES = {'menu actions are disabled', 'disabled for follow'}
+
+
 def _xenv():
     """Subprocess env with DISPLAY set for xdotool/xsel calls."""
     global _XDOTOOL_ENV
     if _XDOTOOL_ENV is None:
         _XDOTOOL_ENV = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
     return _XDOTOOL_ENV
+
+
+def _gemini_navigate_fresh():
+    """Navigate Gemini tab to a fresh conversation page.
+
+    On follow-up conversations, Gemini disables file upload ("Menu actions
+    are disabled for follow ups"). This navigates to gemini.google.com/app
+    to get a clean input state.
+
+    Returns True if navigation was attempted.
+    """
+    return _navigate_fresh_chat('gemini')
+
+
+def _is_gemini_dropdown_disabled(dropdown_items: list) -> bool:
+    """Check if Gemini dropdown items indicate upload is disabled."""
+    if not dropdown_items:
+        return False
+    for item in dropdown_items:
+        name = (item.get('name') or '').lower()
+        if any(phrase in name for phrase in _GEMINI_DISABLED_PHRASES):
+            return True
+    return False
+
+
+def _is_attach_button_disabled(atspi_obj) -> bool:
+    """Check if ChatGPT's 'Add files and more' button is disabled.
+
+    On stale/streaming ChatGPT pages, the attach button exists in the
+    AT-SPI tree but with ENABLED=False. Clicking it does nothing.
+    """
+    if IS_MACOS or not atspi_obj:
+        return False
+    try:
+        state_set = atspi_obj.get_state_set()
+        return not state_set.contains(Atspi.StateType.ENABLED)
+    except Exception:
+        return False
+
+
+def _navigate_fresh_chat(platform: str) -> bool:
+    """Navigate a chat platform tab to a fresh conversation page.
+
+    On stale conversations or during streaming, attach buttons may be
+    disabled or missing. Navigating to the platform's base URL gives
+    a clean input state.
+
+    Returns True if navigation was attempted.
+    """
+    from core.platforms import BASE_URLS
+    url = BASE_URLS.get(platform)
+    if not url:
+        logger.error(f"No base URL for {platform}")
+        return False
+    # ChatGPT: use temporary-chat to avoid Developer Mode
+    if platform == 'chatgpt':
+        url = 'https://chatgpt.com/?temporary-chat=true'
+
+    logger.info(f"{platform} attach recovery — navigating to fresh page: {url}")
+    inp.press_key('Escape')
+    time.sleep(0.3)
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
+    if not inp.clipboard_paste(url):
+        logger.error(f"Failed to paste {platform} URL")
+        return False
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(4.0)
+    return True
 
 
 # =========================================================================
@@ -193,10 +267,20 @@ def _handle_portal_dialog(platform: str, file_path: str,
         inp.focus_firefox()
         time.sleep(0.5)
 
+        # Verify file chip appeared in AT-SPI tree (up to 4s)
+        chip_found = False
+        firefox_check = atspi.find_firefox()
+        for _ in range(20):
+            doc_check = atspi.get_platform_document(firefox_check, platform) if firefox_check else None
+            if doc_check and _detect_existing_attachments(doc_check):
+                chip_found = True
+                break
+            time.sleep(0.2)
+
         # Update attachment checkpoint
         _update_checkpoint(platform, file_path, redis_client)
 
-        return {
+        result = {
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
@@ -204,6 +288,9 @@ def _handle_portal_dialog(platform: str, file_path: str,
             "dialog_type": "nautilus_portal",
             "info": "File chip may shift element positions - re-inspect before further clicks.",
         }
+        if not chip_found:
+            result["warning"] = "Dialog closed but NO file chip detected in AT-SPI tree. File may not have attached — re-inspect to verify."
+        return result
 
     except Exception as e:
         logger.error(f"Portal dialog handling failed: {e}")
@@ -234,16 +321,26 @@ def _any_file_dialog_open(firefox) -> str:
 # =========================================================================
 
 def _update_checkpoint(platform: str, file_path: str, redis_client):
-    """Update Redis attachment checkpoint after successful attach."""
+    """Update Redis attachment checkpoint after successful attach.
+
+    Deduplicates: if this exact file_path is already in the checkpoint,
+    don't increment the count or append again. This prevents the
+    double-count bug when taey_attach is called multiple times for the
+    same file (e.g., dropdown_open → click item → file_dialog).
+    """
     if not redis_client:
         return
     existing = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
     if existing:
         try:
             data = json.loads(existing)
-            count = data.get('attached_count', 0) + 1
             files = data.get('attached_files', [])
+            # Deduplicate: skip if this file is already recorded
+            if file_path in files:
+                logger.debug(f"Checkpoint already has {file_path}, skipping duplicate")
+                return
             files.append(file_path)
+            count = len(files)
         except json.JSONDecodeError:
             count, files = 1, [file_path]
     else:
@@ -395,40 +492,61 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         # Enter to navigate to file
         if not inp.press_key('Return'):
             return {"error": "Failed to press Return (navigate)"}
-        time.sleep(0.3)
 
-        # For directory paths, need a second Return to confirm.
-        # For full file paths, this is harmless (confirms the selection).
-        if not inp.press_key('Return'):
-            return {"error": "Failed to press Return (confirm)"}
+        # Wait briefly, then check if dialog is still open.
+        # For full file paths, the first Return selects the file and closes
+        # the dialog. A premature second Return would hit Firefox's chat
+        # input instead, disrupting the upload (GitHub issue #24).
+        time.sleep(0.8)
+        firefox = atspi.find_firefox()
+        dialog_still_open = atspi.is_file_dialog_open(firefox)
+
+        if dialog_still_open:
+            # Directory path or dialog needs confirmation — press Return again
+            if not inp.press_key('Return'):
+                return {"error": "Failed to press Return (confirm)"}
 
         # Wait for dialog to close
-        firefox = atspi.find_firefox()
-        dialog_closed = False
-        for _ in range(25):
-            time.sleep(0.2)
-            if not atspi.is_file_dialog_open(firefox):
-                dialog_closed = True
-                break
+        dialog_closed = not dialog_still_open or False
+        if not dialog_closed:
+            for _ in range(25):
+                time.sleep(0.2)
+                if not atspi.is_file_dialog_open(firefox):
+                    dialog_closed = True
+                    break
+        else:
+            # Dialog already closed after first Return — wait for upload to process
+            time.sleep(0.3)
+            dialog_closed = True
+            # Re-check to be sure
+            if atspi.is_file_dialog_open(firefox):
+                dialog_closed = False
+                for _ in range(25):
+                    time.sleep(0.2)
+                    if not atspi.is_file_dialog_open(firefox):
+                        dialog_closed = True
+                        break
 
         if not dialog_closed:
             return {"error": "GTK file dialog did not close after selection"}
 
         time.sleep(0.5)
 
-        # Wait for file chip to appear in AT-SPI tree (up to 2s).
+        # Wait for file chip to appear in AT-SPI tree (up to 4s).
         # Chip renders asynchronously after dialog closes — polling here
-        # ensures _detect_existing_attachments() blocks a retry on return.
+        # verifies the file was actually attached (not just dialog dismissed).
+        chip_found = False
         firefox = atspi.find_firefox()
-        for _ in range(10):
+        for _ in range(20):
             doc_check = atspi.get_platform_document(firefox, platform) if firefox else None
             if doc_check and _detect_existing_attachments(doc_check):
+                chip_found = True
                 break
             time.sleep(0.2)
 
         _update_checkpoint(platform, file_path, redis_client)
 
-        return {
+        result = {
             "status": "file_attached",
             "platform": platform,
             "file_path": file_path,
@@ -436,6 +554,9 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
             "dialog_type": "gtk_embedded",
             "info": "File chip may shift element positions - re-inspect before further clicks.",
         }
+        if not chip_found:
+            result["warning"] = "Dialog closed but NO file chip detected in AT-SPI tree. File may not have attached — re-inspect to verify."
+        return result
 
     except Exception as e:
         logger.error(f"GTK file dialog handling failed: {e}")
@@ -690,12 +811,42 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
     Validated as the ONLY working approach across 63 commits of git history.
     """
+    # Ensure the platform tab is actually focused in Firefox before clicking.
+    # Without this, xdotool clicks land on whichever tab is currently visible.
+    if not inp.switch_to_platform(platform):
+        logger.warning(f"Tab switch to {platform} may have failed")
+    time.sleep(0.5)
+
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
 
+    # ChatGPT/Grok: button not found → navigate to fresh page and retry
+    if not btn_coords and platform in _KEYBOARD_NAV_PLATFORMS and not IS_MACOS:
+        logger.info(f"{platform} attach button not found — trying fresh page")
+        if _navigate_fresh_chat(platform):
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}"}
+
+    # ChatGPT/Grok: disabled attach button → navigate to fresh page
+    if platform in _KEYBOARD_NAV_PLATFORMS and not IS_MACOS:
+        atspi_obj = btn_coords.get('atspi_obj')
+        if _is_attach_button_disabled(atspi_obj):
+            if _navigate_fresh_chat(platform):
+                firefox = atspi.find_firefox()
+                doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+                if not btn_coords:
+                    return {"error": f"{platform} attach button not found after fresh page navigation"}
+                new_obj = btn_coords.get('atspi_obj')
+                if _is_attach_button_disabled(new_obj):
+                    return {"error": f"{platform} attach button still disabled after fresh page navigation"}
+            else:
+                return {"error": f"Failed to navigate {platform} to fresh page"}
 
     # Dismiss any stale dropdown/popup
     inp.press_key('Escape')
@@ -783,6 +934,16 @@ def handle_attach(platform: str, file_path: str,
     """
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}"}
+
+    # Path sandboxing: prevent exfiltration of sensitive files
+    real_path = os.path.realpath(file_path)
+    _ALLOWED_DIRS = [
+        os.path.expanduser('~'),
+        '/tmp',
+        '/var/spark',
+    ]
+    if not any(real_path.startswith(d) for d in _ALLOWED_DIRS):
+        return {"error": f"Path not in allowed directories: {real_path}"}
 
     firefox = atspi.find_firefox()
 
@@ -914,8 +1075,64 @@ def handle_attach(platform: str, file_path: str,
                         break
                     time.sleep(0.5)
 
+    # =========================================================================
+    # Gemini follow-up recovery: disabled dropdown → navigate to fresh page
+    # =========================================================================
+    if platform == 'gemini' and _is_gemini_dropdown_disabled(dropdown_items):
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        if _gemini_navigate_fresh():
+            # Wait for fresh page, then retry attach from scratch (one attempt)
+            time.sleep(2.0)
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+            if btn_coords:
+                click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+                if not click_result.get("error"):
+                    time.sleep(1.0)
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    # Scan for dropdown items on fresh page
+                    for attempt in range(3):
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        dropdown_items = find_menu_items(firefox, doc)
+                        if dropdown_items and not _is_gemini_dropdown_disabled(dropdown_items):
+                            break
+                        dropdown_items = []
+                        time.sleep(0.5)
+
+    # Gemini no-items recovery: empty dropdown on fresh page → navigate fresh
+    if platform == 'gemini' and not dropdown_items and not _any_file_dialog_open(firefox):
+        logger.info("Gemini dropdown empty — trying fresh page navigation")
+        inp.press_key('Escape')
+        time.sleep(0.3)
+        if _gemini_navigate_fresh():
+            time.sleep(2.0)
+            firefox = atspi.find_firefox()
+            doc = atspi.get_platform_document(firefox, platform) if firefox else None
+            btn_coords = _get_attach_button_coords(doc, platform=platform) if doc else None
+            if btn_coords:
+                click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+                if not click_result.get("error"):
+                    time.sleep(1.0)
+                    dialog_type = _any_file_dialog_open(firefox)
+                    if dialog_type:
+                        return _handle_file_dialog(platform, file_path, redis_client)
+                    for attempt in range(3):
+                        firefox = atspi.find_firefox()
+                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                        dropdown_items = find_menu_items(firefox, doc)
+                        if dropdown_items and not _is_gemini_dropdown_disabled(dropdown_items):
+                            break
+                        dropdown_items = []
+                        time.sleep(0.5)
+
     # Fallback: Keyboard navigation (Down+Enter) for AT-SPI-invisible dropdowns
-    if not dropdown_items and not _any_file_dialog_open(firefox):
+    # ONLY for React portal platforms — on Gemini, Down+Enter opens new tabs!
+    if not dropdown_items and not _any_file_dialog_open(firefox) and platform in _KEYBOARD_NAV_PLATFORMS:
         logger.info("Trying keyboard nav fallback: Down+Enter for invisible dropdown")
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None

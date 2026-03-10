@@ -31,10 +31,15 @@ logger = logging.getLogger(__name__)
 
 # Track spawned daemon processes for zombie reaping
 _daemon_processes = []
+_reap_counter = 0
 
 
 def _reap_daemons():
-    """Clean up finished daemon processes to prevent zombies."""
+    """Clean up finished daemon processes to prevent zombies.
+
+    Called on every daemon spawn and every 10th send_message call
+    to prevent zombie accumulation during idle periods.
+    """
     global _daemon_processes
     _daemon_processes = [p for p in _daemon_processes if p.poll() is None]
 
@@ -81,11 +86,12 @@ def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
         # Open with os.open so subprocess inherits the fd.
         # Do NOT close in parent — Popen(..., close_fds=False) keeps it open
         # for the child. On macOS, closing before the child writes = 0-byte log.
-        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         proc = subprocess.Popen(
             daemon_cmd, env=daemon_env,
             stdout=log_fd, stderr=log_fd,
-            close_fds=False,
+            close_fds=True,
+            pass_fds=(log_fd,),
             start_new_session=True,
         )
         os.close(log_fd)  # Safe to close AFTER Popen has dup'd the fd
@@ -114,6 +120,12 @@ def handle_send_message(platform: str, message: str,
     5. Spawn monitor daemon BEFORE Enter (avoids race condition)
     6. Press Enter to send
     """
+    # Periodic reap to prevent zombie accumulation during idle periods
+    global _reap_counter
+    _reap_counter += 1
+    if _reap_counter % 10 == 0:
+        _reap_daemons()
+
     # Step 1: Switch to platform, get document + URL
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform}", "platform": platform}

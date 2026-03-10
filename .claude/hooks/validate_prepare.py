@@ -15,7 +15,7 @@ import time
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 CHECKPOINT_TTL = 1800  # 30 minutes
 
@@ -44,11 +44,24 @@ def allow(reason: str):
     sys.exit(0)
 
 
+WORKER_HOSTNAMES = {'jetson', 'thor'}
+
+
 def main():
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError as e:
         deny(f"Invalid JSON input: {e}")
+
+    # Workers NEVER call prepare — they use default models only
+    import socket
+    hostname = socket.gethostname().lower()
+    if hostname in WORKER_HOSTNAMES:
+        deny(
+            f"BLOCKED: Worker nodes ({hostname}) must NOT call taey_prepare.\n"
+            "Workers use DEFAULT models only. Do NOT call taey_prepare or taey_select_dropdown.\n"
+            "Workflow: taey_inspect → taey_attach → taey_inspect → taey_click → taey_send_message"
+        )
 
     r = get_redis()
     if not r:
@@ -59,7 +72,7 @@ def main():
         deny(f"Redis connection failed: {e}")
 
     # Check for list_sessions checkpoint
-    checkpoint = r.get("taey:list_sessions_checkpoint")
+    checkpoint = r.get(node_key("list_sessions_checkpoint"))
     if not checkpoint:
         deny(
             "Must call taey_list_sessions first.\n\n"
@@ -72,7 +85,7 @@ def main():
         checkpoint_time = float(checkpoint)
         age = time.time() - checkpoint_time
         if age > CHECKPOINT_TTL:
-            r.delete("taey:list_sessions_checkpoint")
+            r.delete(node_key("list_sessions_checkpoint"))
             deny(
                 f"taey_list_sessions checkpoint expired ({int(age/60)} min old, limit 30 min).\n"
                 "Call taey_list_sessions() again."
