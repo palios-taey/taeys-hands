@@ -327,7 +327,7 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
     Returns:
         List of menu item dicts with name, role, x, y, sorted by Y.
     """
-    _MENU_ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'option'}
+    _MENU_ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
 
     def _is_menu_showing(menu_obj) -> bool:
         """Check if a menu element is actually visible on screen."""
@@ -370,8 +370,15 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 logger.debug(f"Menu item extent error: {e}")
         return None
 
+    # Two-tier container types to avoid false positives from page content.
+    # Strict containers are real menu/dropdown elements. Loose containers
+    # (list, panel) are used by Gemini but also appear in page content,
+    # so they're only searched if strict containers yield nothing.
+    _STRICT_CONTAINERS = {'menu', 'popup menu', 'listbox'}
+    _LOOSE_CONTAINERS = {'list', 'panel'}
+
     def _collect_from(scope, max_depth=15, require_showing=True,
-                      require_item_showing=False):
+                      require_item_showing=False, container_types=None):
         """Find first menu with items in scope.
 
         Args:
@@ -381,7 +388,11 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             require_item_showing: Require individual ITEMS to be SHOWING.
                 Critical for Firefox root searches to prevent cross-tab
                 contamination from inactive tab menus.
+            container_types: Set of role names to match as containers.
+                Defaults to all container types (strict + loose).
         """
+        if container_types is None:
+            container_types = _STRICT_CONTAINERS | _LOOSE_CONTAINERS
         found = []
 
         def search(obj, depth=0):
@@ -395,9 +406,7 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, popup menu, panel
-                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
-                if role in _MENU_CONTAINERS:
+                if role in container_types:
                     if require_showing and not _is_menu_showing(obj):
                         pass
                     else:
@@ -424,9 +433,13 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         search(scope)
         return found
 
+    # === Pass 1: Strict containers (menu, popup menu, listbox) ===
+    # These are real dropdown/menu elements. Searched first to avoid
+    # false positives from page content list/panel containers.
+
     # Search platform_doc first (avoids cross-tab contamination)
     if platform_doc:
-        items = _collect_from(platform_doc)
+        items = _collect_from(platform_doc, container_types=_STRICT_CONTAINERS)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
@@ -435,18 +448,42 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
     # REQUIRE item-level SHOWING to prevent cross-tab contamination:
     # inactive tab menus have non-zero extents but items lack SHOWING.
     if firefox:
-        items = _collect_from(firefox, require_item_showing=True)
+        items = _collect_from(firefox, require_item_showing=True,
+                              container_types=_STRICT_CONTAINERS)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
 
-    # Retry WITHOUT requiring SHOWING state — platform_doc only.
+    # === Pass 2: Loose containers (list, panel) ===
+    # Used by Gemini dropdowns. Only reached if no strict containers found,
+    # so page content lists don't shadow real menu containers.
+
+    if platform_doc:
+        items = _collect_from(platform_doc, container_types=_LOOSE_CONTAINERS)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+
+    if firefox:
+        items = _collect_from(firefox, require_item_showing=True,
+                              container_types=_LOOSE_CONTAINERS)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+
+    # === Pass 3: Retry without SHOWING requirement (platform_doc only) ===
     # NEVER retry on firefox root without SHOWING: persistent Firefox
     # chrome menus (tab context menu) are always in the tree with
     # non-zero extents even when not displayed.
     logger.debug("Strict SHOWING search failed, retrying platform_doc without SHOWING requirement")
     if platform_doc:
-        items = _collect_from(platform_doc, require_showing=False)
+        items = _collect_from(platform_doc, require_showing=False,
+                              container_types=_STRICT_CONTAINERS)
+        if items:
+            items.sort(key=lambda x: x['y'])
+            return items
+        items = _collect_from(platform_doc, require_showing=False,
+                              container_types=_LOOSE_CONTAINERS)
         if items:
             items.sort(key=lambda x: x['y'])
             return items
