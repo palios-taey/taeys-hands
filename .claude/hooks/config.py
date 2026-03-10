@@ -38,12 +38,32 @@ def get_redis():
 
 
 def detect_node_id() -> str:
-    """Auto-detect instance ID: TAEY_NODE_ID > tmux session > hostname."""
+    """Auto-detect instance ID: TAEY_NODE_ID > parent TTY tmux session > hostname.
+
+    Uses tmux list-panes to map parent process's TTY to a session name.
+    This is reliable for MCP subprocesses (unlike display-message which
+    returns whichever tmux client was most recently active).
+    """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
+    import subprocess
     try:
-        import subprocess
+        # Map parent's TTY → tmux session name (reliable for MCP subprocesses)
+        parent_tty = os.readlink(f'/proc/{os.getppid()}/fd/0')
+        result = subprocess.run(
+            ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().splitlines():
+                parts = line.split(' ', 1)
+                if len(parts) == 2 and parts[0] == parent_tty:
+                    return parts[1]
+    except Exception:
+        pass
+    # Fallback: display-message (works in interactive tmux shells)
+    try:
         result = subprocess.run(
             ['tmux', 'display-message', '-p', '#S'],
             capture_output=True, text=True, timeout=2,
@@ -55,6 +75,12 @@ def detect_node_id() -> str:
     return socket.gethostname()
 
 
+_cached_node_id = None
+
+
 def node_key(suffix: str) -> str:
     """Instance-scoped Redis key: taey:{node_id}:{suffix}."""
-    return f"taey:{detect_node_id()}:{suffix}"
+    global _cached_node_id
+    if _cached_node_id is None:
+        _cached_node_id = detect_node_id()
+    return f"taey:{_cached_node_id}:{suffix}"

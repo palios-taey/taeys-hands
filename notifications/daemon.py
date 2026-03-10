@@ -19,7 +19,12 @@ Usage:
     python3 notifications/daemon.py --node weaver --tmux-session taeys-hands
     python3 notifications/daemon.py --node jetson-claude --tmux-session jetson-claude
 
-Typically started alongside the MCP server and runs in the background.
+IMPORTANT: Only start this daemon for AUTONOMOUS Claude instances (workers,
+background agents). Do NOT start it for sessions where a human is typing —
+the PostToolUse hook handles delivery for active sessions, and tmux injection
+into a human's session is disruptive.
+
+Typically started alongside the MCP server for worker nodes.
 """
 from __future__ import annotations
 
@@ -105,10 +110,16 @@ def format_notification(notif: dict) -> str:
 
 
 def requeue_messages(redis_client, node_id: str, messages: list[dict], key_type: str = "inbox"):
-    """Put messages back if tmux injection fails."""
+    """Put messages back at the head if tmux injection fails.
+
+    Inbox uses LPUSH (head), notifications uses RPUSH (tail).
+    Requeue to the same end as original writers so messages stay in order.
+    Reversed iteration ensures first message ends up at the front.
+    """
     key = f"taey:{node_id}:{'inbox' if key_type == 'inbox' else 'notifications'}"
+    push_fn = redis_client.lpush if key_type == 'inbox' else redis_client.rpush
     for msg in reversed(messages):
-        redis_client.rpush(key, json.dumps(msg))
+        push_fn(key, json.dumps(msg))
 
 
 def run_daemon(node_id: str, tmux_session: str,
