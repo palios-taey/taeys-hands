@@ -64,32 +64,55 @@ def get_client() -> redis.Redis:
 # Instance-scoped key prefix
 
 
-def _detect_node_id() -> str:
-    """Auto-detect instance ID: TAEY_NODE_ID > parent TTY tmux session > hostname.
+def _find_ancestor_tty() -> str:
+    """Walk up process tree to find nearest ancestor with a real TTY.
 
-    'tmux display-message -p #S' is unreliable for MCP subprocesses — it
-    returns whichever tmux client was most recently active, not the one that
-    spawned this process.  Instead, map the parent process's TTY to a tmux
-    session via 'tmux list-panes', which is deterministic.
+    MCP servers and hooks are spawned as subprocesses where the immediate
+    parent may have piped or /dev/null stdin. Walking up finds the claude
+    process or tmux pane that has the real TTY.
+    """
+    pid = os.getpid()
+    for _ in range(10):
+        try:
+            with open(f'/proc/{pid}/stat') as f:
+                stat = f.read()
+            pid = int(stat.split()[3])
+            if pid <= 1:
+                break
+            fd0 = os.readlink(f'/proc/{pid}/fd/0')
+            if fd0.startswith('/dev/pts/') or fd0.startswith('/dev/tty'):
+                return fd0
+        except Exception:
+            break
+    return ''
+
+
+def _detect_node_id() -> str:
+    """Auto-detect instance ID: TAEY_NODE_ID > ancestor TTY tmux session > hostname.
+
+    Walks up the process tree to find the nearest ancestor with a real TTY,
+    then maps that TTY to a tmux session via list-panes. This is deterministic
+    unlike 'tmux display-message' which returns whichever client was most
+    recently active.
     """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
     try:
-        # Map parent's TTY → tmux session name (reliable for MCP subprocesses)
-        parent_tty = os.readlink(f'/proc/{os.getppid()}/fd/0')
-        result = subprocess.run(
-            ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
-            capture_output=True, text=True, timeout=2,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.strip().splitlines():
-                parts = line.split(' ', 1)
-                if len(parts) == 2 and parts[0] == parent_tty:
-                    return parts[1]
+        ancestor_tty = _find_ancestor_tty()
+        if ancestor_tty:
+            result = subprocess.run(
+                ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split(' ', 1)
+                    if len(parts) == 2 and parts[0] == ancestor_tty:
+                        return parts[1]
     except Exception:
         pass
-    # Fallback: try tmux display-message (works in interactive tmux shells)
+    # Fallback: display-message (non-deterministic, last resort)
     try:
         result = subprocess.run(
             ['tmux', 'display-message', '-p', '#S'],
