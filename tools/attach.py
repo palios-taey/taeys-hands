@@ -458,10 +458,16 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
     try:
         time.sleep(0.3)
 
-        # Focus the file dialog window FIRST — otherwise Ctrl+L goes to Firefox address bar
+        # Focus the file dialog window FIRST — otherwise Ctrl+L goes to Firefox address bar.
+        # The file dialog should be the active window when it opens, but we verify and
+        # force-activate it. Uses multiple strategies because dialog titles vary by
+        # platform and locale.
+        dialog_focused = False
         try:
+            # Strategy 1: Search by known dialog title variants
             dialog_wids = []
-            for title in ['File Upload', 'Open', 'Open File']:
+            for title in ['File Upload', 'Open', 'Open File', 'Upload File',
+                          'Select File', 'Choose File', 'open']:
                 result = subprocess.run(
                     ['xdotool', 'search', '--name', title],
                     capture_output=True, text=True, timeout=2, env=_xenv(),
@@ -475,9 +481,37 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
                     capture_output=True, timeout=3, env=_xenv(),
                 )
                 time.sleep(0.3)
+                dialog_focused = True
                 logger.info(f"Focused GTK file dialog window {dialog_wids[0]}")
+
+            # Strategy 2: Use getactivewindow — dialog should already be focused
+            # after opening. Verify it's not the main Firefox window.
+            if not dialog_focused:
+                active = subprocess.run(
+                    ['xdotool', 'getactivewindow'],
+                    capture_output=True, text=True, timeout=2, env=_xenv(),
+                )
+                firefox_wids = subprocess.run(
+                    ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                    capture_output=True, text=True, timeout=2, env=_xenv(),
+                )
+                active_wid = active.stdout.strip()
+                firefox_main_wids = set(firefox_wids.stdout.strip().split('\n')) if firefox_wids.stdout.strip() else set()
+                if active_wid and active_wid not in firefox_main_wids:
+                    # Active window is NOT Firefox main — likely the file dialog
+                    subprocess.run(
+                        ['xdotool', 'windowactivate', '--sync', active_wid],
+                        capture_output=True, timeout=3, env=_xenv(),
+                    )
+                    time.sleep(0.3)
+                    dialog_focused = True
+                    logger.info(f"Focused active non-Firefox window {active_wid} (likely file dialog)")
+
         except Exception as e:
             logger.warning(f"Could not focus GTK file dialog window: {e}")
+
+        if not dialog_focused:
+            logger.warning("GTK file dialog window focus FAILED — Ctrl+L may hit Firefox URL bar")
 
         # GTK file dialogs sometimes open to "Other Locations" (network view)
         # where typing "/" doesn't open the path entry. Fix: Ctrl+L first to
@@ -1165,6 +1199,54 @@ def handle_attach(platform: str, file_path: str,
                     return _handle_file_dialog(platform, file_path, redis_client)
                 time.sleep(0.3)
             logger.warning("Keyboard nav fallback did not open any file dialog")
+
+    # =========================================================================
+    # Auto-click file upload item in dropdown (eliminates manual step)
+    # Works for Gemini, Claude, Perplexity — any platform with AT-SPI-visible
+    # dropdown items. Previously returned "dropdown_open" requiring Claude to
+    # manually click, which broke on machines where the follow-up dialog
+    # handling failed.
+    # =========================================================================
+    _UPLOAD_ITEM_NAMES = {
+        'upload files',              # Gemini
+        'upload files or images',    # Perplexity
+        'add files or photos',       # Claude
+        'upload a file',             # Generic
+    }
+
+    if dropdown_items:
+        upload_item = None
+        for item in dropdown_items:
+            name = (item.get('name') or '').strip().lower()
+            if name in _UPLOAD_ITEM_NAMES:
+                upload_item = item
+                break
+
+        if upload_item:
+            logger.info(f"Auto-clicking upload item: '{upload_item.get('name')}'")
+            # AT-SPI do_action is most reliable for Gemini/Claude menu items
+            clicked = atspi_click(upload_item)
+            if not clicked:
+                # Fallback: coordinate click
+                inp.click_at(upload_item.get('x', 0), upload_item.get('y', 0))
+            time.sleep(1.5)
+
+            # Store pending state for cleanup
+            if redis_client:
+                redis_client.setex(node_key(f"attach:pending:{platform}"), 120, json.dumps({
+                    'file_path': file_path,
+                    'timestamp': time.time(),
+                }))
+
+            # Wait for file dialog to appear (up to 6s)
+            for _ in range(20):
+                dialog_type = _any_file_dialog_open(firefox)
+                if dialog_type:
+                    return _handle_file_dialog(platform, file_path, redis_client)
+                time.sleep(0.3)
+
+            logger.warning("Upload item clicked but no file dialog appeared")
+            # Fall through to dropdown_open as last resort
 
     # Cache dropdown items so taey_click can use AT-SPI do_action
     if dropdown_items:
