@@ -298,6 +298,11 @@ def _handle_portal_dialog(platform: str, file_path: str,
         return {"error": f"Portal dialog handling failed: {e}"}
 
     finally:
+        # Always clean up: close any leftover dialogs and clear pending state
+        try:
+            _close_stale_file_dialogs()
+        except Exception:
+            pass
         if redis_client:
             redis_client.delete(node_key(f"attach:pending:{platform}"))
 
@@ -479,24 +484,15 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         except Exception as e:
             logger.warning(f"Could not focus GTK file dialog window: {e}")
 
-        # GTK file dialogs sometimes open to "Other Locations" (network view)
-        # where typing "/" doesn't open the path entry. Fix: Ctrl+L first to
-        # navigate to the parent directory (works in any view since we already
-        # focused the dialog window above). Then "/" works normally.
-        parent_dir = str(Path(file_path).parent)
+        # GTK file dialogs: Ctrl+L opens the location bar which accepts
+        # a full absolute path directly. This is far more reliable than the
+        # old approach of navigating to parent dir, typing "/", then pasting
+        # a partial path — that depended on xdotool type_text('/') working
+        # and the right widget having focus.
         inp.press_key('ctrl+l')
         time.sleep(0.5)
-        inp.clipboard_paste(parent_dir)
-        time.sleep(0.2)
-        inp.press_key('Return')
-        time.sleep(1.0)
-
-        # Now in a real directory with file list focused — "/" opens path entry
-        inp.type_text('/')
+        inp.clipboard_paste(file_path)
         time.sleep(0.3)
-        rest_of_path = file_path.lstrip('/')
-        inp.clipboard_paste(rest_of_path)
-        time.sleep(0.2)
 
         # Enter to navigate to file
         if not inp.press_key('Return'):
@@ -572,6 +568,11 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         return {"error": f"GTK file dialog handling failed: {e}"}
 
     finally:
+        # Always clean up: close any leftover dialogs and clear pending state
+        try:
+            _close_stale_file_dialogs()
+        except Exception:
+            pass
         if redis_client:
             redis_client.delete(node_key(f"attach:pending:{platform}"))
 
@@ -927,6 +928,11 @@ def _keyboard_nav_attach(platform: str, file_path: str,
             return _handle_file_dialog(platform, file_path, redis_client)
         time.sleep(0.3)
 
+    # Clean up any orphaned dialogs before returning error
+    try:
+        _close_stale_file_dialogs()
+    except Exception:
+        pass
     return {"error": f"Keyboard nav attach failed for {platform}: no file dialog appeared after Down+Enter"}
 
 
