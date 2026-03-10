@@ -75,11 +75,12 @@ _DEFAULT_TAB_SHORTCUTS = {
     # 'linkedin': 'alt+7',
 }
 
-# Worker nodes have fewer tabs (no Claude/Perplexity/X/LinkedIn)
+# Worker nodes: ChatGPT, Claude, Gemini, Grok (4 tabs)
 _WORKER_TAB_SHORTCUTS = {
     'chatgpt': 'alt+1',
-    'gemini': 'alt+2',
-    'grok': 'alt+3',
+    'claude': 'alt+2',
+    'gemini': 'alt+3',
+    'grok': 'alt+4',
 }
 
 _WORKER_HOSTNAMES = {'jetson', 'thor'}
