@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 PreToolUse hook for taey_attach
-Requires: Plan exists for the platform (call taey_plan first).
+Validates: platform is specified and file_path exists.
+
+Plan check is advisory only — attaching without a plan is allowed
+(HMM enrichment, ad-hoc testing, standalone workflows).
 
 Works on: Spark, CCM, Windows (auto-detects environment)
 """
@@ -38,41 +41,26 @@ def allow(reason: str):
     sys.exit(0)
 
 
-WORKER_HOSTNAMES = {'jetson', 'thor'}
-
-
 def main():
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError as e:
         deny(f"Invalid JSON input: {e}")
 
-    # Workers don't use plans — they run the HMM enrichment loop directly
-    import socket
-    hostname = socket.gethostname().lower()
-    if hostname in WORKER_HOSTNAMES:
-        allow(f"Worker node ({hostname}) — plan not required for enrichment")
-
     tool_input = data.get("tool_input", {})
     platform = tool_input.get("platform", "")
+    file_path = tool_input.get("file_path", "")
 
     if not platform:
         deny("No platform specified in taey_attach")
 
-    r = get_redis()
-    if not r:
-        deny("Cannot connect to Redis")
-    try:
-        r.ping()
-    except Exception as e:
-        deny(f"Redis connection failed: {e}")
+    if not file_path:
+        deny("No file_path specified in taey_attach")
 
-    # Check for plan
-    plan_json = r.get(node_key(f"plan:{platform}"))
-    if not plan_json:
-        deny(f"No plan found for {platform}. Call taey_plan first.")
+    if not os.path.isfile(file_path):
+        deny(f"File not found: {file_path}")
 
-    allow(f"Plan exists for {platform}, attach allowed")
+    allow(f"Attach allowed for {platform} — file exists: {os.path.basename(file_path)}")
 
 
 if __name__ == "__main__":
