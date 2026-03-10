@@ -6,10 +6,10 @@ Replacement for tmux-send when communicating between Claude instances.
 Messages are delivered via PostToolUse hook (active) or tmux fallback (idle).
 
 Usage:
-    notify-send <target-node> "message"
-    notify-send <target-node> "ESCALATION: something broke" --type escalation
-    notify-send <target-node> "cycle done" --type heartbeat --priority low
-    notify-send weaver "ESCALATION from $(hostname): Grok inspect failed" --type escalation
+    taey-notify <target-node> "message"
+    taey-notify <target-node> "ESCALATION: something broke" --type escalation
+    taey-notify <target-node> "cycle done" --type heartbeat --priority low
+    taey-notify weaver "ESCALATION from $(hostname): Grok inspect failed" --type escalation
 
 Target nodes: weaver, jetson-claude, thor-claude, claw, etc.
 """
@@ -97,12 +97,18 @@ def main():
         "priority": args.priority,
     })
 
-    r.lpush(f"taey:{args.target}:inbox", msg)
-
-    # Auto-escalate priority for escalation type
+    # Auto-promote escalations to high priority
     if args.type == 'escalation' and args.priority == 'normal':
-        # Re-send with high priority (the first push already happened, so just log)
-        pass
+        args.priority = 'high'
+        msg = json.dumps({
+            "from": from_node,
+            "type": args.type,
+            "body": args.message,
+            "timestamp": time.time(),
+            "priority": args.priority,
+        })
+
+    r.lpush(f"taey:{args.target}:inbox", msg)
 
     print(f"OK: sent to {args.target} [{args.type}] from {from_node}")
 

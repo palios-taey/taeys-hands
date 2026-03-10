@@ -52,11 +52,17 @@ def clear_tool_activity(r, node_id):
         log_debug(f"Activity clear error: {e}")
 
 
-def drain_queue(r, key, max_count=10):
-    """Pop up to max_count items from a Redis list. Returns parsed dicts."""
+def drain_queue(r, key, max_count=10, from_tail=False):
+    """Pop up to max_count items from a Redis list. Returns parsed dicts.
+
+    Args:
+        from_tail: If True, use RPOP (for LPUSH writers = FIFO).
+                   If False, use LPOP (for RPUSH writers = FIFO).
+    """
     items = []
+    pop_fn = r.rpop if from_tail else r.lpop
     for _ in range(max_count):
-        raw = r.lpop(key)
+        raw = pop_fn(key)
         if not raw:
             break
         try:
@@ -69,11 +75,11 @@ def drain_queue(r, key, max_count=10):
 
 def get_all_pending(r, node_id):
     """Drain all notification sources. Returns (monitor_notifs, inbox_msgs, orch_notifs)."""
-    # 1. Monitor daemon notifications
+    # 1. Monitor daemon notifications (RPUSH writers → LPOP = FIFO)
     monitor = drain_queue(r, f"taey:{node_id}:notifications", 10)
 
-    # 2. Inter-Claude inbox messages
-    inbox = drain_queue(r, f"taey:{node_id}:inbox", 10)
+    # 2. Inter-Claude inbox messages (LPUSH writers → RPOP = FIFO)
+    inbox = drain_queue(r, f"taey:{node_id}:inbox", 10, from_tail=True)
 
     # 3. Orchestration notifications
     orch = drain_queue(r, f"orch:notify:{node_id}", 5)
