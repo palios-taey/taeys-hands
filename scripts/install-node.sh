@@ -9,7 +9,7 @@
 #
 # What it installs:
 #   - tmux-send -> /usr/local/bin/tmux-send  (Claude-to-Claude messaging)
-#   - notify-send -> /usr/local/bin/notify-send  (Redis-backed messaging)
+#   - taey-notify -> /usr/local/bin/taey-notify  (Redis-backed messaging)
 #   - System packages: xdotool, xsel, xdpyinfo (required for AT-SPI tools)
 
 set -euo pipefail
@@ -26,10 +26,10 @@ echo "[1/3] Installing tmux-send..."
 sudo install -m 755 "$REPO_ROOT/scripts/tmux-send" /usr/local/bin/tmux-send
 echo "  -> /usr/local/bin/tmux-send"
 
-# --- notify-send ---
-echo "[2/3] Installing notify-send..."
-sudo install -m 755 "$REPO_ROOT/scripts/notify-send" /usr/local/bin/notify-send
-echo "  -> /usr/local/bin/notify-send (Redis-backed, replaces tmux-send for inter-Claude)"
+# --- taey-notify ---
+echo "[2/3] Installing taey-notify..."
+sudo install -m 755 "$REPO_ROOT/scripts/taey-notify" /usr/local/bin/taey-notify
+echo "  -> /usr/local/bin/taey-notify (Redis-backed, replaces tmux-send for inter-Claude)"
 
 # --- System packages ---
 echo "[3/3] Installing system packages..."
@@ -43,3 +43,4 @@ echo ""
 echo "=== Done ==="
 echo "Verify: tmux-send --help 2>&1 | head -2"
 echo "        tmux-send <session> 'hello'"
+echo "        taey-notify --help"
