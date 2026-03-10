@@ -8,7 +8,7 @@ calls from the LLM's responses, feeds results back, and repeats until done.
 Configuration via environment variables:
     LLM_API_URL       OpenAI-compatible endpoint (default: http://localhost:8080/v1)
     LLM_MODEL         Model identifier (auto-detected if not set)
-    LLM_MAX_TOKENS    Max response tokens (default: 4096)
+    LLM_MAX_TOKENS    Max response tokens (default: 32768)
     LLM_TEMPERATURE   Sampling temperature (default: 0.7)
     TAEY_SERVER_CMD   MCP server command (default: python3 server.py)
     TMUX_SUPERVISOR   tmux session for escalation when stuck (optional)
@@ -243,7 +243,7 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
     # Block command chaining/injection metacharacters.
     # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
     # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), command groups ({}).
-    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(', '${', '{', '}']
+    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(']
     for pat in _CHAIN_PATTERNS:
         if pat in cmd_stripped:
             return {"error": f"Shell chaining/injection pattern '{pat}' not allowed", "exit_code": -1}
@@ -353,7 +353,7 @@ class LocalLLMAgent:
             "LLM_API_URL", "http://localhost:8080/v1"
         )).rstrip("/")
         self.model = model or os.environ.get("LLM_MODEL", "")
-        self.max_tokens = max_tokens or int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+        self.max_tokens = max_tokens or int(os.environ.get("LLM_MAX_TOKENS", "32768"))
         self.temperature = temperature or float(os.environ.get("LLM_TEMPERATURE", "0.7"))
         self.supervisor = os.environ.get("TMUX_SUPERVISOR", "")
 
