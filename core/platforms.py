@@ -63,7 +63,8 @@ def _detect_screen_size() -> tuple:
 
 
 # Tab shortcuts (Alt+N) configured in Firefox
-TAB_SHORTCUTS = {
+# Default layout (Spark coordinator)
+_DEFAULT_TAB_SHORTCUTS = {
     'chatgpt': 'alt+1',
     'claude': 'alt+2',
     'gemini': 'alt+3',
@@ -74,7 +75,30 @@ TAB_SHORTCUTS = {
     # 'linkedin': 'alt+7',
 }
 
+# Worker nodes have fewer tabs (no Claude/Perplexity/X/LinkedIn)
+_WORKER_TAB_SHORTCUTS = {
+    'chatgpt': 'alt+1',
+    'gemini': 'alt+2',
+    'grok': 'alt+3',
+}
+
+_WORKER_HOSTNAMES = {'jetson', 'thor'}
+
+
+def _get_tab_shortcuts() -> dict:
+    """Return tab shortcuts for current node (workers have different layout)."""
+    import socket
+    hostname = socket.gethostname().lower()
+    if hostname in _WORKER_HOSTNAMES:
+        return _WORKER_TAB_SHORTCUTS
+    return _DEFAULT_TAB_SHORTCUTS
+
+
+TAB_SHORTCUTS = _get_tab_shortcuts()
+
 # URL patterns for platform detection via AT-SPI DocURL
+# Order matters: more specific patterns MUST come before less specific ones
+# (e.g., 'x.com/i/grok' before 'x.com' so Grok on x.com is detected correctly)
 URL_PATTERNS = {
     'chatgpt': 'chatgpt.com',
     'claude': 'claude.ai',
@@ -83,6 +107,11 @@ URL_PATTERNS = {
     'perplexity': 'perplexity.ai',
     'x_twitter': 'x.com',
     'linkedin': 'linkedin.com',
+}
+
+# Additional URL patterns (checked first, for ambiguous URLs like x.com/i/grok)
+_EXTRA_URL_PATTERNS = {
+    'grok': 'x.com/i/grok',
 }
 
 # Base URLs for new sessions
