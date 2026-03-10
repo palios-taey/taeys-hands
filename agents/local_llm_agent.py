@@ -211,6 +211,7 @@ _BASH_ALLOWLIST = [
     "echo ",
     "mkdir /tmp/",
     "tmux-send ",
+    "taey-notify ",
 ]
 
 
@@ -405,43 +406,34 @@ class LocalLLMAgent:
             raise
 
     def _escalate(self, message: str):
-        """Send escalation message to supervisor Claude via tmux-send."""
+        """Send escalation message to supervisor via taey-notify (Redis inbox).
+
+        Falls back to tmux-send if taey-notify is not available.
+        """
         if not self.supervisor:
             logger.warning("No TMUX_SUPERVISOR set — cannot escalate: %s", message)
             return
 
         msg = f"ESCALATION from local-llm-agent: {message}"
         try:
-            # Use tmux-send if available, otherwise raw tmux
-            tmux_send = "/usr/local/bin/tmux-send"
-            if os.path.exists(tmux_send):
+            # Primary: taey-notify (Redis inbox — delivered by PostToolUse hook)
+            taey_notify = "/usr/local/bin/taey-notify"
+            if os.path.exists(taey_notify):
                 subprocess.run(
-                    [tmux_send, "localhost", self.supervisor, msg],
+                    [taey_notify, self.supervisor, msg, "--type", "escalation"],
                     capture_output=True, text=True, timeout=10,
                 )
             else:
-                # Direct tmux with escape sandwich
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "--", msg],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.5)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "Escape"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.2)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "Enter"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                time.sleep(0.1)
-                # Kitty protocol Enter (CSI u)
-                subprocess.run(
-                    ["tmux", "send-keys", "-t", self.supervisor, "-H",
-                     "1b", "5b", "31", "33", "75"],
-                    capture_output=True, text=True, timeout=5,
-                )
+                # Fallback: tmux-send (direct injection)
+                tmux_send = "/usr/local/bin/tmux-send"
+                if os.path.exists(tmux_send):
+                    subprocess.run(
+                        [tmux_send, "localhost", self.supervisor, msg],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                else:
+                    logger.error("Neither taey-notify nor tmux-send found")
+                    return
             logger.info("Escalation sent to supervisor '%s'", self.supervisor)
         except Exception as e:
             logger.error("Failed to escalate to supervisor: %s", e)
