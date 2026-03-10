@@ -135,8 +135,29 @@ class MCPClient:
         logger.info("MCP server ready — %d tools available", len(self.tools))
         return self.tools
 
+    def is_alive(self) -> bool:
+        """Check if the MCP server subprocess is still running."""
+        return self.proc is not None and self.proc.poll() is None
+
+    def restart(self):
+        """Kill and restart the MCP server subprocess."""
+        logger.warning("Restarting MCP server...")
+        self.close()
+        time.sleep(1)
+        self.start()
+        self.initialize()
+        logger.info("MCP server restarted successfully")
+
     def call_tool(self, name: str, arguments: dict) -> dict:
-        """Call an MCP tool and return the parsed result."""
+        """Call an MCP tool and return the parsed result.
+
+        Auto-restarts the MCP server if it has crashed (broken pipe).
+        """
+        # Auto-restart if server died
+        if not self.is_alive():
+            logger.warning("MCP server dead — auto-restarting before tool call")
+            self.restart()
+
         resp = self._send("tools/call", {"name": name, "arguments": arguments})
 
         result = resp.get("result", {})
@@ -510,6 +531,15 @@ class LocalLLMAgent:
                     else:
                         try:
                             result = mcp.call_tool(tool_name, tool_args)
+                        except (BrokenPipeError, RuntimeError) as e:
+                            # MCP server crashed — restart and retry once
+                            logger.warning("MCP server crashed: %s — restarting", e)
+                            try:
+                                mcp.restart()
+                                result = mcp.call_tool(tool_name, tool_args)
+                            except Exception as e2:
+                                result = {"error": f"MCP restart failed: {e2}"}
+                                logger.error("MCP restart+retry failed: %s", e2)
                         except Exception as e:
                             result = {"error": str(e)}
                             logger.error("MCP tool call failed: %s", e)
