@@ -12,6 +12,7 @@ import os
 import subprocess
 import time
 import logging
+from pathlib import Path
 from typing import Any, Dict, List
 
 import sys
@@ -478,13 +479,21 @@ def _handle_gtk_file_dialog(platform: str, file_path: str,
         except Exception as e:
             logger.warning(f"Could not focus GTK file dialog window: {e}")
 
-        # Use "/" to open GTK location entry — avoids Ctrl+L conflict
-        # where Firefox intercepts Ctrl+L for its URL bar.
-        # In GTK file choosers, typing "/" opens the path entry directly.
+        # GTK file dialogs sometimes open to "Other Locations" (network view)
+        # where typing "/" doesn't open the path entry. Fix: Ctrl+L first to
+        # navigate to the parent directory (works in any view since we already
+        # focused the dialog window above). Then "/" works normally.
+        parent_dir = str(Path(file_path).parent)
+        inp.press_key('ctrl+l')
+        time.sleep(0.5)
+        inp.clipboard_paste(parent_dir)
+        time.sleep(0.2)
+        inp.press_key('Return')
+        time.sleep(1.0)
+
+        # Now in a real directory with file list focused — "/" opens path entry
         inp.type_text('/')
         time.sleep(0.3)
-
-        # Clipboard paste rest of path (without leading /)
         rest_of_path = file_path.lstrip('/')
         inp.clipboard_paste(rest_of_path)
         time.sleep(0.2)
