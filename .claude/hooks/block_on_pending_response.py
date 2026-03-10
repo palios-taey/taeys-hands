@@ -25,7 +25,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 # Tools that are always allowed (extraction + navigation)
 ALWAYS_ALLOWED = {
@@ -90,17 +90,18 @@ def main():
 
     # Check for pending responses on any platform
     try:
-        pending_keys = r.keys("taey:pending_prompt:*")
-        ready_keys = r.keys("taey:response_ready:*")
+        pending_keys = r.keys(node_key("pending_prompt:*"))
+        ready_keys = r.keys(node_key("response_ready:*"))
 
         all_pending = set()
-
+        prefix = node_key("pending_prompt:")
         for key in pending_keys:
-            platform = key.replace("taey:pending_prompt:", "")
+            platform = key[len(prefix):]
             all_pending.add(platform)
 
+        ready_prefix = node_key("response_ready:")
         for key in ready_keys:
-            platform = key.replace("taey:response_ready:", "")
+            platform = key[len(ready_prefix):]
             all_pending.add(platform)
 
         if not all_pending:

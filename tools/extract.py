@@ -139,6 +139,33 @@ def handle_quick_extract(platform: str, redis_client,
     all_elements = find_elements(doc)
     copy_buttons = find_copy_buttons(all_elements)
 
+    # ChatGPT DOM virtualization: copy buttons may not exist in the AT-SPI
+    # tree when the response footer is far from the viewport. Scroll to bring
+    # the response end into view, then re-scan.
+    if not copy_buttons:
+        logger.info("No copy buttons on initial scan — scrolling to find them")
+        for _ in range(5):
+            inp.press_key('End')
+            time.sleep(0.3)
+        time.sleep(0.5)
+        # Re-fetch document (scroll may change AT-SPI tree)
+        doc = atspi.get_platform_document(firefox, platform) if firefox else doc
+        if doc:
+            all_elements = find_elements(doc)
+            copy_buttons = find_copy_buttons(all_elements)
+
+        # Still nothing — try Page_Up from bottom (button above fold)
+        if not copy_buttons:
+            for _ in range(8):
+                inp.press_key('Page_Up')
+                time.sleep(0.4)
+                if doc:
+                    all_elements = find_elements(doc)
+                    copy_buttons = find_copy_buttons(all_elements)
+                    if copy_buttons:
+                        logger.info(f"Found {len(copy_buttons)} copy button(s) after Page_Up scroll")
+                        break
+
     if not copy_buttons:
         return {
             "success": False,

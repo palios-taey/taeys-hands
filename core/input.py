@@ -247,13 +247,15 @@ def clipboard_paste(text: str, timeout: float = 3.0) -> bool:
         True if clipboard write and paste succeeded.
     """
     from core import clipboard
+    lock = clipboard.acquire_clipboard_lock()
     try:
         clipboard.write_marker(text)
+        time.sleep(0.05)
+        paste_ok = press_key('ctrl+v', timeout=5)
+        time.sleep(0.1)
+        return paste_ok
     except RuntimeError as e:
         logger.error(f"Clipboard write failed: {e}")
         return False
-
-    time.sleep(0.05)
-    paste_ok = press_key('ctrl+v', timeout=5)
-    time.sleep(0.1)
-    return paste_ok
+    finally:
+        clipboard.release_clipboard_lock(lock)

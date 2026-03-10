@@ -257,6 +257,34 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
         return True
 
     filtered = [e for e in elements if is_useful(e)]
+
+    # Fallback: if strict SHOWING filter returned nothing but raw elements exist,
+    # accept ENABLED interactive elements. This handles pages like Claude /new
+    # where elements have ENABLED but not SHOWING state.
+    if not filtered and elements:
+        _INTERACTIVE_ROLES = {
+            'push button', 'toggle button', 'entry', 'combo box',
+            'check box', 'radio button', 'link', 'menu item',
+            'page tab', 'page tab list',
+        }
+
+        def is_enabled_interactive(e):
+            if e.get('y', 0) < threshold:
+                return False
+            role = e.get('role', '')
+            name = e.get('name', '').strip()
+            states = set(s.lower() for s in e.get('states', []))
+            if 'enabled' not in states:
+                return False
+            # Named interactive elements, or editable entries
+            if role in _INTERACTIVE_ROLES and name:
+                return True
+            if 'editable' in states:
+                return True
+            return False
+
+        filtered = [e for e in elements if is_enabled_interactive(e)]
+
     filtered.sort(key=lambda x: x['y'])
     return filtered
 
@@ -367,8 +395,9 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                 if role == 'menu bar':
                     return
 
-                # Match menu containers: menu, listbox, popup menu, panel
-                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel'}
+                # Match menu containers: menu, listbox, popup menu, panel, list
+                # 'list' added for Gemini which renders dropdown as list/list item
+                _MENU_CONTAINERS = {'menu', 'listbox', 'popup menu', 'panel', 'list'}
                 if role in _MENU_CONTAINERS:
                     if require_showing and not _is_menu_showing(obj):
                         pass

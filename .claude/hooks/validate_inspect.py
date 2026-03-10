@@ -38,6 +38,11 @@ def allow(reason: str):
     sys.exit(0)
 
 
+WORKER_HOSTNAMES = {'jetson', 'thor'}
+# Platforms that workers definitely cannot access (no login, no tab, not applicable)
+WORKER_BLOCKED_PLATFORMS = {'perplexity', 'x_twitter', 'linkedin'}
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -46,6 +51,19 @@ def main():
 
     tool_input = data.get("tool_input", {})
     platform = tool_input.get("platform", "")
+
+    # Block workers from platforms they don't have tabs for
+    import socket
+    hostname = socket.gethostname().lower()
+    if hostname in WORKER_HOSTNAMES and platform in WORKER_BLOCKED_PLATFORMS:
+        deny(
+            f"BLOCKED: {platform} is not available on {hostname}.\n"
+            "Workers have ChatGPT (Alt+1), Claude (Alt+2), Gemini (Alt+3), and Grok (Alt+4).\n"
+            "DO NOT ESCALATE. Skip this package immediately.\n"
+            "Build next package with: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform chatgpt\n"
+            "or: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform gemini\n"
+            "or: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform grok"
+        )
 
     if not platform:
         deny("No platform specified in taey_inspect")

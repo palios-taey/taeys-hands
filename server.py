@@ -142,7 +142,9 @@ def get_tools() -> List[Dict]:
                 "- URL of current conversation\n"
                 "- State (model, mode, copy button count)\n"
                 "- Controls (all visible elements for Claude to interpret)\n\n"
-                "ALWAYS call this FIRST before any other taey_ tool."
+                "ALWAYS call this FIRST before any other taey_ tool.\n\n"
+                "Use fresh_session=true to navigate to the platform's base URL first,\n"
+                "guaranteeing a new chat. REQUIRED for HMM enrichment to prevent context bleed."
             ),
             "inputSchema": {
                 "type": "object",
@@ -156,6 +158,13 @@ def get_tools() -> List[Dict]:
                             "Use 'none' for PURE SCAN — no tab switch, no scroll, no keyboard input. "
                             "Essential when a dropdown/menu is open or mid-workflow. "
                             "Use 'top' to scroll to page top first."
+                        ),
+                    },
+                    "fresh_session": {
+                        "type": "boolean",
+                        "description": (
+                            "Navigate to platform's base URL to start a fresh chat before scanning. "
+                            "Use for HMM enrichment to prevent context bleed between sessions."
                         ),
                     },
                 },
@@ -390,7 +399,9 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
         if not platform:
             return {"error": "platform is required"}
         scroll = args.get("scroll", "bottom")
-        return handle_inspect(platform, redis_client, scroll=scroll)
+        fresh_session = args.get("fresh_session", False)
+        return handle_inspect(platform, redis_client, scroll=scroll,
+                              fresh_session=fresh_session)
 
     if name == "taey_click":
         platform = args.get("platform")
@@ -536,7 +547,7 @@ def run_server():
                     "jsonrpc": "2.0",
                     "result": {
                         "protocolVersion": "2024-11-05",
-                        "serverInfo": {"name": "taeys-hands", "version": "5.0.0"},
+                        "serverInfo": {"name": "taeys-hands", "version": "6.0.0"},
                         "capabilities": {"tools": {}},
                     },
                     "id": msg_id,

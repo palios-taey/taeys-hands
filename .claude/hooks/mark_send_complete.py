@@ -17,7 +17,7 @@ import os
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_redis
+from config import get_redis, node_key
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
     r = get_redis()
     if r:
         try:
-            r.set("taey:workflow:active_status", "sent")
+            r.set(node_key("workflow:active_status"), "sent")
         except Exception:
             pass
 
