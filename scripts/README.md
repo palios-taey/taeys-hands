@@ -4,13 +4,87 @@ Utility scripts for taeys-hands node setup and Claude-to-Claude communication.
 
 ---
 
-## tmux-send
+## taey-notify (PRIMARY — Redis inbox)
+
+Send a message to any Claude instance via Redis inbox. Messages are delivered by PostToolUse hooks (active instances) or tmux fallback daemon (idle autonomous instances).
+
+### Why not tmux-send?
+
+`tmux-send` injects directly into the tmux command line. If the recipient is mid-tool-call (>15s), the message corrupts their input. `taey-notify` writes to Redis instead — the PostToolUse hook delivers it cleanly after the tool finishes.
+
+### Install
+
+```bash
+bash scripts/install-node.sh    # installs taey-notify + tmux-send + deps
+
+# Or manually
+sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify
+```
+
+### Usage
+
+```bash
+taey-notify <target-node> "message"
+taey-notify <target-node> "message" --type <type> --priority <priority>
+```
+
+### Message types
+
+| Type | Use for |
+|------|---------|
+| `message` | General inter-Claude communication (default) |
+| `escalation` | Error reports, blocked workers (auto-promotes to high priority) |
+| `heartbeat` | Cycle-complete reports, status updates |
+| `notification` | System events |
+| `response_ready` | Platform response detected |
+| `command` | Direct instructions |
+
+### Examples
+
+```bash
+# Worker escalation (auto-promotes to high priority)
+taey-notify weaver "ESCALATION from $(hostname): Grok inspect failed" --type escalation
+
+# Heartbeat from worker
+taey-notify weaver "HEARTBEAT from $(hostname): cycle done" --type heartbeat
+
+# Send instructions to a worker
+taey-notify jetson-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
+
+# Low-priority status update
+taey-notify weaver "254K tiles remaining" --type heartbeat --priority low
+```
+
+### Delivery architecture
+
+```
+taey-notify → Redis LPUSH taey:{node}:inbox
+                    │
+          ┌─────────┴──────────┐
+          ▼                    ▼
+  PostToolUse hook       tmux fallback daemon
+  (active instances)     (idle autonomous only)
+  Drains inbox after     Polls every 5s, checks
+  every tool call,       tool_running flag,
+  injects via            only injects when idle
+  additionalContext      for 30s+
+```
+
+### Environment
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REDIS_HOST` | `127.0.0.1` | Redis server |
+| `REDIS_PORT` | `6379` | Redis port |
+| `TAEY_NODE_ID` | (auto-detected) | Sender identity |
+
+---
+
+## tmux-send (LEGACY — direct tmux injection)
 
 Send a message to a tmux session — locally or on a remote machine over SSH.
 
-This is the backbone of multi-Claude coordination: when you have multiple
-Claude Code instances running (on the same machine or across different nodes),
-`tmux-send` lets them pass instructions to each other reliably.
+Still useful when Redis is unreachable or for direct wake-up of a stopped instance. For routine inter-Claude messaging, use `taey-notify` instead.
 
 ### Why not just use SSH directly?
 
@@ -22,16 +96,6 @@ sessions, and has no feedback. `tmux-send` handles all of that:
 - **Warns** if the target pane isn't running `claude`
 - **Works locally** (2 args) or **remotely** (3 args, same interface)
 
-### Install
-
-```bash
-# On any node — installs tmux-send + system dependencies
-bash scripts/install-node.sh
-
-# Or manually
-sudo install -m 755 scripts/tmux-send /usr/local/bin/tmux-send
-```
-
 ### Usage
 
 ```bash
@@ -42,54 +106,10 @@ tmux-send <session-name> "your message"
 tmux-send <hostname-or-ip> <session-name> "your message"
 ```
 
-### Examples
-
-```bash
-# Wake up a Claude instance in another window
-tmux-send claude-worker "Resume the task from where you left off"
-
-# Send from Spark to a remote worker node
-tmux-send 192.168.x.20 worker-claude "Fix deployed. Run: cd ~/taeys-hands && git pull"
-
-# Escalate a problem to a supervisor Claude
-tmux-send supervisor "ESCALATION from worker: Neo4j connection failed, cannot continue"
-
-# Send a multi-word message (all args after session are joined)
-tmux-send my-session this entire sentence is the message
-```
-
-### Multi-Claude pattern
-
-The typical setup for multi-node taeys-hands operation:
-
-```
-[Coordinator node]          [Worker node 1]         [Worker node 2]
-  tmux: supervisor            tmux: worker-1          tmux: worker-2
-  Claude Code (orchestrates)  Claude Code (executes)  Claude Code (executes)
-
-Coordinator → worker:  tmux-send worker-host worker-1 "Next task: process batch 4"
-Worker → coordinator:  tmux-send coord-host supervisor "DONE: batch 4 complete"
-Worker → coordinator:  tmux-send coord-host supervisor "ESCALATION: attach failed, need fix"
-```
-
-The coordinator (supervisor) handles code changes and decisions.
-Workers execute tasks and escalate when blocked.
-
-### SSH requirements
-
-Remote use requires passwordless SSH access to the target machine.
-The target user's `tmux` must be running with the named session active.
-
-```bash
-# Check if target is reachable and session exists
-ssh <host> "tmux ls"
-```
-
 ### Rules
 
-- **Only target Claude Code sessions** — messages arrive as user input, so
-  sending to a human's terminal is disruptive and wrong
-- **Use tmux-send for all Claude-to-Claude messages** — never raw SSH
+- **Only target Claude Code sessions** — messages arrive as user input
+- **Never target human-attended sessions** — disruptive
 - **Sessions must exist** — script exits with error if session not found
 
 ---
@@ -103,5 +123,6 @@ bash scripts/install-node.sh
 ```
 
 Installs:
-- `tmux-send` → `/usr/local/bin/tmux-send`
+- `taey-notify` → `/usr/local/bin/taey-notify` (Redis-backed messaging)
+- `tmux-send` → `/usr/local/bin/tmux-send` (direct tmux injection)
 - System packages: `xdotool`, `xsel`, `x11-utils` (required for AT-SPI tools)

@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
 """
-Ambient Notification Hook (PostToolUse)
+Unified Notification Hook (PostToolUse)
 
-Reads pending notifications from Redis queue and injects them into Claude's
-context via the additionalContext field. This implements the "piggybacking"
-pattern for background process notifications.
+Drains THREE notification sources after each tool call:
+1. taey:{node_id}:notifications — monitor daemon (response detection)
+2. taey:{node_id}:inbox — inter-Claude messages (escalations, heartbeats)
+3. orch:notify:{node_id} — orchestration notifications
 
-Flow:
-1. Monitor daemon pushes to Redis: rpush("taey:notifications", json)
-2. This hook pops from Redis AFTER each tool call: lpop("taey:notifications")
-3. Notifications delivered via additionalContext in hook output
+Also clears the tool_running flag (set by PreToolUse pre_tool_activity.py)
+so the tmux fallback daemon knows this instance is between tool calls.
 
-IMPORTANT: additionalContext only works with PostToolUse, UserPromptSubmit,
-and SessionStart hooks - NOT PreToolUse. This hook uses PostToolUse.
+Delivery is via additionalContext — Claude sees notifications inline after
+each tool result, enabling it to react to background events without
+explicit polling.
 
-Works on: Spark, CCM, Windows (auto-detects environment)
+Works on: Spark, CCM, Jetson, Thor (auto-detects environment)
 """
 import json
 import sys
 import os
+import time
 
 # Add hooks directory to path for config import
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import get_config, get_redis, node_key
+from config import get_config, get_redis, node_key, detect_node_id
 
 CFG = get_config()
 
@@ -38,111 +39,138 @@ def log_debug(msg):
         pass
 
 
-def get_pending_notifications():
-    """
-    Pop pending notifications from Redis queue.
-    Returns list of notification dicts.
-    """
-    r = get_redis()
-    if not r:
-        return []
+def clear_tool_activity(r, node_id):
+    """Clear tool_running flag and update last activity timestamp.
 
+    This tells the tmux fallback daemon that the instance is between
+    tool calls (safe to inject if idle long enough).
+    """
     try:
-        notifications = []
-        # Pop up to 10 notifications per tool call (node-scoped key)
-        notify_key = node_key("notifications")
-        for _ in range(10):
-            notification_json = r.lpop(notify_key)
-            if not notification_json:
-                break
-            log_debug(f"Raw notification: {repr(notification_json)}")
-            try:
-                parsed = json.loads(notification_json)
-                log_debug(f"Parsed: {parsed}")
-                notifications.append(parsed)
-            except json.JSONDecodeError as e:
-                log_debug(f"JSON decode error: {e}")
-                notifications.append({"raw": notification_json})
-
-        # Also check orchestration notifications (orch:notify:<agent_id>)
-        try:
-            from config import detect_node_id
-            node_id = detect_node_id()
-            orch_key = f"orch:notify:{node_id}"
-            for _ in range(5):
-                orch_json = r.lpop(orch_key)
-                if not orch_json:
-                    break
-                try:
-                    parsed = json.loads(orch_json)
-                    parsed["_source"] = "orchestration"
-                    notifications.append(parsed)
-                    log_debug(f"Orch notification: {parsed}")
-                except json.JSONDecodeError:
-                    pass
-        except Exception as e:
-            log_debug(f"Orch notify check error: {e}")
-
-        return notifications
-    except ImportError:
-        return []
+        r.delete(f"taey:{node_id}:tool_running")
+        r.set(f"taey:{node_id}:last_tool_activity", str(time.time()))
     except Exception as e:
-        log_debug(f"Redis error: {e}")
-        return []
+        log_debug(f"Activity clear error: {e}")
 
 
-def format_notifications(notifications):
-    """Format notifications into human-readable context string."""
-    if not notifications:
+def drain_queue(r, key, max_count=10, from_tail=False):
+    """Pop up to max_count items from a Redis list. Returns parsed dicts.
+
+    Args:
+        from_tail: If True, use RPOP (for LPUSH writers = FIFO).
+                   If False, use LPOP (for RPUSH writers = FIFO).
+    """
+    items = []
+    pop_fn = r.rpop if from_tail else r.lpop
+    for _ in range(max_count):
+        raw = pop_fn(key)
+        if not raw:
+            break
+        try:
+            parsed = json.loads(raw)
+            items.append(parsed)
+        except json.JSONDecodeError:
+            items.append({"raw": raw})
+    return items
+
+
+def get_all_pending(r, node_id):
+    """Drain all notification sources. Returns (monitor_notifs, inbox_msgs, orch_notifs)."""
+    # 1. Monitor daemon notifications (RPUSH writers → LPOP = FIFO)
+    monitor = drain_queue(r, f"taey:{node_id}:notifications", 10)
+
+    # 2. Inter-Claude inbox messages (LPUSH writers → RPOP = FIFO)
+    inbox = drain_queue(r, f"taey:{node_id}:inbox", 10, from_tail=True)
+
+    # 3. Orchestration notifications
+    orch = drain_queue(r, f"orch:notify:{node_id}", 5)
+
+    return monitor, inbox, orch
+
+
+def format_monitor_notification(notif):
+    """Format a monitor daemon notification."""
+    status = notif.get('status', 'unknown')
+    platform = notif.get('platform', 'unknown')
+    msg = notif.get('message', '')
+    elapsed = notif.get('elapsed_seconds', '')
+    monitor_id = notif.get('monitor_id', '')[:8] if notif.get('monitor_id') else ''
+    has_artifacts = notif.get('has_artifacts', False)
+    exchange_hash = notif.get('exchange_hash', '')
+
+    lines = []
+    if status == 'response_complete':
+        lines.append(f"  *** {platform.upper()} RESPONSE READY ***")
+        lines.append(f"  Platform: {platform}")
+        lines.append(f"  Response time: {elapsed}s")
+        lines.append(f"  Artifacts: {'Yes - extract manually!' if has_artifacts else 'No'}")
+        if exchange_hash:
+            lines.append(f"  Exchange stored in ISMA: {exchange_hash[:16]}")
+        lines.append(f"  Monitor ID: {monitor_id}")
+        if msg:
+            lines.append(f"  Message: {msg}")
+        lines.append(f"  ACTION: Call taey_quick_extract(platform='{platform}', complete=True)")
+        return '\n'.join(lines), True
+    elif status == 'timeout':
+        return f"  [TIMEOUT] [{platform}] Timed out after {elapsed}s - {monitor_id}", False
+    elif status == 'error':
+        return f"  [ERROR] [{platform}] {msg} - {monitor_id}", False
+    elif status == 'started':
+        return f"  [STARTED] [{platform}] Monitor started - {monitor_id}", False
+    elif status == 'complete':
+        line = f"  [COMPLETE] [{platform}] Response ready ({elapsed}s) - {monitor_id}"
+        if msg:
+            line += f"\n    Message: {msg}"
+        return line, True
+    else:
+        return f"  [{status.upper()}] [{platform}] {msg}", False
+
+
+def format_inbox_message(msg):
+    """Format an inter-Claude inbox message."""
+    sender = msg.get('from', 'unknown')
+    mtype = msg.get('type', 'message').upper()
+    body = msg.get('body', str(msg))
+    priority = msg.get('priority', 'normal')
+    prefix = "!!!" if priority == "high" else ""
+    return f"  {prefix}[{mtype} from {sender}]: {body}"
+
+
+def format_all(monitor_notifs, inbox_msgs, orch_notifs):
+    """Format all notifications into a single context string."""
+    total = len(monitor_notifs) + len(inbox_msgs) + len(orch_notifs)
+    if total == 0:
         return None
 
-    lines = ["", "=== BACKGROUND NOTIFICATIONS ==="]
+    lines = ["", "=== NOTIFICATIONS ==="]
     requires_action = False
 
-    for notif in notifications:
-        if isinstance(notif, dict):
-            status = notif.get('status', 'unknown')
-            platform = notif.get('platform', 'unknown')
-            msg = notif.get('message', '')
-            elapsed = notif.get('elapsed_seconds', '')
-            monitor_id = notif.get('monitor_id', '')[:8] if notif.get('monitor_id') else ''
-            has_artifacts = notif.get('has_artifacts', False)
-            exchange_hash = notif.get('exchange_hash', '')
-
-            if status == 'response_complete':
+    # Monitor daemon notifications (response detection)
+    if monitor_notifs:
+        lines.append("--- Response Detection ---")
+        for notif in monitor_notifs:
+            text, action = format_monitor_notification(notif)
+            lines.append(text)
+            if action:
                 requires_action = True
-                lines.append(f"")
-                lines.append(f"  *** {platform.upper()} RESPONSE READY ***")
-                lines.append(f"  Platform: {platform}")
-                lines.append(f"  Response time: {elapsed}s")
-                lines.append(f"  Artifacts: {'Yes - extract manually!' if has_artifacts else 'No'}")
-                if exchange_hash:
-                    lines.append(f"  Exchange stored in ISMA: {exchange_hash[:16]}")
-                lines.append(f"  Monitor ID: {monitor_id}")
-                if msg:
-                    lines.append(f"  Message: {msg}")
-                lines.append(f"")
-                lines.append(f"  ACTION: Call taey_quick_extract(platform='{platform}', complete=True)")
-            elif status == 'timeout':
-                lines.append(f"  [TIMEOUT] [{platform}] Timed out after {elapsed}s - {monitor_id}")
-            elif status == 'error':
-                lines.append(f"  [ERROR] [{platform}] {msg} - {monitor_id}")
-            elif status == 'started':
-                lines.append(f"  [STARTED] [{platform}] Monitor started - {monitor_id}")
-            elif status == 'complete':
-                lines.append(f"  [COMPLETE] [{platform}] Response ready ({elapsed}s) - {monitor_id}")
-                if msg:
-                    lines.append(f"    Message: {msg}")
-            else:
-                lines.append(f"  [{status.upper()}] [{platform}] {msg}")
-        else:
-            lines.append(f"  {str(notif)}")
 
-    lines.append("================================")
+    # Inter-Claude inbox messages
+    if inbox_msgs:
+        lines.append("--- Messages ---")
+        for msg in inbox_msgs:
+            lines.append(format_inbox_message(msg))
+
+    # Orchestration notifications
+    if orch_notifs:
+        lines.append("--- Orchestration ---")
+        for notif in orch_notifs:
+            notif_type = notif.get('type', 'info')
+            notif_msg = notif.get('message', str(notif))
+            lines.append(f"  [{notif_type.upper()}] {notif_msg}")
+
+    lines.append("=====================")
 
     if requires_action:
-        lines.append("")
-        lines.append("Extract the response with taey_quick_extract.")
+        lines.append("Extract responses with taey_quick_extract.")
 
     lines.append("")
     return "\n".join(lines)
@@ -159,9 +187,28 @@ def main():
         log_debug(f"Input error: {e}")
         sys.exit(0)
 
-    notifications = get_pending_notifications()
-    log_debug(f"Notifications found: {len(notifications)}")
-    context = format_notifications(notifications)
+    r = get_redis()
+    if not r:
+        # No Redis — nothing to do
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse"}}))
+        sys.exit(0)
+
+    node_id = detect_node_id()
+
+    # Clear tool_running flag (set by PreToolUse pre_tool_activity.py)
+    clear_tool_activity(r, node_id)
+
+    # Drain all notification sources
+    try:
+        monitor, inbox, orch = get_all_pending(r, node_id)
+        total = len(monitor) + len(inbox) + len(orch)
+        log_debug(f"Drained: {len(monitor)} monitor, {len(inbox)} inbox, {len(orch)} orch")
+    except Exception as e:
+        log_debug(f"Redis drain error: {e}")
+        monitor, inbox, orch = [], [], []
+        total = 0
+
+    context = format_all(monitor, inbox, orch)
 
     response = {
         "hookSpecificOutput": {
@@ -171,7 +218,7 @@ def main():
 
     if context:
         response["hookSpecificOutput"]["additionalContext"] = context
-        log_debug(f"Injecting context: {len(context)} chars")
+        log_debug(f"Injecting context: {len(context)} chars, {total} items")
         print(context, file=sys.stderr)
 
     print(json.dumps(response))

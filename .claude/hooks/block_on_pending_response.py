@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook: Block taey_ tools when a response is pending review.
+PreToolUse hook: Block double-sends to a platform with a pending response.
 
 LEAN WORKFLOW ENFORCEMENT:
-- When a platform has an unread AI response, you MUST extract it before
-  doing anything else (except on that platform's extract/inspect/click tools).
-- Prevents accidentally starting new sends while responses are waiting.
-
-Allows through:
-- taey_quick_extract (always - to actually extract the response)
-- taey_inspect (always - to check what's on screen)
-- taey_click (always - to click elements)
-- All other tools are blocked IF a different platform has a pending response
+- Prevents sending a NEW message to a platform that already has one generating.
+- Does NOT block cross-platform work (Dream Cycle pattern: send to A, move to B).
+- Only blocks taey_send_message to the SAME platform with a pending_prompt.
 
 Redis keys checked:
 - taey:pending_prompt:{platform} - set by send_message, cleared by quick_extract
-- taey:response_ready:{platform} - set by monitor daemon
+- taey:response_ready:{platform} - set by monitor daemon (response complete, unextracted)
 
 Works on: Spark, CCM, Windows (auto-detects environment)
 """
@@ -88,40 +82,26 @@ def main():
     except Exception:
         allow("Redis ping failed - allowing")
 
-    # Check for pending responses on any platform
+    # Only block taey_send_message to a platform that already has a pending response
+    # Cross-platform work is always allowed (Dream Cycle pattern)
     try:
-        pending_keys = r.keys(node_key("pending_prompt:*"))
-        ready_keys = r.keys(node_key("response_ready:*"))
-
-        all_pending = set()
-        prefix = node_key("pending_prompt:")
-        for key in pending_keys:
-            platform = key[len(prefix):]
-            all_pending.add(platform)
-
-        ready_prefix = node_key("response_ready:")
-        for key in ready_keys:
-            platform = key[len(ready_prefix):]
-            all_pending.add(platform)
-
-        if not all_pending:
-            allow("No pending responses")
-
-        # Check if current tool is for the pending platform
         current_platform = tool_input.get("platform", "")
 
-        # If only one pending platform and this tool is for it, allow
-        if len(all_pending) == 1 and current_platform in all_pending:
-            allow(f"Tool targets pending platform {current_platform}")
+        # Only send_message can be blocked (prevents double-send)
+        if short_name != "taey_send_message":
+            allow(f"{short_name} allowed - only send_message is gated")
 
-        # If current platform has a pending response, block other actions
-        pending_list = ", ".join(sorted(all_pending))
-        deny(
-            f"PENDING RESPONSES on: {pending_list}\n\n"
-            f"Extract pending responses before continuing:\n"
-            f"  taey_quick_extract(platform='{list(all_pending)[0]}')\n\n"
-            f"Or check status with: taey_list_sessions()"
-        )
+        # Check if THIS platform has a pending prompt
+        pending_key = node_key(f"pending_prompt:{current_platform}")
+        if r.exists(pending_key):
+            deny(
+                f"PENDING RESPONSE on {current_platform} — cannot double-send.\n\n"
+                f"Extract first: taey_quick_extract(platform='{current_platform}')\n"
+                f"Or check status: taey_list_sessions()"
+            )
+
+        # No pending on this platform — allow the send
+        allow(f"No pending response on {current_platform}")
 
     except Exception:
         allow("Redis check failed - allowing")
