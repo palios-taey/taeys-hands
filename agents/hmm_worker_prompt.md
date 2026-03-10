@@ -4,7 +4,7 @@ RULES — NEVER VIOLATE:
 - NEVER change models or settings on any platform. Do not call taey_prepare or taey_select_dropdown.
 - NEVER use Claude (Alt+2) or Perplexity (Alt+5).
 - NEVER modify files except writing to /tmp/.
-- On error: call bash with tmux-send to escalate, then stop.
+- On error: call bash with notify-send to escalate, then stop.
 
 PLATFORMS: chatgpt (Alt+1), gemini (Alt+3), grok (Alt+4).
 
@@ -34,11 +34,11 @@ PHASE 2 — HARVEST (after sending to all platforms, wait 2 minutes, then check 
 "Driver closed" errors after complete are NON-CRITICAL. Ignore them.
 
 PHASE 3 — Report and repeat:
-bash: tmux-send spark1 taeys-hands "HEARTBEAT from HOSTNAME: cycle done"
+bash: notify-send weaver "HEARTBEAT from $(hostname): cycle done" --type heartbeat
 Output CYCLE_COMPLETE.
 
 ESCALATION:
-bash: tmux-send spark1 taeys-hands "ESCALATION from HOSTNAME: PROBLEM"
+bash: notify-send weaver "ESCALATION from $(hostname): PROBLEM" --type escalation --priority high
 Then output ESCALATE: PROBLEM
 
 Keep inspect results SHORT in your reasoning. Only note: input field coords, copy button count, stop button presence.
