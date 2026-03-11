@@ -242,18 +242,18 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
 
     # Block command chaining/injection metacharacters.
     # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
-    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), command groups ({}).
-    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(']
+    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), variable expansion (${}).
+    _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(', '${']
     for pat in _CHAIN_PATTERNS:
         if pat in cmd_stripped:
             return {"error": f"Shell chaining/injection pattern '{pat}' not allowed", "exit_code": -1}
 
     # File redirection: only allow > to /tmp/ destinations
     import re
-    redir_match = re.search(r'>\s*(/[^\s]+)', cmd_stripped)
+    redir_match = re.search(r'>\s*([^\s]+)', cmd_stripped)
     if redir_match:
-        dest = redir_match.group(1)
-        if not dest.startswith('/tmp/'):
+        dest = os.path.expanduser(redir_match.group(1))
+        if not os.path.abspath(dest).startswith('/tmp/'):
             return {"error": f"File redirection only allowed to /tmp/, got: {dest}", "exit_code": -1}
 
     # Enforce allowlist: command must start with an approved prefix
