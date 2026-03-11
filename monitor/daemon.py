@@ -538,29 +538,10 @@ class MonitorDaemon:
             except Exception as e:
                 self._log(f"File notification failed: {e}")
 
-        # tmux fallback: if Claude is idle, the PostToolUse hook won't fire
-        # to drain Redis. Use tmux injection to wake the session.
-        # Only inject when idle — during active tool use the hook handles it.
-        if self.redis_client and self.tmux_session:
-            try:
-                idle = True
-                activity_key = f"taey:{_EFFECTIVE_NODE_ID}:last_tool_activity"
-                running_key = f"taey:{_EFFECTIVE_NODE_ID}:tool_running"
-                if self.redis_client.exists(running_key):
-                    idle = False
-                else:
-                    last_str = self.redis_client.get(activity_key)
-                    if last_str:
-                        elapsed = time.time() - float(last_str)
-                        idle = elapsed > 15
-                if idle:
-                    self._log(f"Node idle, falling back to tmux injection")
-                    self._notify_tmux(self.platform)
-                else:
-                    self._log(f"Node active, hook will drain Redis")
-            except Exception as e:
-                self._log(f"Idle check failed, trying tmux anyway: {e}")
-                self._notify_tmux(self.platform)
+        # Delivery is handled by:
+        # - PostToolUse hook (drains Redis during active tool use)
+        # - notifications/daemon.py (injects via tmux when node is idle)
+        # Monitor does NOT do tmux directly — that caused double delivery.
 
     def _on_first_poll(self) -> bool:
         """First poll after initial delay."""
@@ -1033,36 +1014,10 @@ class MacMonitorDaemon:
             except Exception as e:
                 self._log(f"File notification failed: {e}")
 
-        # tmux fallback: if Claude is idle, the PostToolUse hook won't fire
-        # to drain Redis. Use tmux injection to wake the session.
-        if self.redis_client and self.tmux_session:
-            try:
-                idle = True
-                activity_key = f"taey:{_EFFECTIVE_NODE_ID}:last_tool_activity"
-                running_key = f"taey:{_EFFECTIVE_NODE_ID}:tool_running"
-                if self.redis_client.exists(running_key):
-                    idle = False
-                else:
-                    last_str = self.redis_client.get(activity_key)
-                    if last_str:
-                        elapsed_since = time.time() - float(last_str)
-                        idle = elapsed_since > 15
-                if idle:
-                    self._log(f"Node idle, falling back to tmux injection")
-                    import threading
-                    t = threading.Thread(
-                        target=self._notify_tmux, args=(self.platform,), daemon=False
-                    )
-                    t.start()
-                else:
-                    self._log(f"Node active, hook will drain Redis")
-            except Exception as e:
-                self._log(f"Idle check failed, trying tmux anyway: {e}")
-                import threading
-                t = threading.Thread(
-                    target=self._notify_tmux, args=(self.platform,), daemon=False
-                )
-                t.start()
+        # Delivery is handled by:
+        # - PostToolUse hook (drains Redis during active tool use)
+        # - notifications/daemon.py (injects via tmux when node is idle)
+        # Monitor does NOT do tmux directly — that caused double delivery.
 
     def _poll_check(self) -> bool:
         """Single poll check. Returns True to continue, False to stop."""
