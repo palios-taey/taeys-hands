@@ -130,7 +130,21 @@ def handle_attach(platform: str, file_path: str,
     btn_coords = get_attach_button_coords(doc, platform=platform) if doc else None
 
     if btn_coords:
-        click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+        # Prefer direct AT-SPI do_action(0) — proven reliable on Gemini/Claude
+        # where coordinate clicks fail to trigger React event handlers.
+        atspi_obj = btn_coords.get('atspi_obj')
+        click_result = None
+        if atspi_obj:
+            try:
+                ai = atspi_obj.get_action_iface()
+                if ai and ai.get_n_actions() > 0:
+                    ai.do_action(0)
+                    click_result = {"method": "atspi_direct", "platform": platform}
+                    logger.info("Attach button clicked via direct do_action(0)")
+            except Exception as e:
+                logger.warning(f"Direct do_action failed: {e}")
+        if not click_result:
+            click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
         click_failed = bool(click_result.get("error"))
 
         if not click_failed:
@@ -151,7 +165,7 @@ def handle_attach(platform: str, file_path: str,
                 time.sleep(0.5)
 
             # If AT-SPI click was used but no dropdown, retry with xdotool
-            if not dropdown_items and click_result.get("method") == "atspi":
+            if not dropdown_items and click_result.get("method") in ("atspi", "atspi_direct"):
                 logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
                 inp.click_at(btn_coords['x'], btn_coords['y'])
                 time.sleep(1.0)
