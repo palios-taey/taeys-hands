@@ -635,24 +635,18 @@ class LocalLLMAgent:
                     # Auto-save quick_extract results to file (removes model
                     # from the data path — prevents prompt/response confusion)
                     if tool_name == "taey_quick_extract" and isinstance(result, dict):
-                        extracted = result.get("content") or result.get("extracted_text") or result.get("text", "")
+                        extracted = result.get("extracted_text") or result.get("text", "")
                         platform = tool_args.get("platform", "unknown")
                         if extracted and not result.get("error"):
-                            # Reject if content is the HMM prompt (Copy clicked wrong button)
-                            start = extracted.strip()[:100].lower()
-                            if 'analyze all' in start and 'items in this package' in start:
-                                logger.warning("Auto-save REJECTED: content is the HMM prompt, not AI response")
-                                result["auto_save_rejected"] = "content_is_prompt"
-                            else:
-                                save_path = f"/tmp/hmm_response_{platform}.json"
-                                try:
-                                    with open(save_path, 'w') as f:
-                                        f.write(extracted)
-                                    result["auto_saved"] = save_path
-                                    logger.info("Auto-saved extract to %s (%d chars)",
-                                                save_path, len(extracted))
-                                except Exception as e:
-                                    logger.error("Failed to auto-save extract: %s", e)
+                            save_path = f"/tmp/hmm_response_{platform}.json"
+                            try:
+                                with open(save_path, 'w') as f:
+                                    f.write(extracted)
+                                result["auto_saved"] = save_path
+                                logger.info("Auto-saved extract to %s (%d chars)",
+                                            save_path, len(extracted))
+                            except Exception as e:
+                                logger.error("Failed to auto-save extract: %s", e)
 
                     # Trim large tool results to save context
                     result = _trim_tool_result(tool_name, result)

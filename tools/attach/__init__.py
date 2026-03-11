@@ -31,10 +31,8 @@ from tools.attach.keyboard_nav import keyboard_nav_attach
 
 logger = logging.getLogger(__name__)
 
-# Platforms where keyboard nav (Down+Enter) is more reliable than AT-SPI menu scan.
-# ChatGPT/Grok: React portal dropdowns invisible to AT-SPI.
-# Gemini: AT-SPI menu scan often fails to find dropdown items on workers.
-_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok', 'gemini'}
+# Platforms where the dropdown is a React portal invisible to AT-SPI.
+_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
 
 
 def handle_attach(platform: str, file_path: str,
