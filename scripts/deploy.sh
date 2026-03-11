@@ -1,9 +1,9 @@
 #!/bin/bash
 # deploy.sh — Pull latest code and restart MCP servers on all machines.
 #
-# Kills MCP server processes on each machine. Claude Code's stdio transport
-# auto-relaunches the server command from .mcp.json on the next tool call.
-# This IS the hot-reload mechanism — no /mcp or manual reconnect needed.
+# Kills MCP server processes on each machine. Claude Code does NOT
+# auto-relaunch — each session must run /mcp to reconnect.
+# Deploy notifications remind sessions to reconnect.
 #
 # For file-watch auto-reload during development, see mcp-watch.sh.
 #
@@ -39,7 +39,7 @@ deploy_local() {
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
 
     echo "[local] Killing MCP server processes..."
-    pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (auto-relaunch on next tool call)" \
+    pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (sessions must /mcp to reconnect)" \
         || echo "[local] No MCP servers running"
 
     echo "[local] Restarting notification daemons..."
@@ -73,7 +73,7 @@ deploy_remote() {
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
         sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
-        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (auto-relaunch on next tool call)' || echo 'No MCP running'
+        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (sessions must /mcp to reconnect)' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
         for session in $(tmux ls -F '#{session_name}' 2>/dev/null || true); do
