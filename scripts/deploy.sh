@@ -66,24 +66,27 @@ deploy_remote() {
     [ "$host" = "mira" ] && redis_host="10.0.0.68"
 
     echo "[${host}] Deploying..."
-    ssh -o ConnectTimeout=5 "$host" "
-        cd ${repo_path} 2>/dev/null || { echo 'REPO NOT FOUND: ${repo_path}'; exit 1; }
+    ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" <<'DEPLOY_EOF'
+        REPO="$1"; REDIS="$2"
+        cd "$REPO" 2>/dev/null || { echo "REPO NOT FOUND: $REPO"; exit 1; }
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
         sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
-        pkill -f 'python3.*server\\.py' 2>/dev/null && echo 'MCP killed (auto-relaunch on next tool call)' || echo 'No MCP running'
+        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (auto-relaunch on next tool call)' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
-        for session in \$(tmux ls -F '#{session_name}' 2>/dev/null || true); do
-            nohup python3 notifications/daemon.py \\
-                --node \"\$session\" --tmux-session \"\$session\" \\
-                --redis-host ${redis_host} \\
-                > /tmp/notify-daemon-\${session}.log 2>&1 &
-            echo \"Notify daemon started for \$session (PID \$!)\"
+        for session in $(tmux ls -F '#{session_name}' 2>/dev/null || true); do
+            nohup python3 notifications/daemon.py \
+                --node "$session" --tmux-session "$session" \
+                --redis-host "$REDIS" \
+                > "/tmp/notify-daemon-${session}.log" 2>&1 &
+            echo "Notify daemon started for $session (PID $!)"
         done
-        echo \"Done — commit: \$(git log --oneline -1)\"
-    " 2>&1 | sed "s/^/  /" || echo "  [${host}] SSH FAILED"
+        echo "Done — commit: $(git log --oneline -1)"
+DEPLOY_EOF
+    local rc=$?
+    [ $rc -ne 0 ] && echo "  [${host}] SSH FAILED (exit $rc)" || true
 }
 
 # Parse args
