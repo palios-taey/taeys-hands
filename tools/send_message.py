@@ -143,6 +143,11 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Failed to paste message into {platform} input", "platform": platform}
     time.sleep(0.2)
 
+    # Clear clipboard after paste — stale prompt text causes extract to
+    # return the prompt instead of the AI response if Copy click fails silently.
+    from core.clipboard import clear as _clip_clear
+    _clip_clear()
+
     # Step 3: Store in Neo4j
     neo4j_result = None
     session_id = None
