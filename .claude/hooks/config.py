@@ -49,7 +49,10 @@ def _find_ancestor_tty() -> str:
         try:
             with open(f'/proc/{pid}/stat') as f:
                 stat = f.read()
-            pid = int(stat.split()[3])
+            # Parse ppid after closing ')' — comm field can contain spaces
+            # e.g. "299556 (tmux: server) S 1 ..." → split after ')'
+            after_comm = stat[stat.rfind(')') + 2:]
+            pid = int(after_comm.split()[1])  # state=0, ppid=1
             if pid <= 1:
                 break
             fd0 = os.readlink(f'/proc/{pid}/fd/0')
