@@ -250,10 +250,10 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
 
     # File redirection: only allow > to /tmp/ destinations
     import re
-    redir_match = re.search(r'>\s*(/[^\s]+)', cmd_stripped)
+    redir_match = re.search(r'>\s*([^\s]+)', cmd_stripped)
     if redir_match:
-        dest = redir_match.group(1)
-        if not dest.startswith('/tmp/'):
+        dest = os.path.expanduser(redir_match.group(1))
+        if not os.path.abspath(dest).startswith('/tmp/'):
             return {"error": f"File redirection only allowed to /tmp/, got: {dest}", "exit_code": -1}
 
     # Enforce allowlist: command must start with an approved prefix
