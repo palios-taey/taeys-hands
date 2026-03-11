@@ -635,7 +635,7 @@ class LocalLLMAgent:
                     # Auto-save quick_extract results to file (removes model
                     # from the data path — prevents prompt/response confusion)
                     if tool_name == "taey_quick_extract" and isinstance(result, dict):
-                        extracted = result.get("extracted_text") or result.get("text", "")
+                        extracted = result.get("content") or result.get("extracted_text") or result.get("text", "")
                         platform = tool_args.get("platform", "unknown")
                         if extracted and not result.get("error"):
                             save_path = f"/tmp/hmm_response_{platform}.json"
