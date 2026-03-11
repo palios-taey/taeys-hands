@@ -214,7 +214,8 @@ def handle_quick_extract(platform: str, redis_client,
         # Heuristic: if content starts with the analysis prompt marker,
         # we copied the user message, not the response.
         content_start = content.strip()[:200].lower()
-        prompt_markers = ['analyze the following', 'package analysis request',
+        prompt_markers = ['analyze the following', 'analyze all all items',
+                          'package analysis request',
                           'you are analyzing', 'respond only with minified json',
                           'critical: echo back']
         if any(marker in content_start for marker in prompt_markers):
