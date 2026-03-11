@@ -270,6 +270,14 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
     """Execute a shell command with safety checks."""
     cmd_stripped = command.strip()
 
+    # Auto-extend timeout for sleep commands
+    if cmd_stripped.startswith("sleep "):
+        try:
+            sleep_secs = int(cmd_stripped.split()[1])
+            timeout = max(timeout, sleep_secs + 10)
+        except (IndexError, ValueError):
+            pass
+
     # Block command chaining/injection metacharacters.
     # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
     # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), variable expansion (${}).
