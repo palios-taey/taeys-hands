@@ -26,7 +26,7 @@ PHASE 2 — HARVEST (after sending to all platforms, wait 2 minutes, then check 
 1. taey_inspect platform
 2. If copy buttons visible and no stop button → response is ready:
    a. taey_quick_extract platform with complete=true
-   b. bash: echo 'RESPONSE_CONTENT' > /tmp/hmm_response_PLATFORM.json (write extracted content to tmp)
+   b. write_file path=/tmp/hmm_response_PLATFORM.json content=EXTRACTED_TEXT (the text from step a)
    c. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py complete --platform PLATFORM --response-file /tmp/hmm_response_PLATFORM.json
 3. If stop button visible → still generating, skip.
 4. If page looks wrong → escalate.
