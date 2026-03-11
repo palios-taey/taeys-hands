@@ -242,7 +242,7 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
 
     # Block command chaining/injection metacharacters.
     # Allows: quotes ('"), file redirection (> to /tmp/ only), basic shell.
-    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), command groups ({}).
+    # Blocks: chaining (;&&||), pipes (|), subshells ($() ``), variable expansion (${}).
     _CHAIN_PATTERNS = ['; ', ';;', '&&', '||', '|', '`', '$(', '${']
     for pat in _CHAIN_PATTERNS:
         if pat in cmd_stripped:
