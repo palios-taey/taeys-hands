@@ -223,16 +223,46 @@ BASH_TOOL_DEF = {
     },
 }
 
-# Allowed command prefixes for safety — only builder + basic file ops
+WRITE_FILE_TOOL_DEF = {
+    "type": "function",
+    "function": {
+        "name": "write_file",
+        "description": (
+            "Write text content to a file. Use this to save extracted responses, "
+            "JSON data, or any text that's too large or complex for bash echo. "
+            "Only writes to /tmp/ or ~/.claude/ directories."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "File path (must be under /tmp/ or ~/.claude/)",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write to the file",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+}
+
+# Allowed command prefixes for safety — builder, file ops, X11 tools, shell utils
 _BASH_ALLOWLIST = [
     "python3 ~/embedding-server/",
     "python3 /home/",
     "python3 -c ",
     "cat ", "ls ", "wc ", "head ", "tail ",
     "echo ",
+    "printf ",
+    "sleep ",
     "mkdir /tmp/",
     "tmux-send ",
     "taey-notify ",
+    "xdotool ",
+    "xsel ",
 ]
 
 
@@ -248,13 +278,15 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
         if pat in cmd_stripped:
             return {"error": f"Shell chaining/injection pattern '{pat}' not allowed", "exit_code": -1}
 
-    # File redirection: only allow > to /tmp/ destinations
+    # File redirection: only allow > to safe destinations
     import re
     redir_match = re.search(r'>\s*([^\s]+)', cmd_stripped)
     if redir_match:
         dest = os.path.expanduser(redir_match.group(1))
-        if not os.path.abspath(dest).startswith('/tmp/'):
-            return {"error": f"File redirection only allowed to /tmp/, got: {dest}", "exit_code": -1}
+        abs_dest = os.path.abspath(dest)
+        _ALLOWED_REDIR = ['/tmp/', os.path.expanduser('~/.claude/')]
+        if not any(abs_dest.startswith(d) for d in _ALLOWED_REDIR):
+            return {"error": f"File redirection only allowed to {_ALLOWED_REDIR}, got: {dest}", "exit_code": -1}
 
     # Enforce allowlist: command must start with an approved prefix
     if not any(cmd_stripped.startswith(prefix) for prefix in _BASH_ALLOWLIST):
@@ -284,21 +316,42 @@ def _execute_bash(command: str, timeout: int = 120) -> dict:
         return {"error": str(e), "exit_code": -1}
 
 
+def _write_file(path: str, content: str) -> dict:
+    """Write content to a file. Safe alternative to bash echo for large text."""
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    _ALLOWED_DIRS = ['/tmp/', os.path.expanduser('~/.claude/')]
+    if not any(abs_path.startswith(d) for d in _ALLOWED_DIRS):
+        return {"error": f"Write only allowed to {_ALLOWED_DIRS}, got: {abs_path}"}
+    try:
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, 'w') as f:
+            f.write(content)
+        return {"ok": True, "path": abs_path, "bytes": len(content.encode())}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _trim_tool_result(tool_name: str, result: dict) -> dict:
     """Compress large MCP tool results to save LLM context.
 
     taey_inspect returns full element lists (100+ items, 10K+ chars).
-    For the enrichment workflow, the LLM only needs: input field coords,
-    copy button count, stop button presence, and attach button location.
+    Trim mode controlled by TRIM_INSPECT env var:
+      "hmm"  (default) — only key elements (input, attach, copy, stop, send)
+      "full" — include ALL elements with text content (for X engagement, reading posts)
+      "off"  — no trimming at all
     """
     if tool_name != "taey_inspect" or not isinstance(result, dict):
+        return result
+
+    trim_mode = os.environ.get("TRIM_INSPECT", "hmm").lower()
+    if trim_mode == "off":
         return result
 
     controls = result.get("controls", [])
     if not controls:
         return result
 
-    # Extract only what the LLM needs
+    # Extract base info
     summary = {
         "platform": result.get("platform", ""),
         "success": result.get("success", False),
@@ -307,28 +360,40 @@ def _trim_tool_result(tool_name: str, result: dict) -> dict:
         "element_count": result.get("state", {}).get("element_count", 0),
     }
 
-    # Find key elements: input fields, attach buttons, stop buttons, copy buttons
-    key_elements = []
-    for el in controls:
-        name = (el.get("name") or "").lower()
-        role = (el.get("role") or "").lower()
-
-        is_input = role in ("entry", "text", "editbar") or "input" in name
-        is_attach = any(k in name for k in ["attach", "add files", "upload", "toggle menu", "open upload"])
-        is_stop = any(k in name for k in ["stop", "cancel"])
-        is_copy = "copy" in name and role in ("push button", "toggle button", "button")
-        is_send = "send" in name and role == "push button"
-
-        if is_input or is_attach or is_stop or is_copy or is_send:
+    if trim_mode == "full":
+        # Include all elements but truncate names to save tokens
+        key_elements = []
+        for el in controls:
             key_elements.append({
-                "name": el.get("name", "")[:100],
-                "role": role,
+                "name": (el.get("name") or "")[:200],
+                "role": (el.get("role") or ""),
                 "x": el.get("x"),
                 "y": el.get("y"),
-                "tag": "input" if is_input else "attach" if is_attach else "stop" if is_stop else "copy" if is_copy else "send",
             })
+        summary["key_elements"] = key_elements
+    else:
+        # HMM mode: only key elements (input, attach, copy, stop, send)
+        key_elements = []
+        for el in controls:
+            name = (el.get("name") or "").lower()
+            role = (el.get("role") or "").lower()
 
-    summary["key_elements"] = key_elements
+            is_input = role in ("entry", "text", "editbar") or "input" in name
+            is_attach = any(k in name for k in ["attach", "add files", "upload", "toggle menu", "open upload"])
+            is_stop = any(k in name for k in ["stop", "cancel"])
+            is_copy = "copy" in name and role in ("push button", "toggle button", "button")
+            is_send = "send" in name and role == "push button"
+
+            if is_input or is_attach or is_stop or is_copy or is_send:
+                key_elements.append({
+                    "name": el.get("name", "")[:100],
+                    "role": role,
+                    "x": el.get("x"),
+                    "y": el.get("y"),
+                    "tag": "input" if is_input else "attach" if is_attach else "stop" if is_stop else "copy" if is_copy else "send",
+                })
+        summary["key_elements"] = key_elements
+
     if result.get("error"):
         summary["error"] = result["error"]
     if result.get("attachments"):
@@ -462,8 +527,9 @@ class LocalLLMAgent:
     def run(self, task: str, mcp: MCPClient, max_turns: int = 20) -> str:
         """Run the agentic loop until the LLM responds with text (no tool calls)."""
         openai_tools = self._mcp_tools_to_openai(mcp.tools)
-        # Add built-in bash tool for shell commands (package builder, file ops)
+        # Add built-in tools for shell commands and file writing
         openai_tools.append(BASH_TOOL_DEF)
+        openai_tools.append(WRITE_FILE_TOOL_DEF)
 
         system_prompt = getattr(self, '_custom_system_prompt', None) or SYSTEM_PROMPT
         messages = [
@@ -523,10 +589,15 @@ class LocalLLMAgent:
 
                     logger.info("Tool call: %s(%s)", tool_name, json.dumps(tool_args)[:200])
 
-                    # Route: built-in bash tool vs MCP tools
+                    # Route: built-in tools vs MCP tools
                     if tool_name == "bash":
                         result = _execute_bash(
                             tool_args.get("command", "echo 'no command'"),
+                        )
+                    elif tool_name == "write_file":
+                        result = _write_file(
+                            tool_args.get("path", "/tmp/agent_output.txt"),
+                            tool_args.get("content", ""),
                         )
                     else:
                         try:
@@ -547,11 +618,17 @@ class LocalLLMAgent:
                     # Trim large tool results to save context
                     result = _trim_tool_result(tool_name, result)
 
+                    # General truncation: cap any tool result to 8000 chars
+                    result_json = json.dumps(result, indent=2, default=str)
+                    if len(result_json) > 8000:
+                        result_json = result_json[:7900] + '\n... [TRUNCATED — result too large]'
+                        logger.warning("Tool result truncated: %s (%d -> 8000 chars)", tool_name, len(result_json))
+
                     # Add tool result to messages
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", ""),
-                        "content": json.dumps(result, indent=2, default=str),
+                        "content": result_json,
                     })
 
                     logger.info(
