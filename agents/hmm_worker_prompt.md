@@ -45,11 +45,10 @@ For EACH platform you sent to:
 1. taey_inspect PLATFORM
 2. If copy_button_count > 0 AND no stop-tagged element:
    a. taey_quick_extract PLATFORM with complete=true
-   b. write_file path=/tmp/hmm_response_PLATFORM.json content=EXTRACTED_TEXT
-      CRITICAL: Write the EXACT text from quick_extract. Do NOT reformat it.
-      Do NOT parse it into JSON. Do NOT add fields. Just the raw text.
-   c. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py complete --platform PLATFORM --response-file /tmp/hmm_response_PLATFORM.json
-   d. Platform DONE. Move to next.
+      → The response is AUTO-SAVED to /tmp/hmm_response_PLATFORM.json
+      → Do NOT call write_file. The file is already written.
+   b. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py complete --platform PLATFORM --response-file /tmp/hmm_response_PLATFORM.json
+   c. Platform DONE. Move to next.
 3. If stop button visible → not ready, skip.
 
 After checking all platforms: if any were skipped, do ONE more pass:
@@ -69,7 +68,7 @@ Output CYCLE_COMPLETE.
 CRITICAL RULES FOR HARVEST
 =========================================
 - Extract ONCE per platform. Never re-extract.
-- Write raw text to file. The complete command parses it — you do not.
+- Do NOT call write_file — extract auto-saves the response.
 - Do NOT use xsel, xclip, cat, head, or wc to examine responses.
 - Do NOT call taey_extract_history. Only use taey_quick_extract.
-- Three steps per platform: extract → write_file → complete. That's it.
+- TWO steps per platform: extract → complete. That's it.
