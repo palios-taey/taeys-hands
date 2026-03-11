@@ -539,7 +539,16 @@ class LocalLLMAgent:
         openai_tools.append(BASH_TOOL_DEF)
         openai_tools.append(WRITE_FILE_TOOL_DEF)
 
-        system_prompt = getattr(self, '_custom_system_prompt', None) or SYSTEM_PROMPT
+        # Re-read system prompt from file each cycle (allows live updates)
+        prompt_file = getattr(self, '_system_prompt_file', None)
+        if prompt_file and os.path.isfile(prompt_file):
+            try:
+                with open(prompt_file) as f:
+                    system_prompt = f.read().strip()
+            except Exception:
+                system_prompt = getattr(self, '_custom_system_prompt', None) or SYSTEM_PROMPT
+        else:
+            system_prompt = getattr(self, '_custom_system_prompt', None) or SYSTEM_PROMPT
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
@@ -727,6 +736,8 @@ def main():
     agent = LocalLLMAgent(api_url=args.api_url, model=args.model)
     if custom_system_prompt:
         agent._custom_system_prompt = custom_system_prompt
+    if args.system_prompt:
+        agent._system_prompt_file = args.system_prompt
     logger.info("Agent ready — model=%s, api=%s", agent.model, agent.api_url)
 
     try:
