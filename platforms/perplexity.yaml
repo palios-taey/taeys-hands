@@ -75,6 +75,11 @@ mode_guidance:
     how: "Default - no tool selection needed"
     timeout: 3600
 
+# Noise elements to exclude from inspect output
+inspect_noise:
+  exclude_name_contains:
+    - "Upgrade to Pro"         # Upsell links
+
 element_hints:
   input_role: textbox
   send_role: push button

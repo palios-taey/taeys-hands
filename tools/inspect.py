@@ -121,6 +121,61 @@ def _detect_attachments(elements: list, all_elements: list = None) -> dict | Non
     return result
 
 
+def _reduce_noise(elements: list) -> list:
+    """Reduce element list to save context tokens.
+
+    Filters KNOWN noise patterns while keeping everything unknown.
+    New platform features (buttons, controls, options) always surface.
+
+    What's filtered:
+    - Old copy buttons: only last 3 kept (highest Y = most recent)
+    - Conversation history links: links with names > 50 chars
+      (sidebar titles, in-response URLs). Short links (nav, controls,
+      new features) always pass through.
+    - Unnamed structural containers: sections/landmarks/groups/forms
+      without names, text, or important states — just wrapper divs.
+    """
+    _MAX_LINK_NAME = 50
+    _CONTAINER_ROLES = {'section', 'landmark', 'form', 'group'}
+    _IMPORTANT_STATES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
+
+    drop_idxs = set()
+
+    # --- 1. Cap copy buttons to last 3 (by Y, highest = most recent) ---
+    copy_idxs = []
+    for i, e in enumerate(elements):
+        if ('button' in e.get('role', '')
+                and 'copy' in (e.get('name') or '').lower()):
+            copy_idxs.append((e.get('y', 0), i))
+    if len(copy_idxs) > 3:
+        copy_idxs.sort(key=lambda t: t[0])
+        for _y, idx in copy_idxs[:-3]:
+            drop_idxs.add(idx)
+
+    # --- 2. Filter long-named links (conversation history / in-message URLs) ---
+    # Short links (<50 chars) are always kept — navigation, controls, new features.
+    for i, e in enumerate(elements):
+        if e.get('role') == 'link' and len(e.get('name', '')) > _MAX_LINK_NAME:
+            drop_idxs.add(i)
+
+    # --- 3. Filter unnamed structural containers ---
+    # Wrapper divs with no name, no extracted text, no important states.
+    # Named containers and those with states (editable, checked, etc.) survive.
+    for i, e in enumerate(elements):
+        role = e.get('role', '')
+        if (role in _CONTAINER_ROLES
+                and not (e.get('name') or '').strip()
+                and not e.get('text')
+                and not (set(s.lower() for s in e.get('states', []))
+                         & _IMPORTANT_STATES)):
+            drop_idxs.add(i)
+
+    if not drop_idxs:
+        return elements
+
+    return [e for i, e in enumerate(elements) if i not in drop_idxs]
+
+
 def _check_structure_change(platform: str, elements: list,
                             redis_client) -> dict | None:
     """Compute structure fingerprint and compare against stored baseline.
@@ -368,10 +423,21 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
     except Exception:
         pass  # YAML missing or malformed — proceed without noise filter
 
+    # General noise reduction — filter known-noise patterns, keep everything unknown.
+    # New platform features (buttons, controls, options) always surface.
+    pre_noise = len(elements_json)
+    elements_json = _reduce_noise(elements_json)
+    noise_removed = pre_noise - len(elements_json)
+    if noise_removed:
+        logger.info(f"Noise reduction: {pre_noise} -> {len(elements_json)} "
+                     f"(-{noise_removed} elements)")
+
     copy_buttons = find_copy_buttons(all_elements)
     result['state']['copy_button_count'] = len(copy_buttons)
     result['state']['element_count'] = len(elements_json)
     result['state']['total_before_filter'] = len(all_elements)
+    if noise_removed:
+        result['state']['noise_removed'] = noise_removed
     result['controls'] = elements_json
 
     # Detect existing file attachments (Remove buttons + file chips)
