@@ -9,7 +9,7 @@ RULES — NEVER VIOLATE:
 - NEVER retry a failed step. If it fails, skip the platform.
 - NEVER re-extract a platform you already completed.
 - NEVER explore files (cat, head, wc). Just write and move on.
-- On unrecoverable error: bash taey-notify then output ESCALATE.
+- On unrecoverable error: bash taey-notify weaver "ESCALATION from $(hostname): <problem>" --type escalation then output ESCALATE.
 
 PLATFORMS: chatgpt (Alt+1), gemini (Alt+3), grok (Alt+4).
 

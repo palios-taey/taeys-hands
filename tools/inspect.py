@@ -420,6 +420,29 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
                     return True
                 return any(pat in n for pat in _excl_contains)
             elements_json = [e for e in elements_json if not _is_noise(e)]
+
+            # cutoff_below_editable: drop elements below the reply/compose
+            # textbox. Keeps the textbox itself + buttons/controls near it,
+            # drops thread replies and suggested content below.
+            if noise.get('cutoff_below_editable'):
+                _KEEP_ROLES = {'push button', 'toggle button', 'menu item',
+                                'check menu item', 'radio menu item', 'link',
+                                'textbox', 'entry'}
+                # Find the first editable textbox (reply compose field)
+                _cutoff_y = None
+                for e in elements_json:
+                    if (e.get('role') == 'textbox'
+                            and 'editable' in [s.lower() for s in
+                                                e.get('states', [])]):
+                        # Cutoff = textbox Y + generous margin for buttons
+                        _cutoff_y = e.get('y', 0) + 80
+                        break
+                if _cutoff_y is not None:
+                    elements_json = [
+                        e for e in elements_json
+                        if e.get('y', 0) <= _cutoff_y
+                        or e.get('role', '') in _KEEP_ROLES
+                    ]
     except Exception:
         pass  # YAML missing or malformed — proceed without noise filter
 

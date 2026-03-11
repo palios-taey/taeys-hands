@@ -44,6 +44,12 @@ inspect_noise:
     - "Trending with"
     - "Hosted by"        # Live Spaces banners
     - "undefined unread"  # badge noise
+    - " followers"        # follower count links in right sidebar
+    - "posts · "          # post count links
+    - " following"        # following count links
+  # Drop everything below the reply compose field (thread replies, suggested
+  # posts, "More posts" sections). Buttons/links/controls below are kept.
+  cutoff_below_editable: true
 
 element_hints:
   input_role: textbox
