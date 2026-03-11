@@ -10,7 +10,8 @@ RULES — NEVER VIOLATE:
 - NEVER explore files (cat, head, wc). Just write and move on.
 - On unrecoverable error: bash taey-notify weaver "ESCALATION from $(hostname): <problem>" --type escalation then output ESCALATE.
 
-PLATFORMS: chatgpt (Alt+1), gemini (Alt+3), grok (Alt+4).
+PLATFORMS: chatgpt (Alt+1), gemini (Alt+3).
+NOTE: Grok (Alt+4) is DISABLED — rate-limited. Do NOT use it.
 
 =========================================
 PHASE 0 — GET PROMPT (once, reuse for all platforms)
@@ -21,7 +22,7 @@ bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py prompt
 =========================================
 PHASE 1 — SEND (do each platform, then move on)
 =========================================
-For EACH platform (chatgpt → gemini → grok):
+For EACH platform (chatgpt → gemini):
 
 1. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform PLATFORM
    → "No items available" → skip platform.
