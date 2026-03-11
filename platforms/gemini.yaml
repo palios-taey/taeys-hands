@@ -61,6 +61,14 @@ mode_guidance:
     how: "Click 'Open mode picker', select 'Fast' radio item"
     timeout: 1800
 
+# Noise elements to exclude from inspect output
+# Gemini sidebar items can have very long names (pasted content as titles)
+# — already truncated at 200 chars by inspect.py, long links caught by _reduce_noise
+inspect_noise:
+  exclude_name_contains:
+    - "Gemini Apps Activity"   # Settings/privacy links
+    - "Manage extensions"      # Extension management
+
 element_hints:
   input_role: textbox
   send_role: push button

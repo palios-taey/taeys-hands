@@ -59,6 +59,12 @@ mode_guidance:
     how: "Default model without Extended thinking"
     timeout: 1800
 
+# Noise elements to exclude from inspect output
+inspect_noise:
+  exclude_name_contains:
+    - "Upgrade to"             # Upsell links
+    - "Project, "              # Sidebar project items (always "Project, <name>")
+
 element_hints:
   input_role: textbox
   send_role: push button

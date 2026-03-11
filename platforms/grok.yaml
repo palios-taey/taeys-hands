@@ -58,6 +58,12 @@ mode_guidance:
     how: "Default Auto mode - no selection needed"
     timeout: 1800
 
+# Noise elements to exclude from inspect output
+inspect_noise:
+  exclude_name_contains:
+    - "Upgrade to"            # Upsell links
+    - "SuperGrok"             # Premium promo
+
 element_hints:
   input_role: textbox
   send_role: push button

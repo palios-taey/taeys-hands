@@ -70,6 +70,14 @@ mode_guidance:
     how: "Click model selector, select 'Pro'"
     timeout: 7200
 
+# Noise elements to exclude from inspect output
+inspect_noise:
+  exclude_name_contains:
+    - "Open conversation options"  # Every sidebar history link has this suffix
+    - "Upgrade"                    # Upgrade plan banners/links
+    - "Get Plus"                   # Upsell prompts
+    - "Manage my account"          # Account management sidebar
+
 element_hints:
   input_role: textbox
   send_role: push button
