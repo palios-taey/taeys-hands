@@ -18,6 +18,7 @@ REPO_DIR="taeys-hands"
 declare -A MACHINES=(
     [spark1]="<OPERATOR_HOME>"
     [spark2]="<OPERATOR_HOME>"
+    [spark3]="<OPERATOR_HOME>"
     [spark4]="<OPERATOR_HOME>"
     [thor]="/home/thor"
     [jetson]="/home/jetson"
