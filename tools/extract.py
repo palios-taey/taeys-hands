@@ -216,7 +216,7 @@ def handle_quick_extract(platform: str, redis_client,
         content_start = content.strip()[:200].lower()
         prompt_markers = ['analyze the following', 'package analysis request',
                           'you are analyzing', 'respond only with minified json',
-                          'critical: echo back']
+                          'critical: echo back', 'analyze all', 'for each item provide']
         if any(marker in content_start for marker in prompt_markers):
             logger.warning("Extracted content looks like user prompt, trying previous copy button")
             prev_btn = response_copy[-2]
