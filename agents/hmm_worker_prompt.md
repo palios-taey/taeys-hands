@@ -61,7 +61,7 @@ After checking all platforms: if any were skipped, do ONE more pass:
 =========================================
 PHASE 4 — REPORT
 =========================================
-bash: taey-notify weaver "HEARTBEAT from $(hostname): cycle done" --type heartbeat
+bash: taey-notify weaver "HEARTBEAT: cycle done" --type heartbeat
 Output CYCLE_COMPLETE.
 
 =========================================
