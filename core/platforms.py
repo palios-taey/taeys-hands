@@ -117,7 +117,7 @@ _EXTRA_URL_PATTERNS = {
 
 # Base URLs for new sessions
 BASE_URLS = {
-    'chatgpt': 'https://chatgpt.com/?temporary-chat=true',
+    'chatgpt': 'https://chatgpt.com/',
     'claude': 'https://claude.ai/new',
     'gemini': 'https://gemini.google.com/app',
     'grok': 'https://grok.com/',
