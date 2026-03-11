@@ -10,12 +10,13 @@ RULES — NEVER VIOLATE:
 - NEVER explore files (cat, head, wc). Just write and move on.
 - On unrecoverable error: bash taey-notify then output ESCALATE.
 
-PLATFORMS: chatgpt (Alt+1), gemini (Alt+3), grok (Alt+4).
+PLATFORMS: gemini (Alt+3), grok (Alt+4).
+Skip chatgpt — its paste is unreliable on temporary chat pages.
 
 =========================================
 PHASE 1 — SEND (do each platform, then move on)
 =========================================
-For EACH platform (chatgpt → gemini → grok):
+For EACH platform (gemini → grok):
 
 1. bash: python3 ~/embedding-server/isma/scripts/hmm_package_builder.py next --platform PLATFORM
    → "No items available" → skip platform.
@@ -24,7 +25,8 @@ For EACH platform (chatgpt → gemini → grok):
    → Save prompt text.
 3. taey_inspect PLATFORM with fresh_session=true
 4. taey_attach PLATFORM with package file
-   → ERROR → skip platform. Do NOT retry.
+   → ERROR with "no file dialog" → try ONE more time (keyboard nav needs two attempts sometimes).
+   → Still error → skip platform.
    → "dropdown_open" → call taey_attach again (same args) to complete upload.
 5. taey_inspect PLATFORM (re-inspect after attach)
 6. taey_click PLATFORM at input field coords from step 5
