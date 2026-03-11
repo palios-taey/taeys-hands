@@ -316,6 +316,7 @@ def handle_quick_extract(platform: str, redis_client,
 
     # Handle completion - only if caller explicitly says complete
     plan_consumed = False
+    save_path = None
     if complete and redis_client:
         redis_client.delete(node_key(f"pending_prompt:{platform}"))
         deleted = redis_client.delete(node_key(f"plan:{platform}"))
@@ -324,6 +325,17 @@ def handle_quick_extract(platform: str, redis_client,
         redis_client.delete(node_key(f"checkpoint:{platform}:attach"))
         redis_client.delete(node_key(f"response_reviewed:{platform}"))
         plan_consumed = deleted > 0
+
+        # Auto-save response to file for downstream processing (hmm_package_builder complete)
+        if content:
+            save_path = f"/tmp/hmm_response_{platform}.json"
+            try:
+                with open(save_path, 'w') as f:
+                    f.write(content)
+                logger.info(f"Response auto-saved to {save_path} ({len(content)} chars)")
+            except Exception as e:
+                logger.warning(f"Failed to auto-save response: {e}")
+                save_path = None
 
     return {
         "success": True,
@@ -335,6 +347,7 @@ def handle_quick_extract(platform: str, redis_client,
         "copy_buttons_found": len(copy_buttons),
         "plan_consumed": plan_consumed,
         "neo4j": neo4j_stored,
+        "save_path": save_path,
         # Quality assessment - caller MUST check these
         "quality": quality,
     }
