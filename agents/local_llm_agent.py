@@ -632,6 +632,22 @@ class LocalLLMAgent:
                             result = {"error": str(e)}
                             logger.error("MCP tool call failed: %s", e)
 
+                    # Auto-save quick_extract results to file (removes model
+                    # from the data path — prevents prompt/response confusion)
+                    if tool_name == "taey_quick_extract" and isinstance(result, dict):
+                        extracted = result.get("extracted_text") or result.get("text", "")
+                        platform = tool_args.get("platform", "unknown")
+                        if extracted and not result.get("error"):
+                            save_path = f"/tmp/hmm_response_{platform}.json"
+                            try:
+                                with open(save_path, 'w') as f:
+                                    f.write(extracted)
+                                result["auto_saved"] = save_path
+                                logger.info("Auto-saved extract to %s (%d chars)",
+                                            save_path, len(extracted))
+                            except Exception as e:
+                                logger.error("Failed to auto-save extract: %s", e)
+
                     # Trim large tool results to save context
                     result = _trim_tool_result(tool_name, result)
 
