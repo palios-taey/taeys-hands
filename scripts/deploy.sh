@@ -1,8 +1,9 @@
 #!/bin/bash
 # deploy.sh — Pull latest code and restart MCP servers on all machines.
 #
-# For stdio MCP servers, killing the process forces Claude Code to
-# relaunch it on the next tool call. This IS the hot-reload mechanism.
+# Kills MCP server processes, then sends /mcp to Claude Code tmux sessions
+# to trigger reconnect. Without /mcp, tools stay dead (can't make a tool
+# call to trigger auto-restart when the tool provider is down).
 #
 # Usage:
 #   bash scripts/deploy.sh          # Deploy to all machines
@@ -12,6 +13,7 @@
 set -euo pipefail
 
 REPO_DIR="taeys-hands"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Machine registry: SSH host alias → home dir prefix
 # Uses hostnames from ~/.ssh/config
@@ -25,17 +27,26 @@ declare -A MACHINES=(
     [mira]="/home/mira"
 )
 
+# Claude Code tmux sessions per machine — send /mcp after kill to reconnect.
+# Without this, killing the MCP server leaves tools dead (Claude Code can't
+# make a tool call to trigger auto-restart).
+declare -A TMUX_SESSIONS=(
+    [thor]="thor-claude"
+    [jetson]="jetson-claude"
+    [mira]="treasurer"
+    [spark3]="claw"
+)
+
 deploy_local() {
     echo "[local] Cleaning __pycache__ (prevents stale .pyc shadowing)..."
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
     echo "[local] Ensuring main branch..."
-    git checkout main 2>&1 | tail -1
-    git pull origin main 2>&1 | tail -3
+    git fetch origin main 2>&1 | tail -1
+    git reset --hard origin/main 2>&1 | tail -1
 
     echo "[local] Killing MCP server processes..."
-    # Match the MCP server pattern but not this script or editors
-    pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (will auto-restart)" \
+    pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed" \
         || echo "[local] No MCP servers running"
 
     echo "[local] Done — commit: $(git log --oneline -1)"
@@ -50,11 +61,18 @@ deploy_remote() {
     ssh -o ConnectTimeout=5 "$host" "
         cd ${repo_path} 2>/dev/null || { echo 'REPO NOT FOUND: ${repo_path}'; exit 1; }
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-        git checkout main 2>&1 | tail -1
-        git pull origin main 2>&1 | tail -3
+        git fetch origin main 2>&1 | tail -1
+        git reset --hard origin/main 2>&1 | tail -1
         pkill -f 'python3.*server\\.py' 2>/dev/null && echo 'MCP servers killed' || echo 'No MCP servers running'
         echo \"Done — commit: \$(git log --oneline -1)\"
     " 2>&1 | sed "s/^/  /" || echo "  [${host}] SSH FAILED"
+
+    # Send /mcp to Claude Code tmux session to trigger MCP reconnect
+    local session="${TMUX_SESSIONS[$host]:-}"
+    if [ -n "$session" ]; then
+        echo "  [${host}] Sending /mcp to session '$session'..."
+        tmux-send "$host" "$session" "/mcp" 2>&1 | sed "s/^/  /" || echo "  [${host}] tmux-send failed"
+    fi
 }
 
 # Parse args
