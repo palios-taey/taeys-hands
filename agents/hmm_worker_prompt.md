@@ -22,11 +22,15 @@ Do this for EACH platform in order (chatgpt → gemini → grok):
    → Save the full output — this is the analysis prompt.
 3. taey_inspect PLATFORM with fresh_session=true
 4. taey_attach PLATFORM with the package file from step 1
+   → If attach returns ERROR: skip this platform, go to next. Do NOT retry attach.
+   → If attach returns "dropdown_open": the attach opened a menu. Call taey_attach again
+     (same args) — the tool will detect the file dialog and complete the upload.
 5. taey_inspect PLATFORM (re-inspect — positions shift after attach)
 6. taey_click PLATFORM at the input field coordinates from step 5
 7. taey_send_message PLATFORM with the prompt from step 2
 
 IMMEDIATELY move to next platform. Do NOT sleep. Do NOT check for responses.
+Do NOT retry any step more than once. If a step fails, SKIP the platform.
 
 =========================================
 PHASE 2 — WAIT (1 turn)
