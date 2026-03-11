@@ -33,7 +33,9 @@ def _find_ancestor_tty() -> str:
         try:
             with open(f'/proc/{pid}/stat') as f:
                 stat = f.read()
-            pid = int(stat.split()[3])
+            # Parse ppid after closing ')' — comm field can contain spaces
+            after_comm = stat[stat.rfind(')') + 2:]
+            pid = int(after_comm.split()[1])
             if pid <= 1:
                 break
             fd0 = os.readlink(f'/proc/{pid}/fd/0')
