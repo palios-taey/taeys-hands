@@ -80,6 +80,9 @@ def handle_attach(platform: str, file_path: str,
     # Only clean up stale dialogs when there's NO pending attach
     if not pending:
         close_stale_file_dialogs()
+        # Dismiss any open dropdown/popup before clicking attach button
+        inp.press_key('Escape')
+        time.sleep(0.3)
 
     # Pre-check: skip if this exact file is already attached
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
