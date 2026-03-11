@@ -96,7 +96,7 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 
 ### MCP Server Hot-Reload
 
-**Python MCP servers do NOT hot-reload code.** `git pull` updates files on disk but the running process keeps old code in memory. Must restart the MCP host for code changes to take effect.
+**Python MCP servers do NOT hot-reload code.** `git pull` updates files on disk but the running process keeps old code in memory. `deploy.sh` kills MCP server processes — each Claude Code session must then run `/mcp` to reconnect (auto-relaunch does NOT work after external kill).
 
 ---
 
