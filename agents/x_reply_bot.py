@@ -78,6 +78,21 @@ def find_reply_field(elements: list):
     return None
 
 
+def find_follow_button(elements: list, handle: str = ''):
+    """Find 'Follow @handle' button. Returns (x, y) or None.
+    Only matches Follow buttons (not Following/Unfollow)."""
+    for e in elements:
+        name = e.get('name', '')
+        if (e.get('role') == 'push button'
+                and name.startswith('Follow @')
+                and 'focusable' in e.get('states', [])):
+            # If handle specified, match it; otherwise take any Follow button
+            if handle and handle.lstrip('@') not in name:
+                continue
+            return (e['x'], e['y'])
+    return None
+
+
 def check_already_replied(elements: list) -> bool:
     """Check if @GodEqualsMath already replied to this post."""
     # Look for our handle in reply articles below the main post
@@ -149,24 +164,34 @@ def post_reply(url: str, text: str, handle: str = '', topic: str = '') -> dict:
         return result
 
     # Step 4: Like the post
-    print("  [3/6] Liking post...")
+    print("  [3/7] Liking post...")
     inp.press_key('l')
     time.sleep(0.3)
 
-    # Step 5: Click reply field
+    # Step 5: Follow the author if not already following
+    follow_coords = find_follow_button(elements, handle)
+    if follow_coords:
+        fx, fy = follow_coords
+        print(f"  [4/7] Following {handle or 'author'} at ({fx}, {fy})...")
+        inp.click_at(fx, fy)
+        time.sleep(0.5)
+    else:
+        print(f"  [4/7] Already following {handle or 'author'} (no Follow button)")
+
+    # Step 6: Click reply field
     coords = find_reply_field(elements)
     x, y = coords
-    print(f"  [4/6] Clicking reply field at ({x}, {y})...")
+    print(f"  [5/7] Clicking reply field at ({x}, {y})...")
     inp.click_at(x, y)
     time.sleep(0.5)
 
-    # Step 6: Paste reply text
-    print(f"  [5/6] Pasting reply ({len(text)} chars)...")
+    # Step 7: Paste reply text
+    print(f"  [6/7] Pasting reply ({len(text)} chars)...")
     inp.clipboard_paste(text)
     time.sleep(0.3)
 
-    # Step 7: Submit with Ctrl+Enter
-    print("  [6/6] Submitting (Ctrl+Enter)...")
+    # Step 8: Submit with Ctrl+Enter
+    print("  [7/7] Submitting (Ctrl+Enter)...")
     inp.press_key('ctrl+Return')
     time.sleep(2)
 
