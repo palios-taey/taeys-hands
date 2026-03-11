@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Send a notification to any Claude instance's Redis inbox.
+Send a notification to a Claude instance's Redis inbox.
 
-Messages are delivered via PostToolUse hook (active) or tmux fallback (idle).
+This is a PURE SENDER — writes to Redis and exits.
+Delivery is handled automatically by:
+  - PostToolUse hook (drains inbox during active tool use)
+  - notify-deliver daemon (injects via tmux when target is idle)
 
 Usage:
     taey-notify <target-node> "message"
@@ -18,18 +21,6 @@ import time
 
 REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.100.10')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
-
-# Node ID → (ssh_host, tmux_session) for tmux fallback when target is idle.
-# ssh_host=None means local machine.
-_NODE_TMUX_MAP = {
-    'taeys-hands': (None, 'taeys-hands'),
-    'weaver':      (None, 'weaver'),
-    'claude':      (None, 'claude'),
-    'claw':        ('spark3', 'claw'),
-    'thor-claude': ('thor', 'thor-claude'),
-    'jetson-claude': ('jetson', 'jetson-claude'),
-    'treasurer':   ('mira', 'treasurer'),
-}
 
 
 def detect_from_node():
@@ -48,36 +39,6 @@ def detect_from_node():
         pass
     import socket
     return socket.gethostname()
-
-
-def is_target_idle(r, target, threshold=15):
-    """Check if target node is idle (safe for tmux injection)."""
-    if r.exists(f"taey:{target}:tool_running"):
-        return False
-    last_str = r.get(f"taey:{target}:last_tool_activity")
-    if not last_str:
-        return True
-    try:
-        return time.time() - float(last_str) > threshold
-    except (ValueError, TypeError):
-        return True
-
-
-def tmux_fallback(target, message):
-    """Send message via tmux-send if target node mapping is known."""
-    mapping = _NODE_TMUX_MAP.get(target)
-    if not mapping:
-        return False
-    ssh_host, session = mapping
-    try:
-        if ssh_host:
-            cmd = ['tmux-send', ssh_host, session, message]
-        else:
-            cmd = ['tmux-send', session, message]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        return result.returncode == 0
-    except Exception:
-        return False
 
 
 def main():
@@ -130,19 +91,8 @@ def main():
         "priority": args.priority,
     })
 
-    # Always write to Redis inbox (primary channel)
     r.lpush(f"taey:{args.target}:inbox", msg)
-
-    # If target is idle, also send via tmux to wake them
-    if is_target_idle(r, args.target):
-        prefix = "!!!" if args.type == 'escalation' else ""
-        tmux_msg = f"[{prefix}NOTIFICATION from {from_node}]: {args.message}"
-        if tmux_fallback(args.target, tmux_msg):
-            print(f"OK: sent to {args.target} [{args.type}] from {from_node} (+ tmux fallback)")
-        else:
-            print(f"OK: sent to {args.target} [{args.type}] from {from_node} (Redis only, tmux failed)")
-    else:
-        print(f"OK: sent to {args.target} [{args.type}] from {from_node}")
+    print(f"OK: sent to {args.target} [{args.type}] from {from_node}")
 
 
 if __name__ == '__main__':

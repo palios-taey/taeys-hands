@@ -35,9 +35,24 @@ deploy_local() {
     git fetch origin main 2>&1 | tail -1
     git reset --hard origin/main 2>&1 | tail -1
 
+    echo "[local] Installing taey-notify..."
+    sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
+
     echo "[local] Killing MCP server processes..."
     pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (auto-relaunch on next tool call)" \
         || echo "[local] No MCP servers running"
+
+    echo "[local] Restarting notification daemons..."
+    pkill -f 'notifications/daemon' 2>/dev/null || true
+    sleep 1
+    # Start daemons for all local tmux sessions
+    for session in $(tmux ls -F '#{session_name}' 2>/dev/null); do
+        nohup python3 notifications/daemon.py \
+            --node "$session" --tmux-session "$session" \
+            --redis-host "${REDIS_HOST:-192.168.100.10}" \
+            > "/tmp/notify-daemon-${session}.log" 2>&1 &
+        echo "[local] Notify daemon started for $session (PID $!)"
+    done
 
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
@@ -46,6 +61,9 @@ deploy_remote() {
     local host="$1"
     local home="${MACHINES[$host]}"
     local repo_path="${home}/${REPO_DIR}"
+    # Mira can't reach NCCL network — use management IP for Redis
+    local redis_host="192.168.100.10"
+    [ "$host" = "mira" ] && redis_host="10.0.0.68"
 
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" "
@@ -53,7 +71,17 @@ deploy_remote() {
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
+        sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
         pkill -f 'python3.*server\\.py' 2>/dev/null && echo 'MCP killed (auto-relaunch on next tool call)' || echo 'No MCP running'
+        pkill -f 'notifications/daemon' 2>/dev/null || true
+        sleep 1
+        for session in \$(tmux ls -F '#{session_name}' 2>/dev/null || true); do
+            nohup python3 notifications/daemon.py \\
+                --node \"\$session\" --tmux-session \"\$session\" \\
+                --redis-host ${redis_host} \\
+                > /tmp/notify-daemon-\${session}.log 2>&1 &
+            echo \"Notify daemon started for \$session (PID \$!)\"
+        done
         echo \"Done — commit: \$(git log --oneline -1)\"
     " 2>&1 | sed "s/^/  /" || echo "  [${host}] SSH FAILED"
 }
