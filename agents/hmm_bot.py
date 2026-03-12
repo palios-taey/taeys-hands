@@ -477,10 +477,85 @@ def extract_response(platform: str) -> str:
     return content or ''
 
 
+def _find_dialog_wid() -> str:
+    """Find GTK file dialog window ID. Returns wid or empty string."""
+    xenv = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':1')}
+    for title in ['File Upload', 'Open', 'Open File']:
+        try:
+            r = subprocess.run(
+                ['xdotool', 'search', '--name', title],
+                capture_output=True, text=True, timeout=2, env=xenv,
+            )
+            if r.stdout.strip():
+                return r.stdout.strip().split('\n')[-1]
+        except Exception:
+            pass
+    return ''
+
+
+def _handle_dialog_direct(file_path: str) -> bool:
+    """Handle GTK file dialog using xdotool type (not clipboard paste).
+
+    The standard clipboard_paste (xsel + Ctrl+V) doesn't work in GTK file
+    dialogs on some Xvfb setups. xdotool type works reliably for short paths.
+    """
+    xenv = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':1')}
+    wid = _find_dialog_wid()
+    if not wid:
+        logger.warning("No file dialog window found")
+        return False
+
+    # Focus the dialog
+    subprocess.run(
+        ['xdotool', 'windowactivate', '--sync', wid],
+        capture_output=True, timeout=3, env=xenv,
+    )
+    time.sleep(0.5)
+
+    # Ctrl+L opens location bar in GTK file dialogs
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
+
+    # Type the path directly (short paths, no doubled-char issue)
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '10', '--', file_path],
+        capture_output=True, timeout=15, env=xenv,
+    )
+    time.sleep(0.3)
+
+    # Enter to navigate/select
+    inp.press_key('Return')
+    time.sleep(1.0)
+
+    # Check if dialog closed
+    for _ in range(20):
+        if not _find_dialog_wid():
+            logger.info("File dialog closed after xdotool type path")
+            return True
+        time.sleep(0.3)
+
+    # Dialog still open — try pressing Enter again (might need confirmation)
+    inp.press_key('Return')
+    time.sleep(1.0)
+    for _ in range(10):
+        if not _find_dialog_wid():
+            logger.info("File dialog closed after second Enter")
+            return True
+        time.sleep(0.3)
+
+    logger.warning("File dialog did not close after xdotool type")
+    return False
+
+
 def attach_file(platform: str, file_path: str) -> bool:
-    """Attach a file to the chat input. Returns True on success."""
-    # Use the existing attach infrastructure (handles keyboard nav for
-    # ChatGPT and AT-SPI menu for Gemini)
+    """Attach a file to the chat input. Returns True on success.
+
+    Uses handle_attach() first, then falls back to direct dialog handling
+    with xdotool type (for Xvfb environments where clipboard paste fails).
+    """
+    from tools.attach.dialogs import any_file_dialog_open
+
+    # Try standard attach first
     result = handle_attach(platform, file_path, redis_client=None)
 
     if result.get('status') == 'file_attached':
@@ -489,29 +564,21 @@ def attach_file(platform: str, file_path: str) -> bool:
     elif result.get('status') == 'already_attached':
         logger.info(f"[{platform}] File already attached")
         return True
-    elif result.get('status') == 'dropdown_open':
-        # Need to click the upload option in dropdown
-        items = result.get('dropdown_items', [])
-        upload_item = None
-        for item in items:
-            name = (item.get('name') or '').lower()
-            if 'upload' in name or 'file' in name:
-                upload_item = item
-                break
-        if upload_item and upload_item.get('x') and upload_item.get('y'):
-            inp.click_at(upload_item['x'], upload_item['y'])
-            time.sleep(2)
-            # Now call attach again to handle the file dialog
-            result2 = handle_attach(platform, file_path, redis_client=None)
-            if result2.get('status') == 'file_attached':
-                logger.info(f"[{platform}] File attached via dropdown")
-                return True
-        logger.warning(f"[{platform}] Dropdown opened but couldn't find upload option")
-        return False
-    else:
-        error = result.get('error', 'unknown')
-        logger.warning(f"[{platform}] Attach failed: {error}")
-        return False
+
+    # Check if a dialog is open — handle_attach may have opened it but
+    # failed to complete the file selection (clipboard paste issue on Xvfb)
+    firefox = atspi.find_firefox()
+    dialog_type = any_file_dialog_open(firefox) if firefox else ''
+    if dialog_type or _find_dialog_wid():
+        logger.info(f"[{platform}] Dialog open after handle_attach — trying direct xdotool type")
+        if _handle_dialog_direct(file_path):
+            logger.info(f"[{platform}] File attached via direct dialog handling")
+            time.sleep(0.5)
+            return True
+
+    error = result.get('error', 'unknown')
+    logger.warning(f"[{platform}] Attach failed: {error}")
+    return False
 
 
 def send_prompt(platform: str, prompt: str) -> bool:
