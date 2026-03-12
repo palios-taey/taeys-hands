@@ -800,11 +800,14 @@ def send_prompt(platform: str, prompt: str) -> bool:
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
     else:
-        # Input not in AT-SPI (ChatGPT ProseMirror). DON'T click at random
-        # coords — the input should still be focused from file attach flow.
-        # Just click in the center of the page to be safe (ChatGPT homepage
-        # has centered input, conversation view has bottom input).
-        logger.info(f"[{platform}] Input not in AT-SPI — trusting existing focus")
+        # Input not in AT-SPI (ChatGPT ProseMirror). Click at estimated input
+        # position — center-bottom of page. "Trusting existing focus" was unreliable
+        # (52% of failures were response_timeout from unfocused input).
+        w, h = _get_screen_size()
+        est_x, est_y = w // 2, int(h * 0.85)
+        logger.info(f"[{platform}] Input not in AT-SPI — clicking estimated ({est_x}, {est_y})")
+        inp.click_at(est_x, est_y)
+        time.sleep(0.5)
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
@@ -877,18 +880,25 @@ def process_platform(platform: str, prompt: str) -> dict:
         fail_package(platform, 'send_failed')
         return result
 
-    # Step 5b: Verify send worked — if no stop button after 10s, retry
+    # Step 5b: Verify send worked — if no stop button after 10s, re-paste and retry
     time.sleep(10)
     if not scan_for_stop_button(platform):
-        logger.info(f"[{platform}] No stop button after 10s — retrying Enter")
+        logger.info(f"[{platform}] No stop button after 10s — re-pasting and retrying")
         inp.focus_firefox()
         time.sleep(0.3)
-        # Try clicking AT-SPI input if available, otherwise just press Enter
-        # (text should still be in the input from the paste)
+        # Re-click input (paste may have gone nowhere if input wasn't focused)
         coords = find_input_field_atspi(platform)
         if coords:
+            logger.info(f"[{platform}] Found editable: role=paragraph at ({coords[0]}, {coords[1]})")
             inp.click_at(coords[0], coords[1])
             time.sleep(0.5)
+        else:
+            w, h = _get_screen_size()
+            inp.click_at(w // 2, int(h * 0.85))
+            time.sleep(0.5)
+        # Re-paste prompt (original paste may have gone to wrong element)
+        inp.clipboard_paste(prompt)
+        time.sleep(0.5)
         inp.press_key('Return')
         time.sleep(5)
 
@@ -1013,9 +1023,15 @@ def main():
                 else:
                     failures += 1
 
-            # Heartbeat every cycle
-            notify(f"HEARTBEAT from hmm_bot: cycle {cycle} done "
-                   f"({successes} ok, {failures} fail)")
+            # Only notify on failures or milestones (every 50 cycles)
+            if not results or any(not r.get('success') for r in results.values()):
+                # Get the error type
+                errs = [r.get('error', '?') for r in results.values() if not r.get('success')]
+                if errs:
+                    notify(f"FAIL cycle {cycle}: {', '.join(errs)} "
+                           f"(total: {successes} ok, {failures} fail)")
+            elif cycle % 50 == 0:
+                notify(f"MILESTONE cycle {cycle}: {successes} ok, {failures} fail")
 
             # Check stats periodically
             if cycle % 5 == 0:
