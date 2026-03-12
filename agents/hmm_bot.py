@@ -765,7 +765,7 @@ def process_platform(platform: str, prompt: str) -> dict:
         fail_package(platform, 'attach_failed')
         return result
 
-    time.sleep(1)
+    time.sleep(5)  # Wait for file upload to process before sending
 
     # Step 5: Send prompt
     logger.info(f"[{platform}] Sending prompt...")
@@ -773,6 +773,18 @@ def process_platform(platform: str, prompt: str) -> dict:
         result['error'] = 'send_failed'
         fail_package(platform, 'send_failed')
         return result
+
+    # Step 5b: Verify send worked — if no stop button after 10s, retry Enter
+    time.sleep(10)
+    if not scan_for_stop_button(platform):
+        logger.info(f"[{platform}] No stop button after 10s — retrying Enter")
+        # Re-focus input and press Enter again
+        coords = find_input_field(platform)
+        if coords:
+            inp.click_at(coords[0], coords[1])
+            time.sleep(0.3)
+        inp.press_key('Return')
+        time.sleep(3)
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
