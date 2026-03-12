@@ -472,9 +472,11 @@ def extract_response(platform: str) -> str:
                      if (b.get('name') or '').strip().lower() == 'copy']
     target = (response_copy or copy_buttons)[-1]
 
-    # Click copy button
-    clipboard.clear()
-    time.sleep(0.1)
+    # Click copy button — use marker instead of clear to avoid X11 clipboard
+    # ownership issues on Xvfb (clear claims ownership, blocking JS writes)
+    _MARKER = '__HMM_CLIP_MARKER__'
+    clipboard.write_marker(_MARKER)
+    time.sleep(0.2)
 
     from core.atspi_interact import atspi_click
     if target.get('atspi_obj') and atspi_click(target):
@@ -483,20 +485,26 @@ def extract_response(platform: str) -> str:
         inp.click_at(target['x'], target['y'])
         logger.info(f"[{platform}] Copy via xdotool at ({target['x']}, {target['y']})")
 
-    time.sleep(1.0)
-    content = clipboard.read()
-
-    # Retry with longer wait — clipboard write can be slow on Xvfb
-    if not content:
-        time.sleep(1.5)
-        content = clipboard.read()
+    # Poll clipboard until it changes from marker (up to 3s)
+    content = None
+    for _ in range(6):
+        time.sleep(0.5)
+        raw = clipboard.read()
+        if raw and raw != _MARKER:
+            content = raw
+            break
 
     # Retry with xdotool if AT-SPI didn't work
     if not content and target.get('atspi_obj'):
-        clipboard.clear()
+        clipboard.write_marker(_MARKER)
+        time.sleep(0.2)
         inp.click_at(target['x'], target['y'])
-        time.sleep(1.5)
-        content = clipboard.read()
+        for _ in range(6):
+            time.sleep(0.5)
+            raw = clipboard.read()
+            if raw and raw != _MARKER:
+                content = raw
+                break
 
     # Check if we got the prompt instead of the response
     if content:
