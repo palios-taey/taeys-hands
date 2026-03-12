@@ -703,14 +703,19 @@ def attach_file(platform: str, file_path: str) -> bool:
 
 def send_prompt(platform: str, prompt: str) -> bool:
     """Click input field and paste prompt. Returns True on success."""
+    # Try AT-SPI first; if not found, scroll to bottom and try Tab to focus input
     coords = find_input_field(platform)
-    if not coords:
-        logger.warning(f"[{platform}] Input field not found")
-        return False
-
-    x, y = coords
-    inp.click_at(x, y)
-    time.sleep(0.3)
+    if coords:
+        inp.click_at(coords[0], coords[1])
+        time.sleep(0.3)
+    else:
+        logger.info(f"[{platform}] Input not in AT-SPI — using Tab to focus")
+        inp.focus_firefox()
+        time.sleep(0.3)
+        inp.press_key('End')  # Scroll to bottom
+        time.sleep(0.3)
+        inp.press_key('Tab')  # Tab to input field
+        time.sleep(0.3)
 
     inp.clipboard_paste(prompt)
     time.sleep(0.3)
