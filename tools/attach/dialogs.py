@@ -59,10 +59,16 @@ def find_portal_dialog_wids() -> List[str]:
 
 
 def close_stale_file_dialogs():
-    """Close orphaned Nautilus and GTK file dialog windows from previous attempts.
+    """Close orphaned Nautilus, GTK, and zombie Firefox dialog windows.
 
     Must be called BEFORE starting a new attach to prevent stale windows
     from intercepting keyboard input.
+
+    Zombie Firefox windows: When a file dialog opens but handling fails,
+    Firefox sometimes leaves a ghost window named just 'Firefox' (no page
+    title). These block subsequent dialog opens. Detected by searching for
+    windows named exactly 'Firefox' (real tab windows have titles like
+    'ChatGPT - Mozilla Firefox').
     """
     if IS_MACOS:
         return
@@ -97,9 +103,37 @@ def close_stale_file_dialogs():
         except Exception:
             pass
 
+    # Close zombie Firefox dialog windows (named exactly 'Firefox' with
+    # no page title). Real browser windows have titles like
+    # 'ChatGPT - Mozilla Firefox'. These zombies are leftover from failed
+    # file dialog handling — they prevent new dialogs from opening.
+    try:
+        result = subprocess.run(
+            ['xdotool', 'search', '--name', '^Firefox$'],
+            capture_output=True, text=True, timeout=2, env=_xenv(),
+        )
+        if result.stdout.strip():
+            # Get the main Firefox window to avoid closing it
+            main_result = subprocess.run(
+                ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                capture_output=True, text=True, timeout=2, env=_xenv(),
+            )
+            main_wids = set(main_result.stdout.strip().split('\n')) if main_result.stdout.strip() else set()
+
+            for wid in result.stdout.strip().split('\n'):
+                if wid and wid not in main_wids:
+                    subprocess.run(
+                        ['xdotool', 'windowclose', wid],
+                        capture_output=True, timeout=3, env=_xenv(),
+                    )
+                    logger.info(f"Closed zombie Firefox dialog window {wid}")
+                    closed += 1
+    except Exception as e:
+        logger.debug(f"Zombie Firefox search failed: {e}")
+
     if closed:
         logger.info(f"Closed {closed} stale file dialog window(s)")
-        time.sleep(0.5)
+        time.sleep(1.0)  # Longer delay after cleanup — Firefox needs time to recover
 
 
 def any_file_dialog_open(firefox) -> str:
