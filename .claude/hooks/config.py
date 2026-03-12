@@ -12,6 +12,32 @@ import os
 import socket
 
 
+def _load_project_env():
+    """Load .env from project root (same as server.py).
+
+    Hooks inherit Claude Code's env, NOT the MCP server's env.
+    MCP server gets REDIS_HOST etc from .mcp.json, but hooks don't see that.
+    Loading .env ensures hooks and server use the same config.
+    """
+    # Walk up from .claude/hooks/ to project root
+    hooks_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(hooks_dir))
+    env_path = os.path.join(project_root, '.env')
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, val = line.split('=', 1)
+                    # Don't override explicitly set env vars
+                    if key.strip() not in os.environ:
+                        os.environ[key.strip()] = val.strip()
+
+
+# Load .env on import (before any get_config calls)
+_load_project_env()
+
+
 def get_config() -> dict:
     """Get configuration from environment variables."""
     return {
