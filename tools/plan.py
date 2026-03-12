@@ -19,9 +19,15 @@ _IDENTITY_FILES = [
     os.path.join(_CORPUS_PATH, 'identity', 'IDENTITY_LOGOS.md'),
 ]
 
+_EXT_LANG = {
+    '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+    '.yaml': 'yaml', '.yml': 'yaml', '.json': 'json', '.md': 'markdown',
+    '.sh': 'bash', '.toml': 'toml',
+}
+
 
 def _prepend_identity_files(attachments: List[str]) -> List[str]:
-    """Prepend identity files to attachment list. Skips files that don't exist or are already listed."""
+    """Prepend identity files to attachment list. Skips missing or already-listed."""
     result = []
     existing = set(os.path.abspath(a) for a in attachments)
     for path in _IDENTITY_FILES:
@@ -32,25 +38,26 @@ def _prepend_identity_files(attachments: List[str]) -> List[str]:
 
 
 def _consolidate_attachments(files: List[str], platform: str) -> str:
-    """Consolidate multiple files into a single .md package via build_package."""
+    """Consolidate multiple files into a single .md package."""
     try:
-        from scripts.build_package import collect_files, build_package
-        import argparse
-        args = argparse.Namespace(files=files, manifest=None, glob=None)
-        collected = collect_files(args)
-        if not collected:
-            return None
-        content = build_package(collected, f"Package for {platform}", 200000 * 4)
+        sections = [f"# Package for {platform}\n\n**Files**: {len(files)}\n"]
+        for path in files:
+            if not os.path.isfile(path):
+                continue
+            content = open(path).read()
+            lang = _EXT_LANG.get(os.path.splitext(path)[1].lower(), '')
+            sections.append(
+                f"\n---\n\n## {os.path.basename(path)}\n\n`{path}`\n\n"
+                f"```{lang}\n{content}\n```\n"
+            )
         out_path = f"/tmp/taey_package_{platform}_{int(time.time())}.md"
         with open(out_path, 'w') as f:
-            f.write(content)
-        logger.info(f"Consolidated {len(collected)} files → {out_path}")
+            f.write(''.join(sections))
+        logger.info("Consolidated %d files → %s", len(files), out_path)
         return out_path
     except Exception as e:
-        logger.warning(f"Consolidation failed, using individual files: {e}")
+        logger.warning("Consolidation failed: %s", e)
         return None
-
-logger = logging.getLogger(__name__)
 
 
 def handle_plan(platform: str, action: str, params: Dict,
@@ -104,22 +111,23 @@ def _create_plan(platform: str, action: str, params: Dict,
                 }}
 
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
-    attachments_list = _prepend_identity_files(attachments_list)
-    tools_list = [] if tools == "none" else tools
+    # Auto-prepend identity files (FAMILY_KERNEL.md, IDENTITY_LOGOS.md)
+    all_files = _prepend_identity_files(attachments_list)
+    identity_added = [f for f in all_files if f not in attachments_list]
 
-    # Consolidate all attachments into a single .md package
+    # Consolidate into single package if multiple files
     consolidated_path = None
-    if len(attachments_list) > 1:
-        consolidated_path = _consolidate_attachments(attachments_list, platform)
-        if consolidated_path:
-            original_files = attachments_list
-            attachments_list = [consolidated_path]
+    if len(all_files) > 1:
+        consolidated_path = _consolidate_attachments(all_files, platform)
+
+    final_attachments = [consolidated_path] if consolidated_path else all_files
+    tools_list = [] if tools == "none" else tools
 
     plan_id = str(uuid.uuid4())[:8]
     plan = {
         'plan_id': plan_id, 'platform': platform, 'action': action,
         'session': session, 'message': message,
-        'attachments': attachments_list,
+        'attachments': final_attachments,
         'required_state': {'model': model, 'mode': mode, 'tools': tools_list},
         'current_state': None, 'steps': [], 'status': 'created',
         'navigated': False, 'created_at': time.time(),
@@ -131,7 +139,7 @@ def _create_plan(platform: str, action: str, params: Dict,
         'id': plan_id, 'platform': platform, 'action': action,
         'session': session, 'message': message,
         'model': model, 'mode': mode,
-        'tools': tools_list, 'attachments': attachments_list,
+        'tools': tools_list, 'attachments': final_attachments,
         'validated': True, 'created_at': time.time(),
     }))
 
@@ -145,13 +153,19 @@ def _create_plan(platform: str, action: str, params: Dict,
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
-    return {
+    result = {
         "success": True, "plan_id": plan_id, "platform": platform,
         "action": action, "session": session,
         "required_state": plan['required_state'],
-        "attachments": attachments_list,
+        "attachments": final_attachments,
         "next_step": "Call taey_inspect to see current state",
     }
+    if identity_added:
+        result["identity_files_added"] = identity_added
+    if consolidated_path:
+        result["consolidated_from"] = len(all_files)
+        result["consolidated_path"] = consolidated_path
+    return result
 
 
 def _create_extract_plan(platform: str, params: Dict,
