@@ -36,11 +36,11 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
     Returns:
         (button_dict, x, y) — the re-scanned button with viewport coordinates.
     """
-    # Aggressive scroll to absolute bottom
-    for _ in range(5):
+    # Scroll to bottom (light — heavy scrolling causes 30s+ hangs on large responses)
+    for _ in range(2):
         inp.press_key('End')
         time.sleep(0.3)
-    time.sleep(0.5)
+    time.sleep(0.3)
 
     # Re-scan for copy buttons after scroll
     firefox = atspi.find_firefox()
@@ -64,10 +64,10 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
         return newest, x, y
 
     # Still off-screen — try Page Up from bottom to find it
-    # (response might be just above the bottom fold)
-    for attempt in range(10):
+    # Limited to 3 attempts (was 10 — caused 30s+ hangs on large responses)
+    for attempt in range(3):
         inp.press_key('Page_Up')
-        time.sleep(0.4)
+        time.sleep(0.3)
 
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
