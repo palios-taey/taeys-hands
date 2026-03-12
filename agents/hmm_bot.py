@@ -90,6 +90,21 @@ def restart_firefox(platforms: list) -> bool:
         logger.error("Firefox still alive after 10s of SIGKILL")
     time.sleep(1)
 
+    # Close ALL remaining X windows (zombie dialogs, ghost windows)
+    xenv = {**env, 'DISPLAY': display}
+    try:
+        for pattern in ['Firefox', 'File Upload', 'Open', 'Nautilus']:
+            r = subprocess.run(
+                ['xdotool', 'search', '--name', pattern],
+                capture_output=True, text=True, timeout=3, env=xenv,
+            )
+            for wid in (r.stdout.strip().split('\n') if r.stdout.strip() else []):
+                subprocess.run(['xdotool', 'windowclose', wid],
+                               capture_output=True, timeout=2, env=xenv)
+        time.sleep(0.5)
+    except Exception as e:
+        logger.debug(f"Zombie window cleanup: {e}")
+
     # Remove stale locks and session restore files (prevent old tab restoration)
     import glob as _glob
     import shutil
