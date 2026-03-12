@@ -258,6 +258,9 @@ def navigate_fresh_session(platform: str) -> bool:
     if not url:
         return False
 
+    # Close any stale file dialogs that would capture keyboard input
+    close_stale_file_dialogs()
+
     if not inp.focus_firefox():
         logger.warning("Could not focus Firefox")
         return False
@@ -779,6 +782,10 @@ def process_platform(platform: str, prompt: str) -> dict:
     """
     result = {'platform': platform, 'success': False, 'error': None}
 
+    # Step 0: Clean up stale dialogs BEFORE anything else
+    # (leftover dialogs capture keyboard input and break Ctrl+L navigation)
+    close_stale_file_dialogs()
+
     # Step 1: Get next package
     logger.info(f"[{platform}] Getting next package...")
     pkg_path = get_next_package(platform)
@@ -795,9 +802,6 @@ def process_platform(platform: str, prompt: str) -> dict:
         result['error'] = 'nav_failed'
         fail_package(platform, 'navigation_failed')
         return result
-
-    # Step 3: Clean up stale dialogs
-    close_stale_file_dialogs()
 
     # Step 4: Attach package file (retry once on failure)
     logger.info(f"[{platform}] Attaching package...")
