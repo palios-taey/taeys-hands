@@ -75,10 +75,9 @@ element_filter:
 
   sidebar_history:
     x_max: 400
-    history_roles: [list item, link]
-    # Gemini sidebar is usually closed. When open, conversation titles
-    # appear as links with long names (pasted content). These are
-    # already truncated at 200 chars by inspect.py.
+    history_roles: [list item, link, push button]
+    # Gemini sidebar conversation history items appear as push buttons,
+    # links, or list items. All filtered here.
 
 element_map:
   input:
@@ -127,8 +126,14 @@ element_map:
     role: menu item
 
 sidebar_nav:
-  # Gemini sidebar is typically closed. When open:
   - { name: "New chat", role: link }
+  - { name: "New chat", role: push button }
+  - { name: "Main menu", role: push button }
+  - { name: "Search", role: push button }
+  - { name: "Projects", role: push button }
+  - { name: "New Project", role: push button }
+  - { name: "History", role: push button }
+  - { name: "Settings & help", role: push button }
   - { name: "Show chat history", role: push button }
   - { name: "Settings", role: link }
   - { name: "Help & FAQ", role: link }
