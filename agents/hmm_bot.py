@@ -825,8 +825,14 @@ def process_platform(platform: str, prompt: str) -> dict:
     """
     result = {'platform': platform, 'success': False, 'error': None}
 
-    # Step 0: Clean up stale dialogs BEFORE anything else
-    # (leftover dialogs capture keyboard input and break Ctrl+L navigation)
+    # Step 0: Clean up stale state BEFORE anything else
+    # Kill stale xsel processes (clipboard writes that hung on Xvfb)
+    try:
+        subprocess.run(['pkill', '-f', 'xsel --clipboard --input'],
+                       capture_output=True, timeout=3)
+    except Exception:
+        pass
+    # Close stale dialogs (leftover dialogs capture keyboard input)
     close_stale_file_dialogs()
 
     # Step 1: Get next package
