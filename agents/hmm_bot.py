@@ -239,7 +239,20 @@ def navigate_fresh_session(platform: str) -> bool:
     inp.clipboard_paste(url)
     time.sleep(0.1)
     inp.press_key('Return')
-    time.sleep(4)  # Wait for page load
+    time.sleep(8)  # Wait for page load (needs more time on fresh restart)
+
+    # Verify page loaded by checking for platform document
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        logger.warning(f"[{platform}] Page not loaded after 8s, waiting more...")
+        time.sleep(8)
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if not doc:
+            logger.warning(f"[{platform}] Page still not loaded after 16s")
+            return False
+
     return True
 
 
@@ -524,9 +537,18 @@ def process_platform(platform: str, prompt: str) -> dict:
     # Step 3: Clean up stale dialogs
     close_stale_file_dialogs()
 
-    # Step 4: Attach package file
+    # Step 4: Attach package file (retry once on failure)
     logger.info(f"[{platform}] Attaching package...")
-    if not attach_file(platform, pkg_path):
+    attached = attach_file(platform, pkg_path)
+    if not attached:
+        logger.info(f"[{platform}] Attach failed, cleaning up and retrying...")
+        close_stale_file_dialogs()
+        inp.press_key('Escape')
+        time.sleep(1)
+        # Re-navigate to fresh session before retry
+        navigate_fresh_session(platform)
+        attached = attach_file(platform, pkg_path)
+    if not attached:
         result['error'] = 'attach_failed'
         fail_package(platform, 'attach_failed')
         return result
@@ -596,7 +618,7 @@ def run_cycle(platforms: list, prompt: str) -> dict:
             if not restart_firefox(platforms):
                 escalate(f"ESCALATION from hmm_bot: Firefox restart failed during {platform}")
                 break
-            time.sleep(5)  # Extra settle time after restart
+            time.sleep(15)  # Extra settle time after restart for pages to load
 
         try:
             results[platform] = process_platform(platform, prompt)
@@ -637,6 +659,7 @@ def main():
         if not restart_firefox(args.platforms):
             escalate("ESCALATION from hmm_bot: Firefox failed to start")
             sys.exit(1)
+        time.sleep(10)  # Let pages load after startup
 
     cycle = 0
     successes = 0
