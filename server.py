@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-Taey's Hands - MCP Server
-AT-SPI-based chat and social platform automation.
-
-Simple JSON-RPC over stdio (no mcp library) for AT-SPI compatibility
-with system Python + gi.repository.
-
-Run: python3 server.py
-"""
+"""Taey's Hands - MCP Server (AT-SPI platform automation over JSON-RPC/stdio)."""
 
 import sys
 import os
@@ -19,7 +11,6 @@ from typing import Any, Dict, List
 
 
 class ToolTimeoutError(Exception):
-    """Raised when a tool call exceeds the timeout."""
     pass
 
 
@@ -27,11 +18,9 @@ def _tool_timeout_handler(signum, frame):
     raise ToolTimeoutError("Tool execution timed out")
 
 
-# Max seconds for any single tool call (prevents server hang → broken pipe)
-# 120s needed for Jetson workers (10-20x slower CPU, large AT-SPI trees)
 TOOL_TIMEOUT_SECONDS = int(os.environ.get('MCP_TOOL_TIMEOUT', '120'))
 
-# Load .env file (Redis host, Neo4j URI, etc.)
+# Load .env
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
@@ -41,7 +30,6 @@ if os.path.exists(_env_path):
                 _key, _val = _line.split('=', 1)
                 os.environ.setdefault(_key.strip(), _val.strip())
 
-# Logging to file (stderr reserved for JSON-RPC)
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -49,36 +37,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger('taeys-hands')
 
-# =========================================================================
-# CRITICAL: Set DISPLAY on Linux BEFORE importing AT-SPI modules
-# On macOS, no DISPLAY needed — uses AXUIElement API instead
-# =========================================================================
-if sys.platform != 'darwin':
-    from core.atspi import detect_display
-    DISPLAY = detect_display()
-    os.environ['DISPLAY'] = DISPLAY
-else:
-    DISPLAY = None  # macOS doesn't use X11
+# Set DISPLAY before AT-SPI imports
+from core.atspi import detect_display
+DISPLAY = detect_display()
+os.environ['DISPLAY'] = DISPLAY
 
-# Now safe to import platform-dependent modules
-
-# Storage backends (optional - server works without them but persistence is disabled)
+# Storage backends (optional)
 try:
     from storage.redis_pool import get_client as get_redis, node_key
 except Exception as e:
-    logger.warning("Redis unavailable: %s. Monitor notifications and state persistence disabled.", e)
+    logger.warning("Redis unavailable: %s", e)
     get_redis = lambda: None
     def node_key(suffix): return f"taey:local:{suffix}"
 
 try:
     from storage import neo4j_client
 except Exception as e:
-    logger.warning("Neo4j unavailable: %s. Conversation history persistence disabled.", e)
+    logger.warning("Neo4j unavailable: %s", e)
     neo4j_client = None
 
 from tools.inspect import handle_inspect
-from tools.interact import handle_click
-from tools.send_message import handle_send_message
+from tools.click import handle_click
+from tools.send import handle_send_message
 from tools.extract import handle_quick_extract, handle_extract_history
 from tools.attach import handle_attach
 from tools.dropdown import handle_select_dropdown, handle_prepare
@@ -87,13 +67,7 @@ from tools.sessions import handle_list_sessions
 from tools.monitors import handle_monitors, handle_respawn_monitor
 
 
-# =========================================================================
-# Custom JSON encoder for Neo4j types
-# =========================================================================
-
 class SafeJSONEncoder(json.JSONEncoder):
-    """Handle Neo4j DateTime and other non-serializable types."""
-
     def default(self, obj):
         if hasattr(obj, 'isoformat'):
             return obj.isoformat()
@@ -102,12 +76,7 @@ class SafeJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-# =========================================================================
-# Notification injection (piggybacking pattern)
-# =========================================================================
-
 def get_pending_notifications(redis_client) -> List[Dict]:
-    """Pop pending notifications from background monitors."""
     notifications = []
     if not redis_client:
         return notifications
@@ -126,7 +95,6 @@ def get_pending_notifications(redis_client) -> List[Dict]:
 
 
 def inject_notifications(result: Dict, redis_client) -> Dict:
-    """Attach any pending monitor notifications to the result."""
     notifications = get_pending_notifications(redis_client)
     if notifications:
         result['_notifications'] = notifications
@@ -134,391 +102,200 @@ def inject_notifications(result: Dict, redis_client) -> Dict:
 
 
 # =========================================================================
-# Tool definitions (JSON schemas for MCP)
+# Tool definitions
 # =========================================================================
 
 ALL_PLATFORMS = ["chatgpt", "claude", "gemini", "grok", "perplexity", "x_twitter", "linkedin"]
-
-PLATFORM_PROP = {
-    "type": "string",
-    "enum": ALL_PLATFORMS,
-    "description": "Which chat platform",
-}
+PLATFORM_PROP = {"type": "string", "enum": ALL_PLATFORMS, "description": "Which chat platform"}
 
 
 def get_tools() -> List[Dict]:
-    """Return all MCP tool definitions."""
     return [
-        {
-            "name": "taey_inspect",
-            "description": (
-                "Inspect a chat platform and get the complete control map.\n\n"
-                "Switches to the platform tab (Alt+N), scrolls to bottom (End), and returns:\n"
-                "- URL of current conversation\n"
-                "- State (model, mode, copy button count)\n"
-                "- Controls (all visible elements for Claude to interpret)\n\n"
-                "ALWAYS call this FIRST before any other taey_ tool.\n\n"
-                "Use fresh_session=true to navigate to the platform's base URL first,\n"
-                "guaranteeing a new chat. REQUIRED for HMM enrichment to prevent context bleed."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": {**PLATFORM_PROP, "description": "Which chat platform to inspect"},
-                    "scroll": {
-                        "type": "string",
-                        "enum": ["bottom", "top", "none"],
-                        "description": (
-                            "Where to scroll before scanning. Default 'bottom' (see latest chat). "
-                            "Use 'none' for PURE SCAN — no tab switch, no scroll, no keyboard input. "
-                            "Essential when a dropdown/menu is open or mid-workflow. "
-                            "Use 'top' to scroll to page top first."
-                        ),
-                    },
-                    "fresh_session": {
-                        "type": "boolean",
-                        "description": (
-                            "Navigate to platform's base URL to start a fresh chat before scanning. "
-                            "Use for HMM enrichment to prevent context bleed between sessions."
-                        ),
-                    },
-                },
-                "required": ["platform"],
-            },
-        },
-        {
-            "name": "taey_click",
-            "description": (
-                "Click at coordinates from inspect results.\n\n"
-                "AT-SPI first (cached then fresh scan), xdotool fallback.\n"
-                "Use coordinates from taey_inspect element list."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "x": {"type": "number", "description": "X coordinate to click"},
-                    "y": {"type": "number", "description": "Y coordinate to click"},
-                },
-                "required": ["platform", "x", "y"],
-            },
-        },
-        {
-            "name": "taey_prepare",
-            "description": (
-                "Get available options for a platform BEFORE creating a plan.\n\n"
-                "Returns models, modes, tools, and sources available for selection.\n"
-                "Call this before taey_plan to know what's available."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {"platform": {**PLATFORM_PROP, "description": "Which chat platform to get options for"}},
-                "required": ["platform"],
-            },
-        },
-        {
-            "name": "taey_plan",
-            "description": (
-                "Create or get an execution plan for a platform action.\n\n"
-                "Plans track: required state (mode/model), attachments, message, execution steps.\n\n"
-                "Step order for send_message:\n"
-                "1. Mode/Model - switch if needed\n"
-                "2. Attachments - add files if any\n"
-                "3. Type message\n"
-                "4. Send"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "action": {
-                        "type": "string",
-                        "enum": ["send_message", "extract_response", "get", "update"],
-                        "description": "Action to perform",
-                    },
-                    "params": {
-                        "type": "object",
-                        "description": "Action parameters",
-                        "properties": {
-                            "plan_id": {"type": "string"},
-                            "message": {"type": "string"},
-                            "mode": {"type": "string"},
-                            "model": {"type": "string"},
-                            "attachments": {"type": "array", "items": {"type": "string"}},
-                            "current_state": {"type": "object"},
-                            "steps": {"type": "array"},
-                            "status": {"type": "string"},
-                        },
-                    },
-                },
-                "required": ["platform", "action"],
-            },
-        },
-        {
-            "name": "taey_send_message",
-            "description": (
-                "Send a message with full workflow: type, store in Neo4j, send, spawn monitor.\n\n"
-                "IMPORTANT: Requires taey_inspect first to identify input/send coordinates.\n"
-                "Claude must click the input field via taey_click BEFORE calling this.\n"
-                "send_message pastes into whatever is focused, presses Enter, records, spawns daemon.\n\n"
-                "The background monitor daemon will detect response completion and send\n"
-                "a notification via Redis (injected into future tool responses)."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "message": {"type": "string", "description": "The message text to send"},
-                    "attachments": {"type": "array", "items": {"type": "string"}, "description": "File paths attached (for Neo4j record)"},
-                    "session_type": {"type": "string", "description": "Type of session (research, collaboration, development, testing)"},
-                    "purpose": {"type": "string", "description": "What this session is for"},
-                },
-                "required": ["platform", "message"],
-            },
-        },
-        {
-            "name": "taey_quick_extract",
-            "description": (
-                "Extract the latest AI response via clipboard.\n\n"
-                "Clicks the newest Copy button (highest Y), reads clipboard, returns text.\n"
-                "If complete=True, consumes the plan (marks interaction done)."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": {**PLATFORM_PROP, "description": "Which chat platform to extract from"},
-                    "complete": {"type": "boolean", "description": "Whether this completes the interaction (consumes plan)"},
-                },
-                "required": ["platform"],
-            },
-        },
-        {
-            "name": "taey_extract_history",
-            "description": (
-                "Extract FULL conversation history from a chat platform.\n\n"
-                "Scrolls through the conversation, clicking all Copy buttons chronologically.\n"
-                "Returns all extracted messages."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": {**PLATFORM_PROP, "description": "Which chat platform to extract from"},
-                    "max_messages": {"type": "integer", "description": "Maximum messages to extract (default 500)"},
-                },
-                "required": ["platform"],
-            },
-        },
-        {
-            "name": "taey_attach",
-            "description": (
-                "Attach a file to the chat input - multi-step with Claude in the loop.\n\n"
-                "Flow:\n"
-                "1. Clicks attach button via AT-SPI tree search\n"
-                "2. If file dialog opened -> handles file selection automatically\n"
-                "3. If dropdown appeared -> returns dropdown items for Claude to decide\n\n"
-                "When dropdown returned, use taey_click to select the upload option,\n"
-                "then call taey_attach again to complete the file selection."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "file_path": {"type": "string", "description": "Absolute path to file to attach"},
-                },
-                "required": ["platform", "file_path"],
-            },
-        },
-        {
-            "name": "taey_select_dropdown",
-            "description": (
-                "Select an item from a dropdown menu (model, mode, etc.).\n\n"
-                "Full workflow: click trigger -> find option -> click it -> validate."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                    "dropdown": {"type": "string", "description": "Which dropdown to open (model, mode, thinking, etc.)"},
-                    "target_value": {"type": "string", "description": "Value to select"},
-                },
-                "required": ["platform", "dropdown", "target_value"],
-            },
-        },
-        {
-            "name": "taey_list_sessions",
-            "description": (
-                "Show active sessions, pending responses, and recommendations.\n\n"
-                "Returns sessions from Neo4j, pending responses from Redis monitors,\n"
-                "and a recommendation for what to do next."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {"platform": {**PLATFORM_PROP, "description": "Optional filter by platform"}},
-                "required": [],
-            },
-        },
-        {
-            "name": "taey_monitors",
-            "description": (
-                "List or kill background monitor daemons.\n\n"
-                "action='list': Show all active monitors with platform, ID, status, elapsed time.\n"
-                "action='kill': EMERGENCY STOP — kill all daemons, clear all Redis monitor entries."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["list", "kill"],
-                        "description": "list: show monitors | kill: stop all monitors",
-                    },
-                },
-                "required": ["action"],
-            },
-        },
-        {
-            "name": "taey_respawn_monitor",
-            "description": (
-                "Spawn a fresh monitor daemon for multi-step response flows.\n\n"
-                "Use after clicking 'Start research' (Gemini), 'Continue' (Claude),\n"
-                "or 'Show more' (ChatGPT) to monitor the next generation cycle.\n\n"
-                "Reuses the existing session/message from pending_prompt."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "platform": PLATFORM_PROP,
-                },
-                "required": ["platform"],
-            },
-        },
+        {"name": "taey_inspect",
+         "description": "Switch to platform tab, scan AT-SPI tree, return elements with x,y coords. Call FIRST before other tools. Use fresh_session=true for new chat (prevents context bleed).",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": {**PLATFORM_PROP},
+             "scroll": {"type": "string", "enum": ["bottom", "top", "none"],
+                        "description": "Scroll before scan. 'none'=pure scan (no tab switch/scroll)."},
+             "fresh_session": {"type": "boolean", "description": "Navigate to base URL for fresh chat."},
+         }, "required": ["platform"]}},
+
+        {"name": "taey_click",
+         "description": "Click at x,y coords from inspect results (AT-SPI first, xdotool fallback).",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "x": {"type": "number"}, "y": {"type": "number"},
+         }, "required": ["platform", "x", "y"]}},
+
+        {"name": "taey_prepare",
+         "description": "Get platform capabilities (models/modes/tools) from YAML config.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+         }, "required": ["platform"]}},
+
+        {"name": "taey_plan",
+         "description": "Create/get/update execution plan. Plans track required state, attachments, message, steps.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "action": {"type": "string", "enum": ["send_message", "extract_response", "get", "update"]},
+             "params": {"type": "object", "properties": {
+                 "plan_id": {"type": "string"}, "message": {"type": "string"},
+                 "mode": {"type": "string"}, "model": {"type": "string"},
+                 "attachments": {"type": "array", "items": {"type": "string"}},
+                 "current_state": {"type": "object"}, "steps": {"type": "array"},
+                 "status": {"type": "string"},
+             }},
+         }, "required": ["platform", "action"]}},
+
+        {"name": "taey_send_message",
+         "description": "Paste message, press Enter, store in Neo4j, spawn monitor. Click input field via taey_click FIRST.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "message": {"type": "string", "description": "Message text"},
+             "attachments": {"type": "array", "items": {"type": "string"}},
+             "session_type": {"type": "string"}, "purpose": {"type": "string"},
+         }, "required": ["platform", "message"]}},
+
+        {"name": "taey_quick_extract",
+         "description": "Click newest Copy button, read clipboard, return response text. complete=true consumes plan.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "complete": {"type": "boolean"},
+         }, "required": ["platform"]}},
+
+        {"name": "taey_extract_history",
+         "description": "Extract full conversation history by scrolling through all Copy buttons.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "max_messages": {"type": "integer"},
+         }, "required": ["platform"]}},
+
+        {"name": "taey_attach",
+         "description": "Attach file: clicks attach button, handles file dialog or returns dropdown for Claude to pick from.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "file_path": {"type": "string", "description": "Absolute path to file"},
+         }, "required": ["platform", "file_path"]}},
+
+        {"name": "taey_select_dropdown",
+         "description": "Open dropdown (model/mode/tools), return items for Claude to click.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+             "dropdown": {"type": "string", "description": "Dropdown trigger name"},
+             "target_value": {"type": "string", "description": "Value to select"},
+         }, "required": ["platform", "dropdown", "target_value"]}},
+
+        {"name": "taey_list_sessions",
+         "description": "Show active sessions, pending responses, and next-action recommendation.",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": {**PLATFORM_PROP, "description": "Optional filter"},
+         }, "required": []}},
+
+        {"name": "taey_monitors",
+         "description": "List or kill background monitor daemons.",
+         "inputSchema": {"type": "object", "properties": {
+             "action": {"type": "string", "enum": ["list", "kill"]},
+         }, "required": ["action"]}},
+
+        {"name": "taey_respawn_monitor",
+         "description": "Spawn fresh monitor for multi-step flows (Gemini Deep Research, Claude Continue).",
+         "inputSchema": {"type": "object", "properties": {
+             "platform": PLATFORM_PROP,
+         }, "required": ["platform"]}},
     ]
 
 
 # =========================================================================
-# Tool routing
+# Tool routing (dict-based dispatch)
 # =========================================================================
 
+def _validate_required(args, *keys):
+    for k in keys:
+        if not args.get(k):
+            return {"error": f"{k} is required"}
+    return None
+
+def _validate_required_any(args, *keys):
+    for k in keys:
+        if args.get(k) is None:
+            return {"error": f"{k} is required"}
+    return None
+
+
+def _h_inspect(args, rc):
+    return handle_inspect(args['platform'], rc, scroll=args.get('scroll', 'bottom'),
+                          fresh_session=args.get('fresh_session', False))
+
+def _h_click(args, rc):
+    err = _validate_required_any(args, 'x', 'y')
+    return err or handle_click(args['platform'], args['x'], args['y'])
+
+def _h_prepare(args, rc):
+    return handle_prepare(args['platform'], rc)
+
+def _h_plan(args, rc):
+    err = _validate_required(args, 'action')
+    return err or handle_plan(args['platform'], args['action'], args.get('params', {}), rc)
+
+def _h_send(args, rc):
+    err = _validate_required(args, 'message')
+    return err or handle_send_message(args['platform'], args['message'], rc, DISPLAY,
+                                       args.get('attachments'), args.get('session_type'),
+                                       args.get('purpose'))
+
+def _h_extract(args, rc):
+    return handle_quick_extract(args['platform'], rc, neo4j_client, args.get('complete', False))
+
+def _h_history(args, rc):
+    return handle_extract_history(args['platform'], rc, args.get('max_messages', 500))
+
+def _h_attach(args, rc):
+    err = _validate_required(args, 'file_path')
+    return err or handle_attach(args['platform'], args['file_path'], rc)
+
+def _h_dropdown(args, rc):
+    err = _validate_required(args, 'dropdown', 'target_value')
+    return err or handle_select_dropdown(args['platform'], args['dropdown'],
+                                          args['target_value'], rc)
+
+def _h_sessions(args, rc):
+    return handle_list_sessions(args.get('platform'), rc)
+
+def _h_monitors(args, rc):
+    err = _validate_required(args, 'action')
+    return err or handle_monitors(args['action'], rc)
+
+def _h_respawn(args, rc):
+    return handle_respawn_monitor(args['platform'], rc, DISPLAY)
+
+
+_TOOL_HANDLERS = {
+    'taey_inspect': ('platform', _h_inspect),
+    'taey_click': ('platform', _h_click),
+    'taey_prepare': ('platform', _h_prepare),
+    'taey_plan': ('platform', _h_plan),
+    'taey_send_message': ('platform', _h_send),
+    'taey_quick_extract': ('platform', _h_extract),
+    'taey_extract_history': ('platform', _h_history),
+    'taey_attach': ('platform', _h_attach),
+    'taey_select_dropdown': ('platform', _h_dropdown),
+    'taey_list_sessions': (None, _h_sessions),
+    'taey_monitors': (None, _h_monitors),
+    'taey_respawn_monitor': ('platform', _h_respawn),
+}
+
+
 def handle_tool(name: str, args: Dict, redis_client) -> Dict:
-    """Route tool call to handler, inject notifications."""
-
-    result = _route_tool(name, args, redis_client)
+    entry = _TOOL_HANDLERS.get(name)
+    if not entry:
+        return {"error": f"Unknown tool: {name}"}
+    required_key, handler = entry
+    if required_key:
+        err = _validate_required(args, required_key)
+        if err:
+            return err
+    result = handler(args, redis_client)
     return inject_notifications(result, redis_client)
-
-
-def _route_tool(name: str, args: Dict, redis_client) -> Dict:
-    """Dispatch tool call to the appropriate handler."""
-
-    if name == "taey_inspect":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        scroll = args.get("scroll", "bottom")
-        fresh_session = args.get("fresh_session", False)
-        return handle_inspect(platform, redis_client, scroll=scroll,
-                              fresh_session=fresh_session)
-
-    if name == "taey_click":
-        platform = args.get("platform")
-        x = args.get("x")
-        y = args.get("y")
-        if not platform:
-            return {"error": "platform is required"}
-        if x is None or y is None:
-            return {"error": "x and y are required"}
-        return handle_click(platform, x, y)
-
-    if name == "taey_prepare":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        return handle_prepare(platform, redis_client)
-
-    if name == "taey_plan":
-        platform = args.get("platform")
-        action = args.get("action")
-        params = args.get("params", {})
-        if not platform:
-            return {"error": "platform is required"}
-        if not action:
-            return {"error": "action is required"}
-        return handle_plan(platform, action, params, redis_client)
-
-    if name == "taey_send_message":
-        platform = args.get("platform")
-        message = args.get("message")
-        if not platform:
-            return {"error": "platform is required"}
-        if not message:
-            return {"error": "message is required"}
-        return handle_send_message(
-            platform=platform,
-            message=message,
-            redis_client=redis_client,
-            display=DISPLAY,
-            attachments=args.get("attachments"),
-            session_type=args.get("session_type"),
-            purpose=args.get("purpose"),
-        )
-
-    if name == "taey_quick_extract":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        return handle_quick_extract(
-            platform=platform,
-            redis_client=redis_client,
-            neo4j_mod=neo4j_client,
-            complete=args.get("complete", False),
-        )
-
-    if name == "taey_extract_history":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        return handle_extract_history(
-            platform=platform,
-            redis_client=redis_client,
-            max_messages=args.get("max_messages", 500),
-        )
-
-    if name == "taey_attach":
-        platform = args.get("platform")
-        file_path = args.get("file_path")
-        if not platform:
-            return {"error": "platform is required"}
-        if not file_path:
-            return {"error": "file_path is required"}
-        return handle_attach(platform, file_path, redis_client)
-
-    if name == "taey_select_dropdown":
-        platform = args.get("platform")
-        dropdown = args.get("dropdown")
-        target_value = args.get("target_value")
-        if not platform:
-            return {"error": "platform is required"}
-        if not dropdown:
-            return {"error": "dropdown is required"}
-        if not target_value:
-            return {"error": "target_value is required"}
-        return handle_select_dropdown(platform, dropdown, target_value, redis_client)
-
-    if name == "taey_list_sessions":
-        return handle_list_sessions(args.get("platform"), redis_client)
-
-    if name == "taey_monitors":
-        action = args.get("action")
-        if not action:
-            return {"error": "action is required"}
-        return handle_monitors(action, redis_client)
-
-    if name == "taey_respawn_monitor":
-        platform = args.get("platform")
-        if not platform:
-            return {"error": "platform is required"}
-        return handle_respawn_monitor(platform, redis_client, DISPLAY)
-
-    return {"error": f"Unknown tool: {name}"}
 
 
 # =========================================================================
@@ -526,22 +303,17 @@ def _route_tool(name: str, args: Dict, redis_client) -> Dict:
 # =========================================================================
 
 def run_server():
-    """Run the MCP server over stdio."""
     try:
         redis_client = get_redis()
     except Exception as e:
-        logger.warning("Redis unavailable at startup: %s. Running without Redis.", e)
+        logger.warning("Redis unavailable at startup: %s", e)
         redis_client = None
 
     def read_message():
-        """Read a JSON-RPC message from stdin."""
         line = sys.stdin.readline()
-        if not line:
-            return None
-        return json.loads(line.strip())
+        return json.loads(line.strip()) if line else None
 
     def write_message(msg):
-        """Write a JSON-RPC message to stdout."""
         sys.stdout.write(json.dumps(msg, cls=SafeJSONEncoder) + '\n')
         sys.stdout.flush()
 
@@ -558,74 +330,49 @@ def run_server():
             msg_id = msg.get('id')
 
             if method == 'initialize':
-                write_message({
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "serverInfo": {"name": "taeys-hands", "version": "6.0.0"},
-                        "capabilities": {"tools": {}},
-                    },
-                    "id": msg_id,
-                })
+                write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {"name": "taeys-hands", "version": "7.0.0"},
+                    "capabilities": {"tools": {}},
+                }})
 
             elif method == 'tools/list':
-                write_message({
-                    "jsonrpc": "2.0",
-                    "result": {"tools": get_tools()},
-                    "id": msg_id,
-                })
+                write_message({"jsonrpc": "2.0", "id": msg_id,
+                              "result": {"tools": get_tools()}})
 
             elif method == 'tools/call':
                 tool_name = params.get('name')
                 tool_args = params.get('arguments', {})
-                # Timeout guard: prevents a hung AT-SPI call from killing
-                # the server (which causes broken pipe for the client).
                 old_handler = signal.signal(signal.SIGALRM, _tool_timeout_handler)
                 signal.alarm(TOOL_TIMEOUT_SECONDS)
                 try:
                     result = handle_tool(tool_name, tool_args, redis_client)
                 except ToolTimeoutError:
                     result = {"error": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
-                    logger.error("Tool timeout: %s", tool_name)
                 finally:
                     signal.alarm(0)
                     signal.signal(signal.SIGALRM, old_handler)
                 is_error = isinstance(result, dict) and result.get('error') is not None
-                write_message({
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "content": [{
-                            "type": "text",
-                            "text": json.dumps(result, indent=2, cls=SafeJSONEncoder),
-                        }],
-                        "isError": is_error,
-                    },
-                    "id": msg_id,
-                })
+                write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
+                    "content": [{"type": "text",
+                                 "text": json.dumps(result, indent=2, cls=SafeJSONEncoder)}],
+                    "isError": is_error,
+                }})
 
             elif method == 'notifications/initialized':
                 pass
 
             else:
-                write_message({
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32601, "message": f"Method not found: {method}"},
-                    "id": msg_id,
-                })
+                write_message({"jsonrpc": "2.0", "id": msg_id,
+                              "error": {"code": -32601, "message": f"Method not found: {method}"}})
 
         except json.JSONDecodeError as e:
-            write_message({
-                "jsonrpc": "2.0",
-                "error": {"code": -32700, "message": f"Parse error: {e}"},
-                "id": None,
-            })
+            write_message({"jsonrpc": "2.0", "id": None,
+                          "error": {"code": -32700, "message": f"Parse error: {e}"}})
         except Exception as e:
             logger.error("Internal error: %s", traceback.format_exc())
-            write_message({
-                "jsonrpc": "2.0",
-                "error": {"code": -32603, "message": f"Internal error: {e}"},
-                "id": None,
-            })
+            write_message({"jsonrpc": "2.0", "id": None,
+                          "error": {"code": -32603, "message": f"Internal error: {e}"}})
 
 
 if __name__ == '__main__':

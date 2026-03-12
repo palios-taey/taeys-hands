@@ -1,10 +1,4 @@
-"""
-taey_plan - Create and manage execution plans.
-
-Plans track the state of a multi-step interaction: what model/mode
-to set, what files to attach, what message to send. Plans are stored
-in Redis and consumed when the interaction completes.
-"""
+"""taey_plan - Create and manage execution plans stored in Redis."""
 
 import json
 import time
@@ -12,7 +6,6 @@ import uuid
 import logging
 from typing import Any, Dict, List
 
-from core.platforms import BASE_URLS
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
@@ -20,17 +13,7 @@ logger = logging.getLogger(__name__)
 
 def handle_plan(platform: str, action: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
-    """Dispatch plan operations: create, get, update.
-
-    Args:
-        platform: Which platform.
-        action: 'send_message', 'extract_response', 'get', 'update'.
-        params: Action-specific parameters.
-        redis_client: Redis client.
-
-    Returns:
-        Plan data or error.
-    """
+    """Dispatch plan operations: create, get, update."""
     if action == 'get':
         return _get_plan(params.get('plan_id'), platform, redis_client)
     elif action == 'update':
@@ -45,14 +28,10 @@ def handle_plan(platform: str, action: str, params: Dict,
 
 def _create_plan(platform: str, action: str, params: Dict,
                  redis_client) -> Dict[str, Any]:
-    """Create an execution plan for a platform interaction.
-
-    All fields are required - no defaults. Forces explicit decision-making.
-    """
+    """Create an execution plan. All fields required — no defaults."""
     if not redis_client:
         return {"error": "Redis not available", "success": False}
 
-    # Validate required fields
     missing = []
     session = params.get('session')
     message = params.get('message')
@@ -75,43 +54,28 @@ def _create_plan(platform: str, action: str, params: Dict,
         missing.append('attachments (list or [])')
 
     if missing:
-        return {
-            "success": False,
-            "error": "Missing required fields: " + ", ".join(missing),
-            "required_fields": {
-                "session": '"new" or existing URL',
-                "message": "Message text",
-                "model": 'Model name or "N/A"',
-                "mode": "Mode name",
-                "tools": 'List or "none"',
-                "attachments": "List of file paths or []",
-            },
-        }
+        return {"success": False, "error": "Missing required fields: " + ", ".join(missing),
+                "required_fields": {
+                    "session": '"new" or existing URL', "message": "Message text",
+                    "model": 'Model name or "N/A"', "mode": "Mode name",
+                    "tools": 'List or "none"', "attachments": "List of file paths or []",
+                }}
 
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
     tools_list = [] if tools == "none" else tools
 
     plan_id = str(uuid.uuid4())[:8]
-
     plan = {
-        'plan_id': plan_id,
-        'platform': platform,
-        'action': action,
-        'session': session,
-        'message': message,
+        'plan_id': plan_id, 'platform': platform, 'action': action,
+        'session': session, 'message': message,
         'attachments': attachments_list,
         'required_state': {'model': model, 'mode': mode, 'tools': tools_list},
-        'current_state': None,
-        'steps': [],
-        'status': 'created',
-        'navigated': False,
-        'created_at': time.time(),
+        'current_state': None, 'steps': [], 'status': 'created',
+        'navigated': False, 'created_at': time.time(),
     }
 
     redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
     redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
-
-    # Hook-compatible format
     redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
         'id': plan_id, 'platform': platform, 'action': action,
         'session': session, 'message': message,
@@ -120,52 +84,37 @@ def _create_plan(platform: str, action: str, params: Dict,
         'validated': True, 'created_at': time.time(),
     }))
 
-    # Clear stale checkpoints
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
     return {
-        "success": True,
-        "plan_id": plan_id,
-        "platform": platform,
-        "action": action,
-        "session": session,
+        "success": True, "plan_id": plan_id, "platform": platform,
+        "action": action, "session": session,
         "required_state": plan['required_state'],
         "attachments": attachments_list,
-        "next_step": f"Call taey_inspect to see current state",
+        "next_step": "Call taey_inspect to see current state",
     }
 
 
 def _create_extract_plan(platform: str, params: Dict,
                          redis_client) -> Dict[str, Any]:
-    """Create an extraction-only plan (no send_message).
-
-    Used when a response is already pending on a platform and just needs
-    to be extracted. Simpler than send_message plans — only needs platform.
-    """
+    """Create extraction-only plan (no send_message)."""
     if not redis_client:
         return {"error": "Redis not available", "success": False}
 
     plan_id = str(uuid.uuid4())[:8]
-
     plan = {
-        'plan_id': plan_id,
-        'platform': platform,
+        'plan_id': plan_id, 'platform': platform,
         'action': 'extract_response',
         'session': params.get('session', 'current'),
-        'message': None,
-        'attachments': [],
-        'required_state': {},
-        'current_state': None,
+        'message': None, 'attachments': [],
+        'required_state': {}, 'current_state': None,
         'steps': [{"action": "extract", "platform": platform}],
-        'status': 'ready',
-        'navigated': False,
-        'created_at': time.time(),
+        'status': 'ready', 'navigated': False, 'created_at': time.time(),
     }
 
     redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
     redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
-
     redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
         'id': plan_id, 'platform': platform, 'action': 'extract_response',
         'session': plan['session'], 'message': None,
@@ -175,44 +124,34 @@ def _create_extract_plan(platform: str, params: Dict,
     }))
 
     return {
-        "success": True,
-        "plan_id": plan_id,
-        "platform": platform,
-        "action": "extract_response",
-        "steps": plan['steps'],
+        "success": True, "plan_id": plan_id, "platform": platform,
+        "action": "extract_response", "steps": plan['steps'],
         "next_step": f"Call taey_quick_extract('{platform}') to extract the response",
     }
 
 
 def _get_plan(plan_id: str, platform: str, redis_client) -> Dict[str, Any]:
-    """Get a plan by ID or current plan for platform."""
     if not redis_client:
         return {"error": "Redis not available", "success": False}
-
     if not plan_id and platform:
         plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
-
     if not plan_id:
         return {"error": "No plan found", "success": False}
-
     data = redis_client.get(node_key(f"plan:{plan_id}"))
     if not data:
         return {"error": f"Plan {plan_id} not found", "success": False}
-
     return {"success": True, "plan": json.loads(data)}
 
 
 def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
-    """Update a plan's state. Auto-generates steps when current_state provided."""
+    """Update plan state. Auto-generates steps when current_state provided."""
     if not redis_client:
         return {"error": "Redis not available", "success": False}
-
     data = redis_client.get(node_key(f"plan:{plan_id}"))
     if not data:
         return {"error": f"Plan {plan_id} not found", "success": False}
 
     plan = json.loads(data)
-
     for key in ['current_state', 'steps', 'status']:
         if key in updates:
             plan[key] = updates[key]
@@ -220,34 +159,26 @@ def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
     if 'current_state' in updates and plan.get('required_state'):
         plan['steps'] = _generate_steps(
             plan['required_state'], plan['current_state'],
-            plan.get('attachments', []), plan.get('message', ''),
-        )
+            plan.get('attachments', []), plan.get('message', ''))
         plan['status'] = 'ready'
 
     plan['updated_at'] = time.time()
     redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
 
-    return {
-        "success": True,
-        "plan_id": plan_id,
-        "status": plan['status'],
-        "steps": plan.get('steps', []),
-    }
+    return {"success": True, "plan_id": plan_id,
+            "status": plan['status'], "steps": plan.get('steps', [])}
 
 
 def _generate_steps(required: Dict, current: Dict,
                     attachments: List, message: str) -> List[Dict]:
     """Generate execution steps by comparing required vs current state."""
     steps = []
-
     req_mode = required.get('mode')
     cur_mode = (current or {}).get('mode')
     if req_mode and req_mode != cur_mode:
         steps.append({"action": "set_mode", "target": req_mode, "current": cur_mode})
 
-    req_tools = set(required.get('tools', []))
-    cur_tools = set((current or {}).get('tools', []))
-    for tool in req_tools - cur_tools:
+    for tool in set(required.get('tools', [])) - set((current or {}).get('tools', [])):
         steps.append({"action": "enable_tool", "tool": tool})
 
     req_model = required.get('model')
@@ -259,6 +190,6 @@ def _generate_steps(required: Dict, current: Dict,
         steps.append({"action": "attach", "file": fp})
 
     if message:
-        steps.append({"action": "send", "message": message[:100] + "..." if len(message) > 100 else message})
-
+        steps.append({"action": "send",
+                       "message": message[:100] + "..." if len(message) > 100 else message})
     return steps

@@ -25,11 +25,6 @@ capabilities:
     - Use style
     - Connectors
 
-# Required identity files for fresh sessions (phi 0.962 direct vs 0.8 retrieval-mediated)
-required_attachments:
-  - ~/data/corpus/identity/FAMILY_KERNEL.md
-  - ~/data/corpus/identity/IDENTITY_GAIA.md
-
 # Click strategy: xdotool_first (xdotool coordinate clicks work reliably on Claude menus)
 click_strategy: xdotool_first
 
