@@ -78,10 +78,17 @@ def restart_firefox(platforms: list) -> bool:
     env = os.environ.copy()
     display = env.get('DISPLAY', ':1')
 
-    # Kill existing Firefox
-    subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
-    subprocess.run(['pkill', '-f', 'crashreporter'], capture_output=True)
-    time.sleep(2)
+    # Kill existing Firefox — wait until fully dead
+    subprocess.run(['pkill', '-9', '-f', 'firefox'], capture_output=True)
+    subprocess.run(['pkill', '-9', '-f', 'crashreporter'], capture_output=True)
+    for _ in range(10):
+        time.sleep(1)
+        result = subprocess.run(['pgrep', '-c', 'firefox'], capture_output=True, text=True)
+        if result.returncode != 0 or result.stdout.strip() == '0':
+            break
+    else:
+        logger.error("Firefox still alive after 10s of SIGKILL")
+    time.sleep(1)
 
     # Remove stale locks and session restore files (prevent old tab restoration)
     import glob as _glob
