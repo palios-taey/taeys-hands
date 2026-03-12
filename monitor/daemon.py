@@ -176,6 +176,18 @@ URL_PATTERNS = {
     'perplexity': 'perplexity.ai',
 }
 
+# Tab shortcuts for xdotool tab switching (worker nodes have 4 tabs, coordinators have 7)
+_WORKER_HOSTNAMES = {'jetson', 'thor'}
+_DEFAULT_TAB_SHORTCUTS = {
+    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3',
+    'grok': 'alt+4', 'perplexity': 'alt+5', 'x_twitter': 'alt+6',
+}
+_WORKER_TAB_SHORTCUTS = {
+    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3', 'grok': 'alt+4',
+}
+_hostname = socket.gethostname().lower()
+TAB_SHORTCUTS = _WORKER_TAB_SHORTCUTS if _hostname in _WORKER_HOSTNAMES else _DEFAULT_TAB_SHORTCUTS
+
 
 # =========================================================================
 # Monitor daemon
@@ -388,7 +400,6 @@ class MonitorDaemon:
         process still holds stale objects. The only way to force Firefox to
         process queued DOM mutations is to make the tab active.
         """
-        from core.platforms import TAB_SHORTCUTS
         shortcut = TAB_SHORTCUTS.get(self.platform)
         if not shortcut:
             return
@@ -611,7 +622,19 @@ class MonitorDaemon:
         return False
 
     def _on_poll_check(self) -> bool:
-        """Periodic check for response completion."""
+        """Periodic check for response completion.
+
+        MUST NOT raise — GLib removes the timeout callback on unhandled exception.
+        All errors are caught and logged; polling continues until timeout/completion.
+        """
+        try:
+            return self._poll_check_inner()
+        except Exception as e:
+            self._log(f"ERROR in poll check (continuing): {e}")
+            return True  # Keep polling
+
+    def _poll_check_inner(self) -> bool:
+        """Inner poll check (may raise — wrapped by _on_poll_check)."""
         elapsed = time.time() - self.start_time
 
         # Timeout
