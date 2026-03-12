@@ -159,10 +159,8 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
                 continue
             if hist_name_contains and any(p in name_lower for p in hist_name_contains):
                 continue
-            if name and role in ('link', 'push button', 'toggle button'):
-                e['NEW'] = True
-                result.append(e)
-                new_elements.append(e)
+            # Unknown sidebar items are conversation history — exclude them.
+            # Only sidebar_nav matches (above) pass through.
             continue
 
         # Not matched - noise or NEW?
