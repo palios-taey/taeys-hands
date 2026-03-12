@@ -126,7 +126,10 @@ def focus_firefox(timeout: int = 5) -> bool:
         if result.returncode != 0 or not result.stdout.strip():
             return False
 
-        window_id = result.stdout.strip().split('\n')[0]
+        # Use LAST window ID — mutter-x11-frames creates a decorator window
+        # with the same title that appears first. The actual Firefox window
+        # is always the last in the list.
+        window_id = result.stdout.strip().split('\n')[-1]
         subprocess.run(
             ['xdotool', 'windowactivate', window_id],
             env=_get_env(), capture_output=True, timeout=timeout,

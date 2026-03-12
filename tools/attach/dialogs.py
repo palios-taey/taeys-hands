@@ -107,21 +107,46 @@ def close_stale_file_dialogs():
     # no page title). Real browser windows have titles like
     # 'ChatGPT - Mozilla Firefox'. These zombies are leftover from failed
     # file dialog handling — they prevent new dialogs from opening.
+    # NOTE: Firefox creates a helper/IPC window named exactly 'Firefox'
+    # that is part of the running process — skip windows owned by Firefox PIDs.
     try:
         result = subprocess.run(
             ['xdotool', 'search', '--name', '^Firefox$'],
             capture_output=True, text=True, timeout=2, env=_xenv(),
         )
         if result.stdout.strip():
-            # Get the main Firefox window to avoid closing it
+            # Get Firefox PIDs to skip their helper windows
+            firefox_pids = set()
             main_result = subprocess.run(
                 ['xdotool', 'search', '--name', 'Mozilla Firefox'],
                 capture_output=True, text=True, timeout=2, env=_xenv(),
             )
-            main_wids = set(main_result.stdout.strip().split('\n')) if main_result.stdout.strip() else set()
+            main_wids = set()
+            if main_result.stdout.strip():
+                for mwid in main_result.stdout.strip().split('\n'):
+                    main_wids.add(mwid)
+                    try:
+                        pid_r = subprocess.run(
+                            ['xdotool', 'getwindowpid', mwid],
+                            capture_output=True, text=True, timeout=2, env=_xenv(),
+                        )
+                        if pid_r.stdout.strip():
+                            firefox_pids.add(pid_r.stdout.strip())
+                    except Exception:
+                        pass
 
             for wid in result.stdout.strip().split('\n'):
                 if wid and wid not in main_wids:
+                    # Check if this window belongs to a running Firefox
+                    try:
+                        pid_r = subprocess.run(
+                            ['xdotool', 'getwindowpid', wid],
+                            capture_output=True, text=True, timeout=2, env=_xenv(),
+                        )
+                        if pid_r.stdout.strip() in firefox_pids:
+                            continue  # Skip — Firefox helper window, not zombie
+                    except Exception:
+                        pass
                     subprocess.run(
                         ['xdotool', 'windowclose', wid],
                         capture_output=True, timeout=3, env=_xenv(),
