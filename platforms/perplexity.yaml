@@ -80,13 +80,94 @@ mode_guidance:
     how: "Default - no tool selection needed"
     timeout: 3600
 
-# Noise elements to exclude from inspect output
-inspect_noise:
-  exclude_name_contains:
-    - "Upgrade to Pro"         # Upsell links
+# ─── Element Filtering ───────────────────────────────────────────────
+element_filter:
+  exclude:
+    names:
+      - "User avatar"               # profile image
+    name_contains:
+      - "Upgrade to Pro"
+      - ", open profile menu"
+      - "User avatar Jesse"          # profile button
+    roles:
+      - separator
+      - document web
 
-element_hints:
-  input_role: textbox
-  send_role: push button
-  send_name_pattern: submit
-  copy_name_pattern: copy
+  sidebar_history:
+    x_max: 400
+    history_roles: [list item, link]
+    # Perplexity thread entries are sections with "More options" in text
+    history_text_contains: ["More options"]
+
+element_map:
+  input:
+    role: entry
+    states_include: [editable]
+  attach_trigger:
+    name: "Add files or tools"
+    role: push button
+  model_selector:
+    name: "Model"
+    role: push button
+  copy_button:
+    name: "Copy"
+    role: push button
+  copy_code:
+    name: "Copy code"
+    role: push button
+  stop_button:
+    name_contains: "Stop"
+    role_contains: button
+  submit_button:
+    name: "Submit"
+    role: push button
+  share_button:
+    name: "Share"
+    role: push button
+  download_button:
+    name: "Download"
+    role: push button
+  rewrite_thread:
+    name: "Rewrite Thread"
+    role: push button
+  helpful:
+    name: "Helpful"
+    role: push button
+  not_helpful:
+    name: "Not helpful"
+    role: push button
+  more_actions:
+    name: "More actions"
+    role: push button
+  thread_actions:
+    name: "Thread actions"
+    role: push button
+  dictation:
+    name: "Dictation"
+    role: push button
+  # Answer mode tabs
+  answer_tab:
+    name: "Answer"
+    role: page tab
+  links_tab:
+    name: "Links"
+    role: page tab
+  images_tab:
+    name: "Images"
+    role: page tab
+  notifications:
+    name: "Notifications"
+    role: push button
+
+sidebar_nav:
+  - { name: "Search", role: link }
+  - { name: "Computer", role: link }
+  - { name: "New Thread", role: push button }
+  - { name: "History", role: link }
+  - { name: "Discover", role: link }
+  - { name: "Spaces", role: link }
+  - { name: "Finance", role: link }
+  - { name: "More", role: push button }
+  - { name: "Recent", role: link }
+  - { name: "Collapse", role: push button }
+  - { name: "View All", role: link }

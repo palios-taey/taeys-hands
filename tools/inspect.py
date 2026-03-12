@@ -25,11 +25,12 @@ Structure change detection:
 - Stable across normal content changes (new messages, different text)
 """
 
+import fnmatch
 import json
 import os
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
@@ -121,59 +122,180 @@ def _detect_attachments(elements: list, all_elements: list = None) -> dict | Non
     return result
 
 
-def _reduce_noise(elements: list) -> list:
-    """Reduce element list to save context tokens.
+def _match_element(element: dict, criteria: dict) -> bool:
+    """Check if element matches all criteria in a dict.
 
-    Filters KNOWN noise patterns while keeping everything unknown.
-    New platform features (buttons, controls, options) always surface.
-
-    What's filtered:
-    - Old copy buttons: only last 3 kept (highest Y = most recent)
-    - Conversation history links: links with names > 50 chars
-      (sidebar titles, in-response URLs). Short links (nav, controls,
-      new features) always pass through.
-    - Unnamed structural containers: sections/landmarks/groups/forms
-      without names, text, or important states — just wrapper divs.
+    Criteria keys (all optional, all must match if specified):
+      name: exact match (case-insensitive)
+      name_contains: substring(s) (case-insensitive), str or list
+      name_pattern: glob pattern(s) with * (case-insensitive), str or list
+      role: exact role match
+      role_contains: substring in role
+      states_include: all specified states must be present
     """
-    _MAX_LINK_NAME = 50
-    _CONTAINER_ROLES = {'section', 'landmark', 'form', 'group'}
+    name = (element.get('name') or '').strip()
+    name_lower = name.lower()
+    role = element.get('role', '')
+    states = set(s.lower() for s in element.get('states', []))
+
+    if 'name' in criteria:
+        if name_lower != str(criteria['name']).lower():
+            return False
+
+    if 'name_contains' in criteria:
+        patterns = criteria['name_contains']
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not any(str(p).lower() in name_lower for p in patterns):
+            return False
+
+    if 'name_pattern' in criteria:
+        patterns = criteria['name_pattern']
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not any(fnmatch.fnmatch(name_lower, str(p).lower()) for p in patterns):
+            return False
+
+    if 'role' in criteria:
+        if role != criteria['role']:
+            return False
+
+    if 'role_contains' in criteria:
+        if str(criteria['role_contains']) not in role:
+            return False
+
+    if 'states_include' in criteria:
+        required = set(s.lower() for s in criteria['states_include'])
+        if not required.issubset(states):
+            return False
+
+    return True
+
+
+def _apply_element_filter(elements: list, platform_config: dict) -> Tuple[list, list]:
+    """Apply YAML-driven element filtering.
+
+    Two-section approach:
+      1. exclude → known noise, always dropped
+      2. element_map → known controls, labeled with semantic name
+    Sidebar chat history is excluded via sidebar_history pattern.
+    Sidebar nav items pass through (whitelisted).
+    Anything not matching exclude, element_map, or sidebar_nav → flagged as NEW.
+
+    Returns (filtered_elements, new_elements).
+    """
+    ef = platform_config.get('element_filter', {})
+    emap = platform_config.get('element_map', {})
+    snav = platform_config.get('sidebar_nav', [])
+
+    exclude = ef.get('exclude', {})
+    sidebar_hist = ef.get('sidebar_history', {})
+
+    # Build exclude sets
+    excl_names = set(n.lower() for n in exclude.get('names', []))
+    excl_name_contains = [str(p).lower() for p in exclude.get('name_contains', [])]
+    excl_roles = set(exclude.get('roles', []))
+
+    # Sidebar history config
+    hist_x_max = sidebar_hist.get('x_max', 400)
+    hist_roles = set(sidebar_hist.get('history_roles', []))
+    hist_text_contains = [str(p).lower() for p in sidebar_hist.get('history_text_contains', [])]
+    hist_name_contains = [str(p).lower() for p in sidebar_hist.get('history_name_contains', [])]
+
     _IMPORTANT_STATES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
 
-    drop_idxs = set()
+    result = []
+    new_elements = []
 
-    # --- 1. Cap copy buttons to last 3 (by Y, highest = most recent) ---
+    for e in elements:
+        name = (e.get('name') or '').strip()
+        name_lower = name.lower()
+        role = e.get('role', '')
+        x = e.get('x', 0)
+        text = (e.get('text') or '').lower()
+        states = set(s.lower() for s in e.get('states', []))
+
+        # --- 1. Exclude check (name OR text) ---
+        if role in excl_roles:
+            continue
+        if name_lower in excl_names:
+            continue
+        if any(p in name_lower for p in excl_name_contains):
+            continue
+        # Also check text field — unnamed wrapper sections echo excluded names
+        if not name and text and any(p in text for p in excl_name_contains):
+            continue
+
+        # --- 2. Element map check (runs first — known controls always labeled) ---
+        matched_semantic = None
+        for semantic_name, criteria in emap.items():
+            if isinstance(criteria, dict) and _match_element(e, criteria):
+                matched_semantic = semantic_name
+                break
+        if matched_semantic:
+            e['semantic'] = matched_semantic
+            result.append(e)
+            continue
+
+        # --- 3. Sidebar: nav whitelist first, then history exclusion ---
+        in_sidebar = x < hist_x_max
+        if in_sidebar:
+            # Nav whitelist — known sidebar controls pass through
+            if name:
+                matched_nav = False
+                for nav_item in snav:
+                    if _match_element(e, nav_item):
+                        matched_nav = True
+                        break
+                if matched_nav:
+                    e['semantic'] = 'sidebar_nav'
+                    result.append(e)
+                    continue
+
+            # History exclusion — everything else in sidebar is chat history
+            if role in hist_roles:
+                continue
+            if hist_text_contains and any(p in text for p in hist_text_contains):
+                continue
+            if hist_name_contains and any(p in name_lower for p in hist_name_contains):
+                continue
+
+            # Named link/button NOT in nav → likely a feature or project
+            if name and role in ('link', 'push button', 'toggle button'):
+                e['NEW'] = True
+                result.append(e)
+                new_elements.append(e)
+                continue
+            # Other sidebar elements → skip
+            continue
+
+        # --- 5. Not matched → noise or NEW? ---
+        # Unnamed elements without important states → structural noise (React wrappers)
+        # Text alone doesn't qualify — wrapper divs echo their children's names
+        if not name and not (states & _IMPORTANT_STATES):
+            continue
+
+        # Named headings in main content area are likely response content → skip
+        if role == 'heading' and not in_sidebar:
+            continue
+
+        # Everything else → flag as NEW
+        e['NEW'] = True
+        result.append(e)
+        new_elements.append(e)
+
+    # Cap copy buttons to last 3 (by Y, highest = most recent)
     copy_idxs = []
-    for i, e in enumerate(elements):
-        if ('button' in e.get('role', '')
-                and 'copy' in (e.get('name') or '').lower()):
+    for i, e in enumerate(result):
+        sem = e.get('semantic', '')
+        if 'copy' in sem:
             copy_idxs.append((e.get('y', 0), i))
     if len(copy_idxs) > 3:
         copy_idxs.sort(key=lambda t: t[0])
-        for _y, idx in copy_idxs[:-3]:
-            drop_idxs.add(idx)
+        drop = set(idx for _y, idx in copy_idxs[:-3])
+        result = [e for i, e in enumerate(result) if i not in drop]
 
-    # --- 2. Filter long-named links (conversation history / in-message URLs) ---
-    # Short links (<50 chars) are always kept — navigation, controls, new features.
-    for i, e in enumerate(elements):
-        if e.get('role') == 'link' and len(e.get('name', '')) > _MAX_LINK_NAME:
-            drop_idxs.add(i)
-
-    # --- 3. Filter unnamed structural containers ---
-    # Wrapper divs with no name, no extracted text, no important states.
-    # Named containers and those with states (editable, checked, etc.) survive.
-    for i, e in enumerate(elements):
-        role = e.get('role', '')
-        if (role in _CONTAINER_ROLES
-                and not (e.get('name') or '').strip()
-                and not e.get('text')
-                and not (set(s.lower() for s in e.get('states', []))
-                         & _IMPORTANT_STATES)):
-            drop_idxs.add(i)
-
-    if not drop_idxs:
-        return elements
-
-    return [e for i, e in enumerate(elements) if i not in drop_idxs]
+    return result, new_elements
 
 
 def _check_structure_change(platform: str, elements: list,
@@ -400,60 +522,31 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         if len(name) > MAX_NAME_LEN:
             e['name'] = name[:MAX_NAME_LEN] + '...'
 
-    # Platform-specific noise filtering (configured in platforms/*.yaml)
-    # Removes sidebar/footer elements that are never actionable (e.g. X/Twitter
-    # trending topics, relevant people, footer links).
+    # YAML-driven element filtering: exclude noise, label known elements,
+    # flag NEW elements for investigation. Replaces old inspect_noise + _reduce_noise.
     try:
         yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
         with open(yaml_path) as _f:
             _pcfg = yaml.safe_load(_f) or {}
+    except Exception:
+        _pcfg = {}
+
+    pre_filter = len(elements_json)
+    if _pcfg.get('element_filter') or _pcfg.get('element_map'):
+        elements_json, new_elements = _apply_element_filter(elements_json, _pcfg)
+        noise_removed = pre_filter - len(elements_json)
+        if new_elements:
+            result['new_elements'] = [{'name': e.get('name', ''), 'role': e.get('role', ''),
+                                       'x': e.get('x'), 'y': e.get('y')}
+                                      for e in new_elements]
+    else:
+        # Fallback: legacy inspect_noise filtering for platforms without new format
         noise = _pcfg.get('inspect_noise', {})
         if noise:
-            _excl_roles = set(noise.get('exclude_roles', []))
-            _excl_names = set(noise.get('exclude_names', []))
             _excl_contains = noise.get('exclude_name_contains', [])
-            def _is_noise(e):
-                if e.get('role', '') in _excl_roles:
-                    return True
-                n = e.get('name', '')
-                if n in _excl_names:
-                    return True
-                return any(pat in n for pat in _excl_contains)
-            elements_json = [e for e in elements_json if not _is_noise(e)]
-
-            # cutoff_below_editable: drop elements below the reply/compose
-            # textbox. Keeps the textbox itself + buttons/controls near it,
-            # drops thread replies and suggested content below.
-            if noise.get('cutoff_below_editable'):
-                _KEEP_ROLES = {'push button', 'toggle button', 'menu item',
-                                'check menu item', 'radio menu item', 'link',
-                                'textbox', 'entry'}
-                # Find the first editable textbox (reply compose field)
-                _cutoff_y = None
-                for e in elements_json:
-                    if (e.get('role') == 'textbox'
-                            and 'editable' in [s.lower() for s in
-                                                e.get('states', [])]):
-                        # Cutoff = textbox Y + generous margin for buttons
-                        _cutoff_y = e.get('y', 0) + 80
-                        break
-                if _cutoff_y is not None:
-                    elements_json = [
-                        e for e in elements_json
-                        if e.get('y', 0) <= _cutoff_y
-                        or e.get('role', '') in _KEEP_ROLES
-                    ]
-    except Exception:
-        pass  # YAML missing or malformed — proceed without noise filter
-
-    # General noise reduction — filter known-noise patterns, keep everything unknown.
-    # New platform features (buttons, controls, options) always surface.
-    pre_noise = len(elements_json)
-    elements_json = _reduce_noise(elements_json)
-    noise_removed = pre_noise - len(elements_json)
-    if noise_removed:
-        logger.info(f"Noise reduction: {pre_noise} -> {len(elements_json)} "
-                     f"(-{noise_removed} elements)")
+            elements_json = [e for e in elements_json
+                             if not any(pat in e.get('name', '') for pat in _excl_contains)]
+        noise_removed = pre_filter - len(elements_json)
 
     copy_buttons = find_copy_buttons(all_elements)
     result['state']['copy_button_count'] = len(copy_buttons)

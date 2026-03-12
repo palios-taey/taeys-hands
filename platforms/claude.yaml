@@ -64,14 +64,62 @@ mode_guidance:
     how: "Default model without Extended thinking"
     timeout: 1800
 
-# Noise elements to exclude from inspect output
-inspect_noise:
-  exclude_name_contains:
-    - "Upgrade to"             # Upsell links
-    - "Project, "              # Sidebar project items (always "Project, <name>")
+# ─── Element Filtering ───────────────────────────────────────────────
+element_filter:
+  exclude:
+    names:
+      - "Close sidebar"
+      - "Claude"                     # logo image + document web root
+      - "Profile image"
+    name_contains:
+      - "Upgrade to"
+      - ", Settings"                 # "Jesse LaRose, Settings" button
+      - "Get apps and extensions"
+    roles:
+      - separator
+      - document web
+      - paragraph                    # ProseMirror paragraph wrappers
 
-element_hints:
-  input_role: textbox
-  send_role: push button
-  send_name_pattern: send
-  copy_name_pattern: copy
+  sidebar_history:
+    x_max: 400
+    history_roles: [list item, link]
+    # Starred projects also excluded — sections with "Project, " prefix
+    history_name_contains: ["Project, "]
+
+element_map:
+  input:
+    name: "Write your prompt to Claude"
+    role: entry
+    states_include: [editable]
+  toggle_menu:
+    name: "Toggle menu"
+    role: push button
+  model_selector:
+    name_pattern: "* Extended"
+    role: push button
+    # Also matches: "Opus 4.6 Extended", "Sonnet 4.6", etc.
+  copy_button:
+    name_contains: "Copy"
+    role_contains: button
+  stop_button:
+    name_contains: "Stop"
+    role_contains: button
+  # Prompt category tabs (main content area, not sidebar)
+  prompt_categories:
+    name: "Prompt categories"
+    role: page tab list
+  prompt_tab:
+    name_contains: ["Write", "Learn", "Code", "Life stuff", "From Drive"]
+    role: page tab
+
+sidebar_nav:
+  - { name: "Home", role: link }
+  - { name: "New chat", role: link }
+  - { name: "Search", role: link }
+  - { name: "Customize", role: link }
+  - { name: "Chats", role: link }
+  - { name: "Projects", role: link }
+  - { name: "Artifacts", role: link }
+  - { name: "Code", role: link }
+  - { name: "Starred", role: heading }
+  - { name_pattern: "Recents*", role: push button }

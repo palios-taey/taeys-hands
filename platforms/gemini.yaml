@@ -66,16 +66,74 @@ mode_guidance:
     how: "Click 'Open mode picker', select 'Fast' radio item"
     timeout: 1800
 
-# Noise elements to exclude from inspect output
-# Gemini sidebar items can have very long names (pasted content as titles)
-# — already truncated at 200 chars by inspect.py, long links caught by _reduce_noise
-inspect_noise:
-  exclude_name_contains:
-    - "Gemini Apps Activity"   # Settings/privacy links
-    - "Manage extensions"      # Extension management
+# ─── Element Filtering ───────────────────────────────────────────────
+element_filter:
+  exclude:
+    names:
+      - "Gemini"                     # document web root
+    name_contains:
+      - "Gemini Apps Activity"
+      - "Manage extensions"
+    roles:
+      - separator
+      - document web
 
-element_hints:
-  input_role: textbox
-  send_role: push button
-  send_name_pattern: send
-  copy_name_pattern: copy
+  sidebar_history:
+    x_max: 400
+    history_roles: [list item, link]
+    # Gemini sidebar is usually closed. When open, conversation titles
+    # appear as links with long names (pasted content). These are
+    # already truncated at 200 chars by inspect.py.
+
+element_map:
+  input:
+    role: entry
+    states_include: [editable]
+    # Gemini also uses contenteditable sections — match either
+  input_alt:
+    role_contains: section
+    states_include: [editable, focusable, multi-line]
+  mode_picker:
+    name: "Open mode picker"
+    role: push button
+  tools_button:
+    name: "Tools"
+    role: push button
+  upload_menu:
+    name: "Open upload file menu"
+    role: push button
+  copy_button:
+    name_contains: "Copy"
+    role_contains: button
+  stop_button:
+    name_contains: ["Stop", "Cancel"]
+    role_contains: button
+  send_button:
+    name: "Send message"
+    role: push button
+  share_export:
+    name_contains: "Share & export"
+    role_contains: button
+  start_research:
+    name: "Start research"
+    role: push button
+  # Menu items (visible when dropdown is open)
+  upload_files_item:
+    name_pattern: "Upload files*"
+    role: menu item
+  add_from_drive_item:
+    name_pattern: "Add from Drive*"
+    role: menu item
+  import_code_item:
+    name: "Import code"
+    role: menu item
+  notebooklm_item:
+    name: "NotebookLM"
+    role: menu item
+
+sidebar_nav:
+  # Gemini sidebar is typically closed. When open:
+  - { name: "New chat", role: link }
+  - { name: "Show chat history", role: push button }
+  - { name: "Settings", role: link }
+  - { name: "Help & FAQ", role: link }
