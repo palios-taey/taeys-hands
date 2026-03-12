@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""
-Background Monitor Daemon for Taey's Hands.
-
-Monitors chat platform responses using AT-SPI events.
-Runs as an independent subprocess, spawned by send_message.
-
-Usage:
-    python3 monitor/daemon.py --platform gemini --monitor-id abc123 \
-        --baseline-copy-count 5 --session-id uuid --user-message-id uuid
-
-Detection strategy:
-    Stop button appears = AI generating (GENERATING state)
-    Stop button disappears = response complete (COMPLETE state)
-    This is more reliable than copy button counting (scroll-dependent).
-"""
+"""Background monitor daemon — detects response completion via AT-SPI stop button polling."""
 
 import argparse
 import json
@@ -23,81 +9,9 @@ import subprocess
 import sys
 import time
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
-# Instance-scoped key prefix (must match storage/redis_pool.py logic)
-def _find_ancestor_tty() -> str:
-    """Walk up process tree to find nearest ancestor with a real TTY."""
-    pid = os.getpid()
-    for _ in range(10):
-        try:
-            with open(f'/proc/{pid}/stat') as f:
-                stat = f.read()
-            # Parse ppid after closing ')' — comm field can contain spaces
-            after_comm = stat[stat.rfind(')') + 2:]
-            pid = int(after_comm.split()[1])
-            if pid <= 1:
-                break
-            fd0 = os.readlink(f'/proc/{pid}/fd/0')
-            if fd0.startswith('/dev/pts/') or fd0.startswith('/dev/tty'):
-                return fd0
-        except Exception:
-            break
-    return ''
-
-
-def _detect_node_id() -> str:
-    """Auto-detect instance ID: TAEY_NODE_ID > ancestor TTY tmux session > hostname.
-
-    Must match storage/redis_pool.py and hooks/config.py detection logic.
-    Walks up process tree to find real TTY (immediate parent may have
-    /dev/null or piped stdin).
-    """
-    explicit = os.environ.get('TAEY_NODE_ID')
-    if explicit:
-        return explicit
-    try:
-        ancestor_tty = _find_ancestor_tty()
-        if ancestor_tty:
-            result = subprocess.run(
-                ['tmux', 'list-panes', '-a', '-F', '#{pane_tty} #{session_name}'],
-                capture_output=True, text=True, timeout=2,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().splitlines():
-                    parts = line.split(' ', 1)
-                    if len(parts) == 2 and parts[0] == ancestor_tty:
-                        return parts[1]
-    except Exception:
-        pass
-    # Fallback: display-message (non-deterministic, last resort)
-    try:
-        result = subprocess.run(
-            ['tmux', 'display-message', '-p', '#S'],
-            capture_output=True, text=True, timeout=2,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return socket.gethostname()
-
-_NODE_ID = _detect_node_id()
-
-# Overridden by --tmux-session in main() to match the spawning MCP server's
-# node_id. The auto-detect above is unreliable for background daemon processes
-# because tmux display-message returns whichever session was most recently
-# active, not the one that spawned this daemon.
-_EFFECTIVE_NODE_ID = _NODE_ID
-
-
-def _node_key(suffix: str) -> str:
-    """Instance-scoped Redis key (matches storage.redis_pool.node_key)."""
-    return f"taey:{_EFFECTIVE_NODE_ID}:{suffix}"
-
-# =========================================================================
-# Load .env (daemon runs as subprocess, doesn't inherit server's env loading)
-# =========================================================================
+# .env loading (daemon runs as subprocess, doesn't inherit server's env)
 _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
@@ -107,76 +21,47 @@ if os.path.exists(_env_path):
                 _key, _val = _line.split('=', 1)
                 os.environ.setdefault(_key.strip(), _val.strip())
 
-# =========================================================================
-# Set DISPLAY before AT-SPI import
-# =========================================================================
-
-
+# DISPLAY detection
 def _detect_display() -> str:
-    """Detect active X display.
-
-    Checks DISPLAY env var first (set by spawner for multi-instance isolation),
-    then falls back to lock file detection.
-    """
-    env_display = os.environ.get('DISPLAY')
-    if env_display:
-        return env_display
+    env = os.environ.get('DISPLAY')
+    if env:
+        return env
     for d in [':0', ':1']:
-        if os.path.exists(f'/tmp/.X{d[1:]}-lock'):
-            return d
-    for d in [':0', ':1']:
-        if os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
+        if os.path.exists(f'/tmp/.X{d[1:]}-lock') or os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
             return d
     return ':0'
 
+DISPLAY = _detect_display()
+os.environ['DISPLAY'] = DISPLAY
 
-if sys.platform != 'darwin':
-    DISPLAY = _detect_display()
-    os.environ['DISPLAY'] = DISPLAY
+import gi
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi, GLib
 
-    import gi
-    gi.require_version('Atspi', '2.0')
-    from gi.repository import Atspi, GLib
-else:
-    DISPLAY = None
-    Atspi = None
-    GLib = None
-
-# Optional dependencies
+# Redis (optional)
 try:
     import redis
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
 
-try:
-    from neo4j import GraphDatabase
-    NEO4J_AVAILABLE = True
-except ImportError:
-    NEO4J_AVAILABLE = False
+# Node ID: --tmux-session overrides auto-detect
+_NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
+_EFFECTIVE_NODE_ID = _NODE_ID
 
+def _node_key(suffix: str) -> str:
+    return f"taey:{_EFFECTIVE_NODE_ID}:{suffix}"
 
-# =========================================================================
 # Platform patterns
-# =========================================================================
-
 STOP_PATTERNS = {
-    'chatgpt': ['stop', 'stop generating'],
-    'claude': ['stop', 'stop response'],
-    'gemini': ['stop', 'cancel'],
-    'grok': ['stop', 'stop generating'],
+    'chatgpt': ['stop', 'stop generating'], 'claude': ['stop', 'stop response'],
+    'gemini': ['stop', 'cancel'], 'grok': ['stop', 'stop generating'],
     'perplexity': ['stop', 'cancel'],
 }
-
 URL_PATTERNS = {
-    'chatgpt': 'chatgpt.com',
-    'claude': 'claude.ai',
-    'gemini': 'gemini.google.com',
-    'grok': 'grok.com',
-    'perplexity': 'perplexity.ai',
+    'chatgpt': 'chatgpt.com', 'claude': 'claude.ai', 'gemini': 'gemini.google.com',
+    'grok': 'grok.com', 'perplexity': 'perplexity.ai',
 }
-
-# Tab shortcuts for xdotool tab switching (worker nodes have 4 tabs, coordinators have 7)
 _WORKER_HOSTNAMES = {'jetson', 'thor'}
 _DEFAULT_TAB_SHORTCUTS = {
     'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3',
@@ -185,109 +70,57 @@ _DEFAULT_TAB_SHORTCUTS = {
 _WORKER_TAB_SHORTCUTS = {
     'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3', 'grok': 'alt+4',
 }
-_hostname = socket.gethostname().lower()
-TAB_SHORTCUTS = _WORKER_TAB_SHORTCUTS if _hostname in _WORKER_HOSTNAMES else _DEFAULT_TAB_SHORTCUTS
+TAB_SHORTCUTS = (_WORKER_TAB_SHORTCUTS if socket.gethostname().lower() in _WORKER_HOSTNAMES
+                 else _DEFAULT_TAB_SHORTCUTS)
 
-
-# =========================================================================
-# Monitor daemon
-# =========================================================================
 
 class MonitorDaemon:
-    """Event-driven AT-SPI monitor for chat platform responses.
+    """Stop button + copy count monitor. States: IDLE → GENERATING → COMPLETE."""
 
-    State machine:
-        IDLE -> GENERATING (stop button appears)
-        GENERATING -> SETTLING (stop disappears, settle > 0, cycle 1)
-        SETTLING -> GENERATING (new stop button appears during settle)
-        SETTLING -> COMPLETE (settle expires, no new stop button)
-        GENERATING -> COMPLETE (stop disappears, final cycle or settle == 0)
-    """
-
-    def __init__(self, platform: str, monitor_id: str,
-                 baseline_copy_count: int,
-                 session_id: Optional[str] = None,
-                 user_message_id: Optional[str] = None,
-                 timeout_seconds: int = 3600,
-                 tmux_session: Optional[str] = None,
-                 settle_seconds: int = 0):
+    def __init__(self, platform, monitor_id, baseline_copy_count,
+                 session_id=None, user_message_id=None,
+                 timeout_seconds=3600, tmux_session=None):
         self.platform = platform.lower()
         self.monitor_id = monitor_id
         self.baseline_copy_count = baseline_copy_count
         self.session_id = session_id
-        self.user_message_id = user_message_id
         self.timeout_seconds = timeout_seconds
-        self.tmux_session = tmux_session
-        self.settle_seconds = settle_seconds
 
         self.state = "IDLE"
         self.start_time = time.time()
         self.stop_button_seen = False
-        self.cycle_count = 0
-        self.settle_start = None
-
-        self.poll_interval_ms = 3000
-        self.initial_delay_ms = 3000  # Reduced from 10s - fast responses missed at 10s
-        self.no_stop_warning_seconds = 45  # Increased to account for slower initial load
         self.no_stop_warned = False
         self.verbose_logged = False
-
         self.generating_since = None
         self.last_tab_refresh = None
-        self._TAB_REFRESH_INTERVAL = 30  # seconds between tab switches
-        self._TAB_REFRESH_DELAY = 30     # seconds in GENERATING before first switch
 
-        self.main_loop = GLib.MainLoop() if GLib else None
-
-        # Connect services
         self.redis_client = self._connect_redis()
-        self.neo4j_driver = self._connect_neo4j()
         self.firefox_app = self._find_firefox()
+        self.main_loop = GLib.MainLoop()
 
         if not self.firefox_app:
             self._log("ERROR: Firefox not found in AT-SPI tree")
             sys.exit(1)
-
         self._log(f"Initialized for {platform}, baseline={baseline_copy_count}")
 
-    def _log(self, message: str):
-        """Log with timestamp."""
+    def _log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[{ts}] [{self.monitor_id}] {message}", flush=True)
+        print(f"[{ts}] [{self.monitor_id}] {msg}", flush=True)
 
     def _connect_redis(self):
-        """Connect to Redis for notifications."""
         if not REDIS_AVAILABLE:
             return None
         try:
-            client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
-                port=int(os.environ.get('REDIS_PORT', 6379)),
-                decode_responses=True,
-            )
-            client.ping()
-            self._log("Redis connected")
-            return client
+            c = redis.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                           port=int(os.environ.get('REDIS_PORT', 6379)),
+                           decode_responses=True)
+            c.ping()
+            return c
         except Exception as e:
-            self._log(f"Redis connection failed: {e}")
-            return None
-
-    def _connect_neo4j(self):
-        """Connect to Neo4j for message storage."""
-        if not NEO4J_AVAILABLE:
-            return None
-        try:
-            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
-            driver = GraphDatabase.driver(uri, auth=None)
-            driver.verify_connectivity()
-            self._log("Neo4j connected")
-            return driver
-        except Exception as e:
-            self._log(f"Neo4j connection failed: {e}")
+            self._log(f"Redis failed: {e}")
             return None
 
     def _find_firefox(self):
-        """Find Firefox in AT-SPI desktop tree."""
         desktop = Atspi.get_desktop(0)
         for i in range(desktop.get_child_count()):
             app = desktop.get_child_at_index(i)
@@ -296,11 +129,9 @@ class MonitorDaemon:
         return None
 
     def _find_platform_document(self):
-        """Find the document element for this platform's tab."""
         if not self.firefox_app:
             return None
-
-        url_pattern = URL_PATTERNS.get(self.platform, self.platform)
+        url_pat = URL_PATTERNS.get(self.platform, self.platform)
 
         def search(obj, depth=0):
             if depth > 10:
@@ -310,48 +141,26 @@ class MonitorDaemon:
                     iface = obj.get_document_iface()
                     if iface:
                         url = iface.get_document_attribute_value('DocURL')
-                        if url and url_pattern in url.lower():
+                        if url and url_pat in url.lower():
                             return obj
-
                 for i in range(obj.get_child_count()):
                     child = obj.get_child_at_index(i)
                     if child:
-                        result = search(child, depth + 1)
-                        if result:
-                            return result
+                        r = search(child, depth + 1)
+                        if r:
+                            return r
             except Exception:
                 pass
             return None
 
         return search(self.firefox_app)
 
-    def _force_dbus_refresh(self, platform_doc):
-        """Bypass the AT-SPI client cache to force fresh D-Bus calls to Firefox.
-
-        Firefox's NotificationController::WillRefresh() is throttled to ≤1 Hz
-        for background tabs. DOM mutations (e.g. stop button removal) are queued
-        but may not be flushed, leaving the AT-SPI tree stale.
-
-        gi.repository.Atspi caches accessible objects locally (child lists,
-        properties). Without cache clearing, get_child_count() and
-        get_child_at_index() return CACHED data that never reflects DOM changes.
-
-        clear_cache_single() clears the platform_doc's cached children list.
-        Subsequent get_child_at_index() calls then make real D-Bus round-trips
-        to Firefox's content process, which forces it to compute current state.
-
-        Research: Perplexity Deep Research 2026-03-04, gi.repository.Atspi
-        source: atspi_accessible_clear_cache_single() clears cached_properties
-        + children list, forcing cache miss on next access.
-        """
+    def _force_dbus_refresh(self, doc):
+        """Clear AT-SPI client cache to force fresh D-Bus calls."""
         try:
-            # Clear this object's child cache — forces fresh D-Bus calls below
-            platform_doc.clear_cache_single()
-            count = platform_doc.get_child_count()  # Now a real D-Bus call
-            # Fetch top-level children (fresh from Firefox content process)
-            for i in range(min(count, 5)):
-                child = platform_doc.get_child_at_index(i)
-                # Also clear children's caches for 2-level freshness
+            doc.clear_cache_single()
+            for i in range(min(doc.get_child_count(), 5)):
+                child = doc.get_child_at_index(i)
                 if child:
                     try:
                         child.clear_cache_single()
@@ -361,433 +170,200 @@ class MonitorDaemon:
             pass
 
     def _should_refresh_tab(self) -> bool:
-        """Check if it's safe and needed to switch to the platform tab.
-
-        Only refreshes when:
-        1. We're in GENERATING state (stop button was seen)
-        2. Enough time has passed since generation started (30s)
-        3. Enough time since last refresh (30s interval)
-        4. Node is idle (no active tool calls that tab switch would disrupt)
-        """
         if self.state != "GENERATING" or not self.generating_since:
             return False
         now = time.time()
-        gen_elapsed = now - self.generating_since
-        if gen_elapsed < self._TAB_REFRESH_DELAY:
+        if now - self.generating_since < 30:
             return False
-        if self.last_tab_refresh and (now - self.last_tab_refresh) < self._TAB_REFRESH_INTERVAL:
+        if self.last_tab_refresh and now - self.last_tab_refresh < 30:
             return False
-        # Only switch tabs when node is idle — don't disrupt active tool use
         if self.redis_client:
             try:
                 nid = _EFFECTIVE_NODE_ID
                 if self.redis_client.exists(f"taey:{nid}:tool_running"):
-                    return False  # tools active, don't switch
+                    return False
                 last_str = self.redis_client.get(f"taey:{nid}:last_tool_activity")
-                if last_str:
-                    idle_secs = now - float(last_str)
-                    if idle_secs < 15:
-                        return False  # recent activity, don't switch
+                if last_str and now - float(last_str) < 15:
+                    return False
             except Exception:
-                return False  # Redis down — play it safe, don't switch
+                return False
         return True
 
     def _refresh_tab(self):
-        """Switch to the platform's Firefox tab to force AT-SPI tree update.
-
-        Firefox does NOT update AT-SPI for inactive tabs. D-Bus cache flush
-        (clear_cache_single) only clears the CLIENT cache — Firefox's content
-        process still holds stale objects. The only way to force Firefox to
-        process queued DOM mutations is to make the tab active.
-        """
         shortcut = TAB_SHORTCUTS.get(self.platform)
         if not shortcut:
             return
         try:
-            display = os.environ.get('DISPLAY', ':0')
-            subprocess.run(
-                ['xdotool', 'key', '--clearmodifiers', shortcut],
-                env={**os.environ, 'DISPLAY': display},
-                capture_output=True, timeout=5,
-            )
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', shortcut],
+                          env={**os.environ, 'DISPLAY': DISPLAY},
+                          capture_output=True, timeout=5)
             self.last_tab_refresh = time.time()
-            self._log(f"Tab refresh: switched to {self.platform} ({shortcut})")
+            self._log(f"Tab refresh: {self.platform} ({shortcut})")
         except Exception as e:
             self._log(f"Tab refresh failed: {e}")
 
     def _is_stop_button(self, name: str) -> bool:
-        """Check if button name matches stop patterns.
-
-        Real stop buttons have short names like "Stop" or "Stop generating".
-        Content buttons (e.g. Perplexity Deep Research) can have 19K+ char
-        names containing "stop" as a regular word. Filter by length.
-        """
         if not name or len(name) > 50:
             return False
-        name_lower = name.lower().strip()
         patterns = STOP_PATTERNS.get(self.platform, ['stop'])
-        return any(p in name_lower for p in patterns)
+        return any(p in name.lower().strip() for p in patterns)
 
     def _is_canvas_stop(self, stop_obj) -> bool:
-        """Check if a stop button is ChatGPT's canvas stop (not generation stop).
-
-        Canvas has a persistent "Stop" + "Update" button pair. The generation
-        stop button is standalone. We detect canvas stop by checking if an
-        "Update" button exists at the same Y position (within 50px).
-        """
+        """Filter ChatGPT canvas Stop (persistent alongside Update button)."""
         try:
-            stop_comp = stop_obj.get_component_iface()
-            if not stop_comp:
+            comp = stop_obj.get_component_iface()
+            if not comp:
                 return False
-            stop_ext = stop_comp.get_extents(0)  # 0 = ATSPI_COORD_TYPE_SCREEN
-            stop_y = stop_ext.y
-
-            # Walk siblings looking for "Update" button at same Y
+            stop_y = comp.get_extents(0).y
             parent = stop_obj.get_parent()
             if not parent:
                 return False
-
-            for i in range(parent.get_child_count()):
-                try:
-                    sibling = parent.get_child_at_index(i)
-                    if not sibling:
-                        continue
-                    sib_role = sibling.get_role_name() or ''
-                    sib_name = (sibling.get_name() or '').lower()
-                    if sib_role in ('push button', 'button') and 'update' in sib_name:
-                        sib_comp = sibling.get_component_iface()
-                        if sib_comp:
-                            sib_ext = sib_comp.get_extents(0)
-                            if abs(sib_ext.y - stop_y) < 50:
-                                self._log(f"Canvas stop filtered: Stop@y={stop_y} near Update@y={sib_ext.y}")
-                                return True
-                except Exception:
+            for level in [parent, parent.get_parent()]:
+                if not level:
                     continue
-
-            # Also check grandparent (button groups may be wrapped)
-            grandparent = parent.get_parent()
-            if grandparent:
-                for i in range(grandparent.get_child_count()):
+                for i in range(level.get_child_count()):
                     try:
-                        uncle = grandparent.get_child_at_index(i)
-                        if not uncle:
+                        sib = level.get_child_at_index(i)
+                        if not sib:
                             continue
-                        # Check uncle's children for Update
-                        for j in range(uncle.get_child_count()):
-                            child = uncle.get_child_at_index(j)
-                            if not child:
+                        # Check direct children
+                        targets = [sib]
+                        if level == parent.get_parent():
+                            targets = [sib.get_child_at_index(j)
+                                       for j in range(sib.get_child_count())
+                                       if sib.get_child_at_index(j)]
+                        for t in targets:
+                            if not t:
                                 continue
-                            ch_role = child.get_role_name() or ''
-                            ch_name = (child.get_name() or '').lower()
-                            if ch_role in ('push button', 'button') and 'update' in ch_name:
-                                ch_comp = child.get_component_iface()
-                                if ch_comp:
-                                    ch_ext = ch_comp.get_extents(0)
-                                    if abs(ch_ext.y - stop_y) < 50:
-                                        self._log(f"Canvas stop filtered (grandparent): Stop@y={stop_y} near Update@y={ch_ext.y}")
-                                        return True
+                            if 'button' in (t.get_role_name() or '') and 'update' in (t.get_name() or '').lower():
+                                tc = t.get_component_iface()
+                                if tc and abs(tc.get_extents(0).y - stop_y) < 50:
+                                    return True
                     except Exception:
                         continue
-
-        except Exception as e:
-            self._log(f"Canvas stop check error: {e}")
-
+        except Exception:
+            pass
         return False
 
-    def _notify_tmux(self, platform: str):
-        """Send notification to the spawning Claude session via tmux send-keys.
-
-        Pattern:
-          1. Verify session exists
-          2. Escape (dismiss any modal/rating prompt that would consume Enter)
-          3. tmux send-keys -t SESSION -l "msg"   (literal text, -l flag)
-          4. sleep 0.5
-          5. tmux send-keys -t SESSION Enter       (legacy 0x0D)
-          6. tmux send-keys -t SESSION C-j         (0x0A fallback for Kitty protocol)
-
-        Claude Code uses Ink TUI with Kitty keyboard protocol (ESC[13u for Enter).
-        tmux send-keys Enter sends legacy 0x0D which may not submit in Kitty mode.
-        C-j sends 0x0A (line feed) which is the recommended universal fallback
-        per Perplexity Deep Research on Kitty protocol + tmux incompatibility.
-        Sending both Enter and C-j ensures at least one submits regardless of
-        Kitty protocol state.
-
-        The message arrives as user input to Claude Code. Redis piggybacking
-        is the backup notification channel.
-        """
-        if not self.tmux_session:
-            self._log("No --tmux-session set, skipping tmux notification")
-            return
-
-        session = self.tmux_session
-        msg = f"Response ready on {platform}. Extract with taey_quick_extract('{platform}')."
-
-        # Brief delay to let Claude Code finish any in-progress tool rendering
-        time.sleep(2)
-
-        try:
-            # Verify session exists
-            check = subprocess.run(
-                ['tmux', 'has-session', '-t', session],
-                capture_output=True, timeout=5,
-            )
-            if check.returncode != 0:
-                self._log(f"tmux session '{session}' not found, skipping notification")
-                return
-
-            # Dismiss any modal/rating prompt that would swallow the Enter
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'Escape'],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-
-            # Send literal text (-l flag for literal, same as tmux-send)
-            result = subprocess.run(
-                ['tmux', 'send-keys', '-t', session, '-l', msg],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                self._log(f"send-keys text failed: {result.stderr.strip()}")
-                return
-
-            time.sleep(0.5)
-
-            # Submit: Enter (legacy 0x0D) then C-j (0x0A Kitty fallback)
-            # One of these will submit depending on Kitty protocol state.
-            # If both fire, Claude Code ignores the empty second submission.
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'Enter'],
-                capture_output=True, text=True, timeout=5,
-            )
-            subprocess.run(
-                ['tmux', 'send-keys', '-t', session, 'C-j'],
-                capture_output=True, text=True, timeout=5,
-            )
-
-            self._log(f"tmux notification sent to session '{session}'")
-        except subprocess.TimeoutExpired:
-            self._log(f"tmux notification timed out for session '{session}'")
-        except Exception as e:
-            self._log(f"tmux notification failed for session '{session}': {e}")
-
-    def _notify_agent(self, status: str, message: str, extra: Dict = None):
-        """Write notification to Redis for agent injection."""
+    def _notify(self, status: str, message: str, extra: Dict = None):
+        """Write notification to Redis RPUSH."""
         notification = {
-            "monitor_id": self.monitor_id,
-            "platform": self.platform,
-            "node_id": _NODE_ID,
-            "status": status,
-            "message": message,
-            "timestamp": datetime.now().isoformat(),
-            "session_id": self.session_id,
+            "monitor_id": self.monitor_id, "platform": self.platform,
+            "node_id": _NODE_ID, "status": status, "message": message,
+            "timestamp": datetime.now().isoformat(), "session_id": self.session_id,
             "elapsed_seconds": int(time.time() - self.start_time),
         }
         if extra:
             notification.update(extra)
-
-        notification_json = json.dumps(notification)
-
+        nj = json.dumps(notification)
         if self.redis_client:
             try:
-                self.redis_client.rpush(_node_key("notifications"), notification_json)
-                self.redis_client.setex(
-                    _node_key(f"monitor:{self.monitor_id}"),
-                    3600,
-                    notification_json,
-                )
-                self._log(f"Notification sent: {status}")
+                self.redis_client.rpush(_node_key("notifications"), nj)
+                self.redis_client.setex(_node_key(f"monitor:{self.monitor_id}"), 3600, nj)
+                self._log(f"Notification: {status}")
             except Exception as e:
                 self._log(f"Redis notification error: {e}")
         else:
-            path = f"/tmp/taey_monitor_{self.monitor_id}.json"
             try:
-                with open(path, 'w') as f:
-                    json.dump(notification, f)
-                self._log(f"Notification written to {path}")
-            except Exception as e:
-                self._log(f"File notification failed: {e}")
-
-        # Delivery is handled by:
-        # - PostToolUse hook (drains Redis during active tool use)
-        # - notifications/daemon.py (injects via tmux when node is idle)
-        # Monitor does NOT do tmux directly — that caused double delivery.
+                with open(f"/tmp/taey_monitor_{self.monitor_id}.json", 'w') as f:
+                    f.write(nj)
+            except Exception:
+                pass
 
     def _on_first_poll(self) -> bool:
-        """First poll after initial delay."""
-        self._log("Initial delay complete, starting regular polling")
-        self._on_poll_check()
+        self._log("Initial delay done, polling")
+        self._on_poll()
         if self.state != "COMPLETE":
-            GLib.timeout_add(self.poll_interval_ms, self._on_poll_check)
+            GLib.timeout_add(3000, self._on_poll)
         return False
 
-    def _on_poll_check(self) -> bool:
-        """Periodic check for response completion.
-
-        MUST NOT raise — GLib removes the timeout callback on unhandled exception.
-        All errors are caught and logged; polling continues until timeout/completion.
-        """
+    def _on_poll(self) -> bool:
         try:
-            return self._poll_check_inner()
+            return self._poll_inner()
         except Exception as e:
-            self._log(f"ERROR in poll check (continuing): {e}")
-            return True  # Keep polling
+            self._log(f"Poll error (continuing): {e}")
+            return True
 
-    def _poll_check_inner(self) -> bool:
-        """Inner poll check (may raise — wrapped by _on_poll_check)."""
+    def _poll_inner(self) -> bool:
         elapsed = time.time() - self.start_time
-
-        # Timeout
         if elapsed > self.timeout_seconds:
             self._log(f"Timeout after {elapsed:.0f}s")
-            self._notify_agent("timeout", f"Timed out after {elapsed:.0f}s")
+            self._notify("timeout", f"Timed out after {elapsed:.0f}s")
             self.main_loop.quit()
             return False
 
-        # Early warning: no stop button detected
-        if (not self.stop_button_seen and not self.no_stop_warned
-                and elapsed > self.no_stop_warning_seconds):
-            self._log("WARNING: No stop button detected - possible submission error")
-            self._notify_agent(
-                "warning",
-                f"No stop button detected after {elapsed:.0f}s - message may not have been sent",
-                {"warning_type": "no_stop_button"},
-            )
+        if not self.stop_button_seen and not self.no_stop_warned and elapsed > 45:
+            self._notify("warning", f"No stop button after {elapsed:.0f}s",
+                        {"warning_type": "no_stop_button"})
             self.no_stop_warned = True
 
-        # Find platform document
-        platform_doc = self._find_platform_document()
-        if not platform_doc:
-            self._log("WARNING: Platform document not found, skipping poll")
+        doc = self._find_platform_document()
+        if not doc:
             return True
 
-        # Force D-Bus round-trips to flush Firefox's stale AT-SPI cache.
-        # Background tabs are throttled to ≤1 Hz refresh; DOM mutations may
-        # be queued but not yet propagated to AT-SPI. Iterating top-level
-        # children forces Firefox's content process to flush pending state
-        # without switching tabs.
-        self._force_dbus_refresh(platform_doc)
-
-        # Switch to platform tab if stuck in GENERATING and node is idle.
-        # Firefox does NOT update AT-SPI for inactive tabs — this is the
-        # only reliable way to detect response completion on background tabs.
+        self._force_dbus_refresh(doc)
         if self._should_refresh_tab():
             self._refresh_tab()
 
-        # Search for stop button and count copy buttons in document
-        all_buttons = []
-        stop_candidates = []
-        copy_button_count = 0
+        # Search for stop + copy buttons
+        stop_candidates, copy_count, all_btns = [], 0, []
 
-        def find_stops(obj, depth=0):
-            nonlocal copy_button_count
+        def scan(obj, depth=0):
+            nonlocal copy_count
             if depth > 25:
                 return
             try:
                 role = obj.get_role_name() or ''
                 name = obj.get_name() or ''
-
                 if role in ('push button', 'button'):
                     if name and not self.verbose_logged:
-                        all_buttons.append(name)
+                        all_btns.append(name)
                     if self._is_stop_button(name):
                         stop_candidates.append(obj)
-                    if 'copy' in name.lower() and 'button' in role:
-                        copy_button_count += 1
-
+                    if 'copy' in name.lower():
+                        copy_count += 1
                 for i in range(obj.get_child_count()):
                     child = obj.get_child_at_index(i)
                     if child:
-                        find_stops(child, depth + 1)
+                        scan(child, depth + 1)
             except Exception:
                 pass
 
-        find_stops(platform_doc)
+        scan(doc)
 
-        # Filter out canvas stop buttons (ChatGPT-specific)
-        stop_button = None
-        for candidate in stop_candidates:
-            if not self._is_canvas_stop(candidate):
-                stop_button = candidate
-                break
-
-        # Log buttons once for debugging
-        if all_buttons and not self.verbose_logged:
-            self._log(f"Buttons in doc (sample): {all_buttons[:10]}")
+        if all_btns and not self.verbose_logged:
+            self._log(f"Buttons: {all_btns[:10]}")
             self.verbose_logged = True
 
-        # Handle SETTLING state: waiting between cycles for new stop button
-        if self.state == "SETTLING":
-            if stop_button:
-                self._log("Stop button reappeared during settle - new generation cycle")
-                self.state = "GENERATING"
-                self.stop_button_seen = True
-                self.settle_start = None
-                return True
-            settle_elapsed = time.time() - self.settle_start
-            if settle_elapsed > self.settle_seconds:
-                self._log(f"Settle period expired ({settle_elapsed:.1f}s). Final completion.")
-                self.state = "NOTIFYING"
-                self._notify_agent(
-                    "response_ready",
-                    f"Response complete on {self.platform} - switch to tab and extract",
-                    {"cycle": self.cycle_count, "requires_action": True},
-                )
-                self.state = "COMPLETE"
-                self.main_loop.quit()
-                return False
-            return True  # Keep polling during settle
+        # Filter canvas stop
+        stop_button = None
+        for c in stop_candidates:
+            if not self._is_canvas_stop(c):
+                stop_button = c
+                break
 
         if stop_button:
             if self.state == "IDLE":
                 self.state = "GENERATING"
                 self.stop_button_seen = True
                 self.generating_since = time.time()
-                self._log("Stop button appeared - response generating")
+                self._log("Stop button appeared — generating")
         else:
-            # Fast-response fallback: if never saw stop button but copy count
-            # increased above baseline, response completed before first poll.
-            if (self.state == "IDLE" and not self.stop_button_seen
-                    and copy_button_count > self.baseline_copy_count):
-                self._log(
-                    f"Fast-response fallback: copy buttons {self.baseline_copy_count} -> "
-                    f"{copy_button_count} (no stop button seen)"
-                )
-                self.state = "NOTIFYING"
-                self._notify_agent(
-                    "response_ready",
-                    f"Response complete on {self.platform} - switch to tab and extract",
-                    {"cycle": 1, "requires_action": True,
-                     "detection": "copy_button_fallback"},
-                )
+            # Fast-response fallback: copy count increased without seeing stop button
+            if self.state == "IDLE" and not self.stop_button_seen and copy_count > self.baseline_copy_count:
+                self._log(f"Fast-response: copies {self.baseline_copy_count}→{copy_count}")
+                self._notify("response_ready",
+                            f"Response complete on {self.platform}",
+                            {"detection": "copy_button_fallback", "requires_action": True})
                 self.state = "COMPLETE"
                 self.main_loop.quit()
                 return False
 
             if self.stop_button_seen:
-                self.cycle_count += 1
-
-                if self.settle_seconds > 0 and self.cycle_count == 1:
-                    # First cycle done, enter settling period for possible second cycle
-                    self._log(f"Cycle {self.cycle_count} complete. Settling for {self.settle_seconds}s...")
-                    self.state = "SETTLING"
-                    self.settle_start = time.time()
-                    self.stop_button_seen = False  # Reset for next cycle
-                    self._notify_agent(
-                        "intermediate_ready",
-                        f"Intermediate response on {self.platform} (cycle {self.cycle_count}). Daemon still monitoring.",
-                        {"cycle": self.cycle_count, "requires_action": True},
-                    )
-                    return True  # Keep polling
-
-                # Final cycle (or no settling configured)
-                self._log(f"Completion detected (cycle {self.cycle_count}): stop button disappeared")
-                self.state = "NOTIFYING"
-                self._notify_agent(
-                    "response_ready",
-                    f"Response complete on {self.platform} - switch to tab and extract",
-                    {"cycle": self.cycle_count, "requires_action": True},
-                )
+                self._log("Stop button gone — response complete")
+                self._notify("response_ready",
+                            f"Response complete on {self.platform}",
+                            {"requires_action": True})
                 self.state = "COMPLETE"
                 self.main_loop.quit()
                 return False
@@ -795,469 +371,45 @@ class MonitorDaemon:
         return True
 
     def start(self):
-        """Start the monitoring loop."""
         self._log(f"Starting monitor for {self.platform}")
-
         if self.redis_client:
-            self.redis_client.setex(
-                _node_key(f"monitor:{self.monitor_id}"),
-                self.timeout_seconds,
-                json.dumps({
-                    "status": "monitoring",
-                    "platform": self.platform,
-                    "node_id": _NODE_ID,
-                    "started": datetime.now().isoformat(),
-                    "baseline_copy_count": self.baseline_copy_count,
-                }),
-            )
-
-        self._log(f"Waiting {self.initial_delay_ms / 1000:.0f}s before first poll...")
-        GLib.timeout_add(self.initial_delay_ms, self._on_first_poll)
-
+            self.redis_client.setex(_node_key(f"monitor:{self.monitor_id}"),
+                                   self.timeout_seconds, json.dumps({
+                "status": "monitoring", "platform": self.platform,
+                "node_id": _NODE_ID, "started": datetime.now().isoformat(),
+                "baseline_copy_count": self.baseline_copy_count,
+            }))
+        GLib.timeout_add(3000, self._on_first_poll)
         try:
             self.main_loop.run()
         except KeyboardInterrupt:
-            self._log("Interrupted by user")
-            self._notify_agent("interrupted", "Monitor stopped by user")
+            self._notify("interrupted", "Monitor stopped")
         finally:
-            if self.neo4j_driver:
-                self.neo4j_driver.close()
-            self._log("Monitor exited")
-
-
-# =========================================================================
-# CLI entry point
-# =========================================================================
-
-class MacMonitorDaemon:
-    """macOS AXUIElement-based monitor for chat platform responses.
-
-    Same state machine as MonitorDaemon but uses AXUIElement API
-    with a simple time.sleep polling loop instead of AT-SPI/GLib.
-
-    State machine:
-        IDLE -> GENERATING (stop button appears)
-        GENERATING -> SETTLING (stop disappears, settle > 0, cycle 1)
-        SETTLING -> GENERATING (new stop button appears during settle)
-        SETTLING -> COMPLETE (settle expires, no new stop button)
-        GENERATING -> COMPLETE (stop disappears, final cycle or settle == 0)
-    """
-
-    def __init__(self, platform: str, monitor_id: str,
-                 baseline_copy_count: int,
-                 session_id: Optional[str] = None,
-                 user_message_id: Optional[str] = None,
-                 timeout_seconds: int = 3600,
-                 tmux_session: Optional[str] = None,
-                 settle_seconds: int = 0):
-        self.platform = platform.lower()
-        self.monitor_id = monitor_id
-        self.baseline_copy_count = baseline_copy_count
-        self.session_id = session_id
-        self.user_message_id = user_message_id
-        self.timeout_seconds = timeout_seconds
-        self.tmux_session = tmux_session
-        self.settle_seconds = settle_seconds
-
-        self.state = "IDLE"
-        self.start_time = time.time()
-        self.stop_button_seen = False
-        self.cycle_count = 0
-        self.settle_start = None
-
-        self.poll_interval = 3.0  # seconds
-        self.initial_delay = 3.0
-        self.no_stop_warning_seconds = 45
-        self.no_stop_warned = False
-        self.verbose_logged = False
-        self.generating_since = None
-
-        # Import macOS AX API
-        try:
-            from ApplicationServices import (
-                AXUIElementCreateApplication,
-                AXUIElementCopyAttributeValue,
-            )
-            self._AXCreate = AXUIElementCreateApplication
-            self._AXCopy = AXUIElementCopyAttributeValue
-            self._has_ax = True
-        except ImportError:
-            self._has_ax = False
-
-        # Find Chrome PID
-        self.chrome_pid = self._find_chrome_pid()
-
-        # Connect services
-        self.redis_client = self._connect_redis()
-        self.neo4j_driver = self._connect_neo4j()
-
-        if not self.chrome_pid:
-            self._log("ERROR: Chrome not found on macOS")
-            sys.exit(1)
-
-        self._log(f"Initialized for {platform} (macOS AX), baseline={baseline_copy_count}")
-
-    def _log(self, message: str):
-        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[{ts}] [{self.monitor_id}] {message}", flush=True)
-
-    def _find_chrome_pid(self) -> Optional[int]:
-        """Find Chrome's PID via NSWorkspace."""
-        if not self._has_ax:
-            return None
-        try:
-            from AppKit import NSWorkspace
-            ws = NSWorkspace.sharedWorkspace()
-            for app in ws.runningApplications():
-                if app.localizedName() == 'Google Chrome':
-                    return app.processIdentifier()
-        except Exception as e:
-            self._log(f"Chrome PID lookup failed: {e}")
-        return None
-
-    def _connect_redis(self):
-        if not REDIS_AVAILABLE:
-            return None
-        try:
-            client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', '127.0.0.1'),
-                port=int(os.environ.get('REDIS_PORT', 6379)),
-                decode_responses=True,
-            )
-            client.ping()
-            self._log("Redis connected")
-            return client
-        except Exception as e:
-            self._log(f"Redis connection failed: {e}")
-            return None
-
-    def _connect_neo4j(self):
-        if not NEO4J_AVAILABLE:
-            return None
-        try:
-            uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
-            driver = GraphDatabase.driver(uri, auth=None)
-            driver.verify_connectivity()
-            self._log("Neo4j connected")
-            return driver
-        except Exception as e:
-            self._log(f"Neo4j connection failed: {e}")
-            return None
-
-    def _get_attr(self, el, attr):
-        err, val = self._AXCopy(el, attr, None)
-        return val if err == 0 else None
-
-    def _is_stop_button(self, name: str) -> bool:
-        if not name or len(name) > 50:
-            return False
-        name_lower = name.lower().strip()
-        patterns = STOP_PATTERNS.get(self.platform, ['stop'])
-        return any(p in name_lower for p in patterns)
-
-    def _find_stop_buttons(self) -> list:
-        """Search Chrome's AX tree for stop buttons on the active tab."""
-        if not self._has_ax or not self.chrome_pid:
-            return []
-
-        ax_app = self._AXCreate(self.chrome_pid)
-        stop_buttons = []
-        all_buttons = []
-
-        def search(el, depth=0, max_depth=25):
-            if depth > max_depth:
-                return
-            try:
-                role = self._get_attr(el, 'AXRole') or ''
-                if role in ('AXButton', 'AXMenuItem'):
-                    name = self._get_attr(el, 'AXTitle') or \
-                           self._get_attr(el, 'AXDescription') or ''
-                    if name and not self.verbose_logged:
-                        all_buttons.append(name)
-                    if self._is_stop_button(name):
-                        stop_buttons.append(name)
-
-                children = self._get_attr(el, 'AXChildren')
-                if children:
-                    for child in children:
-                        search(child, depth + 1)
-            except Exception:
-                pass
-
-        # Scope to focused window if possible
-        err, win = self._AXCopy(ax_app, 'AXFocusedWindow', None)
-        if err == 0 and win is not None:
-            search(win)
-        else:
-            search(ax_app)
-
-        if all_buttons and not self.verbose_logged:
-            self._log(f"Buttons in doc (sample): {all_buttons[:10]}")
-            self.verbose_logged = True
-
-        return stop_buttons
-
-    def _notify_tmux(self, platform: str):
-        """Send notification to spawning Claude session via tmux."""
-        if not self.tmux_session:
-            self._log("No --tmux-session set, skipping tmux notification")
-            return
-
-        session = self.tmux_session
-        msg = f"Response ready on {platform}. Extract with taey_quick_extract('{platform}')."
-        time.sleep(2)
-
-        # Find tmux binary (macOS: may be in /opt/homebrew/bin)
-        tmux_bin = None
-        for path in ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux']:
-            if os.path.isfile(path):
-                tmux_bin = path
-                break
-        if not tmux_bin:
-            # Try PATH
-            try:
-                result = subprocess.run(['which', 'tmux'], capture_output=True,
-                                        text=True, timeout=3)
-                if result.returncode == 0:
-                    tmux_bin = result.stdout.strip()
-            except Exception:
-                pass
-        if not tmux_bin:
-            self._log("tmux not found, skipping notification")
-            return
-
-        try:
-            check = subprocess.run(
-                [tmux_bin, 'has-session', '-t', session],
-                capture_output=True, timeout=5,
-            )
-            if check.returncode != 0:
-                self._log(f"tmux session '{session}' not found, skipping notification")
-                return
-
-            subprocess.run(
-                [tmux_bin, 'send-keys', '-t', session, 'Escape'],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-
-            result = subprocess.run(
-                [tmux_bin, 'send-keys', '-t', session, '-l', msg],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                self._log(f"send-keys text failed: {result.stderr.strip()}")
-                return
-
-            time.sleep(0.5)
-            subprocess.run(
-                [tmux_bin, 'send-keys', '-t', session, 'Enter'],
-                capture_output=True, text=True, timeout=5,
-            )
-            subprocess.run(
-                [tmux_bin, 'send-keys', '-t', session, 'C-j'],
-                capture_output=True, text=True, timeout=5,
-            )
-
-            self._log(f"tmux notification sent to session '{session}'")
-        except subprocess.TimeoutExpired:
-            self._log(f"tmux notification timed out for session '{session}'")
-        except Exception as e:
-            self._log(f"tmux notification failed for session '{session}': {e}")
-
-    def _notify_agent(self, status: str, message: str, extra: Dict = None):
-        """Write notification to Redis for agent injection."""
-        notification = {
-            "monitor_id": self.monitor_id,
-            "platform": self.platform,
-            "node_id": _NODE_ID,
-            "status": status,
-            "message": message,
-            "timestamp": datetime.now().isoformat(),
-            "session_id": self.session_id,
-            "elapsed_seconds": int(time.time() - self.start_time),
-        }
-        if extra:
-            notification.update(extra)
-
-        notification_json = json.dumps(notification)
-
-        if self.redis_client:
-            try:
-                self.redis_client.rpush(_node_key("notifications"), notification_json)
-                self.redis_client.setex(
-                    _node_key(f"monitor:{self.monitor_id}"),
-                    3600,
-                    notification_json,
-                )
-                self._log(f"Notification sent: {status}")
-            except Exception as e:
-                self._log(f"Redis notification error: {e}")
-        else:
-            path = f"/tmp/taey_monitor_{self.monitor_id}.json"
-            try:
-                with open(path, 'w') as f:
-                    json.dump(notification, f)
-                self._log(f"Notification written to {path}")
-            except Exception as e:
-                self._log(f"File notification failed: {e}")
-
-        # Delivery is handled by:
-        # - PostToolUse hook (drains Redis during active tool use)
-        # - notifications/daemon.py (injects via tmux when node is idle)
-        # Monitor does NOT do tmux directly — that caused double delivery.
-
-    def _poll_check(self) -> bool:
-        """Single poll check. Returns True to continue, False to stop."""
-        elapsed = time.time() - self.start_time
-
-        if elapsed > self.timeout_seconds:
-            self._log(f"Timeout after {elapsed:.0f}s")
-            self._notify_agent("timeout", f"Timed out after {elapsed:.0f}s")
-            return False
-
-        if (not self.stop_button_seen and not self.no_stop_warned
-                and elapsed > self.no_stop_warning_seconds):
-            self._log("WARNING: No stop button detected - possible submission error")
-            self._notify_agent(
-                "warning",
-                f"No stop button detected after {elapsed:.0f}s - message may not have been sent",
-                {"warning_type": "no_stop_button"},
-            )
-            self.no_stop_warned = True
-
-        stop_buttons = self._find_stop_buttons()
-        has_stop = len(stop_buttons) > 0
-
-        # Handle SETTLING state
-        if self.state == "SETTLING":
-            if has_stop:
-                self._log("Stop button reappeared during settle - new generation cycle")
-                self.state = "GENERATING"
-                self.stop_button_seen = True
-                self.settle_start = None
-                return True
-            settle_elapsed = time.time() - self.settle_start
-            if settle_elapsed > self.settle_seconds:
-                self._log(f"Settle period expired ({settle_elapsed:.1f}s). Final completion.")
-                self._notify_agent(
-                    "response_ready",
-                    f"Response complete on {self.platform} - switch to tab and extract",
-                    {"cycle": self.cycle_count, "requires_action": True},
-                )
-                self.state = "COMPLETE"
-                return False
-            return True
-
-        if has_stop:
-            if self.state == "IDLE":
-                self.state = "GENERATING"
-                self.stop_button_seen = True
-                self.generating_since = time.time()
-                self._log(f"Stop button appeared ({stop_buttons[0]}) - response generating")
-        else:
-            if self.stop_button_seen:
-                self.cycle_count += 1
-
-                if self.settle_seconds > 0 and self.cycle_count == 1:
-                    self._log(f"Cycle {self.cycle_count} complete. Settling for {self.settle_seconds}s...")
-                    self.state = "SETTLING"
-                    self.settle_start = time.time()
-                    self.stop_button_seen = False
-                    self._notify_agent(
-                        "intermediate_ready",
-                        f"Intermediate response on {self.platform} (cycle {self.cycle_count}). Daemon still monitoring.",
-                        {"cycle": self.cycle_count, "requires_action": True},
-                    )
-                    return True
-
-                self._log(f"Completion detected (cycle {self.cycle_count}): stop button disappeared")
-                self._notify_agent(
-                    "response_ready",
-                    f"Response complete on {self.platform} - switch to tab and extract",
-                    {"cycle": self.cycle_count, "requires_action": True},
-                )
-                self.state = "COMPLETE"
-                return False
-
-        return True
-
-    def start(self):
-        """Start the monitoring loop."""
-        self._log(f"Starting macOS AX monitor for {self.platform}")
-
-        if self.redis_client:
-            self.redis_client.setex(
-                _node_key(f"monitor:{self.monitor_id}"),
-                self.timeout_seconds,
-                json.dumps({
-                    "status": "monitoring",
-                    "platform": self.platform,
-                    "node_id": _NODE_ID,
-                    "started": datetime.now().isoformat(),
-                    "baseline_copy_count": self.baseline_copy_count,
-                }),
-            )
-
-        self._log(f"Waiting {self.initial_delay:.0f}s before first poll...")
-        time.sleep(self.initial_delay)
-
-        try:
-            while self._poll_check():
-                time.sleep(self.poll_interval)
-        except KeyboardInterrupt:
-            self._log("Interrupted by user")
-            self._notify_agent("interrupted", "Monitor stopped by user")
-        finally:
-            if self.neo4j_driver:
-                self.neo4j_driver.close()
-            self._log("Monitor exited")
+            self._log("Exited")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Background monitor daemon')
+    parser = argparse.ArgumentParser()
     parser.add_argument('--platform', required=True)
     parser.add_argument('--monitor-id', required=True)
     parser.add_argument('--baseline-copy-count', type=int, required=True)
     parser.add_argument('--session-id')
     parser.add_argument('--user-message-id')
     parser.add_argument('--timeout', type=int, default=3600)
-    parser.add_argument('--tmux-session', help='tmux session to notify on completion')
-    parser.add_argument('--settle-seconds', type=int, default=0,
-                        help='Seconds to wait after first cycle before exiting. '
-                             'If new stop button appears during settle, monitors second cycle.')
-
+    parser.add_argument('--tmux-session')
+    parser.add_argument('--settle-seconds', type=int, default=0)  # Accepted but ignored (v7)
     args = parser.parse_args()
 
-    # Use --tmux-session as authoritative node_id for Redis key scoping.
     if args.tmux_session:
         global _EFFECTIVE_NODE_ID
         _EFFECTIVE_NODE_ID = args.tmux_session
 
-    # Route to platform-appropriate daemon
-    if sys.platform == 'darwin' and Atspi is None:
-        daemon = MacMonitorDaemon(
-            platform=args.platform,
-            monitor_id=args.monitor_id,
-            baseline_copy_count=args.baseline_copy_count,
-            session_id=args.session_id,
-            user_message_id=args.user_message_id,
-            timeout_seconds=args.timeout,
-            tmux_session=args.tmux_session,
-            settle_seconds=args.settle_seconds,
-        )
-    else:
-        daemon = MonitorDaemon(
-            platform=args.platform,
-            monitor_id=args.monitor_id,
-            baseline_copy_count=args.baseline_copy_count,
-            session_id=args.session_id,
-            user_message_id=args.user_message_id,
-            timeout_seconds=args.timeout,
-            tmux_session=args.tmux_session,
-            settle_seconds=args.settle_seconds,
-        )
-    daemon.start()
+    MonitorDaemon(
+        platform=args.platform, monitor_id=args.monitor_id,
+        baseline_copy_count=args.baseline_copy_count,
+        session_id=args.session_id, user_message_id=args.user_message_id,
+        timeout_seconds=args.timeout, tmux_session=args.tmux_session,
+    ).start()
 
 
 if __name__ == '__main__':

@@ -42,9 +42,7 @@ if os.path.expanduser('~/embedding-server') not in sys.path:
 from core import atspi, clipboard
 from core import input as inp
 from core.tree import find_elements, find_copy_buttons, filter_useful_elements, detect_chrome_y
-from tools.attach.keyboard_nav import keyboard_nav_attach
-from tools.attach import handle_attach
-from tools.attach.dialogs import close_stale_file_dialogs
+from tools.attach import handle_attach, _keyboard_nav_attach as keyboard_nav_attach, _close_stale_file_dialogs as close_stale_file_dialogs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -478,7 +476,7 @@ def extract_response(platform: str) -> str:
     clipboard.write_marker(_MARKER)
     time.sleep(0.2)
 
-    from core.atspi_interact import atspi_click
+    from core.interact import atspi_click
     if target.get('atspi_obj') and atspi_click(target):
         logger.info(f"[{platform}] Copy via AT-SPI at ({target['x']}, {target['y']})")
     else:
@@ -670,9 +668,8 @@ def attach_file(platform: str, file_path: str) -> bool:
     Handles everything directly instead of using handle_attach(), because
     the standard clipboard paste doesn't reliably select files on Xvfb.
     """
-    from tools.attach.buttons import get_attach_button_coords
-    from tools.attach.dialogs import any_file_dialog_open, close_stale_file_dialogs
-    from core.atspi_interact import atspi_click
+    from tools.attach import _get_attach_button_coords as get_attach_button_coords, _any_file_dialog_open as any_file_dialog_open, _close_stale_file_dialogs as close_stale_file_dialogs
+    from core.interact import atspi_click
 
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None

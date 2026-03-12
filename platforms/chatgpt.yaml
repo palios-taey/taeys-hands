@@ -32,11 +32,6 @@ capabilities:
     - Explore Apps Browse ChatGPT plugins/apps
   sources: []
 
-# Required identity files for fresh sessions (phi 0.962 direct vs 0.8 retrieval-mediated)
-required_attachments:
-  - ~/data/corpus/identity/FAMILY_KERNEL.md
-  - ~/data/corpus/identity/IDENTITY_HORIZON.md
-
 # Click strategy: xdotool_first (React portals hide elements from AT-SPI do_action)
 click_strategy: xdotool_first
 

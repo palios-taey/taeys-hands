@@ -1,17 +1,12 @@
-"""
-Platform definitions: URL patterns, tab shortcuts, capabilities.
-
-Central registry for all supported platforms (chat AI and social).
-Cross-platform: works on both Linux (xdpyinfo) and macOS (system_profiler).
-"""
+"""Platform definitions: URL patterns, tab shortcuts, screen detection."""
 
 import os
-import sys
+import socket
 import subprocess
 
 
-def _detect_screen_size_linux() -> tuple:
-    """Detect screen dimensions from X display via xdpyinfo."""
+def _detect_screen_size() -> tuple:
+    """Detect screen dimensions via xdpyinfo."""
     try:
         result = subprocess.run(
             ['xdpyinfo'], capture_output=True, text=True, timeout=5,
@@ -19,103 +14,64 @@ def _detect_screen_size_linux() -> tuple:
         )
         for line in result.stdout.splitlines():
             if 'dimensions:' in line:
-                parts = line.strip().split()
-                w, h = parts[1].split('x')
+                w, h = line.strip().split()[1].split('x')
                 return int(w), int(h)
     except Exception as e:
-        raise RuntimeError(f"Screen size detection failed (xdpyinfo error): {e}")
-    raise RuntimeError("Screen size detection failed: no 'dimensions:' line in xdpyinfo output")
+        raise RuntimeError(f"Screen size detection failed: {e}")
+    raise RuntimeError("No 'dimensions:' line in xdpyinfo output")
 
 
-def _detect_screen_size_macos() -> tuple:
-    """Detect screen dimensions on macOS via Quartz."""
-    try:
-        import Quartz
-        main = Quartz.CGMainDisplayID()
-        w = Quartz.CGDisplayPixelsWide(main)
-        h = Quartz.CGDisplayPixelsHigh(main)
-        return int(w), int(h)
-    except ImportError:
-        pass
-    # Fallback: system_profiler
-    try:
-        result = subprocess.run(
-            ['system_profiler', 'SPDisplaysDataType'],
-            capture_output=True, text=True, timeout=10,
-        )
-        for line in result.stdout.splitlines():
-            if 'Resolution' in line:
-                # "Resolution: 1512 x 982 Retina"
-                parts = line.split(':')[1].strip().split()
-                w = int(parts[0])
-                h = int(parts[2])
-                return w, h
-    except Exception as e:
-        raise RuntimeError(f"Screen size detection failed (system_profiler): {e}")
-    raise RuntimeError("Screen size detection failed on macOS")
+_screen_size = None
 
 
-def _detect_screen_size() -> tuple:
-    """Detect screen dimensions (cross-platform)."""
-    if sys.platform == 'darwin':
-        return _detect_screen_size_macos()
-    return _detect_screen_size_linux()
+def get_screen_size() -> tuple:
+    """Get (width, height), detecting on first call."""
+    global _screen_size
+    if _screen_size is None:
+        _screen_size = _detect_screen_size()
+    return _screen_size
 
 
-# Tab shortcuts (Alt+N) configured in Firefox
-# Default layout (Spark coordinator)
-_DEFAULT_TAB_SHORTCUTS = {
-    'chatgpt': 'alt+1',
-    'claude': 'alt+2',
-    'gemini': 'alt+3',
-    'grok': 'alt+4',
-    'perplexity': 'alt+5',
-    # Social platforms
-    'x_twitter': 'alt+6',
-    # 'linkedin': 'alt+7',
-}
+# Lazy accessors for SCREEN_WIDTH / SCREEN_HEIGHT
+class _LazyDim:
+    def __init__(self, idx):
+        self._idx = idx
+    def __int__(self):
+        return get_screen_size()[self._idx]
+    def __eq__(self, o):  return int(self) == o
+    def __lt__(self, o):  return int(self) < o
+    def __le__(self, o):  return int(self) <= o
+    def __gt__(self, o):  return int(self) > o
+    def __ge__(self, o):  return int(self) >= o
+    def __floordiv__(self, o): return int(self) // o
+    def __repr__(self): return str(int(self))
 
-# Worker nodes: ChatGPT, Claude, Gemini, Grok (4 tabs)
-_WORKER_TAB_SHORTCUTS = {
-    'chatgpt': 'alt+1',
-    'claude': 'alt+2',
-    'gemini': 'alt+3',
-    'grok': 'alt+4',
-}
 
+SCREEN_WIDTH = _LazyDim(0)
+SCREEN_HEIGHT = _LazyDim(1)
+
+# Tab shortcuts — workers have fewer tabs
 _WORKER_HOSTNAMES = {'jetson', 'thor'}
+_DEFAULT_TABS = {
+    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3',
+    'grok': 'alt+4', 'perplexity': 'alt+5', 'x_twitter': 'alt+6',
+}
+_WORKER_TABS = {
+    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3', 'grok': 'alt+4',
+}
 
+_hostname = socket.gethostname().lower()
+TAB_SHORTCUTS = _WORKER_TABS if _hostname in _WORKER_HOSTNAMES else _DEFAULT_TABS
 
-def _get_tab_shortcuts() -> dict:
-    """Return tab shortcuts for current node (workers have different layout)."""
-    import socket
-    hostname = socket.gethostname().lower()
-    if hostname in _WORKER_HOSTNAMES:
-        return _WORKER_TAB_SHORTCUTS
-    return _DEFAULT_TAB_SHORTCUTS
-
-
-TAB_SHORTCUTS = _get_tab_shortcuts()
-
-# URL patterns for platform detection via AT-SPI DocURL
-# Order matters: more specific patterns MUST come before less specific ones
-# (e.g., 'x.com/i/grok' before 'x.com' so Grok on x.com is detected correctly)
+# URL patterns for platform detection (order: specific first)
+_EXTRA_URL_PATTERNS = {'grok': 'x.com/i/grok'}
 URL_PATTERNS = {
-    'chatgpt': 'chatgpt.com',
-    'claude': 'claude.ai',
-    'gemini': 'gemini.google.com',
-    'grok': 'grok.com',
-    'perplexity': 'perplexity.ai',
-    'x_twitter': 'x.com',
+    'chatgpt': 'chatgpt.com', 'claude': 'claude.ai',
+    'gemini': 'gemini.google.com', 'grok': 'grok.com',
+    'perplexity': 'perplexity.ai', 'x_twitter': 'x.com',
     'linkedin': 'linkedin.com',
 }
 
-# Additional URL patterns (checked first, for ambiguous URLs like x.com/i/grok)
-_EXTRA_URL_PATTERNS = {
-    'grok': 'x.com/i/grok',
-}
-
-# Base URLs for new sessions
 BASE_URLS = {
     'chatgpt': 'https://chatgpt.com/',
     'claude': 'https://claude.ai/new',
@@ -126,64 +82,6 @@ BASE_URLS = {
     'linkedin': 'https://www.linkedin.com/feed/',
 }
 
-# Chat AI platforms (have copy buttons, response detection)
 CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
-
-# Social platforms (posting, replying, searching)
 SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
-
-# All platforms
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
-
-# Screen bounds (lazy-detected from X display on first access)
-_screen_size = None
-
-
-def get_screen_size() -> tuple:
-    """Get screen dimensions, detecting on first call.
-
-    Returns:
-        (width, height) tuple.
-
-    Raises:
-        RuntimeError: If screen size cannot be detected.
-    """
-    global _screen_size
-    if _screen_size is None:
-        _screen_size = _detect_screen_size()
-    return _screen_size
-
-
-# Module-level aliases for backward compat - these are properties
-# that raise on access if DISPLAY is unavailable.
-class _LazyScreenDim:
-    def __init__(self, index):
-        self._index = index
-
-    def __int__(self):
-        return get_screen_size()[self._index]
-
-    def __eq__(self, other):
-        return int(self) == other
-
-    def __lt__(self, other):
-        return int(self) < other
-
-    def __le__(self, other):
-        return int(self) <= other
-
-    def __gt__(self, other):
-        return int(self) > other
-
-    def __ge__(self, other):
-        return int(self) >= other
-
-    def __floordiv__(self, other):
-        return int(self) // other
-
-    def __repr__(self):
-        return str(int(self))
-
-
-SCREEN_WIDTH = _LazyScreenDim(0)
-SCREEN_HEIGHT = _LazyScreenDim(1)

@@ -1,31 +1,18 @@
-"""
-Neo4j client for session and message persistence.
-
-Provides CRUD operations for chat sessions and messages.
-Sessions and messages form a graph:
-  (ChatSession)-[:HAS_MESSAGE]->(Message)
-  (Message)-[:RESPONDS_TO]->(Message)
-
-Configure via NEO4J_URI environment variable.
-"""
+"""Neo4j client for session and message persistence."""
 
 import json
 import logging
 import os
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Neo4j configuration — override via environment variable
 NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
-
 _driver = None
 
 
 class Neo4jJSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder for Neo4j temporal types."""
     def default(self, obj):
         if hasattr(obj, 'isoformat'):
             return obj.isoformat()
@@ -35,11 +22,6 @@ class Neo4jJSONEncoder(json.JSONEncoder):
 
 
 def get_driver():
-    """Get or create the Neo4j driver (singleton).
-
-    Raises:
-        ConnectionError: If Neo4j is not reachable.
-    """
     global _driver
     if _driver is None:
         try:
@@ -54,29 +36,17 @@ def get_driver():
 
 
 def create_session(platform: str, url: str,
-                   session_type: str = None,
-                   purpose: str = None) -> Optional[str]:
-    """Create a new chat session.
-
-    Returns:
-        Session ID string, or None on failure.
-    """
+                   session_type: str = None, purpose: str = None) -> Optional[str]:
     driver = get_driver()
     if not driver:
         return None
-
     session_id = str(uuid.uuid4())[:12]
     with driver.session() as s:
         s.run("""
             CREATE (sess:ChatSession {
-                session_id: $session_id,
-                platform: $platform,
-                url: $url,
-                session_type: $session_type,
-                purpose: $purpose,
-                created_at: datetime(),
-                last_activity: datetime(),
-                message_count: 0
+                session_id: $session_id, platform: $platform, url: $url,
+                session_type: $session_type, purpose: $purpose,
+                created_at: datetime(), last_activity: datetime(), message_count: 0
             })
         """, session_id=session_id, platform=platform, url=url,
              session_type=session_type, purpose=purpose)
@@ -84,15 +54,9 @@ def create_session(platform: str, url: str,
 
 
 def get_or_create_session(platform: str, url: str) -> Optional[str]:
-    """Get existing session by URL or create new one.
-
-    Returns:
-        Session ID string, or None on failure.
-    """
     driver = get_driver()
     if not driver:
         return None
-
     try:
         with driver.session() as s:
             result = s.run("""
@@ -105,37 +69,21 @@ def get_or_create_session(platform: str, url: str) -> Optional[str]:
                 return record['session_id']
     except Exception as e:
         logger.error(f"Session lookup failed: {e}")
-
     return create_session(platform, url)
 
 
 def add_message(session_id: str, role: str, content: str,
                 attachments: List[str] = None) -> Optional[str]:
-    """Add a message to a session.
-
-    Args:
-        session_id: Parent session ID.
-        role: 'user' or 'assistant'.
-        content: Message text.
-        attachments: List of attached file paths.
-
-    Returns:
-        Message ID string, or None on failure.
-    """
     driver = get_driver()
     if not driver:
         return None
-
     message_id = str(uuid.uuid4())[:12]
     with driver.session() as s:
         s.run("""
             MATCH (sess:ChatSession {session_id: $session_id})
             CREATE (msg:Message {
-                message_id: $message_id,
-                role: $role,
-                content: $content,
-                attachments: $attachments,
-                created_at: datetime(),
+                message_id: $message_id, role: $role, content: $content,
+                attachments: $attachments, created_at: datetime(),
                 handled: $handled
             })
             CREATE (sess)-[:HAS_MESSAGE]->(msg)
@@ -152,32 +100,18 @@ _ALLOWED_SESSION_PROPS = {'session_type', 'purpose', 'last_activity'}
 
 
 def update_session(session_id: str, updates: Dict[str, Any]) -> bool:
-    """Update session properties.
-
-    Args:
-        session_id: Session to update.
-        updates: Dict of property names to new values.
-                 Keys must be in _ALLOWED_SESSION_PROPS (prevents Cypher injection).
-
-    Returns:
-        True on success.
-    """
     driver = get_driver()
     if not driver:
         return False
-
     bad_keys = set(updates) - _ALLOWED_SESSION_PROPS
     if bad_keys:
         logger.error(f"Rejecting disallowed session properties: {bad_keys}")
         return False
-
     try:
         with driver.session() as s:
-            set_clauses = ', '.join(f's.{k} = ${k}' for k in updates)
-            s.run(
-                f"MATCH (s:ChatSession {{session_id: $session_id}}) SET {set_clauses}",
-                session_id=session_id, **updates,
-            )
+            clauses = ', '.join(f's.{k} = ${k}' for k in updates)
+            s.run(f"MATCH (s:ChatSession {{session_id: $session_id}}) SET {clauses}",
+                  session_id=session_id, **updates)
         return True
     except Exception as e:
         logger.error(f"Update session failed: {e}")
@@ -185,30 +119,20 @@ def update_session(session_id: str, updates: Dict[str, Any]) -> bool:
 
 
 def get_active_sessions(platform: str = None) -> List[Dict]:
-    """Get active sessions, optionally filtered by platform.
-
-    Returns:
-        List of session dicts with metadata.
-    """
     driver = get_driver()
     if not driver:
         return []
-
     try:
         with driver.session() as s:
             if platform:
                 result = s.run("""
                     MATCH (sess:ChatSession {platform: $platform})
-                    RETURN sess
-                    ORDER BY sess.last_activity DESC
-                    LIMIT 20
+                    RETURN sess ORDER BY sess.last_activity DESC LIMIT 20
                 """, platform=platform)
             else:
                 result = s.run("""
                     MATCH (sess:ChatSession)
-                    RETURN sess
-                    ORDER BY sess.last_activity DESC
-                    LIMIT 50
+                    RETURN sess ORDER BY sess.last_activity DESC LIMIT 50
                 """)
             return [dict(record['sess']) for record in result]
     except Exception as e:
@@ -217,15 +141,9 @@ def get_active_sessions(platform: str = None) -> List[Dict]:
 
 
 def mark_message_handled(message_id: str) -> bool:
-    """Mark a message as handled (response processed).
-
-    Returns:
-        True on success.
-    """
     driver = get_driver()
     if not driver:
         return False
-
     try:
         with driver.session() as s:
             s.run("""

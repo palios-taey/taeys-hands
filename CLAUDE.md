@@ -46,36 +46,33 @@ Environment variables can go in `taeys-hands/.env` (loaded by server.py at start
 ## Architecture
 
 ```
-server.py              # MCP router (~600 lines)
-core/                  # AT-SPI primitives
-  atspi.py             # Firefox/desktop discovery
-  atspi_interact.py    # Element cache, AT-SPI click/focus/state
-  tree.py              # BFS traversal, element filtering, menu items
+server.py              # MCP router — dict-based tool dispatch (~380 lines)
+core/                  # AT-SPI primitives (Linux only)
+  atspi.py             # Firefox/desktop discovery, document lookup
+  interact.py          # Element cache, AT-SPI click/focus/state
+  tree.py              # BFS traversal, YAML element filtering, menu items
   clipboard.py         # xsel read/write/clear
   input.py             # xdotool key/mouse/type + clipboard_paste
-  platforms.py         # URL patterns, tab shortcuts
+  platforms.py         # URL patterns, tab shortcuts, screen detection
 storage/               # Data persistence
-  redis_pool.py        # Connection pool singleton
+  redis_pool.py        # Connection pool singleton, node_key()
   neo4j_client.py      # Session/message CRUD
-tools/                 # MCP tool handlers - one per file
-  inspect.py           # taey_inspect
-  interact.py          # taey_set_map, taey_click, taey_click_at
-  send_message.py      # taey_send_message
+tools/                 # MCP tool handlers — one per file
+  inspect.py           # taey_inspect (YAML pipeline, NEW flagging)
+  click.py             # taey_click (AT-SPI first, xdotool fallback)
+  send.py              # taey_send_message (Neo4j + daemon spawn)
   extract.py           # taey_quick_extract, taey_extract_history
-  attach/              # taey_attach (decomposed package)
-    __init__.py        #   Router: validation, dedup, platform dispatch
-    dialogs.py         #   GTK + Portal + macOS file dialog handlers
-    buttons.py         #   Button discovery: cache lookup + AT-SPI tree search
-    chips.py           #   Existing attachment detection
-    keyboard_nav.py    #   ChatGPT/Grok keyboard navigation path
-    checkpoint.py      #   Redis checkpoint CRUD
+  attach.py            # taey_attach (button find, dialogs, keyboard nav)
   dropdown.py          # taey_select_dropdown, taey_prepare
   plan.py              # taey_plan (create/get/update)
   sessions.py          # taey_list_sessions
-  monitors.py          # taey_list_monitors, taey_kill_monitors
+  monitors.py          # taey_monitors, taey_respawn_monitor
 monitor/               # Background response detection
-  daemon.py            # Standalone subprocess, AT-SPI stop button detection
-platforms/             # Platform configs (YAML)
+  daemon.py            # AT-SPI stop button polling + copy count fallback
+platforms/             # Platform configs (YAML — 7 platforms)
+scripts/               # Utilities
+  build_package.py     # Consolidate files into single .md attachment
+  deploy.sh            # Deploy + kill MCP servers across nodes
 ```
 
 ---
@@ -522,7 +519,7 @@ See `agents/README.md` for full configuration details.
 ### Input Architecture
 - **`core/input.py`**: xdotool key/mouse/type + `clipboard_paste()` (xsel + Ctrl+V)
 - **`core/clipboard.py`**: xsel-based read/write/clear (unified, no xclip)
-- **`core/atspi_interact.py`**: AT-SPI do_action click, element cache, focus, state checks
+- **`core/interact.py`**: AT-SPI do_action click, element cache, focus, state checks
 - No smart_input.py or fallback cascades. One input path: clipboard paste.
 
 ### AT-SPI Click Strategy (3-tier)
