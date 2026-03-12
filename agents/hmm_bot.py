@@ -904,7 +904,7 @@ def process_platform(platform: str, prompt: str) -> dict:
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
-    if not wait_for_response(platform, timeout=900):
+    if not wait_for_response(platform, timeout=1200):
         result['error'] = 'response_timeout'
         fail_package(platform, 'response_timeout')
         return result
