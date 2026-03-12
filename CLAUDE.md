@@ -60,7 +60,7 @@ storage/               # Data persistence
 tools/                 # MCP tool handlers — one per file
   inspect.py           # taey_inspect (YAML pipeline, NEW flagging)
   click.py             # taey_click (AT-SPI first, xdotool fallback)
-  send.py              # taey_send_message (Neo4j + daemon spawn)
+  send.py              # taey_send_message (Neo4j + session registration)
   extract.py           # taey_quick_extract, taey_extract_history
   attach.py            # taey_attach (button find, dialogs, keyboard nav)
   dropdown.py          # taey_select_dropdown, taey_prepare
@@ -68,7 +68,7 @@ tools/                 # MCP tool handlers — one per file
   sessions.py          # taey_list_sessions
   monitors.py          # taey_monitors, taey_respawn_monitor
 monitor/               # Background response detection
-  daemon.py            # AT-SPI stop button polling + copy count fallback
+  central.py           # Central monitor — cycles active sessions, detects completion
 platforms/             # Platform configs (YAML — 7 platforms)
 scripts/               # Utilities
   build_package.py     # Consolidate files into single .md attachment
@@ -105,14 +105,14 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 | `taey_click` | Click at x,y coordinates (AT-SPI first, xdotool fallback) |
 | `taey_prepare` | Get platform capabilities (models/modes/tools) |
 | `taey_plan` | Create/get/update multi-step execution plans |
-| `taey_send_message` | Type, store, send, spawn monitor daemon |
+| `taey_send_message` | Type, store, send, register monitor session |
 | `taey_quick_extract` | Click Copy, read clipboard, return text |
 | `taey_extract_history` | Extract full conversation chronologically |
 | `taey_attach` | File attachment (dialog or dropdown workflow) |
 | `taey_select_dropdown` | Select model/mode from dropdown |
 | `taey_list_sessions` | Show active sessions and pending responses |
 | `taey_monitors` | List or kill background monitor daemons (action="list"\|"kill") |
-| `taey_respawn_monitor` | Spawn fresh daemon for multi-step response flows |
+| `taey_respawn_monitor` | Register fresh monitor session for multi-step flows |
 
 ---
 
@@ -137,8 +137,8 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 2. taey_attach(platform, path)      # Attach files if needed (finds button via AT-SPI tree)
 3. taey_inspect(platform)           # RE-INSPECT after attach (file chip shifts positions)
 4. taey_click(platform, x=N, y=N)  # Click input field using coordinates from inspect
-5. taey_send_message(platform, msg) # Pastes into focused input, Enter, stores, spawns daemon
-6. [monitor daemon detects response]
+5. taey_send_message(platform, msg) # Pastes into focused input, Enter, stores, registers monitor
+6. [central monitor detects response]
 7. taey_quick_extract(platform)     # Get response text, stores in Neo4j
 ```
 
@@ -173,33 +173,38 @@ Some platforms require user action mid-generation:
 - **Claude**: Truncated response → click "Continue" → rest of response
 - **ChatGPT**: Collapsed response → click "Show more" → full content
 
-The daemon exits after the first stop-button cycle. After taking the mid-generation action (clicking the trigger button), call:
+The central monitor detects the first completion. After taking the mid-generation action (clicking the trigger button), call:
 
 ```
 taey_respawn_monitor(platform)
 ```
 
-This spawns a fresh daemon to detect the second generation cycle. The original `pending_prompt` is preserved for session linkage — do NOT call `quick_extract(complete=True)` until the final response is ready.
+This registers a fresh monitor session to detect the second generation cycle. The original `pending_prompt` is preserved for session linkage — do NOT call `quick_extract(complete=True)` until the final response is ready.
 
 **Gemini Deep Research workflow:**
-1. `taey_send_message(platform, msg)` → daemon spawns
-2. Daemon detects plan card complete → sends notification
+1. `taey_send_message(platform, msg)` → monitor session registered
+2. Monitor detects plan card complete → sends notification
 3. Inspect Gemini → find "Start research" button → click it
-4. `taey_respawn_monitor("gemini")` → fresh daemon monitors actual research
-5. Daemon detects research complete → sends `response_ready`
+4. `taey_respawn_monitor("gemini")` → fresh session registered for actual research
+5. Monitor detects research complete → sends `response_ready`
 6. Extract via Share & Export > Copy Content (Copy button only gets closing line)
 
 ---
 
 ## Response Detection
 
-The monitor daemon (spawned by send_message) watches for:
+The central monitor (`monitor/central.py`) runs as a single long-lived process per machine. `send_message` registers sessions in Redis — the monitor picks them up and cycles through them.
+
 1. **Stop button appears** -> AI is generating
 2. **Stop button disappears** -> response complete
-3. **Fast-response fallback** -> if no stop button seen but copy count increased above baseline, response completed before first poll
-4. **Redis notification** -> injected into next tool call
+3. **Fast-response fallback** -> copy count increased above baseline without seeing stop button
+4. **Redis notification** -> RPUSH to `taey:{node_id}:notifications`, consumed by orchestrator hooks
 
-The stop-button method is primary. The copy-button-count fallback catches instant responses (errors, very short replies) where the stop button appears and disappears in under 3 seconds.
+The monitor cycles through all active sessions, switching to each platform tab and navigating to each session's URL. Multiple sessions on the same platform (from different Claude instances) are supported — the monitor verifies the current page URL matches the session before interpreting stop button state.
+
+**Plan lock**: When `taey_plan()` creates a plan, it sets `taey:{node_id}:plan_active`. The monitor stops ALL tab/URL cycling while this key exists. `taey_send_message` clears it on completion. TTL 120s safety net.
+
+**Starting the monitor**: `python3 -m monitor.central` (or `python3 monitor/central.py`). Runs continuously. Configure via env vars: `MONITOR_CYCLE_SEC` (default 30), `MONITOR_DWELL_SEC` (default 5).
 
 ---
 
@@ -214,8 +219,8 @@ The stop-button method is primary. The copy-button-count fallback catches instan
 3. taey_attach(platform, file)         # Attach if needed (finds button via AT-SPI tree)
 4. taey_inspect(platform)              # RE-INSPECT after attach (file chip shifts positions)
 5. taey_click(platform, x=N, y=N)     # Click input using coords from inspect
-6. taey_send_message(platform, msg)    # Paste + Enter + daemon spawn
-7. DONE with this platform - daemon monitors in background
+6. taey_send_message(platform, msg)    # Paste + Enter + register monitor
+7. DONE with this platform - monitor tracks in background
 8. Move to NEXT platform, repeat from step 1
 ```
 
@@ -228,8 +233,8 @@ The stop-button method is primary. The copy-button-count fallback catches instan
 **NEVER batch** - do NOT inspect all platforms, then attach to all.
 Each platform must complete steps 1-7 before starting the next.
 
-After send_message, the daemon runs independently. You can immediately start the next platform.
-When a daemon detects a response, it injects a notification into your session.
+After send_message, the central monitor tracks it. You can immediately start the next platform.
+When the monitor detects a response, a notification is injected into your session.
 When you see "Response ready on {platform}", extract with `taey_quick_extract(platform)`.
 
 ### NEVER Rules (Hard Constraints)
@@ -241,13 +246,13 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 | Open new tabs (Ctrl+T) | Breaks tab ordering (Alt+1-5 positions) | Use existing tabs only |
 | Type URLs via xdotool | Drops doubled chars (google→gogle) | URLs are clipboard-pasted automatically |
 | Click Submit/Send buttons | Unreliable across platforms | Press Enter (universal) |
-| Wait/block for AI responses | Wastes time, daemon handles it | Move to next platform immediately |
+| Wait/block for AI responses | Wastes time, monitor handles it | Move to next platform immediately |
 | Use xdotool for long text (>100 chars) | Character dropping bug | Clipboard paste + Ctrl+V |
 
 ### Sending Messages
 1. **ALWAYS press Enter to send** - never click Submit/Send buttons. Enter is universal.
-2. **ALWAYS use `taey_send_message`** - it handles Enter press + daemon spawn in one call.
-3. **NEVER wait/block for responses** - daemon notifies asynchronously. Move on immediately.
+2. **ALWAYS use `taey_send_message`** - it handles Enter press + monitor registration in one call.
+3. **NEVER wait/block for responses** - monitor notifies asynchronously. Move on immediately.
 4. **Pipeline pattern**: inspect → attach (if needed) → re-inspect → click input → send_message → move on → extract when `response_ready`
 
 ### Text Entry
@@ -277,8 +282,8 @@ When you see "Response ready on {platform}", extract with `taey_quick_extract(pl
 2. If not checked: click "Deep research New" radio menu item to enable
 3. Attach files via same dropdown → "Upload files or images"
 4. Paste text, press Enter (NOT click Submit)
-5. Spawn daemon or use `taey_send_message`
-6. Deep Research takes 5-10 minutes - daemon notifies when done
+5. Use `taey_send_message` (registers monitor session)
+6. Deep Research takes 5-10 minutes - monitor notifies when done
 7. **Copy button returns summary only** - use Export > Download as Markdown for full report
 
 ### Display Environment
@@ -467,7 +472,7 @@ See `agents/README.md` for full configuration details.
 | Wait/block for AI responses | Daemon notifies, move on |
 | Use xdotool for long text | Clipboard paste + Ctrl+V |
 | Use xclip (fork hangs) | Use xsel (no fork hang) |
-| Manually orchestrate send flow | Use `taey_send_message` (handles Enter + daemon) |
+| Manually orchestrate send flow | Use `taey_send_message` (handles Enter + monitor) |
 | Use raw Python AT-SPI scripts | Always use MCP tools (taey_inspect, etc.) |
 | Open new Firefox windows/tabs | Use existing pre-configured tabs only |
 | Run `import -window root` | Use `gnome-screenshot` (import grabs X server) |
@@ -480,7 +485,7 @@ See `agents/README.md` for full configuration details.
 - **Developer Mode** is default on new chats. File attachment button ("Add files and more") is BROKEN in Developer Mode.
 - Use temporary-chat URL: `https://chatgpt.com/?temporary-chat=true` to avoid Developer Mode.
 - Response extraction: Toggle Copy buttons. AT-SPI `do_action(0)` works even off-screen.
-- Canvas "Stop" button persists alongside "Update" - daemon filters this correctly.
+- Canvas "Stop" button persists alongside "Update" - monitor filters this correctly.
 - Has active AT-SPI countermeasures - if things fail unexpectedly, assume interference first.
 
 ### Claude (AI Platform)
