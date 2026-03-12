@@ -697,23 +697,34 @@ def attach_file(platform: str, file_path: str) -> bool:
             inp.press_key_split('Return')
             time.sleep(2.5)
 
-    # Gemini: dropdown should appear — look for "Upload files" and click it
+    # Gemini: dropdown should appear — look for "Upload files" menu item and click it
     elif platform == 'gemini':
-        time.sleep(1.0)
+        time.sleep(1.5)
         # Re-scan for dropdown items
         doc = atspi.get_platform_document(firefox, platform)
         if doc:
             elements = find_elements(doc)
             for e in elements:
-                name = (e.get('name') or '').lower()
-                if 'upload file' in name and e.get('x') and e.get('y'):
+                name = (e.get('name') or '').strip()
+                role = e.get('role', '')
+                # Match "Upload files" menu item but NOT "Open upload file menu" trigger button
+                if ('upload file' in name.lower()
+                        and name.lower() != 'open upload file menu'
+                        and e.get('x') and e.get('y')):
                     if e.get('atspi_obj') and atspi_click(e):
-                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
+                        logger.info(f"[{platform}] Clicked '{name}' via AT-SPI")
                     else:
                         inp.click_at(e['x'], e['y'])
-                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                        logger.info(f"[{platform}] Clicked '{name}' via xdotool")
                     time.sleep(2.0)
                     break
+            else:
+                # Fallback: try Down+Enter like ChatGPT
+                logger.info(f"[{platform}] 'Upload files' not found — trying Down+Enter")
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key_split('Return')
+                time.sleep(2.5)
 
     # Wait for file dialog to appear
     dialog_found = False
