@@ -84,6 +84,13 @@ def _create_plan(platform: str, action: str, params: Dict,
         'validated': True, 'created_at': time.time(),
     }))
 
+    # Global plan lock — central monitor stops ALL tab/URL cycling while active.
+    # Cleared by send_message on completion. TTL=120s safety net.
+    redis_client.setex(node_key("plan_active"), 120, json.dumps({
+        'plan_id': plan_id, 'platform': platform,
+        'created_at': time.time(),
+    }))
+
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
