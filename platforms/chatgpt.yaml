@@ -75,16 +75,89 @@ mode_guidance:
     how: "Click model selector, select 'Pro'"
     timeout: 7200
 
-# Noise elements to exclude from inspect output
-inspect_noise:
-  exclude_name_contains:
-    - "Open conversation options"  # Every sidebar history link has this suffix
-    - "Upgrade"                    # Upgrade plan banners/links
-    - "Get Plus"                   # Upsell prompts
-    - "Manage my account"          # Account management sidebar
+# ─── Element Filtering ───────────────────────────────────────────────
+# Applied BEFORE returning inspect results. Two sections:
+#   1. exclude → noise, never show
+#   2. element_map → known controls we need (labeled with semantic name)
+# Anything not in exclude OR element_map → flagged as NEW for investigation.
+# Chat history is excluded via sidebar_history pattern.
 
-element_hints:
-  input_role: textbox
-  send_role: push button
-  send_name_pattern: send
-  copy_name_pattern: copy
+element_filter:
+  exclude:
+    # Exact name matches — never show
+    names:
+      - "Close sidebar"
+      - "Turn on temporary chat"
+      - "Start a group chat"
+      - "Dictate button"
+      - "Start Voice"
+      - "Profile image"
+      - "ChatGPT"                    # document web root
+    # Substring matches — exclude if name contains any of these
+    name_contains:
+      - "Open conversation options"
+      - ", open profile menu"
+      - "Upgrade"
+      - "Get Plus"
+      - "Manage my account"
+    # Roles to always exclude
+    roles:
+      - separator
+      - document web
+
+  # Sidebar chat history exclusion
+  # Elements in sidebar region matching these patterns are chat history → excluded
+  # (Navigate to previous chats by pasting URLs, not clicking sidebar)
+  sidebar_history:
+    x_max: 400
+    history_roles: [list item, link]
+    # Sections with these in their text field are history entries
+    history_text_contains: ["Open conversation options"]
+
+# ─── Known Elements ─────────────────────────────────────────────────
+# Controls we interact with. Each gets a semantic label in inspect output.
+# Matched by: name/name_contains/name_pattern + role/role_contains + states_include
+element_map:
+  input:
+    role: entry
+    states_include: [editable]
+  model_selector:
+    name_pattern: "Model selector, current model is *"
+    role: push button
+  attach_trigger:
+    name: "Add files and more"
+    role: push button
+  copy_button:
+    name_contains: "Copy"
+    role_contains: button
+  stop_button:
+    name_contains: "Stop"
+    role_contains: button
+  pro_indicator:
+    name_pattern: "Pro, click to remove"
+    role: push button
+  thinking_mode:
+    name_pattern: "*, click to remove"
+    role: push button
+
+# ─── Known Sidebar Navigation ───────────────────────────────────────
+# Whitelist of sidebar links/buttons. These always pass through.
+# New items (link/button in sidebar not in this list) → flagged as NEW.
+sidebar_nav:
+  - { name: "Home", role: link }
+  - { name_pattern: "New chat*", role: link }
+  - { name: "Pulse", role: link }
+  - { name: "Images", role: link }
+  - { name: "Library", role: link }
+  - { name: "Apps", role: link }
+  - { name: "Deep research", role: link }
+  - { name: "Codex", role: link }
+  - { name: "GPTs", role: link }
+  - { name: "Projects", role: push button }
+  - { name: "New project", role: push button }
+  - { name: "Your chats", role: push button }
+  - { name: "Your chats", role: heading }
+
+# ─── Dropdown Items ─────────────────────────────────────────────────
+# Captured for drift detection. Updated when platform changes.
+# (moved from capabilities section for clarity — capabilities kept for backward compat)

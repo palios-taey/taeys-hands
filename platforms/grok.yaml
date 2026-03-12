@@ -65,14 +65,81 @@ mode_guidance:
     how: "Default Auto mode - no selection needed"
     timeout: 1800
 
-# Noise elements to exclude from inspect output
-inspect_noise:
-  exclude_name_contains:
-    - "Upgrade to"            # Upsell links
-    - "SuperGrok"             # Premium promo
+# ─── Element Filtering ───────────────────────────────────────────────
+element_filter:
+  exclude:
+    names:
+      - "Toggle Sidebar"
+      - "pfp"                        # profile picture button + image
+      - "Web page favicon"           # source favicons in responses
+    name_contains:
+      - "Upgrade to"
+      - "SuperGrok"
+    roles:
+      - separator
+      - document web
 
-element_hints:
-  input_role: textbox
-  send_role: push button
-  send_name_pattern: send
-  copy_name_pattern: copy
+  sidebar_history:
+    x_max: 400
+    history_roles: [list item, link]
+
+element_map:
+  input:
+    role_contains: section
+    states_include: [editable, focusable, multi-line]
+  attach_trigger:
+    name: "Attach"
+    role: push button
+  model_selector:
+    name: "Model select"
+    role: push button
+  copy_button:
+    name: "Copy"
+    role: push button
+  edit_button:
+    name: "Edit"
+    role: push button
+  stop_button:
+    name_contains: "Stop"
+    role_contains: button
+  regenerate:
+    name: "Regenerate"
+    role: push button
+  read_aloud:
+    name: "Read aloud"
+    role: push button
+  start_thread:
+    name: "Start thread"
+    role: push button
+  like:
+    name: "Like"
+    role: push button
+  dislike:
+    name: "Dislike"
+    role: push button
+  more_actions:
+    name: "More actions"
+    role: push button
+  create_share_link:
+    name: "Create share link"
+    role: push button
+  thought_indicator:
+    name_pattern: "Thought for *"
+    role: push button
+
+sidebar_nav:
+  - { name: "Home page", role: link }
+  - { name: "Search", role: push button }
+  - { name_pattern: "Search*", role: list item }
+  - { name: "Chat", role: link }
+  - { name_pattern: "Chat*", role: list item }
+  - { name: "Voice", role: link }
+  - { name_pattern: "Voice*", role: list item }
+  - { name: "Imagine", role: link }
+  - { name_pattern: "Imagine*", role: list item }
+  - { name: "Projects", role: push button }
+  - { name: "New Project", role: push button }
+  - { name_pattern: "New Project*", role: list item }
+  - { name: "History", role: push button }
+  - { name: "More", role: push button }
+  - { name: "Options", role: push button }
