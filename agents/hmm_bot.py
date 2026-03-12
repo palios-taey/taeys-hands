@@ -83,29 +83,28 @@ def restart_firefox(platforms: list) -> bool:
     subprocess.run(['pkill', '-f', 'crashreporter'], capture_output=True)
     time.sleep(2)
 
-    # Remove stale locks
+    # Remove stale locks and session restore files (prevent old tab restoration)
     import glob as _glob
-    for lock in _glob.glob(os.path.expanduser('~/.config/mozilla/firefox/*/.parentlock')):
-        try:
-            os.remove(lock)
-        except Exception:
-            pass
-    for lock in _glob.glob(os.path.expanduser('~/.mozilla/firefox/*/.parentlock')):
-        try:
-            os.remove(lock)
-        except Exception:
-            pass
+    import shutil
+    for profile_dir in ['~/.config/mozilla/firefox', '~/.mozilla/firefox']:
+        for lock in _glob.glob(os.path.expanduser(f'{profile_dir}/*/.parentlock')):
+            try:
+                os.remove(lock)
+            except Exception:
+                pass
+        # Remove session restore files to prevent restoring old tabs
+        for pattern in ['*/sessionstore*', '*/sessionstore-backups']:
+            for path in _glob.glob(os.path.expanduser(f'{profile_dir}/{pattern}')):
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+                except Exception:
+                    pass
 
-    # Build URL list from platforms
-    urls = []
-    tab_order = ['chatgpt', 'claude', 'gemini']  # Alt+1, Alt+2, Alt+3
-    for slot in tab_order:
-        if slot in platforms:
-            urls.append(FRESH_URLS.get(slot, 'about:blank'))
-        elif slot == 'claude':
-            urls.append('about:blank')  # Placeholder for Claude tab slot
-        else:
-            urls.append('about:blank')
+    # Open with a single blank tab — navigate_fresh_session handles URLs
+    urls = ['about:blank']
 
     firefox_env = {
         **env,
@@ -222,13 +221,17 @@ def get_stats() -> str:
 
 
 def navigate_fresh_session(platform: str) -> bool:
-    """Navigate to a fresh session URL for the platform."""
+    """Navigate to a fresh session URL for the platform.
+
+    Does NOT depend on tab order — just focuses Firefox and navigates
+    the current tab to the platform URL via Ctrl+L.
+    """
     url = FRESH_URLS.get(platform)
     if not url:
         return False
 
-    if not inp.switch_to_platform(platform):
-        logger.warning(f"Could not switch to {platform} tab")
+    if not inp.focus_firefox():
+        logger.warning("Could not focus Firefox")
         return False
 
     time.sleep(0.3)
@@ -370,8 +373,8 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
 
 def extract_response(platform: str) -> str:
     """Extract latest response via copy button. Returns content or empty string."""
-    if not inp.switch_to_platform(platform):
-        return ''
+    inp.focus_firefox()
+    time.sleep(0.3)
 
     # Scroll to bottom
     inp.press_key('End')
