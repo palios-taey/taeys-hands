@@ -31,6 +31,18 @@ _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
 _ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
 
 
+def _set_attach_checkpoint(platform: str, file_path: str, redis_client):
+    """Write attach checkpoint to Redis so validate_send knows attach completed."""
+    if not redis_client:
+        return
+    try:
+        redis_client.setex(node_key(f"checkpoint:{platform}:attach"), 1800,
+                           json.dumps({"attached_count": 1, "file": file_path,
+                                       "timestamp": time.time()}))
+    except Exception as e:
+        logger.warning("Failed to set attach checkpoint: %s", e)
+
+
 # --- Button discovery ---
 
 def _find_attach_button(doc, platform: str = None):
@@ -291,6 +303,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
                   "info": "File chip may shift element positions - re-inspect before further clicks."}
         if not chip_found:
             result["warning"] = "Dialog closed but no file chip detected — re-inspect to verify."
+        _set_attach_checkpoint(platform, file_path, redis_client)
         return result
     except Exception as e:
         return {"error": f"Portal dialog handling failed: {e}"}
@@ -347,6 +360,7 @@ def _handle_gtk_dialog(platform: str, file_path: str,
                   "info": "File chip may shift element positions - re-inspect before further clicks."}
         if not chip_found:
             result["warning"] = "Dialog closed but no file chip detected — re-inspect to verify."
+        _set_attach_checkpoint(platform, file_path, redis_client)
         return result
     except Exception as e:
         return {"error": f"GTK dialog handling failed: {e}"}
@@ -517,6 +531,7 @@ def handle_attach(platform: str, file_path: str,
     if existing:
         basename = os.path.basename(file_path)
         if any(basename in f.get('file', '') for f in existing):
+            _set_attach_checkpoint(platform, file_path, redis_client)
             return {"status": "already_attached", "platform": platform,
                     "file_path": file_path, "filename": basename,
                     "existing_attachments": existing,
