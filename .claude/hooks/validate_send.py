@@ -63,10 +63,11 @@ def main():
     except Exception:
         allow("Redis unavailable - allowing send without plan check")
 
-    # Check for active plan
+    # Require active plan — plans auto-include identity files + consolidation
     plan_json = r.get(node_key(f"plan:{platform}"))
     if not plan_json:
-        allow(f"No plan found for {platform} - allowing send (plan is advisory)")
+        deny(f"No plan for {platform}. Create a plan with taey_plan first. "
+             "Plans auto-include identity files and consolidate attachments.")
 
     try:
         plan = json.loads(plan_json)
