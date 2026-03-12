@@ -1,0 +1,687 @@
+#!/usr/bin/env python3
+"""hmm_bot.py — Autonomous HMM enrichment bot via AT-SPI.
+
+Pure mechanical automation: no LLM in the loop. Uses AT-SPI to attach
+packages, send prompts, detect response completion, extract, and process.
+
+Usage:
+    # Continuous mode (default)
+    python3 agents/hmm_bot.py
+
+    # Single cycle
+    python3 agents/hmm_bot.py --cycles 1
+
+    # Specific platforms only
+    python3 agents/hmm_bot.py --platforms chatgpt gemini
+
+Environment:
+    DISPLAY          — X11 display (default: :1)
+    NOTIFY_TARGET    — taey-notify target for escalations (default: weaver)
+    BUILDER_PATH     — path to hmm_package_builder.py
+    PYTHONPATH       — must include embedding-server root
+"""
+
+import argparse
+import json
+import logging
+import os
+import subprocess
+import sys
+import time
+
+# Must set DISPLAY before importing AT-SPI modules
+os.environ.setdefault('DISPLAY', ':1')
+
+# Add taeys-hands and embedding-server to path
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+sys.path.insert(0, _ROOT)
+if os.path.expanduser('~/embedding-server') not in sys.path:
+    sys.path.insert(0, os.path.expanduser('~/embedding-server'))
+
+from core import atspi, clipboard
+from core import input as inp
+from core.tree import find_elements, find_copy_buttons, filter_useful_elements, detect_chrome_y
+from tools.attach.keyboard_nav import keyboard_nav_attach
+from tools.attach import handle_attach
+from tools.attach.dialogs import close_stale_file_dialogs
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S',
+)
+logger = logging.getLogger('hmm_bot')
+
+NOTIFY_TARGET = os.environ.get('NOTIFY_TARGET', 'weaver')
+BUILDER_PATH = os.environ.get(
+    'BUILDER_PATH',
+    os.path.expanduser('~/embedding-server/isma/scripts/hmm_package_builder.py'),
+)
+
+# Stop button patterns (from monitor/daemon.py)
+STOP_PATTERNS = {
+    'chatgpt': ['stop', 'stop generating'],
+    'gemini': ['stop', 'cancel'],
+}
+
+# Platform fresh-session URLs
+FRESH_URLS = {
+    'chatgpt': 'https://chatgpt.com',
+    'gemini': 'https://gemini.google.com/app',
+}
+
+
+def restart_firefox(platforms: list) -> bool:
+    """Kill and restart Firefox with platform tabs. Returns True if successful."""
+    logger.warning("Restarting Firefox...")
+    env = os.environ.copy()
+    display = env.get('DISPLAY', ':1')
+
+    # Kill existing Firefox
+    subprocess.run(['pkill', '-f', 'firefox'], capture_output=True)
+    subprocess.run(['pkill', '-f', 'crashreporter'], capture_output=True)
+    time.sleep(2)
+
+    # Remove stale locks
+    import glob as _glob
+    for lock in _glob.glob(os.path.expanduser('~/.config/mozilla/firefox/*/.parentlock')):
+        try:
+            os.remove(lock)
+        except Exception:
+            pass
+    for lock in _glob.glob(os.path.expanduser('~/.mozilla/firefox/*/.parentlock')):
+        try:
+            os.remove(lock)
+        except Exception:
+            pass
+
+    # Build URL list from platforms
+    urls = []
+    tab_order = ['chatgpt', 'claude', 'gemini']  # Alt+1, Alt+2, Alt+3
+    for slot in tab_order:
+        if slot in platforms:
+            urls.append(FRESH_URLS.get(slot, 'about:blank'))
+        elif slot == 'claude':
+            urls.append('about:blank')  # Placeholder for Claude tab slot
+        else:
+            urls.append('about:blank')
+
+    firefox_env = {
+        **env,
+        'DISPLAY': display,
+        'MOZ_DISABLE_CONTENT_SANDBOX': '1',
+        'LIBGL_ALWAYS_SOFTWARE': '1',
+        'MOZ_ACCELERATED': '0',
+    }
+    # Add DBUS if available
+    uid = os.getuid()
+    dbus_path = f'/run/user/{uid}/bus'
+    if os.path.exists(dbus_path):
+        firefox_env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={dbus_path}'
+
+    subprocess.Popen(
+        ['firefox'] + urls,
+        env=firefox_env,
+        stdout=open('/tmp/firefox.log', 'w'),
+        stderr=subprocess.STDOUT,
+    )
+
+    # Wait for Firefox to become accessible
+    for i in range(15):
+        time.sleep(2)
+        if check_firefox_alive():
+            logger.info(f"Firefox restarted successfully ({(i+1)*2}s)")
+            return True
+
+    logger.error("Firefox failed to start after 30s")
+    return False
+
+
+def notify(message: str):
+    """Send notification via taey-notify."""
+    try:
+        subprocess.run(
+            ['taey-notify', NOTIFY_TARGET, message, '--type', 'notification'],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        logger.warning(f"Notify failed: {message}")
+
+
+def escalate(message: str):
+    """Send escalation via taey-notify."""
+    try:
+        subprocess.run(
+            ['taey-notify', NOTIFY_TARGET, message, '--type', 'escalation'],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        logger.error(f"Escalate failed: {message}")
+
+
+def builder_cmd(*args) -> subprocess.CompletedProcess:
+    """Run hmm_package_builder.py with given args."""
+    cmd = ['python3', BUILDER_PATH] + list(args)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+
+def get_prompt() -> str:
+    """Get HMM analysis prompt from builder."""
+    result = builder_cmd('prompt')
+    if result.returncode != 0:
+        logger.error(f"Failed to get prompt: {result.stderr}")
+        return ''
+    return result.stdout.strip()
+
+
+def get_next_package(platform: str) -> str:
+    """Get next package for platform. Returns file path or empty string."""
+    result = builder_cmd('next', '--platform', platform)
+    if result.returncode != 0 or 'No items available' in result.stdout:
+        return ''
+    # Parse file path from output (last non-empty line)
+    for line in reversed(result.stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith('/') and line.endswith('.md'):
+            return line
+    # Try to find it in /tmp/hmm_packages/
+    for line in result.stdout.strip().splitlines():
+        if '/tmp/hmm_packages/' in line:
+            # Extract path
+            idx = line.find('/tmp/hmm_packages/')
+            if idx >= 0:
+                path = line[idx:].split()[0]
+                if os.path.isfile(path):
+                    return path
+    logger.warning(f"Could not parse package path from builder output:\n{result.stdout[:200]}")
+    return ''
+
+
+def complete_package(platform: str, response_file: str) -> bool:
+    """Mark package complete with response. Returns True on success."""
+    result = builder_cmd('complete', '--platform', platform,
+                         '--response-file', response_file)
+    if result.returncode != 0:
+        logger.error(f"Complete failed for {platform}: {result.stderr[:200]}")
+        return False
+    logger.info(f"Package completed for {platform}")
+    return True
+
+
+def fail_package(platform: str, reason: str = 'bot_failure'):
+    """Mark package as failed (requeues it)."""
+    builder_cmd('fail', '--platform', platform, reason)
+    logger.info(f"Package failed/requeued for {platform}: {reason}")
+
+
+def get_stats() -> str:
+    """Get builder stats."""
+    result = builder_cmd('stats')
+    return result.stdout.strip() if result.returncode == 0 else 'stats unavailable'
+
+
+def navigate_fresh_session(platform: str) -> bool:
+    """Navigate to a fresh session URL for the platform."""
+    url = FRESH_URLS.get(platform)
+    if not url:
+        return False
+
+    if not inp.switch_to_platform(platform):
+        logger.warning(f"Could not switch to {platform} tab")
+        return False
+
+    time.sleep(0.3)
+    inp.press_key('Escape')
+    time.sleep(0.2)
+    inp.press_key('ctrl+l')
+    time.sleep(0.3)
+    inp.clipboard_paste(url)
+    time.sleep(0.1)
+    inp.press_key('Return')
+    time.sleep(4)  # Wait for page load
+    return True
+
+
+def check_firefox_alive() -> bool:
+    """Check if Firefox is accessible via AT-SPI."""
+    firefox = atspi.find_firefox()
+    return firefox is not None
+
+
+def scan_for_stop_button(platform: str) -> bool:
+    """Check if a stop/cancel button is visible (AI is generating)."""
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        return False
+
+    elements = find_elements(doc)
+    patterns = STOP_PATTERNS.get(platform, ['stop'])
+
+    for e in elements:
+        name = (e.get('name') or '').strip()
+        if not name or len(name) > 50:
+            continue
+        if 'button' not in e.get('role', ''):
+            continue
+        name_lower = name.lower()
+        if any(p in name_lower for p in patterns):
+            return True
+    return False
+
+
+def count_copy_buttons(platform: str) -> int:
+    """Count visible copy buttons on the platform."""
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        return 0
+
+    elements = find_elements(doc)
+    return len(find_copy_buttons(elements))
+
+
+def find_input_field(platform: str):
+    """Find the chat input field. Returns (x, y) or None."""
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        return None
+
+    elements = find_elements(doc)
+    chrome_y = detect_chrome_y(doc)
+    filtered = filter_useful_elements(elements, chrome_y=chrome_y)
+
+    for e in filtered:
+        if (e.get('role') == 'entry'
+                and 'editable' in e.get('states', [])
+                and e.get('y', 0) > chrome_y):
+            return (e['x'], e['y'])
+    return None
+
+
+def wait_for_response(platform: str, timeout: int = 600) -> bool:
+    """Wait for AI response to complete.
+
+    Strategy:
+    1. Poll for stop button to appear (AI started generating)
+    2. Then poll for stop button to disappear (AI finished)
+    3. Fallback: if no stop button seen within 30s but copy count increased, done
+
+    Returns True if response detected, False on timeout.
+    """
+    start = time.time()
+    initial_copy_count = count_copy_buttons(platform)
+    stop_seen = False
+    phase = 'waiting_for_start'
+
+    while time.time() - start < timeout:
+        if not check_firefox_alive():
+            logger.error("Firefox died during response wait")
+            return False
+
+        has_stop = scan_for_stop_button(platform)
+
+        if phase == 'waiting_for_start':
+            if has_stop:
+                logger.info(f"[{platform}] Stop button appeared — AI generating")
+                stop_seen = True
+                phase = 'generating'
+            elif time.time() - start > 30:
+                # Fallback: check if copy count increased (fast response)
+                current_copy = count_copy_buttons(platform)
+                if current_copy > initial_copy_count:
+                    logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
+                    return True
+                elif time.time() - start > 60:
+                    logger.warning(f"[{platform}] No stop button after 60s — possible send failure")
+                    return False
+            time.sleep(3)
+
+        elif phase == 'generating':
+            if not has_stop:
+                # Stop button disappeared — wait a bit to confirm
+                logger.info(f"[{platform}] Stop button gone — settling...")
+                time.sleep(2)
+                if not scan_for_stop_button(platform):
+                    logger.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
+                    return True
+                else:
+                    logger.info(f"[{platform}] Stop button reappeared — still generating")
+            time.sleep(3)
+
+    logger.warning(f"[{platform}] Timeout after {timeout}s")
+    return False
+
+
+def extract_response(platform: str) -> str:
+    """Extract latest response via copy button. Returns content or empty string."""
+    if not inp.switch_to_platform(platform):
+        return ''
+
+    # Scroll to bottom
+    inp.press_key('End')
+    time.sleep(0.5)
+
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if not doc:
+        return ''
+
+    elements = find_elements(doc)
+    copy_buttons = find_copy_buttons(elements)
+
+    if not copy_buttons:
+        # Retry with scroll
+        for _ in range(3):
+            inp.press_key('End')
+            time.sleep(0.5)
+        doc = atspi.get_platform_document(firefox, platform)
+        if doc:
+            elements = find_elements(doc)
+            copy_buttons = find_copy_buttons(elements)
+
+    if not copy_buttons:
+        logger.warning(f"[{platform}] No copy buttons found")
+        return ''
+
+    # Prefer response-level "Copy" over "Copy code"
+    response_copy = [b for b in copy_buttons
+                     if (b.get('name') or '').strip().lower() == 'copy']
+    target = (response_copy or copy_buttons)[-1]
+
+    # Click copy button
+    clipboard.clear()
+    time.sleep(0.1)
+
+    from core.atspi_interact import atspi_click
+    if target.get('atspi_obj') and atspi_click(target):
+        logger.info(f"[{platform}] Copy via AT-SPI at ({target['x']}, {target['y']})")
+    else:
+        inp.click_at(target['x'], target['y'])
+        logger.info(f"[{platform}] Copy via xdotool at ({target['x']}, {target['y']})")
+
+    time.sleep(0.8)
+    content = clipboard.read()
+
+    # Retry with xdotool if AT-SPI didn't work
+    if not content and target.get('atspi_obj'):
+        clipboard.clear()
+        inp.click_at(target['x'], target['y'])
+        time.sleep(0.8)
+        content = clipboard.read()
+
+    # Check if we got the prompt instead of the response
+    if content:
+        start_text = content.strip()[:200].lower()
+        prompt_markers = ['analyze the following', 'package analysis request',
+                          'you are analyzing', 'respond only with minified json',
+                          'critical: echo back', 'analyze all', 'for each item provide']
+        if any(m in start_text for m in prompt_markers):
+            if len(response_copy) >= 2:
+                logger.warning(f"[{platform}] Got prompt text, trying previous copy button")
+                prev = response_copy[-2]
+                clipboard.clear()
+                time.sleep(0.1)
+                if prev.get('atspi_obj') and atspi_click(prev):
+                    pass
+                else:
+                    inp.click_at(prev['x'], prev['y'])
+                time.sleep(0.8)
+                retry = clipboard.read()
+                if retry and retry != content:
+                    content = retry
+            else:
+                logger.warning(f"[{platform}] Only 1 copy button — got prompt, no response yet")
+                content = ''
+
+    return content or ''
+
+
+def attach_file(platform: str, file_path: str) -> bool:
+    """Attach a file to the chat input. Returns True on success."""
+    # Use the existing attach infrastructure (handles keyboard nav for
+    # ChatGPT and AT-SPI menu for Gemini)
+    result = handle_attach(platform, file_path, redis_client=None)
+
+    if result.get('status') == 'file_attached':
+        logger.info(f"[{platform}] File attached: {os.path.basename(file_path)}")
+        return True
+    elif result.get('status') == 'already_attached':
+        logger.info(f"[{platform}] File already attached")
+        return True
+    elif result.get('status') == 'dropdown_open':
+        # Need to click the upload option in dropdown
+        items = result.get('dropdown_items', [])
+        upload_item = None
+        for item in items:
+            name = (item.get('name') or '').lower()
+            if 'upload' in name or 'file' in name:
+                upload_item = item
+                break
+        if upload_item and upload_item.get('x') and upload_item.get('y'):
+            inp.click_at(upload_item['x'], upload_item['y'])
+            time.sleep(2)
+            # Now call attach again to handle the file dialog
+            result2 = handle_attach(platform, file_path, redis_client=None)
+            if result2.get('status') == 'file_attached':
+                logger.info(f"[{platform}] File attached via dropdown")
+                return True
+        logger.warning(f"[{platform}] Dropdown opened but couldn't find upload option")
+        return False
+    else:
+        error = result.get('error', 'unknown')
+        logger.warning(f"[{platform}] Attach failed: {error}")
+        return False
+
+
+def send_prompt(platform: str, prompt: str) -> bool:
+    """Click input field and paste prompt. Returns True on success."""
+    coords = find_input_field(platform)
+    if not coords:
+        logger.warning(f"[{platform}] Input field not found")
+        return False
+
+    x, y = coords
+    inp.click_at(x, y)
+    time.sleep(0.3)
+
+    inp.clipboard_paste(prompt)
+    time.sleep(0.3)
+
+    inp.press_key('Return')
+    time.sleep(0.5)
+
+    logger.info(f"[{platform}] Prompt sent ({len(prompt)} chars)")
+    return True
+
+
+def process_platform(platform: str, prompt: str) -> dict:
+    """Full cycle for one platform: package → attach → send → wait → extract → complete.
+
+    Returns result dict with status and details.
+    """
+    result = {'platform': platform, 'success': False, 'error': None}
+
+    # Step 1: Get next package
+    logger.info(f"[{platform}] Getting next package...")
+    pkg_path = get_next_package(platform)
+    if not pkg_path:
+        result['error'] = 'no_items'
+        logger.info(f"[{platform}] No items available — skipping")
+        return result
+
+    logger.info(f"[{platform}] Package: {os.path.basename(pkg_path)}")
+
+    # Step 2: Navigate to fresh session
+    logger.info(f"[{platform}] Navigating to fresh session...")
+    if not navigate_fresh_session(platform):
+        result['error'] = 'nav_failed'
+        fail_package(platform, 'navigation_failed')
+        return result
+
+    # Step 3: Clean up stale dialogs
+    close_stale_file_dialogs()
+
+    # Step 4: Attach package file
+    logger.info(f"[{platform}] Attaching package...")
+    if not attach_file(platform, pkg_path):
+        result['error'] = 'attach_failed'
+        fail_package(platform, 'attach_failed')
+        return result
+
+    time.sleep(1)
+
+    # Step 5: Send prompt
+    logger.info(f"[{platform}] Sending prompt...")
+    if not send_prompt(platform, prompt):
+        result['error'] = 'send_failed'
+        fail_package(platform, 'send_failed')
+        return result
+
+    # Step 6: Wait for response
+    logger.info(f"[{platform}] Waiting for response...")
+    if not wait_for_response(platform, timeout=600):
+        result['error'] = 'response_timeout'
+        fail_package(platform, 'response_timeout')
+        return result
+
+    time.sleep(2)  # Let response fully render
+
+    # Step 7: Extract response
+    logger.info(f"[{platform}] Extracting response...")
+    content = extract_response(platform)
+    if not content:
+        result['error'] = 'extract_failed'
+        fail_package(platform, 'extract_failed')
+        return result
+
+    logger.info(f"[{platform}] Extracted {len(content)} chars")
+
+    # Step 8: Save response to file
+    response_file = f"/tmp/hmm_response_{platform}.json"
+    try:
+        with open(response_file, 'w') as f:
+            f.write(content)
+    except Exception as e:
+        result['error'] = f'save_failed: {e}'
+        fail_package(platform, 'save_failed')
+        return result
+
+    # Step 9: Process with builder
+    logger.info(f"[{platform}] Processing response...")
+    if not complete_package(platform, response_file):
+        result['error'] = 'complete_failed'
+        # Don't fail_package here — complete already handles requeue on error
+        return result
+
+    result['success'] = True
+    result['content_length'] = len(content)
+    logger.info(f"[{platform}] === CYCLE COMPLETE === ({len(content)} chars)")
+    return result
+
+
+def run_cycle(platforms: list, prompt: str) -> dict:
+    """Run one full enrichment cycle across all platforms.
+
+    Processes platforms sequentially (one at a time per CLAUDE.md rules).
+    Returns summary dict.
+    """
+    results = {}
+
+    for platform in platforms:
+        if not check_firefox_alive():
+            logger.warning("Firefox died — auto-restarting...")
+            if not restart_firefox(platforms):
+                escalate(f"ESCALATION from hmm_bot: Firefox restart failed during {platform}")
+                break
+            time.sleep(5)  # Extra settle time after restart
+
+        try:
+            results[platform] = process_platform(platform, prompt)
+        except Exception as e:
+            logger.error(f"[{platform}] Unhandled error: {e}")
+            results[platform] = {'platform': platform, 'success': False,
+                                 'error': f'exception: {e}'}
+            fail_package(platform, f'exception: {e}')
+
+    return results
+
+
+def main():
+    parser = argparse.ArgumentParser(description='HMM enrichment bot')
+    parser.add_argument('--platforms', nargs='+', default=['chatgpt', 'gemini'],
+                        help='Platforms to use (default: chatgpt gemini)')
+    parser.add_argument('--cycles', type=int, default=0,
+                        help='Number of cycles (0=infinite)')
+    parser.add_argument('--pause', type=int, default=10,
+                        help='Seconds between cycles (default: 10)')
+    args = parser.parse_args()
+
+    logger.info(f"HMM Bot starting — platforms: {args.platforms}, "
+                f"cycles: {'infinite' if args.cycles == 0 else args.cycles}")
+
+    # Get the prompt once (reused for all cycles)
+    prompt = get_prompt()
+    if not prompt:
+        logger.error("Failed to get HMM prompt — exiting")
+        escalate("ESCALATION from hmm_bot: failed to get HMM prompt")
+        sys.exit(1)
+
+    logger.info(f"Prompt loaded ({len(prompt)} chars)")
+
+    # Verify Firefox is alive — auto-restart if not
+    if not check_firefox_alive():
+        logger.warning("Firefox not found at startup — starting it...")
+        if not restart_firefox(args.platforms):
+            escalate("ESCALATION from hmm_bot: Firefox failed to start")
+            sys.exit(1)
+
+    cycle = 0
+    successes = 0
+    failures = 0
+
+    try:
+        while True:
+            cycle += 1
+            if args.cycles > 0 and cycle > args.cycles:
+                break
+
+            logger.info(f"\n{'='*60}")
+            logger.info(f"  CYCLE {cycle} — {successes} ok, {failures} fail")
+            logger.info(f"{'='*60}")
+
+            results = run_cycle(args.platforms, prompt)
+
+            for platform, r in results.items():
+                if r.get('success'):
+                    successes += 1
+                else:
+                    failures += 1
+
+            # Heartbeat every cycle
+            notify(f"HEARTBEAT from hmm_bot: cycle {cycle} done "
+                   f"({successes} ok, {failures} fail)")
+
+            # Check stats periodically
+            if cycle % 5 == 0:
+                logger.info(f"Builder stats:\n{get_stats()}")
+
+            # Pause between cycles
+            if args.cycles == 0 or cycle < args.cycles:
+                time.sleep(args.pause)
+
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        escalate(f"ESCALATION from hmm_bot: fatal error: {e}")
+        raise
+
+    logger.info(f"\nHMM Bot finished — {cycle} cycles, {successes} ok, {failures} fail")
+    logger.info(f"Stats:\n{get_stats()}")
+
+
+if __name__ == '__main__':
+    main()
