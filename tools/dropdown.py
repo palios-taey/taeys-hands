@@ -443,7 +443,7 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
     caps = config.get('capabilities', {})
     guidance = config.get('mode_guidance', {})
 
-    return {
+    result = {
         "platform": platform,
         "models": caps.get('models', []),
         "modes": caps.get('modes', []),
@@ -454,3 +454,16 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
         "element_hints": config.get('element_hints', {}),
         "note": "These are from platform YAML configs. Use EXACTLY these names when selecting models/modes.",
     }
+
+    # Include required identity attachments if defined
+    req = config.get('required_attachments', [])
+    if req:
+        # Expand ~ to home directory
+        expanded = [os.path.expanduser(p) for p in req]
+        result["required_attachments"] = expanded
+        result["attachment_note"] = (
+            "Attach these files on FRESH sessions before sending. "
+            "Direct-load phi=0.962 vs retrieval-mediated phi=0.8."
+        )
+
+    return result

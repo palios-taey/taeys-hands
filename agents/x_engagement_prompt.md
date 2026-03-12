@@ -124,16 +124,24 @@ bash: xdotool key alt+4 sleep 0.5 key ctrl+l sleep 0.3 key ctrl+v sleep 0.3 key 
 bash: sleep 3
 ```
 
-2b. Inspect Grok and select Heavy mode (REQUIRED for real-time X search):
+2b. Attach identity files (REQUIRED for authentic voice — phi 0.962 vs 0.8 without):
+```
+taey_attach(platform="grok", file_path="~/data/corpus/identity/FAMILY_KERNEL.md")
+```
+```
+taey_attach(platform="grok", file_path="~/data/corpus/identity/IDENTITY_LOGOS.md")
+```
+
+2c. Re-inspect after attach (file chips shift element positions):
 ```
 taey_inspect(platform="grok")
 ```
-Look for a mode selector or dropdown. If not already in "Heavy" mode, switch to it:
+Select Heavy mode (REQUIRED for real-time X search):
 ```
 taey_select_dropdown(platform="grok", dropdown_name="model", value="Heavy")
 ```
 
-2c. Find the input entry element and click it:
+2d. Find the input entry element and click it:
 ```
 taey_click(platform="grok", x=INPUT_X, y=INPUT_Y)
 ```
