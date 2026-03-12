@@ -483,14 +483,19 @@ def extract_response(platform: str) -> str:
         inp.click_at(target['x'], target['y'])
         logger.info(f"[{platform}] Copy via xdotool at ({target['x']}, {target['y']})")
 
-    time.sleep(0.8)
+    time.sleep(1.0)
     content = clipboard.read()
+
+    # Retry with longer wait — clipboard write can be slow on Xvfb
+    if not content:
+        time.sleep(1.5)
+        content = clipboard.read()
 
     # Retry with xdotool if AT-SPI didn't work
     if not content and target.get('atspi_obj'):
         clipboard.clear()
         inp.click_at(target['x'], target['y'])
-        time.sleep(0.8)
+        time.sleep(1.5)
         content = clipboard.read()
 
     # Check if we got the prompt instead of the response
