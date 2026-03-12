@@ -494,10 +494,12 @@ def _find_dialog_wid() -> str:
 
 
 def _handle_dialog_direct(file_path: str) -> bool:
-    """Handle GTK file dialog using xdotool type (not clipboard paste).
+    """Handle GTK file dialog: focus → open path bar → enter path → confirm.
 
-    The standard clipboard_paste (xsel + Ctrl+V) doesn't work in GTK file
-    dialogs on some Xvfb setups. xdotool type works reliably for short paths.
+    Tries multiple approaches for entering the path since GTK file dialogs
+    vary across environments:
+    1. Ctrl+L to open location bar + clipboard paste
+    2. Type '/' to trigger GTK path-bar + xdotool type
     """
     xenv = {**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':1')}
     wid = _find_dialog_wid()
@@ -505,45 +507,103 @@ def _handle_dialog_direct(file_path: str) -> bool:
         logger.warning("No file dialog window found")
         return False
 
-    # Focus the dialog
+    def _dialog_gone() -> bool:
+        return not _find_dialog_wid()
+
+    # Focus the dialog window
     subprocess.run(
         ['xdotool', 'windowactivate', '--sync', wid],
         capture_output=True, timeout=3, env=xenv,
     )
     time.sleep(0.5)
 
-    # Ctrl+L opens location bar in GTK file dialogs
+    # === Approach 1: Ctrl+L + clipboard paste ===
+    logger.info("Dialog: trying Ctrl+L + clipboard paste")
     inp.press_key('ctrl+l')
     time.sleep(0.5)
+    # Select all existing text and replace with our path
+    inp.press_key('ctrl+a')
+    time.sleep(0.1)
+    inp.clipboard_paste(file_path)
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(1.5)
 
-    # Type the path directly (short paths, no doubled-char issue)
+    if _dialog_gone():
+        logger.info("File dialog closed after Ctrl+L + clipboard paste")
+        return True
+
+    # Dialog still open — first Enter may have navigated to directory.
+    # Press Enter again to confirm file selection.
+    inp.press_key('Return')
+    time.sleep(1.0)
+    if _dialog_gone():
+        logger.info("File dialog closed after second Enter (Ctrl+L approach)")
+        return True
+
+    # === Approach 2: Type '/' to trigger GTK path bar + xdotool type ===
+    logger.info("Dialog: Ctrl+L failed, trying '/' + xdotool type")
+    # Re-focus in case focus shifted
     subprocess.run(
-        ['xdotool', 'type', '--clearmodifiers', '--delay', '10', '--', file_path],
+        ['xdotool', 'windowactivate', '--sync', wid],
+        capture_output=True, timeout=3, env=xenv,
+    )
+    time.sleep(0.3)
+    # In GTK file dialogs, typing '/' opens the path entry automatically
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', file_path],
         capture_output=True, timeout=15, env=xenv,
     )
     time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(1.5)
 
-    # Enter to navigate/select
+    if _dialog_gone():
+        logger.info("File dialog closed after '/' + xdotool type")
+        return True
+
+    # Second Enter
     inp.press_key('Return')
     time.sleep(1.0)
+    if _dialog_gone():
+        logger.info("File dialog closed after second Enter (type approach)")
+        return True
 
-    # Check if dialog closed
-    for _ in range(20):
-        if not _find_dialog_wid():
-            logger.info("File dialog closed after xdotool type path")
-            return True
-        time.sleep(0.3)
-
-    # Dialog still open — try pressing Enter again (might need confirmation)
+    # === Approach 3: Navigate to directory first, then select filename ===
+    logger.info("Dialog: path entry failed, trying directory + filename")
+    dir_path = os.path.dirname(file_path)
+    filename = os.path.basename(file_path)
+    subprocess.run(
+        ['xdotool', 'windowactivate', '--sync', wid],
+        capture_output=True, timeout=3, env=xenv,
+    )
+    time.sleep(0.3)
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
+    inp.press_key('ctrl+a')
+    time.sleep(0.1)
+    # Type directory path
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', dir_path],
+        capture_output=True, timeout=10, env=xenv,
+    )
+    time.sleep(0.2)
     inp.press_key('Return')
-    time.sleep(1.0)
-    for _ in range(10):
-        if not _find_dialog_wid():
-            logger.info("File dialog closed after second Enter")
-            return True
-        time.sleep(0.3)
+    time.sleep(1.5)
+    # Now type the filename to select it
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', filename],
+        capture_output=True, timeout=10, env=xenv,
+    )
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(1.5)
 
-    logger.warning("File dialog did not close after xdotool type")
+    if _dialog_gone():
+        logger.info("File dialog closed after directory + filename approach")
+        return True
+
+    logger.warning("All file dialog approaches failed")
     return False
 
 
