@@ -270,8 +270,12 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.2)
     inp.press_key('ctrl+l')
     time.sleep(0.3)
-    inp.clipboard_paste(url)
+    # Use xdotool type for URLs — clipboard paste (xsel + Ctrl+V) fails on
+    # some Xvfb setups. URLs are short so xdotool type is reliable here.
+    inp.press_key('ctrl+a')
     time.sleep(0.1)
+    inp.type_text(url, delay_ms=10)
+    time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(8)  # Wait for page load (needs more time on fresh restart)
 
@@ -556,14 +560,15 @@ def _handle_dialog_direct(file_path: str) -> bool:
     )
     time.sleep(0.5)
 
-    # === Approach 1: Ctrl+L + clipboard paste ===
-    logger.info("Dialog: trying Ctrl+L + clipboard paste")
+    # === Approach 1: Ctrl+L + type path ===
+    logger.info("Dialog: trying Ctrl+L + type path")
     inp.press_key('ctrl+l')
     time.sleep(0.5)
     # Select all existing text and replace with our path
     inp.press_key('ctrl+a')
     time.sleep(0.1)
-    inp.clipboard_paste(file_path)
+    # Use xdotool type for file paths — clipboard paste fails on some Xvfb setups
+    inp.type_text(file_path, delay_ms=10)
     time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(1.5)
