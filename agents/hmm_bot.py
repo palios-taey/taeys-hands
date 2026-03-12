@@ -320,8 +320,29 @@ def count_copy_buttons(platform: str) -> int:
     return len(find_copy_buttons(elements))
 
 
+def _get_screen_size():
+    """Get screen dimensions via xdpyinfo. Returns (width, height)."""
+    try:
+        r = subprocess.run(
+            ['xdpyinfo'], capture_output=True, text=True, timeout=3,
+            env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':1')},
+        )
+        for line in r.stdout.splitlines():
+            if 'dimensions:' in line:
+                parts = line.split()[1].split('x')
+                return (int(parts[0]), int(parts[1]))
+    except Exception:
+        pass
+    return (1920, 1080)  # Default
+
+
 def find_input_field(platform: str):
-    """Find the chat input field. Returns (x, y) or None."""
+    """Find the chat input field. Returns (x, y) or None.
+
+    Searches for: role=entry with editable, OR any element with editable state
+    near the bottom of the page. Falls back to estimated position based on
+    screen geometry if AT-SPI doesn't expose the input (ChatGPT ProseMirror).
+    """
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
@@ -329,14 +350,32 @@ def find_input_field(platform: str):
 
     elements = find_elements(doc)
     chrome_y = detect_chrome_y(doc)
-    filtered = filter_useful_elements(elements, chrome_y=chrome_y)
 
-    for e in filtered:
+    # Priority 1: role=entry with editable
+    for e in elements:
         if (e.get('role') == 'entry'
                 and 'editable' in e.get('states', [])
-                and e.get('y', 0) > chrome_y):
+                and e.get('y', 0) > chrome_y
+                and e.get('x', 0) > 0):
             return (e['x'], e['y'])
-    return None
+
+    # Priority 2: any element with editable state near bottom half
+    screen_w, screen_h = _get_screen_size()
+    bottom_half_y = screen_h * 0.5
+    for e in elements:
+        if ('editable' in e.get('states', [])
+                and e.get('y', 0) > bottom_half_y
+                and e.get('x', 0) > 0):
+            logger.info(f"[{platform}] Found editable element: role={e.get('role')} at ({e['x']}, {e['y']})")
+            return (e['x'], e['y'])
+
+    # Priority 3: estimate from screen geometry
+    # ChatGPT/Gemini input is at bottom-center of content area
+    # Sidebar is ~260px wide, input bar ~100px from bottom
+    est_x = screen_w // 2
+    est_y = int(screen_h * 0.88)
+    logger.info(f"[{platform}] AT-SPI input not found — using estimated coords ({est_x}, {est_y})")
+    return (est_x, est_y)
 
 
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
@@ -702,26 +741,36 @@ def attach_file(platform: str, file_path: str) -> bool:
 
 
 def send_prompt(platform: str, prompt: str) -> bool:
-    """Click input field and paste prompt. Returns True on success."""
-    # Try AT-SPI first; if not found, scroll to bottom and try Tab to focus input
+    """Click input field and paste prompt. Returns True on success.
+
+    Always clicks at input coordinates (AT-SPI or estimated). Never uses
+    Tab fallback — it doesn't reliably focus ChatGPT's ProseMirror input.
+    """
+    inp.focus_firefox()
+    time.sleep(0.3)
+
+    # Scroll to bottom first so input is visible
+    inp.press_key('End')
+    time.sleep(0.5)
+
+    # Find and click input field (always returns coords now — has fallback)
     coords = find_input_field(platform)
     if coords:
         inp.click_at(coords[0], coords[1])
-        time.sleep(0.3)
+        time.sleep(0.5)
     else:
-        logger.info(f"[{platform}] Input not in AT-SPI — using Tab to focus")
-        inp.focus_firefox()
-        time.sleep(0.3)
-        inp.press_key('End')  # Scroll to bottom
-        time.sleep(0.3)
-        inp.press_key('Tab')  # Tab to input field
-        time.sleep(0.3)
+        # Shouldn't happen (find_input_field has geometry fallback) but just in case
+        screen_w, screen_h = _get_screen_size()
+        inp.click_at(screen_w // 2, int(screen_h * 0.88))
+        time.sleep(0.5)
 
+    # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
-    time.sleep(0.3)
-
-    inp.press_key('Return')
     time.sleep(0.5)
+
+    # Press Enter to send
+    inp.press_key('Return')
+    time.sleep(1.0)
 
     logger.info(f"[{platform}] Prompt sent ({len(prompt)} chars)")
     return True
@@ -779,17 +828,21 @@ def process_platform(platform: str, prompt: str) -> dict:
         fail_package(platform, 'send_failed')
         return result
 
-    # Step 5b: Verify send worked — if no stop button after 10s, retry Enter
+    # Step 5b: Verify send worked — if no stop button after 10s, retry
     time.sleep(10)
     if not scan_for_stop_button(platform):
-        logger.info(f"[{platform}] No stop button after 10s — retrying Enter")
-        # Re-focus input and press Enter again
+        logger.info(f"[{platform}] No stop button after 10s — clicking input + Enter retry")
+        inp.focus_firefox()
+        time.sleep(0.3)
+        inp.press_key('End')
+        time.sleep(0.3)
+        # Click input area and press Enter (text should still be there)
         coords = find_input_field(platform)
         if coords:
             inp.click_at(coords[0], coords[1])
-            time.sleep(0.3)
+            time.sleep(0.5)
         inp.press_key('Return')
-        time.sleep(3)
+        time.sleep(5)
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
