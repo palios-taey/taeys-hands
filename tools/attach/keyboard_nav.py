@@ -21,7 +21,7 @@ else:
     Atspi = None
 
 from core import atspi, input as inp
-from core.atspi_interact import find_element_at, atspi_click
+from core.atspi_interact import atspi_click
 from core.tree import find_elements
 from tools.attach.buttons import get_attach_button_coords, is_attach_button_disabled
 from tools.attach.dialogs import any_file_dialog_open, handle_file_dialog, close_stale_file_dialogs
@@ -146,10 +146,12 @@ def keyboard_nav_attach(platform: str, file_path: str,
             logger.debug(f"Attach button action check failed: {e}")
 
     # Try accessibility action first — AT-SPI do_action on Linux, AXPress on macOS
-    element_for_click = find_element_at(platform, btn_coords['x'], btn_coords['y'])
-    if element_for_click:
-        logger.info(f"Keyboard nav attach for {platform}: accessibility action on button at ({btn_coords['x']}, {btn_coords['y']})")
-        if atspi_click(element_for_click):
+    # Use btn_coords directly (has atspi_obj from button discovery).
+    # Do NOT use find_element_at() — coordinate matching can return a
+    # container/section element that overlaps the button's position.
+    if btn_coords.get('atspi_obj'):
+        logger.info(f"Keyboard nav attach for {platform}: do_action on '{btn_coords.get('name', 'attach')}' button at ({btn_coords['x']}, {btn_coords['y']})")
+        if atspi_click(btn_coords):
             time.sleep(1.5)
 
             dialog_type = any_file_dialog_open(firefox)
