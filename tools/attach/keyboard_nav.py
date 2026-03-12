@@ -161,7 +161,7 @@ def keyboard_nav_attach(platform: str, file_path: str,
             # Accessibility action may have opened dropdown — try Down+Enter
             inp.press_key('Down')
             time.sleep(0.5)
-            inp.press_key('Return')
+            inp.press_key_split('Return')  # Split keydown/keyup to prevent Enter leaking into file dialog
             time.sleep(2.5)
 
             for _ in range(10):
@@ -184,7 +184,7 @@ def keyboard_nav_attach(platform: str, file_path: str,
     # Keyboard nav: Down selects first dropdown item, Enter activates it
     inp.press_key('Down')
     time.sleep(0.5)
-    inp.press_key('Return')
+    inp.press_key_split('Return')  # Split keydown/keyup to prevent Enter leaking into file dialog
     time.sleep(2.5)
 
     for _ in range(10):

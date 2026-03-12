@@ -208,6 +208,44 @@ def switch_to_platform(platform: str) -> bool:
     return False
 
 
+def press_key_split(key: str, gap_ms: int = 50, timeout: int = 10) -> bool:
+    """Press a key using separate keydown/keyup events with a gap.
+
+    Prevents the key release from leaking into a newly opened dialog.
+    Used when pressing Enter to activate a dropdown item that opens a
+    file dialog — the normal key event sends release too fast, causing
+    the dialog to auto-confirm.
+
+    Args:
+        key: Key name (e.g., 'Return').
+        gap_ms: Milliseconds between keydown and keyup.
+        timeout: Maximum seconds per xdotool call.
+
+    Returns:
+        True if both keydown and keyup succeeded.
+    """
+    env = _get_env()
+    try:
+        r1 = subprocess.run(
+            ['xdotool', 'keydown', key],
+            env=env, capture_output=True, timeout=timeout,
+        )
+        time.sleep(gap_ms / 1000.0)
+        r2 = subprocess.run(
+            ['xdotool', 'keyup', key],
+            env=env, capture_output=True, timeout=timeout,
+        )
+        return r1.returncode == 0 and r2.returncode == 0
+    except Exception as e:
+        logger.error(f"press_key_split {key} error: {e}")
+        # Always try to release the key
+        try:
+            subprocess.run(['xdotool', 'keyup', key], env=env, timeout=3)
+        except Exception:
+            pass
+        return False
+
+
 def scroll_to_bottom():
     """Scroll to bottom of page using End key."""
     press_key('End')
