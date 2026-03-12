@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """
 PreToolUse hook for taey_attach
-Validates: platform is specified and file_path exists.
-
-Plan check is advisory only — attaching without a plan is allowed
-(HMM enrichment, ad-hoc testing, standalone workflows).
-
-Works on: Spark, CCM, Windows (auto-detects environment)
+CRITICAL: Blocks attach unless a plan exists for the platform.
+Also validates: platform is specified and file_path exists.
 """
 import json
 import sys
@@ -60,7 +56,19 @@ def main():
     if not os.path.isfile(file_path):
         deny(f"File not found: {file_path}")
 
-    allow(f"Attach allowed for {platform} — file exists: {os.path.basename(file_path)}")
+    # Require active plan
+    r = get_redis()
+    if r:
+        try:
+            r.ping()
+            plan_json = r.get(node_key(f"plan:{platform}"))
+            if not plan_json:
+                deny(f"No plan for {platform}. Create a plan with taey_plan first. "
+                     "Plans auto-include identity files and consolidate attachments.")
+        except Exception:
+            pass  # Redis down — allow (can't check)
+
+    allow(f"Attach allowed for {platform} — plan exists, file: {os.path.basename(file_path)}")
 
 
 if __name__ == "__main__":
