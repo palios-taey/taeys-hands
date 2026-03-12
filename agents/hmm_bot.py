@@ -342,12 +342,11 @@ def _get_screen_size():
     return (1920, 1080)  # Default
 
 
-def find_input_field(platform: str):
-    """Find the chat input field. Returns (x, y) or None.
+def find_input_field_atspi(platform: str):
+    """Find the chat input field via AT-SPI. Returns (x, y) or None.
 
-    Searches for: role=entry with editable, OR any element with editable state
-    near the bottom of the page. Falls back to estimated position based on
-    screen geometry if AT-SPI doesn't expose the input (ChatGPT ProseMirror).
+    Only returns coordinates if AT-SPI exposes an editable element.
+    Does NOT fall back to estimated coords (caller decides what to do).
     """
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
@@ -365,23 +364,15 @@ def find_input_field(platform: str):
                 and e.get('x', 0) > 0):
             return (e['x'], e['y'])
 
-    # Priority 2: any element with editable state near bottom half
-    screen_w, screen_h = _get_screen_size()
-    bottom_half_y = screen_h * 0.5
+    # Priority 2: any element with editable state in page area
     for e in elements:
         if ('editable' in e.get('states', [])
-                and e.get('y', 0) > bottom_half_y
+                and e.get('y', 0) > chrome_y
                 and e.get('x', 0) > 0):
-            logger.info(f"[{platform}] Found editable element: role={e.get('role')} at ({e['x']}, {e['y']})")
+            logger.info(f"[{platform}] Found editable: role={e.get('role')} at ({e['x']}, {e['y']})")
             return (e['x'], e['y'])
 
-    # Priority 3: estimate from screen geometry
-    # ChatGPT/Gemini input is at bottom-center of content area
-    # Sidebar is ~260px wide, input bar ~100px from bottom
-    est_x = screen_w // 2
-    est_y = int(screen_h * 0.88)
-    logger.info(f"[{platform}] AT-SPI input not found — using estimated coords ({est_x}, {est_y})")
-    return (est_x, est_y)
+    return None
 
 
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
@@ -749,26 +740,25 @@ def attach_file(platform: str, file_path: str) -> bool:
 def send_prompt(platform: str, prompt: str) -> bool:
     """Click input field and paste prompt. Returns True on success.
 
-    Always clicks at input coordinates (AT-SPI or estimated). Never uses
-    Tab fallback — it doesn't reliably focus ChatGPT's ProseMirror input.
+    Strategy: After file attach, the input field should already be focused.
+    Don't scroll (End key moves focus away on homepage layouts). If AT-SPI
+    finds the input, click it. Otherwise trust existing focus and paste directly.
     """
     inp.focus_firefox()
     time.sleep(0.3)
 
-    # Scroll to bottom first so input is visible
-    inp.press_key('End')
-    time.sleep(0.5)
-
-    # Find and click input field (always returns coords now — has fallback)
-    coords = find_input_field(platform)
+    # Try to find input via AT-SPI (role=entry with editable)
+    coords = find_input_field_atspi(platform)
     if coords:
+        logger.info(f"[{platform}] Found input via AT-SPI at ({coords[0]}, {coords[1]})")
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
     else:
-        # Shouldn't happen (find_input_field has geometry fallback) but just in case
-        screen_w, screen_h = _get_screen_size()
-        inp.click_at(screen_w // 2, int(screen_h * 0.88))
-        time.sleep(0.5)
+        # Input not in AT-SPI (ChatGPT ProseMirror). DON'T click at random
+        # coords — the input should still be focused from file attach flow.
+        # Just click in the center of the page to be safe (ChatGPT homepage
+        # has centered input, conversation view has bottom input).
+        logger.info(f"[{platform}] Input not in AT-SPI — trusting existing focus")
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
@@ -837,13 +827,12 @@ def process_platform(platform: str, prompt: str) -> dict:
     # Step 5b: Verify send worked — if no stop button after 10s, retry
     time.sleep(10)
     if not scan_for_stop_button(platform):
-        logger.info(f"[{platform}] No stop button after 10s — clicking input + Enter retry")
+        logger.info(f"[{platform}] No stop button after 10s — retrying Enter")
         inp.focus_firefox()
         time.sleep(0.3)
-        inp.press_key('End')
-        time.sleep(0.3)
-        # Click input area and press Enter (text should still be there)
-        coords = find_input_field(platform)
+        # Try clicking AT-SPI input if available, otherwise just press Enter
+        # (text should still be in the input from the paste)
+        coords = find_input_field_atspi(platform)
         if coords:
             inp.click_at(coords[0], coords[1])
             time.sleep(0.5)
