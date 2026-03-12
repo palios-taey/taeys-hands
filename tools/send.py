@@ -1,8 +1,7 @@
-"""taey_send_message - Paste, send, record, spawn monitor."""
+"""taey_send_message - Paste, send, record, register monitor session."""
 
 import json
 import os
-import subprocess
 import time
 import uuid
 import logging
@@ -16,54 +15,42 @@ from storage.redis_pool import node_key, NODE_ID
 
 logger = logging.getLogger(__name__)
 
-_daemon_processes = []
-_reap_counter = 0
 
+def register_monitor_session(platform: str, monitor_id: str, url: str,
+                             redis_client, session_id: str = None,
+                             user_message_id: str = None,
+                             tmux_session: str = None,
+                             baseline_copies: int = 0,
+                             timeout: int = 3600) -> Dict[str, Any]:
+    """Register active session for the central monitor to track."""
+    if not redis_client:
+        return {"registered": False, "error": "Redis not available"}
 
-def _reap_daemons():
-    global _daemon_processes
-    _daemon_processes = [p for p in _daemon_processes if p.poll() is None]
-
-
-def spawn_monitor_daemon(platform: str, monitor_id: str, display: str,
-                         session_id: str = None, user_message_id: str = None,
-                         timeout: int = 3600, settle_seconds: int = 0) -> Dict[str, Any]:
-    """Spawn monitor daemon as detached subprocess."""
-    daemon_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'monitor', 'daemon.py',
-    )
-    import sys as _sys
-    cmd = [
-        _sys.executable or '/usr/bin/python3', daemon_path,
-        '--platform', platform, '--monitor-id', monitor_id,
-        '--baseline-copy-count', '0', '--timeout', str(timeout),
-        '--tmux-session', NODE_ID,
-    ]
-    if session_id:
-        cmd.extend(['--session-id', session_id])
-    if user_message_id:
-        cmd.extend(['--user-message-id', user_message_id])
-    if settle_seconds > 0:
-        cmd.extend(['--settle-seconds', str(settle_seconds)])
-
-    _reap_daemons()
-    env = os.environ.copy()
-    env['DISPLAY'] = display
+    session_data = {
+        "platform": platform,
+        "monitor_id": monitor_id,
+        "url": url or "",
+        "session_id": session_id,
+        "user_message_id": user_message_id,
+        "tmux_session": tmux_session or NODE_ID,
+        "baseline_copies": baseline_copies,
+        "stop_seen": False,
+        "generating_since": None,
+        "started_ts": time.time(),
+        "timeout": timeout,
+        "started": datetime.now().isoformat(),
+    }
 
     try:
-        log_file = f"/tmp/taey_daemon_{monitor_id}.log"
-        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        proc = subprocess.Popen(
-            cmd, env=env, stdout=log_fd, stderr=log_fd,
-            close_fds=True, pass_fds=(log_fd,), start_new_session=True,
+        redis_client.setex(
+            node_key(f"active_session:{monitor_id}"),
+            timeout,
+            json.dumps(session_data),
         )
-        os.close(log_fd)
-        _daemon_processes.append(proc)
-        return {"spawned": True, "pid": proc.pid, "log": log_file}
+        return {"registered": True, "monitor_id": monitor_id}
     except Exception as e:
-        logger.error(f"Daemon spawn failed: {e}")
-        return {"spawned": False, "error": str(e)}
+        logger.error(f"Session registration failed: {e}")
+        return {"registered": False, "error": str(e)}
 
 
 def handle_send_message(platform: str, message: str,
@@ -71,12 +58,7 @@ def handle_send_message(platform: str, message: str,
                         attachments: List[str] = None,
                         session_type: str = None,
                         purpose: str = None) -> Dict[str, Any]:
-    """Paste message, press Enter, record in Neo4j, spawn monitor."""
-    global _reap_counter
-    _reap_counter += 1
-    if _reap_counter % 10 == 0:
-        _reap_daemons()
-
+    """Paste message, press Enter, record in Neo4j, register monitor session."""
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform}", "platform": platform}
     time.sleep(0.5)
@@ -114,36 +96,36 @@ def handle_send_message(platform: str, message: str,
             'message_id': message_id, 'sent_at': datetime.now().isoformat(),
         }))
 
-    # Spawn monitor BEFORE Enter (chat platforms only)
+    # Register monitor session BEFORE Enter (chat platforms only)
     monitor_id = str(uuid.uuid4())[:8]
-    daemon_spawned = daemon_pid = daemon_log_path = None
+    monitor_registered = False
 
     if platform not in SOCIAL_PLATFORMS:
-        spawn_result = spawn_monitor_daemon(
-            platform=platform, monitor_id=monitor_id, display=display,
-            session_id=session_id, user_message_id=message_id,
+        reg = register_monitor_session(
+            platform=platform, monitor_id=monitor_id, url=url,
+            redis_client=redis_client, session_id=session_id,
+            user_message_id=message_id,
         )
-        daemon_spawned = spawn_result.get("spawned", False)
-        daemon_pid = spawn_result.get("pid")
-        daemon_log_path = spawn_result.get("log")
+        monitor_registered = reg.get("registered", False)
 
     # Press Enter (skip on social platforms where Enter = newline)
     enter_pressed = False
     if platform not in SOCIAL_PLATFORMS:
         if not inp.press_key('Return', timeout=5):
-            if daemon_spawned and daemon_pid:
-                try:
-                    os.kill(daemon_pid, 15)
-                except (ProcessLookupError, OSError):
-                    pass
+            # Clean up monitor session on send failure
+            if monitor_registered and redis_client:
+                redis_client.delete(node_key(f"active_session:{monitor_id}"))
             return {"error": "Send (Enter) failed", "platform": platform, "neo4j": neo4j_result}
         enter_pressed = True
+
+    # Clear plan lock — send complete, monitor can resume cycling
+    if redis_client:
+        redis_client.delete(node_key("plan_active"))
 
     result = {
         "platform": platform, "url": url, "message_length": len(message),
         "neo4j": neo4j_result,
-        "monitor": {"id": monitor_id, "spawned": daemon_spawned,
-                     "pid": daemon_pid, "log": daemon_log_path},
+        "monitor": {"id": monitor_id, "registered": monitor_registered},
     }
 
     if not enter_pressed:
@@ -151,7 +133,7 @@ def handle_send_message(platform: str, message: str,
             "Text pasted but NOT sent. On social platforms, Enter = newline. "
             "Click the Post/Reply button via taey_inspect + taey_click."
         )
-    if not daemon_spawned:
-        result["warning"] = "Monitor daemon FAILED to spawn. Use taey_quick_extract manually."
+    if not monitor_registered:
+        result["warning"] = "Monitor session NOT registered. Use taey_quick_extract manually."
 
     return result
