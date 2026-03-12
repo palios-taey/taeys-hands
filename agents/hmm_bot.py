@@ -680,8 +680,9 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button
-    if btn.get('atspi_obj') and atspi_click(btn):
+    # Click attach button — try AT-SPI first, then xdotool coordinate click
+    clicked_atspi = btn.get('atspi_obj') and atspi_click(btn)
+    if clicked_atspi:
         logger.info(f"[{platform}] Clicked attach button via AT-SPI")
     else:
         inp.click_at(btn['x'], btn['y'])
@@ -696,6 +697,19 @@ def attach_file(platform: str, file_path: str) -> bool:
             time.sleep(0.5)
             inp.press_key_split('Return')
             time.sleep(2.5)
+
+        # If AT-SPI click didn't produce anything, retry with xdotool click
+        if not _find_dialog_wid() and clicked_atspi:
+            logger.info(f"[{platform}] AT-SPI click didn't open dropdown — retrying xdotool")
+            inp.press_key('Escape')
+            time.sleep(0.3)
+            inp.click_at(btn['x'], btn['y'])
+            time.sleep(1.5)
+            if not _find_dialog_wid():
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key_split('Return')
+                time.sleep(2.5)
 
     # Gemini: dropdown should appear — look for "Upload files" menu item and click it
     elif platform == 'gemini':
