@@ -184,7 +184,13 @@ def escalate(message: str):
 def builder_cmd(*args) -> subprocess.CompletedProcess:
     """Run hmm_package_builder.py with given args."""
     cmd = ['python3', BUILDER_PATH] + list(args)
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    env = {**os.environ}
+    # Ensure embedding-server is in PYTHONPATH for the subprocess
+    emb_root = os.path.expanduser('~/embedding-server')
+    existing = env.get('PYTHONPATH', '')
+    if emb_root not in existing:
+        env['PYTHONPATH'] = f"{emb_root}:{existing}" if existing else emb_root
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
 
 def get_prompt() -> str:
