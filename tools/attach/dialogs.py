@@ -103,6 +103,23 @@ def close_stale_file_dialogs():
         except Exception:
             pass
 
+    # Close xdg-desktop-portal-gtk dialogs (Xvfb / headless environments)
+    try:
+        result = subprocess.run(
+            ['xdotool', 'search', '--name', 'xdg-desktop-portal-gtk'],
+            capture_output=True, text=True, timeout=2, env=_xenv(),
+        )
+        if result.stdout.strip():
+            for wid in result.stdout.strip().split('\n'):
+                subprocess.run(
+                    ['xdotool', 'windowclose', wid],
+                    capture_output=True, timeout=3, env=_xenv(),
+                )
+                logger.info(f"Closed xdg-desktop-portal-gtk dialog {wid}")
+                closed += 1
+    except Exception as e:
+        logger.debug(f"xdg-desktop-portal-gtk search failed: {e}")
+
     # Close zombie Firefox dialog windows (named exactly 'Firefox' with
     # no page title). Real browser windows have titles like
     # 'ChatGPT - Mozilla Firefox'. These zombies are leftover from failed
