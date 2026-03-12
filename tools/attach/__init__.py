@@ -142,29 +142,30 @@ def handle_attach(platform: str, file_path: str,
                 return handle_file_dialog(platform, file_path, redis_client)
 
             # Scan for dropdown items (retry for slow renders)
-            for attempt in range(3):
+            # 5×0.6s = 3s total — Gemini React portal needs 2-3s to render
+            for attempt in range(5):
                 firefox = atspi.find_firefox()
                 doc = atspi.get_platform_document(firefox, platform) if firefox else None
                 dropdown_items = find_menu_items(firefox, doc)
                 if dropdown_items:
                     break
-                time.sleep(0.5)
+                time.sleep(0.6)
 
             # If AT-SPI click was used but no dropdown, retry with xdotool
             if not dropdown_items and click_result.get("method") == "atspi":
                 logger.info("AT-SPI click didn't open dropdown, retrying with xdotool")
                 inp.click_at(btn_coords['x'], btn_coords['y'])
-                time.sleep(1.0)
+                time.sleep(1.5)
                 dialog_type = any_file_dialog_open(firefox)
                 if dialog_type:
                     return handle_file_dialog(platform, file_path, redis_client)
-                for attempt in range(3):
+                for attempt in range(5):
                     firefox = atspi.find_firefox()
                     doc = atspi.get_platform_document(firefox, platform) if firefox else None
                     dropdown_items = find_menu_items(firefox, doc)
                     if dropdown_items:
                         break
-                    time.sleep(0.5)
+                    time.sleep(0.6)
     else:
         logger.info("Attach button not found via AT-SPI tree search")
 

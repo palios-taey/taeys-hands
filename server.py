@@ -28,7 +28,8 @@ def _tool_timeout_handler(signum, frame):
 
 
 # Max seconds for any single tool call (prevents server hang → broken pipe)
-TOOL_TIMEOUT_SECONDS = 60
+# 120s needed for Jetson workers (10-20x slower CPU, large AT-SPI trees)
+TOOL_TIMEOUT_SECONDS = int(os.environ.get('MCP_TOOL_TIMEOUT', '120'))
 
 # Load .env file (Redis host, Neo4j URI, etc.)
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
