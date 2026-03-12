@@ -221,6 +221,9 @@ class MonitorDaemon:
         self.verbose_logged = False
 
         self.generating_since = None
+        self.last_tab_refresh = None
+        self._TAB_REFRESH_INTERVAL = 30  # seconds between tab switches
+        self._TAB_REFRESH_DELAY = 30     # seconds in GENERATING before first switch
 
         self.main_loop = GLib.MainLoop() if GLib else None
 
@@ -344,6 +347,62 @@ class MonitorDaemon:
                         pass
         except Exception:
             pass
+
+    def _should_refresh_tab(self) -> bool:
+        """Check if it's safe and needed to switch to the platform tab.
+
+        Only refreshes when:
+        1. We're in GENERATING state (stop button was seen)
+        2. Enough time has passed since generation started (30s)
+        3. Enough time since last refresh (30s interval)
+        4. Node is idle (no active tool calls that tab switch would disrupt)
+        """
+        if self.state != "GENERATING" or not self.generating_since:
+            return False
+        now = time.time()
+        gen_elapsed = now - self.generating_since
+        if gen_elapsed < self._TAB_REFRESH_DELAY:
+            return False
+        if self.last_tab_refresh and (now - self.last_tab_refresh) < self._TAB_REFRESH_INTERVAL:
+            return False
+        # Only switch tabs when node is idle — don't disrupt active tool use
+        if self.redis_client:
+            try:
+                nid = _EFFECTIVE_NODE_ID
+                if self.redis_client.exists(f"taey:{nid}:tool_running"):
+                    return False  # tools active, don't switch
+                last_str = self.redis_client.get(f"taey:{nid}:last_tool_activity")
+                if last_str:
+                    idle_secs = now - float(last_str)
+                    if idle_secs < 15:
+                        return False  # recent activity, don't switch
+            except Exception:
+                return False  # Redis down — play it safe, don't switch
+        return True
+
+    def _refresh_tab(self):
+        """Switch to the platform's Firefox tab to force AT-SPI tree update.
+
+        Firefox does NOT update AT-SPI for inactive tabs. D-Bus cache flush
+        (clear_cache_single) only clears the CLIENT cache — Firefox's content
+        process still holds stale objects. The only way to force Firefox to
+        process queued DOM mutations is to make the tab active.
+        """
+        from core.platforms import TAB_SHORTCUTS
+        shortcut = TAB_SHORTCUTS.get(self.platform)
+        if not shortcut:
+            return
+        try:
+            display = os.environ.get('DISPLAY', ':0')
+            subprocess.run(
+                ['xdotool', 'key', '--clearmodifiers', shortcut],
+                env={**os.environ, 'DISPLAY': display},
+                capture_output=True, timeout=5,
+            )
+            self.last_tab_refresh = time.time()
+            self._log(f"Tab refresh: switched to {self.platform} ({shortcut})")
+        except Exception as e:
+            self._log(f"Tab refresh failed: {e}")
 
     def _is_stop_button(self, name: str) -> bool:
         """Check if button name matches stop patterns.
@@ -585,6 +644,12 @@ class MonitorDaemon:
         # children forces Firefox's content process to flush pending state
         # without switching tabs.
         self._force_dbus_refresh(platform_doc)
+
+        # Switch to platform tab if stuck in GENERATING and node is idle.
+        # Firefox does NOT update AT-SPI for inactive tabs — this is the
+        # only reliable way to detect response completion on background tabs.
+        if self._should_refresh_tab():
+            self._refresh_tab()
 
         # Search for stop button and count copy buttons in document
         all_buttons = []
