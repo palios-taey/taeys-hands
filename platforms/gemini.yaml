@@ -61,6 +61,12 @@ mode_guidance:
     how: "Click 'Open mode picker', select 'Fast' radio item"
     timeout: 1800
 
+# ─── Sidebar Fence ────────────────────────────────────────────────
+# When this element is encountered during traversal, it is collected but
+# all remaining siblings in the parent are skipped. Excludes sidebar history.
+fence_after:
+  - { name: "Chats", role: heading }
+
 # ─── Element Filtering ───────────────────────────────────────────────
 element_filter:
   exclude:

@@ -75,6 +75,12 @@ mode_guidance:
     how: "Default - no tool selection needed"
     timeout: 3600
 
+# ─── Sidebar Fence ────────────────────────────────────────────────
+# When this element is encountered during traversal, it is collected but
+# all remaining siblings in the parent are skipped. Excludes sidebar history.
+fence_after:
+  - { name: "Recent Collapse", role: push button }
+
 # ─── Element Filtering ───────────────────────────────────────────────
 element_filter:
   exclude:
