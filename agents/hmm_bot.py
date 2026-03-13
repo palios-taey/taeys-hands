@@ -57,14 +57,36 @@ BUILDER_PATH = os.environ.get(
     os.path.expanduser('~/embedding-server/isma/scripts/hmm_package_builder.py'),
 )
 
-# Stop button patterns (from monitor/central.py)
-STOP_PATTERNS = {
-    'chatgpt': ['stop', 'stop generating'],
-    'gemini': ['stop', 'cancel'],
-    'grok': ['stop', 'stop generating'],
-}
+# Load platform configs from YAMLs — fence_after, stop_patterns, etc.
+import yaml as _yaml
 
-# Platform fresh-session URLs
+PLATFORMS_DIR = os.path.join(_ROOT, 'platforms')
+_platform_configs = {}
+
+
+def _load_platform_config(platform: str) -> dict:
+    """Load platform YAML config (cached)."""
+    if platform not in _platform_configs:
+        try:
+            with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as f:
+                _platform_configs[platform] = _yaml.safe_load(f) or {}
+        except Exception:
+            _platform_configs[platform] = {}
+    return _platform_configs[platform]
+
+
+def _get_fence_after(platform: str) -> list:
+    """Get fence_after config from platform YAML."""
+    return _load_platform_config(platform).get('fence_after', [])
+
+
+def _get_stop_patterns(platform: str) -> list:
+    """Get stop_patterns from platform YAML."""
+    cfg = _load_platform_config(platform)
+    return cfg.get('stop_patterns', ['stop'])
+
+
+# Platform fresh-session URLs (from YAML base_url)
 FRESH_URLS = {
     'chatgpt': 'https://chatgpt.com/?temporary-chat=true',
     'gemini': 'https://gemini.google.com/app',
@@ -421,9 +443,10 @@ def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
     return False
 
 
-def _find_elements_with_timeout(doc, timeout_sec: int = 15):
-    """find_elements with signal-based timeout to prevent AT-SPI hangs."""
+def _find_elements_with_fence(doc, platform: str, timeout_sec: int = 15):
+    """find_elements with fence_after from YAML + signal-based timeout."""
     import signal
+    fences = _get_fence_after(platform)
 
     def _handler(signum, frame):
         raise TimeoutError("AT-SPI find_elements timed out")
@@ -431,9 +454,9 @@ def _find_elements_with_timeout(doc, timeout_sec: int = 15):
     old_handler = signal.signal(signal.SIGALRM, _handler)
     signal.alarm(timeout_sec)
     try:
-        return find_elements(doc)
+        return find_elements(doc, fence_after=fences)
     except TimeoutError:
-        logger.warning("AT-SPI find_elements timed out — D-Bus likely stalled")
+        logger.warning(f"[{platform}] AT-SPI find_elements timed out — D-Bus likely stalled")
         return []
     finally:
         signal.alarm(0)
@@ -446,8 +469,8 @@ def scan_for_stop_button(platform: str) -> bool:
     if not doc:
         return False
 
-    elements = _find_elements_with_timeout(doc)
-    patterns = STOP_PATTERNS.get(platform, ['stop'])
+    elements = _find_elements_with_fence(doc, platform)
+    patterns = _get_stop_patterns(platform)
 
     for e in elements:
         name = (e.get('name') or '').strip()
@@ -467,7 +490,7 @@ def count_copy_buttons(platform: str) -> int:
     if not doc:
         return 0
 
-    elements = _find_elements_with_timeout(doc)
+    elements = _find_elements_with_fence(doc, platform)
     return len(find_copy_buttons(elements))
 
 
@@ -478,12 +501,11 @@ def find_input_field_atspi(platform: str):
     With taeys-hands v7, AT-SPI ALWAYS exposes the input field.
     If this returns None, it's a real bug — callers must fail loud.
     """
-    firefox = get_firefox(platform)
     doc = get_doc(platform)
     if not doc:
         return None
 
-    elements = find_elements(doc)
+    elements = _find_elements_with_fence(doc, platform)
     chrome_y = detect_chrome_y(doc)
 
     # Priority 1: role=entry with editable
@@ -584,7 +606,7 @@ def extract_response(platform: str) -> str:
     if not doc:
         return ''
 
-    elements = find_elements(doc)
+    elements = _find_elements_with_fence(doc, platform)
     copy_buttons = find_copy_buttons(elements)
 
     # Retry: copy buttons may not be in AT-SPI yet after scroll (render lag)
@@ -596,7 +618,7 @@ def extract_response(platform: str) -> str:
             doc = get_doc(platform, force_refresh=True)
             if not doc:
                 break
-            elements = find_elements(doc)
+            elements = _find_elements_with_fence(doc, platform)
             copy_buttons = find_copy_buttons(elements)
             if copy_buttons:
                 logger.info(f"[{platform}] Copy buttons found on retry {retry+1}")
@@ -794,7 +816,7 @@ def attach_file(platform: str, file_path: str) -> bool:
         time.sleep(2.0)  # Gemini dropdown needs time to render
         doc2 = get_doc(platform, force_refresh=True)
         if doc2:
-            elems2 = find_elements(doc2)
+            elems2 = _find_elements_with_fence(doc2, platform)
             for e in elems2:
                 name = (e.get('name') or '').strip().lower()
                 if 'upload file' in name and 'menu item' in e.get('role', ''):
