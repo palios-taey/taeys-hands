@@ -331,27 +331,11 @@ def count_copy_buttons(platform: str) -> int:
     return len(find_copy_buttons(elements))
 
 
-def _get_screen_size():
-    """Get screen dimensions via xdpyinfo. Returns (width, height)."""
-    try:
-        r = subprocess.run(
-            ['xdpyinfo'], capture_output=True, text=True, timeout=3,
-            env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':1')},
-        )
-        for line in r.stdout.splitlines():
-            if 'dimensions:' in line:
-                parts = line.split()[1].split('x')
-                return (int(parts[0]), int(parts[1]))
-    except Exception:
-        pass
-    return (1920, 1080)  # Default
-
-
 def find_input_field_atspi(platform: str):
     """Find the chat input field via AT-SPI. Returns (x, y) or None.
 
-    Only returns coordinates if AT-SPI exposes an editable element.
-    Does NOT fall back to estimated coords (caller decides what to do).
+    With taeys-hands v7, AT-SPI ALWAYS exposes the input field.
+    If this returns None, it's a real bug — callers must fail loud.
     """
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
@@ -452,17 +436,7 @@ def extract_response(platform: str) -> str:
     copy_buttons = find_copy_buttons(elements)
 
     if not copy_buttons:
-        # Retry with scroll
-        for _ in range(3):
-            inp.press_key('End')
-            time.sleep(0.5)
-        doc = atspi.get_platform_document(firefox, platform)
-        if doc:
-            elements = find_elements(doc)
-            copy_buttons = find_copy_buttons(elements)
-
-    if not copy_buttons:
-        logger.warning(f"[{platform}] No copy buttons found")
+        logger.error(f"[{platform}] No copy buttons found after scroll to bottom")
         return ''
 
     # Prefer response-level "Copy" over "Copy code"
@@ -492,17 +466,9 @@ def extract_response(platform: str) -> str:
             content = raw
             break
 
-    # Retry with xdotool if AT-SPI didn't work
-    if not content and target.get('atspi_obj'):
-        clipboard.write_marker(_MARKER)
-        time.sleep(0.2)
-        inp.click_at(target['x'], target['y'])
-        for _ in range(6):
-            time.sleep(0.5)
-            raw = clipboard.read()
-            if raw and raw != _MARKER:
-                content = raw
-                break
+    if not content:
+        logger.error(f"[{platform}] Copy button clicked but clipboard unchanged after 3s")
+        return ''
 
     # Check if we got the prompt instead of the response
     if content:
@@ -521,9 +487,9 @@ def extract_response(platform: str) -> str:
                 else:
                     inp.click_at(prev['x'], prev['y'])
                 time.sleep(0.8)
-                retry = clipboard.read()
-                if retry and retry != content:
-                    content = retry
+                alt = clipboard.read()
+                if alt and alt != content:
+                    content = alt
             else:
                 logger.warning(f"[{platform}] Only 1 copy button — got prompt, no response yet")
                 content = ''
@@ -571,94 +537,29 @@ def _handle_dialog_direct(file_path: str) -> bool:
     )
     time.sleep(0.5)
 
-    # === Approach 1: Ctrl+L + type path ===
-    logger.info("Dialog: trying Ctrl+L + type path")
+    # Ctrl+L opens location bar, Ctrl+A clears, type path, Enter confirms
+    logger.info(f"Dialog: Ctrl+L + type path: {file_path}")
     inp.press_key('ctrl+l')
     time.sleep(0.5)
-    # Select all existing text and replace with our path
     inp.press_key('ctrl+a')
     time.sleep(0.1)
-    # Use xdotool type for file paths — clipboard paste fails on some Xvfb setups
     inp.type_text(file_path, delay_ms=10)
     time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(1.5)
 
     if _dialog_gone():
-        logger.info("File dialog closed after Ctrl+L + clipboard paste")
+        logger.info("File dialog closed successfully")
         return True
 
-    # Dialog still open — first Enter may have navigated to directory.
-    # Press Enter again to confirm file selection.
+    # GTK sometimes navigates to directory on first Enter — second Enter selects file
     inp.press_key('Return')
     time.sleep(1.0)
     if _dialog_gone():
-        logger.info("File dialog closed after second Enter (Ctrl+L approach)")
+        logger.info("File dialog closed after directory navigation + file select")
         return True
 
-    # === Approach 2: Type '/' to trigger GTK path bar + xdotool type ===
-    logger.info("Dialog: Ctrl+L failed, trying '/' + xdotool type")
-    # Re-focus in case focus shifted
-    subprocess.run(
-        ['xdotool', 'windowactivate', '--sync', wid],
-        capture_output=True, timeout=3, env=xenv,
-    )
-    time.sleep(0.3)
-    # In GTK file dialogs, typing '/' opens the path entry automatically
-    subprocess.run(
-        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', file_path],
-        capture_output=True, timeout=15, env=xenv,
-    )
-    time.sleep(0.3)
-    inp.press_key('Return')
-    time.sleep(1.5)
-
-    if _dialog_gone():
-        logger.info("File dialog closed after '/' + xdotool type")
-        return True
-
-    # Second Enter
-    inp.press_key('Return')
-    time.sleep(1.0)
-    if _dialog_gone():
-        logger.info("File dialog closed after second Enter (type approach)")
-        return True
-
-    # === Approach 3: Navigate to directory first, then select filename ===
-    logger.info("Dialog: path entry failed, trying directory + filename")
-    dir_path = os.path.dirname(file_path)
-    filename = os.path.basename(file_path)
-    subprocess.run(
-        ['xdotool', 'windowactivate', '--sync', wid],
-        capture_output=True, timeout=3, env=xenv,
-    )
-    time.sleep(0.3)
-    inp.press_key('ctrl+l')
-    time.sleep(0.5)
-    inp.press_key('ctrl+a')
-    time.sleep(0.1)
-    # Type directory path
-    subprocess.run(
-        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', dir_path],
-        capture_output=True, timeout=10, env=xenv,
-    )
-    time.sleep(0.2)
-    inp.press_key('Return')
-    time.sleep(1.5)
-    # Now type the filename to select it
-    subprocess.run(
-        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', '--', filename],
-        capture_output=True, timeout=10, env=xenv,
-    )
-    time.sleep(0.3)
-    inp.press_key('Return')
-    time.sleep(1.5)
-
-    if _dialog_gone():
-        logger.info("File dialog closed after directory + filename approach")
-        return True
-
-    logger.warning("All file dialog approaches failed")
+    logger.error(f"File dialog did NOT close after path entry. Dialog wid: {_find_dialog_wid()}")
     return False
 
 
@@ -677,66 +578,46 @@ def attach_file(platform: str, file_path: str) -> bool:
         logger.warning(f"[{platform}] No document found for attach")
         return False
 
-    # Check if dialog is already open (from previous failed attempt)
+    # Stale dialog from previous run = bug. Clean it up and fail.
     if _find_dialog_wid():
-        logger.info(f"[{platform}] Dialog already open — handling directly")
-        if _handle_dialog_direct(file_path):
-            return True
+        logger.error(f"[{platform}] Stale file dialog found — cleaning up")
         close_stale_file_dialogs()
         return False
 
     # Find attach button
     btn = get_attach_button_coords(doc, platform=platform)
     if not btn:
-        logger.warning(f"[{platform}] Attach button not found")
+        logger.error(f"[{platform}] Attach button not found in AT-SPI tree")
         return False
 
     # Dismiss any stale popups
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button — try AT-SPI first, then xdotool coordinate click
-    clicked_atspi = btn.get('atspi_obj') and atspi_click(btn)
-    if clicked_atspi:
+    # Click attach button via AT-SPI (preferred) or xdotool
+    if btn.get('atspi_obj') and atspi_click(btn):
         logger.info(f"[{platform}] Clicked attach button via AT-SPI")
     else:
         inp.click_at(btn['x'], btn['y'])
         logger.info(f"[{platform}] Clicked attach button via xdotool")
     time.sleep(1.5)
 
-    # ChatGPT/Grok: need Down+Enter for dropdown → "Upload a file"
+    # ChatGPT/Grok: dropdown → Down+Enter for "Upload a file"
     if platform in ('chatgpt', 'grok'):
-        # Check if dialog already opened (some versions skip the dropdown)
         if not _find_dialog_wid():
             inp.press_key('Down')
             time.sleep(0.5)
             inp.press_key_split('Return')
             time.sleep(2.5)
 
-        # If AT-SPI click didn't produce anything, retry with xdotool click
-        if not _find_dialog_wid() and clicked_atspi:
-            logger.info(f"[{platform}] AT-SPI click didn't open dropdown — retrying xdotool")
-            inp.press_key('Escape')
-            time.sleep(0.3)
-            inp.click_at(btn['x'], btn['y'])
-            time.sleep(1.5)
-            if not _find_dialog_wid():
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key_split('Return')
-                time.sleep(2.5)
-
-    # Gemini: dropdown should appear — look for "Upload files" menu item and click it
+    # Gemini: find "Upload files" menu item in AT-SPI tree
     elif platform == 'gemini':
         time.sleep(1.5)
-        # Re-scan for dropdown items
         doc = atspi.get_platform_document(firefox, platform)
         if doc:
             elements = find_elements(doc)
             for e in elements:
                 name = (e.get('name') or '').strip()
-                role = e.get('role', '')
-                # Match "Upload files" menu item but NOT "Open upload file menu" trigger button
                 if ('upload file' in name.lower()
                         and name.lower() != 'open upload file menu'
                         and e.get('x') and e.get('y')):
@@ -748,12 +629,8 @@ def attach_file(platform: str, file_path: str) -> bool:
                     time.sleep(2.0)
                     break
             else:
-                # Fallback: try Down+Enter like ChatGPT
-                logger.info(f"[{platform}] 'Upload files' not found — trying Down+Enter")
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key_split('Return')
-                time.sleep(2.5)
+                logger.error(f"[{platform}] 'Upload files' menu item not found in AT-SPI tree")
+                return False
 
     # Wait for file dialog to appear
     dialog_found = False
@@ -783,28 +660,21 @@ def attach_file(platform: str, file_path: str) -> bool:
 def send_prompt(platform: str, prompt: str) -> bool:
     """Click input field and paste prompt. Returns True on success.
 
-    Strategy: After file attach, the input field should already be focused.
-    Don't scroll (End key moves focus away on homepage layouts). If AT-SPI
-    finds the input, click it. Otherwise trust existing focus and paste directly.
+    AT-SPI must find the input field (v7 guarantees this). If not found,
+    returns False — callers must fail loud, never guess coordinates.
     """
     inp.focus_firefox()
     time.sleep(0.3)
 
-    # Try to find input via AT-SPI (role=entry with editable)
+    # Find input via AT-SPI — v7 guarantees input is always in the tree
     coords = find_input_field_atspi(platform)
     if coords:
         logger.info(f"[{platform}] Found input via AT-SPI at ({coords[0]}, {coords[1]})")
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
     else:
-        # Input not in AT-SPI (ChatGPT ProseMirror). Click at estimated input
-        # position — center-bottom of page. "Trusting existing focus" was unreliable
-        # (52% of failures were response_timeout from unfocused input).
-        w, h = _get_screen_size()
-        est_x, est_y = w // 2, int(h * 0.85)
-        logger.info(f"[{platform}] Input not in AT-SPI — clicking estimated ({est_x}, {est_y})")
-        inp.click_at(est_x, est_y)
-        time.sleep(0.5)
+        logger.error(f"[{platform}] AT-SPI cannot find input field — failing send")
+        return False
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
@@ -852,18 +722,9 @@ def process_platform(platform: str, prompt: str) -> dict:
         fail_package(platform, 'navigation_failed')
         return result
 
-    # Step 4: Attach package file (retry once on failure)
+    # Step 4: Attach package file
     logger.info(f"[{platform}] Attaching package...")
-    attached = attach_file(platform, pkg_path)
-    if not attached:
-        logger.info(f"[{platform}] Attach failed, cleaning up and retrying...")
-        close_stale_file_dialogs()
-        inp.press_key('Escape')
-        time.sleep(1)
-        # Re-navigate to fresh session before retry
-        navigate_fresh_session(platform)
-        attached = attach_file(platform, pkg_path)
-    if not attached:
+    if not attach_file(platform, pkg_path):
         result['error'] = 'attach_failed'
         fail_package(platform, 'attach_failed')
         return result
@@ -876,28 +737,6 @@ def process_platform(platform: str, prompt: str) -> dict:
         result['error'] = 'send_failed'
         fail_package(platform, 'send_failed')
         return result
-
-    # Step 5b: Verify send worked — if no stop button after 10s, re-paste and retry
-    time.sleep(10)
-    if not scan_for_stop_button(platform):
-        logger.info(f"[{platform}] No stop button after 10s — re-pasting and retrying")
-        inp.focus_firefox()
-        time.sleep(0.3)
-        # Re-click input (paste may have gone nowhere if input wasn't focused)
-        coords = find_input_field_atspi(platform)
-        if coords:
-            logger.info(f"[{platform}] Found editable: role=paragraph at ({coords[0]}, {coords[1]})")
-            inp.click_at(coords[0], coords[1])
-            time.sleep(0.5)
-        else:
-            w, h = _get_screen_size()
-            inp.click_at(w // 2, int(h * 0.85))
-            time.sleep(0.5)
-        # Re-paste prompt (original paste may have gone to wrong element)
-        inp.clipboard_paste(prompt)
-        time.sleep(0.5)
-        inp.press_key('Return')
-        time.sleep(5)
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
