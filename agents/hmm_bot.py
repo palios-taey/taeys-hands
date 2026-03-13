@@ -641,27 +641,13 @@ def attach_file(platform: str, file_path: str) -> bool:
             inp.press_key_split('Return')
             time.sleep(2.5)
 
-    # Gemini: find "Upload files" menu item in AT-SPI tree
+    # Gemini: dropdown menu items invisible to AT-SPI on Xvfb — use keyboard nav
     elif platform == 'gemini':
-        time.sleep(1.5)
-        doc = atspi.get_platform_document(firefox, platform)
-        if doc:
-            elements = find_elements(doc)
-            for e in elements:
-                name = (e.get('name') or '').strip()
-                if ('upload file' in name.lower()
-                        and name.lower() != 'open upload file menu'
-                        and e.get('x') and e.get('y')):
-                    if e.get('atspi_obj') and atspi_click(e):
-                        logger.info(f"[{platform}] Clicked '{name}' via AT-SPI")
-                    else:
-                        inp.click_at(e['x'], e['y'])
-                        logger.info(f"[{platform}] Clicked '{name}' via xdotool")
-                    time.sleep(2.0)
-                    break
-            else:
-                logger.error(f"[{platform}] 'Upload files' menu item not found in AT-SPI tree")
-                return False
+        if not _find_dialog_wid():
+            inp.press_key('Down')
+            time.sleep(0.5)
+            inp.press_key('Return')
+            time.sleep(2.5)
 
     # Wait for file dialog to appear
     dialog_found = False
