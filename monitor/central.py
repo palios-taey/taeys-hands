@@ -137,12 +137,17 @@ class CentralMonitor:
     # ------------------------------------------------------------------
 
     def _get_sessions(self) -> List[Dict]:
+        """Find ALL active sessions across ALL node_ids on this machine.
+
+        Each MCP server registers sessions under its own node_id (tmux session
+        name). The monitor must find them all: taey:*:active_session:*
+        """
         if not self.rc:
             return []
         sessions = []
         cursor = 0
         while True:
-            cursor, keys = self.rc.scan(cursor, match=_node_key("active_session:*"), count=100)
+            cursor, keys = self.rc.scan(cursor, match="taey:*:active_session:*", count=100)
             for key in keys:
                 try:
                     data = self.rc.get(key)
@@ -172,26 +177,14 @@ class CentralMonitor:
             self.rc.delete(key)
 
     def _plan_active(self) -> bool:
-        """Check if ANY session on this machine has an active plan.
+        """Check if any session has an active plan (global lock).
 
-        plan_active is a global key (taey:plan_active) — not scoped per
-        node_id — because only one tab can be active at a time regardless
-        of which Claude session set the lock.
+        One Firefox, one active tab. When ANY session is executing a plan,
+        the monitor must not cycle tabs.
         """
         if not self.rc:
             return False
-        # Check global key first, then scan for any node-scoped plan_active
-        if self.rc.exists("taey:plan_active"):
-            return True
-        # Also check all node-scoped plan_active keys (backward compat + multi-session)
-        cursor = 0
-        while True:
-            cursor, keys = self.rc.scan(cursor, match="taey:*:plan_active", count=100)
-            if keys:
-                return True
-            if cursor == 0:
-                break
-        return False
+        return bool(self.rc.exists("taey:plan_active"))
 
     # ------------------------------------------------------------------
     # AT-SPI helpers
@@ -429,25 +422,33 @@ class CentralMonitor:
         return False
 
     def _notify(self, session: Dict, status: str, detection: str):
+        """Send notification to the session that registered this monitor session.
+
+        Routes to taey:{tmux_session}:notifications — the tmux_session field
+        was set by the MCP server that called send_message (its NODE_ID).
+        """
+        target_node = session.get('tmux_session', NODE_ID)
         notification = {
             "monitor_id": session.get('monitor_id'),
             "platform": session.get('platform'),
-            "node_id": NODE_ID,
+            "node_id": target_node,
             "status": status,
             "message": f"{status} on {session.get('platform')}",
             "detection": detection,
             "timestamp": datetime.now().isoformat(),
             "session_id": session.get('session_id'),
-            "tmux_session": session.get('tmux_session'),
+            "tmux_session": target_node,
             "url": session.get('url'),
             "elapsed_seconds": int(time.time() - session.get('started_ts', time.time())),
             "requires_action": status == "response_ready",
         }
         nj = json.dumps(notification)
+        notify_key = f"taey:{target_node}:notifications"
         if self.rc:
             try:
-                self.rc.rpush(_node_key("notifications"), nj)
-                _log(f"[{session.get('platform')}/{session.get('monitor_id')}] Notified: {status}")
+                self.rc.rpush(notify_key, nj)
+                _log(f"[{session.get('platform')}/{session.get('monitor_id')}] "
+                     f"Notified {target_node}: {status}")
             except Exception as e:
                 _log(f"Redis notification error: {e}")
         else:
