@@ -450,6 +450,17 @@ def find_input_field_atspi(platform: str):
             logger.info(f"[{platform}] Found editable: role={e.get('role')} at ({e['x']}, {e['y']})")
             return (e['x'], e['y'])
 
+    # Priority 3: Grok uses role=section for input — sometimes lacks editable state.
+    # Also match ChatGPT ProseMirror (role=section). Look for section/paragraph
+    # in the lower portion of the page (input area) that is focusable.
+    for e in elements:
+        if (e.get('role') in ('section', 'paragraph')
+                and 'focusable' in e.get('states', [])
+                and e.get('y', 0) > chrome_y
+                and e.get('x', 0) > 0):
+            logger.info(f"[{platform}] Found focusable {e.get('role')} at ({e['x']}, {e['y']})")
+            return (e['x'], e['y'])
+
     return None
 
 
@@ -789,7 +800,10 @@ def send_prompt(platform: str, prompt: str) -> bool:
                     clicked = True
                     break
         if not clicked:
-            logger.info(f"[{platform}] No send button found — pasting directly (focus retained after attach)")
+            logger.warning(f"[{platform}] No input field or send button found — send will likely fail")
+            # Last resort: click center-bottom of page where input usually is
+            inp.click_at(960, 600)
+            time.sleep(0.5)
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
