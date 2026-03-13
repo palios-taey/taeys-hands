@@ -65,14 +65,27 @@ def _collect_child_text(obj, max_children=_TEXT_EXTRACT_MAX_CHILDREN,
 
 
 def find_elements(scope, max_depth: int = 25,
-                  exclude_landmarks: Optional[List[str]] = None) -> List[Dict]:
-    """Find all visible elements in an AT-SPI subtree."""
+                  exclude_landmarks: Optional[List[str]] = None,
+                  fence_after: Optional[List[Dict]] = None) -> List[Dict]:
+    """Find all visible elements in an AT-SPI subtree.
+
+    fence_after: list of {name, role} dicts. When an element matches,
+    it is collected but traversal stops for all remaining siblings in the
+    parent. Used to exclude sidebar history (siblings after a known trigger).
+    The fence propagates one level: the parent stops iterating, but the
+    grandparent continues normally.
+    """
     results = []
     exclude_lower = [n.lower() for n in (exclude_landmarks or [])]
+    fence_set = set()
+    if fence_after:
+        for item in fence_after:
+            fence_set.add((str(item.get('name', '')).lower(), item.get('role', '')))
 
     def traverse(obj, depth=0):
+        """Returns True if a fence element was found (signals parent to stop siblings)."""
         if depth > max_depth:
-            return
+            return False
         try:
             name = obj.get_name() or ''
             role = obj.get_role_name() or ''
@@ -80,7 +93,7 @@ def find_elements(scope, max_depth: int = 25,
 
             if role == 'landmark' and name and exclude_lower:
                 if name.lower() in exclude_lower:
-                    return
+                    return False
 
             has_showing = state_set.contains(Atspi.StateType.SHOWING)
             has_visible = state_set.contains(Atspi.StateType.VISIBLE)
@@ -106,12 +119,18 @@ def find_elements(scope, max_depth: int = 25,
                             element['text'] = child_text
                     results.append(element)
 
+            # Fence: collect this element, skip children, tell parent to stop siblings
+            if fence_set and name and (name.lower(), role) in fence_set:
+                return True
+
             for i in range(obj.get_child_count()):
                 child = obj.get_child_at_index(i)
                 if child:
-                    traverse(child, depth + 1)
+                    if traverse(child, depth + 1):
+                        break  # Fence found in child — stop remaining siblings
         except Exception as e:
             logger.debug(f"Traversal error at depth {depth}: {e}")
+        return False
 
     traverse(scope)
     return results

@@ -74,7 +74,7 @@ element_filter:
       - separator
       - document web
       - paragraph                    # ProseMirror paragraph wrappers
-
+      - list item                    # Sidebar history (Starred projects + Recents)
 
 element_map:
   input:

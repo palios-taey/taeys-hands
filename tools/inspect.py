@@ -276,8 +276,16 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
     url = atspi.get_document_url(doc)
     result['url'] = url
 
+    # Load YAML config early — fence_after needed for tree traversal
+    try:
+        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as _f:
+            _pcfg = yaml.safe_load(_f) or {}
+    except Exception:
+        _pcfg = {}
+
     chrome_y = detect_chrome_y(doc)
-    all_elements = find_elements(doc)
+    fences = _pcfg.get('fence_after', [])
+    all_elements = find_elements(doc, fence_after=fences)
     elements = filter_useful_elements(all_elements, chrome_y=chrome_y)
     cache_elements(platform, all_elements)
     elements_json = strip_atspi_obj(elements)
@@ -287,13 +295,6 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         name = e.get('name', '')
         if len(name) > 200:
             e['name'] = name[:200] + '...'
-
-    # YAML filtering
-    try:
-        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as _f:
-            _pcfg = yaml.safe_load(_f) or {}
-    except Exception:
-        _pcfg = {}
 
     pre_filter = len(elements_json)
     noise_removed = 0

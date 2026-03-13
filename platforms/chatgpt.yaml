@@ -145,6 +145,12 @@ sidebar_nav:
   - { name: "Your chats", role: push button }
   - { name: "Your chats", role: heading }
 
+# ─── Sidebar Fence ────────────────────────────────────────────────
+# When this element is encountered during traversal, it is collected but
+# all remaining siblings in the parent are skipped. Excludes sidebar history.
+fence_after:
+  - { name: "Your chats", role: push button }
+
 # ─── Dropdown Items ─────────────────────────────────────────────────
 # Captured for drift detection. Updated when platform changes.
 # (moved from capabilities section for clarity — capabilities kept for backward compat)
