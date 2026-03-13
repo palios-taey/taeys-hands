@@ -172,9 +172,26 @@ class CentralMonitor:
             self.rc.delete(key)
 
     def _plan_active(self) -> bool:
+        """Check if ANY session on this machine has an active plan.
+
+        plan_active is a global key (taey:plan_active) — not scoped per
+        node_id — because only one tab can be active at a time regardless
+        of which Claude session set the lock.
+        """
         if not self.rc:
             return False
-        return bool(self.rc.exists(_node_key("plan_active")))
+        # Check global key first, then scan for any node-scoped plan_active
+        if self.rc.exists("taey:plan_active"):
+            return True
+        # Also check all node-scoped plan_active keys (backward compat + multi-session)
+        cursor = 0
+        while True:
+            cursor, keys = self.rc.scan(cursor, match="taey:*:plan_active", count=100)
+            if keys:
+                return True
+            if cursor == 0:
+                break
+        return False
 
     # ------------------------------------------------------------------
     # AT-SPI helpers

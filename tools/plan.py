@@ -153,12 +153,14 @@ def _create_plan(platform: str, action: str, params: Dict,
         'validated': True, 'created_at': time.time(),
     }))
 
-    # Global plan lock — central monitor stops ALL tab/URL cycling while active.
-    # Cleared by send_message on completion. TTL=1800s safety net.
-    redis_client.setex(node_key("plan_active"), 1800, json.dumps({
+    # Plan lock — stops monitor tab cycling. Set BOTH scoped + global keys:
+    # - scoped: taey:{node_id}:plan_active (for per-session checks)
+    # - global: taey:plan_active (for monitor — scans taey:*:plan_active)
+    _plan_data = json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'created_at': time.time(),
-    }))
+    })
+    redis_client.setex(node_key("plan_active"), 1800, _plan_data)
 
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
