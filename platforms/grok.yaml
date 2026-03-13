@@ -72,9 +72,6 @@ element_filter:
       - separator
       - document web
 
-  sidebar_history:
-    x_max: 400
-    history_roles: [list item, link]
 
 element_map:
   input:

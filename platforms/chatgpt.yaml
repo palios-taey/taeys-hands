@@ -75,7 +75,7 @@ mode_guidance:
 #   1. exclude → noise, never show
 #   2. element_map → known controls we need (labeled with semantic name)
 # Anything not in exclude OR element_map → flagged as NEW for investigation.
-# Chat history is excluded via sidebar_history pattern.
+# Unknown elements (not in exclude, element_map, or sidebar_nav) are flagged NEW.
 
 element_filter:
   exclude:
@@ -100,14 +100,6 @@ element_filter:
       - separator
       - document web
 
-  # Sidebar chat history exclusion
-  # Elements in sidebar region matching these patterns are chat history → excluded
-  # (Navigate to previous chats by pasting URLs, not clicking sidebar)
-  sidebar_history:
-    x_max: 400
-    history_roles: [list item, link]
-    # Sections with these in their text field are history entries
-    history_text_contains: ["Open conversation options"]
 
 # ─── Known Elements ─────────────────────────────────────────────────
 # Controls we interact with. Each gets a semantic label in inspect output.

@@ -36,20 +36,9 @@ def _detect_attachments(elements: list, all_elements: list = None) -> dict | Non
             if role in ('heading', 'push button', 'toggle button', 'link'):
                 file_chips.append(name)
 
-    # Unnamed file chips (Perplexity): unnamed buttons clustered above input
-    if not remove_buttons and not file_chips and all_elements:
-        entry_y = None
-        for e in all_elements:
-            if e.get('role') == 'entry' and 'editable' in e.get('states', []):
-                entry_y = e.get('y', 0)
-                break
-        if entry_y:
-            unnamed = [e for e in all_elements
-                       if e.get('role') == 'push button'
-                       and not (e.get('name') or '').strip()
-                       and entry_y - 100 < e.get('y', 0) < entry_y - 10]
-            if unnamed:
-                remove_buttons = unnamed
+    # NOTE: Removed unnamed button fallback. Was causing false positives
+    # (ChatGPT sidebar buttons misdetected as file chips).
+    # Attachments are detected ONLY by named "Remove" buttons or file extension chips.
 
     if not remove_buttons and not file_chips:
         return None
@@ -100,20 +89,19 @@ def _match_element(element: dict, criteria: dict) -> bool:
 
 
 def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
-    """YAML-driven element filtering: exclude noise, label known controls, flag NEW."""
+    """YAML-driven element filtering: exclude noise, label known controls, flag NEW.
+
+    NO coordinate-based filtering. Every element is matched by exact name/role
+    from YAML. Anything not matched is flagged NEW and surfaced.
+    """
     ef = config.get('element_filter', {})
     emap = config.get('element_map', {})
     snav = config.get('sidebar_nav', [])
     exclude = ef.get('exclude', {})
-    sidebar_hist = ef.get('sidebar_history', {})
 
     excl_names = set(n.lower() for n in exclude.get('names', []))
     excl_contains = [str(p).lower() for p in exclude.get('name_contains', [])]
     excl_roles = set(exclude.get('roles', []))
-    hist_x_max = sidebar_hist.get('x_max', 400)
-    hist_roles = set(sidebar_hist.get('history_roles', []))
-    hist_text_contains = [str(p).lower() for p in sidebar_hist.get('history_text_contains', [])]
-    hist_name_contains = [str(p).lower() for p in sidebar_hist.get('history_name_contains', [])]
 
     _IMP_STATES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
     result, new_elements = [], []
@@ -122,11 +110,10 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
         name = (e.get('name') or '').strip()
         name_lower = name.lower()
         role = e.get('role', '')
-        x = e.get('x', 0)
         text = (e.get('text') or '').lower()
         states = set(s.lower() for s in e.get('states', []))
 
-        # Exclude check
+        # Exclude check (exact name, substring, role — all YAML-driven)
         if role in excl_roles or name_lower in excl_names:
             continue
         if any(p in name_lower for p in excl_contains):
@@ -134,7 +121,7 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
         if not name and text and any(p in text for p in excl_contains):
             continue
 
-        # Element map (known controls)
+        # Element map (known controls — exact match from YAML)
         matched_semantic = None
         for sem, criteria in emap.items():
             if isinstance(criteria, dict) and _match_element(e, criteria):
@@ -145,38 +132,24 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
             result.append(e)
             continue
 
-        # Sidebar handling
-        in_sidebar = x < hist_x_max
-        if in_sidebar:
-            if name:
-                if any(_match_element(e, nav) for nav in snav):
-                    e['semantic'] = 'sidebar_nav'
-                    result.append(e)
-                    continue
-            if role in hist_roles:
-                continue
-            if hist_text_contains and any(p in text for p in hist_text_contains):
-                continue
-            if hist_name_contains and any(p in name_lower for p in hist_name_contains):
-                continue
-            # Unknown sidebar items are conversation history — exclude them.
-            # Only sidebar_nav matches (above) pass through.
+        # Sidebar nav (known sidebar controls — exact match from YAML)
+        if name and any(_match_element(e, nav) for nav in snav):
+            e['semantic'] = 'sidebar_nav'
+            result.append(e)
             continue
 
-        # Not matched - noise or NEW?
+        # Not matched — noise or NEW?
+        # Unnamed elements without important states are noise
         if not name and not (states & _IMP_STATES):
-            continue
-        if role == 'heading' and not in_sidebar:
             continue
         e['NEW'] = True
         result.append(e)
         new_elements.append(e)
 
-    # Cap copy buttons to last 3
-    copy_idxs = [(e.get('y', 0), i) for i, e in enumerate(result) if 'copy' in e.get('semantic', '')]
+    # Cap copy buttons to last 3 (by list order — BFS traversal is top-to-bottom)
+    copy_idxs = [i for i, e in enumerate(result) if 'copy' in e.get('semantic', '')]
     if len(copy_idxs) > 3:
-        copy_idxs.sort(key=lambda t: t[0])
-        drop = set(idx for _y, idx in copy_idxs[:-3])
+        drop = set(copy_idxs[:-3])
         result = [e for i, e in enumerate(result) if i not in drop]
 
     return result, new_elements
