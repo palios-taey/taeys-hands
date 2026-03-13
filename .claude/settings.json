@@ -32,16 +32,7 @@
       },
       {
         "matcher": "mcp__taeys-hands__taey_prepare",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate_prepare.py\""
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/enforce_single_platform.py\""
-          }
-        ]
+        "hooks": []
       },
       {
         "matcher": "mcp__taeys-hands__taey_inspect",
@@ -92,12 +83,7 @@
       },
       {
         "matcher": "mcp__taeys-hands__taey_list_sessions",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/mark_list_sessions_complete.py\""
-          }
-        ]
+        "hooks": []
       },
       {
         "matcher": "mcp__taeys-hands__taey_send_message",

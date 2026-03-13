@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
 PreToolUse hook for taey_select_dropdown
-Requires: taey_prepare called for this platform (workflow lock must be active).
+Requires: Plan exists for the platform (same check as validate_attach).
 
-WHY: taey_select_dropdown changes model/mode. You MUST call taey_prepare first
-     to understand what the options actually mean. Selecting without prepare
-     caused mode selection bugs (e.g. selecting "Thinking" instead of "Deep Think").
+Workers are blocked (they use default models only).
 
 Works on: Spark, CCM, Windows (auto-detects environment)
 """
@@ -57,7 +55,7 @@ def main():
     if hostname in WORKER_HOSTNAMES:
         deny(
             f"BLOCKED: Worker nodes ({hostname}) must NOT call taey_select_dropdown.\n"
-            "Workers use DEFAULT models only. Do NOT call taey_prepare or taey_select_dropdown.\n"
+            "Workers use DEFAULT models only.\n"
             "Workflow: taey_inspect → taey_attach → taey_inspect → taey_click → taey_send_message"
         )
 
@@ -69,32 +67,21 @@ def main():
 
     r = get_redis()
     if not r:
-        deny("Cannot connect to Redis")
+        allow("Redis unavailable - allowing dropdown without plan check")
     try:
         r.ping()
-    except Exception as e:
-        deny(f"Redis connection failed: {e}")
+    except Exception:
+        allow("Redis unavailable - allowing dropdown without plan check")
 
-    # Check that taey_prepare was called for this platform
-    active_platform = r.get(node_key("workflow:active_platform"))
-    if not active_platform:
+    # Check for plan (same gate as validate_attach)
+    plan_json = r.get(node_key(f"plan:{platform}"))
+    if not plan_json:
         deny(
-            f"taey_prepare not called for {platform}.\n\n"
-            f"REQUIRED WORKFLOW:\n"
-            f"1. taey_list_sessions()\n"
-            f"2. taey_prepare(platform='{platform}')  ← tells you what options are available\n"
-            f"3. taey_select_dropdown(...)  ← only AFTER you know the options\n\n"
-            f"Without prepare, you don't know what the dropdown options mean."
+            f"No plan for {platform}. Create a plan with taey_plan first.\n"
+            "Plans define the required model/mode/tools for the platform."
         )
 
-    if active_platform != platform:
-        deny(
-            f"Workflow locked to '{active_platform}', but trying to select dropdown on '{platform}'.\n\n"
-            f"Complete the workflow for '{active_platform}' first, or call:\n"
-            f"  taey_prepare(platform='{platform}')"
-        )
-
-    allow(f"Prepare completed for {platform}, dropdown selection allowed")
+    allow(f"Plan exists for {platform}, dropdown selection allowed")
 
 
 if __name__ == "__main__":
