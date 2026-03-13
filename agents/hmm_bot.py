@@ -647,7 +647,7 @@ def attach_file(platform: str, file_path: str) -> bool:
 
     # Gemini: menu items ARE visible in AT-SPI — click "Upload files" directly
     elif platform == 'gemini':
-        time.sleep(1.0)
+        time.sleep(2.0)  # Gemini dropdown needs time to render
         ff2 = atspi.find_firefox()
         doc2 = atspi.get_platform_document(ff2, platform)
         if doc2:
