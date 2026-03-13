@@ -995,35 +995,41 @@ def select_model(platform: str, model_name: str) -> bool:
     inp.click_at(selector['x'], selector['y'])
     time.sleep(1.5)
 
-    # Models in order: Auto, Instant, Thinking, Pro, Legacy
-    # Calculate how many Downs from current to target
-    model_order = ['auto', 'instant', 'thinking', 'pro', 'legacy']
-    try:
-        current_idx = next(i for i, m in enumerate(model_order)
-                          if m in (current_model or '').lower())
-    except StopIteration:
-        current_idx = 0  # Assume Auto if unknown
-
-    try:
-        target_idx = next(i for i, m in enumerate(model_order)
-                          if m == model_name.lower())
-    except StopIteration:
+    # React dropdown focus position is unpredictable. Navigate from known position:
+    # Press Home/Up 5x to guarantee we're at the top, then Down to target.
+    # Models in order: Auto(0), Instant(1), Thinking(2), Pro(3), Legacy(4)
+    model_positions = {'auto': 0, 'instant': 1, 'thinking': 2, 'pro': 3, 'legacy': 4}
+    target_pos = model_positions.get(model_name.lower())
+    if target_pos is None:
         logger.error(f"[{platform}] Unknown model: {model_name}")
         inp.press_key('Escape')
         return False
 
-    steps = target_idx - current_idx
-    if steps > 0:
-        for _ in range(steps):
-            inp.press_key('Down')
-            time.sleep(0.3)
-    elif steps < 0:
-        for _ in range(abs(steps)):
-            inp.press_key('Up')
-            time.sleep(0.3)
+    # Go to top of list
+    for _ in range(5):
+        inp.press_key('Up')
+        time.sleep(0.15)
+
+    # Navigate down to target
+    for _ in range(target_pos):
+        inp.press_key('Down')
+        time.sleep(0.3)
 
     inp.press_key('Return')
     time.sleep(1.0)
+
+    # Verify switch by re-inspecting
+    invalidate_doc_cache(platform)
+    time.sleep(1.0)
+    doc2 = get_doc(platform, force_refresh=True)
+    if doc2:
+        elems2 = _find_elements_with_fence(doc2, platform)
+        for e in elems2:
+            name = (e.get('name') or '').strip()
+            if name.startswith('Model selector, current model is'):
+                new_model = name.split('is ')[-1].strip()
+                logger.info(f"[{platform}] Model after switch: {new_model}")
+                break
 
     logger.info(f"[{platform}] Model switched to {model_name}")
     return True
