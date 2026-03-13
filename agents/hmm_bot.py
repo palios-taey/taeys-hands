@@ -71,6 +71,50 @@ FRESH_URLS = {
     'grok': 'https://grok.com/',
 }
 
+# Cached AT-SPI references — avoids repeated deep traversals that cause D-Bus contention
+_cached_firefox = {}  # platform -> AT-SPI firefox app ref
+_cached_doc = {}      # platform -> AT-SPI document ref
+
+
+def get_firefox(platform: str):
+    """Get Firefox AT-SPI ref with caching. Avoids D-Bus contention in parallel mode."""
+    cached = _cached_firefox.get(platform)
+    if cached:
+        try:
+            # Quick check: can we still access it?
+            cached.get_name()
+            return cached
+        except Exception:
+            _cached_firefox.pop(platform, None)
+    # Full discovery (expensive — only on first call or after stale)
+    ff = atspi.find_firefox_for_platform(platform)
+    if ff:
+        _cached_firefox[platform] = ff
+    return ff
+
+
+def get_doc(platform: str, force_refresh: bool = False):
+    """Get platform document with caching. force_refresh after navigation."""
+    if not force_refresh:
+        cached = _cached_doc.get(platform)
+        if cached:
+            try:
+                cached.get_name()
+                return cached
+            except Exception:
+                _cached_doc.pop(platform, None)
+    ff = get_firefox(platform)
+    doc = atspi.get_platform_document(ff, platform) if ff else None
+    if doc:
+        _cached_doc[platform] = doc
+    return doc
+
+
+def invalidate_cache(platform: str):
+    """Clear cached refs after Firefox restart or navigation."""
+    _cached_firefox.pop(platform, None)
+    _cached_doc.pop(platform, None)
+
 
 def restart_firefox(platforms: list) -> bool:
     """Kill and restart Firefox on current DISPLAY only. Parallel-safe."""
@@ -211,6 +255,8 @@ def restart_firefox(platforms: list) -> bool:
         time.sleep(2)
         if check_firefox_alive():
             logger.info(f"Firefox restarted successfully ({(i+1)*2}s)")
+            _cached_firefox.clear()
+            _cached_doc.clear()
             return True
 
     logger.error("Firefox failed to start after 30s")
@@ -337,14 +383,13 @@ def navigate_fresh_session(platform: str) -> bool:
     inp.press_key('Return')
     time.sleep(8)  # Wait for page load (needs more time on fresh restart)
 
-    # Verify page loaded by checking for platform document
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    # Verify page loaded by checking for platform document (must refresh after nav)
+    invalidate_cache(platform)
+    doc = get_doc(platform, force_refresh=True)
     if not doc:
         logger.warning(f"[{platform}] Page not loaded after 8s, waiting more...")
         time.sleep(8)
-        firefox = atspi.find_firefox_for_platform(platform)
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        doc = get_doc(platform, force_refresh=True)
         if not doc:
             logger.warning(f"[{platform}] Page still not loaded after 16s")
             return False
@@ -404,8 +449,8 @@ def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
 
 def scan_for_stop_button(platform: str) -> bool:
     """Check if a stop/cancel button is visible (AI is generating)."""
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    firefox = get_firefox(platform)
+    doc = get_doc(platform)
     if not doc:
         return False
 
@@ -426,8 +471,8 @@ def scan_for_stop_button(platform: str) -> bool:
 
 def count_copy_buttons(platform: str) -> int:
     """Count visible copy buttons on the platform."""
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    firefox = get_firefox(platform)
+    doc = get_doc(platform)
     if not doc:
         return 0
 
@@ -442,8 +487,8 @@ def find_input_field_atspi(platform: str):
     With taeys-hands v7, AT-SPI ALWAYS exposes the input field.
     If this returns None, it's a real bug — callers must fail loud.
     """
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    firefox = get_firefox(platform)
+    doc = get_doc(platform)
     if not doc:
         return None
 
@@ -543,8 +588,8 @@ def extract_response(platform: str) -> str:
     inp.press_key('End')
     time.sleep(0.5)
 
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    firefox = get_firefox(platform)
+    doc = get_doc(platform)
     if not doc:
         return ''
 
@@ -557,8 +602,7 @@ def extract_response(platform: str) -> str:
             time.sleep(2)
             inp.press_key('End')
             time.sleep(1)
-            doc = atspi.get_platform_document(
-                atspi.find_firefox_for_platform(platform), platform)
+            doc = get_doc(platform, force_refresh=True)
             if not doc:
                 break
             elements = find_elements(doc)
@@ -704,8 +748,8 @@ def attach_file(platform: str, file_path: str) -> bool:
     from tools.attach import _get_attach_button_coords as get_attach_button_coords, _any_file_dialog_open as any_file_dialog_open, _close_stale_file_dialogs as close_stale_file_dialogs
     from core.interact import atspi_click
 
-    firefox = atspi.find_firefox_for_platform(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    firefox = get_firefox(platform)
+    doc = get_doc(platform)
     if not doc:
         logger.warning(f"[{platform}] No document found for attach")
         return False
@@ -719,8 +763,7 @@ def attach_file(platform: str, file_path: str) -> bool:
     # Find attach button — retry up to 5 times (AT-SPI tree lags after navigation)
     btn = None
     for attempt in range(5):
-        firefox = atspi.find_firefox_for_platform(platform)
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        doc = get_doc(platform, force_refresh=True)
         if doc:
             btn = get_attach_button_coords(doc, platform=platform)
         if btn:
@@ -758,8 +801,7 @@ def attach_file(platform: str, file_path: str) -> bool:
     # Gemini: menu items ARE visible in AT-SPI — click "Upload files" directly
     elif platform == 'gemini':
         time.sleep(2.0)  # Gemini dropdown needs time to render
-        ff2 = atspi.find_firefox_for_platform(platform)
-        doc2 = atspi.get_platform_document(ff2, platform)
+        doc2 = get_doc(platform, force_refresh=True)
         if doc2:
             elems2 = find_elements(doc2)
             for e in elems2:
