@@ -701,6 +701,10 @@ def send_prompt(platform: str, prompt: str) -> bool:
         logger.info(f"[{platform}] Found input via AT-SPI at ({coords[0]}, {coords[1]})")
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
+    elif platform == 'chatgpt':
+        # ChatGPT ProseMirror doesn't always expose editable state in AT-SPI.
+        # After file attach, input retains focus — just paste directly.
+        logger.info(f"[{platform}] AT-SPI input not found — pasting directly (focus retained after attach)")
     else:
         logger.error(f"[{platform}] AT-SPI cannot find input field — failing send")
         return False
