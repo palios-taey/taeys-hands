@@ -366,10 +366,19 @@ class CentralMonitor:
         monitor_id = session['monitor_id']
 
         # URL verification — only skip if we're sure this is wrong session.
-        # Landing pages redirect after send, so don't skip on mismatch
-        # with landing URLs. Always check if this is the only session.
         expected_url = session.get('url', '')
         current_url = self._get_document_url(doc) or ''
+
+        # If session was registered with a landing page URL but browser now shows
+        # a conversation URL, capture the real URL for future checks.
+        if expected_url and self._is_landing_page(expected_url) and current_url:
+            if not self._is_landing_page(current_url):
+                _log(f"[{platform}/{monitor_id}] Captured conversation URL: "
+                     f"{current_url[:80]}")
+                session['url'] = current_url
+                self._update_session(session)
+
+        expected_url = session.get('url', '')  # may have been updated above
         if expected_url and not self._is_landing_page(expected_url):
             if expected_url not in current_url and current_url not in expected_url:
                 _log(f"[{platform}/{monitor_id}] URL mismatch, skipping "
