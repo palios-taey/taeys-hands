@@ -10,7 +10,7 @@ import yaml
 
 from core import atspi, input as inp
 from core.tree import find_elements, find_menu_items
-from core.interact import extend_cache, atspi_click, find_element_at
+from core.interact import extend_cache
 from tools.click import handle_click
 from storage.redis_pool import node_key
 
@@ -20,19 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 def _click_trigger_via_atspi(doc, trigger_name: str, platform: str = None) -> bool:
-    """Find button by name in AT-SPI tree and click via do_action."""
-    trigger_lower = trigger_name.lower()
+    """Find button by name in AT-SPI tree and click via do_action.
 
-    # Check element cache first
-    from core.interact import _element_cache
-    for e in _element_cache.get(platform, []) if platform else []:
-        name = (e.get('name') or '').lower()
-        if trigger_lower in name and 'button' in e.get('role', ''):
-            if atspi_click(e):
-                return True
-
+    Always uses fresh DFS from live doc — never cache. Cached AT-SPI refs
+    can be stale (D-Bus proxy alive but widget gone) causing silent no-ops.
+    """
     if not doc:
         return False
+    trigger_lower = trigger_name.lower()
 
     def find_and_click(obj, depth=0):
         if depth > 25:
@@ -57,18 +52,13 @@ def _click_trigger_via_atspi(doc, trigger_name: str, platform: str = None) -> bo
 
 
 def _get_trigger_coords(doc, trigger_name: str, platform: str = None) -> Dict | None:
-    """Find button by name and return center coordinates."""
-    trigger_lower = trigger_name.lower()
+    """Find button by name and return center coordinates.
 
-    from core.interact import _element_cache
-    for e in _element_cache.get(platform, []) if platform else []:
-        name = (e.get('name') or '').lower()
-        if trigger_lower in name and 'button' in e.get('role', ''):
-            return {'x': e.get('x', 0), 'y': e.get('y', 0),
-                    'name': e.get('name', ''), 'role': e.get('role', '')}
-
+    Always uses fresh DFS from live doc — never cache.
+    """
     if not doc:
         return None
+    trigger_lower = trigger_name.lower()
 
     import gi
     gi.require_version('Atspi', '2.0')
