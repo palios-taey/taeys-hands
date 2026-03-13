@@ -897,6 +897,81 @@ def attach_file(platform: str, file_path: str) -> bool:
     return False
 
 
+def select_model(platform: str, model_name: str) -> bool:
+    """Select a model on the platform (e.g., 'Instant' for ChatGPT).
+
+    Only ChatGPT is supported currently. Uses xdotool click (React portal
+    dropdown is invisible to AT-SPI) + keyboard navigation.
+    """
+    if platform != 'chatgpt':
+        logger.info(f"[{platform}] Model selection not implemented — skipping")
+        return True
+
+    doc = get_doc(platform)
+    if not doc:
+        logger.warning(f"[{platform}] No document for model selection")
+        return False
+
+    elements = _find_elements_with_fence(doc, platform)
+
+    # Find model selector button: "Model selector, current model is ..."
+    selector = None
+    current_model = None
+    for e in elements:
+        name = (e.get('name') or '').strip()
+        if name.startswith('Model selector, current model is') and 'button' in e.get('role', ''):
+            selector = e
+            current_model = name.split('is ')[-1].strip() if 'is ' in name else ''
+            break
+
+    if not selector:
+        logger.warning(f"[{platform}] Model selector button not found")
+        return False
+
+    if current_model and current_model.lower() == model_name.lower():
+        logger.info(f"[{platform}] Already on {model_name} — no change needed")
+        return True
+
+    logger.info(f"[{platform}] Current model: {current_model}, switching to {model_name}")
+
+    # Click model selector with xdotool (AT-SPI do_action opens browser context menu)
+    inp.click_at(selector['x'], selector['y'])
+    time.sleep(1.5)
+
+    # Models in order: Auto, Instant, Thinking, Pro, Legacy
+    # Calculate how many Downs from current to target
+    model_order = ['auto', 'instant', 'thinking', 'pro', 'legacy']
+    try:
+        current_idx = next(i for i, m in enumerate(model_order)
+                          if m in (current_model or '').lower())
+    except StopIteration:
+        current_idx = 0  # Assume Auto if unknown
+
+    try:
+        target_idx = next(i for i, m in enumerate(model_order)
+                          if m == model_name.lower())
+    except StopIteration:
+        logger.error(f"[{platform}] Unknown model: {model_name}")
+        inp.press_key('Escape')
+        return False
+
+    steps = target_idx - current_idx
+    if steps > 0:
+        for _ in range(steps):
+            inp.press_key('Down')
+            time.sleep(0.3)
+    elif steps < 0:
+        for _ in range(abs(steps)):
+            inp.press_key('Up')
+            time.sleep(0.3)
+
+    inp.press_key('Return')
+    time.sleep(1.0)
+
+    logger.info(f"[{platform}] Model switched to {model_name}")
+    return True
+
+
 def send_prompt(platform: str, prompt: str) -> bool:
     """Focus input, paste prompt, press Enter. Fails loud if input not found."""
     inp.focus_firefox()
@@ -981,6 +1056,10 @@ def process_platform(platform: str, prompt: str) -> dict:
         fail_package(platform, 'navigation_failed')
         return result
 
+    # Step 3: Select model if configured
+    if platform == 'chatgpt':
+        select_model(platform, 'instant')
+
     # Step 4: Attach package file
     logger.info(f"[{platform}] Attaching package...")
     if not attach_file(platform, pkg_path):
@@ -999,7 +1078,9 @@ def process_platform(platform: str, prompt: str) -> dict:
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
-    if not wait_for_response(platform, timeout=1200):
+    # Instant mode (ChatGPT): 5min timeout. Others: 20min.
+    resp_timeout = 300 if platform == 'chatgpt' else 1200
+    if not wait_for_response(platform, timeout=resp_timeout):
         result['error'] = 'response_timeout'
         fail_package(platform, 'response_timeout')
         return result
