@@ -48,6 +48,39 @@ def find_firefox():
     return None
 
 
+def find_all_firefox():
+    """Find ALL Firefox apps in AT-SPI desktop tree."""
+    apps = []
+    try:
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app and 'firefox' in (app.get_name() or '').lower():
+                apps.append(app)
+    except Exception as e:
+        logger.error(f"AT-SPI search failed: {e}")
+    return apps
+
+
+def find_firefox_for_platform(platform: str):
+    """Find the Firefox instance that has a document matching the given platform.
+    Handles multiple Firefox instances (parallel HMM mode).
+    Falls back to find_firefox() if only one instance exists."""
+    all_ff = find_all_firefox()
+    if not all_ff:
+        return None
+    if len(all_ff) == 1:
+        return all_ff[0]
+    # Multiple Firefox instances — find the one with our platform's document
+    for ff in all_ff:
+        doc = get_platform_document(ff, platform)
+        if doc:
+            return ff
+    # None had the right document — return first as fallback
+    logger.warning(f"No Firefox instance has {platform} document, using first")
+    return all_ff[0]
+
+
 def get_document_url(doc) -> str | None:
     """Extract DocURL from a document element."""
     try:
