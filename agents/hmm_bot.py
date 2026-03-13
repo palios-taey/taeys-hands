@@ -549,6 +549,28 @@ def find_input_field_atspi(platform: str):
     return None
 
 
+def _scan_with_timeout(platform: str, timeout_sec: int = 20):
+    """scan_for_stop_button with thread timeout.
+
+    Returns: True (stop found), False (no stop), None (timed out / inconclusive).
+    Callers must handle None — it means we don't know, not that stop is gone.
+    """
+    import threading
+    result = [None]
+
+    def _worker():
+        result[0] = scan_for_stop_button(platform)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+
+    if t.is_alive():
+        logger.warning(f"[{platform}] scan_for_stop_button timed out after {timeout_sec}s")
+        return None  # Inconclusive — don't treat as stop gone
+    return result[0]
+
+
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
     """Wait for AI response to complete.
 
@@ -569,10 +591,12 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
             logger.error(f"[{platform}] Firefox died during response wait")
             return False
 
-        has_stop = scan_for_stop_button(platform)
+        has_stop = _scan_with_timeout(platform)
 
         if phase == 'waiting_for_start':
-            if has_stop:
+            if has_stop is None:
+                pass  # AT-SPI timeout — skip this poll, try again
+            elif has_stop:
                 logger.info(f"[{platform}] Stop button appeared — AI generating")
                 stop_seen = True
                 phase = 'generating'
@@ -588,11 +612,16 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
             time.sleep(3)
 
         elif phase == 'generating':
-            if not has_stop:
+            if has_stop is None:
+                pass  # AT-SPI timeout — assume still generating
+            elif not has_stop:
                 # Stop button disappeared — wait a bit to confirm
                 logger.info(f"[{platform}] Stop button gone — settling...")
                 time.sleep(2)
-                if not scan_for_stop_button(platform):
+                confirm = _scan_with_timeout(platform)
+                if confirm is None:
+                    logger.info(f"[{platform}] Confirm scan timed out — assuming still generating")
+                elif not confirm:
                     logger.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
                     return True
                 else:
