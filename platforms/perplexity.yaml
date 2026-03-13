@@ -94,6 +94,7 @@ element_filter:
       - separator
       - document web
       - paragraph                    # ProseMirror wrapper in input
+      - landmark                     # Main content landmark
 
 
 element_map:
@@ -157,6 +158,15 @@ element_map:
     role: page tab
   notifications:
     name: "Notifications"
+    role: push button
+  computer_mode:
+    name: "Computer"
+    role: push button
+  voice_mode:
+    name: "Use voice mode"
+    role: push button
+  incognito:
+    name_contains: "Use incognito"
     role: push button
 
 sidebar_nav:
