@@ -795,18 +795,20 @@ def send_prompt(platform: str, prompt: str) -> bool:
     input_elem = find_input_field_atspi(platform)
     if input_elem:
         logger.info(f"[{platform}] Found input via AT-SPI at ({input_elem['x']}, {input_elem['y']})")
-        # AT-SPI grab_focus is essential on Xvfb (click_at alone doesn't
-        # give proper focus — Gemini clipboard paste fails without it)
+        inp.click_at(input_elem['x'], input_elem['y'])
+        time.sleep(0.3)
+        # AT-SPI grab_focus AFTER click — essential on Xvfb where click_at
+        # alone doesn't give proper focus for clipboard paste (Gemini)
         obj = input_elem.get('atspi_obj')
         if obj:
             try:
                 comp = obj.get_component_iface()
                 if comp:
                     comp.grab_focus()
+                    logger.info(f"[{platform}] AT-SPI grab_focus OK")
             except Exception:
                 pass
-        inp.click_at(input_elem['x'], input_elem['y'])
-        time.sleep(0.5)
+        time.sleep(0.3)
     else:
         # Input not found via AT-SPI (ChatGPT/Grok ProseMirror doesn't expose editable state).
         # Find send button and click left of it to hit the input area.
