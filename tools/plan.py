@@ -171,9 +171,9 @@ def _create_plan(platform: str, action: str, params: Dict,
         'navigated': False, 'created_at': time.time(),
     }
 
-    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
-    redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
-    redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
+    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
+    redis_client.setex(node_key(f"plan:current:{platform}"), 300, plan_id)
+    redis_client.setex(node_key(f"plan:{platform}"), 300, json.dumps({
         'id': plan_id, 'platform': platform, 'action': action,
         'session': session, 'message': message,
         'model': model, 'mode': mode,
@@ -184,7 +184,7 @@ def _create_plan(platform: str, action: str, params: Dict,
     # Global plan lock — ONE lock for the whole machine.
     # Only one Firefox, one active tab. Monitor stops ALL cycling while set.
     # Cleared by send_message (plan executed) or extract(complete=True).
-    redis_client.setex("taey:plan_active", 1800, json.dumps({
+    redis_client.setex("taey:plan_active", 120, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),  # who set this lock
         'created_at': time.time(),
@@ -225,9 +225,9 @@ def _create_extract_plan(platform: str, params: Dict,
         'status': 'ready', 'navigated': False, 'created_at': time.time(),
     }
 
-    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
-    redis_client.set(node_key(f"plan:current:{platform}"), plan_id)
-    redis_client.setex(node_key(f"plan:{platform}"), 1800, json.dumps({
+    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
+    redis_client.setex(node_key(f"plan:current:{platform}"), 300, plan_id)
+    redis_client.setex(node_key(f"plan:{platform}"), 300, json.dumps({
         'id': plan_id, 'platform': platform, 'action': 'extract_response',
         'session': plan['session'], 'message': None,
         'model': None, 'mode': None,
@@ -236,7 +236,7 @@ def _create_extract_plan(platform: str, params: Dict,
     }))
 
     # Global plan lock — blocks monitor tab cycling during extraction
-    redis_client.setex("taey:plan_active", 1800, json.dumps({
+    redis_client.setex("taey:plan_active", 120, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),
@@ -299,7 +299,7 @@ def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
         plan['status'] = 'ready'
 
     plan['updated_at'] = time.time()
-    redis_client.set(node_key(f"plan:{plan_id}"), json.dumps(plan))
+    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
 
     return {"success": True, "plan_id": plan_id,
             "status": plan['status'], "steps": plan.get('steps', [])}
