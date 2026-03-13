@@ -73,11 +73,6 @@ element_filter:
       - separator
       - document web
 
-  sidebar_history:
-    x_max: 400
-    history_roles: [list item, link, push button]
-    # Gemini sidebar conversation history items appear as push buttons,
-    # links, or list items. All filtered here.
 
 element_map:
   input:

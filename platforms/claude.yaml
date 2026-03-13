@@ -75,11 +75,6 @@ element_filter:
       - document web
       - paragraph                    # ProseMirror paragraph wrappers
 
-  sidebar_history:
-    x_max: 400
-    history_roles: [list item, link]
-    # Starred projects also excluded — sections with "Project, " prefix
-    history_name_contains: ["Project, "]
 
 element_map:
   input:

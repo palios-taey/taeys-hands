@@ -88,11 +88,6 @@ element_filter:
       - separator
       - document web
 
-  sidebar_history:
-    x_max: 400
-    history_roles: [list item, link]
-    # Perplexity thread entries are sections with "More options" in text
-    history_text_contains: ["More options"]
 
 element_map:
   input:

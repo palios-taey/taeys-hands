@@ -264,7 +264,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
             config = _load_platform_yaml(platform)
             caps = config.get('capabilities', {})
             # Match dropdown name to YAML key
-            yaml_key_map = {'model': 'models', 'models': 'models', 'model select': 'models',
+            yaml_key_map = {'model': 'models', 'models': 'models',
                             'mode': 'modes', 'modes': 'modes',
                             'tool': 'tools', 'tools': 'tools',
                             'attach': 'attach_menu'}
