@@ -57,16 +57,18 @@ BUILDER_PATH = os.environ.get(
     os.path.expanduser('~/embedding-server/isma/scripts/hmm_package_builder.py'),
 )
 
-# Stop button patterns (from monitor/daemon.py)
+# Stop button patterns (from monitor/central.py)
 STOP_PATTERNS = {
     'chatgpt': ['stop', 'stop generating'],
     'gemini': ['stop', 'cancel'],
+    'grok': ['stop', 'stop generating'],
 }
 
 # Platform fresh-session URLs
 FRESH_URLS = {
     'chatgpt': 'https://chatgpt.com',
     'gemini': 'https://gemini.google.com/app',
+    'grok': 'https://grok.com/',
 }
 
 
@@ -701,27 +703,27 @@ def send_prompt(platform: str, prompt: str) -> bool:
         logger.info(f"[{platform}] Found input via AT-SPI at ({coords[0]}, {coords[1]})")
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
-    elif platform == 'chatgpt':
-        # ChatGPT ProseMirror doesn't expose editable state in AT-SPI.
-        # Find "Send prompt" button and click left of it to hit the input area.
+    else:
+        # Input not found via AT-SPI (ChatGPT/Grok ProseMirror doesn't expose editable state).
+        # Find send button and click left of it to hit the input area.
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        clicked = False
         if doc:
             elements = find_elements(doc)
+            send_names = ['send prompt', 'send message', 'submit']
             for e in elements:
                 name = (e.get('name') or '').lower()
-                if 'send prompt' in name and 'button' in e.get('role', ''):
+                if any(s in name for s in send_names) and 'button' in e.get('role', ''):
                     input_x = e['x'] - 200  # Input is left of send button
                     input_y = e['y']
-                    logger.info(f"[{platform}] Clicking left of Send button at ({input_x}, {input_y})")
+                    logger.info(f"[{platform}] Clicking left of send button at ({input_x}, {input_y})")
                     inp.click_at(input_x, input_y)
                     time.sleep(0.5)
+                    clicked = True
                     break
-            else:
-                logger.info(f"[{platform}] No Send button found — pasting directly (focus retained after attach)")
-    else:
-        logger.error(f"[{platform}] AT-SPI cannot find input field — failing send")
-        return False
+        if not clicked:
+            logger.info(f"[{platform}] No send button found — pasting directly (focus retained after attach)")
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
