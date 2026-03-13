@@ -64,10 +64,10 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
-NODE_ID = os.environ.get('TAEY_NODE_ID', socket.gethostname())
-
-def _node_key(suffix: str) -> str:
-    return f"taey:{NODE_ID}:{suffix}"
+# Import node_key from redis_pool — single source of truth for key prefixing.
+# Eliminates NODE_ID mismatch between monitor and MCP server.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from storage.redis_pool import node_key as _node_key, NODE_ID
 
 # Platform patterns
 STOP_PATTERNS = {
