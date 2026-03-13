@@ -549,26 +549,67 @@ def find_input_field_atspi(platform: str):
     return None
 
 
-def _scan_with_timeout(platform: str, timeout_sec: int = 20):
-    """scan_for_stop_button with thread timeout.
+def _scan_with_timeout(platform: str, timeout_sec: int = 15):
+    """scan_for_stop_button via subprocess (own GIL, own D-Bus connection).
+
+    Threading can't interrupt AT-SPI C extensions that hold the GIL.
+    Subprocess has its own interpreter — subprocess.run(timeout) kills it
+    via SIGTERM/SIGKILL at the OS level.
 
     Returns: True (stop found), False (no stop), None (timed out / inconclusive).
-    Callers must handle None — it means we don't know, not that stop is gone.
     """
-    import threading
-    result = [None]
-
-    def _worker():
-        result[0] = scan_for_stop_button(platform)
-
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    t.join(timeout=timeout_sec)
-
-    if t.is_alive():
-        logger.warning(f"[{platform}] scan_for_stop_button timed out after {timeout_sec}s")
-        return None  # Inconclusive — don't treat as stop gone
-    return result[0]
+    display = os.environ.get('DISPLAY', ':1')
+    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
+    script = f'''
+import os, sys
+os.environ["DISPLAY"] = "{display}"
+sys.path.insert(0, "{_ROOT}")
+import yaml
+from core import atspi
+from core.tree import find_elements
+with open("{yaml_path}") as f:
+    cfg = yaml.safe_load(f) or {{}}
+fences = cfg.get("fence_after", [])
+patterns = cfg.get("stop_patterns", ["stop"])
+ff = atspi.find_firefox_for_platform("{platform}")
+if not ff:
+    print("NOSTOP")
+    sys.exit(0)
+doc = atspi.get_platform_document(ff, "{platform}")
+if not doc:
+    print("NOSTOP")
+    sys.exit(0)
+elements = find_elements(doc, fence_after=fences)
+for e in elements:
+    name = (e.get("name") or "").strip()
+    if not name or len(name) > 50:
+        continue
+    if "button" not in e.get("role", ""):
+        continue
+    if any(p in name.lower() for p in patterns):
+        print("STOP")
+        sys.exit(0)
+print("NOSTOP")
+'''
+    try:
+        r = subprocess.run(
+            [sys.executable, '-u', '-c', script],
+            capture_output=True, text=True, timeout=timeout_sec,
+            env={**os.environ, 'DISPLAY': display, 'PYTHONDONTWRITEBYTECODE': '1'},
+        )
+        out = r.stdout.strip().split('\n')[-1] if r.stdout.strip() else ''
+        if out == 'STOP':
+            return True
+        elif out == 'NOSTOP':
+            return False
+        logger.debug(f"[{platform}] scan subprocess unexpected output: {out[:100]}")
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[{platform}] scan subprocess timed out after {timeout_sec}s")
+        return None
+    except Exception as e:
+        logger.warning(f"[{platform}] scan subprocess error: {e}")
+        return None
 
 
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
