@@ -625,8 +625,12 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button via AT-SPI (preferred) or xdotool
-    if btn.get('atspi_obj') and atspi_click(btn):
+    # Click attach button — Grok/ChatGPT need xdotool (AT-SPI doesn't trigger React),
+    # Gemini works with AT-SPI
+    if platform in ('chatgpt', 'grok'):
+        inp.click_at(btn['x'], btn['y'])
+        logger.info(f"[{platform}] Clicked attach button via xdotool")
+    elif btn.get('atspi_obj') and atspi_click(btn):
         logger.info(f"[{platform}] Clicked attach button via AT-SPI")
     else:
         inp.click_at(btn['x'], btn['y'])
@@ -641,13 +645,27 @@ def attach_file(platform: str, file_path: str) -> bool:
             inp.press_key_split('Return')
             time.sleep(2.5)
 
-    # Gemini: dropdown menu items invisible to AT-SPI on Xvfb — use keyboard nav
+    # Gemini: menu items ARE visible in AT-SPI — click "Upload files" directly
     elif platform == 'gemini':
-        if not _find_dialog_wid():
-            inp.press_key('Down')
-            time.sleep(0.5)
-            inp.press_key('Return')
-            time.sleep(2.5)
+        time.sleep(1.0)
+        ff2 = atspi.find_firefox()
+        doc2 = atspi.get_platform_document(ff2, platform)
+        if doc2:
+            elems2 = find_elements(doc2)
+            for e in elems2:
+                name = (e.get('name') or '').strip().lower()
+                if 'upload file' in name and 'menu item' in e.get('role', ''):
+                    if e.get('atspi_obj') and atspi_click(e):
+                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
+                    else:
+                        inp.click_at(e['x'], e['y'])
+                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                    time.sleep(2.0)
+                    break
+            else:
+                logger.error(f"[{platform}] 'Upload files' menu item not found")
+                inp.press_key('Escape')
+                return False
 
     # Wait for file dialog to appear
     dialog_found = False
