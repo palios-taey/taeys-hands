@@ -289,6 +289,35 @@ def navigate_fresh_session(platform: str) -> bool:
             logger.warning(f"[{platform}] Page still not loaded after 16s")
             return False
 
+    # ChatGPT: ensure fresh chat — click "New chat" if we landed on old conversation
+    if platform == 'chatgpt' and doc:
+        elements = find_elements(doc)
+        has_copy = any('copy' in (e.get('name') or '').lower()
+                       and 'button' in e.get('role', '')
+                       for e in elements)
+        if has_copy:
+            logger.info(f"[{platform}] Old conversation detected — clicking New chat")
+            from core.interact import atspi_click
+            for e in elements:
+                if (e.get('name') or '').strip().lower() == 'new chat':
+                    if e.get('atspi_obj') and atspi_click(e):
+                        logger.info(f"[{platform}] Clicked New chat via AT-SPI")
+                    else:
+                        inp.click_at(e.get('x', 0), e.get('y', 0))
+                        logger.info(f"[{platform}] Clicked New chat via xdotool")
+                    time.sleep(3)
+                    break
+            else:
+                # No "New chat" button found — try keyboard shortcut
+                inp.press_key('ctrl+l')
+                time.sleep(0.2)
+                inp.press_key('ctrl+a')
+                time.sleep(0.1)
+                inp.type_text(url, delay_ms=10)
+                time.sleep(0.2)
+                inp.press_key('Return')
+                time.sleep(5)
+
     return True
 
 
