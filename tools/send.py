@@ -129,9 +129,9 @@ def handle_send_message(platform: str, message: str,
             return {"error": "Send (Enter) failed", "platform": platform, "neo4j": neo4j_result}
         enter_pressed = True
 
-    # Clear plan lock — send complete, monitor can resume cycling
+    # Clear global plan lock — send complete, monitor can resume cycling
     if redis_client:
-        redis_client.delete(node_key("plan_active"))
+        redis_client.delete("taey:plan_active")
 
     result = {
         "platform": platform, "url": url, "message_length": len(message),
