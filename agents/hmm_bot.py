@@ -779,11 +779,7 @@ def attach_file(platform: str, file_path: str) -> bool:
 
 
 def send_prompt(platform: str, prompt: str) -> bool:
-    """Click input field and paste prompt. Returns True on success.
-
-    AT-SPI must find the input field (v7 guarantees this). If not found,
-    returns False — callers must fail loud, never guess coordinates.
-    """
+    """Focus input, paste prompt, press Enter. Fails loud if input not found."""
     inp.focus_firefox()
     time.sleep(0.3)
 
@@ -791,71 +787,40 @@ def send_prompt(platform: str, prompt: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Find input via AT-SPI — v7 guarantees input is always in the tree
-    input_elem = find_input_field_atspi(platform)
-    if input_elem:
-        logger.info(f"[{platform}] Found input via AT-SPI at ({input_elem['x']}, {input_elem['y']})")
-        inp.click_at(input_elem['x'], input_elem['y'])
-        time.sleep(0.3)
-        # AT-SPI grab_focus AFTER click — essential on Xvfb where click_at
-        # alone doesn't give proper focus for clipboard paste (Gemini)
-        obj = input_elem.get('atspi_obj')
-        if obj:
-            try:
-                comp = obj.get_component_iface()
-                if comp:
-                    comp.grab_focus()
-                    logger.info(f"[{platform}] AT-SPI grab_focus OK")
-            except Exception:
-                pass
-        time.sleep(0.3)
-    else:
-        # Input not found via AT-SPI (ChatGPT/Grok ProseMirror doesn't expose editable state).
-        # Find send button and click left of it to hit the input area.
-        firefox = atspi.find_firefox_for_platform(platform)
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        clicked = False
-        entry_obj = None
-        if doc:
-            elements = find_elements(doc)
-            chrome_y = detect_chrome_y(doc)
-            send_names = ['send prompt', 'send message', 'submit']
-            for e in elements:
-                name = (e.get('name') or '').lower()
-                if any(s in name for s in send_names) and 'button' in e.get('role', ''):
-                    input_x = e['x'] - 200  # Input is left of send button
-                    input_y = e['y']
-                    logger.info(f"[{platform}] Clicking left of send button at ({input_x}, {input_y})")
-                    inp.click_at(input_x, input_y)
-                    time.sleep(0.5)
-                    clicked = True
-                    break
-            # Find entry element for grab_focus even if it wasn't matched by
-            # find_input_field_atspi (may lack editable/focusable states)
-            for e in elements:
-                if e.get('role') == 'entry' and e.get('y', 0) > chrome_y:
-                    entry_obj = e.get('atspi_obj')
-                    break
-        if not clicked:
-            logger.warning(f"[{platform}] No input field or send button found — send will likely fail")
-            inp.click_at(960, 600)
-            time.sleep(0.5)
-        # grab_focus on entry if found (essential for Gemini on Xvfb)
-        if entry_obj:
-            try:
-                comp = entry_obj.get_component_iface()
-                if comp:
-                    comp.grab_focus()
-                    logger.info(f"[{platform}] AT-SPI grab_focus OK (fallback path)")
-            except Exception:
-                pass
-            time.sleep(0.3)
+    # Find input via AT-SPI — retry up to 5 times (AT-SPI tree may lag
+    # after file dialog close or page navigation)
+    input_elem = None
+    for attempt in range(5):
+        input_elem = find_input_field_atspi(platform)
+        if input_elem:
+            break
+        logger.info(f"[{platform}] Input not found, retry {attempt+1}/5...")
+        time.sleep(2)
 
-    # Paste prompt via clipboard
+    if not input_elem:
+        logger.error(f"[{platform}] Input field not found after 5 retries — aborting send")
+        return False
+
+    logger.info(f"[{platform}] Found input via AT-SPI at ({input_elem['x']}, {input_elem['y']})")
+
+    # Click to position cursor, then grab_focus for proper AT-SPI focus
+    # (grab_focus is essential on Xvfb — click_at alone doesn't give
+    # focus that clipboard paste needs, especially on Gemini)
+    inp.click_at(input_elem['x'], input_elem['y'])
+    time.sleep(0.3)
+    obj = input_elem.get('atspi_obj')
+    if obj:
+        try:
+            comp = obj.get_component_iface()
+            if comp:
+                comp.grab_focus()
+        except Exception:
+            pass
+    time.sleep(0.3)
+
+    # Paste prompt via clipboard + Enter to send
     inp.clipboard_paste(prompt)
     time.sleep(0.5)
-
-    # Press Enter to send
     inp.press_key('Return')
     time.sleep(1.0)
 
