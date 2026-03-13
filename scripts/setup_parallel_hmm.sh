@@ -32,10 +32,11 @@ done
 
 RESOLUTION="1920x1080x24"
 
+# Display numbers start at :2 to avoid :0 (physical) and :1 (GNOME session on some machines)
 declare -A PLATFORMS=(
-    [1]="chatgpt|https://chatgpt.com"
-    [2]="gemini|https://gemini.google.com/app"
-    [3]="grok|https://grok.com/"
+    [2]="chatgpt|https://chatgpt.com"
+    [3]="gemini|https://gemini.google.com/app"
+    [4]="grok|https://grok.com/"
 )
 
 for cmd in Xvfb x11vnc firefox tmux; do
@@ -90,7 +91,7 @@ if [ "$SKIP_FIREFOX" = false ]; then
     echo ""
 fi
 
-for DNUM in 1 2 3; do
+for DNUM in 2 3 4; do
     IFS='|' read -r PLATFORM URL <<< "${PLATFORMS[$DNUM]}"
     DISPLAY_STR=":${DNUM}"
     VNC_PORT="590${DNUM}"
@@ -190,9 +191,9 @@ echo "============================================================"
 echo ""
 echo "  VNC (password: ${VNC_PASSWORD}):"
 FIRST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-echo "    :1 chatgpt  → vnc://${FIRST_IP}:5901"
-echo "    :2 gemini   → vnc://${FIRST_IP}:5902"
-echo "    :3 grok     → vnc://${FIRST_IP}:5903"
+echo "    :2 chatgpt  → vnc://${FIRST_IP}:5902"
+echo "    :3 gemini   → vnc://${FIRST_IP}:5903"
+echo "    :4 grok     → vnc://${FIRST_IP}:5904"
 echo ""
 echo "  tmux sessions:"
 echo "    tmux attach -t hmm-chatgpt"
