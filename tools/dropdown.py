@@ -190,10 +190,48 @@ def _load_platform_yaml(platform: str) -> Dict:
     return data
 
 
+def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
+                         yaml_items: List) -> Dict[str, Any] | None:
+    """For platforms with React portal dropdowns (Grok, ChatGPT), use keyboard nav.
+
+    Matches target_value against YAML items list to determine arrow-down count,
+    then navigates: Down * N + Enter.
+    """
+    if not yaml_items:
+        return None
+    target_lower = target_value.lower()
+    target_idx = None
+    for i, item in enumerate(yaml_items):
+        if target_lower in str(item).lower():
+            target_idx = i
+            break
+    if target_idx is None:
+        return None
+
+    for _ in range(target_idx + 1):
+        inp.press_key('Down')
+        time.sleep(0.15)
+    inp.press_key('Return')
+    time.sleep(0.5)
+
+    return {
+        "platform": platform, "dropdown": dropdown,
+        "target_requested": target_value,
+        "selected_via": "keyboard_nav",
+        "selected_index": target_idx,
+        "selected_item": str(yaml_items[target_idx]),
+        "instruction": "Selected via keyboard navigation. Call taey_inspect to verify.",
+    }
+
+
+# Platforms where AT-SPI can't reliably enumerate dropdown items (React portals)
+_KEYBOARD_NAV_PLATFORMS = {'grok', 'chatgpt'}
+
+
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
-    """Open dropdown, return items for Claude to pick from. No auto-selection."""
+    """Open dropdown, select item. Keyboard nav for React portals, AT-SPI for others."""
     inp.press_key('Escape')
     time.sleep(0.2)
 
@@ -207,44 +245,54 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Primary: AT-SPI do_action on named button
-    menu_items = []
+    # Open dropdown trigger
     trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
-    if trigger_clicked:
-        time.sleep(1.0)
-        firefox = atspi.find_firefox()
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        if doc:
-            menu_items = find_menu_items(firefox, doc)
-
-    # Fallback: coordinate click
-    if not menu_items:
-        trigger_info = _get_trigger_coords(
-            doc or atspi.get_platform_document(atspi.find_firefox(), platform),
-            dropdown, platform=platform)
+    if not trigger_clicked:
+        trigger_info = _get_trigger_coords(doc, dropdown, platform=platform)
         if trigger_info:
-            if trigger_clicked:
-                inp.press_key('Escape')
-                time.sleep(0.3)
             click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
-            if not click_result.get("error"):
-                time.sleep(1.0)
-                firefox = atspi.find_firefox()
-                doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                if doc:
-                    menu_items = find_menu_items(firefox, doc)
-        elif not trigger_clicked:
+            trigger_clicked = not click_result.get("error")
+        if not trigger_clicked:
             return {"error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
                     "platform": platform,
                     "hint": "Try taey_inspect to verify screen state."}
+    time.sleep(1.0)
+
+    # For React portal platforms, use keyboard nav with YAML item order
+    if platform in _KEYBOARD_NAV_PLATFORMS:
+        try:
+            config = _load_platform_yaml(platform)
+            caps = config.get('capabilities', {})
+            # Match dropdown name to YAML key
+            yaml_key_map = {'model': 'models', 'models': 'models', 'model select': 'models',
+                            'mode': 'modes', 'modes': 'modes',
+                            'tool': 'tools', 'tools': 'tools',
+                            'attach': 'attach_menu'}
+            yaml_key = yaml_key_map.get(dropdown.lower())
+            yaml_items = caps.get(yaml_key, []) if yaml_key else []
+            if yaml_items:
+                result = _keyboard_nav_select(platform, dropdown, target_value, yaml_items)
+                if result:
+                    return result
+        except Exception as e:
+            logger.warning("Keyboard nav failed for %s: %s", platform, e)
+        # Fall through to AT-SPI enumeration if keyboard nav fails
+
+    # AT-SPI item enumeration (works for Claude, Gemini, Perplexity)
+    menu_items = []
+    firefox = atspi.find_firefox()
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    if doc:
+        menu_items = find_menu_items(firefox, doc)
 
     if menu_items:
         extend_cache(platform, menu_items)
 
     if not menu_items:
-        return {"error": f"Dropdown '{dropdown}' did not open - no menu items found.",
+        return {"error": f"Dropdown '{dropdown}' opened but no menu items found via AT-SPI.",
                 "platform": platform,
-                "hint": "Try taey_inspect to verify screen state."}
+                "hint": "For Grok/ChatGPT, check YAML item order and retry. "
+                        "For others, try taey_inspect to verify screen state."}
 
     items = [{'name': e.get('name', ''), 'role': e.get('role', ''),
               'x': e.get('x'), 'y': e.get('y'), 'states': e.get('states', [])}
