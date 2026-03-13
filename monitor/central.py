@@ -287,13 +287,11 @@ class CentralMonitor:
             pass
         return False
 
-    def _scan_buttons(self, doc, platform: str) -> tuple:
-        """Scan document for stop button and copy count. Returns (stop_found, copy_count)."""
+    def _scan_buttons(self, doc, platform: str) -> bool:
+        """Scan document for stop button. Returns stop_found."""
         stop_candidates = []
-        copy_count = 0
 
         def scan(obj, depth=0):
-            nonlocal copy_count
             if depth > 25:
                 return
             try:
@@ -302,8 +300,6 @@ class CentralMonitor:
                 if role in ('push button', 'button'):
                     if self._is_stop_button(name, platform):
                         stop_candidates.append(obj)
-                    if 'copy' in name.lower():
-                        copy_count += 1
                 for i in range(obj.get_child_count()):
                     child = obj.get_child_at_index(i)
                     if child:
@@ -313,13 +309,10 @@ class CentralMonitor:
 
         scan(doc)
 
-        stop_found = False
         for c in stop_candidates:
             if not self._is_canvas_stop(c):
-                stop_found = True
-                break
-
-        return stop_found, copy_count
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Tab / URL navigation
@@ -384,34 +377,25 @@ class CentralMonitor:
                 return False
 
         self._force_dbus_refresh(doc)
-        stop_found, copy_count = self._scan_buttons(doc, platform)
-        _log(f"[{platform}/{monitor_id}] scan: stop={stop_found}, copies={copy_count}, "
-             f"baseline={session.get('baseline_copies', 0)}, stop_seen={session.get('stop_seen')}, "
-             f"url={current_url[:60]}")
+        stop_found = self._scan_buttons(doc, platform)
+        _log(f"[{platform}/{monitor_id}] scan: stop={stop_found}, "
+             f"stop_seen={session.get('stop_seen')}, url={current_url[:60]}")
 
         stop_seen = session.get('stop_seen', False)
-        baseline = session.get('baseline_copies', 0)
         started_ts = session.get('started_ts', time.time())
         timeout = session.get('timeout', 3600)
 
-        # State machine
+        # State machine: stop button appears → generating. Disappears → complete.
         if stop_found:
             if not stop_seen:
                 session['stop_seen'] = True
                 session['generating_since'] = time.time()
                 self._update_session(session)
                 _log(f"[{platform}/{monitor_id}] Stop button — generating")
-        else:
-            # Fast-response fallback
-            if not stop_seen and copy_count > baseline:
-                _log(f"[{platform}/{monitor_id}] Fast response: copies {baseline}→{copy_count}")
-                self._notify(session, "response_ready", "copy_button_fallback")
-                return True
-
-            if stop_seen:
-                _log(f"[{platform}/{monitor_id}] Stop gone — complete")
-                self._notify(session, "response_ready", "stop_button")
-                return True
+        elif stop_seen:
+            _log(f"[{platform}/{monitor_id}] Stop gone — complete")
+            self._notify(session, "response_ready", "stop_button")
+            return True
 
         # Timeout check
         if time.time() - started_ts > timeout:
