@@ -381,17 +381,26 @@ def navigate_fresh_session(platform: str) -> bool:
     return True
 
 
-def check_firefox_alive(platform: str = None) -> bool:
+def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
     """Check if Firefox is accessible via AT-SPI.
 
     With multiple Firefox instances (parallel mode), must check the
     specific platform's Firefox, not just any Firefox on the D-Bus.
+    Retries on failure — a single AT-SPI hiccup is NOT proof of death.
     """
-    if platform:
-        firefox = atspi.find_firefox_for_platform(platform)
-    else:
-        firefox = atspi.find_firefox()
-    return firefox is not None
+    for attempt in range(retries):
+        try:
+            if platform:
+                firefox = atspi.find_firefox_for_platform(platform)
+            else:
+                firefox = atspi.find_firefox()
+            if firefox is not None:
+                return True
+        except Exception:
+            pass
+        if attempt < retries - 1:
+            time.sleep(2)
+    return False
 
 
 def scan_for_stop_button(platform: str) -> bool:
