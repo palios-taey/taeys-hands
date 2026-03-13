@@ -93,6 +93,7 @@ element_filter:
     roles:
       - separator
       - document web
+      - paragraph                    # ProseMirror wrapper in input
 
 
 element_map:
@@ -141,6 +142,9 @@ element_map:
   dictation:
     name: "Dictation"
     role: push button
+  answer_mode_tabs:
+    name: "Answer mode tabs"
+    role: page tab list
   # Answer mode tabs
   answer_tab:
     name: "Answer"
@@ -164,6 +168,5 @@ sidebar_nav:
   - { name: "Spaces", role: link }
   - { name: "Finance", role: link }
   - { name: "More", role: push button }
-  - { name: "Recent", role: link }
-  - { name: "Collapse", role: push button }
+  - { name: "Recent Collapse", role: push button }
   - { name: "View All", role: link }

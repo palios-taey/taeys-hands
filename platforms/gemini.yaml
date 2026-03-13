@@ -75,9 +75,12 @@ element_filter:
     name_contains:
       - "Gemini Apps Activity"
       - "Manage extensions"
+      - ", Google Account"
+      - "tap to use tool"
     roles:
       - separator
       - document web
+      - paragraph                    # ProseMirror wrapper in input
 
 
 element_map:
@@ -112,6 +115,9 @@ element_map:
   start_research:
     name: "Start research"
     role: push button
+  microphone:
+    name: "Microphone"
+    role: toggle button
   # Menu items (visible when dropdown is open)
   upload_files_item:
     name_pattern: "Upload files*"
@@ -134,6 +140,8 @@ sidebar_nav:
   - { name: "Projects", role: push button }
   - { name: "New Project", role: push button }
   - { name: "History", role: push button }
+  - { name: "My stuff", role: link }
+  - { name: "Gems", role: link }
   - { name: "Settings & help", role: push button }
   - { name: "Show chat history", role: push button }
   - { name: "Settings", role: link }

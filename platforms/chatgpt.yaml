@@ -88,6 +88,8 @@ element_filter:
       - "Start Voice"
       - "Profile image"
       - "ChatGPT"                    # document web root
+      - "Chat history"              # sidebar landmark container
+      - "Image attachment"          # decorative images
     # Substring matches — exclude if name contains any of these
     name_contains:
       - "Open conversation options"
@@ -126,6 +128,9 @@ element_map:
   thinking_mode:
     name_pattern: "*, click to remove"
     role: push button
+  extended_pro:
+    name: "Extended Pro"
+    role: push button
 
 # ─── Known Sidebar Navigation ───────────────────────────────────────
 # Whitelist of sidebar links/buttons. These always pass through.
@@ -141,6 +146,7 @@ sidebar_nav:
   - { name: "Codex", role: link }
   - { name: "GPTs", role: link }
   - { name: "Projects", role: push button }
+  - { name: "Projects", role: heading }
   - { name: "New project", role: push button }
   - { name: "Your chats", role: push button }
   - { name: "Your chats", role: heading }
@@ -149,6 +155,7 @@ sidebar_nav:
 # When this element is encountered during traversal, it is collected but
 # all remaining siblings in the parent are skipped. Excludes sidebar history.
 fence_after:
+  - { name: "New project", role: push button }
   - { name: "Your chats", role: push button }
 
 # ─── Dropdown Items ─────────────────────────────────────────────────
