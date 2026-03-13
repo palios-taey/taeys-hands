@@ -10,7 +10,6 @@ from typing import Any, Dict, List
 
 from core import atspi, input as inp
 from core.platforms import SOCIAL_PLATFORMS
-from core.tree import find_elements, find_copy_buttons
 from storage import neo4j_client
 from storage.redis_pool import node_key, NODE_ID
 
@@ -21,7 +20,6 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
                              redis_client, session_id: str = None,
                              user_message_id: str = None,
                              tmux_session: str = None,
-                             baseline_copies: int = 0,
                              timeout: int = 3600) -> Dict[str, Any]:
     """Register active session for the central monitor to track."""
     if not redis_client:
@@ -34,7 +32,6 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
         "session_id": session_id,
         "user_message_id": user_message_id,
         "tmux_session": tmux_session or NODE_ID,
-        "baseline_copies": baseline_copies,
         "stop_seen": False,
         "generating_since": None,
         "started_ts": time.time(),
@@ -102,20 +99,10 @@ def handle_send_message(platform: str, message: str,
     monitor_registered = False
 
     if platform not in SOCIAL_PLATFORMS:
-        # Count existing copy buttons as baseline — prevents false-positive
-        # response_ready from copy_button_fallback on non-empty conversations.
-        baseline_copies = 0
-        try:
-            all_elements = find_elements(doc)
-            baseline_copies = len(find_copy_buttons(all_elements))
-        except Exception:
-            pass
-
         reg = register_monitor_session(
             platform=platform, monitor_id=monitor_id, url=url,
             redis_client=redis_client, session_id=session_id,
             user_message_id=message_id,
-            baseline_copies=baseline_copies,
         )
         monitor_registered = reg.get("registered", False)
 
