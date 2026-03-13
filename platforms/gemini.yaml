@@ -142,6 +142,7 @@ sidebar_nav:
   - { name: "History", role: push button }
   - { name: "My stuff", role: link }
   - { name: "Gems", role: link }
+  - { name: "Chats", role: heading }
   - { name: "Settings & help", role: push button }
   - { name: "Show chat history", role: push button }
   - { name: "Settings", role: link }

@@ -139,11 +139,17 @@ element_map:
 sidebar_nav:
   - { name: "Home page", role: link }
   - { name: "Search", role: push button }
+  - { name_pattern: "Search*", role: list item }
   - { name: "Chat", role: link }
+  - { name_pattern: "Chat*", role: list item }
   - { name: "Voice", role: link }
+  - { name_pattern: "Voice*", role: list item }
   - { name: "Imagine", role: link }
+  - { name_pattern: "Imagine*", role: list item }
   - { name: "Projects", role: push button }
   - { name: "New Project", role: push button }
+  - { name_pattern: "New Project*", role: list item }
   - { name: "History", role: push button }
   - { name: "More", role: push button }
   - { name: "Options", role: push button }
+  - { name: "Switch to Private Chat", role: link }

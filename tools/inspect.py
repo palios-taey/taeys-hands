@@ -113,15 +113,7 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
         text = (e.get('text') or '').lower()
         states = set(s.lower() for s in e.get('states', []))
 
-        # Exclude check (exact name, substring, role — all YAML-driven)
-        if role in excl_roles or name_lower in excl_names:
-            continue
-        if any(p in name_lower for p in excl_contains):
-            continue
-        if not name and text and any(p in text for p in excl_contains):
-            continue
-
-        # Element map (known controls — exact match from YAML)
+        # Known controls FIRST — element_map and sidebar_nav survive role exclusion
         matched_semantic = None
         for sem, criteria in emap.items():
             if isinstance(criteria, dict) and _match_element(e, criteria):
@@ -132,10 +124,18 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
             result.append(e)
             continue
 
-        # Sidebar nav (known sidebar controls — exact match from YAML)
         if name and any(_match_element(e, nav) for nav in snav):
             e['semantic'] = 'sidebar_nav'
             result.append(e)
+            continue
+
+        # Exclude check (exact name, substring, role — all YAML-driven)
+        # Runs AFTER known control matching so sidebar_nav/element_map survive
+        if role in excl_roles or name_lower in excl_names:
+            continue
+        if any(p in name_lower for p in excl_contains):
+            continue
+        if not name and text and any(p in text for p in excl_contains):
             continue
 
         # Not matched — noise or NEW?
