@@ -421,8 +421,9 @@ def count_copy_buttons(platform: str) -> int:
 
 
 def find_input_field_atspi(platform: str):
-    """Find the chat input field via AT-SPI. Returns (x, y) or None.
+    """Find the chat input field via AT-SPI. Returns element dict or None.
 
+    Returns dict with 'x', 'y', 'atspi_obj' keys (same as find_elements output).
     With taeys-hands v7, AT-SPI ALWAYS exposes the input field.
     If this returns None, it's a real bug — callers must fail loud.
     """
@@ -440,7 +441,7 @@ def find_input_field_atspi(platform: str):
                 and 'editable' in e.get('states', [])
                 and e.get('y', 0) > chrome_y
                 and e.get('x', 0) > 0):
-            return (e['x'], e['y'])
+            return e
 
     # Priority 2: any element with editable state in page area
     for e in elements:
@@ -448,7 +449,7 @@ def find_input_field_atspi(platform: str):
                 and e.get('y', 0) > chrome_y
                 and e.get('x', 0) > 0):
             logger.info(f"[{platform}] Found editable: role={e.get('role')} at ({e['x']}, {e['y']})")
-            return (e['x'], e['y'])
+            return e
 
     # Priority 3: Grok uses role=section for input — sometimes lacks editable state.
     # Also match ChatGPT ProseMirror (role=section). Look for section/paragraph
@@ -459,7 +460,7 @@ def find_input_field_atspi(platform: str):
                 and e.get('y', 0) > chrome_y
                 and e.get('x', 0) > 0):
             logger.info(f"[{platform}] Found focusable {e.get('role')} at ({e['x']}, {e['y']})")
-            return (e['x'], e['y'])
+            return e
 
     return None
 
@@ -534,6 +535,22 @@ def extract_response(platform: str) -> str:
 
     elements = find_elements(doc)
     copy_buttons = find_copy_buttons(elements)
+
+    # Retry: copy buttons may not be in AT-SPI yet after scroll (render lag)
+    if not copy_buttons:
+        for retry in range(3):
+            time.sleep(2)
+            inp.press_key('End')
+            time.sleep(1)
+            doc = atspi.get_platform_document(
+                atspi.find_firefox_for_platform(platform), platform)
+            if not doc:
+                break
+            elements = find_elements(doc)
+            copy_buttons = find_copy_buttons(elements)
+            if copy_buttons:
+                logger.info(f"[{platform}] Copy buttons found on retry {retry+1}")
+                break
 
     if not copy_buttons:
         logger.error(f"[{platform}] No copy buttons found after scroll to bottom")
@@ -775,10 +792,20 @@ def send_prompt(platform: str, prompt: str) -> bool:
     time.sleep(0.3)
 
     # Find input via AT-SPI — v7 guarantees input is always in the tree
-    coords = find_input_field_atspi(platform)
-    if coords:
-        logger.info(f"[{platform}] Found input via AT-SPI at ({coords[0]}, {coords[1]})")
-        inp.click_at(coords[0], coords[1])
+    input_elem = find_input_field_atspi(platform)
+    if input_elem:
+        logger.info(f"[{platform}] Found input via AT-SPI at ({input_elem['x']}, {input_elem['y']})")
+        # AT-SPI grab_focus is essential on Xvfb (click_at alone doesn't
+        # give proper focus — Gemini clipboard paste fails without it)
+        obj = input_elem.get('atspi_obj')
+        if obj:
+            try:
+                comp = obj.get_component_iface()
+                if comp:
+                    comp.grab_focus()
+            except Exception:
+                pass
+        inp.click_at(input_elem['x'], input_elem['y'])
         time.sleep(0.5)
     else:
         # Input not found via AT-SPI (ChatGPT/Grok ProseMirror doesn't expose editable state).
