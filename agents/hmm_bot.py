@@ -815,8 +815,10 @@ def send_prompt(platform: str, prompt: str) -> bool:
         firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         clicked = False
+        entry_obj = None
         if doc:
             elements = find_elements(doc)
+            chrome_y = detect_chrome_y(doc)
             send_names = ['send prompt', 'send message', 'submit']
             for e in elements:
                 name = (e.get('name') or '').lower()
@@ -828,11 +830,26 @@ def send_prompt(platform: str, prompt: str) -> bool:
                     time.sleep(0.5)
                     clicked = True
                     break
+            # Find entry element for grab_focus even if it wasn't matched by
+            # find_input_field_atspi (may lack editable/focusable states)
+            for e in elements:
+                if e.get('role') == 'entry' and e.get('y', 0) > chrome_y:
+                    entry_obj = e.get('atspi_obj')
+                    break
         if not clicked:
             logger.warning(f"[{platform}] No input field or send button found — send will likely fail")
-            # Last resort: click center-bottom of page where input usually is
             inp.click_at(960, 600)
             time.sleep(0.5)
+        # grab_focus on entry if found (essential for Gemini on Xvfb)
+        if entry_obj:
+            try:
+                comp = entry_obj.get_component_iface()
+                if comp:
+                    comp.grab_focus()
+                    logger.info(f"[{platform}] AT-SPI grab_focus OK (fallback path)")
+            except Exception:
+                pass
+            time.sleep(0.3)
 
     # Paste prompt via clipboard
     inp.clipboard_paste(prompt)
