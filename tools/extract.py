@@ -15,6 +15,19 @@ from storage.redis_pool import node_key
 logger = logging.getLogger(__name__)
 
 
+def _filter_response_copy(copy_buttons: list) -> list:
+    """Filter copy buttons to prefer response copy over user message / code copy."""
+    _RESPONSE_NAMES = {'copy response', 'copy'}
+    _EXCLUDE_NAMES = {'copy message', 'copy code', 'copy message to clipboard'}
+    response_copy = [
+        b for b in copy_buttons
+        if (b.get('name') or '').strip().lower() in _RESPONSE_NAMES
+        and (b.get('name') or '').strip().lower() not in _EXCLUDE_NAMES
+    ]
+    chatgpt_copy = [b for b in response_copy if (b.get('name') or '').strip().lower() == 'copy response']
+    return chatgpt_copy or response_copy or copy_buttons
+
+
 def _scroll_copy_into_view(platform: str, target_btn: dict,
                            original_buttons: list) -> tuple:
     """Scroll until copy button is in viewport (ChatGPT DOM virtualization)."""
@@ -33,8 +46,7 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
     if not copy_buttons:
         return target_btn, target_btn['x'], target_btn['y']
 
-    response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
-    candidates = response_copy or copy_buttons
+    candidates = _filter_response_copy(copy_buttons)
     newest = candidates[-1]
     x, y = newest['x'], newest['y']
 
@@ -52,8 +64,7 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
         copy_buttons = find_copy_buttons(all_elements)
         if not copy_buttons:
             continue
-        response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
-        visible = [b for b in (response_copy or copy_buttons) if 0 < b.get('y', 0) <= SCREEN_HEIGHT]
+        visible = [b for b in _filter_response_copy(copy_buttons) if 0 < b.get('y', 0) <= SCREEN_HEIGHT]
         if visible:
             newest = visible[-1]
             return newest, newest['x'], newest['y']
@@ -105,9 +116,20 @@ def handle_quick_extract(platform: str, redis_client,
         return {"success": False, "error": "No copy buttons found", "platform": platform,
                 "hint": "Response may not be visible - try scrolling or waiting."}
 
-    # Prefer response "Copy" over "Copy code"
-    response_copy = [b for b in copy_buttons if (b.get('name') or '').strip().lower() == 'copy']
-    newest = (response_copy or copy_buttons)[-1]
+    # Prefer response copy buttons over code/message copy buttons.
+    # ChatGPT: "Copy response" (response) vs "Copy message" (user msg)
+    # Claude/Grok: "Copy" (both user and response)
+    _RESPONSE_NAMES = {'copy response', 'copy'}
+    _EXCLUDE_NAMES = {'copy message', 'copy code', 'copy message to clipboard'}
+    response_copy = [
+        b for b in copy_buttons
+        if (b.get('name') or '').strip().lower() in _RESPONSE_NAMES
+        and (b.get('name') or '').strip().lower() not in _EXCLUDE_NAMES
+    ]
+    # If we have "Copy response" buttons (ChatGPT), prefer those over plain "Copy"
+    chatgpt_copy = [b for b in response_copy if (b.get('name') or '').strip().lower() == 'copy response']
+    candidates = chatgpt_copy or response_copy or copy_buttons
+    newest = candidates[-1]
     x, y = newest['x'], newest['y']
 
     if y > SCREEN_HEIGHT:
@@ -129,7 +151,12 @@ def handle_quick_extract(platform: str, redis_client,
         start = content.strip()[:200].lower()
         markers = ['analyze the following', 'package analysis request',
                     'you are analyzing', 'respond only with minified json',
-                    'critical: echo back', 'analyze all', 'for each item provide']
+                    'critical: echo back', 'analyze all', 'for each item provide',
+                    'you are chatgpt', 'you are grok', 'you are gemini',
+                    'you are claude', 'you are perplexity',
+                    'please perform a thorough', 'please perform a full',
+                    'the attached file is the complete',
+                    'part of the family']
         if any(m in start for m in markers):
             if len(response_copy) >= 2:
                 prev = response_copy[-2]
