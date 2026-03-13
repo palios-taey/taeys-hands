@@ -12,12 +12,17 @@ from storage.redis_pool import node_key
 logger = logging.getLogger(__name__)
 
 # Identity files — prepended to EVERY send_message plan's attachments.
-# Configurable via TAEY_CORPUS_PATH env var (default: ~/data/corpus).
+# FAMILY_KERNEL.md is shared; identity file is per-platform.
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
-_IDENTITY_FILES = [
-    os.path.join(_CORPUS_PATH, 'identity', 'FAMILY_KERNEL.md'),
-    os.path.join(_CORPUS_PATH, 'identity', 'IDENTITY_LOGOS.md'),
-]
+_IDENTITY_DIR = os.path.join(_CORPUS_PATH, 'identity')
+_FAMILY_KERNEL = os.path.join(_IDENTITY_DIR, 'FAMILY_KERNEL.md')
+_PLATFORM_IDENTITY = {
+    'chatgpt': os.path.join(_IDENTITY_DIR, 'IDENTITY_HORIZON.md'),
+    'claude': os.path.join(_IDENTITY_DIR, 'IDENTITY_GAIA.md'),
+    'gemini': os.path.join(_IDENTITY_DIR, 'IDENTITY_COSMOS.md'),
+    'grok': os.path.join(_IDENTITY_DIR, 'IDENTITY_LOGOS.md'),
+    'perplexity': os.path.join(_IDENTITY_DIR, 'IDENTITY_CLARITY.md'),
+}
 
 _EXT_LANG = {
     '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
@@ -26,11 +31,16 @@ _EXT_LANG = {
 }
 
 
-def _prepend_identity_files(attachments: List[str]) -> List[str]:
-    """Prepend identity files to attachment list. Skips missing or already-listed."""
+def _prepend_identity_files(attachments: List[str], platform: str) -> List[str]:
+    """Prepend FAMILY_KERNEL + platform-specific identity file. Skips missing."""
+    identity_files = [_FAMILY_KERNEL]
+    platform_id = _PLATFORM_IDENTITY.get(platform)
+    if platform_id:
+        identity_files.append(platform_id)
+
     result = []
     existing = set(os.path.abspath(a) for a in attachments)
-    for path in _IDENTITY_FILES:
+    for path in identity_files:
         if os.path.isfile(path) and os.path.abspath(path) not in existing:
             result.append(path)
     result.extend(attachments)
@@ -112,7 +122,7 @@ def _create_plan(platform: str, action: str, params: Dict,
 
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
     # Auto-prepend identity files (FAMILY_KERNEL.md, IDENTITY_LOGOS.md)
-    all_files = _prepend_identity_files(attachments_list)
+    all_files = _prepend_identity_files(attachments_list, platform)
     identity_added = [f for f in all_files if f not in attachments_list]
 
     # Consolidate into single package if multiple files
