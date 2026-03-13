@@ -338,12 +338,12 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(8)  # Wait for page load (needs more time on fresh restart)
 
     # Verify page loaded by checking for platform document
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         logger.warning(f"[{platform}] Page not loaded after 8s, waiting more...")
         time.sleep(8)
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         if not doc:
             logger.warning(f"[{platform}] Page still not loaded after 16s")
@@ -389,7 +389,7 @@ def check_firefox_alive() -> bool:
 
 def scan_for_stop_button(platform: str) -> bool:
     """Check if a stop/cancel button is visible (AI is generating)."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return False
@@ -411,7 +411,7 @@ def scan_for_stop_button(platform: str) -> bool:
 
 def count_copy_buttons(platform: str) -> int:
     """Count visible copy buttons on the platform."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return 0
@@ -426,7 +426,7 @@ def find_input_field_atspi(platform: str):
     With taeys-hands v7, AT-SPI ALWAYS exposes the input field.
     If this returns None, it's a real bug — callers must fail loud.
     """
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return None
@@ -516,7 +516,7 @@ def extract_response(platform: str) -> str:
     inp.press_key('End')
     time.sleep(0.5)
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return ''
@@ -661,7 +661,7 @@ def attach_file(platform: str, file_path: str) -> bool:
     from tools.attach import _get_attach_button_coords as get_attach_button_coords, _any_file_dialog_open as any_file_dialog_open, _close_stale_file_dialogs as close_stale_file_dialogs
     from core.interact import atspi_click
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         logger.warning(f"[{platform}] No document found for attach")
@@ -706,7 +706,7 @@ def attach_file(platform: str, file_path: str) -> bool:
     # Gemini: menu items ARE visible in AT-SPI — click "Upload files" directly
     elif platform == 'gemini':
         time.sleep(2.0)  # Gemini dropdown needs time to render
-        ff2 = atspi.find_firefox()
+        ff2 = atspi.find_firefox_for_platform(platform)
         doc2 = atspi.get_platform_document(ff2, platform)
         if doc2:
             elems2 = find_elements(doc2)
@@ -768,7 +768,7 @@ def send_prompt(platform: str, prompt: str) -> bool:
     else:
         # Input not found via AT-SPI (ChatGPT/Grok ProseMirror doesn't expose editable state).
         # Find send button and click left of it to hit the input area.
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         clicked = False
         if doc:

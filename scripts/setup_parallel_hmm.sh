@@ -4,11 +4,13 @@
 # Usage: ./scripts/setup_parallel_hmm.sh [--vnc-password PASSWORD] [--skip-firefox] [--skip-bots]
 #
 # Creates:
-#   :1 → D-Bus → Firefox → chatgpt.com → hmm_bot --platforms chatgpt
-#   :2 → D-Bus → Firefox → gemini.google.com → hmm_bot --platforms gemini
-#   :3 → D-Bus → Firefox → grok.com → hmm_bot --platforms grok
+#   :1 → Firefox → chatgpt.com → hmm_bot --platforms chatgpt
+#   :2 → Firefox → gemini.google.com → hmm_bot --platforms gemini
+#   :3 → Firefox → grok.com → hmm_bot --platforms grok
 #
-# Each display gets its OWN D-Bus session for AT-SPI isolation.
+# AT-SPI isolation: find_firefox_for_platform() handles multiple Firefox
+# instances by matching documents to platform URLs. No D-Bus isolation needed.
+#
 # Firefox profile is copied from the active profile (preserving cookies).
 # VNC ports: 5901, 5902, 5903 (password protected)
 # tmux sessions: hmm-chatgpt, hmm-gemini, hmm-grok
@@ -36,7 +38,7 @@ declare -A PLATFORMS=(
     [3]="grok|https://grok.com/"
 )
 
-for cmd in Xvfb x11vnc firefox tmux dbus-launch; do
+for cmd in Xvfb x11vnc firefox tmux; do
     command -v "$cmd" >/dev/null || { echo "ERROR: $cmd not found"; exit 1; }
 done
 
@@ -65,6 +67,13 @@ find_firefox_profile() {
 VNC_PASSWD_FILE="/tmp/.vnc_passwd_hmm"
 x11vnc -storepasswd "$VNC_PASSWORD" "$VNC_PASSWD_FILE" 2>/dev/null || true
 
+# D-Bus: use system session bus (AT-SPI isolation via find_firefox_for_platform)
+DBUS_ADDR=""
+UID_NUM=$(id -u)
+if [ -S "/run/user/${UID_NUM}/bus" ]; then
+    DBUS_ADDR="unix:path=/run/user/${UID_NUM}/bus"
+fi
+
 echo "============================================================"
 echo "  HMM Parallel Setup — $(hostname)"
 echo "============================================================"
@@ -87,7 +96,6 @@ for DNUM in 1 2 3; do
     VNC_PORT="590${DNUM}"
     TMUX_SESSION="hmm-${PLATFORM}"
     PROFILE_COPY="/tmp/ff-profile-${PLATFORM}"
-    DBUS_FILE="/tmp/dbus_display_${DNUM}"
 
     echo "--- Display :${DNUM} → ${PLATFORM} ---"
 
@@ -113,23 +121,9 @@ for DNUM in 1 2 3; do
         fi
     fi
 
-    # 3. Per-display D-Bus session (AT-SPI isolation)
-    if [ -f "$DBUS_FILE" ]; then
-        DBUS_ADDR=$(cat "$DBUS_FILE")
-        echo "  D-Bus: reusing $DBUS_ADDR"
-    else
-        echo "  Starting per-display D-Bus..."
-        eval $(dbus-launch --sh-syntax)
-        DBUS_ADDR="$DBUS_SESSION_BUS_ADDRESS"
-        echo "$DBUS_ADDR" > "$DBUS_FILE"
-        echo "  D-Bus: $DBUS_ADDR"
-    fi
-
-    # 4. Firefox
+    # 3. Firefox with profile copy
     if [ "$SKIP_FIREFOX" = false ]; then
-        # Check if Firefox is running on this display+dbus
-        FF_COUNT=$(DISPLAY="${DISPLAY_STR}" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-            xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
+        FF_COUNT=$(DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
         if [ "$FF_COUNT" -gt 0 ]; then
             echo "  Firefox already running on ${DISPLAY_STR}"
         else
@@ -145,20 +139,22 @@ for DNUM in 1 2 3; do
             fi
 
             echo "  Launching Firefox → ${URL}..."
-            DISPLAY="${DISPLAY_STR}" \
-            DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-            MOZ_DISABLE_CONTENT_SANDBOX=1 \
-            LIBGL_ALWAYS_SOFTWARE=1 \
-            MOZ_ACCELERATED=0 \
-            nohup firefox --no-remote ${PROFILE_ARG} "${URL}" \
+            FF_ENV=(
+                "DISPLAY=${DISPLAY_STR}"
+                "MOZ_DISABLE_CONTENT_SANDBOX=1"
+                "LIBGL_ALWAYS_SOFTWARE=1"
+                "MOZ_ACCELERATED=0"
+            )
+            [ -n "$DBUS_ADDR" ] && FF_ENV+=("DBUS_SESSION_BUS_ADDRESS=$DBUS_ADDR")
+
+            env "${FF_ENV[@]}" nohup firefox --no-remote ${PROFILE_ARG} "${URL}" \
                 &>/tmp/firefox_${PLATFORM}.log &
             disown
 
-            # Wait for Firefox to appear
+            # Wait for Firefox window
             for i in $(seq 1 12); do
                 sleep 2
-                FC=$(DISPLAY="${DISPLAY_STR}" DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR" \
-                    xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
+                FC=$(DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
                 if [ "$FC" -gt 0 ]; then
                     echo "  Firefox ready (${i}×2s)"
                     break
@@ -167,7 +163,7 @@ for DNUM in 1 2 3; do
         fi
     fi
 
-    # 5. Bot
+    # 4. Bot
     if [ "$SKIP_BOTS" = true ]; then
         echo "  Skipping bot (--skip-bots)"
     else
@@ -180,7 +176,7 @@ for DNUM in 1 2 3; do
             tmux new-session -d -s "${TMUX_SESSION}" -x 200 -y 50
         fi
 
-        BOT_CMD="cd ~/taeys-hands && DISPLAY=${DISPLAY_STR} DBUS_SESSION_BUS_ADDRESS='${DBUS_ADDR}' PYTHONPATH=~/embedding-server python3 agents/hmm_bot.py --platforms ${PLATFORM} 2>&1 | tee /tmp/hmm_bot_${PLATFORM}.log"
+        BOT_CMD="cd ~/taeys-hands && DISPLAY=${DISPLAY_STR} PYTHONPATH=~/embedding-server python3 agents/hmm_bot.py --platforms ${PLATFORM} 2>&1 | tee /tmp/hmm_bot_${PLATFORM}.log"
         tmux send-keys -t "${TMUX_SESSION}" "${BOT_CMD}" Enter
         echo "  Bot started in tmux '${TMUX_SESSION}'"
     fi
