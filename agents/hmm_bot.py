@@ -321,7 +321,7 @@ def builder_cmd(*args) -> subprocess.CompletedProcess:
     existing = env.get('PYTHONPATH', '')
     if emb_root not in existing:
         env['PYTHONPATH'] = f"{emb_root}:{existing}" if existing else emb_root
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
 
 
 def get_prompt() -> str:
@@ -596,7 +596,7 @@ def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
     Instant mode responses typically take 20-60s.
     """
     start = time.time()
-    initial_wait = 30  # Minimum generation time for Instant mode
+    initial_wait = 45  # Instant mode takes ~40s for HMM packages
 
     logger.info(f"[{platform}] Fixed wait {initial_wait}s (Instant mode)...")
     time.sleep(initial_wait)
