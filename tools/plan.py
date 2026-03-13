@@ -77,10 +77,38 @@ def handle_plan(platform: str, action: str, params: Dict,
         return _get_plan(params.get('plan_id'), platform, redis_client)
     elif action == 'update':
         return _update_plan(params.get('plan_id'), params, redis_client)
-    elif action == 'send_message':
-        return _create_plan(platform, action, params, redis_client)
-    elif action == 'extract_response':
-        return _create_extract_plan(platform, params, redis_client)
+    elif action in ('send_message', 'extract_response'):
+        # Block if a plan is already active (global lock — one at a time per machine)
+        if redis_client:
+            existing = redis_client.get("taey:plan_active")
+            if existing:
+                try:
+                    lock = json.loads(existing)
+                except (json.JSONDecodeError, TypeError):
+                    lock = {}
+                lock_owner = lock.get('node_id', 'unknown')
+                lock_platform = lock.get('platform', 'unknown')
+                my_node = node_key('').rstrip(':')
+                if lock_owner == my_node:
+                    msg = (f"You already have an active plan for {lock_platform}. "
+                           f"Complete it before creating another.")
+                else:
+                    msg = (f"{lock_owner} is currently executing a plan on {lock_platform}. "
+                           f"Wait until it completes.")
+                return {
+                    "error": msg,
+                    "success": False,
+                    "existing_plan": lock,
+                    "hint": "Complete the plan (send_message clears the lock), "
+                            "extract with complete=True, or cancel with "
+                            "taey_plan(action='delete').",
+                }
+        if action == 'send_message':
+            return _create_plan(platform, action, params, redis_client)
+        else:
+            return _create_extract_plan(platform, params, redis_client)
+    elif action == 'delete':
+        return _delete_plan(platform, params, redis_client)
     else:
         return {"error": f"Unknown plan action: {action}", "success": False}
 
@@ -219,6 +247,23 @@ def _create_extract_plan(platform: str, params: Dict,
         "action": "extract_response", "steps": plan['steps'],
         "next_step": f"Call taey_quick_extract('{platform}') to extract the response",
     }
+
+
+def _delete_plan(platform: str, params: Dict, redis_client) -> Dict[str, Any]:
+    """Delete/cancel an active plan and clear the global lock."""
+    if not redis_client:
+        return {"error": "Redis not available", "success": False}
+    plan_id = params.get('plan_id') or redis_client.get(node_key(f"plan:current:{platform}"))
+    deleted = []
+    if plan_id:
+        if redis_client.delete(node_key(f"plan:{plan_id}")):
+            deleted.append(f"plan:{plan_id}")
+    for suffix in [f"plan:current:{platform}", f"plan:{platform}"]:
+        if redis_client.delete(node_key(suffix)):
+            deleted.append(suffix)
+    if redis_client.delete("taey:plan_active"):
+        deleted.append("plan_active (global)")
+    return {"success": True, "deleted": deleted, "platform": platform}
 
 
 def _get_plan(plan_id: str, platform: str, redis_client) -> Dict[str, Any]:
