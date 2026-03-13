@@ -205,6 +205,12 @@ def _create_extract_plan(platform: str, params: Dict,
         'validated': True, 'created_at': time.time(),
     }))
 
+    # Plan lock — blocks monitor tab cycling during extraction
+    redis_client.setex(node_key("plan_active"), 1800, json.dumps({
+        'plan_id': plan_id, 'platform': platform,
+        'created_at': time.time(),
+    }))
+
     return {
         "success": True, "plan_id": plan_id, "platform": platform,
         "action": "extract_response", "steps": plan['steps'],

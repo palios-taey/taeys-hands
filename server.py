@@ -112,7 +112,7 @@ PLATFORM_PROP = {"type": "string", "enum": ALL_PLATFORMS, "description": "Which 
 def get_tools() -> List[Dict]:
     return [
         {"name": "taey_inspect",
-         "description": "Switch to platform tab, scan AT-SPI tree, return elements with x,y coords. Call FIRST before other tools. Use fresh_session=true for new chat (prevents context bleed).",
+         "description": "Switch to platform tab, scan AT-SPI tree, return elements with x,y coords. REQUIRES taey_plan first (sets monitor lock). Use fresh_session=true for new chat.",
          "inputSchema": {"type": "object", "properties": {
              "platform": {**PLATFORM_PROP},
              "scroll": {"type": "string", "enum": ["bottom", "top", "none"],
@@ -284,6 +284,34 @@ _TOOL_HANDLERS = {
     'taey_respawn_monitor': ('platform', _h_respawn),
 }
 
+# Tools that require an active plan before they can run.
+# These interact with the platform UI (switch tabs, click, type).
+# Without a plan, the monitor cycles tabs and disrupts the workflow.
+_REQUIRES_PLAN = {
+    'taey_inspect', 'taey_click', 'taey_attach',
+    'taey_send_message', 'taey_select_dropdown',
+}
+
+
+def _check_plan_required(name: str, args: Dict, redis_client) -> Dict:
+    """Block platform UI tools unless a plan exists for that platform."""
+    if name not in _REQUIRES_PLAN:
+        return None
+    platform = args.get('platform')
+    if not platform or not redis_client:
+        return None
+    plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
+    if plan_id:
+        return None
+    return {
+        "error": f"No plan exists for {platform}. Create one first with "
+                 f"taey_plan(platform='{platform}', action='send_message', "
+                 f"params={{...}}) or taey_plan(platform='{platform}', "
+                 f"action='extract_response'). "
+                 f"Plans set a lock that prevents the monitor from cycling tabs.",
+        "fix": "taey_plan",
+    }
+
 
 def handle_tool(name: str, args: Dict, redis_client) -> Dict:
     entry = _TOOL_HANDLERS.get(name)
@@ -294,6 +322,9 @@ def handle_tool(name: str, args: Dict, redis_client) -> Dict:
         err = _validate_required(args, required_key)
         if err:
             return err
+    err = _check_plan_required(name, args, redis_client)
+    if err:
+        return err
     result = handler(args, redis_client)
     return inject_notifications(result, redis_client)
 
