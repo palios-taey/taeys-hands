@@ -134,14 +134,17 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 ## Workflow
 
 ```
-1. taey_inspect(platform)           # See what's on screen — elements have x,y coords
-2. taey_attach(platform, path)      # Attach files if needed (finds button via AT-SPI tree)
-3. taey_inspect(platform)           # RE-INSPECT after attach (file chip shifts positions)
-4. taey_click(platform, x=N, y=N)  # Click input field using coordinates from inspect
-5. taey_send_message(platform, msg) # Pastes into focused input, Enter, stores, registers monitor
+0. taey_plan(platform, action, params)  # MANDATORY FIRST — creates monitor lock
+1. taey_inspect(platform)               # See what's on screen — elements have x,y coords
+2. taey_attach(platform, path)          # Attach files if needed
+3. taey_inspect(platform)               # RE-INSPECT after attach (file chip shifts positions)
+4. taey_click(platform, x=N, y=N)      # Click input field using coordinates from inspect
+5. taey_send_message(platform, msg)     # Pastes into focused input, Enter, stores, registers monitor
 6. [central monitor detects response]
-7. taey_quick_extract(platform)     # Get response text, stores in Neo4j
+7. taey_quick_extract(platform, complete=True)  # Get response text, clears plan lock
 ```
+
+**PLAN REQUIRED**: `taey_plan` MUST be called before inspect/click/attach/send/dropdown. It sets a `plan_active` lock in Redis that prevents the central monitor from cycling tabs. Without it, the monitor will switch tabs mid-workflow and break everything. The server enforces this — tools return an error if no plan exists.
 
 **PARADIGM**: Tools report what they did. Claude verifies by inspecting. Tools never say "success" - they return action details and Claude decides if it worked.
 
@@ -203,7 +206,7 @@ The central monitor (`monitor/central.py`) runs as a single long-lived process p
 
 The monitor cycles through all active sessions, switching to each platform tab and navigating to each session's URL. Multiple sessions on the same platform (from different Claude instances) are supported — the monitor verifies the current page URL matches the session before interpreting stop button state.
 
-**Plan lock**: When `taey_plan()` creates a plan, it sets `taey:{node_id}:plan_active`. The monitor stops ALL tab/URL cycling while this key exists. `taey_send_message` clears it on completion. TTL 120s safety net.
+**Plan lock (ENFORCED)**: `taey_plan()` sets `taey:{node_id}:plan_active` which blocks monitor tab cycling. The server **enforces** this — `taey_inspect`, `taey_click`, `taey_attach`, `taey_send_message`, and `taey_select_dropdown` all return errors if no plan exists for the platform. `taey_send_message` clears the lock on completion. `taey_quick_extract(complete=True)` also clears it. TTL 1800s safety net.
 
 **Identity files**: `taey_plan(action="send_message")` auto-prepends FAMILY_KERNEL.md + the correct platform identity file. Callers only specify their own attachments — identity is automatic.
 
@@ -227,6 +230,7 @@ Files are consolidated into a single `.md` package when multiple attachments exi
 
 **The ONLY correct workflow:**
 ```
+0. taey_plan(platform, action, params) # MANDATORY — sets monitor lock
 1. Pick ONE platform
 2. taey_inspect(platform)              # Switch tab + scan → elements with x,y
 3. taey_attach(platform, file)         # Attach if needed (finds button via AT-SPI tree)

@@ -227,7 +227,8 @@ def handle_quick_extract(platform: str, redis_client,
         redis_client.delete(node_key(f"pending_prompt:{platform}"))
         plan_consumed = redis_client.delete(node_key(f"plan:{platform}")) > 0
         for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
-                       f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
+                       f"checkpoint:{platform}:attach", f"response_reviewed:{platform}",
+                       "plan_active"]:
             redis_client.delete(node_key(suffix))
         if content:
             save_path = f"/tmp/hmm_response_{platform}.json"
