@@ -150,8 +150,13 @@ def detect_chrome_y(doc) -> int:
 
 
 def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[Dict]:
-    """Filter to active main-window content (SHOWING + chrome Y threshold)."""
+    """Filter to active main-window content (SHOWING/ENABLED + chrome Y threshold)."""
     threshold = chrome_y if chrome_y is not None else FIREFOX_CHROME_Y
+    _INTERACTIVE = {
+        'push button', 'toggle button', 'entry', 'combo box',
+        'check box', 'radio button', 'link', 'menu item',
+        'page tab', 'page tab list',
+    }
 
     def is_useful(e):
         if e.get('y', 0) < threshold:
@@ -160,6 +165,12 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
         name = e.get('name', '').strip()
         states = set(s.lower() for s in e.get('states', []))
 
+        # Editable elements are always useful (input fields)
+        if 'editable' in states:
+            return True
+        # Named enabled interactive elements (some platforms lack SHOWING)
+        if 'enabled' in states and role in _INTERACTIVE and name:
+            return True
         if role in POPUP_ROLES:
             return bool(name) or bool(states & IMPORTANT_STATE_NAMES)
         if 'showing' not in states:
@@ -170,14 +181,8 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
 
     filtered = [e for e in elements if is_useful(e)]
 
-    # Fallback: if SHOWING filter returned nothing, accept ENABLED interactive elements
+    # Fallback kept for edge cases where nothing passes above
     if not filtered and elements:
-        _INTERACTIVE = {
-            'push button', 'toggle button', 'entry', 'combo box',
-            'check box', 'radio button', 'link', 'menu item',
-            'page tab', 'page tab list',
-        }
-
         def is_enabled_interactive(e):
             if e.get('y', 0) < threshold:
                 return False

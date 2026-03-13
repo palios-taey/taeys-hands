@@ -59,6 +59,13 @@ mode_guidance:
     how: "Default model without Extended thinking"
     timeout: 1800
 
+# ─── Sidebar Fence ────────────────────────────────────────────────
+# When this element is encountered during traversal, it is collected but
+# all remaining siblings in the parent are skipped. Excludes starred
+# projects and recent chat history links.
+fence_after:
+  - { name: "Starred", role: heading }
+
 # ─── Element Filtering ───────────────────────────────────────────────
 element_filter:
   exclude:
@@ -66,6 +73,7 @@ element_filter:
       - "Close sidebar"
       - "Claude"                     # logo image + document web root
       - "Profile image"
+      - "Sidebar"                    # landmark container
     name_contains:
       - "Upgrade to"
       - ", Settings"                 # "Jesse LaRose, Settings" button
