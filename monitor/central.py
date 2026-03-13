@@ -315,6 +315,23 @@ class CentralMonitor:
     # Tab / URL navigation
     # ------------------------------------------------------------------
 
+    _LANDING_PAGES = [
+        'chatgpt.com/', 'chatgpt.com/?', 'claude.ai/new',
+        'gemini.google.com/app', 'grok.com/', 'grok.com/?',
+        'perplexity.ai/', 'perplexity.ai/?',
+    ]
+
+    def _is_landing_page(self, url: str) -> bool:
+        """Check if URL is a landing/new-chat page that redirects after send."""
+        if not url:
+            return True
+        url_lower = url.lower().rstrip('/')
+        for pat in self._LANDING_PAGES:
+            pat_clean = pat.rstrip('/')
+            if url_lower.endswith(pat_clean):
+                return True
+        return False
+
     def _switch_tab(self, platform: str):
         shortcut = TAB_SHORTCUTS.get(platform)
         if shortcut:
@@ -345,15 +362,22 @@ class CentralMonitor:
         platform = session['platform']
         monitor_id = session['monitor_id']
 
-        # Verify URL matches this session (multi-session safety)
+        # URL verification — only skip if we're sure this is wrong session.
+        # Landing pages redirect after send, so don't skip on mismatch
+        # with landing URLs. Always check if this is the only session.
         expected_url = session.get('url', '')
-        if expected_url:
-            current_url = self._get_document_url(doc) or ''
+        current_url = self._get_document_url(doc) or ''
+        if expected_url and not self._is_landing_page(expected_url):
             if expected_url not in current_url and current_url not in expected_url:
-                return False  # Tab showing different session — skip
+                _log(f"[{platform}/{monitor_id}] URL mismatch, skipping "
+                     f"(expected={expected_url[:50]}, got={current_url[:50]})")
+                return False
 
         self._force_dbus_refresh(doc)
         stop_found, copy_count = self._scan_buttons(doc, platform)
+        _log(f"[{platform}/{monitor_id}] scan: stop={stop_found}, copies={copy_count}, "
+             f"baseline={session.get('baseline_copies', 0)}, stop_seen={session.get('stop_seen')}, "
+             f"url={current_url[:60]}")
 
         stop_seen = session.get('stop_seen', False)
         baseline = session.get('baseline_copies', 0)
@@ -438,6 +462,7 @@ class CentralMonitor:
     def _cycle(self):
         # Check plan lock — full stop
         if self._plan_active():
+            _log("Plan active — skipping cycle")
             return
 
         sessions = self._get_sessions()
@@ -448,6 +473,9 @@ class CentralMonitor:
         if not firefox:
             _log("Firefox not found")
             return
+
+        platforms = {s['platform'] for s in sessions}
+        _log(f"Cycle: {len(sessions)} session(s) on {platforms}")
 
         # Group by platform
         by_platform: Dict[str, List[Dict]] = {}
@@ -470,14 +498,16 @@ class CentralMonitor:
                 if self._plan_active():
                     break
 
-                # Navigate to session URL if needed
                 doc = self._find_document(firefox, platform)
-                if doc and session.get('url'):
+
+                # Navigate to session URL only for multi-session disambiguation.
+                # Skip navigation for landing pages — they redirect after send.
+                if doc and session.get('url') and len(platform_sessions) > 1:
                     current_url = self._get_document_url(doc) or ''
-                    if session['url'] not in current_url:
+                    if not self._is_landing_page(session['url']) and \
+                       session['url'] not in current_url:
                         self._navigate_url(session['url'])
-                        time.sleep(3)  # page load
-                        # Re-find document after navigation
+                        time.sleep(3)
                         firefox = self._find_firefox()
                         if firefox:
                             doc = self._find_document(firefox, platform)
