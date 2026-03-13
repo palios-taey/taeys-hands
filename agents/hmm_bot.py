@@ -702,9 +702,23 @@ def send_prompt(platform: str, prompt: str) -> bool:
         inp.click_at(coords[0], coords[1])
         time.sleep(0.5)
     elif platform == 'chatgpt':
-        # ChatGPT ProseMirror doesn't always expose editable state in AT-SPI.
-        # After file attach, input retains focus — just paste directly.
-        logger.info(f"[{platform}] AT-SPI input not found — pasting directly (focus retained after attach)")
+        # ChatGPT ProseMirror doesn't expose editable state in AT-SPI.
+        # Find "Send prompt" button and click left of it to hit the input area.
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if doc:
+            elements = find_elements(doc)
+            for e in elements:
+                name = (e.get('name') or '').lower()
+                if 'send prompt' in name and 'button' in e.get('role', ''):
+                    input_x = e['x'] - 200  # Input is left of send button
+                    input_y = e['y']
+                    logger.info(f"[{platform}] Clicking left of Send button at ({input_x}, {input_y})")
+                    inp.click_at(input_x, input_y)
+                    time.sleep(0.5)
+                    break
+            else:
+                logger.info(f"[{platform}] No Send button found — pasting directly (focus retained after attach)")
     else:
         logger.error(f"[{platform}] AT-SPI cannot find input field — failing send")
         return False
