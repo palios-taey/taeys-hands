@@ -421,14 +421,32 @@ def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
     return False
 
 
+def _find_elements_with_timeout(doc, timeout_sec: int = 15):
+    """find_elements with signal-based timeout to prevent AT-SPI hangs."""
+    import signal
+
+    def _handler(signum, frame):
+        raise TimeoutError("AT-SPI find_elements timed out")
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(timeout_sec)
+    try:
+        return find_elements(doc)
+    except TimeoutError:
+        logger.warning("AT-SPI find_elements timed out — D-Bus likely stalled")
+        return []
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
 def scan_for_stop_button(platform: str) -> bool:
     """Check if a stop/cancel button is visible (AI is generating)."""
-    firefox = get_firefox(platform)
     doc = get_doc(platform)
     if not doc:
         return False
 
-    elements = find_elements(doc)
+    elements = _find_elements_with_timeout(doc)
     patterns = STOP_PATTERNS.get(platform, ['stop'])
 
     for e in elements:
@@ -445,12 +463,11 @@ def scan_for_stop_button(platform: str) -> bool:
 
 def count_copy_buttons(platform: str) -> int:
     """Count visible copy buttons on the platform."""
-    firefox = get_firefox(platform)
     doc = get_doc(platform)
     if not doc:
         return 0
 
-    elements = find_elements(doc)
+    elements = _find_elements_with_timeout(doc)
     return len(find_copy_buttons(elements))
 
 
