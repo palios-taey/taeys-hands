@@ -2,6 +2,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import time
 import uuid
 import logging
@@ -14,6 +16,38 @@ from storage import neo4j_client
 from storage.redis_pool import node_key, NODE_ID
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_central_monitor(display: str):
+    """Ensure the central monitor process is running. Spawn if not."""
+    try:
+        result = subprocess.run(
+            ['pgrep', '-f', 'monitor.central'],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return  # already running
+    except Exception:
+        pass
+
+    # Spawn central monitor as detached process
+    monitor_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_file = '/tmp/central_monitor.log'
+    try:
+        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        env = os.environ.copy()
+        env['DISPLAY'] = display
+        subprocess.Popen(
+            [sys.executable, '-m', 'monitor.central', '--cycle-interval', '10'],
+            cwd=monitor_dir,
+            env=env,
+            stdout=log_fd, stderr=log_fd,
+            close_fds=True, start_new_session=True,
+        )
+        os.close(log_fd)
+        logger.info("Central monitor spawned (display=%s)", display)
+    except Exception as e:
+        logger.warning("Failed to spawn central monitor: %s", e)
 
 
 def register_monitor_session(platform: str, monitor_id: str, url: str,
@@ -99,6 +133,7 @@ def handle_send_message(platform: str, message: str,
     monitor_registered = False
 
     if platform not in SOCIAL_PLATFORMS:
+        _ensure_central_monitor(display)
         reg = register_monitor_session(
             platform=platform, monitor_id=monitor_id, url=url,
             redis_client=redis_client, session_id=session_id,

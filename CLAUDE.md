@@ -201,12 +201,13 @@ The central monitor (`monitor/central.py`) runs as a single long-lived process p
 
 1. **Stop button appears** -> AI is generating
 2. **Stop button disappears** -> response complete
-3. **Fast-response fallback** -> copy count increased above baseline without seeing stop button
-4. **Redis notification** -> RPUSH to `taey:{node_id}:notifications`, consumed by orchestrator hooks
+3. **Redis notification** -> RPUSH to `taey:{tmux_session}:notifications`, consumed by orchestrator hooks
+
+Detection is **stop button only** — no copy button counting (copy buttons cause false positives on intermediate stages like Deep Research).
 
 The monitor cycles through all active sessions, switching to each platform tab and navigating to each session's URL. Multiple sessions on the same platform (from different Claude instances) are supported — the monitor verifies the current page URL matches the session before interpreting stop button state.
 
-**Plan lock (ENFORCED)**: `taey_plan()` sets `taey:{node_id}:plan_active` which blocks monitor tab cycling. The server **enforces** this — `taey_inspect`, `taey_click`, `taey_attach`, `taey_send_message`, and `taey_select_dropdown` all return errors if no plan exists for the platform. `taey_send_message` clears the lock on completion. `taey_quick_extract(complete=True)` also clears it. TTL 1800s safety net.
+**Plan lock (GLOBAL)**: `taey_plan()` sets `taey:plan_active` (single global key — one Firefox, one active tab). This blocks ALL monitor tab cycling. Only one plan can exist at a time across all sessions. The server **enforces** plan-before-action — `taey_inspect`, `taey_click`, `taey_attach`, `taey_send_message`, and `taey_select_dropdown` return errors if no plan exists for the platform. `taey_send_message` clears the lock on completion. `taey_quick_extract(complete=True)` also clears it. TTL 1800s safety net. Cancel stuck plans with `taey_plan(action='delete')`.
 
 **Identity files**: `taey_plan(action="send_message")` auto-prepends FAMILY_KERNEL.md + the correct platform identity file. Callers only specify their own attachments — identity is automatic.
 
