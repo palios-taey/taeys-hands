@@ -708,10 +708,19 @@ def attach_file(platform: str, file_path: str) -> bool:
         close_stale_file_dialogs()
         return False
 
-    # Find attach button
-    btn = get_attach_button_coords(doc, platform=platform)
+    # Find attach button — retry up to 5 times (AT-SPI tree lags after navigation)
+    btn = None
+    for attempt in range(5):
+        firefox = atspi.find_firefox_for_platform(platform)
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if doc:
+            btn = get_attach_button_coords(doc, platform=platform)
+        if btn:
+            break
+        logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/5...")
+        time.sleep(3)
     if not btn:
-        logger.error(f"[{platform}] Attach button not found in AT-SPI tree")
+        logger.error(f"[{platform}] Attach button not found after 5 retries")
         return False
 
     # Dismiss any stale popups
