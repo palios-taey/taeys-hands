@@ -381,9 +381,16 @@ def navigate_fresh_session(platform: str) -> bool:
     return True
 
 
-def check_firefox_alive() -> bool:
-    """Check if Firefox is accessible via AT-SPI."""
-    firefox = atspi.find_firefox()
+def check_firefox_alive(platform: str = None) -> bool:
+    """Check if Firefox is accessible via AT-SPI.
+
+    With multiple Firefox instances (parallel mode), must check the
+    specific platform's Firefox, not just any Firefox on the D-Bus.
+    """
+    if platform:
+        firefox = atspi.find_firefox_for_platform(platform)
+    else:
+        firefox = atspi.find_firefox()
     return firefox is not None
 
 
@@ -481,8 +488,8 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
     phase = 'waiting_for_start'
 
     while time.time() - start < timeout:
-        if not check_firefox_alive():
-            logger.error("Firefox died during response wait")
+        if not check_firefox_alive(platform):
+            logger.error(f"[{platform}] Firefox died during response wait")
             return False
 
         has_stop = scan_for_stop_button(platform)
@@ -929,8 +936,8 @@ def run_cycle(platforms: list, prompt: str) -> dict:
     results = {}
 
     for platform in platforms:
-        if not check_firefox_alive():
-            logger.warning("Firefox died — auto-restarting...")
+        if not check_firefox_alive(platform):
+            logger.warning(f"[{platform}] Firefox died — auto-restarting...")
             if not restart_firefox(platforms):
                 escalate(f"ESCALATION from hmm_bot: Firefox restart failed during {platform}")
                 break
