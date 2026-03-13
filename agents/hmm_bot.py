@@ -110,10 +110,15 @@ def get_doc(platform: str, force_refresh: bool = False):
     return doc
 
 
-def invalidate_cache(platform: str):
-    """Clear cached refs after Firefox restart or navigation."""
-    _cached_firefox.pop(platform, None)
+def invalidate_doc_cache(platform: str):
+    """Clear cached document ref after navigation (Firefox ref stays valid)."""
     _cached_doc.pop(platform, None)
+
+
+def invalidate_all_cache():
+    """Clear ALL cached refs after Firefox restart."""
+    _cached_firefox.clear()
+    _cached_doc.clear()
 
 
 def restart_firefox(platforms: list) -> bool:
@@ -255,8 +260,7 @@ def restart_firefox(platforms: list) -> bool:
         time.sleep(2)
         if check_firefox_alive():
             logger.info(f"Firefox restarted successfully ({(i+1)*2}s)")
-            _cached_firefox.clear()
-            _cached_doc.clear()
+            invalidate_all_cache()
             return True
 
     logger.error("Firefox failed to start after 30s")
@@ -383,8 +387,8 @@ def navigate_fresh_session(platform: str) -> bool:
     inp.press_key('Return')
     time.sleep(8)  # Wait for page load (needs more time on fresh restart)
 
-    # Invalidate cache — page changed, old refs are stale
-    invalidate_cache(platform)
+    # Invalidate doc cache — page changed but Firefox ref stays valid
+    invalidate_doc_cache(platform)
 
     # Verification is best-effort — D-Bus contention in parallel mode can
     # make AT-SPI verification fail even when page loaded fine. Trust the
@@ -1049,9 +1053,11 @@ def main():
             if cycle % 5 == 0:
                 logger.info(f"Builder stats:\n{get_stats()}")
 
-            # Pause between cycles
+            # Pause between cycles (with jitter to stagger parallel bots)
             if args.cycles == 0 or cycle < args.cycles:
-                time.sleep(args.pause)
+                import random
+                jitter = random.uniform(0, 10)
+                time.sleep(args.pause + jitter)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
