@@ -759,6 +759,10 @@ def send_prompt(platform: str, prompt: str) -> bool:
     inp.focus_firefox()
     time.sleep(0.3)
 
+    # Dismiss any open dropdown menus (Grok attach leaves dropdown open)
+    inp.press_key('Escape')
+    time.sleep(0.3)
+
     # Find input via AT-SPI — v7 guarantees input is always in the tree
     coords = find_input_field_atspi(platform)
     if coords:
