@@ -77,8 +77,11 @@ def type_text(text: str, delay_ms: int = 5, timeout: int = 30) -> bool:
 
 
 def focus_firefox(timeout: int = 5) -> bool:
-    """Activate the Firefox window. Uses LAST window ID (mutter decorator workaround).
-    Falls back to wmctrl for GNOME Shell where xdotool windowactivate fails."""
+    """Activate the Firefox window. Tries multiple methods:
+    1. xdotool windowactivate (standard X11 with WM)
+    2. xdotool windowfocus (bare Xvfb without WM)
+    3. wmctrl -a (GNOME Shell fallback)
+    Uses LAST window ID to skip mutter decorator windows."""
     try:
         r = subprocess.run(
             ['xdotool', 'search', '--name', 'Mozilla Firefox'],
@@ -87,22 +90,37 @@ def focus_firefox(timeout: int = 5) -> bool:
         if r.returncode != 0 or not r.stdout.strip():
             return False
         window_id = r.stdout.strip().split('\n')[-1]
+
+        # Method 1: windowactivate (works with standard WMs)
         r2 = subprocess.run(
             ['xdotool', 'windowactivate', window_id],
             env=_get_env(), capture_output=True, text=True, timeout=timeout,
         )
-        # xdotool windowactivate can fail on GNOME Shell (BadMatch) — try wmctrl
-        if r2.returncode != 0 or 'BadMatch' in (r2.stderr or ''):
-            r3 = subprocess.run(
-                ['wmctrl', '-a', 'Mozilla Firefox'],
-                env=_get_env(), capture_output=True, timeout=timeout,
-            )
-            if r3.returncode != 0:
-                logger.warning("Both xdotool and wmctrl failed to focus Firefox")
-                return False
+        if r2.returncode == 0 and 'error' not in (r2.stderr or '').lower():
+            time.sleep(0.3)
+            return True
+
+        # Method 2: windowfocus (works on bare Xvfb without WM)
+        r3 = subprocess.run(
+            ['xdotool', 'windowfocus', window_id],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
+        )
+        if r3.returncode == 0:
+            time.sleep(0.3)
+            return True
+
+        # Method 3: wmctrl (works on some GNOME Shell setups)
+        r4 = subprocess.run(
+            ['wmctrl', '-a', 'Mozilla Firefox'],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if r4.returncode == 0:
             logger.info("Firefox focused via wmctrl fallback")
-        time.sleep(0.3)
-        return True
+            time.sleep(0.3)
+            return True
+
+        logger.warning("All focus methods failed for Firefox")
+        return False
     except subprocess.TimeoutExpired:
         logger.error("Firefox focus timed out")
         return False
