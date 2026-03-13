@@ -158,12 +158,17 @@ for DNUM in 1 2 3; do
             fi
 
             echo "  Launching Firefox → ${URL}..."
-            DISPLAY="${DISPLAY_STR}" \
-            MOZ_DISABLE_CONTENT_SANDBOX=1 \
-            LIBGL_ALWAYS_SOFTWARE=1 \
-            MOZ_ACCELERATED=0 \
-            ${DBUS_ADDR:+DBUS_SESSION_BUS_ADDRESS="$DBUS_ADDR"} \
-            firefox --no-remote ${PROFILE_ARG} "${URL}" &>/tmp/firefox_${PLATFORM}.log &
+            FF_ENV=(
+                env
+                "DISPLAY=${DISPLAY_STR}"
+                "MOZ_DISABLE_CONTENT_SANDBOX=1"
+                "LIBGL_ALWAYS_SOFTWARE=1"
+                "MOZ_ACCELERATED=0"
+            )
+            if [ -n "$DBUS_ADDR" ]; then
+                FF_ENV+=("DBUS_SESSION_BUS_ADDRESS=$DBUS_ADDR")
+            fi
+            "${FF_ENV[@]}" firefox --no-remote ${PROFILE_ARG} "${URL}" &>/tmp/firefox_${PLATFORM}.log &
             disown
             sleep 4
         fi
