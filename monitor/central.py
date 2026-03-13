@@ -519,9 +519,11 @@ class CentralMonitor:
 
                 doc = self._find_document(firefox, platform)
 
-                # Navigate to session URL only for multi-session disambiguation.
-                # Skip navigation for landing pages — they redirect after send.
-                if doc and session.get('url') and len(platform_sessions) > 1:
+                # Navigate to session URL if browser is on a different page.
+                # Always navigate — even with a single session, the tab may
+                # show a landing page while the real conversation URL was
+                # captured after redirect.
+                if doc and session.get('url'):
                     current_url = self._get_document_url(doc) or ''
                     if not self._is_landing_page(session['url']) and \
                        session['url'] not in current_url:
