@@ -444,23 +444,34 @@ def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
 
 
 def _find_elements_with_fence(doc, platform: str, timeout_sec: int = 15):
-    """find_elements with fence_after from YAML + signal-based timeout."""
-    import signal
+    """find_elements with fence_after from YAML + thread-based timeout.
+
+    Uses a daemon thread so the main thread can kill it if AT-SPI hangs
+    in a C extension (SIGALRM can't interrupt C-level D-Bus calls).
+    """
+    import threading
     fences = _get_fence_after(platform)
+    result = []
+    error = [None]
 
-    def _handler(signum, frame):
-        raise TimeoutError("AT-SPI find_elements timed out")
+    def _worker():
+        try:
+            result.extend(find_elements(doc, fence_after=fences))
+        except Exception as e:
+            error[0] = e
 
-    old_handler = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(timeout_sec)
-    try:
-        return find_elements(doc, fence_after=fences)
-    except TimeoutError:
-        logger.warning(f"[{platform}] AT-SPI find_elements timed out — D-Bus likely stalled")
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+
+    if t.is_alive():
+        logger.warning(f"[{platform}] AT-SPI find_elements timed out after {timeout_sec}s")
+        # Thread is daemon — will be killed when main process exits or on next GC
         return []
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
+    if error[0]:
+        logger.warning(f"[{platform}] find_elements error: {error[0]}")
+        return []
+    return result
 
 
 def scan_for_stop_button(platform: str) -> bool:
