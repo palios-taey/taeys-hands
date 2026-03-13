@@ -121,7 +121,7 @@ def _create_plan(platform: str, action: str, params: Dict,
                 }}
 
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
-    # Auto-prepend identity files (FAMILY_KERNEL.md, IDENTITY_LOGOS.md)
+    # Auto-prepend identity files (FAMILY_KERNEL + platform-specific identity)
     all_files = _prepend_identity_files(attachments_list, platform)
     identity_added = [f for f in all_files if f not in attachments_list]
 

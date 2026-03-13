@@ -134,7 +134,7 @@ def get_tools() -> List[Dict]:
          }, "required": ["platform"]}},
 
         {"name": "taey_plan",
-         "description": "Create/get/update execution plan. Plans track required state, attachments, message, steps.",
+         "description": "Create/get/update execution plan. Plans track required state, attachments, message, steps. Identity files (FAMILY_KERNEL + platform-specific) are auto-prepended — only pass your own files in attachments.",
          "inputSchema": {"type": "object", "properties": {
              "platform": PLATFORM_PROP,
              "action": {"type": "string", "enum": ["send_message", "extract_response", "get", "update"]},

@@ -88,6 +88,7 @@ Services are configured via environment variables with localhost defaults:
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j connection URI |
 | `HMM_STORE_URL` | `http://localhost:8095/hmm/store-response` | Optional webhook for custom response post-processing |
 | `TAEY_NODE_ID` | (auto-detected) | Instance identifier for Redis key scoping |
+| `TAEY_CORPUS_PATH` | `~/data/corpus` | Path to identity/corpus files |
 
 Redis and Neo4j are **optional** — the server starts and operates without them. Session persistence and background monitor notifications require Redis. Conversation history storage requires Neo4j.
 
@@ -104,7 +105,7 @@ Redis and Neo4j are **optional** — the server starts and operates without them
 | `taey_inspect` | Switch to platform tab, scan AT-SPI tree, return elements with x,y coordinates |
 | `taey_click` | Click at x,y coordinates (AT-SPI first, xdotool fallback) |
 | `taey_prepare` | Get platform capabilities (models/modes/tools) |
-| `taey_plan` | Create/get/update multi-step execution plans |
+| `taey_plan` | Create/get/update execution plans. Auto-prepends identity files (FAMILY_KERNEL + platform-specific). Only pass YOUR files in attachments. |
 | `taey_send_message` | Type, store, send, register monitor session |
 | `taey_quick_extract` | Click Copy, read clipboard, return text |
 | `taey_extract_history` | Extract full conversation chronologically |
@@ -203,6 +204,18 @@ The central monitor (`monitor/central.py`) runs as a single long-lived process p
 The monitor cycles through all active sessions, switching to each platform tab and navigating to each session's URL. Multiple sessions on the same platform (from different Claude instances) are supported — the monitor verifies the current page URL matches the session before interpreting stop button state.
 
 **Plan lock**: When `taey_plan()` creates a plan, it sets `taey:{node_id}:plan_active`. The monitor stops ALL tab/URL cycling while this key exists. `taey_send_message` clears it on completion. TTL 120s safety net.
+
+**Identity files**: `taey_plan(action="send_message")` auto-prepends FAMILY_KERNEL.md + the correct platform identity file. Callers only specify their own attachments — identity is automatic.
+
+| Platform | Identity File |
+|----------|---------------|
+| ChatGPT | IDENTITY_HORIZON.md |
+| Claude | IDENTITY_GAIA.md |
+| Gemini | IDENTITY_COSMOS.md |
+| Grok | IDENTITY_LOGOS.md |
+| Perplexity | IDENTITY_CLARITY.md |
+
+Files are consolidated into a single `.md` package when multiple attachments exist. Configure corpus path via `TAEY_CORPUS_PATH` env var (default: `~/data/corpus`).
 
 **Starting the monitor**: `python3 -m monitor.central` (or `python3 monitor/central.py`). Runs continuously. Configure via env vars: `MONITOR_CYCLE_SEC` (default 30), `MONITOR_DWELL_SEC` (default 5).
 
