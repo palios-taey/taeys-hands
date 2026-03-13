@@ -73,27 +73,59 @@ FRESH_URLS = {
 
 
 def restart_firefox(platforms: list) -> bool:
-    """Kill and restart Firefox with platform tabs. Returns True if successful."""
+    """Kill and restart Firefox on current DISPLAY only. Parallel-safe."""
     logger.warning("Restarting Firefox...")
     env = os.environ.copy()
     display = env.get('DISPLAY', ':1')
+    xenv = {**env, 'DISPLAY': display}
 
-    # Kill existing Firefox — wait until fully dead
-    subprocess.run(['pkill', '-9', '-f', 'firefox'], capture_output=True)
+    # Find Firefox window PIDs on THIS display only (parallel-safe)
+    pids_to_kill = set()
+    try:
+        r = subprocess.run(
+            ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+            capture_output=True, text=True, timeout=5, env=xenv,
+        )
+        for wid in (r.stdout.strip().split('\n') if r.stdout.strip() else []):
+            try:
+                p = subprocess.run(
+                    ['xdotool', 'getwindowpid', wid],
+                    capture_output=True, text=True, timeout=3, env=xenv,
+                )
+                if p.returncode == 0 and p.stdout.strip():
+                    pids_to_kill.add(p.stdout.strip())
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if pids_to_kill:
+        for pid in pids_to_kill:
+            subprocess.run(['kill', '-9', pid], capture_output=True)
+        logger.info(f"Killed Firefox PIDs on {display}: {pids_to_kill}")
+    else:
+        # Fallback: no window found, kill all (single-instance mode)
+        subprocess.run(['pkill', '-9', '-f', 'firefox'], capture_output=True)
+
     subprocess.run(['pkill', '-9', '-f', 'crashreporter'], capture_output=True)
     for _ in range(10):
         time.sleep(1)
-        result = subprocess.run(['pgrep', '-c', 'firefox'], capture_output=True, text=True)
-        if result.returncode != 0 or result.stdout.strip() == '0':
+        # Check if our display is clear
+        try:
+            r = subprocess.run(
+                ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                capture_output=True, text=True, timeout=3, env=xenv,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                break
+        except Exception:
             break
-    else:
-        logger.error("Firefox still alive after 10s of SIGKILL")
     time.sleep(1)
 
-    # Close ALL remaining X windows (zombie dialogs, ghost windows)
-    xenv = {**env, 'DISPLAY': display}
+    # Close zombie windows on this display
     try:
-        for pattern in ['Firefox', 'File Upload', 'Open', 'Nautilus']:
+        for pattern in ['Firefox', 'File Upload', 'Open', 'Nautilus',
+                        'xdg-desktop-portal-gtk']:
             r = subprocess.run(
                 ['xdotool', 'search', '--name', pattern],
                 capture_output=True, text=True, timeout=3, env=xenv,
@@ -105,27 +137,55 @@ def restart_firefox(platforms: list) -> bool:
     except Exception as e:
         logger.debug(f"Zombie window cleanup: {e}")
 
-    # Remove stale locks and session restore files (prevent old tab restoration)
-    import glob as _glob
-    import shutil
-    for profile_dir in ['~/.config/mozilla/firefox', '~/.mozilla/firefox']:
-        for lock in _glob.glob(os.path.expanduser(f'{profile_dir}/*/.parentlock')):
-            try:
-                os.remove(lock)
-            except Exception:
-                pass
-        # Remove session restore files to prevent restoring old tabs
-        for pattern in ['*/sessionstore*', '*/sessionstore-backups']:
-            for path in _glob.glob(os.path.expanduser(f'{profile_dir}/{pattern}')):
+    # Determine profile to use
+    # Parallel mode: /tmp/ff-profile-<platform> (created by setup_parallel_hmm.sh)
+    # Single mode: default profile
+    profile_arg = []
+    platform_name = platforms[0] if len(platforms) == 1 else None
+    if platform_name:
+        parallel_profile = f'/tmp/ff-profile-{platform_name}'
+        if os.path.isdir(parallel_profile):
+            # Clean locks from profile copy
+            for lock in [f'{parallel_profile}/lock', f'{parallel_profile}/.parentlock']:
                 try:
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    else:
-                        os.remove(path)
+                    os.remove(lock)
+                except FileNotFoundError:
+                    pass
+            # Remove session restore to prevent old tab restoration
+            import glob as _glob
+            import shutil
+            for pattern in ['sessionstore*', 'sessionstore-backups']:
+                for path in _glob.glob(f'{parallel_profile}/{pattern}'):
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                    except Exception:
+                        pass
+            profile_arg = ['--profile', parallel_profile, '--no-remote']
+            logger.info(f"Using parallel profile: {parallel_profile}")
+
+    if not profile_arg:
+        # Single-instance mode: clean default profile locks
+        import glob as _glob
+        import shutil
+        for profile_dir in ['~/.config/mozilla/firefox', '~/.mozilla/firefox']:
+            for lock in _glob.glob(os.path.expanduser(f'{profile_dir}/*/.parentlock')):
+                try:
+                    os.remove(lock)
                 except Exception:
                     pass
+            for pattern in ['*/sessionstore*', '*/sessionstore-backups']:
+                for path in _glob.glob(os.path.expanduser(f'{profile_dir}/{pattern}')):
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                    except Exception:
+                        pass
 
-    # Open with a single blank tab — navigate_fresh_session handles URLs
     urls = ['about:blank']
 
     firefox_env = {
@@ -135,20 +195,18 @@ def restart_firefox(platforms: list) -> bool:
         'LIBGL_ALWAYS_SOFTWARE': '1',
         'MOZ_ACCELERATED': '0',
     }
-    # Add DBUS if available
     uid = os.getuid()
     dbus_path = f'/run/user/{uid}/bus'
     if os.path.exists(dbus_path):
         firefox_env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={dbus_path}'
 
     subprocess.Popen(
-        ['firefox'] + urls,
+        ['firefox'] + profile_arg + urls,
         env=firefox_env,
-        stdout=open('/tmp/firefox.log', 'w'),
+        stdout=open(f'/tmp/firefox_{platform_name or "main"}.log', 'w'),
         stderr=subprocess.STDOUT,
     )
 
-    # Wait for Firefox to become accessible
     for i in range(15):
         time.sleep(2)
         if check_firefox_alive():
