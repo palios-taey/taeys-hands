@@ -96,6 +96,7 @@ FRESH_URLS = {
 # Cached AT-SPI references — avoids repeated deep traversals that cause D-Bus contention
 _cached_firefox = {}  # platform -> AT-SPI firefox app ref
 _cached_doc = {}      # platform -> AT-SPI document ref
+_extracted_cache = {}  # platform -> extracted content (ChatGPT fixed-wait pre-extracts)
 
 
 def get_firefox(platform: str):
@@ -549,100 +550,115 @@ def find_input_field_atspi(platform: str):
     return None
 
 
-def _scan_with_timeout(platform: str, timeout_sec: int = 15):
-    """scan_for_stop_button via subprocess (own GIL, own D-Bus connection).
+def _scan_with_thread_timeout(platform: str, timeout_sec: int = 15):
+    """scan_for_stop_button with thread timeout (Gemini/Grok only).
 
-    Threading can't interrupt AT-SPI C extensions that hold the GIL.
-    Subprocess has its own interpreter — subprocess.run(timeout) kills it
-    via SIGTERM/SIGKILL at the OS level.
+    Works reliably for Gemini/Grok where AT-SPI doesn't hang.
+    Do NOT use for ChatGPT — its AT-SPI tree hangs and blocks the GIL.
 
-    Returns: True (stop found), False (no stop), None (timed out / inconclusive).
+    Returns: True (stop found), False (no stop), None (timed out).
     """
-    display = os.environ.get('DISPLAY', ':1')
-    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
-    script = f'''
-import os, sys
-os.environ["DISPLAY"] = "{display}"
-sys.path.insert(0, "{_ROOT}")
-import yaml
-from core import atspi
-from core.tree import find_elements
-with open("{yaml_path}") as f:
-    cfg = yaml.safe_load(f) or {{}}
-fences = cfg.get("fence_after", [])
-patterns = cfg.get("stop_patterns", ["stop"])
-ff = atspi.find_firefox_for_platform("{platform}")
-if not ff:
-    print("NOSTOP")
-    sys.exit(0)
-doc = atspi.get_platform_document(ff, "{platform}")
-if not doc:
-    print("NOSTOP")
-    sys.exit(0)
-elements = find_elements(doc, fence_after=fences)
-for e in elements:
-    name = (e.get("name") or "").strip()
-    if not name or len(name) > 50:
-        continue
-    if "button" not in e.get("role", ""):
-        continue
-    if any(p in name.lower() for p in patterns):
-        print("STOP")
-        sys.exit(0)
-print("NOSTOP")
-'''
-    try:
-        r = subprocess.run(
-            [sys.executable, '-u', '-c', script],
-            capture_output=True, text=True, timeout=timeout_sec,
-            env={**os.environ, 'DISPLAY': display, 'PYTHONDONTWRITEBYTECODE': '1'},
-        )
-        out = r.stdout.strip().split('\n')[-1] if r.stdout.strip() else ''
-        if out == 'STOP':
-            return True
-        elif out == 'NOSTOP':
-            return False
-        logger.debug(f"[{platform}] scan subprocess unexpected output: {out[:100]}")
+    import threading
+    result = [None]
+
+    def _worker():
+        result[0] = scan_for_stop_button(platform)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+
+    if t.is_alive():
+        logger.warning(f"[{platform}] scan timed out after {timeout_sec}s")
         return None
-    except subprocess.TimeoutExpired:
-        logger.warning(f"[{platform}] scan subprocess timed out after {timeout_sec}s")
-        return None
-    except Exception as e:
-        logger.warning(f"[{platform}] scan subprocess error: {e}")
-        return None
+    return result[0]
 
 
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
     """Wait for AI response to complete.
 
-    Strategy:
-    1. Poll for stop button to appear (AI started generating)
-    2. Then poll for stop button to disappear (AI finished)
-    3. Fallback: if no stop button seen within 30s but copy count increased, done
+    Two strategies based on platform:
+    - ChatGPT: Fixed wait + extract attempt (AT-SPI hangs on ChatGPT)
+    - Gemini/Grok: AT-SPI stop button polling (reliable on these platforms)
 
     Returns True if response detected, False on timeout.
     """
+    if platform == 'chatgpt':
+        return _wait_fixed_then_extract(platform, timeout)
+    return _wait_atspi_polling(platform, timeout)
+
+
+def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
+    """ChatGPT: wait fixed intervals, try extract to detect completion.
+
+    ChatGPT's AT-SPI tree hangs during generation — can't poll stop button.
+    Instead: wait, then try to extract. If extract gets content, done.
+    Instant mode responses typically take 20-60s.
+    """
+    start = time.time()
+    initial_wait = 30  # Minimum generation time for Instant mode
+
+    logger.info(f"[{platform}] Fixed wait {initial_wait}s (Instant mode)...")
+    time.sleep(initial_wait)
+
+    # Try extract every 15s until timeout
+    attempt = 0
+    while time.time() - start < timeout:
+        attempt += 1
+        if not check_firefox_alive(platform):
+            logger.error(f"[{platform}] Firefox died during wait")
+            return False
+
+        logger.info(f"[{platform}] Extract attempt {attempt} ({time.time()-start:.0f}s elapsed)...")
+
+        # Try to get response content
+        content = extract_response(platform)
+        if content and len(content) > 100:
+            # Verify it's not the prompt
+            start_text = content.strip()[:200].lower()
+            prompt_markers = ['analyze the following', 'package analysis request',
+                              'you are analyzing', 'respond only with minified json',
+                              'critical: echo back', 'analyze all', 'for each item provide']
+            if not any(m in start_text for m in prompt_markers):
+                logger.info(f"[{platform}] Response detected ({len(content)} chars, {time.time()-start:.0f}s)")
+                # Store content for process_platform to use (avoid double-extract)
+                _extracted_cache[platform] = content
+                return True
+            else:
+                logger.info(f"[{platform}] Got prompt text, not response yet")
+
+        time.sleep(15)
+
+    logger.warning(f"[{platform}] No response after {timeout}s")
+    return False
+
+
+def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
+    """Gemini/Grok: poll AT-SPI stop button for response detection.
+
+    Reliable on these platforms — AT-SPI doesn't hang like ChatGPT.
+    """
     start = time.time()
     initial_copy_count = count_copy_buttons(platform)
-    stop_seen = False
     phase = 'waiting_for_start'
+    poll_count = 0
 
     while time.time() - start < timeout:
         if not check_firefox_alive(platform):
             logger.error(f"[{platform}] Firefox died during response wait")
             return False
 
-        has_stop = _scan_with_timeout(platform)
+        has_stop = _scan_with_thread_timeout(platform)
+        poll_count += 1
 
         if phase == 'waiting_for_start':
             if has_stop is None:
-                pass  # AT-SPI timeout — skip this poll, try again
+                if poll_count % 3 == 0:
+                    logger.info(f"[{platform}] Scan timeout ({poll_count} polls, {time.time()-start:.0f}s)")
             elif has_stop:
                 logger.info(f"[{platform}] Stop button appeared — AI generating")
-                stop_seen = True
                 phase = 'generating'
             elif time.time() - start > 30:
-                # Fallback: check if copy count increased (fast response)
                 current_copy = count_copy_buttons(platform)
                 if current_copy > initial_copy_count:
                     logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
@@ -654,12 +670,12 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
 
         elif phase == 'generating':
             if has_stop is None:
-                pass  # AT-SPI timeout — assume still generating
+                if poll_count % 3 == 0:
+                    logger.info(f"[{platform}] Still generating ({poll_count} polls, {time.time()-start:.0f}s)")
             elif not has_stop:
-                # Stop button disappeared — wait a bit to confirm
                 logger.info(f"[{platform}] Stop button gone — settling...")
                 time.sleep(2)
-                confirm = _scan_with_timeout(platform)
+                confirm = _scan_with_thread_timeout(platform)
                 if confirm is None:
                     logger.info(f"[{platform}] Confirm scan timed out — assuming still generating")
                 elif not confirm:
@@ -1128,9 +1144,13 @@ def process_platform(platform: str, prompt: str) -> dict:
 
     time.sleep(2)  # Let response fully render
 
-    # Step 7: Extract response
-    logger.info(f"[{platform}] Extracting response...")
-    content = extract_response(platform)
+    # Step 7: Extract response (ChatGPT may have pre-extracted in wait phase)
+    content = _extracted_cache.pop(platform, None)
+    if content:
+        logger.info(f"[{platform}] Using pre-extracted response ({len(content)} chars)")
+    else:
+        logger.info(f"[{platform}] Extracting response...")
+        content = extract_response(platform)
     if not content:
         result['error'] = 'extract_failed'
         fail_package(platform, 'extract_failed')
