@@ -221,7 +221,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     menu_items = []
     trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
     if trigger_clicked:
-        time.sleep(0.5)
+        time.sleep(1.0)
         firefox = atspi.find_firefox()
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         if doc:
@@ -238,7 +238,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
                 time.sleep(0.3)
             click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
             if not click_result.get("error"):
-                time.sleep(0.5)
+                time.sleep(1.0)
                 firefox = atspi.find_firefox()
                 doc = atspi.get_platform_document(firefox, platform) if firefox else None
                 if doc:

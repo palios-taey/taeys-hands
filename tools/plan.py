@@ -144,8 +144,8 @@ def _create_plan(platform: str, action: str, params: Dict,
     }))
 
     # Global plan lock — central monitor stops ALL tab/URL cycling while active.
-    # Cleared by send_message on completion. TTL=120s safety net.
-    redis_client.setex(node_key("plan_active"), 120, json.dumps({
+    # Cleared by send_message on completion. TTL=1800s safety net.
+    redis_client.setex(node_key("plan_active"), 1800, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'created_at': time.time(),
     }))
