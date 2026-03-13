@@ -71,12 +71,16 @@ element_filter:
       - "Toggle Sidebar"
       - "pfp"                        # profile picture button + image
       - "Web page favicon"           # source favicons in responses
+      - "Markdown"                   # decorative image in responses
     name_contains:
       - "Upgrade to"
       - "SuperGrok"
     roles:
       - separator
       - document web
+      - list item                    # Response bullets + sidebar dupes (sidebar has link/button dupes)
+      - paragraph                    # Input wrapper
+      - image                        # Decorative images in responses
 
 
 element_map:
@@ -122,20 +126,24 @@ element_map:
   thought_indicator:
     name_pattern: "Thought for *"
     role: push button
+  scroll_down:
+    name: "Scroll down"
+    role: push button
+  dictation:
+    name_pattern: "Start dictation*"
+    role: push button
+  voice_mode:
+    name_pattern: "Enter voice mode*"
+    role: push button
 
 sidebar_nav:
   - { name: "Home page", role: link }
   - { name: "Search", role: push button }
-  - { name_pattern: "Search*", role: list item }
   - { name: "Chat", role: link }
-  - { name_pattern: "Chat*", role: list item }
   - { name: "Voice", role: link }
-  - { name_pattern: "Voice*", role: list item }
   - { name: "Imagine", role: link }
-  - { name_pattern: "Imagine*", role: list item }
   - { name: "Projects", role: push button }
   - { name: "New Project", role: push button }
-  - { name_pattern: "New Project*", role: list item }
   - { name: "History", role: push button }
   - { name: "More", role: push button }
   - { name: "Options", role: push button }
