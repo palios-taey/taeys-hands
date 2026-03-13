@@ -34,7 +34,7 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
         # Also check plan lock
         plan_active = None
         if redis_client:
-            plan_data = redis_client.get(node_key("plan_active"))
+            plan_data = redis_client.get("taey:plan_active")
             if plan_data:
                 try:
                     plan_active = json.loads(plan_data)
@@ -67,7 +67,7 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
                 if cursor == 0:
                     break
             redis_client.delete(node_key("notifications"))
-            redis_client.delete(node_key("plan_active"))
+            redis_client.delete("taey:plan_active")
 
         # Kill any legacy daemon processes still running
         killed = 0
@@ -92,7 +92,8 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
 def handle_respawn_monitor(platform: str, redis_client,
                            display: str) -> Dict[str, Any]:
     """Register fresh monitor session for multi-step response flows."""
-    from tools.send import register_monitor_session
+    from tools.send import register_monitor_session, _ensure_central_monitor
+    _ensure_central_monitor(display)
 
     session_id = user_message_id = url = None
     if redis_client:

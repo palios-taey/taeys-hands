@@ -462,6 +462,14 @@ class CentralMonitor:
             time.sleep(self.cycle_interval)
 
     def _cycle(self):
+        # Reconnect Redis if connection was lost
+        if self.rc:
+            try:
+                self.rc.ping()
+            except Exception:
+                _log("Redis connection lost — reconnecting")
+                self.rc = self._connect_redis()
+
         # Check plan lock — full stop
         if self._plan_active():
             _log("Plan active — skipping cycle")
