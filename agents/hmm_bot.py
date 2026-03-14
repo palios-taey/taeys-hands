@@ -910,9 +910,10 @@ def attach_file(platform: str, file_path: str) -> bool:
             inp.press_key_split('Return')
             time.sleep(2.5)
 
-    # Gemini: menu items ARE visible in AT-SPI — click "Upload files" directly
+    # Gemini: try AT-SPI first, fall back to keyboard nav (Down+Enter)
     elif platform == 'gemini':
         time.sleep(2.0)  # Gemini dropdown needs time to render
+        found_upload = False
         doc2 = get_doc(platform, force_refresh=True)
         if doc2:
             elems2 = _find_elements_with_fence(doc2, platform)
@@ -924,12 +925,17 @@ def attach_file(platform: str, file_path: str) -> bool:
                     else:
                         inp.click_at(e['x'], e['y'])
                         logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                    found_upload = True
                     time.sleep(2.0)
                     break
-            else:
-                logger.error(f"[{platform}] 'Upload files' menu item not found")
-                inp.press_key('Escape')
-                return False
+        if not found_upload:
+            # Fallback: keyboard nav — "Upload files" is typically first item
+            logger.info(f"[{platform}] AT-SPI menu item not found, using keyboard nav")
+            if not _find_dialog_wid():
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key_split('Return')
+                time.sleep(2.5)
 
     # Wait for file dialog to appear
     dialog_found = False
