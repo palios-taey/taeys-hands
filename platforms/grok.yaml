@@ -7,15 +7,12 @@ tab_shortcut: alt+4
 capabilities:
   # "Model select" button — React portal dropdown, visible in AT-SPI after xdotool click
   # AT-SPI concatenates label+description WITHOUT space (e.g. "AutoChooses Fast or Expert")
-  # Verified live March 7 2026 — NEEDS RE-VERIFICATION
-  # NOTE: Dropdown may have items not listed here (Custom Instructions, etc.)
-  # Keyboard nav uses index position — order MUST match live dropdown exactly.
+  # Verified live March 14 2026 via AT-SPI dump
   models:
     - AutoChooses Fast or Expert
     - FastQuick responses
     - ExpertThinks hard
     - HeavyPowered by Grok 4.20 (beta)
-    - Custom InstructionsNot set Open Custom Instructions
     - Try Grok 4.20 BetaEarly access Toggle
   modes: []
   tools: []
@@ -37,7 +34,7 @@ click_strategy: xdotool_first
 # How attach works: click trigger → keyboard Down+Enter → file dialog
 attach_method: keyboard_nav
 # How dropdowns work: React portal, keyboard nav
-dropdown_method: keyboard_nav
+dropdown_method: atspi_enum
 
 quirks:
   - sidebar: "Left sidebar OPEN, no right sidebar"

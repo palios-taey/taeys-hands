@@ -245,18 +245,9 @@ def handle_select_dropdown(platform: str, dropdown: str,
                 "platform": platform,
                 "hint": "Call taey_inspect first to populate the element cache."}
 
-    # Click trigger — method depends on platform config
-    trigger_clicked = False
-    if dropdown_method == 'keyboard_nav':
-        # React portal: coordinate click (do_action opens browser context menu)
-        click_result = handle_click(platform, trigger['x'], trigger['y'])
-        trigger_clicked = not click_result.get("error")
-    else:
-        # AT-SPI: do_action is reliable
-        trigger_clicked = atspi_click(trigger)
-        if not trigger_clicked:
-            click_result = handle_click(platform, trigger['x'], trigger['y'])
-            trigger_clicked = not click_result.get("error")
+    # Click trigger — uses handle_click which respects platform click_strategy
+    click_result = handle_click(platform, trigger['x'], trigger['y'])
+    trigger_clicked = not click_result.get("error")
 
     if not trigger_clicked:
         return {"error": f"Failed to click trigger '{dropdown}' at ({trigger['x']},{trigger['y']})",
