@@ -281,13 +281,20 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         items.sort(key=lambda x: x['y'])
         return items
 
-    # Pass 1: Strict containers in platform_doc
+    # Pass 1: Strict containers in platform_doc (with SHOWING on container)
     if platform_doc:
         items = _collect(platform_doc, containers=_STRICT)
         if items:
             return _sorted(items)
 
-    # Pass 1b: Containerless menu items in platform_doc
+    # Pass 2: Strict containers WITHOUT SHOWING requirement
+    # (Gemini doesn't set SHOWING on menu containers when sidebar collapsed)
+    if platform_doc:
+        items = _collect(platform_doc, require_showing=False, containers=_STRICT)
+        if items:
+            return _sorted(items)
+
+    # Pass 3: Containerless menu items in platform_doc
     if platform_doc:
         _fallback = ('menu item', 'radio menu item', 'check menu item')
         all_el = find_elements(platform_doc)
@@ -295,13 +302,11 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         if items:
             return _sorted(items)
 
-    # Pass 2: Strict containers in Firefox root (require item SHOWING)
+    # Pass 4: Firefox root (strict then loose containers)
     if firefox:
         items = _collect(firefox, require_item_showing=True, containers=_STRICT)
         if items:
             return _sorted(items)
-
-    # Pass 3: Loose containers
     if platform_doc:
         items = _collect(platform_doc, containers=_LOOSE)
         if items:
@@ -310,13 +315,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         items = _collect(firefox, require_item_showing=True, containers=_LOOSE)
         if items:
             return _sorted(items)
-
-    # Pass 4: Retry without SHOWING (platform_doc only, never firefox root)
-    if platform_doc:
-        for ctypes in [_STRICT, _LOOSE]:
-            items = _collect(platform_doc, require_showing=False, containers=ctypes)
-            if items:
-                return _sorted(items)
 
     return []
 
