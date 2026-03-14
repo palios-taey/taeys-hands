@@ -29,6 +29,11 @@ ALWAYS_ALLOWED = {
     'taey_extract_history',
     'taey_list_sessions',
     'taey_monitors',
+    'taey_plan',
+    'taey_prepare',
+    'taey_respawn_monitor',
+    'taey_select_dropdown',
+    'taey_attach',
 }
 
 
