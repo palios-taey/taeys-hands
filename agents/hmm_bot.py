@@ -484,7 +484,7 @@ def scan_for_stop_button(platform: str) -> bool:
         return False
 
     elements = _find_elements_with_fence(doc, platform)
-    patterns = _get_stop_patterns(platform)
+    patterns = set(_get_stop_patterns(platform))
 
     for e in elements:
         name = (e.get('name') or '').strip()
@@ -492,8 +492,8 @@ def scan_for_stop_button(platform: str) -> bool:
             continue
         if 'button' not in e.get('role', ''):
             continue
-        name_lower = name.lower()
-        if any(p in name_lower for p in patterns):
+        name_lower = name.lower().strip()
+        if name_lower in patterns:
             return True
     return False
 
@@ -852,7 +852,7 @@ def _handle_dialog_direct(file_path: str) -> bool:
 
 
 def attach_file(platform: str, file_path: str) -> bool:
-    """Attach a file: click button → open dialog → type path → confirm.
+    """Attach a file: open file dialog → type path → confirm.
 
     Handles everything directly instead of using handle_attach(), because
     the standard clipboard paste doesn't reliably select files on Xvfb.
@@ -868,32 +868,37 @@ def attach_file(platform: str, file_path: str) -> bool:
         close_stale_file_dialogs()
         return False
 
-    # Find attach button — retry up to 8 times (AT-SPI tree lags after navigation)
-    btn = None
-    doc = None
-    for attempt in range(8):
-        doc = get_doc(platform, force_refresh=True)
-        if not doc:
-            logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
-            time.sleep(3)
-            continue
-        btn = get_attach_button_coords(doc, platform=platform)
-        if btn:
-            break
-        logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
-        time.sleep(3)
-    if not btn:
-        logger.error(f"[{platform}] Attach button not found after 5 retries")
-        return False
-
     # Dismiss any stale popups
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button:
-    # Gemini: AT-SPI do_action (only reliable method — xdotool doesn't trigger dropdown)
-    # ChatGPT/Grok: xdotool click (works universally; AT-SPI do_action inconsistent across machines)
-    if platform == 'gemini':
+    # ChatGPT: Ctrl+U opens file upload directly (keyboard shortcut).
+    # Bypasses button finding, clicking, and dropdown navigation entirely.
+    # Works reliably on bare Xvfb where xdotool clicks fail on React buttons.
+    if platform == 'chatgpt':
+        inp.focus_firefox()
+        time.sleep(0.3)
+        inp.press_key('ctrl+u')
+        logger.info(f"[{platform}] Pressed Ctrl+U for file upload")
+        time.sleep(1.5)
+    elif platform == 'gemini':
+        # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
+        btn = None
+        for attempt in range(8):
+            doc = get_doc(platform, force_refresh=True)
+            if not doc:
+                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
+                time.sleep(3)
+                continue
+            btn = get_attach_button_coords(doc, platform=platform)
+            if btn:
+                break
+            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
+            time.sleep(3)
+        if not btn:
+            logger.error(f"[{platform}] Attach button not found after 8 retries")
+            return False
+
         btn_obj = btn.get('atspi_obj')
         atspi_clicked = False
         if btn_obj:
@@ -908,22 +913,17 @@ def attach_file(platform: str, file_path: str) -> bool:
         if not atspi_clicked:
             inp.click_at(btn['x'], btn['y'])
             logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-    else:
-        inp.click_at(btn['x'], btn['y'])
-        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-    time.sleep(1.5)
+        time.sleep(1.5)
 
-    # Select file upload from dropdown menu
-    if not _find_dialog_wid():
-        if platform == 'gemini':
-            # Gemini: menu items visible in AT-SPI — click "Upload files" directly
+        # Gemini: menu items visible in AT-SPI — click "Upload files" directly
+        if not _find_dialog_wid():
             time.sleep(1.0)
             doc2 = get_doc(platform, force_refresh=True)
             if doc2:
                 elems2 = _find_elements_with_fence(doc2, platform)
                 for e in elems2:
                     name = (e.get('name') or '').strip().lower()
-                    if 'upload file' in name and 'menu item' in e.get('role', ''):
+                    if name.startswith('upload file') and 'menu item' in e.get('role', ''):
                         if e.get('atspi_obj') and atspi_click(e):
                             logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
                         else:
@@ -931,8 +931,30 @@ def attach_file(platform: str, file_path: str) -> bool:
                             logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
                         time.sleep(2.0)
                         break
-        else:
-            # ChatGPT/Grok: keyboard nav — Down selects "Upload a file", Enter confirms
+    else:
+        # Grok and others: find button, xdotool click, keyboard nav dropdown
+        btn = None
+        for attempt in range(8):
+            doc = get_doc(platform, force_refresh=True)
+            if not doc:
+                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
+                time.sleep(3)
+                continue
+            btn = get_attach_button_coords(doc, platform=platform)
+            if btn:
+                break
+            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
+            time.sleep(3)
+        if not btn:
+            logger.error(f"[{platform}] Attach button not found after 8 retries")
+            return False
+
+        inp.click_at(btn['x'], btn['y'])
+        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+        time.sleep(1.5)
+
+        # Keyboard nav — Down selects "Upload a file", Enter confirms
+        if not _find_dialog_wid():
             inp.press_key('Down')
             time.sleep(0.5)
             inp.press_key_split('Return')
