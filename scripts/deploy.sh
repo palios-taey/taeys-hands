@@ -154,12 +154,11 @@ pkill -f 'mcp-reconnect' 2>/dev/null || true
 cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
-# Local
-mcp-reconnect 2>/dev/null || true
-# Remote machines with Claude sessions
-for host in spark3 mira; do
-    mcp-reconnect --remote "$host" 2>/dev/null || true
-done
+# All machines in parallel — local + remote
+mcp-reconnect 2>/dev/null &
+mcp-reconnect --remote spark3 2>/dev/null &
+mcp-reconnect --remote mira 2>/dev/null &
+wait
 REOF
 chmod +x /tmp/deploy-reconnect.sh
 nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
