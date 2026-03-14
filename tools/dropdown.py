@@ -157,11 +157,13 @@ def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
     if target_idx is None:
         return None
 
-    # Reset to top — dropdown may open with current selection highlighted
-    for _ in range(len(yaml_items)):
+    # Reset to top — dropdown may open with current selection highlighted.
+    # Use fixed count (not yaml_items length) because dropdown may have
+    # items not in YAML (e.g., Custom Instructions on Grok).
+    for _ in range(15):
         inp.press_key('Up')
-        time.sleep(0.1)
-    time.sleep(0.15)
+        time.sleep(0.05)
+    time.sleep(0.2)
 
     # Navigate down to target — first item is already focused at top
     for _ in range(target_idx):
