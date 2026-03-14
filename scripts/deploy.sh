@@ -1,12 +1,12 @@
 #!/bin/bash
 # deploy.sh — Pull latest code, reconnect MCP servers on all machines.
 #
-# Pulls code, cleans __pycache__, installs scripts, restarts notification
-# daemon, then uses mcp-reconnect to auto-reconnect each Claude Code
-# session via tmux key injection (/mcp menu). The /mcp reconnect restarts
-# the MCP server process within Claude Code, picking up new code.
+# Two phases:
+#   1. DEPLOY: Pull code, install scripts, restart daemons (all machines)
+#   2. RECONNECT: After ALL deploys finish, reconnect MCP in Claude sessions
 #
-# For file-watch auto-reload during development, see mcp-watch.sh.
+# The reconnect phase runs as a detached process with a delay so the
+# calling Claude session's Bash tool returns cleanly before Escape hits.
 #
 # Usage:
 #   bash scripts/deploy.sh          # Deploy to all machines
@@ -43,7 +43,6 @@ deploy_local() {
     echo "[local] Restarting notification daemon..."
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
-    # ONE daemon per machine — auto-discovers all local tmux sessions
     local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
     nohup python3 "$daemon_path" \
         --redis-host "${REDIS_HOST:-192.168.100.10}" \
@@ -57,7 +56,6 @@ deploy_remote() {
     local host="$1"
     local home="${MACHINES[$host]}"
     local repo_path="${home}/${REPO_DIR}"
-    # Non-NCCL machines (Mira, Thor, Jetson) use management IP for Redis
     local redis_host="192.168.100.10"
     case "$host" in
         mira|thor|jetson) redis_host="10.0.0.68" ;;
@@ -74,7 +72,6 @@ deploy_remote() {
         sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
-        # ONE daemon per machine — auto-discovers all local tmux sessions
         DAEMON="${HOME_DIR}/orchestrator/notifications/daemon.py"
         if [ ! -f "$DAEMON" ]; then
             echo "WARNING: daemon not found at $DAEMON — skipping"
@@ -83,14 +80,25 @@ deploy_remote() {
                 > "/tmp/notify-daemon.log" 2>&1 &
             echo "Notify daemon started (PID $!)"
         fi
-        # Auto-reconnect MCP in Claude sessions on this machine
-        if command -v mcp-reconnect &>/dev/null; then
-            mcp-reconnect &
-        fi
         echo "Done — commit: $(git log --oneline -1)"
 DEPLOY_EOF
     local rc=$?
     [ $rc -ne 0 ] && echo "  [${host}] SSH FAILED (exit $rc)" || true
+}
+
+# Reconnect ALL machines — runs as detached process after deploy
+reconnect_all() {
+    # Local sessions
+    echo "[reconnect] Local sessions..."
+    mcp-reconnect 2>/dev/null || true
+
+    # Remote machines with known Claude sessions
+    for host in spark3 mira; do
+        echo "[reconnect] Remote: $host..."
+        mcp-reconnect --remote "$host" 2>/dev/null || true
+    done
+
+    echo "[reconnect] All machines done"
 }
 
 # Parse args
@@ -98,7 +106,8 @@ TARGET="${1:-all}"
 
 if [ "$TARGET" = "--local" ]; then
     deploy_local
-    echo "[local] MCP reconnect will run in 10 seconds (detached)..."
+    echo ""
+    echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
     nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
     disown
     exit 0
@@ -116,7 +125,7 @@ if [ "$TARGET" != "all" ]; then
 fi
 
 # Deploy to all machines: local first, then remote in parallel
-echo "=== Deploying to all machines ==="
+echo "=== Phase 1: Deploy to all machines ==="
 echo ""
 
 deploy_local
@@ -134,9 +143,20 @@ for pid in "${pids[@]}"; do
 done
 
 echo ""
-echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
-# Detach mcp-reconnect so it survives after deploy.sh exits.
-# The 10s delay lets the calling Claude session's Bash tool return
-# before Escape hits all sessions.
-nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
+echo "=== Phase 2: MCP reconnect (all machines, in 10 seconds) ==="
+# Write reconnect script to file, run detached.
+# Survives after deploy.sh exits. 10s delay lets Bash tool return first.
+cat > /tmp/deploy-reconnect.sh <<'REOF'
+#!/bin/bash
+sleep 10
+# Local
+mcp-reconnect 2>/dev/null || true
+# Remote machines with Claude sessions
+for host in spark3 mira; do
+    mcp-reconnect --remote "$host" 2>/dev/null || true
+done
+REOF
+chmod +x /tmp/deploy-reconnect.sh
+nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
 disown
+echo "Detached reconnect PID $! — will fire in 10s"
