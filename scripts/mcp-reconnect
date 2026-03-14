@@ -1,28 +1,38 @@
 #!/bin/bash
 # mcp-reconnect: Reconnect MCP servers in Claude Code sessions via tmux key injection.
 #
-# After deploy.sh kills MCP server processes, each Claude Code session needs
-# to reconnect. This script automates the /mcp menu sequence:
-#   Escape → /mcp → Enter (submit) → Enter (enter menu) → Down → Enter → continuation prompt
+# After deploy.sh pulls new code, each Claude Code session needs to
+# reconnect its MCP server to pick up the changes. This script automates
+# the /mcp menu sequence:
+#   Escape → /mcp → Enter (submit) → Enter (enter menu) → Down → Enter
 #
 # Usage:
 #   mcp-reconnect                    # All local Claude sessions
 #   mcp-reconnect weaver claude      # Specific sessions
 #   mcp-reconnect --remote spark2    # All Claude sessions on remote host
 #
-# The script:
-#   1. Finds tmux sessions running 'claude' as pane command
-#   2. Sends Escape to stop active generation
-#   3. Waits for Claude to settle
-#   4. Sends /mcp → Enter → Enter → Down → Enter (reconnect option)
-#   5. Sends continuation prompt so Claude resumes work
+# Sessions are reconnected ONE AT A TIME (sequential) to avoid
+# tmux send-keys interference between parallel key injections.
 
 set -euo pipefail
 
-SETTLE_AFTER_ESC=3       # Seconds to wait after Escape
-SETTLE_AFTER_MCP=1       # Seconds to wait for /mcp menu to render
-SETTLE_AFTER_SELECT=3    # Seconds to wait for MCP reconnection
+SETTLE_AFTER_ESC=5       # Seconds to wait after Escape (let Claude settle)
+SETTLE_AFTER_MCP=2       # Seconds to wait for /mcp menu to render
+SETTLE_AFTER_SELECT=5    # Seconds to wait for MCP reconnection
 CONTINUATION_MSG="MCP servers reconnected with latest deployed code. Continue."
+
+# Kill any previous mcp-reconnect processes (stale from prior deploys)
+cleanup_previous() {
+    local my_pid=$$
+    local stale_pids
+    stale_pids=$(pgrep -f 'mcp-reconnect' 2>/dev/null | grep -v "^${my_pid}$" || true)
+    if [ -n "$stale_pids" ]; then
+        echo "[mcp-reconnect] Killing stale mcp-reconnect processes: $stale_pids"
+        echo "$stale_pids" | xargs kill 2>/dev/null || true
+        # Also kill any "sleep && mcp-reconnect" parent shells
+        pgrep -f 'sleep.*mcp-reconnect' 2>/dev/null | xargs kill 2>/dev/null || true
+    fi
+}
 
 get_claude_sessions() {
     # Find tmux sessions where the pane is running 'claude'
@@ -43,17 +53,17 @@ reconnect_session() {
     tmux send-keys -t "$session" Escape
     sleep "$SETTLE_AFTER_ESC"
 
-    echo "[mcp-reconnect] $session: sending /mcp..."
+    echo "[mcp-reconnect] $session: sending /mcp + Enter..."
     tmux send-keys -t "$session" -l "/mcp"
     sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep "$SETTLE_AFTER_MCP"
 
-    echo "[mcp-reconnect] $session: entering menu + selecting reconnect..."
+    echo "[mcp-reconnect] $session: Enter (menu) → Down → Enter (reconnect)..."
     tmux send-keys -t "$session" Enter
-    sleep 0.3
+    sleep 0.5
     tmux send-keys -t "$session" Down
-    sleep 0.2
+    sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep "$SETTLE_AFTER_SELECT"
 
@@ -88,22 +98,23 @@ reconnect_remote() {
         sessions=($remote_sessions)
     fi
 
+    # Sequential — one session at a time
     for session in "${sessions[@]}"; do
         echo "[mcp-reconnect] $host/$session: reconnecting..."
         ssh -o ConnectTimeout=5 "$host" bash -s -- "$session" <<'RECONNECT_EOF'
 SESSION="$1"
 tmux send-keys -t "$SESSION" Escape
-sleep 3
+sleep 5
 tmux send-keys -t "$SESSION" -l "/mcp"
 sleep 0.3
 tmux send-keys -t "$SESSION" Enter
-sleep 1
+sleep 2
 tmux send-keys -t "$SESSION" Enter
-sleep 0.3
+sleep 0.5
 tmux send-keys -t "$SESSION" Down
-sleep 0.2
+sleep 0.3
 tmux send-keys -t "$SESSION" Enter
-sleep 3
+sleep 5
 tmux send-keys -t "$SESSION" -l "MCP servers reconnected with latest deployed code. Continue."
 sleep 0.3
 tmux send-keys -t "$SESSION" Enter
@@ -111,6 +122,9 @@ echo "done"
 RECONNECT_EOF
     done
 }
+
+# Kill stale processes from prior runs
+cleanup_previous
 
 # Parse args
 if [ "${1:-}" = "--remote" ]; then
@@ -136,8 +150,11 @@ if [ ${#SESSIONS[@]} -eq 0 ]; then
 fi
 
 echo "[mcp-reconnect] Reconnecting ${#SESSIONS[@]} session(s): ${SESSIONS[*]}"
+echo "[mcp-reconnect] Running SEQUENTIALLY (one at a time)"
+
+# Sequential — no parallel, avoids tmux contention
 for session in "${SESSIONS[@]}"; do
-    reconnect_session "$session" &
+    reconnect_session "$session"
 done
-wait
+
 echo "[mcp-reconnect] All sessions reconnected"
