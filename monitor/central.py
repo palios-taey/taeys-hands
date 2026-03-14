@@ -323,13 +323,7 @@ class CentralMonitor:
             except Exception as e:
                 _log(f"Redis notification error: {e}")
         else:
-            # Fallback: write to file
-            try:
-                path = f"/tmp/taey_monitor_{session.get('monitor_id')}.json"
-                with open(path, 'w') as f:
-                    f.write(nj)
-            except Exception:
-                pass
+            _log(f"No Redis — notification for {session.get('monitor_id')} dropped")
 
     # ── Main cycle ──────────────────────────────────────────────────
 

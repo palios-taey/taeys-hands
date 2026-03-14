@@ -67,11 +67,11 @@ def main():
 
     r = get_redis()
     if not r:
-        allow("Redis unavailable - allowing dropdown without plan check")
+        deny("Redis unavailable — required infrastructure is down")
     try:
         r.ping()
     except Exception:
-        allow("Redis unavailable - allowing dropdown without plan check")
+        deny("Redis unavailable — required infrastructure is down")
 
     # Check for plan (same gate as validate_attach)
     plan_json = r.get(node_key(f"plan:{platform}"))

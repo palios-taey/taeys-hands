@@ -57,11 +57,11 @@ def main():
 
     r = get_redis()
     if not r:
-        allow("Redis unavailable - allowing send without plan check")
+        deny("Redis unavailable — required infrastructure is down")
     try:
         r.ping()
     except Exception:
-        allow("Redis unavailable - allowing send without plan check")
+        deny("Redis unavailable — required infrastructure is down")
 
     # Require active plan — plans auto-include identity files + consolidation
     plan_json = r.get(node_key(f"plan:{platform}"))

@@ -10,6 +10,9 @@ capabilities:
   tools: []
   sources: []
 
+attach_method: none
+dropdown_method: none
+
 quirks:
   - compose: "Compose button opens tweet editor"
   - media: "Supports image/video attachments"

@@ -91,7 +91,7 @@ def main():
                 "Call taey_list_sessions() again."
             )
     except (ValueError, TypeError):
-        pass  # Non-timestamp checkpoint - allow through
+        deny("Corrupt checkpoint data — call taey_list_sessions() again")
 
     allow("list_sessions checkpoint valid")
 

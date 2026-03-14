@@ -181,8 +181,9 @@ def filter_useful_elements(elements: List[Dict], chrome_y: int = None) -> List[D
 
     filtered = [e for e in elements if is_useful(e)]
 
-    # Fallback kept for edge cases where nothing passes above
+    # Fallback for platforms that don't set SHOWING on interactive elements
     if not filtered and elements:
+        logger.warning("Primary filter returned 0 elements, using ENABLED-only fallback")
         def is_enabled_interactive(e):
             if e.get('y', 0) < threshold:
                 return False

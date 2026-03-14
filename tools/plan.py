@@ -47,19 +47,39 @@ def _validate_path(path: str) -> bool:
     return any(real == d or real.startswith(d + os.sep) for d in _PLAN_ALLOWED_DIRS)
 
 
+_IDENTITY_BASENAMES = (
+    {'FAMILY_KERNEL.md'} |
+    {os.path.basename(p) for p in _PLATFORM_IDENTITY.values()}
+)
+
+
 def _prepend_identity_files(attachments: List[str], platform: str) -> List[str]:
-    """Prepend FAMILY_KERNEL + platform-specific identity file. Skips missing."""
+    """Prepend FAMILY_KERNEL + platform-specific identity file.
+
+    Strips any identity files the caller included — identity is ALWAYS
+    determined by the platform parameter, never by caller's attachments.
+    """
+    # Strip identity files from caller's list (prevents wrong-identity bugs)
+    stripped = []
+    clean_attachments = []
+    for a in attachments:
+        if os.path.basename(a) in _IDENTITY_BASENAMES:
+            stripped.append(os.path.basename(a))
+        else:
+            clean_attachments.append(a)
+    if stripped:
+        logger.warning("Stripped caller-provided identity files: %s (identity is automatic)", stripped)
+
     identity_files = [_FAMILY_KERNEL]
     platform_id = _PLATFORM_IDENTITY.get(platform)
     if platform_id:
         identity_files.append(platform_id)
 
     result = []
-    existing = set(os.path.abspath(a) for a in attachments)
     for path in identity_files:
-        if os.path.isfile(path) and os.path.abspath(path) not in existing:
+        if os.path.isfile(path):
             result.append(path)
-    result.extend(attachments)
+    result.extend(clean_attachments)
     return result
 
 
@@ -204,9 +224,17 @@ def _create_plan(platform: str, params: Dict,
         'created_at': time.time(),
     }
 
-    # Store plan
+    # Store plan — plan:{plan_id} for full data, plan:current:{platform} for lookup,
+    # plan:{platform} for hook validation (validate_send, validate_select_dropdown)
     redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
     redis_client.setex(node_key(f"plan:current:{platform}"), _PLAN_TTL, plan_id)
+    redis_client.setex(node_key(f"plan:{platform}"), _PLAN_TTL, json.dumps({
+        'id': plan_id, 'platform': platform, 'action': 'send_message',
+        'session': session, 'message': message,
+        'model': model, 'mode': mode,
+        'tools': tools_list, 'attachments': [final_attachment] if final_attachment else [],
+        'validated': True, 'created_at': time.time(),
+    }))
 
     # Global plan lock — ONE lock for the whole machine.
     redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
@@ -389,6 +417,11 @@ def _create_extract_plan(platform: str, params: Dict,
 
     redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
     redis_client.setex(node_key(f"plan:current:{platform}"), _PLAN_TTL, plan_id)
+    redis_client.setex(node_key(f"plan:{platform}"), _PLAN_TTL, json.dumps({
+        'id': plan_id, 'platform': platform, 'action': 'extract_response',
+        'session': plan['session'], 'model': None, 'mode': None,
+        'tools': [], 'attachments': [], 'validated': True, 'created_at': time.time(),
+    }))
 
     redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
         'plan_id': plan_id, 'platform': platform,

@@ -42,13 +42,8 @@ from core.atspi import detect_display
 DISPLAY = detect_display()
 os.environ['DISPLAY'] = DISPLAY
 
-# Storage backends (optional)
-try:
-    from storage.redis_pool import get_client as get_redis, node_key
-except Exception as e:
-    logger.warning("Redis unavailable: %s", e)
-    get_redis = lambda: None
-    def node_key(suffix): return f"taey:local:{suffix}"
+# Storage backends (required)
+from storage.redis_pool import get_client as get_redis, node_key
 
 try:
     from storage import neo4j_client
@@ -317,6 +312,9 @@ def _check_plan_required(name: str, args: Dict, redis_client) -> Dict:
 
 
 def handle_tool(name: str, args: Dict, redis_client) -> Dict:
+    if not redis_client:
+        return {"error": "Redis is not connected. Redis is required infrastructure. "
+                "Ensure Redis is running and restart the MCP server."}
     entry = _TOOL_HANDLERS.get(name)
     if not entry:
         return {"error": f"Unknown tool: {name}"}

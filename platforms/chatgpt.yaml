@@ -35,6 +35,11 @@ capabilities:
 # Click strategy: xdotool_first (React portals hide elements from AT-SPI do_action)
 click_strategy: xdotool_first
 
+# How attach works: click trigger → keyboard Down+Enter → file dialog
+attach_method: keyboard_nav
+# How dropdowns work: React portal (invisible to AT-SPI), must use keyboard
+dropdown_method: keyboard_nav
+
 quirks:
   # OpenAI has AI countermeasures detecting AT-SPI patterns
   # AT-SPI may show garbage elements, tabs may navigate elsewhere

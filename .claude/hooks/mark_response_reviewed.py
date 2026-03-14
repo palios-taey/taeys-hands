@@ -66,8 +66,9 @@ def main():
             })
             r.expire(node_key(f"extraction_summary:{platform}"), 3600)
 
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error("mark_response_reviewed: Redis operation failed: %s", e)
 
 
 if __name__ == "__main__":

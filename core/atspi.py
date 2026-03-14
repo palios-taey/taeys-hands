@@ -76,9 +76,9 @@ def find_firefox_for_platform(platform: str):
         doc = get_platform_document(ff, platform)
         if doc:
             return ff
-    # None had the right document — return first as fallback
-    logger.warning(f"No Firefox instance has {platform} document, using first")
-    return all_ff[0]
+    # None had the right document — fail, don't guess
+    logger.error(f"No Firefox instance has {platform} document")
+    return None
 
 
 def get_document_url(doc) -> str | None:

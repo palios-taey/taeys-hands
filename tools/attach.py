@@ -25,7 +25,16 @@ ATTACH_NAMES = [
     'open upload file menu', 'attach', 'add files and more',
     'add files or tools', 'toggle menu',
 ]
-_KEYBOARD_NAV_PLATFORMS = {'chatgpt', 'grok'}
+def _get_attach_method(platform: str) -> str:
+    """Get attach method from platform YAML config."""
+    try:
+        import yaml
+        yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms', f'{platform}.yaml')
+        with open(yaml_path) as f:
+            config = yaml.safe_load(f) or {}
+        return config.get('attach_method', 'atspi_menu')
+    except (FileNotFoundError, Exception):
+        return 'atspi_menu'
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')
 _ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
@@ -551,67 +560,41 @@ def handle_attach(platform: str, file_path: str,
         if dt:
             return _handle_file_dialog(platform, file_path, redis_client)
 
-    # ChatGPT/Grok: keyboard nav fast-path
-    if platform in _KEYBOARD_NAV_PLATFORMS:
+    # Dispatch based on YAML attach_method
+    attach_method = _get_attach_method(platform)
+    if attach_method == 'keyboard_nav':
         return _keyboard_nav_attach(platform, file_path, redis_client)
+    elif attach_method == 'none':
+        return {"error": f"{platform} does not support file attachments"}
 
-    # Other platforms: AT-SPI menu scan
-    dropdown_items = []
+    # AT-SPI menu platforms: click trigger, scan for menu items or dialog
     firefox = atspi.find_firefox()
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform) if doc else None
 
-    if btn_coords:
-        click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
-        if not click_result.get("error"):
-            time.sleep(1.0)
-            dt = _any_file_dialog_open(firefox)
-            if dt:
-                return _handle_file_dialog(platform, file_path, redis_client)
+    if not btn_coords:
+        return {"error": f"Attach button not found for {platform}",
+                "action": "button_not_found"}
 
-            for _ in range(5):
-                firefox = atspi.find_firefox()
-                doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                dropdown_items = find_menu_items(firefox, doc)
-                if dropdown_items:
-                    break
-                time.sleep(0.6)
+    click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
+    if click_result.get("error"):
+        return {"error": f"Failed to click attach button: {click_result['error']}",
+                "action": "click_failed"}
 
-            # Retry with xdotool if AT-SPI click didn't open dropdown
-            if not dropdown_items and click_result.get("method") == "atspi":
-                inp.click_at(btn_coords['x'], btn_coords['y'])
-                time.sleep(1.5)
-                dt = _any_file_dialog_open(firefox)
-                if dt:
-                    return _handle_file_dialog(platform, file_path, redis_client)
-                for _ in range(5):
-                    firefox = atspi.find_firefox()
-                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                    dropdown_items = find_menu_items(firefox, doc)
-                    if dropdown_items:
-                        break
-                    time.sleep(0.6)
+    time.sleep(1.0)
+    dt = _any_file_dialog_open(firefox)
+    if dt:
+        return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Accessibility action fallback
-    if not dropdown_items and not _any_file_dialog_open(firefox):
-        btn_fb = _get_attach_button_coords(
-            atspi.get_platform_document(atspi.find_firefox(), platform), platform)
-        if btn_fb:
-            inp.press_key('Escape')
-            time.sleep(0.3)
-            el = find_element_at(platform, btn_fb['x'], btn_fb['y'])
-            if el and atspi_click(el):
-                time.sleep(1.5)
-                dt = _any_file_dialog_open(firefox)
-                if dt:
-                    return _handle_file_dialog(platform, file_path, redis_client)
-                for _ in range(3):
-                    firefox = atspi.find_firefox()
-                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                    dropdown_items = find_menu_items(firefox, doc)
-                    if dropdown_items:
-                        break
-                    time.sleep(0.5)
+    # Wait for dropdown menu items
+    dropdown_items = []
+    for _ in range(5):
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        dropdown_items = find_menu_items(firefox, doc)
+        if dropdown_items:
+            break
+        time.sleep(0.6)
 
     if not dropdown_items and not _any_file_dialog_open(firefox):
         return {"error": f"No dropdown items or file dialog found for {platform}",

@@ -37,6 +37,11 @@ capabilities:
 # Click strategy: xdotool_first (xdotool coordinate clicks work on Perplexity dropdowns)
 click_strategy: xdotool_first
 
+# How attach works: click "Add files or tools" → AT-SPI menu → click item
+attach_method: atspi_menu
+# How dropdowns work: AT-SPI enumerates menu items
+dropdown_method: atspi_enum
+
 quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
   - model_selector: "'Model' button visible in search landing page input area (role=push button). Opens model selector. NOT visible in Computer mode."

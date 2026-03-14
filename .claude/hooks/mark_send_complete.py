@@ -44,8 +44,9 @@ def main():
     if r:
         try:
             r.set(node_key("workflow:active_status"), "sent")
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("mark_send_complete: Redis write failed: %s", e)
 
     sys.exit(0)
 

@@ -31,6 +31,11 @@ capabilities:
 # Click strategy: xdotool_first (React portals, AT-SPI do_action focuses but doesn't activate)
 click_strategy: xdotool_first
 
+# How attach works: click trigger → keyboard Down+Enter → file dialog
+attach_method: keyboard_nav
+# How dropdowns work: React portal, keyboard nav
+dropdown_method: keyboard_nav
+
 quirks:
   - sidebar: "Left sidebar OPEN, no right sidebar"
   - attach: "'Attach' button near input. xdotool click opens dropdown. Items visible in AT-SPI. xdotool coordinate click on items works. AT-SPI do_action focuses but doesn't activate — use xdotool click or keyboard nav. File dialog is Firefox-embedded GTK (Ctrl+L for path entry)."

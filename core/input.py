@@ -156,7 +156,7 @@ def switch_to_platform(platform: str) -> bool:
             from gi.repository import Atspi as _A
             return doc.get_state_set().contains(_A.StateType.SHOWING)
         except Exception:
-            return True
+            return False
 
     if _on_target():
         return True
