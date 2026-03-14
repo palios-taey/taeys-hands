@@ -206,7 +206,7 @@ def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
     target_idx = None
     for i, item in enumerate(yaml_items):
         item_lower = str(item).lower().strip()
-        if item_lower.startswith(target_lower) or target_lower.startswith(item_lower):
+        if item_lower == target_lower:
             target_idx = i
             break
     if target_idx is None:
@@ -352,7 +352,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
         matched_raw = None
         for raw_item, item_info in zip(menu_items, items):
             item_name = (item_info.get('name') or '').lower().strip()
-            if item_name.startswith(target_lower) or target_lower.startswith(item_name):
+            if item_name == target_lower:
                 matched_item = item_info
                 matched_raw = raw_item
                 break
