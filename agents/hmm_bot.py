@@ -266,6 +266,20 @@ def restart_firefox(platforms: list) -> bool:
     for i in range(15):
         time.sleep(2)
         if check_firefox_alive():
+            # On bare Xvfb (no window manager), Firefox may create oversized
+            # windows. Force 1920×1080 at (0,0) so AT-SPI coords stay on-screen.
+            try:
+                r = subprocess.run(
+                    ['xdotool', 'search', '--class', 'Firefox'],
+                    capture_output=True, text=True, timeout=5, env=firefox_env,
+                )
+                for wid in r.stdout.strip().split('\n'):
+                    if wid:
+                        subprocess.run(['xdotool', 'windowmap', wid], env=firefox_env, timeout=3, capture_output=True)
+                        subprocess.run(['xdotool', 'windowsize', wid, '1920', '1080'], env=firefox_env, timeout=3, capture_output=True)
+                        subprocess.run(['xdotool', 'windowmove', wid, '0', '0'], env=firefox_env, timeout=3, capture_output=True)
+            except Exception as e:
+                logger.debug(f"Window positioning: {e}")
             logger.info(f"Firefox restarted successfully ({(i+1)*2}s)")
             invalidate_all_cache()
             return True
@@ -1261,8 +1275,9 @@ def process_platform(platform: str, prompt: str) -> dict:
     dismiss_browser_popups(platform)
 
     # Step 3: Select model if configured
+    # ChatGPT: use "auto" — "instant" can't process file attachments
     if platform == 'chatgpt':
-        select_model(platform, 'instant')
+        select_model(platform, 'auto')
 
     # Step 4: Attach package file
     logger.info(f"[{platform}] Attaching package...")
