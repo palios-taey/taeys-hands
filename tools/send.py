@@ -1,4 +1,8 @@
-"""taey_send_message - Paste, send, record, register monitor session."""
+"""taey_send_message - Paste, send, record, register monitor session.
+
+HARD GATE: Refuses to send unless plan audit_passed=True.
+No exceptions. No bypasses. Audit first, then send.
+"""
 
 import json
 import os
@@ -18,47 +22,45 @@ from storage.redis_pool import node_key, NODE_ID
 logger = logging.getLogger(__name__)
 
 
+def _check_audit_gate(platform: str, redis_client) -> Optional[str]:
+    """Hard gate: verify plan exists and audit_passed=True.
 
-def _validate_send_requirements(platform: str, redis_client) -> Optional[str]:
-    """Check that plan-required attachments were actually attached.
-
-    Returns None if OK, or an error string if send should be blocked.
+    Returns None if OK, error string if blocked.
     """
     if not redis_client:
-        return None
+        return None  # No Redis = no enforcement possible
 
-    # Get active plan for this platform
     plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
     if not plan_id:
-        return None  # No active plan — nothing to validate
+        return ("No active plan for this platform. "
+                "Create a plan with taey_plan(action='create') first.")
 
     plan_data = redis_client.get(node_key(f"plan:{plan_id}"))
     if not plan_data:
-        return None
+        return (f"Plan {plan_id} expired or not found. "
+                "Create a new plan with taey_plan(action='create').")
 
     try:
         plan = json.loads(plan_data)
     except (json.JSONDecodeError, TypeError):
+        return f"Plan {plan_id} is corrupt. Create a new plan."
+
+    # Extract plans skip audit
+    if plan.get('action') == 'extract_response':
         return None
 
-    required_attachments = plan.get('attachments', [])
-    if not required_attachments:
-        return None  # No attachments required
+    if not plan.get('audit_passed'):
+        audit_result = plan.get('audit_result')
+        if audit_result and audit_result.get('failures'):
+            failures_summary = "; ".join(
+                f"{f['field']}: need '{f.get('required')}', have '{f.get('current')}'"
+                for f in audit_result['failures']
+            )
+            return (f"Plan {plan_id} audit FAILED: {failures_summary}. "
+                    "Fix the issues and re-audit with taey_plan(action='audit').")
+        return (f"Plan {plan_id} has not been audited. "
+                "Call taey_plan(action='audit') before sending.")
 
-    # Check attach checkpoint exists
-    checkpoint_raw = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
-    if not checkpoint_raw:
-        return (f"Plan {plan_id} requires {len(required_attachments)} attachment(s) "
-                f"but no attach checkpoint found. Attach files before sending.")
-
-    try:
-        checkpoint = json.loads(checkpoint_raw)
-    except (json.JSONDecodeError, TypeError):
-        return (f"Plan {plan_id} requires attachments but checkpoint is corrupt. "
-                f"Re-attach files before sending.")
-
-    logger.info("Send validation passed: plan=%s, attachments=%d, checkpoint=%s",
-                plan_id, len(required_attachments), checkpoint.get('file', 'unknown'))
     return None
 
 
@@ -134,7 +136,22 @@ def handle_send_message(platform: str, message: str,
                         attachments: List[str] = None,
                         session_type: str = None,
                         purpose: str = None) -> Dict[str, Any]:
-    """Paste message, press Enter, record in Neo4j, register monitor session."""
+    """Paste message, press Enter, record in Neo4j, register monitor session.
+
+    BLOCKS unless plan audit_passed=True.
+    """
+    # ═══ HARD GATE: Audit must have passed ═══
+    if platform not in SOCIAL_PLATFORMS:
+        gate_error = _check_audit_gate(platform, redis_client)
+        if gate_error:
+            return {
+                "error": gate_error,
+                "platform": platform,
+                "action": "audit_required",
+                "hint": "Run taey_plan(action='audit') to verify state before sending.",
+            }
+
+    # Switch to platform tab
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform}", "platform": platform}
     time.sleep(0.5)
@@ -145,6 +162,7 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
+    # Paste message
     if not inp.clipboard_paste(message):
         return {"error": f"Failed to paste message", "platform": platform}
     time.sleep(0.2)
@@ -184,13 +202,6 @@ def handle_send_message(platform: str, message: str,
             user_message_id=message_id,
         )
         monitor_registered = reg.get("registered", False)
-
-    # Validate plan requirements before sending
-    if platform not in SOCIAL_PLATFORMS:
-        validation_error = _validate_send_requirements(platform, redis_client)
-        if validation_error:
-            return {"error": validation_error, "platform": platform,
-                    "action": "attach_missing", "neo4j": neo4j_result}
 
     # Press Enter (skip on social platforms where Enter = newline)
     enter_pressed = False
