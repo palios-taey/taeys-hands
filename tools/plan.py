@@ -1,18 +1,25 @@
-"""taey_plan - Create and manage execution plans stored in Redis."""
+"""taey_plan - Create, audit, and manage execution plans.
+
+The plan is the single source of truth. Flow:
+  1. create  → store required model/mode/attachments in Redis
+  2. audit   → compare plan vs live AT-SPI elements → PASS or FAIL
+  3. send.py → hard-blocked until audit_passed=True
+
+No plan ships without audit. No send happens without a passed audit.
+"""
 
 import json
 import os
 import time
 import uuid
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
 # Identity files — prepended to EVERY send_message plan's attachments.
-# FAMILY_KERNEL.md is shared; identity file is per-platform.
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
 _IDENTITY_DIR = os.path.join(_CORPUS_PATH, 'identity')
 _FAMILY_KERNEL = os.path.join(_IDENTITY_DIR, 'FAMILY_KERNEL.md')
@@ -29,6 +36,15 @@ _EXT_LANG = {
     '.yaml': 'yaml', '.yml': 'yaml', '.json': 'json', '.md': 'markdown',
     '.sh': 'bash', '.toml': 'toml',
 }
+
+_PLAN_ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
+_PLAN_TTL = 600  # 10 minutes
+
+
+def _validate_path(path: str) -> bool:
+    """Check path is within allowed directories."""
+    real = os.path.realpath(path)
+    return any(real == d or real.startswith(d + os.sep) for d in _PLAN_ALLOWED_DIRS)
 
 
 def _prepend_identity_files(attachments: List[str], platform: str) -> List[str]:
@@ -47,17 +63,11 @@ def _prepend_identity_files(attachments: List[str], platform: str) -> List[str]:
     return result
 
 
-_PLAN_ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
+def _consolidate_attachments(files: List[str], platform: str) -> Optional[str]:
+    """Consolidate multiple files into a single .md package.
 
-
-def _validate_path(path: str) -> bool:
-    """Check path is within allowed directories (mirrors attach.py _ALLOWED_DIRS)."""
-    real = os.path.realpath(path)
-    return any(real == d or real.startswith(d + os.sep) for d in _PLAN_ALLOWED_DIRS)
-
-
-def _consolidate_attachments(files: List[str], platform: str) -> str:
-    """Consolidate multiple files into a single .md package."""
+    KERNEL + IDENTITY + user files → one file for upload.
+    """
     try:
         sections = [f"# Package for {platform}\n\n**Files**: {len(files)}\n"]
         for path in files:
@@ -82,55 +92,55 @@ def _consolidate_attachments(files: List[str], platform: str) -> str:
         return None
 
 
+# ─── Dispatch ────────────────────────────────────────────────────────────
+
 def handle_plan(platform: str, action: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
-    """Dispatch plan operations: create, get, update."""
-    if action == 'get':
+    """Dispatch plan operations: create, audit, get, update, delete."""
+    if action == 'create' or action == 'send_message':
+        return _create_plan(platform, params, redis_client)
+    elif action == 'audit':
+        return _audit_plan(platform, params, redis_client)
+    elif action == 'get':
         return _get_plan(params.get('plan_id'), platform, redis_client)
     elif action == 'update':
         return _update_plan(params.get('plan_id'), params, redis_client)
-    elif action in ('send_message', 'extract_response'):
-        # Block if a plan is already active (global lock — one at a time per machine)
-        if redis_client:
-            existing = redis_client.get("taey:plan_active")
-            if existing:
-                try:
-                    lock = json.loads(existing)
-                except (json.JSONDecodeError, TypeError):
-                    lock = {}
-                lock_owner = lock.get('node_id', 'unknown')
-                lock_platform = lock.get('platform', 'unknown')
-                my_node = node_key('').rstrip(':')
-                if lock_owner == my_node:
-                    msg = (f"You already have an active plan for {lock_platform}. "
-                           f"Complete it before creating another.")
-                else:
-                    msg = (f"{lock_owner} is currently executing a plan on {lock_platform}. "
-                           f"Wait until it completes.")
-                return {
-                    "error": msg,
-                    "success": False,
-                    "existing_plan": lock,
-                    "hint": "Complete the plan (send_message clears the lock), "
-                            "extract with complete=True, or cancel with "
-                            "taey_plan(action='delete').",
-                }
-        if action == 'send_message':
-            return _create_plan(platform, action, params, redis_client)
-        else:
-            return _create_extract_plan(platform, params, redis_client)
+    elif action == 'extract_response':
+        return _create_extract_plan(platform, params, redis_client)
     elif action == 'delete':
         return _delete_plan(platform, params, redis_client)
     else:
         return {"error": f"Unknown plan action: {action}", "success": False}
 
 
-def _create_plan(platform: str, action: str, params: Dict,
+# ─── Create ──────────────────────────────────────────────────────────────
+
+def _create_plan(platform: str, params: Dict,
                  redis_client) -> Dict[str, Any]:
-    """Create an execution plan. All fields required — no defaults."""
+    """Create an execution plan. All fields required — no defaults.
+
+    Does NOT set audit_passed. Caller must run audit before send.
+    """
     if not redis_client:
         return {"error": "Redis not available", "success": False}
 
+    # Block if another plan is already active
+    existing = redis_client.get("taey:plan_active")
+    if existing:
+        try:
+            lock = json.loads(existing)
+        except (json.JSONDecodeError, TypeError):
+            lock = {}
+        lock_platform = lock.get('platform', 'unknown')
+        return {
+            "error": f"Active plan exists for {lock_platform}. "
+                     "Complete or delete it first.",
+            "success": False,
+            "existing_plan": lock,
+            "hint": "Use taey_plan(action='delete') to cancel.",
+        }
+
+    # Validate required fields
     missing = []
     session = params.get('session')
     message = params.get('message')
@@ -160,69 +170,210 @@ def _create_plan(platform: str, action: str, params: Dict,
                     "tools": 'List or "none"', "attachments": "List of file paths or []",
                 }}
 
+    # Build attachment list: identity files + user files → consolidated
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
-    # Auto-prepend identity files (FAMILY_KERNEL + platform-specific identity)
     all_files = _prepend_identity_files(attachments_list, platform)
     identity_added = [f for f in all_files if f not in attachments_list]
 
-    # Consolidate into single package if multiple files
     consolidated_path = None
     if len(all_files) > 1:
         consolidated_path = _consolidate_attachments(all_files, platform)
+    elif len(all_files) == 1:
+        consolidated_path = all_files[0]
 
-    final_attachments = [consolidated_path] if consolidated_path else all_files
-    tools_list = [] if tools == "none" else tools
+    final_attachment = consolidated_path if consolidated_path else None
+    tools_list = [] if tools == "none" else list(tools) if tools else []
 
     plan_id = str(uuid.uuid4())[:8]
     plan = {
-        'plan_id': plan_id, 'platform': platform, 'action': action,
-        'session': session, 'message': message,
-        'attachments': final_attachments,
-        'required_state': {'model': model, 'mode': mode, 'tools': tools_list},
-        'current_state': None, 'steps': [], 'status': 'created',
-        'navigated': False, 'created_at': time.time(),
+        'plan_id': plan_id,
+        'platform': platform,
+        'action': 'send_message',
+        'session': session,
+        'message': message,
+        'attachment': final_attachment,  # Single file (consolidated)
+        'attachment_sources': all_files,  # What went into it
+        'required_state': {
+            'model': model,
+            'mode': mode,
+            'tools': tools_list,
+        },
+        'audit_passed': False,  # MUST be set True by audit before send
+        'audit_result': None,
+        'status': 'created',
+        'created_at': time.time(),
     }
 
-    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
-    redis_client.setex(node_key(f"plan:current:{platform}"), 300, plan_id)
-    redis_client.setex(node_key(f"plan:{platform}"), 300, json.dumps({
-        'id': plan_id, 'platform': platform, 'action': action,
-        'session': session, 'message': message,
-        'model': model, 'mode': mode,
-        'tools': tools_list, 'attachments': final_attachments,
-        'validated': True, 'created_at': time.time(),
-    }))
+    # Store plan
+    redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
+    redis_client.setex(node_key(f"plan:current:{platform}"), _PLAN_TTL, plan_id)
 
     # Global plan lock — ONE lock for the whole machine.
-    # Only one Firefox, one active tab. Monitor stops ALL cycling while set.
-    # Cleared by send_message (plan executed) or extract(complete=True).
-    redis_client.setex("taey:plan_active", 180, json.dumps({
+    redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
         'plan_id': plan_id, 'platform': platform,
-        'node_id': node_key('').rstrip(':'),  # who set this lock
+        'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),
     }))
 
+    # Clear checkpoints from previous plans
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
     result = {
-        "success": True, "plan_id": plan_id, "platform": platform,
-        "action": action, "session": session,
+        "success": True,
+        "plan_id": plan_id,
+        "platform": platform,
+        "session": session,
         "required_state": plan['required_state'],
-        "attachments": final_attachments,
-        "next_step": "Call taey_inspect to see current state",
+        "attachment": final_attachment,
+        "audit_passed": False,
+        "next_steps": [
+            "1. Call taey_inspect to see current platform state",
+            "2. Set model/mode if needed (taey_select_dropdown)",
+            "3. Call taey_attach to upload the attachment",
+            "4. Call taey_plan(action='audit') to verify everything matches",
+            "5. Only then call taey_send",
+        ],
     }
     if identity_added:
         result["identity_files_added"] = identity_added
-    if consolidated_path:
+    if consolidated_path and len(all_files) > 1:
         result["consolidated_from"] = len(all_files)
         result["consolidated_path"] = consolidated_path
     return result
 
 
+# ─── Audit ───────────────────────────────────────────────────────────────
+
+def _audit_plan(platform: str, params: Dict,
+                redis_client) -> Dict[str, Any]:
+    """Audit plan against live UI state. This is the gate before send.
+
+    Params:
+        current_model: str — model name read from AT-SPI elements
+        current_mode: str — mode/state read from AT-SPI elements
+        current_tools: list — enabled tools read from AT-SPI elements
+        attachment_confirmed: bool — True if file chip is visible in AT-SPI
+    """
+    if not redis_client:
+        return {"error": "Redis not available", "success": False}
+
+    plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
+    if not plan_id:
+        return {"error": "No active plan for this platform", "success": False}
+
+    plan_data = redis_client.get(node_key(f"plan:{plan_id}"))
+    if not plan_data:
+        return {"error": f"Plan {plan_id} not found or expired", "success": False}
+
+    plan = json.loads(plan_data)
+    required = plan.get('required_state', {})
+
+    # Collect what the AI reports as current state
+    current_model = params.get('current_model', '')
+    current_mode = params.get('current_mode', '')
+    current_tools = params.get('current_tools', [])
+    attachment_confirmed = params.get('attachment_confirmed', False)
+
+    failures = []
+
+    # --- Model check ---
+    req_model = required.get('model', '')
+    if req_model and req_model not in ('N/A', 'any', 'default'):
+        if not current_model:
+            failures.append({
+                "field": "model",
+                "required": req_model,
+                "current": "(not provided)",
+                "fix": "Read model from taey_inspect elements, then provide current_model",
+            })
+        elif req_model.lower() not in current_model.lower() and \
+             current_model.lower() not in req_model.lower():
+            failures.append({
+                "field": "model",
+                "required": req_model,
+                "current": current_model,
+                "fix": f"Use taey_select_dropdown to change model to '{req_model}'",
+            })
+
+    # --- Mode check ---
+    req_mode = required.get('mode', '')
+    if req_mode and req_mode not in ('N/A', 'any', 'default', 'normal'):
+        if not current_mode:
+            failures.append({
+                "field": "mode",
+                "required": req_mode,
+                "current": "(not provided)",
+                "fix": "Read mode from taey_inspect elements, then provide current_mode",
+            })
+        elif req_mode.lower() not in current_mode.lower() and \
+             current_mode.lower() not in req_mode.lower():
+            failures.append({
+                "field": "mode",
+                "required": req_mode,
+                "current": current_mode,
+                "fix": f"Use taey_select_dropdown to change mode to '{req_mode}'",
+            })
+
+    # --- Tools check ---
+    req_tools = set(t.lower() for t in required.get('tools', []))
+    cur_tools = set(t.lower() for t in (current_tools or []))
+    missing_tools = req_tools - cur_tools
+    if missing_tools:
+        failures.append({
+            "field": "tools",
+            "required": sorted(req_tools),
+            "current": sorted(cur_tools),
+            "missing": sorted(missing_tools),
+            "fix": f"Enable missing tools: {sorted(missing_tools)}",
+        })
+
+    # --- Attachment check ---
+    if plan.get('attachment'):
+        if not attachment_confirmed:
+            # Also check Redis checkpoint as backup
+            checkpoint = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
+            if not checkpoint:
+                failures.append({
+                    "field": "attachment",
+                    "required": os.path.basename(plan['attachment']),
+                    "current": "not attached",
+                    "fix": f"Call taey_attach('{platform}', '{plan['attachment']}')",
+                })
+
+    # --- Result ---
+    passed = len(failures) == 0
+    audit_result = {
+        "plan_id": plan_id,
+        "passed": passed,
+        "failures": failures,
+        "checked": {
+            "model": {"required": required.get('model'), "current": current_model},
+            "mode": {"required": required.get('mode'), "current": current_mode},
+            "tools": {"required": required.get('tools'), "current": current_tools},
+            "attachment": {"required": plan.get('attachment'), "confirmed": attachment_confirmed},
+        },
+    }
+
+    # Update plan with audit result
+    plan['audit_passed'] = passed
+    plan['audit_result'] = audit_result
+    plan['status'] = 'audit_passed' if passed else 'audit_failed'
+    redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
+
+    if passed:
+        audit_result["next_step"] = "Audit PASSED. Call taey_send to send the message."
+    else:
+        audit_result["next_step"] = "Audit FAILED. Fix the issues above, then re-audit."
+
+    return {"success": True, **audit_result}
+
+
+# ─── Extract Plan ────────────────────────────────────────────────────────
+
 def _create_extract_plan(platform: str, params: Dict,
                          redis_client) -> Dict[str, Any]:
-    """Create extraction-only plan (no send_message)."""
+    """Create extraction-only plan (no send_message, no audit needed)."""
     if not redis_client:
         return {"error": "Redis not available", "success": False}
 
@@ -231,24 +382,15 @@ def _create_extract_plan(platform: str, params: Dict,
         'plan_id': plan_id, 'platform': platform,
         'action': 'extract_response',
         'session': params.get('session', 'current'),
-        'message': None, 'attachments': [],
-        'required_state': {}, 'current_state': None,
-        'steps': [{"action": "extract", "platform": platform}],
-        'status': 'ready', 'navigated': False, 'created_at': time.time(),
+        'message': None, 'attachment': None,
+        'required_state': {}, 'audit_passed': True,  # No audit needed for extract
+        'status': 'ready', 'created_at': time.time(),
     }
 
-    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
-    redis_client.setex(node_key(f"plan:current:{platform}"), 300, plan_id)
-    redis_client.setex(node_key(f"plan:{platform}"), 300, json.dumps({
-        'id': plan_id, 'platform': platform, 'action': 'extract_response',
-        'session': plan['session'], 'message': None,
-        'model': None, 'mode': None,
-        'tools': [], 'attachments': [],
-        'validated': True, 'created_at': time.time(),
-    }))
+    redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
+    redis_client.setex(node_key(f"plan:current:{platform}"), _PLAN_TTL, plan_id)
 
-    # Global plan lock — blocks monitor tab cycling during extraction
-    redis_client.setex("taey:plan_active", 180, json.dumps({
+    redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),
@@ -256,9 +398,52 @@ def _create_extract_plan(platform: str, params: Dict,
 
     return {
         "success": True, "plan_id": plan_id, "platform": platform,
-        "action": "extract_response", "steps": plan['steps'],
+        "action": "extract_response",
         "next_step": f"Call taey_quick_extract('{platform}') to extract the response",
     }
+
+
+# ─── Get / Update / Delete ──────────────────────────────────────────────
+
+def _get_plan(plan_id: str, platform: str, redis_client) -> Dict[str, Any]:
+    if not redis_client:
+        return {"error": "Redis not available", "success": False}
+    if not plan_id and platform:
+        plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
+    if not plan_id:
+        return {"error": "No plan found", "success": False}
+    data = redis_client.get(node_key(f"plan:{plan_id}"))
+    if not data:
+        return {"error": f"Plan {plan_id} not found", "success": False}
+    return {"success": True, "plan": json.loads(data)}
+
+
+def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
+    """Update plan fields. Resets audit_passed if required_state changes."""
+    if not redis_client:
+        return {"error": "Redis not available", "success": False}
+    data = redis_client.get(node_key(f"plan:{plan_id}"))
+    if not data:
+        return {"error": f"Plan {plan_id} not found", "success": False}
+
+    plan = json.loads(data)
+
+    # If required_state is being changed, reset audit
+    if 'required_state' in updates:
+        plan['required_state'] = updates['required_state']
+        plan['audit_passed'] = False
+        plan['audit_result'] = None
+        plan['status'] = 'updated'
+
+    for key in ['status', 'session', 'message']:
+        if key in updates:
+            plan[key] = updates[key]
+
+    plan['updated_at'] = time.time()
+    redis_client.setex(node_key(f"plan:{plan_id}"), _PLAN_TTL, json.dumps(plan))
+
+    return {"success": True, "plan_id": plan_id,
+            "status": plan['status'], "audit_passed": plan['audit_passed']}
 
 
 def _delete_plan(platform: str, params: Dict, redis_client) -> Dict[str, Any]:
@@ -276,68 +461,3 @@ def _delete_plan(platform: str, params: Dict, redis_client) -> Dict[str, Any]:
     if redis_client.delete("taey:plan_active"):
         deleted.append("plan_active (global)")
     return {"success": True, "deleted": deleted, "platform": platform}
-
-
-def _get_plan(plan_id: str, platform: str, redis_client) -> Dict[str, Any]:
-    if not redis_client:
-        return {"error": "Redis not available", "success": False}
-    if not plan_id and platform:
-        plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
-    if not plan_id:
-        return {"error": "No plan found", "success": False}
-    data = redis_client.get(node_key(f"plan:{plan_id}"))
-    if not data:
-        return {"error": f"Plan {plan_id} not found", "success": False}
-    return {"success": True, "plan": json.loads(data)}
-
-
-def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
-    """Update plan state. Auto-generates steps when current_state provided."""
-    if not redis_client:
-        return {"error": "Redis not available", "success": False}
-    data = redis_client.get(node_key(f"plan:{plan_id}"))
-    if not data:
-        return {"error": f"Plan {plan_id} not found", "success": False}
-
-    plan = json.loads(data)
-    for key in ['current_state', 'steps', 'status']:
-        if key in updates:
-            plan[key] = updates[key]
-
-    if 'current_state' in updates and plan.get('required_state'):
-        plan['steps'] = _generate_steps(
-            plan['required_state'], plan['current_state'],
-            plan.get('attachments', []), plan.get('message', ''))
-        plan['status'] = 'ready'
-
-    plan['updated_at'] = time.time()
-    redis_client.setex(node_key(f"plan:{plan_id}"), 300, json.dumps(plan))
-
-    return {"success": True, "plan_id": plan_id,
-            "status": plan['status'], "steps": plan.get('steps', [])}
-
-
-def _generate_steps(required: Dict, current: Dict,
-                    attachments: List, message: str) -> List[Dict]:
-    """Generate execution steps by comparing required vs current state."""
-    steps = []
-    req_mode = required.get('mode')
-    cur_mode = (current or {}).get('mode')
-    if req_mode and req_mode != cur_mode:
-        steps.append({"action": "set_mode", "target": req_mode, "current": cur_mode})
-
-    for tool in set(required.get('tools', [])) - set((current or {}).get('tools', [])):
-        steps.append({"action": "enable_tool", "tool": tool})
-
-    req_model = required.get('model')
-    cur_model = (current or {}).get('model')
-    if req_model and req_model != cur_model:
-        steps.append({"action": "change_model", "target": req_model, "current": cur_model})
-
-    for fp in attachments:
-        steps.append({"action": "attach", "file": fp})
-
-    if message:
-        steps.append({"action": "send",
-                       "message": message[:100] + "..." if len(message) > 100 else message})
-    return steps

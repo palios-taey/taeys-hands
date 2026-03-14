@@ -1,1 +1,1 @@
-# monitor - Background response detection daemon
+# Central response monitor package
