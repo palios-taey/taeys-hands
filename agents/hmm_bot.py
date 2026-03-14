@@ -957,7 +957,14 @@ def attach_file(platform: str, file_path: str) -> bool:
                     names = [f"'{i.get('name','')}'" for i in menu_items[:5]]
                     logger.warning(f"[{platform}] Menu items found but no 'Upload files': {names}")
             else:
-                logger.warning(f"[{platform}] find_menu_items returned empty (doc={doc2 is not None}, ff={firefox is not None})")
+                logger.warning(f"[{platform}] find_menu_items returned empty — trying keyboard nav")
+            # Keyboard nav fallback: dropdown should be open, Down+Enter selects first item (Upload files)
+            if not clicked_upload and not _find_dialog_wid():
+                logger.info(f"[{platform}] Keyboard nav fallback: Down+Enter")
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key_split('Return')
+                time.sleep(2.0)
     else:
         # Grok and others: click input first to activate page (homepage mode
         # has dormant buttons + "Connect X" popup blocks dropdowns), then
