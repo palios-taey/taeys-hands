@@ -98,8 +98,9 @@ TARGET="${1:-all}"
 
 if [ "$TARGET" = "--local" ]; then
     deploy_local
-    echo "[local] Reconnecting MCP in all Claude sessions..."
-    mcp-reconnect 2>/dev/null || echo "[local] mcp-reconnect not installed — sessions must /mcp manually"
+    echo "[local] MCP reconnect will run in 10 seconds (detached)..."
+    nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
+    disown
     exit 0
 fi
 
@@ -110,10 +111,6 @@ if [ "$TARGET" != "all" ]; then
         echo "Unknown machine: $TARGET"
         echo "Available: ${!MACHINES[*]} --local"
         exit 1
-    fi
-    # If deploying to spark1 (self), reconnect local sessions after
-    if [ "$TARGET" = "spark1" ]; then
-        mcp-reconnect 2>/dev/null || true
     fi
     exit 0
 fi
@@ -137,5 +134,9 @@ for pid in "${pids[@]}"; do
 done
 
 echo ""
-echo "=== Deploy complete — reconnecting local MCP sessions ==="
-mcp-reconnect 2>/dev/null || echo "[local] mcp-reconnect not installed — sessions must /mcp manually"
+echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
+# Detach mcp-reconnect so it survives after deploy.sh exits.
+# The 10s delay lets the calling Claude session's Bash tool return
+# before Escape hits all sessions.
+nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
+disown
