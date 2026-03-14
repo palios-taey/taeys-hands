@@ -566,9 +566,11 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
     - Grok: AT-SPI stop button polling (stop button IS exposed, and Grok
       doesn't always generate — fixed-wait wastes 5min on failed sends)
     """
-    if platform in ('chatgpt', 'gemini'):
-        return _wait_fixed_then_extract(platform, timeout)
-    return _wait_atspi_polling(platform, timeout)
+    # All platforms use fixed-wait-then-extract on Xvfb.
+    # AT-SPI stop button polling is unreliable on headless displays:
+    # stop button appears/disappears between polls, or AT-SPI doesn't
+    # expose it. Fixed-wait + extract is more reliable.
+    return _wait_fixed_then_extract(platform, timeout)
 
 
 def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
@@ -720,11 +722,14 @@ def extract_response(platform: str) -> str:
                      if (b.get('name') or '').strip().lower() == 'copy']
     target = (response_copy or copy_buttons)[-1]
 
-    # Click copy button — use marker instead of clear to avoid X11 clipboard
-    # ownership issues on Xvfb (clear claims ownership, blocking JS writes)
-    _MARKER = '__HMM_CLIP_MARKER__'
-    clipboard.write_marker(_MARKER)
-    time.sleep(0.2)
+    # Release clipboard ownership before clicking Copy.
+    # xsel --input stays resident as clipboard owner on Xvfb, blocking
+    # Firefox's navigator.clipboard.writeText() from taking ownership.
+    # Kill any lingering xsel input processes so Firefox JS can write.
+    clipboard.write_marker('')  # ensure xsel is the owner (not some stale process)
+    time.sleep(0.1)
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.1)
 
     from core.interact import atspi_click
     if target.get('atspi_obj') and atspi_click(target):
@@ -733,12 +738,12 @@ def extract_response(platform: str) -> str:
         inp.click_at(target['x'], target['y'])
         logger.info(f"[{platform}] Copy via xdotool at ({target['x']}, {target['y']})")
 
-    # Poll clipboard until it changes from marker (up to 3s)
+    # Poll clipboard until Firefox writes content (up to 3s)
     content = None
     for _ in range(6):
         time.sleep(0.5)
         raw = clipboard.read()
-        if raw and raw != _MARKER:
+        if raw:
             content = raw
             break
 
@@ -760,7 +765,7 @@ def extract_response(platform: str) -> str:
             alternatives = [b for b in copy_buttons if b is not target]
             found_alt = False
             for alt_btn in alternatives:
-                clipboard.write_marker(_MARKER)
+                subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
                 time.sleep(0.1)
                 if alt_btn.get('atspi_obj') and atspi_click(alt_btn):
                     logger.info(f"[{platform}] Trying alt copy button at ({alt_btn['x']}, {alt_btn['y']})")
@@ -769,7 +774,7 @@ def extract_response(platform: str) -> str:
                     logger.info(f"[{platform}] Trying alt copy button (xdotool) at ({alt_btn['x']}, {alt_btn['y']})")
                 time.sleep(0.8)
                 alt = clipboard.read()
-                if alt and alt != _MARKER and alt != content:
+                if alt and alt != content:
                     content = alt
                     found_alt = True
                     logger.info(f"[{platform}] Got response from alt copy button ({len(alt)} chars)")
