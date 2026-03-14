@@ -978,29 +978,43 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.error(f"[{platform}] Attach button not found after 8 retries")
             return False
 
-        # AT-SPI do_action first, xdotool fallback
-        btn_obj = btn.get('atspi_obj')
-        atspi_clicked = False
-        if btn_obj:
-            try:
-                ai = btn_obj.get_action_iface()
-                if ai and ai.get_n_actions() > 0:
-                    ai.do_action(0)
-                    atspi_clicked = True
-                    logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
-            except Exception as e:
-                logger.debug(f"[{platform}] AT-SPI do_action failed: {e}")
-        if not atspi_clicked:
-            inp.click_at(btn['x'], btn['y'])
-            logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-        time.sleep(1.5)
-
-        # Keyboard nav — Down selects "Upload a file", Enter confirms
-        if not _find_dialog_wid():
+        # Two-pass attach: matches tools/attach.py _try_click_then_dialog()
+        # Pass 1: AT-SPI do_action + keyboard nav
+        # Pass 2: xdotool click + keyboard nav (fallback)
+        def _click_and_nav(use_atspi):
+            if use_atspi:
+                btn_obj = btn.get('atspi_obj')
+                if btn_obj:
+                    try:
+                        ai = btn_obj.get_action_iface()
+                        if ai and ai.get_n_actions() > 0:
+                            ai.do_action(0)
+                            logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
+                        else:
+                            return False
+                    except Exception:
+                        return False
+                else:
+                    return False
+            else:
+                inp.click_at(btn['x'], btn['y'])
+                logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+            time.sleep(1.5)
+            if _find_dialog_wid():
+                return True
             inp.press_key('Down')
             time.sleep(0.5)
             inp.press_key_split('Return')
             time.sleep(2.5)
+            for _ in range(10):
+                if _find_dialog_wid():
+                    return True
+                time.sleep(0.3)
+            return False
+
+        if not _click_and_nav(use_atspi=True):
+            if not _click_and_nav(use_atspi=False):
+                pass  # Falls through to dialog_found check below
 
     # Wait for file dialog to appear
     dialog_found = False
