@@ -403,7 +403,7 @@ class CentralMonitor:
                 _log(f"[{platform}/{monitor_id}] Stop button — generating")
         elif stop_seen:
             _log(f"[{platform}/{monitor_id}] Stop gone — complete")
-            self._notify(session, "response_ready", "stop_button")
+            self._notify(session, "response_complete", "stop_button")
             return True
 
         # Timeout check
@@ -433,7 +433,7 @@ class CentralMonitor:
             "tmux_session": target_node,
             "url": session.get('url'),
             "elapsed_seconds": int(time.time() - session.get('started_ts', time.time())),
-            "requires_action": status == "response_ready",
+            "requires_action": status in ("response_complete", "response_ready"),
         }
         nj = json.dumps(notification)
         notify_key = f"taey:{target_node}:notifications"
