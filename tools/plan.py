@@ -273,15 +273,70 @@ def _create_plan(platform: str, params: Dict,
 
 # ─── Audit ───────────────────────────────────────────────────────────────
 
+def _extract_model_from_inspect(elements: list, platform: str) -> str:
+    """Extract current model from inspect element data.
+
+    Looks for model_selector semantic element and parses the model name
+    from its AT-SPI name. E.g. ChatGPT: "Model selector, current model is 5.4 Pro"
+    Some platforms (like Grok) don't include the model name in the button label.
+    Returns empty string if model can't be determined from elements.
+    """
+    for e in elements:
+        if e.get('semantic') == 'model_selector':
+            name = (e.get('name') or '').strip()
+            # ChatGPT pattern: "Model selector, current model is <model>"
+            if 'current model is' in name.lower():
+                return name.split('current model is')[-1].strip()
+            # Claude pattern: model name directly in button text
+            # Gemini pattern: similar
+            # If the name is just "Model select" or similar, no model info
+            if name.lower() in ('model select', 'model selector'):
+                return ''
+            # Return the name itself as potential model indicator
+            return name
+    return ''
+
+
+def _extract_mode_from_inspect(elements: list) -> str:
+    """Extract current mode from inspect element data.
+
+    Looks for mode_selector/mode_picker semantic element.
+    Returns empty string if mode can't be determined.
+    """
+    for e in elements:
+        if e.get('semantic') in ('mode_selector', 'mode_picker'):
+            name = (e.get('name') or '').strip()
+            if name:
+                return name
+    return ''
+
+
+def _extract_tools_from_inspect(elements: list) -> list:
+    """Extract enabled tools from inspect element data.
+
+    Looks for elements with tool-related semantics that have checked/pressed state.
+    """
+    tools = []
+    for e in elements:
+        sem = e.get('semantic', '')
+        if 'tool' in sem.lower():
+            states = set(s.lower() for s in e.get('states', []))
+            if states & {'checked', 'pressed'}:
+                name = (e.get('name') or '').strip()
+                if name:
+                    tools.append(name)
+    return tools
+
+
 def _audit_plan(platform: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
     """Audit plan against live UI state. This is the gate before send.
 
-    Params:
-        current_model: str — model name read from AT-SPI elements
-        current_mode: str — mode/state read from AT-SPI elements
-        current_tools: list — enabled tools read from AT-SPI elements
-        attachment_confirmed: bool — True if file chip is visible in AT-SPI
+    Reads the inspect data from Redis (stored by taey_inspect) instead of
+    trusting caller-supplied claims. The inspect data contains the AT-SPI
+    element tree with semantic labels from YAML matching.
+
+    Only attachment_confirmed can optionally supplement the Redis attach checkpoint.
     """
     if not redis_client:
         return {"error": "Redis not available", "success": False}
@@ -297,10 +352,24 @@ def _audit_plan(platform: str, params: Dict,
     plan = json.loads(plan_data)
     required = plan.get('required_state', {})
 
-    # Collect what the AI reports as current state
-    current_model = params.get('current_model', '')
-    current_mode = params.get('current_mode', '')
-    current_tools = params.get('current_tools', [])
+    # Read inspect data from Redis (written by taey_inspect)
+    inspect_raw = redis_client.get(node_key(f"inspect:{platform}"))
+    if not inspect_raw:
+        return {"error": "No inspect data found. Call taey_inspect first.",
+                "success": False}
+
+    try:
+        inspect_data = json.loads(inspect_raw)
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Inspect data is corrupt. Call taey_inspect again.",
+                "success": False}
+
+    elements = inspect_data.get('controls', [])
+
+    # Extract current state from inspect elements (NOT from caller params)
+    current_model = _extract_model_from_inspect(elements, platform)
+    current_mode = _extract_mode_from_inspect(elements)
+    current_tools = _extract_tools_from_inspect(elements)
     attachment_confirmed = params.get('attachment_confirmed', False)
 
     failures = []
@@ -309,13 +378,20 @@ def _audit_plan(platform: str, params: Dict,
     req_model = required.get('model', '')
     if req_model and req_model not in ('N/A', 'any', 'default'):
         if not current_model:
-            failures.append({
-                "field": "model",
-                "required": req_model,
-                "current": "(not provided)",
-                "fix": "Read model from taey_inspect elements, then provide current_model",
-            })
-        elif current_model.lower().strip() != req_model.lower().strip():
+            # Model not readable from inspect elements — accept caller claim
+            # for platforms where model_selector doesn't include model name (e.g. Grok)
+            caller_model = params.get('current_model', '')
+            if caller_model:
+                current_model = caller_model
+                logger.info("Model not in inspect elements, accepting caller claim: %s", caller_model)
+            else:
+                failures.append({
+                    "field": "model",
+                    "required": req_model,
+                    "current": "(not readable from inspect — model_selector has no model name)",
+                    "fix": "Provide current_model in audit params (inspect can't determine model for this platform)",
+                })
+        if current_model and current_model.lower().strip() != req_model.lower().strip():
             failures.append({
                 "field": "model",
                 "required": req_model,
@@ -330,8 +406,8 @@ def _audit_plan(platform: str, params: Dict,
             failures.append({
                 "field": "mode",
                 "required": req_mode,
-                "current": "(not provided)",
-                "fix": "Read mode from taey_inspect elements, then provide current_mode",
+                "current": "(not found in inspect elements)",
+                "fix": "Check taey_inspect output for mode_selector element",
             })
         elif current_mode.lower().strip() != req_mode.lower().strip():
             failures.append({
@@ -357,7 +433,7 @@ def _audit_plan(platform: str, params: Dict,
     # --- Attachment check ---
     if plan.get('attachment'):
         if not attachment_confirmed:
-            # Also check Redis checkpoint as backup
+            # Check Redis attach checkpoint (written by taey_attach)
             checkpoint = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
             if not checkpoint:
                 failures.append({
@@ -373,6 +449,7 @@ def _audit_plan(platform: str, params: Dict,
         "plan_id": plan_id,
         "passed": passed,
         "failures": failures,
+        "data_source": "inspect_checkpoint",
         "checked": {
             "model": {"required": required.get('model'), "current": current_model},
             "mode": {"required": required.get('mode'), "current": current_mode},
@@ -466,7 +543,7 @@ def _update_plan(plan_id: str, updates: Dict, redis_client) -> Dict[str, Any]:
         plan['audit_result'] = None
         plan['status'] = 'updated'
 
-    for key in ['status', 'session', 'message']:
+    for key in ['status', 'session', 'message', 'current_state']:
         if key in updates:
             plan[key] = updates[key]
 

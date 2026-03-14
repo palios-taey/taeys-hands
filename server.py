@@ -135,7 +135,10 @@ def get_tools() -> List[Dict]:
              "action": {"type": "string", "enum": ["send_message", "extract_response", "audit", "get", "update", "delete"]},
              "params": {"type": "object", "properties": {
                  "plan_id": {"type": "string"}, "message": {"type": "string"},
+                 "session": {"type": "string", "description": "'new' or existing URL"},
                  "mode": {"type": "string"}, "model": {"type": "string"},
+                 "tools": {"type": "array", "items": {"type": "string"},
+                           "description": "List of tool names or empty array"},
                  "attachments": {"type": "array", "items": {"type": "string"}},
                  "current_state": {"type": "object"}, "steps": {"type": "array"},
                  "status": {"type": "string"},
