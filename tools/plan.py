@@ -145,7 +145,7 @@ def _create_plan(platform: str, params: Dict,
         return {"error": "Redis not available", "success": False}
 
     # Block if another plan is already active
-    existing = redis_client.get("taey:plan_active")
+    existing = redis_client.get(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}")
     if existing:
         try:
             lock = json.loads(existing)
@@ -237,7 +237,7 @@ def _create_plan(platform: str, params: Dict,
     }))
 
     # Global plan lock — ONE lock for the whole machine.
-    redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
+    redis_client.setex(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}", _PLAN_TTL, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),
@@ -421,7 +421,7 @@ def _create_extract_plan(platform: str, params: Dict,
         'tools': [], 'attachments': [], 'validated': True, 'created_at': time.time(),
     }))
 
-    redis_client.setex("taey:plan_active", _PLAN_TTL, json.dumps({
+    redis_client.setex(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}", _PLAN_TTL, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),
@@ -489,6 +489,6 @@ def _delete_plan(platform: str, params: Dict, redis_client) -> Dict[str, Any]:
     for suffix in [f"plan:current:{platform}", f"plan:{platform}"]:
         if redis_client.delete(node_key(suffix)):
             deleted.append(suffix)
-    if redis_client.delete("taey:plan_active"):
+    if redis_client.delete(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}"):
         deleted.append("plan_active (global)")
     return {"success": True, "deleted": deleted, "platform": platform}

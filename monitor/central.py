@@ -153,7 +153,7 @@ class CentralMonitor:
             return
         key = session.get('_redis_key')
         if key:
-            self.rc.setex(key, session.get('timeout', 3600), json.dumps(
+            self.rc.setex(key, session.get('timeout', 7200), json.dumps(
                 {k: v for k, v in session.items() if k != '_redis_key'}))
 
     def _remove_session(self, session: Dict):
@@ -164,11 +164,12 @@ class CentralMonitor:
             self.rc.delete(key)
 
     def _plan_active(self) -> bool:
-        """Check if any session has an active plan (global lock).
+        """Check if any session has an active plan (DISPLAY-scoped lock).
         When set, monitor must not cycle tabs."""
         if not self.rc:
             return False
-        return bool(self.rc.exists("taey:plan_active"))
+        display = os.environ.get('DISPLAY', ':0')
+        return bool(self.rc.exists(f"taey:plan_active:{display}"))
 
     # ── AT-SPI: stop button detection ───────────────────────────────
 
@@ -252,12 +253,15 @@ class CentralMonitor:
     # ── Session checking ────────────────────────────────────────────
 
     def _check_session(self, session: Dict, doc, firefox) -> bool:
-        """Check one session for completion. Returns True if complete (remove it).
+        """Check one session for completion using a 4-state machine.
 
-        Simple: stop button there = generating. Not there = complete.
-        But AT-SPI cache is stale after tab switch — so if no stop found,
-        wait 3s, get fresh document, scan again. Only declare complete if
-        BOTH scans show no stop button.
+        State machine (stop_seen persists in Redis between cycles):
+          1. No stop button AND stop_seen=False → waiting for generation to start
+          2. Stop button found AND stop_seen=False → mark stop_seen=True (generating)
+          3. Stop button found AND stop_seen=True → still generating
+          4. No stop button AND stop_seen=True → COMPLETE, notify
+
+        Returns True if complete (remove session).
         """
         platform = session['platform']
         monitor_id = session['monitor_id']
@@ -270,28 +274,31 @@ class CentralMonitor:
 
         stop_found = self._scan_for_stop_button(doc, platform)
         started_ts = session.get('started_ts', time.time())
-        timeout = session.get('timeout', 3600)
+        timeout = session.get('timeout', 7200)
         elapsed = int(time.time() - started_ts)
+        stop_seen = session.get('stop_seen', False)
 
-        if stop_found:
-            _log(f"[{platform}/{monitor_id}] stop=YES ({elapsed}s)")
-        else:
-            # No stop on first scan — AT-SPI may be stale after tab switch.
-            # Wait and re-scan with fresh document before declaring complete.
-            time.sleep(3)
-            fresh_doc = get_platform_document(firefox, platform)
-            if fresh_doc:
-                try:
-                    fresh_doc.clear_cache_single()
-                except Exception:
-                    pass
-                stop_found_2 = self._scan_for_stop_button(fresh_doc, platform)
-                if stop_found_2:
-                    _log(f"[{platform}/{monitor_id}] stop=NO then YES — stale cache, still generating ({elapsed}s)")
-                    return False
-            _log(f"[{platform}/{monitor_id}] stop=NO (confirmed) → COMPLETE ({elapsed}s)")
+        if stop_found and not stop_seen:
+            # State 2: Stop button appeared — generation started
+            session['stop_seen'] = True
+            session['generating_since'] = time.time()
+            self._update_session(session)
+            _log(f"[{platform}/{monitor_id}] stop=YES (generation started, {elapsed}s)")
+            return False
+
+        if stop_found and stop_seen:
+            # State 3: Still generating
+            _log(f"[{platform}/{monitor_id}] stop=YES (still generating, {elapsed}s)")
+            return False
+
+        if not stop_found and stop_seen:
+            # State 4: Stop button disappeared — COMPLETE
+            _log(f"[{platform}/{monitor_id}] stop=NO, stop_seen=True → COMPLETE ({elapsed}s)")
             self._notify(session, "response_complete", "stop_button")
             return True
+
+        # State 1: No stop button, stop_seen=False — still waiting for generation
+        _log(f"[{platform}/{monitor_id}] stop=NO, waiting for generation to start ({elapsed}s)")
 
         # Timeout check
         if time.time() - started_ts > timeout:

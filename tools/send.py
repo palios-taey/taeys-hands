@@ -45,9 +45,9 @@ def _check_audit_gate(platform: str, redis_client) -> Optional[str]:
     except (json.JSONDecodeError, TypeError):
         return f"Plan {plan_id} is corrupt. Create a new plan."
 
-    # Extract plans skip audit
-    if plan.get('action') == 'extract_response':
-        return None
+    # Only send_message plans are valid for sending
+    if plan.get('action') != 'send_message':
+        return f"Plan {plan_id} is for '{plan.get('action')}', not 'send_message'. Create a send_message plan."
 
     if not plan.get('audit_passed'):
         audit_result = plan.get('audit_result')
@@ -100,7 +100,7 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
                              redis_client, session_id: str = None,
                              user_message_id: str = None,
                              tmux_session: str = None,
-                             timeout: int = 3600) -> Dict[str, Any]:
+                             timeout: int = 7200) -> Dict[str, Any]:
     """Register active session for the central monitor to track."""
     if not redis_client:
         return {"registered": False, "error": "Redis not available"}
@@ -243,9 +243,10 @@ def handle_send_message(platform: str, message: str,
             except Exception as e:
                 logger.debug("URL re-capture attempt %d: %s", _attempt, e)
 
-    # Clear global plan lock — send complete, monitor can resume cycling
+    # Clear DISPLAY-scoped plan lock — send complete, monitor can resume cycling
     if redis_client:
-        redis_client.delete("taey:plan_active")
+        display = os.environ.get('DISPLAY', ':0')
+        redis_client.delete(f"taey:plan_active:{display}")
 
     result = {
         "platform": platform, "url": url, "message_length": len(message),
