@@ -324,11 +324,58 @@ def handle_select_dropdown(platform: str, dropdown: str,
               'x': e.get('x'), 'y': e.get('y'), 'states': e.get('states', [])}
              for e in menu_items]
 
+    # Auto-select: find the matching item and click it
+    if target_value:
+        target_lower = target_value.lower()
+        matched_item = None
+        matched_raw = None
+        for raw_item, item_info in zip(menu_items, items):
+            item_name = (item_info.get('name') or '').lower()
+            if target_lower in item_name or item_name in target_lower:
+                matched_item = item_info
+                matched_raw = raw_item
+                break
+
+        if matched_item and matched_raw:
+            # Try AT-SPI do_action first (most reliable for Gemini)
+            clicked = False
+            atspi_obj = matched_raw.get('atspi_obj')
+            if atspi_obj:
+                try:
+                    action = atspi_obj.get_action_iface()
+                    if action and action.get_n_actions() > 0:
+                        action.do_action(0)
+                        clicked = True
+                        logger.info("atspi_enum: clicked '%s' via do_action", matched_item.get('name'))
+                except Exception as e:
+                    logger.debug("atspi_enum do_action failed: %s", e)
+
+            # Fallback: coordinate click
+            if not clicked and matched_item.get('x') and matched_item.get('y'):
+                click_result = handle_click(platform, matched_item['x'], matched_item['y'])
+                clicked = not click_result.get('error')
+                if clicked:
+                    logger.info("atspi_enum: clicked '%s' via coords (%d,%d)",
+                                matched_item.get('name'), matched_item['x'], matched_item['y'])
+
+            if clicked:
+                time.sleep(0.5)
+                return {
+                    "platform": platform, "dropdown": dropdown,
+                    "target_requested": target_value,
+                    "selected_via": "atspi_enum",
+                    "selected_item": matched_item.get('name', ''),
+                    "selected_role": matched_item.get('role', ''),
+                    "item_count": len(items),
+                    "instruction": "Selected via AT-SPI enumeration. Call taey_inspect to verify.",
+                }
+
+    # No match or click failed — return the list for manual selection
     result = {
         "platform": platform, "dropdown": dropdown,
         "target_requested": target_value, "items": items,
         "item_count": len(items),
-        "instruction": "Dropdown is OPEN. Review items, pick the correct one, click with taey_click.",
+        "instruction": "Dropdown is OPEN. No exact match found for target. Review items, pick the correct one, click with taey_click.",
     }
 
     baseline_diff = _check_dropdown_baseline(platform, dropdown, items, redis_client)
