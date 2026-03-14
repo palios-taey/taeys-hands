@@ -363,39 +363,18 @@ class CentralMonitor:
 
         self._force_dbus_refresh(doc)
         stop_found = self._scan_buttons(doc, platform)
-        _log(f"[{platform}/{monitor_id}] scan: stop={stop_found}, "
-             f"stop_seen={session.get('stop_seen')}, url={current_url[:60]}")
 
-        stop_seen = session.get('stop_seen', False)
         started_ts = session.get('started_ts', time.time())
         timeout = session.get('timeout', 3600)
 
-        # State machine: stop button appears → generating. Disappears → complete.
-        # Require 2 consecutive scans without stop to confirm completion.
-        # ChatGPT Extended Thinking has a gap between thinking and response
-        # where the stop button briefly disappears then reappears.
-        gone_count = session.get('stop_gone_count', 0)
+        # Simple: stop button there → generating. Not there → complete.
         if stop_found:
-            if not stop_seen:
-                session['stop_seen'] = True
-                session['generating_since'] = time.time()
-                self._update_session(session)
-                _log(f"[{platform}/{monitor_id}] Stop button — generating")
-            elif gone_count > 0:
-                # Stop reappeared after brief disappearance — reset counter
-                session['stop_gone_count'] = 0
-                self._update_session(session)
-                _log(f"[{platform}/{monitor_id}] Stop reappeared — still generating")
-        elif stop_seen:
-            gone_count += 1
-            session['stop_gone_count'] = gone_count
-            if gone_count >= 2:
-                _log(f"[{platform}/{monitor_id}] Stop gone (confirmed) — complete")
-                self._notify(session, "response_complete", "stop_button")
-                return True
-            else:
-                self._update_session(session)
-                _log(f"[{platform}/{monitor_id}] Stop gone ({gone_count}/2) — confirming...")
+            _log(f"[{platform}/{monitor_id}] stop=YES — generating")
+        else:
+            elapsed = int(time.time() - started_ts)
+            _log(f"[{platform}/{monitor_id}] stop=NO — complete ({elapsed}s)")
+            self._notify(session, "response_complete", "stop_button")
+            return True
 
         # Timeout check
         if time.time() - started_ts > timeout:
