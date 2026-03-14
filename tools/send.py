@@ -210,6 +210,9 @@ def handle_send_message(platform: str, message: str,
             # Clean up monitor session on send failure
             if monitor_registered and redis_client:
                 redis_client.delete(node_key(f"active_session:{monitor_id}"))
+            # Clear pending_prompt so extract doesn't pick up a stale entry
+            if redis_client:
+                redis_client.delete(node_key(f"pending_prompt:{platform}"))
             return {"error": "Send (Enter) failed", "platform": platform, "neo4j": neo4j_result}
         enter_pressed = True
 
@@ -229,6 +232,12 @@ def handle_send_message(platform: str, message: str,
                             'session_url': url, 'session_id': session_id,
                             'message_id': message_id, 'sent_at': datetime.now().isoformat(),
                         }))
+                    # Update Neo4j session with conversation URL
+                    if session_id:
+                        try:
+                            neo4j_client.update_session(session_id, {'url': url})
+                        except Exception:
+                            pass
                     # Update monitor session with conversation URL
                     if monitor_registered and redis_client:
                         sess_key = node_key(f"active_session:{monitor_id}")

@@ -95,7 +95,7 @@ def add_message(session_id: str, role: str, content: str,
     return message_id
 
 
-_ALLOWED_SESSION_PROPS = {'session_type', 'purpose', 'last_activity'}
+_ALLOWED_SESSION_PROPS = {'session_type', 'purpose', 'last_activity', 'url'}
 
 
 def update_session(session_id: str, updates: Dict[str, Any]) -> bool:

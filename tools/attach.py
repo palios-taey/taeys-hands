@@ -25,15 +25,25 @@ ATTACH_NAMES = [
     'open upload file menu', 'attach', 'add files and more',
     'add files or tools', 'toggle menu',
 ]
+_KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
+
+
 def _get_attach_method(platform: str) -> str:
-    """Get attach method from platform YAML config."""
+    """Get attach method from platform YAML config.
+
+    For known platforms, FileNotFoundError propagates (fail loud).
+    For unknown/new platforms, falls back to 'atspi_menu'.
+    """
+    import yaml
+    yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms', f'{platform}.yaml')
     try:
-        import yaml
-        yaml_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms', f'{platform}.yaml')
         with open(yaml_path) as f:
             config = yaml.safe_load(f) or {}
         return config.get('attach_method', 'atspi_menu')
-    except (FileNotFoundError, Exception):
+    except FileNotFoundError:
+        if platform in _KNOWN_PLATFORMS:
+            logger.error("Platform YAML missing for known platform %s", platform)
+            raise
         return 'atspi_menu'
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')

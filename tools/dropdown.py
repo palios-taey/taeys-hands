@@ -211,12 +211,22 @@ def _normalize_dropdown_key(dropdown: str) -> str:
     return _EXACT.get(s, '')
 
 
+_KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
+
+
 def _get_dropdown_method(platform: str) -> str:
-    """Get dropdown method from platform YAML config."""
+    """Get dropdown method from platform YAML config.
+
+    For known platforms, FileNotFoundError propagates (fail loud).
+    For unknown/new platforms, falls back to 'atspi_enum'.
+    """
     try:
         config = _load_platform_yaml(platform)
         return config.get('dropdown_method', 'atspi_enum')
     except (FileNotFoundError, ValueError):
+        if platform in _KNOWN_PLATFORMS:
+            logger.error("Platform YAML missing for known platform %s", platform)
+            raise
         return 'atspi_enum'
 
 
