@@ -56,6 +56,7 @@ quirks:
 
 stop_patterns:
   - stop
+  - stop response (esc)
   - cancel
 
 mode_guidance:
