@@ -8,7 +8,7 @@ import time
 import uuid
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core import atspi, input as inp
 from core.platforms import SOCIAL_PLATFORMS
@@ -16,6 +16,50 @@ from storage import neo4j_client
 from storage.redis_pool import node_key, NODE_ID
 
 logger = logging.getLogger(__name__)
+
+
+
+def _validate_send_requirements(platform: str, redis_client) -> Optional[str]:
+    """Check that plan-required attachments were actually attached.
+
+    Returns None if OK, or an error string if send should be blocked.
+    """
+    if not redis_client:
+        return None
+
+    # Get active plan for this platform
+    plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
+    if not plan_id:
+        return None  # No active plan — nothing to validate
+
+    plan_data = redis_client.get(node_key(f"plan:{plan_id}"))
+    if not plan_data:
+        return None
+
+    try:
+        plan = json.loads(plan_data)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    required_attachments = plan.get('attachments', [])
+    if not required_attachments:
+        return None  # No attachments required
+
+    # Check attach checkpoint exists
+    checkpoint_raw = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
+    if not checkpoint_raw:
+        return (f"Plan {plan_id} requires {len(required_attachments)} attachment(s) "
+                f"but no attach checkpoint found. Attach files before sending.")
+
+    try:
+        checkpoint = json.loads(checkpoint_raw)
+    except (json.JSONDecodeError, TypeError):
+        return (f"Plan {plan_id} requires attachments but checkpoint is corrupt. "
+                f"Re-attach files before sending.")
+
+    logger.info("Send validation passed: plan=%s, attachments=%d, checkpoint=%s",
+                plan_id, len(required_attachments), checkpoint.get('file', 'unknown'))
+    return None
 
 
 def _ensure_central_monitor(display: str):
@@ -140,6 +184,13 @@ def handle_send_message(platform: str, message: str,
             user_message_id=message_id,
         )
         monitor_registered = reg.get("registered", False)
+
+    # Validate plan requirements before sending
+    if platform not in SOCIAL_PLATFORMS:
+        validation_error = _validate_send_requirements(platform, redis_client)
+        if validation_error:
+            return {"error": validation_error, "platform": platform,
+                    "action": "attach_missing", "neo4j": neo4j_result}
 
     # Press Enter (skip on social platforms where Enter = newline)
     enter_pressed = False
