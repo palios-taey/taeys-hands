@@ -757,11 +757,13 @@ def extract_response(platform: str) -> str:
         return ''
 
     # Check if we got the prompt instead of the response
+    # Use specific markers only — generic ones like 'analyze all' false-positive
+    # on Grok/ChatGPT responses that reference the prompt instructions
     if content:
         start_text = content.strip()[:200].lower()
         prompt_markers = ['analyze the following', 'package analysis request',
-                          'you are analyzing', 'respond only with minified json',
-                          'critical: echo back', 'analyze all', 'for each item provide']
+                          'respond only with minified json',
+                          'critical: echo back', 'analyze all all items']
         if any(m in start_text for m in prompt_markers):
             if len(response_copy) >= 2:
                 logger.warning(f"[{platform}] Got prompt text, trying previous copy button")
@@ -777,8 +779,10 @@ def extract_response(platform: str) -> str:
                 if alt and alt != content:
                     content = alt
             else:
-                logger.warning(f"[{platform}] Only 1 copy button — got prompt, no response yet")
-                content = ''
+                # Don't blank — on Grok/ChatGPT user messages have no copy buttons,
+                # so 1 copy button IS the response. Let downstream parser validate.
+                logger.warning(f"[{platform}] Only 1 copy button — prompt marker in response, keeping content")
+                pass
 
     return content or ''
 
