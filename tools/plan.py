@@ -196,7 +196,7 @@ def _create_plan(platform: str, action: str, params: Dict,
     # Global plan lock — ONE lock for the whole machine.
     # Only one Firefox, one active tab. Monitor stops ALL cycling while set.
     # Cleared by send_message (plan executed) or extract(complete=True).
-    redis_client.setex("taey:plan_active", 600, json.dumps({
+    redis_client.setex("taey:plan_active", 180, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),  # who set this lock
         'created_at': time.time(),
@@ -248,7 +248,7 @@ def _create_extract_plan(platform: str, params: Dict,
     }))
 
     # Global plan lock — blocks monitor tab cycling during extraction
-    redis_client.setex("taey:plan_active", 600, json.dumps({
+    redis_client.setex("taey:plan_active", 180, json.dumps({
         'plan_id': plan_id, 'platform': platform,
         'node_id': node_key('').rstrip(':'),
         'created_at': time.time(),

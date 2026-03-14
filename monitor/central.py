@@ -79,6 +79,7 @@ except ImportError:
 # Eliminates NODE_ID mismatch between monitor and MCP server.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from storage.redis_pool import node_key as _node_key, NODE_ID
+from core.atspi import find_firefox as _find_firefox_core, get_platform_document, get_document_url
 
 # Platform patterns
 STOP_PATTERNS = {
@@ -204,59 +205,21 @@ class CentralMonitor:
     # ------------------------------------------------------------------
 
     def _find_firefox(self):
-        desktop = Atspi.get_desktop(0)
-        for i in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(i)
-            if 'firefox' in (app.get_name() or '').lower():
-                return app
-        return None
+        return _find_firefox_core()
 
     def _find_document(self, firefox, platform: str):
-        url_pat = URL_PATTERNS.get(platform, platform)
-
-        def search(obj, depth=0):
-            if depth > 10:
-                return None
-            try:
-                if (obj.get_role_name() or '') == 'document web':
-                    iface = obj.get_document_iface()
-                    if iface:
-                        url = iface.get_document_attribute_value('DocURL')
-                        if url and url_pat in url.lower():
-                            return obj
-                for i in range(obj.get_child_count()):
-                    child = obj.get_child_at_index(i)
-                    if child:
-                        r = search(child, depth + 1)
-                        if r:
-                            return r
-            except Exception:
-                pass
-            return None
-
-        return search(firefox)
+        return get_platform_document(firefox, platform)
 
     def _get_document_url(self, doc) -> Optional[str]:
-        try:
-            iface = doc.get_document_iface()
-            if iface:
-                return iface.get_document_attribute_value('DocURL')
-        except Exception:
-            pass
-        return None
+        return get_document_url(doc)
 
     def _force_dbus_refresh(self, doc):
-        try:
-            doc.clear_cache_single()
-            for i in range(min(doc.get_child_count(), 5)):
-                child = doc.get_child_at_index(i)
-                if child:
-                    try:
-                        child.clear_cache_single()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        """Clear AT-SPI cache on document so we see current state."""
+        doc.clear_cache_single()
+        for i in range(doc.get_child_count()):
+            child = doc.get_child_at_index(i)
+            if child:
+                child.clear_cache_single()
 
     def _is_stop_button(self, name: str, platform: str) -> bool:
         if not name or len(name) > 50:
@@ -408,16 +371,31 @@ class CentralMonitor:
         timeout = session.get('timeout', 3600)
 
         # State machine: stop button appears → generating. Disappears → complete.
+        # Require 2 consecutive scans without stop to confirm completion.
+        # ChatGPT Extended Thinking has a gap between thinking and response
+        # where the stop button briefly disappears then reappears.
+        gone_count = session.get('stop_gone_count', 0)
         if stop_found:
             if not stop_seen:
                 session['stop_seen'] = True
                 session['generating_since'] = time.time()
                 self._update_session(session)
                 _log(f"[{platform}/{monitor_id}] Stop button — generating")
+            elif gone_count > 0:
+                # Stop reappeared after brief disappearance — reset counter
+                session['stop_gone_count'] = 0
+                self._update_session(session)
+                _log(f"[{platform}/{monitor_id}] Stop reappeared — still generating")
         elif stop_seen:
-            _log(f"[{platform}/{monitor_id}] Stop gone — complete")
-            self._notify(session, "response_complete", "stop_button")
-            return True
+            gone_count += 1
+            session['stop_gone_count'] = gone_count
+            if gone_count >= 2:
+                _log(f"[{platform}/{monitor_id}] Stop gone (confirmed) — complete")
+                self._notify(session, "response_complete", "stop_button")
+                return True
+            else:
+                self._update_session(session)
+                _log(f"[{platform}/{monitor_id}] Stop gone ({gone_count}/2) — confirming...")
 
         # Timeout check
         if time.time() - started_ts > timeout:
@@ -508,6 +486,7 @@ class CentralMonitor:
 
         sessions = self._get_sessions()
         if not sessions:
+            _log("No active sessions")
             return
 
         firefox = self._find_firefox()
@@ -533,7 +512,7 @@ class CentralMonitor:
                 continue
 
             self._switch_tab(platform)
-            time.sleep(1)
+            time.sleep(3)
 
             for session in platform_sessions:
                 if self._plan_active():
