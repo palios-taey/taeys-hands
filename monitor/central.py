@@ -23,12 +23,23 @@ Environment:
 import argparse
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
+
+CYCLE_TIMEOUT_SECONDS = 60  # Hard limit per cycle — kills hung AT-SPI/Redis calls
+
+
+class CycleTimeout(Exception):
+    pass
+
+
+def _cycle_timeout_handler(signum, frame):
+    raise CycleTimeout("Cycle timed out")
 
 # .env loading
 _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -125,6 +136,8 @@ class CentralMonitor:
                 host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                 port=int(os.environ.get('REDIS_PORT', 6379)),
                 decode_responses=True,
+                socket_timeout=5,
+                socket_connect_timeout=5,
             )
             c.ping()
             return c
@@ -461,13 +474,22 @@ class CentralMonitor:
              f"cycle={self.cycle_interval}s, dwell={self.dwell_seconds}s)")
 
         while True:
+            old_handler = signal.signal(signal.SIGALRM, _cycle_timeout_handler)
+            signal.alarm(CYCLE_TIMEOUT_SECONDS)
             try:
                 self._cycle()
             except KeyboardInterrupt:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
                 _log("Interrupted — exiting")
                 break
+            except CycleTimeout:
+                _log("CYCLE TIMEOUT — AT-SPI or Redis hung, skipping")
             except Exception as e:
                 _log(f"Cycle error: {e}")
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
             time.sleep(self.cycle_interval)
 
     def _cycle(self):
