@@ -212,7 +212,14 @@ def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
     if target_idx is None:
         return None
 
-    for _ in range(target_idx + 1):
+    # Reset to top — dropdown may open with current selection highlighted
+    for _ in range(len(yaml_items)):
+        inp.press_key('Up')
+        time.sleep(0.1)
+    time.sleep(0.15)
+
+    # Navigate down to target — first item is already focused at top
+    for _ in range(target_idx):
         inp.press_key('Down')
         time.sleep(0.15)
     inp.press_key('Return')
