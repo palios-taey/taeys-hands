@@ -1094,6 +1094,55 @@ def send_prompt(platform: str, prompt: str) -> bool:
     return True
 
 
+def dismiss_browser_popups(platform: str) -> None:
+    """Dismiss native Firefox permission popups (e.g. persistent storage).
+
+    These popups block all page interaction. Uses AT-SPI do_action on
+    Block/Deny buttons (xdotool clicks don't reach native Firefox UI).
+    """
+    doc = get_doc(platform, force_refresh=True)
+    if not doc:
+        return
+
+    # Walk up to the frame (popups are siblings of the document, not children)
+    try:
+        frame = doc.get_parent()
+        while frame and frame.get_role_name() != 'frame':
+            frame = frame.get_parent()
+    except Exception:
+        return
+
+    if not frame:
+        return
+
+    # BFS the frame for Block/Deny/Dismiss buttons in the popup area (y < 250)
+    queue = [frame]
+    count = 0
+    dismissed = False
+    while queue and count < 200:
+        node = queue.pop(0)
+        count += 1
+        try:
+            role = node.get_role_name()
+            name = (node.get_name() or '').strip()
+            if role == 'push button' and name in ('Block', 'Deny', 'Not now', 'Not Now', 'Dismiss'):
+                ext = node.get_extents(0)
+                if ext.y < 300:  # Popup area is at top of window
+                    ai = node.get_action_iface()
+                    if ai and ai.get_n_actions() > 0:
+                        ai.do_action(0)
+                        logger.info(f"[{platform}] Dismissed browser popup: clicked '{name}'")
+                        dismissed = True
+                        break
+            for k in range(min(node.get_child_count(), 30)):
+                queue.append(node.get_child_at_index(k))
+        except Exception:
+            pass
+
+    if dismissed:
+        time.sleep(1.0)
+
+
 def process_platform(platform: str, prompt: str) -> dict:
     """Full cycle for one platform: package → attach → send → wait → extract → complete.
 
@@ -1127,6 +1176,9 @@ def process_platform(platform: str, prompt: str) -> dict:
         result['error'] = 'nav_failed'
         fail_package(platform, 'navigation_failed')
         return result
+
+    # Step 2.5: Dismiss any browser permission popups
+    dismiss_browser_popups(platform)
 
     # Step 3: Select model if configured
     if platform == 'chatgpt':
