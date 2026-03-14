@@ -579,15 +579,10 @@ def _scan_with_thread_timeout(platform: str, timeout_sec: int = 15):
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
     """Wait for AI response to complete.
 
-    Two strategies based on platform:
-    - ChatGPT/Gemini: Fixed wait + extract attempt (stop button not in AT-SPI)
-    - Grok: AT-SPI stop button polling (reliable on Grok)
-
-    Returns True if response detected, False on timeout.
+    All platforms use fixed wait + extract attempt. AT-SPI stop button
+    detection is unreliable — button names change or aren't exposed.
     """
-    if platform in ('chatgpt', 'gemini'):
-        return _wait_fixed_then_extract(platform, timeout)
-    return _wait_atspi_polling(platform, timeout)
+    return _wait_fixed_then_extract(platform, timeout)
 
 
 def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
