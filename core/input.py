@@ -77,11 +77,11 @@ def type_text(text: str, delay_ms: int = 5, timeout: int = 30) -> bool:
 
 
 def focus_firefox(timeout: int = 5) -> bool:
-    """Activate the Firefox window. Tries multiple methods:
+    """Activate the Firefox window. Tries multiple methods per window:
     1. xdotool windowactivate (standard X11 with WM)
     2. xdotool windowfocus (bare Xvfb without WM)
-    3. wmctrl -a (GNOME Shell fallback)
-    Uses LAST window ID to skip mutter decorator windows."""
+    Tries LAST window first (skips mutter decorators on GNOME), then
+    iterates all windows (skips utility windows on bare Xvfb)."""
     try:
         r = subprocess.run(
             ['xdotool', 'search', '--class', 'Firefox'],
@@ -89,27 +89,31 @@ def focus_firefox(timeout: int = 5) -> bool:
         )
         if r.returncode != 0 or not r.stdout.strip():
             return False
-        window_id = r.stdout.strip().split('\n')[-1]
+        wids = r.stdout.strip().split('\n')
 
-        # Method 1: windowactivate (works with standard WMs)
-        r2 = subprocess.run(
-            ['xdotool', 'windowactivate', window_id],
-            env=_get_env(), capture_output=True, text=True, timeout=timeout,
-        )
-        if r2.returncode == 0 and 'error' not in (r2.stderr or '').lower():
-            time.sleep(0.3)
-            return True
+        # Try last first (GNOME: decorator is first, real window is last),
+        # then all others in reverse (Xvfb: utility windows come last)
+        ordered = [wids[-1]] + list(reversed(wids[:-1]))
+        for window_id in ordered:
+            # Method 1: windowactivate (works with standard WMs)
+            r2 = subprocess.run(
+                ['xdotool', 'windowactivate', window_id],
+                env=_get_env(), capture_output=True, text=True, timeout=timeout,
+            )
+            if r2.returncode == 0 and 'error' not in (r2.stderr or '').lower():
+                time.sleep(0.3)
+                return True
 
-        # Method 2: windowfocus (works on bare Xvfb without WM)
-        r3 = subprocess.run(
-            ['xdotool', 'windowfocus', window_id],
-            env=_get_env(), capture_output=True, text=True, timeout=timeout,
-        )
-        if r3.returncode == 0:
-            time.sleep(0.3)
-            return True
+            # Method 2: windowfocus (works on bare Xvfb without WM)
+            r3 = subprocess.run(
+                ['xdotool', 'windowfocus', window_id],
+                env=_get_env(), capture_output=True, text=True, timeout=timeout,
+            )
+            if r3.returncode == 0 and 'error' not in (r3.stderr or '').lower():
+                time.sleep(0.3)
+                return True
 
-        # Method 3: wmctrl (works on some GNOME Shell setups)
+        # Method 3: wmctrl fallback
         r4 = subprocess.run(
             ['wmctrl', '-a', 'Mozilla Firefox'],
             env=_get_env(), capture_output=True, timeout=timeout,
