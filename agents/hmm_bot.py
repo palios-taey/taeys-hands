@@ -661,8 +661,15 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
             elif time.time() - start > 30:
                 current_copy = count_copy_buttons(platform)
                 if current_copy > initial_copy_count:
-                    logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
-                    return True
+                    # 0→1 could be just the prompt's copy button appearing (Grok).
+                    # Require +2 from zero, or +1 from non-zero (prompt already counted).
+                    if initial_copy_count == 0 and current_copy == 1:
+                        logger.info(f"[{platform}] Copy 0->1 (may be prompt button, waiting for response...)")
+                        # Update baseline so next check detects 1→2
+                        initial_copy_count = 1
+                    else:
+                        logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
+                        return True
                 elif time.time() - start > 120:
                     logger.warning(f"[{platform}] No stop button after 120s — possible send failure")
                     return False
