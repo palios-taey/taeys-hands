@@ -3,7 +3,7 @@
 #
 # After deploy.sh kills MCP server processes, each Claude Code session needs
 # to reconnect. This script automates the /mcp menu sequence:
-#   Escape → /mcp → Enter → Down → Enter → continuation prompt
+#   Escape → /mcp → Enter (submit) → Enter (enter menu) → Down → Enter → continuation prompt
 #
 # Usage:
 #   mcp-reconnect                    # All local Claude sessions
@@ -14,7 +14,7 @@
 #   1. Finds tmux sessions running 'claude' as pane command
 #   2. Sends Escape to stop active generation
 #   3. Waits for Claude to settle
-#   4. Sends /mcp → Enter → Down → Enter (reconnect option)
+#   4. Sends /mcp → Enter → Enter → Down → Enter (reconnect option)
 #   5. Sends continuation prompt so Claude resumes work
 
 set -euo pipefail
@@ -47,21 +47,20 @@ reconnect_session() {
     tmux send-keys -t "$session" -l "/mcp"
     sleep 0.3
     tmux send-keys -t "$session" Enter
-    tmux send-keys -t "$session" C-j
     sleep "$SETTLE_AFTER_MCP"
 
-    echo "[mcp-reconnect] $session: selecting reconnect (Down + Enter)..."
+    echo "[mcp-reconnect] $session: entering menu + selecting reconnect..."
+    tmux send-keys -t "$session" Enter
+    sleep 0.3
     tmux send-keys -t "$session" Down
     sleep 0.2
     tmux send-keys -t "$session" Enter
-    tmux send-keys -t "$session" C-j
     sleep "$SETTLE_AFTER_SELECT"
 
     echo "[mcp-reconnect] $session: sending continuation prompt..."
     tmux send-keys -t "$session" -l "$CONTINUATION_MSG"
     sleep 0.3
     tmux send-keys -t "$session" Enter
-    tmux send-keys -t "$session" C-j
 
     echo "[mcp-reconnect] $session: done"
 }
@@ -98,17 +97,16 @@ sleep 3
 tmux send-keys -t "$SESSION" -l "/mcp"
 sleep 0.3
 tmux send-keys -t "$SESSION" Enter
-tmux send-keys -t "$SESSION" C-j
 sleep 1
+tmux send-keys -t "$SESSION" Enter
+sleep 0.3
 tmux send-keys -t "$SESSION" Down
 sleep 0.2
 tmux send-keys -t "$SESSION" Enter
-tmux send-keys -t "$SESSION" C-j
 sleep 3
 tmux send-keys -t "$SESSION" -l "MCP servers reconnected with latest deployed code. Continue."
 sleep 0.3
 tmux send-keys -t "$SESSION" Enter
-tmux send-keys -t "$SESSION" C-j
 echo "done"
 RECONNECT_EOF
     done
