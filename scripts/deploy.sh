@@ -1,8 +1,10 @@
 #!/bin/bash
-# deploy.sh — Pull latest code, restart MCP servers, auto-reconnect sessions.
+# deploy.sh — Pull latest code, reconnect MCP servers on all machines.
 #
-# Kills MCP server processes, then uses mcp-reconnect to automatically
-# reconnect each Claude Code session via tmux key injection (/mcp menu).
+# Pulls code, cleans __pycache__, installs scripts, restarts notification
+# daemon, then uses mcp-reconnect to auto-reconnect each Claude Code
+# session via tmux key injection (/mcp menu). The /mcp reconnect restarts
+# the MCP server process within Claude Code, picking up new code.
 #
 # For file-watch auto-reload during development, see mcp-watch.sh.
 #
@@ -38,10 +40,6 @@ deploy_local() {
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
     sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
 
-    echo "[local] Killing MCP server processes..."
-    pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (sessions must /mcp to reconnect)" \
-        || echo "[local] No MCP servers running"
-
     echo "[local] Restarting notification daemon..."
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
@@ -74,7 +72,6 @@ deploy_remote() {
         git reset --hard origin/main 2>&1 | tail -1
         sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
         sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
-        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
         # ONE daemon per machine — auto-discovers all local tmux sessions
@@ -86,7 +83,7 @@ deploy_remote() {
                 > "/tmp/notify-daemon.log" 2>&1 &
             echo "Notify daemon started (PID $!)"
         fi
-        # Auto-reconnect MCP in Claude sessions
+        # Auto-reconnect MCP in Claude sessions on this machine
         if command -v mcp-reconnect &>/dev/null; then
             mcp-reconnect &
         fi
