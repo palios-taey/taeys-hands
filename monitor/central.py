@@ -449,6 +449,47 @@ class CentralMonitor:
                 signal.signal(signal.SIGALRM, old_handler)
             time.sleep(self.cycle_interval)
 
+    def _get_plan_platform(self) -> Optional[str]:
+        """Get the platform from the active plan lock."""
+        if not self.rc:
+            return None
+        try:
+            raw = self.rc.get("taey:plan_active")
+            if raw:
+                return json.loads(raw).get('platform')
+        except Exception:
+            return None
+
+    def _check_current_tab(self, sessions: List[Dict], firefox):
+        """During plan lock, check sessions on the current tab without switching.
+
+        AT-SPI only reliably reflects the active tab's state (inactive tabs
+        are stale). So we only check sessions matching the plan's platform.
+        """
+        plan_platform = self._get_plan_platform()
+        if not plan_platform:
+            return
+
+        matching = [s for s in sessions if s['platform'] == plan_platform]
+        if not matching:
+            return
+
+        doc = self._find_document(firefox, plan_platform)
+        if not doc:
+            return
+
+        self._force_dbus_refresh(doc)
+        completed = []
+        for session in matching:
+            if self._check_session(session, doc):
+                completed.append(session)
+
+        for s in completed:
+            self._remove_session(s)
+
+        if completed:
+            _log(f"Plan active ({plan_platform}) — detected {len(completed)} completion(s)")
+
     def _cycle(self):
         # Reconnect Redis if connection was lost
         if self.rc:
@@ -458,19 +499,22 @@ class CentralMonitor:
                 _log("Redis connection lost — reconnecting")
                 self.rc = self._connect_redis()
 
-        # Check plan lock — full stop
-        if self._plan_active():
-            _log("Plan active — skipping cycle")
-            return
+        plan_locked = self._plan_active()
 
         sessions = self._get_sessions()
         if not sessions:
-            _log("No active sessions")
+            if not plan_locked:
+                _log("No active sessions")
             return
 
         firefox = self._find_firefox()
         if not firefox:
             _log("Firefox not found")
+            return
+
+        if plan_locked:
+            # Plan active — check current tab only (no tab switching)
+            self._check_current_tab(sessions, firefox)
             return
 
         platforms = {s['platform'] for s in sessions}
