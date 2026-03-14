@@ -84,7 +84,7 @@ def focus_firefox(timeout: int = 5) -> bool:
     Uses LAST window ID to skip mutter decorator windows."""
     try:
         r = subprocess.run(
-            ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+            ['xdotool', 'search', '--class', 'Firefox'],
             env=_get_env(), capture_output=True, text=True, timeout=timeout,
         )
         if r.returncode != 0 or not r.stdout.strip():
