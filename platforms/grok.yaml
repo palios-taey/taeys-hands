@@ -7,12 +7,15 @@ tab_shortcut: alt+4
 capabilities:
   # "Model select" button — React portal dropdown, visible in AT-SPI after xdotool click
   # AT-SPI concatenates label+description WITHOUT space (e.g. "AutoChooses Fast or Expert")
-  # Verified live March 7 2026
+  # Verified live March 7 2026 — NEEDS RE-VERIFICATION
+  # NOTE: Dropdown may have items not listed here (Custom Instructions, etc.)
+  # Keyboard nav uses index position — order MUST match live dropdown exactly.
   models:
     - AutoChooses Fast or Expert
     - FastQuick responses
     - ExpertThinks hard
     - HeavyPowered by Grok 4.20 (beta)
+    - Custom InstructionsNot set Open Custom Instructions
     - Try Grok 4.20 BetaEarly access Toggle
   modes: []
   tools: []
