@@ -129,7 +129,8 @@ def handle_quick_extract(platform: str, redis_client,
     # If we have "Copy response" buttons (ChatGPT), prefer those over plain "Copy"
     chatgpt_copy = [b for b in response_copy if (b.get('name') or '').strip().lower() == 'copy response']
     candidates = chatgpt_copy or response_copy or copy_buttons
-    newest = candidates[-1]
+    # Pick the button with highest Y coordinate — bottom of page = AI response
+    newest = max(candidates, key=lambda b: b.get('y', 0))
     x, y = newest['x'], newest['y']
 
     if y > SCREEN_HEIGHT:
