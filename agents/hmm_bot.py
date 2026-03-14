@@ -890,13 +890,10 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button — method depends on platform:
-    # ChatGPT/Gemini: AT-SPI do_action triggers React handlers reliably
-    # Grok: AT-SPI do_action doesn't open dropdown, xdotool click does
-    if platform == 'grok':
-        inp.click_at(btn['x'], btn['y'])
-        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-    else:
+    # Click attach button:
+    # Gemini: AT-SPI do_action (only reliable method — xdotool doesn't trigger dropdown)
+    # ChatGPT/Grok: xdotool click (works universally; AT-SPI do_action inconsistent across machines)
+    if platform == 'gemini':
         btn_obj = btn.get('atspi_obj')
         atspi_clicked = False
         if btn_obj:
@@ -905,12 +902,15 @@ def attach_file(platform: str, file_path: str) -> bool:
                 if ai and ai.get_n_actions() > 0:
                     ai.do_action(0)
                     atspi_clicked = True
-                    logger.info(f"[{platform}] Clicked attach button via AT-SPI do_action at ({btn['x']}, {btn['y']})")
+                    logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
             except Exception as e:
                 logger.debug(f"[{platform}] AT-SPI do_action failed: {e}")
         if not atspi_clicked:
             inp.click_at(btn['x'], btn['y'])
             logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+    else:
+        inp.click_at(btn['x'], btn['y'])
+        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
     time.sleep(1.5)
 
     # Select file upload from dropdown menu
