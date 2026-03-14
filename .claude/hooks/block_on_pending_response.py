@@ -65,7 +65,7 @@ def main():
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
-        allow()
+        deny("Invalid JSON input from Claude Code")
 
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
@@ -77,15 +77,15 @@ def main():
     if short_name in ALWAYS_ALLOWED:
         allow(f"{short_name} always allowed")
 
-    # Connect to Redis
+    # Connect to Redis — required infrastructure
     r = get_redis()
     if not r:
-        allow("Redis unavailable - allowing")
+        deny("Redis unavailable — required infrastructure is down")
 
     try:
         r.ping()
     except Exception:
-        allow("Redis ping failed - allowing")
+        deny("Redis unavailable — required infrastructure is down")
 
     # Only block taey_send_message to a platform that already has a pending response
     # Cross-platform work is always allowed (Dream Cycle pattern)
@@ -109,7 +109,7 @@ def main():
         allow(f"No pending response on {current_platform}")
 
     except Exception:
-        allow("Redis check failed - allowing")
+        deny("Redis check failed — required infrastructure is down")
 
 
 if __name__ == "__main__":

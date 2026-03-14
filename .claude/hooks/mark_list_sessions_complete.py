@@ -44,8 +44,9 @@ def main():
     if r:
         try:
             r.set(node_key("list_sessions_checkpoint"), str(time.time()), ex=1800)  # 30 min TTL
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("mark_list_sessions: Redis write failed: %s", e)
 
     sys.exit(0)
 

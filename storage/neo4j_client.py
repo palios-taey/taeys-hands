@@ -57,18 +57,17 @@ def get_or_create_session(platform: str, url: str) -> Optional[str]:
     driver = get_driver()
     if not driver:
         return None
-    try:
-        with driver.session() as s:
-            result = s.run("""
-                MATCH (sess:ChatSession {platform: $platform, url: $url})
-                RETURN sess.session_id AS session_id
-                ORDER BY sess.created_at DESC LIMIT 1
-            """, platform=platform, url=url)
-            record = result.single()
-            if record:
-                return record['session_id']
-    except Exception as e:
-        logger.error(f"Session lookup failed: {e}")
+    # Lookup existing — let errors propagate (don't mask with silent create)
+    with driver.session() as s:
+        result = s.run("""
+            MATCH (sess:ChatSession {platform: $platform, url: $url})
+            RETURN sess.session_id AS session_id
+            ORDER BY sess.created_at DESC LIMIT 1
+        """, platform=platform, url=url)
+        record = result.single()
+        if record:
+            return record['session_id']
+    # No existing session found — create new
     return create_session(platform, url)
 
 

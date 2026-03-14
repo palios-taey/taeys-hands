@@ -249,8 +249,13 @@ def _normalize_dropdown_key(dropdown: str) -> str:
     return _EXACT.get(s, '')
 
 
-# Platforms where AT-SPI can't reliably enumerate dropdown items (React portals)
-_KEYBOARD_NAV_PLATFORMS = {'grok', 'chatgpt'}
+def _get_dropdown_method(platform: str) -> str:
+    """Get dropdown method from platform YAML config."""
+    try:
+        config = _load_platform_yaml(platform)
+        return config.get('dropdown_method', 'atspi_enum')
+    except (FileNotFoundError, ValueError):
+        return 'atspi_enum'
 
 
 def handle_select_dropdown(platform: str, dropdown: str,
@@ -284,7 +289,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     time.sleep(1.0)
 
     # For React portal platforms, use keyboard nav with YAML item order
-    if platform in _KEYBOARD_NAV_PLATFORMS:
+    if _get_dropdown_method(platform) == 'keyboard_nav':
         try:
             config = _load_platform_yaml(platform)
             caps = config.get('capabilities', {})

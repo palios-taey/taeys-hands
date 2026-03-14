@@ -27,6 +27,11 @@ capabilities:
 # Click strategy: atspi_first (AT-SPI do_action reliable) or xdotool_first (default for React portals)
 click_strategy: atspi_first
 
+# How attach works: do_action on "Open upload file menu" → AT-SPI menu → click "Upload files"
+attach_method: atspi_menu
+# How dropdowns work: AT-SPI enumerates menu items after click
+dropdown_method: atspi_enum
+
 quirks:
   - sidebar: "Left sidebar CLOSED, right sidebar always CLOSE"
   - tree_depth: "AT-SPI tree nests buttons at depth 16-20 (deeper than others)"

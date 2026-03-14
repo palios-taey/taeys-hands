@@ -70,11 +70,11 @@ def main():
 
     r = get_redis()
     if not r:
-        allow("Redis unavailable - allowing inspect without plan check")
+        deny("Redis unavailable — required infrastructure is down")
     try:
         r.ping()
     except Exception:
-        allow("Redis unavailable - allowing inspect without plan check")
+        deny("Redis unavailable — required infrastructure is down")
 
     # Check for plan (plans are consumption-based - deleted after successful send)
     plan_json = r.get(node_key(f"plan:{platform}"))

@@ -56,17 +56,19 @@ def main():
     if not os.path.isfile(file_path):
         deny(f"File not found: {file_path}")
 
-    # Require active plan
+    # Require active plan — Redis is required infrastructure
     r = get_redis()
-    if r:
-        try:
-            r.ping()
-            plan_json = r.get(node_key(f"plan:{platform}"))
-            if not plan_json:
-                deny(f"No plan for {platform}. Create a plan with taey_plan first. "
-                     "Plans auto-include identity files and consolidate attachments.")
-        except Exception:
-            pass  # Redis down — allow (can't check)
+    if not r:
+        deny("Redis unavailable — required infrastructure is down")
+    try:
+        r.ping()
+    except Exception:
+        deny("Redis unavailable — required infrastructure is down")
+
+    plan_json = r.get(node_key(f"plan:{platform}"))
+    if not plan_json:
+        deny(f"No plan for {platform}. Create a plan with taey_plan first. "
+             "Plans auto-include identity files and consolidate attachments.")
 
     allow(f"Attach allowed for {platform} — plan exists, file: {os.path.basename(file_path)}")
 
