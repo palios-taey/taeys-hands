@@ -48,6 +48,7 @@ quirks:
 stop_patterns:
   - stop
   - stop generating
+  - thinking
 
 mode_guidance:
   expert:
