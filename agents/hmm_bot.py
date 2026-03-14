@@ -155,7 +155,7 @@ def restart_firefox(platforms: list) -> bool:
     pids_to_kill = set()
     try:
         r = subprocess.run(
-            ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+            ['xdotool', 'search', '--class', 'Firefox'],
             capture_output=True, text=True, timeout=5, env=xenv,
         )
         for wid in (r.stdout.strip().split('\n') if r.stdout.strip() else []):
@@ -176,8 +176,9 @@ def restart_firefox(platforms: list) -> bool:
             subprocess.run(['kill', '-9', pid], capture_output=True)
         logger.info(f"Killed Firefox PIDs on {display}: {pids_to_kill}")
     else:
-        # Fallback: no window found, kill all (single-instance mode)
-        subprocess.run(['pkill', '-9', '-f', 'firefox'], capture_output=True)
+        # No window found — DON'T pkill all Firefox (kills other displays' bots).
+        # Just log and proceed to start a new instance.
+        logger.info(f"No Firefox windows found on {display} — starting fresh")
 
     subprocess.run(['pkill', '-9', '-f', 'crashreporter'], capture_output=True)
     for _ in range(10):
@@ -185,7 +186,7 @@ def restart_firefox(platforms: list) -> bool:
         # Check if our display is clear
         try:
             r = subprocess.run(
-                ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                ['xdotool', 'search', '--class', 'Firefox'],
                 capture_output=True, text=True, timeout=3, env=xenv,
             )
             if r.returncode != 0 or not r.stdout.strip():
@@ -426,13 +427,14 @@ def navigate_fresh_session(platform: str) -> bool:
 def check_firefox_alive(platform: str = None, retries: int = 3) -> bool:
     """Check if Firefox is running via xdotool (DISPLAY-scoped).
 
-    Uses xdotool instead of AT-SPI to avoid D-Bus contention when
-    multiple bots query simultaneously on shared D-Bus session.
+    Uses --class Firefox instead of --name 'Mozilla Firefox' because
+    page navigation changes the window title (e.g. to 'ChatGPT').
+    Class name stays 'Firefox' regardless of page content.
     """
     for attempt in range(retries):
         try:
             r = subprocess.run(
-                ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                ['xdotool', 'search', '--class', 'Firefox'],
                 capture_output=True, text=True, timeout=5,
             )
             if r.returncode == 0 and r.stdout.strip():
@@ -859,10 +861,6 @@ def attach_file(platform: str, file_path: str) -> bool:
     from core.interact import atspi_click
 
     firefox = get_firefox(platform)
-    doc = get_doc(platform)
-    if not doc:
-        logger.warning(f"[{platform}] No document found for attach")
-        return False
 
     # Stale dialog from previous run = bug. Clean it up and fail.
     if _find_dialog_wid():
@@ -870,15 +868,19 @@ def attach_file(platform: str, file_path: str) -> bool:
         close_stale_file_dialogs()
         return False
 
-    # Find attach button — retry up to 5 times (AT-SPI tree lags after navigation)
+    # Find attach button — retry up to 8 times (AT-SPI tree lags after navigation)
     btn = None
-    for attempt in range(5):
+    doc = None
+    for attempt in range(8):
         doc = get_doc(platform, force_refresh=True)
-        if doc:
-            btn = get_attach_button_coords(doc, platform=platform)
+        if not doc:
+            logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
+            time.sleep(3)
+            continue
+        btn = get_attach_button_coords(doc, platform=platform)
         if btn:
             break
-        logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/5...")
+        logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
         time.sleep(3)
     if not btn:
         logger.error(f"[{platform}] Attach button not found after 5 retries")
