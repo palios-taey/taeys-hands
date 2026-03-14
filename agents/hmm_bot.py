@@ -959,7 +959,9 @@ def attach_file(platform: str, file_path: str) -> bool:
             else:
                 logger.warning(f"[{platform}] find_menu_items returned empty (doc={doc2 is not None}, ff={firefox is not None})")
     else:
-        # Grok and others: find button, xdotool click, keyboard nav dropdown
+        # Grok and others: find button, AT-SPI click first (React buttons
+        # don't respond to xdotool), then keyboard nav dropdown.
+        # Matches tools/attach.py _try_click_then_dialog() strategy.
         btn = None
         for attempt in range(8):
             doc = get_doc(platform, force_refresh=True)
@@ -976,8 +978,21 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.error(f"[{platform}] Attach button not found after 8 retries")
             return False
 
-        inp.click_at(btn['x'], btn['y'])
-        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+        # AT-SPI do_action first, xdotool fallback
+        btn_obj = btn.get('atspi_obj')
+        atspi_clicked = False
+        if btn_obj:
+            try:
+                ai = btn_obj.get_action_iface()
+                if ai and ai.get_n_actions() > 0:
+                    ai.do_action(0)
+                    atspi_clicked = True
+                    logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
+            except Exception as e:
+                logger.debug(f"[{platform}] AT-SPI do_action failed: {e}")
+        if not atspi_clicked:
+            inp.click_at(btn['x'], btn['y'])
+            logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
         time.sleep(1.5)
 
         # Keyboard nav — Down selects "Upload a file", Enter confirms
