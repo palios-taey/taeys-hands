@@ -35,7 +35,9 @@ def _click_trigger_via_atspi(doc, trigger_name: str, platform: str = None) -> bo
         try:
             name = (obj.get_name() or '').lower().strip()
             role = obj.get_role_name() or ''
-            if name == trigger_lower and 'button' in role:
+            # Substring match — trigger names are variable AT-SPI labels
+            # e.g. "Model selector, current model is 5.4 Pro" contains "model"
+            if trigger_lower in name and 'button' in role:
                 action = obj.get_action_iface()
                 if action and action.get_n_actions() > 0:
                     action.do_action(0)
@@ -70,7 +72,8 @@ def _get_trigger_coords(doc, trigger_name: str, platform: str = None) -> Dict | 
         try:
             name = (obj.get_name() or '').lower().strip()
             role = obj.get_role_name() or ''
-            if name == trigger_lower and 'button' in role:
+            # Substring match — trigger names are variable AT-SPI labels
+            if trigger_lower in name and 'button' in role:
                 comp = obj.get_component_iface()
                 if comp:
                     rect = comp.get_extents(Atspi.CoordType.SCREEN)
