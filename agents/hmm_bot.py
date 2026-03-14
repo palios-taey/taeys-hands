@@ -493,7 +493,7 @@ def scan_for_stop_button(platform: str) -> bool:
         if 'button' not in e.get('role', ''):
             continue
         name_lower = name.lower().strip()
-        if name_lower in patterns:
+        if any(p in name_lower for p in patterns):
             return True
     return False
 
@@ -1287,8 +1287,9 @@ def process_platform(platform: str, prompt: str) -> dict:
 
     # Step 6: Wait for response
     logger.info(f"[{platform}] Waiting for response...")
-    # Instant mode (ChatGPT): 5min timeout. Others: 20min.
-    resp_timeout = 300 if platform == 'chatgpt' else 1200
+    # ChatGPT/Gemini: 5min (fixed-wait extraction, no stop button).
+    # Grok: 10min (AT-SPI stop button polling, generation can be slow).
+    resp_timeout = 600 if platform == 'grok' else 300
     if not wait_for_response(platform, timeout=resp_timeout):
         result['error'] = 'response_timeout'
         fail_package(platform, 'response_timeout')
