@@ -52,13 +52,6 @@ deploy_local() {
         > "/tmp/notify-daemon.log" 2>&1 &
     echo "[local] Notify daemon started (PID $!)"
 
-    echo "[local] Reconnecting MCP in Claude sessions..."
-    if command -v mcp-reconnect &>/dev/null; then
-        mcp-reconnect &
-    else
-        echo "[local] WARNING: mcp-reconnect not installed — sessions must /mcp manually"
-    fi
-
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
 
@@ -108,6 +101,8 @@ TARGET="${1:-all}"
 
 if [ "$TARGET" = "--local" ]; then
     deploy_local
+    echo "[local] Reconnecting MCP in all Claude sessions..."
+    mcp-reconnect 2>/dev/null || echo "[local] mcp-reconnect not installed — sessions must /mcp manually"
     exit 0
 fi
 
@@ -118,6 +113,10 @@ if [ "$TARGET" != "all" ]; then
         echo "Unknown machine: $TARGET"
         echo "Available: ${!MACHINES[*]} --local"
         exit 1
+    fi
+    # If deploying to spark1 (self), reconnect local sessions after
+    if [ "$TARGET" = "spark1" ]; then
+        mcp-reconnect 2>/dev/null || true
     fi
     exit 0
 fi
@@ -141,4 +140,5 @@ for pid in "${pids[@]}"; do
 done
 
 echo ""
-echo "=== Deploy complete ==="
+echo "=== Deploy complete — reconnecting local MCP sessions ==="
+mcp-reconnect 2>/dev/null || echo "[local] mcp-reconnect not installed — sessions must /mcp manually"
