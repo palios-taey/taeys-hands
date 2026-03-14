@@ -580,27 +580,27 @@ def wait_for_response(platform: str, timeout: int = 600) -> bool:
     """Wait for AI response to complete.
 
     Two strategies based on platform:
-    - ChatGPT: Fixed wait + extract attempt (AT-SPI hangs on ChatGPT)
-    - Gemini/Grok: AT-SPI stop button polling (reliable on these platforms)
+    - ChatGPT/Gemini: Fixed wait + extract attempt (stop button not in AT-SPI)
+    - Grok: AT-SPI stop button polling (reliable on Grok)
 
     Returns True if response detected, False on timeout.
     """
-    if platform == 'chatgpt':
+    if platform in ('chatgpt', 'gemini'):
         return _wait_fixed_then_extract(platform, timeout)
     return _wait_atspi_polling(platform, timeout)
 
 
 def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
-    """ChatGPT: wait fixed intervals, try extract to detect completion.
+    """ChatGPT/Gemini: wait fixed intervals, try extract to detect completion.
 
-    ChatGPT's AT-SPI tree hangs during generation — can't poll stop button.
+    Stop button not reliably exposed in AT-SPI on these platforms.
     Instead: wait, then try to extract. If extract gets content, done.
-    Instant mode responses typically take 20-60s.
     """
     start = time.time()
-    initial_wait = 45  # Instant mode takes ~40s for HMM packages
+    # Gemini thinking takes longer (60-120s), ChatGPT instant mode ~40s
+    initial_wait = 60 if platform == 'gemini' else 45
 
-    logger.info(f"[{platform}] Fixed wait {initial_wait}s (Instant mode)...")
+    logger.info(f"[{platform}] Fixed wait {initial_wait}s...")
     time.sleep(initial_wait)
 
     # Try extract every 15s until timeout
