@@ -134,7 +134,7 @@ for DNUM in 2 3 4; do
                 rm -rf "${PROFILE_COPY}"
                 cp -r "$SOURCE_PROFILE" "${PROFILE_COPY}"
                 rm -f "${PROFILE_COPY}/lock" "${PROFILE_COPY}/.parentlock"
-                rm -rf "${PROFILE_COPY}/sessionstore"* "${PROFILE_COPY}/sessionstore-backups"
+                # sessionstore preserved — contains session cookies for login
                 PROFILE_ARG="--profile ${PROFILE_COPY}"
             fi
 
