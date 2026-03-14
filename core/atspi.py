@@ -48,25 +48,33 @@ def find_firefox():
     return None
 
 
-def find_all_firefox():
-    """Find ALL Firefox apps in AT-SPI desktop tree."""
+def find_all_firefox(pid: int = None):
+    """Find ALL Firefox apps in AT-SPI desktop tree.
+    If pid is given, only return apps matching that process ID."""
     apps = []
     try:
         desktop = Atspi.get_desktop(0)
         for i in range(desktop.get_child_count()):
             app = desktop.get_child_at_index(i)
             if app and 'firefox' in (app.get_name() or '').lower():
+                if pid is not None:
+                    try:
+                        if app.get_process_id() != pid:
+                            continue
+                    except Exception:
+                        continue
                 apps.append(app)
     except Exception as e:
         logger.error(f"AT-SPI search failed: {e}")
     return apps
 
 
-def find_firefox_for_platform(platform: str):
+def find_firefox_for_platform(platform: str, pid: int = None):
     """Find the Firefox instance that has a document matching the given platform.
     Handles multiple Firefox instances (parallel HMM mode).
+    If pid is given, restricts search to that process only.
     Falls back to find_firefox() if only one instance exists."""
-    all_ff = find_all_firefox()
+    all_ff = find_all_firefox(pid=pid)
     if not all_ff:
         return None
     if len(all_ff) == 1:
