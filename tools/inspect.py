@@ -24,6 +24,70 @@ _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')
 
 
+def _click_new_chat_gemini():
+    """Click Gemini's 'New chat' button/link via AT-SPI after page load.
+
+    Gemini's /app URL redirects to the last conversation. This function
+    finds and clicks the 'New chat' element in the sidebar to guarantee
+    a fresh session.
+    """
+    firefox = atspi.find_firefox()
+    if not firefox:
+        logger.warning("Gemini fresh_session: Firefox not found for New chat click")
+        return
+    doc = atspi.get_platform_document(firefox, 'gemini')
+    if not doc:
+        logger.warning("Gemini fresh_session: document not found for New chat click")
+        return
+
+    from gi.repository import Atspi as _Atspi
+
+    def _find_new_chat(obj, depth=0):
+        if depth > 20:
+            return None
+        try:
+            name = (obj.get_name() or '').strip().lower()
+            role = obj.get_role_name() or ''
+            if name == 'new chat' and role in ('link', 'push button'):
+                return obj
+            for i in range(obj.get_child_count()):
+                child = obj.get_child_at_index(i)
+                if child:
+                    found = _find_new_chat(child, depth + 1)
+                    if found:
+                        return found
+        except Exception:
+            pass
+        return None
+
+    new_chat = _find_new_chat(doc)
+    if new_chat:
+        try:
+            action = new_chat.get_action_iface()
+            if action and action.get_n_actions() > 0:
+                action.do_action(0)
+                logger.info("Gemini fresh_session: clicked 'New chat' via AT-SPI")
+                time.sleep(3.0)
+                return
+        except Exception:
+            pass
+        # Fallback: coordinate click
+        try:
+            comp = new_chat.get_component_iface()
+            if comp:
+                rect = comp.get_extents(_Atspi.CoordType.SCREEN)
+                if rect and rect.width > 0:
+                    cx = rect.x + rect.width // 2
+                    cy = rect.y + rect.height // 2
+                    inp.click_at(cx, cy)
+                    logger.info("Gemini fresh_session: clicked 'New chat' at (%d, %d)", cx, cy)
+                    time.sleep(3.0)
+                    return
+        except Exception:
+            pass
+    logger.warning("Gemini fresh_session: 'New chat' element not found — may be on stale conversation")
+
+
 def _detect_attachments(elements: list, all_elements: list = None) -> dict | None:
     """Detect existing file attachments from element list."""
     remove_buttons, file_chips = [], []
@@ -197,6 +261,12 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         time.sleep(0.1)
         inp.press_key('Return')
         time.sleep(8.0)
+
+        # Gemini redirects /app to the last conversation. Click "New chat"
+        # via AT-SPI after page load to guarantee a fresh session.
+        if platform == 'gemini':
+            _click_new_chat_gemini()
+
         inp.press_key('End')
         time.sleep(1.0)
         result['fresh_session'] = True

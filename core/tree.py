@@ -18,7 +18,8 @@ IMPORTANT_STATES = [
 ]
 
 POPUP_ROLES = {
-    'menu', 'menu item', 'menu bar', 'popup menu',
+    'menu', 'menu item', 'check menu item', 'radio menu item',
+    'menu bar', 'popup menu',
     'combo box', 'list box', 'list item',
     'dialog', 'alert', 'tool tip', 'window',
 }
