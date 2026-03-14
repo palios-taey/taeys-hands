@@ -765,24 +765,27 @@ def extract_response(platform: str) -> str:
                           'respond only with minified json',
                           'critical: echo back', 'analyze all all items']
         if any(m in start_text for m in prompt_markers):
-            if len(response_copy) >= 2:
-                logger.warning(f"[{platform}] Got prompt text, trying previous copy button")
-                prev = response_copy[-2]
-                clipboard.clear()
+            # Got prompt text — try ALL other copy buttons (Grok's response button
+            # often has zero extents → Y=0 → sorts first, so [-1] picks prompt's)
+            alternatives = [b for b in copy_buttons if b is not target]
+            found_alt = False
+            for alt_btn in alternatives:
+                clipboard.write_marker(_MARKER)
                 time.sleep(0.1)
-                if prev.get('atspi_obj') and atspi_click(prev):
-                    pass
+                if alt_btn.get('atspi_obj') and atspi_click(alt_btn):
+                    logger.info(f"[{platform}] Trying alt copy button at ({alt_btn['x']}, {alt_btn['y']})")
                 else:
-                    inp.click_at(prev['x'], prev['y'])
+                    inp.click_at(alt_btn['x'], alt_btn['y'])
+                    logger.info(f"[{platform}] Trying alt copy button (xdotool) at ({alt_btn['x']}, {alt_btn['y']})")
                 time.sleep(0.8)
                 alt = clipboard.read()
-                if alt and alt != content:
+                if alt and alt != _MARKER and alt != content:
                     content = alt
-            else:
-                # Don't blank — on Grok/ChatGPT user messages have no copy buttons,
-                # so 1 copy button IS the response. Let downstream parser validate.
-                logger.warning(f"[{platform}] Only 1 copy button — prompt marker in response, keeping content")
-                pass
+                    found_alt = True
+                    logger.info(f"[{platform}] Got response from alt copy button ({len(alt)} chars)")
+                    break
+            if not found_alt:
+                logger.warning(f"[{platform}] All {len(copy_buttons)} copy buttons returned prompt text")
 
     return content or ''
 
