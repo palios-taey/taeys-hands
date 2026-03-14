@@ -579,10 +579,13 @@ def _scan_with_thread_timeout(platform: str, timeout_sec: int = 15):
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
     """Wait for AI response to complete.
 
-    All platforms use fixed wait + extract attempt. AT-SPI stop button
-    detection is unreliable — button names change or aren't exposed.
+    - ChatGPT/Gemini: Fixed wait + extract (stop button not in AT-SPI)
+    - Grok: AT-SPI stop button polling (stop button IS exposed, and Grok
+      doesn't always generate — fixed-wait wastes 5min on failed sends)
     """
-    return _wait_fixed_then_extract(platform, timeout)
+    if platform in ('chatgpt', 'gemini'):
+        return _wait_fixed_then_extract(platform, timeout)
+    return _wait_atspi_polling(platform, timeout)
 
 
 def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
@@ -660,8 +663,8 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
                 if current_copy > initial_copy_count:
                     logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
                     return True
-                elif time.time() - start > 60:
-                    logger.warning(f"[{platform}] No stop button after 60s — possible send failure")
+                elif time.time() - start > 120:
+                    logger.warning(f"[{platform}] No stop button after 120s — possible send failure")
                     return False
             time.sleep(3)
 
