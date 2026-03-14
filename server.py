@@ -288,6 +288,7 @@ _TOOL_HANDLERS = {
 _REQUIRES_PLAN = {
     'taey_inspect', 'taey_click', 'taey_attach',
     'taey_send_message', 'taey_select_dropdown',
+    'taey_quick_extract', 'taey_extract_history',
 }
 
 
