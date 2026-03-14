@@ -27,15 +27,15 @@ def _click_trigger_via_atspi(doc, trigger_name: str, platform: str = None) -> bo
     """
     if not doc:
         return False
-    trigger_lower = trigger_name.lower()
+    trigger_lower = trigger_name.lower().strip()
 
     def find_and_click(obj, depth=0):
         if depth > 25:
             return False
         try:
-            name = (obj.get_name() or '').lower()
+            name = (obj.get_name() or '').lower().strip()
             role = obj.get_role_name() or ''
-            if trigger_lower in name and 'button' in role:
+            if name == trigger_lower and 'button' in role:
                 action = obj.get_action_iface()
                 if action and action.get_n_actions() > 0:
                     action.do_action(0)
@@ -58,7 +58,7 @@ def _get_trigger_coords(doc, trigger_name: str, platform: str = None) -> Dict | 
     """
     if not doc:
         return None
-    trigger_lower = trigger_name.lower()
+    trigger_lower = trigger_name.lower().strip()
 
     import gi
     gi.require_version('Atspi', '2.0')
@@ -68,9 +68,9 @@ def _get_trigger_coords(doc, trigger_name: str, platform: str = None) -> Dict | 
         if depth > 25:
             return None
         try:
-            name = (obj.get_name() or '').lower()
+            name = (obj.get_name() or '').lower().strip()
             role = obj.get_role_name() or ''
-            if trigger_lower in name and 'button' in role:
+            if name == trigger_lower and 'button' in role:
                 comp = obj.get_component_iface()
                 if comp:
                     rect = comp.get_extents(Atspi.CoordType.SCREEN)
@@ -150,6 +150,9 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
     }
     yaml_key = yaml_key_map.get(dropdown_name.lower())
     if not yaml_key:
+        # NOTE: Substring matching is intentional — dropdown_name is the AT-SPI
+        # button label (variable), not a target selection value. We're mapping
+        # unknown labels to known YAML categories.
         if 'attach' in dropdown_name.lower():
             yaml_items = caps.get('attach_menu', [])
         elif 'tool' in dropdown_name.lower() or 'file' in dropdown_name.lower():
@@ -199,10 +202,11 @@ def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
     """
     if not yaml_items:
         return None
-    target_lower = target_value.lower()
+    target_lower = target_value.lower().strip()
     target_idx = None
     for i, item in enumerate(yaml_items):
-        if target_lower in str(item).lower():
+        item_lower = str(item).lower().strip()
+        if item_lower.startswith(target_lower) or target_lower.startswith(item_lower):
             target_idx = i
             break
     if target_idx is None:
@@ -230,6 +234,10 @@ def _normalize_dropdown_key(dropdown: str) -> str:
     The dropdown parameter is whatever name the button has in the tree
     (e.g. "Model selector, current model is 5.4 Pro"). We need to map
     that to a YAML key like "models".
+
+    NOTE: Substring matching is INTENTIONAL here — we're mapping unknown,
+    variable-length AT-SPI labels to known category keywords. The labels
+    change across platforms and updates, so exact matching would break.
     """
     s = (dropdown or '').strip().lower()
     if 'model' in s:
@@ -326,12 +334,12 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
     # Auto-select: find the matching item and click it
     if target_value:
-        target_lower = target_value.lower()
+        target_lower = target_value.lower().strip()
         matched_item = None
         matched_raw = None
         for raw_item, item_info in zip(menu_items, items):
-            item_name = (item_info.get('name') or '').lower()
-            if target_lower in item_name or item_name in target_lower:
+            item_name = (item_info.get('name') or '').lower().strip()
+            if item_name.startswith(target_lower) or target_lower.startswith(item_name):
                 matched_item = item_info
                 matched_raw = raw_item
                 break
