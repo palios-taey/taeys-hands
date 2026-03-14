@@ -36,9 +36,8 @@ deploy_local() {
     git fetch origin main 2>&1 | tail -1
     git reset --hard origin/main 2>&1 | tail -1
 
-    echo "[local] Installing taey-notify + mcp-reconnect..."
+    echo "[local] Installing taey-notify..."
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
-    sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
 
     echo "[local] Restarting notification daemon..."
     pkill -f 'notifications/daemon' 2>/dev/null || true
@@ -69,7 +68,6 @@ deploy_remote() {
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
         sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
-        sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
         DAEMON="${HOME_DIR}/orchestrator/notifications/daemon.py"
@@ -84,21 +82,6 @@ deploy_remote() {
 DEPLOY_EOF
     local rc=$?
     [ $rc -ne 0 ] && echo "  [${host}] SSH FAILED (exit $rc)" || true
-}
-
-# Reconnect ALL machines — runs as detached process after deploy
-reconnect_all() {
-    # Local sessions
-    echo "[reconnect] Local sessions..."
-    mcp-reconnect 2>/dev/null || true
-
-    # Remote machines with known Claude sessions
-    for host in spark3 mira; do
-        echo "[reconnect] Remote: $host..."
-        mcp-reconnect --remote "$host" 2>/dev/null || true
-    done
-
-    echo "[reconnect] All machines done"
 }
 
 # Parse args
@@ -166,7 +149,7 @@ echo ""
 echo "=== Phase 2: MCP reconnect (all machines, in 10 seconds) ==="
 # Kill any previous reconnect processes before spawning new one
 pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
-pkill -f 'mcp-reconnect' 2>/dev/null || true
+
 # Write reconnect script to file, run detached.
 # Survives after deploy.sh exits. 10s delay lets Bash tool return first.
 cat > /tmp/deploy-reconnect.sh <<'REOF'
