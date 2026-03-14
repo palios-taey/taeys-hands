@@ -42,19 +42,15 @@ deploy_local() {
     pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (sessions must /mcp to reconnect)" \
         || echo "[local] No MCP servers running"
 
-    echo "[local] Restarting notification daemons..."
+    echo "[local] Restarting notification daemon..."
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
-    # Start daemons for all local tmux sessions
-    # Daemon lives in orchestrator repo, not taeys-hands
+    # ONE daemon per machine — auto-discovers all local tmux sessions
     local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
-    for session in $(tmux ls -F '#{session_name}' 2>/dev/null); do
-        nohup python3 "$daemon_path" \
-            --node "$session" --tmux-session "$session" \
-            --redis-host "${REDIS_HOST:-192.168.100.10}" \
-            > "/tmp/notify-daemon-${session}.log" 2>&1 &
-        echo "[local] Notify daemon started for $session (PID $!)"
-    done
+    nohup python3 "$daemon_path" \
+        --redis-host "${REDIS_HOST:-192.168.100.10}" \
+        > "/tmp/notify-daemon.log" 2>&1 &
+    echo "[local] Notify daemon started (PID $!)"
 
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
@@ -63,9 +59,11 @@ deploy_remote() {
     local host="$1"
     local home="${MACHINES[$host]}"
     local repo_path="${home}/${REPO_DIR}"
-    # Mira can't reach NCCL network — use management IP for Redis
+    # Non-NCCL machines (Mira, Thor, Jetson) use management IP for Redis
     local redis_host="192.168.100.10"
-    [ "$host" = "mira" ] && redis_host="10.0.0.68"
+    case "$host" in
+        mira|thor|jetson) redis_host="10.0.0.68" ;;
+    esac
 
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" "${home}" <<'DEPLOY_EOF'
@@ -78,18 +76,14 @@ deploy_remote() {
         pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (sessions must /mcp to reconnect)' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
-        # Daemon lives in orchestrator repo, not taeys-hands
+        # ONE daemon per machine — auto-discovers all local tmux sessions
         DAEMON="${HOME_DIR}/orchestrator/notifications/daemon.py"
         if [ ! -f "$DAEMON" ]; then
             echo "WARNING: daemon not found at $DAEMON — skipping"
         else
-            for session in $(tmux ls -F '#{session_name}' 2>/dev/null || true); do
-                nohup python3 "$DAEMON" \
-                    --node "$session" --tmux-session "$session" \
-                    --redis-host "$REDIS" \
-                    > "/tmp/notify-daemon-${session}.log" 2>&1 &
-                echo "Notify daemon started for $session (PID $!)"
-            done
+            nohup python3 "$DAEMON" --redis-host "$REDIS" \
+                > "/tmp/notify-daemon.log" 2>&1 &
+            echo "Notify daemon started (PID $!)"
         fi
         echo "Done — commit: $(git log --oneline -1)"
 DEPLOY_EOF
