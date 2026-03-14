@@ -959,9 +959,16 @@ def attach_file(platform: str, file_path: str) -> bool:
             else:
                 logger.warning(f"[{platform}] find_menu_items returned empty (doc={doc2 is not None}, ff={firefox is not None})")
     else:
-        # Grok and others: find button, AT-SPI click first (React buttons
-        # don't respond to xdotool), then keyboard nav dropdown.
-        # Matches tools/attach.py _try_click_then_dialog() strategy.
+        # Grok and others: click input first to activate page (homepage mode
+        # has dormant buttons + "Connect X" popup blocks dropdowns), then
+        # find button and use two-pass click strategy.
+        input_el = find_input_field_atspi(platform)
+        if input_el:
+            inp.click_at(input_el['x'], input_el['y'])
+            logger.info(f"[{platform}] Clicked input to activate page at ({input_el['x']}, {input_el['y']})")
+            time.sleep(1.0)
+            inp.press_key('Escape')  # Dismiss any popup that appeared
+            time.sleep(0.3)
         btn = None
         for attempt in range(8):
             doc = get_doc(platform, force_refresh=True)
