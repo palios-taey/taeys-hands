@@ -315,8 +315,8 @@ def _audit_plan(platform: str, params: Dict,
                 "current": "(not provided)",
                 "fix": "Read model from taey_inspect elements, then provide current_model",
             })
-        elif req_model.lower() not in current_model.lower() and \
-             current_model.lower() not in req_model.lower():
+        elif not current_model.lower().startswith(req_model.lower()) and \
+             not req_model.lower().startswith(current_model.lower()):
             failures.append({
                 "field": "model",
                 "required": req_model,
@@ -334,8 +334,8 @@ def _audit_plan(platform: str, params: Dict,
                 "current": "(not provided)",
                 "fix": "Read mode from taey_inspect elements, then provide current_mode",
             })
-        elif req_mode.lower() not in current_mode.lower() and \
-             current_mode.lower() not in req_mode.lower():
+        elif not current_mode.lower().startswith(req_mode.lower()) and \
+             not req_mode.lower().startswith(current_mode.lower()):
             failures.append({
                 "field": "mode",
                 "required": req_mode,

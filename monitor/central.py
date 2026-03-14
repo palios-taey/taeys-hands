@@ -173,11 +173,16 @@ class CentralMonitor:
     # ── AT-SPI: stop button detection ───────────────────────────────
 
     def _is_stop_button(self, name: str, platform: str) -> bool:
-        """Check if element name matches a stop pattern for this platform."""
+        """Check if element name matches a stop pattern for this platform.
+
+        Uses exact matching (case-insensitive) against the pattern set.
+        Patterns in YAML are full button names like 'stop', 'cancel'.
+        """
         if not name or len(name) > 50:
             return False
         patterns = self.stop_patterns.get(platform, ['stop'])
-        return any(p in name.lower().strip() for p in patterns)
+        name_clean = name.lower().strip()
+        return name_clean in patterns
 
     def _is_canvas_stop(self, stop_obj) -> bool:
         """Filter ChatGPT canvas Stop button (persistent alongside Update)."""
@@ -206,7 +211,7 @@ class CentralMonitor:
                             if not t:
                                 continue
                             if 'button' in (t.get_role_name() or '') and \
-                               'update' in (t.get_name() or '').lower():
+                               (t.get_name() or '').lower().strip() == 'update':
                                 tc = t.get_component_iface()
                                 if tc and abs(tc.get_extents(0).y - stop_y) < 50:
                                     return True
