@@ -78,7 +78,10 @@ def handle_quick_extract(platform: str, redis_client,
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
-    inp.press_key('End')
+    # Scroll to absolute bottom — multiple End presses for long responses
+    for _ in range(3):
+        inp.press_key('End')
+        time.sleep(0.3)
     time.sleep(0.5)
 
     firefox = atspi.find_firefox()
