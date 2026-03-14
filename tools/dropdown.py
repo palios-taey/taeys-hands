@@ -283,17 +283,30 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Open dropdown trigger
-    trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
-    if not trigger_clicked:
+    # Open dropdown trigger — method depends on platform config
+    dropdown_method = _get_dropdown_method(platform)
+    trigger_clicked = False
+
+    if dropdown_method == 'keyboard_nav':
+        # React portal platforms: AT-SPI do_action opens browser context menu.
+        # Must use coordinate click on the trigger button.
         trigger_info = _get_trigger_coords(doc, dropdown, platform=platform)
         if trigger_info:
             click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
             trigger_clicked = not click_result.get("error")
+    else:
+        # AT-SPI platforms: do_action is reliable
+        trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
         if not trigger_clicked:
-            return {"error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
-                    "platform": platform,
-                    "hint": "Try taey_inspect to verify screen state."}
+            trigger_info = _get_trigger_coords(doc, dropdown, platform=platform)
+            if trigger_info:
+                click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
+                trigger_clicked = not click_result.get("error")
+
+    if not trigger_clicked:
+        return {"error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
+                "platform": platform,
+                "hint": "Try taey_inspect to verify screen state."}
     time.sleep(1.0)
 
     # For React portal platforms, use keyboard nav with YAML item order
