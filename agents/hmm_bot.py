@@ -919,12 +919,16 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
         time.sleep(1.5)
 
-        # Gemini: menu items visible in AT-SPI — click "Upload files" directly
+        # Gemini: menu items visible in AT-SPI — click "Upload files" directly.
+        # Retry up to 4 times — dropdown may not appear immediately on slower hardware.
         if not _find_dialog_wid():
-            time.sleep(1.0)
-            doc2 = get_doc(platform, force_refresh=True)
-            if doc2:
+            for menu_attempt in range(4):
+                time.sleep(1.5)
+                doc2 = get_doc(platform, force_refresh=True)
+                if not doc2:
+                    continue
                 elems2 = _find_elements_with_fence(doc2, platform)
+                clicked_upload = False
                 for e in elems2:
                     name = (e.get('name') or '').strip().lower()
                     if name.startswith('upload file') and 'menu item' in e.get('role', ''):
@@ -933,8 +937,18 @@ def attach_file(platform: str, file_path: str) -> bool:
                         else:
                             inp.click_at(e['x'], e['y'])
                             logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                        clicked_upload = True
                         time.sleep(2.0)
                         break
+                if clicked_upload or _find_dialog_wid():
+                    break
+                logger.info(f"[{platform}] Upload menu item not found, retry {menu_attempt+1}/4...")
+                # Re-click the attach button — dropdown may have closed
+                if btn_obj and atspi_clicked:
+                    try:
+                        btn_obj.get_action_iface().do_action(0)
+                    except Exception:
+                        pass
     else:
         # Grok and others: find button, xdotool click, keyboard nav dropdown
         btn = None
