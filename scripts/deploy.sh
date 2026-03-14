@@ -46,8 +46,10 @@ deploy_local() {
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
     # Start daemons for all local tmux sessions
+    # Daemon lives in orchestrator repo, not taeys-hands
+    local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
     for session in $(tmux ls -F '#{session_name}' 2>/dev/null); do
-        nohup python3 notifications/daemon.py \
+        nohup python3 "$daemon_path" \
             --node "$session" --tmux-session "$session" \
             --redis-host "${REDIS_HOST:-192.168.100.10}" \
             > "/tmp/notify-daemon-${session}.log" 2>&1 &
@@ -66,8 +68,8 @@ deploy_remote() {
     [ "$host" = "mira" ] && redis_host="10.0.0.68"
 
     echo "[${host}] Deploying..."
-    ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" <<'DEPLOY_EOF'
-        REPO="$1"; REDIS="$2"
+    ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" "${home}" <<'DEPLOY_EOF'
+        REPO="$1"; REDIS="$2"; HOME_DIR="$3"
         cd "$REPO" 2>/dev/null || { echo "REPO NOT FOUND: $REPO"; exit 1; }
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git fetch origin main 2>&1 | tail -1
@@ -76,13 +78,19 @@ deploy_remote() {
         pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (sessions must /mcp to reconnect)' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
-        for session in $(tmux ls -F '#{session_name}' 2>/dev/null || true); do
-            nohup python3 notifications/daemon.py \
-                --node "$session" --tmux-session "$session" \
-                --redis-host "$REDIS" \
-                > "/tmp/notify-daemon-${session}.log" 2>&1 &
-            echo "Notify daemon started for $session (PID $!)"
-        done
+        # Daemon lives in orchestrator repo, not taeys-hands
+        DAEMON="${HOME_DIR}/orchestrator/notifications/daemon.py"
+        if [ ! -f "$DAEMON" ]; then
+            echo "WARNING: daemon not found at $DAEMON — skipping"
+        else
+            for session in $(tmux ls -F '#{session_name}' 2>/dev/null || true); do
+                nohup python3 "$DAEMON" \
+                    --node "$session" --tmux-session "$session" \
+                    --redis-host "$REDIS" \
+                    > "/tmp/notify-daemon-${session}.log" 2>&1 &
+                echo "Notify daemon started for $session (PID $!)"
+            done
+        fi
         echo "Done — commit: $(git log --oneline -1)"
 DEPLOY_EOF
     local rc=$?
