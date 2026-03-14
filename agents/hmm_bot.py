@@ -878,6 +878,10 @@ def attach_file(platform: str, file_path: str) -> bool:
     if platform == 'chatgpt':
         inp.focus_firefox()
         time.sleep(0.3)
+        # Click page center to ensure web content has focus (not Firefox chrome).
+        # Without this, Ctrl+U may be captured by Firefox as "View Source" or ignored.
+        inp.click_at(960, 540)
+        time.sleep(0.5)
         inp.press_key('ctrl+u')
         logger.info(f"[{platform}] Pressed Ctrl+U for file upload")
         time.sleep(1.5)
