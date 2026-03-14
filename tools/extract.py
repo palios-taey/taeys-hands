@@ -233,8 +233,9 @@ def handle_quick_extract(platform: str, redis_client,
         for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
                        f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
             redis_client.delete(node_key(suffix))
-        # Clear global plan lock (not node-scoped)
-        redis_client.delete("taey:plan_active")
+        # Clear DISPLAY-scoped plan lock
+        display = os.environ.get('DISPLAY', ':0')
+        redis_client.delete(f"taey:plan_active:{display}")
         if content:
             save_path = f"/tmp/hmm_response_{platform}.json"
             try:
