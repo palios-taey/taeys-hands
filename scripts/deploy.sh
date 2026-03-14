@@ -207,14 +207,14 @@ done
 
 echo "Local Claude sessions: ${SESSIONS[*]:-none}"
 
-# Reconnect all local sessions in parallel
+# Reconnect all local sessions sequentially
 for s in "${SESSIONS[@]}"; do
-    reconnect "$s" &
+    reconnect "$s"
 done
 
 # Remote machines — find and reconnect Claude sessions via SSH
 for host in spark3 mira; do
-    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_EOF' &
+    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_EOF'
 for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
     cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
     if [ "$cmd" = "claude" ]; then
