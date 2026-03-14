@@ -890,9 +890,22 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # Click attach button — always use xdotool click for consistent focus/dropdown behavior
-    inp.click_at(btn['x'], btn['y'])
-    logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+    # Click attach button — try AT-SPI do_action first (more reliable on React UIs),
+    # fall back to xdotool click
+    atspi_clicked = False
+    btn_obj = btn.get('atspi_obj')
+    if btn_obj:
+        try:
+            ai = btn_obj.get_action_iface()
+            if ai and ai.get_n_actions() > 0:
+                ai.do_action(0)
+                atspi_clicked = True
+                logger.info(f"[{platform}] Clicked attach button via AT-SPI do_action at ({btn['x']}, {btn['y']})")
+        except Exception as e:
+            logger.debug(f"[{platform}] AT-SPI do_action failed: {e}")
+    if not atspi_clicked:
+        inp.click_at(btn['x'], btn['y'])
+        logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
     time.sleep(1.5)
 
     # All platforms: dropdown → Down+Enter to select file upload option
@@ -900,24 +913,24 @@ def attach_file(platform: str, file_path: str) -> bool:
     # Grok: "Upload a file" (1st item)
     # Gemini: "Upload files" (1st item)
     if not _find_dialog_wid():
-        # Try AT-SPI menu item click first for Gemini (works on some setups)
+        # Try AT-SPI menu item click for upload option (all platforms)
         found_upload = False
-        if platform == 'gemini':
-            time.sleep(1.0)  # Gemini dropdown render time
-            doc2 = get_doc(platform, force_refresh=True)
-            if doc2:
-                elems2 = _find_elements_with_fence(doc2, platform)
-                for e in elems2:
-                    name = (e.get('name') or '').strip().lower()
-                    if 'upload file' in name and 'menu item' in e.get('role', ''):
-                        if e.get('atspi_obj') and atspi_click(e):
-                            logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
-                        else:
-                            inp.click_at(e['x'], e['y'])
-                            logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
-                        found_upload = True
-                        time.sleep(2.0)
-                        break
+        time.sleep(1.0)  # dropdown render time
+        doc2 = get_doc(platform, force_refresh=True)
+        if doc2:
+            elems2 = _find_elements_with_fence(doc2, platform)
+            for e in elems2:
+                name = (e.get('name') or '').strip().lower()
+                if ('upload' in name and ('file' in name or 'image' in name)
+                        and 'menu item' in e.get('role', '')):
+                    if e.get('atspi_obj') and atspi_click(e):
+                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
+                    else:
+                        inp.click_at(e['x'], e['y'])
+                        logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                    found_upload = True
+                    time.sleep(2.0)
+                    break
         if not found_upload and not _find_dialog_wid():
             # Keyboard nav fallback — works for all platforms
             inp.press_key('Down')
