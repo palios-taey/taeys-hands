@@ -500,7 +500,7 @@ def handle_attach(platform: str, file_path: str,
     if not os.path.isfile(file_path):
         return {"error": f"File not found: {file_path}"}
     real_path = os.path.realpath(file_path)
-    if not any(real_path.startswith(d) for d in _ALLOWED_DIRS):
+    if not any(real_path == d or real_path.startswith(d + os.sep) for d in _ALLOWED_DIRS):
         return {"error": f"Path not in allowed directories: {real_path}"}
 
     firefox = atspi.find_firefox()
