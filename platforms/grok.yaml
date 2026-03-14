@@ -48,6 +48,7 @@ quirks:
 stop_patterns:
   - stop
   - stop generating
+  - stop model response
   - thinking
 
 mode_guidance:
