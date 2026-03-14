@@ -24,7 +24,7 @@ def get_pool() -> redis.ConnectionPool:
             host=DEFAULT_HOST, port=DEFAULT_PORT,
             decode_responses=True, max_connections=20,
             socket_timeout=5.0, socket_connect_timeout=5.0,
-            retry_on_timeout=True,
+            retry_on_timeout=False,
         )
     return _pool
 
