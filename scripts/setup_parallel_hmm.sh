@@ -124,8 +124,7 @@ for DNUM in 2 3 4; do
 
     # 3. Firefox with profile copy
     if [ "$SKIP_FIREFOX" = false ]; then
-        FF_COUNT=$(DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
-        if [ "$FF_COUNT" -gt 0 ]; then
+        if DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' &>/dev/null; then
             echo "  Firefox already running on ${DISPLAY_STR}"
         else
             # Copy profile
@@ -155,8 +154,7 @@ for DNUM in 2 3 4; do
             # Wait for Firefox window
             for i in $(seq 1 12); do
                 sleep 2
-                FC=$(DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' 2>/dev/null | wc -l || echo 0)
-                if [ "$FC" -gt 0 ]; then
+                if DISPLAY="${DISPLAY_STR}" xdotool search --name 'Mozilla Firefox' &>/dev/null; then
                     echo "  Firefox ready (${i}×2s)"
                     break
                 fi
