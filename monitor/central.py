@@ -246,12 +246,13 @@ class CentralMonitor:
 
     # ── Session checking ────────────────────────────────────────────
 
-    def _check_session(self, session: Dict, doc) -> bool:
+    def _check_session(self, session: Dict, doc, firefox) -> bool:
         """Check one session for completion. Returns True if complete (remove it).
 
         Simple: stop button there = generating. Not there = complete.
-        Plan lock prevents premature scanning (monitor can't check until
-        send clears the lock ~5-10s after Enter).
+        But AT-SPI cache is stale after tab switch — so if no stop found,
+        wait 3s, get fresh document, scan again. Only declare complete if
+        BOTH scans show no stop button.
         """
         platform = session['platform']
         monitor_id = session['monitor_id']
@@ -270,7 +271,20 @@ class CentralMonitor:
         if stop_found:
             _log(f"[{platform}/{monitor_id}] stop=YES ({elapsed}s)")
         else:
-            _log(f"[{platform}/{monitor_id}] stop=NO → COMPLETE ({elapsed}s)")
+            # No stop on first scan — AT-SPI may be stale after tab switch.
+            # Wait and re-scan with fresh document before declaring complete.
+            time.sleep(3)
+            fresh_doc = get_platform_document(firefox, platform)
+            if fresh_doc:
+                try:
+                    fresh_doc.clear_cache_single()
+                except Exception:
+                    pass
+                stop_found_2 = self._scan_for_stop_button(fresh_doc, platform)
+                if stop_found_2:
+                    _log(f"[{platform}/{monitor_id}] stop=NO then YES — stale cache, still generating ({elapsed}s)")
+                    return False
+            _log(f"[{platform}/{monitor_id}] stop=NO (confirmed) → COMPLETE ({elapsed}s)")
             self._notify(session, "response_complete", "stop_button")
             return True
 
@@ -395,7 +409,7 @@ class CentralMonitor:
             for session in platform_sessions:
                 if self._plan_active():
                     break
-                if self._check_session(session, doc):
+                if self._check_session(session, doc, firefox):
                     completed.append(session)
                 time.sleep(0.5)
 
