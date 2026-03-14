@@ -97,6 +97,32 @@ FRESH_URLS = {
 _cached_firefox = {}  # platform -> AT-SPI firefox app ref
 _cached_doc = {}      # platform -> AT-SPI document ref
 _extracted_cache = {}  # platform -> extracted content (ChatGPT fixed-wait pre-extracts)
+_our_firefox_pid = None  # PID of Firefox on OUR display (filters out cross-display AT-SPI contamination)
+
+
+def discover_firefox_pid() -> int | None:
+    """Discover the Firefox PID on our DISPLAY via xdotool.
+    All Firefox instances share D-Bus, so AT-SPI sees them all.
+    This PID lets us filter to only OUR display's Firefox."""
+    global _our_firefox_pid
+    try:
+        r = subprocess.run(
+            ['xdotool', 'search', '--class', 'Firefox'],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            wid = r.stdout.strip().split('\n')[-1]  # Last = real window (not mutter decorator)
+            r2 = subprocess.run(
+                ['xdotool', 'getwindowpid', wid],
+                capture_output=True, text=True, timeout=3,
+            )
+            if r2.returncode == 0 and r2.stdout.strip():
+                _our_firefox_pid = int(r2.stdout.strip())
+                logger.info(f"Firefox PID on {os.environ.get('DISPLAY', '?')}: {_our_firefox_pid}")
+                return _our_firefox_pid
+    except Exception as e:
+        logger.warning(f"Failed to discover Firefox PID: {e}")
+    return None
 
 
 def get_firefox(platform: str):
@@ -110,7 +136,7 @@ def get_firefox(platform: str):
         except Exception:
             _cached_firefox.pop(platform, None)
     # Full discovery (expensive — only on first call or after stale)
-    ff = atspi.find_firefox_for_platform(platform)
+    ff = atspi.find_firefox_for_platform(platform, pid=_our_firefox_pid)
     if ff:
         _cached_firefox[platform] = ff
     return ff
@@ -282,6 +308,7 @@ def restart_firefox(platforms: list) -> bool:
                 logger.debug(f"Window positioning: {e}")
             logger.info(f"Firefox restarted successfully ({(i+1)*2}s)")
             invalidate_all_cache()
+            discover_firefox_pid()
             return True
 
     logger.error("Firefox failed to start after 30s")
@@ -1400,6 +1427,9 @@ def main():
             escalate("ESCALATION from hmm_bot: Firefox failed to start")
             sys.exit(1)
         time.sleep(10)  # Let pages load after startup
+    else:
+        # Firefox already running — discover its PID for AT-SPI filtering
+        discover_firefox_pid()
 
     cycle = 0
     successes = 0
