@@ -4,13 +4,13 @@ import json
 import os
 import time
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 from core import atspi, input as inp
 from core.tree import find_elements, find_menu_items
-from core.interact import extend_cache
+from core.interact import extend_cache, atspi_click
 from tools.click import handle_click
 from storage.redis_pool import node_key
 
@@ -19,79 +19,21 @@ PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 logger = logging.getLogger(__name__)
 
 
-def _click_trigger_via_atspi(doc, trigger_name: str, platform: str = None) -> bool:
-    """Find button by name in AT-SPI tree and click via do_action.
+def _find_trigger_in_cache(trigger_name: str, platform: str) -> Optional[Dict]:
+    """Find trigger button in element cache by exact name.
 
-    Always uses fresh DFS from live doc — never cache. Cached AT-SPI refs
-    can be stale (D-Bus proxy alive but widget gone) causing silent no-ops.
+    Every platform has its buttons mapped in YAML element_map.
+    Inspect populates the cache. We look up by exact name — if it's
+    not there, the element doesn't exist or inspect wasn't called.
     """
-    if not doc:
-        return False
+    from core.interact import _element_cache, is_defunct
     trigger_lower = trigger_name.lower().strip()
-
-    def find_and_click(obj, depth=0):
-        if depth > 25:
-            return False
-        try:
-            name = (obj.get_name() or '').lower().strip()
-            role = obj.get_role_name() or ''
-            # Substring match — trigger names are variable AT-SPI labels
-            # e.g. "Model selector, current model is 5.4 Pro" contains "model"
-            if trigger_lower in name and 'button' in role:
-                action = obj.get_action_iface()
-                if action and action.get_n_actions() > 0:
-                    action.do_action(0)
-                    return True
-            for i in range(obj.get_child_count()):
-                child = obj.get_child_at_index(i)
-                if child and find_and_click(child, depth + 1):
-                    return True
-        except Exception:
-            pass
-        return False
-
-    return find_and_click(doc)
-
-
-def _get_trigger_coords(doc, trigger_name: str, platform: str = None) -> Dict | None:
-    """Find button by name and return center coordinates.
-
-    Always uses fresh DFS from live doc — never cache.
-    """
-    if not doc:
-        return None
-    trigger_lower = trigger_name.lower().strip()
-
-    import gi
-    gi.require_version('Atspi', '2.0')
-    from gi.repository import Atspi
-
-    def find_button(obj, depth=0):
-        if depth > 25:
-            return None
-        try:
-            name = (obj.get_name() or '').lower().strip()
-            role = obj.get_role_name() or ''
-            # Substring match — trigger names are variable AT-SPI labels
-            if trigger_lower in name and 'button' in role:
-                comp = obj.get_component_iface()
-                if comp:
-                    rect = comp.get_extents(Atspi.CoordType.SCREEN)
-                    if rect and rect.width > 0 and rect.height > 0:
-                        return {'x': rect.x + rect.width // 2,
-                                'y': rect.y + rect.height // 2,
-                                'name': obj.get_name() or '', 'role': role}
-            for i in range(obj.get_child_count()):
-                child = obj.get_child_at_index(i)
-                if child:
-                    r = find_button(child, depth + 1)
-                    if r:
-                        return r
-        except Exception:
-            pass
-        return None
-
-    return find_button(doc)
+    for e in _element_cache.get(platform, []):
+        name = (e.get('name') or '').strip().lower()
+        if name == trigger_lower and 'button' in e.get('role', ''):
+            if e.get('atspi_obj') and not is_defunct(e):
+                return e
+    return None
 
 
 def _check_dropdown_baseline(platform: str, dropdown_name: str,
@@ -293,30 +235,30 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not doc:
         return {"error": f"Could not find {platform} document"}
 
-    # Open dropdown trigger — method depends on platform config
+    # Find trigger button in element cache (populated by inspect) — exact name match
     dropdown_method = _get_dropdown_method(platform)
-    trigger_clicked = False
+    trigger = _find_trigger_in_cache(dropdown, platform)
+    if not trigger:
+        return {"error": f"Trigger button '{dropdown}' not found in element cache for {platform}.",
+                "platform": platform,
+                "hint": "Call taey_inspect first to populate the element cache."}
 
+    # Click trigger — method depends on platform config
+    trigger_clicked = False
     if dropdown_method == 'keyboard_nav':
-        # React portal platforms: AT-SPI do_action opens browser context menu.
-        # Must use coordinate click on the trigger button.
-        trigger_info = _get_trigger_coords(doc, dropdown, platform=platform)
-        if trigger_info:
-            click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
-            trigger_clicked = not click_result.get("error")
+        # React portal: coordinate click (do_action opens browser context menu)
+        click_result = handle_click(platform, trigger['x'], trigger['y'])
+        trigger_clicked = not click_result.get("error")
     else:
-        # AT-SPI platforms: do_action is reliable
-        trigger_clicked = _click_trigger_via_atspi(doc, dropdown, platform=platform)
+        # AT-SPI: do_action is reliable
+        trigger_clicked = atspi_click(trigger)
         if not trigger_clicked:
-            trigger_info = _get_trigger_coords(doc, dropdown, platform=platform)
-            if trigger_info:
-                click_result = handle_click(platform, trigger_info['x'], trigger_info['y'])
-                trigger_clicked = not click_result.get("error")
+            click_result = handle_click(platform, trigger['x'], trigger['y'])
+            trigger_clicked = not click_result.get("error")
 
     if not trigger_clicked:
-        return {"error": f"Failed to find dropdown trigger '{dropdown}' in AT-SPI tree.",
-                "platform": platform,
-                "hint": "Try taey_inspect to verify screen state."}
+        return {"error": f"Failed to click trigger '{dropdown}' at ({trigger['x']},{trigger['y']})",
+                "platform": platform}
     time.sleep(1.0)
 
     # For React portal platforms, use keyboard nav with YAML item order
