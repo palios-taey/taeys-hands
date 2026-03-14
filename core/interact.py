@@ -12,21 +12,46 @@ logger = logging.getLogger(__name__)
 
 # Element cache keyed by platform — updated by inspect after each scan
 _element_cache: Dict[str, List[Dict]] = {}
+_cache_timestamps: Dict[str, float] = {}
+CACHE_TTL_SECONDS = 10  # Invalidate cached elements after this many seconds
 
 
 def cache_elements(platform: str, elements: List[Dict]):
     """Store elements from last AT-SPI scan (must include 'atspi_obj')."""
     _element_cache[platform] = elements
+    _cache_timestamps[platform] = time.time()
 
 
 def extend_cache(platform: str, elements: List[Dict]):
     """Add elements to existing cache (e.g., dropdown items after click)."""
     _element_cache[platform] = _element_cache.get(platform, []) + elements
+    _cache_timestamps[platform] = time.time()
+
+
+def is_cache_stale(platform: str) -> bool:
+    """Check if the cache for this platform has exceeded its TTL."""
+    ts = _cache_timestamps.get(platform)
+    if ts is None:
+        return True
+    return (time.time() - ts) > CACHE_TTL_SECONDS
+
+
+def invalidate_cache(platform: str):
+    """Explicitly invalidate cache for a platform."""
+    _element_cache.pop(platform, None)
+    _cache_timestamps.pop(platform, None)
 
 
 def find_element_at(platform: str, x: int, y: int,
                     tolerance: int = 30) -> Optional[Dict]:
-    """Find cached element closest to (x, y) by Manhattan distance."""
+    """Find cached element closest to (x, y) by Manhattan distance.
+
+    Returns None if cache is stale (caller should re-inspect).
+    """
+    if is_cache_stale(platform):
+        logger.debug("Cache stale for %s (age=%.1fs), returning None",
+                     platform, time.time() - _cache_timestamps.get(platform, 0))
+        return None
     best, best_dist = None, float('inf')
     for e in _element_cache.get(platform, []):
         if not e.get('atspi_obj') or is_defunct(e):
