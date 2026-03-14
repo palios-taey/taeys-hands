@@ -150,11 +150,11 @@ if [ ${#SESSIONS[@]} -eq 0 ]; then
 fi
 
 echo "[mcp-reconnect] Reconnecting ${#SESSIONS[@]} session(s): ${SESSIONS[*]}"
-echo "[mcp-reconnect] Running SEQUENTIALLY (one at a time)"
 
-# Sequential — no parallel, avoids tmux contention
+# Parallel — each session is a different tmux target, no contention
 for session in "${SESSIONS[@]}"; do
-    reconnect_session "$session"
+    reconnect_session "$session" &
 done
+wait
 
 echo "[mcp-reconnect] All sessions reconnected"
