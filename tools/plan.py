@@ -47,12 +47,24 @@ def _prepend_identity_files(attachments: List[str], platform: str) -> List[str]:
     return result
 
 
+_PLAN_ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
+
+
+def _validate_path(path: str) -> bool:
+    """Check path is within allowed directories (mirrors attach.py _ALLOWED_DIRS)."""
+    real = os.path.realpath(path)
+    return any(real == d or real.startswith(d + os.sep) for d in _PLAN_ALLOWED_DIRS)
+
+
 def _consolidate_attachments(files: List[str], platform: str) -> str:
     """Consolidate multiple files into a single .md package."""
     try:
         sections = [f"# Package for {platform}\n\n**Files**: {len(files)}\n"]
         for path in files:
             if not os.path.isfile(path):
+                continue
+            if not _validate_path(path):
+                logger.warning("Skipping disallowed path in consolidation: %s", path)
                 continue
             content = open(path).read()
             lang = _EXT_LANG.get(os.path.splitext(path)[1].lower(), '')
