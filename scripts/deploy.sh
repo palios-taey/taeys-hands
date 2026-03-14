@@ -109,8 +109,26 @@ if [ "$TARGET" = "--local" ]; then
     echo ""
     echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
     pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
-    pkill -f 'mcp-reconnect' 2>/dev/null || true
-    nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
+    # Reuse the same reconnect script (local only for --local)
+    cat > /tmp/deploy-reconnect.sh <<'LEOF'
+#!/bin/bash
+sleep 10
+for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
+    if [ "$cmd" = "claude" ]; then
+        echo "[$s] reconnecting..."
+        tmux send-keys -t "$s" Escape; sleep 5
+        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
+        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Down; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 5
+        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
+        sleep 0.3; tmux send-keys -t "$s" Enter
+        echo "[$s] done"
+    fi
+done &
+wait
+LEOF
+    chmod +x /tmp/deploy-reconnect.sh
+    nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
     disown
     exit 0
 fi
@@ -154,11 +172,69 @@ pkill -f 'mcp-reconnect' 2>/dev/null || true
 cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
-# All machines in parallel — local + remote
-mcp-reconnect 2>/dev/null &
-mcp-reconnect --remote spark3 2>/dev/null &
-mcp-reconnect --remote mira 2>/dev/null &
+
+# Reconnect function — sends key sequence to one tmux session
+reconnect() {
+    local session="$1"
+    echo "[$session] Escape..."
+    tmux send-keys -t "$session" Escape
+    sleep 5
+    echo "[$session] /mcp + Enter..."
+    tmux send-keys -t "$session" -l "/mcp"
+    sleep 0.3
+    tmux send-keys -t "$session" Enter
+    sleep 2
+    echo "[$session] Enter → Down → Enter..."
+    tmux send-keys -t "$session" Enter
+    sleep 0.5
+    tmux send-keys -t "$session" Down
+    sleep 0.3
+    tmux send-keys -t "$session" Enter
+    sleep 5
+    echo "[$session] Continue prompt..."
+    tmux send-keys -t "$session" -l "MCP servers reconnected with latest deployed code. Continue."
+    sleep 0.3
+    tmux send-keys -t "$session" Enter
+    echo "[$session] done"
+}
+
+# Find all local Claude sessions
+SESSIONS=()
+for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
+    [ "$cmd" = "claude" ] && SESSIONS+=("$s")
+done
+
+echo "Local Claude sessions: ${SESSIONS[*]:-none}"
+
+# Reconnect all local sessions in parallel
+for s in "${SESSIONS[@]}"; do
+    reconnect "$s" &
+done
+
+# Remote machines — find and reconnect Claude sessions via SSH
+for host in spark3 mira; do
+    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_EOF' &
+for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
+    if [ "$cmd" = "claude" ]; then
+        echo "[$s@$(hostname)] reconnecting..."
+        tmux send-keys -t "$s" Escape; sleep 5
+        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
+        tmux send-keys -t "$s" Enter; sleep 2
+        tmux send-keys -t "$s" Enter; sleep 0.5
+        tmux send-keys -t "$s" Down; sleep 0.3
+        tmux send-keys -t "$s" Enter; sleep 5
+        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
+        sleep 0.3; tmux send-keys -t "$s" Enter
+        echo "[$s@$(hostname)] done"
+    fi
+done
+REMOTE_EOF
+done
+
 wait
+echo "All machines reconnected"
 REOF
 chmod +x /tmp/deploy-reconnect.sh
 nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
