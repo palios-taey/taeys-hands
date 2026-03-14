@@ -108,6 +108,8 @@ if [ "$TARGET" = "--local" ]; then
     deploy_local
     echo ""
     echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
+    pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
+    pkill -f 'mcp-reconnect' 2>/dev/null || true
     nohup bash -c 'sleep 10 && mcp-reconnect' > /tmp/mcp-reconnect.log 2>&1 &
     disown
     exit 0
@@ -144,6 +146,9 @@ done
 
 echo ""
 echo "=== Phase 2: MCP reconnect (all machines, in 10 seconds) ==="
+# Kill any previous reconnect processes before spawning new one
+pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
+pkill -f 'mcp-reconnect' 2>/dev/null || true
 # Write reconnect script to file, run detached.
 # Survives after deploy.sh exits. 10s delay lets Bash tool return first.
 cat > /tmp/deploy-reconnect.sh <<'REOF'
