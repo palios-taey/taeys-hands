@@ -1,0 +1,145 @@
+#!/bin/bash
+# mcp-reconnect: Reconnect MCP servers in Claude Code sessions via tmux key injection.
+#
+# After deploy.sh kills MCP server processes, each Claude Code session needs
+# to reconnect. This script automates the /mcp menu sequence:
+#   Escape → /mcp → Enter → Down → Enter → continuation prompt
+#
+# Usage:
+#   mcp-reconnect                    # All local Claude sessions
+#   mcp-reconnect weaver claude      # Specific sessions
+#   mcp-reconnect --remote spark2    # All Claude sessions on remote host
+#
+# The script:
+#   1. Finds tmux sessions running 'claude' as pane command
+#   2. Sends Escape to stop active generation
+#   3. Waits for Claude to settle
+#   4. Sends /mcp → Enter → Down → Enter (reconnect option)
+#   5. Sends continuation prompt so Claude resumes work
+
+set -euo pipefail
+
+SETTLE_AFTER_ESC=3       # Seconds to wait after Escape
+SETTLE_AFTER_MCP=1       # Seconds to wait for /mcp menu to render
+SETTLE_AFTER_SELECT=3    # Seconds to wait for MCP reconnection
+CONTINUATION_MSG="MCP servers reconnected with latest deployed code. Continue."
+
+get_claude_sessions() {
+    # Find tmux sessions where the pane is running 'claude'
+    local sessions=()
+    for session in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+        local cmd
+        cmd=$(tmux display-message -t "$session" -p '#{pane_current_command}' 2>/dev/null || echo "")
+        if [ "$cmd" = "claude" ]; then
+            sessions+=("$session")
+        fi
+    done
+    printf '%s\n' "${sessions[@]}"
+}
+
+reconnect_session() {
+    local session="$1"
+    echo "[mcp-reconnect] $session: sending Escape..."
+    tmux send-keys -t "$session" Escape
+    sleep "$SETTLE_AFTER_ESC"
+
+    echo "[mcp-reconnect] $session: sending /mcp..."
+    tmux send-keys -t "$session" -l "/mcp"
+    sleep 0.3
+    tmux send-keys -t "$session" Enter
+    tmux send-keys -t "$session" C-j
+    sleep "$SETTLE_AFTER_MCP"
+
+    echo "[mcp-reconnect] $session: selecting reconnect (Down + Enter)..."
+    tmux send-keys -t "$session" Down
+    sleep 0.2
+    tmux send-keys -t "$session" Enter
+    tmux send-keys -t "$session" C-j
+    sleep "$SETTLE_AFTER_SELECT"
+
+    echo "[mcp-reconnect] $session: sending continuation prompt..."
+    tmux send-keys -t "$session" -l "$CONTINUATION_MSG"
+    sleep 0.3
+    tmux send-keys -t "$session" Enter
+    tmux send-keys -t "$session" C-j
+
+    echo "[mcp-reconnect] $session: done"
+}
+
+reconnect_remote() {
+    local host="$1"
+    shift
+    local sessions=("$@")
+
+    echo "[mcp-reconnect] Remote: $host"
+
+    # If no specific sessions given, find Claude sessions on remote
+    if [ ${#sessions[@]} -eq 0 ]; then
+        local remote_sessions
+        remote_sessions=$(ssh -o ConnectTimeout=5 "$host" bash -c '
+            for s in $(tmux list-sessions -F "#{session_name}" 2>/dev/null); do
+                cmd=$(tmux display-message -t "$s" -p "#{pane_current_command}" 2>/dev/null || echo "")
+                [ "$cmd" = "claude" ] && echo "$s"
+            done
+        ' 2>/dev/null)
+        if [ -z "$remote_sessions" ]; then
+            echo "[mcp-reconnect] $host: no Claude sessions found"
+            return
+        fi
+        sessions=($remote_sessions)
+    fi
+
+    for session in "${sessions[@]}"; do
+        echo "[mcp-reconnect] $host/$session: reconnecting..."
+        ssh -o ConnectTimeout=5 "$host" bash -s -- "$session" <<'RECONNECT_EOF'
+SESSION="$1"
+tmux send-keys -t "$SESSION" Escape
+sleep 3
+tmux send-keys -t "$SESSION" -l "/mcp"
+sleep 0.3
+tmux send-keys -t "$SESSION" Enter
+tmux send-keys -t "$SESSION" C-j
+sleep 1
+tmux send-keys -t "$SESSION" Down
+sleep 0.2
+tmux send-keys -t "$SESSION" Enter
+tmux send-keys -t "$SESSION" C-j
+sleep 3
+tmux send-keys -t "$SESSION" -l "MCP servers reconnected with latest deployed code. Continue."
+sleep 0.3
+tmux send-keys -t "$SESSION" Enter
+tmux send-keys -t "$SESSION" C-j
+echo "done"
+RECONNECT_EOF
+    done
+}
+
+# Parse args
+if [ "${1:-}" = "--remote" ]; then
+    shift
+    HOST="${1:?Usage: mcp-reconnect --remote <host> [session...]}"
+    shift
+    reconnect_remote "$HOST" "$@"
+    exit 0
+fi
+
+# Local reconnect
+if [ $# -gt 0 ]; then
+    # Specific sessions given
+    SESSIONS=("$@")
+else
+    # Auto-detect Claude sessions
+    mapfile -t SESSIONS < <(get_claude_sessions)
+fi
+
+if [ ${#SESSIONS[@]} -eq 0 ]; then
+    echo "[mcp-reconnect] No Claude sessions found"
+    exit 0
+fi
+
+echo "[mcp-reconnect] Reconnecting ${#SESSIONS[@]} session(s): ${SESSIONS[*]}"
+for session in "${SESSIONS[@]}"; do
+    reconnect_session "$session" &
+done
+wait
+echo "[mcp-reconnect] All sessions reconnected"

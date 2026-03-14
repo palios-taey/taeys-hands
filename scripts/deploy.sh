@@ -1,9 +1,8 @@
 #!/bin/bash
-# deploy.sh — Pull latest code and restart MCP servers on all machines.
+# deploy.sh — Pull latest code, restart MCP servers, auto-reconnect sessions.
 #
-# Kills MCP server processes on each machine. Claude Code does NOT
-# auto-relaunch — each session must run /mcp to reconnect.
-# Deploy notifications remind sessions to reconnect.
+# Kills MCP server processes, then uses mcp-reconnect to automatically
+# reconnect each Claude Code session via tmux key injection (/mcp menu).
 #
 # For file-watch auto-reload during development, see mcp-watch.sh.
 #
@@ -35,8 +34,9 @@ deploy_local() {
     git fetch origin main 2>&1 | tail -1
     git reset --hard origin/main 2>&1 | tail -1
 
-    echo "[local] Installing taey-notify..."
+    echo "[local] Installing taey-notify + mcp-reconnect..."
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
+    sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
 
     echo "[local] Killing MCP server processes..."
     pkill -f 'python3.*server\.py' 2>/dev/null && echo "[local] MCP servers killed (sessions must /mcp to reconnect)" \
@@ -51,6 +51,13 @@ deploy_local() {
         --redis-host "${REDIS_HOST:-192.168.100.10}" \
         > "/tmp/notify-daemon.log" 2>&1 &
     echo "[local] Notify daemon started (PID $!)"
+
+    echo "[local] Reconnecting MCP in Claude sessions..."
+    if command -v mcp-reconnect &>/dev/null; then
+        mcp-reconnect &
+    else
+        echo "[local] WARNING: mcp-reconnect not installed — sessions must /mcp manually"
+    fi
 
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
@@ -73,7 +80,8 @@ deploy_remote() {
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
         sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
-        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed (sessions must /mcp to reconnect)' || echo 'No MCP running'
+        sudo install -m 755 scripts/mcp-reconnect /usr/local/bin/mcp-reconnect 2>/dev/null || true
+        pkill -f 'python3.*server\.py' 2>/dev/null && echo 'MCP killed' || echo 'No MCP running'
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
         # ONE daemon per machine — auto-discovers all local tmux sessions
@@ -84,6 +92,10 @@ deploy_remote() {
             nohup python3 "$DAEMON" --redis-host "$REDIS" \
                 > "/tmp/notify-daemon.log" 2>&1 &
             echo "Notify daemon started (PID $!)"
+        fi
+        # Auto-reconnect MCP in Claude sessions
+        if command -v mcp-reconnect &>/dev/null; then
+            mcp-reconnect &
         fi
         echo "Done — commit: $(git log --oneline -1)"
 DEPLOY_EOF
