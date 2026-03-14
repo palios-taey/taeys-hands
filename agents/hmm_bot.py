@@ -224,18 +224,9 @@ def restart_firefox(platforms: list) -> bool:
                     os.remove(lock)
                 except FileNotFoundError:
                     pass
-            # Remove session restore to prevent old tab restoration
-            import glob as _glob
-            import shutil
-            for pattern in ['sessionstore*', 'sessionstore-backups']:
-                for path in _glob.glob(f'{parallel_profile}/{pattern}'):
-                    try:
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        else:
-                            os.remove(path)
-                    except Exception:
-                        pass
+            # NOTE: sessionstore files are preserved — they contain session
+            # cookies needed for login. Old tab restoration is harmless since
+            # the bot navigates to fresh URLs via Ctrl+L.
             profile_arg = ['--profile', parallel_profile, '--no-remote']
             logger.info(f"Using parallel profile: {parallel_profile}")
 
@@ -249,15 +240,7 @@ def restart_firefox(platforms: list) -> bool:
                     os.remove(lock)
                 except Exception:
                     pass
-            for pattern in ['*/sessionstore*', '*/sessionstore-backups']:
-                for path in _glob.glob(os.path.expanduser(f'{profile_dir}/{pattern}')):
-                    try:
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        else:
-                            os.remove(path)
-                    except Exception:
-                        pass
+            # sessionstore preserved — contains session cookies for login
 
     urls = ['about:blank']
 
