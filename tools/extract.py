@@ -146,32 +146,32 @@ def handle_quick_extract(platform: str, redis_client,
 
     content = clipboard.read()
 
-    # Detect if we copied user prompt instead of response
-    if content:
-        start = content.strip()[:200].lower()
-        markers = ['analyze the following', 'package analysis request',
-                    'you are analyzing', 'respond only with minified json',
-                    'critical: echo back', 'analyze all', 'for each item provide',
-                    'you are chatgpt', 'you are grok', 'you are gemini',
-                    'you are claude', 'you are perplexity',
-                    'please perform a thorough', 'please perform a full',
-                    'the attached file is the complete',
-                    'part of the family']
-        if any(m in start for m in markers):
-            if len(response_copy) >= 2:
-                prev = response_copy[-2]
-                clipboard.clear()
-                time.sleep(0.1)
-                if prev.get('atspi_obj') and atspi_click(prev):
-                    pass
-                else:
-                    inp.click_at(prev['x'], prev['y'])
-                time.sleep(0.8)
-                retry = clipboard.read()
-                if retry and retry != content:
-                    content = retry
-            else:
-                content = None
+    # Detect if we copied user prompt instead of AI response.
+    # Check against the actual pending_prompt stored by send_message.
+    if content and redis_client:
+        pending_json = redis_client.get(node_key(f"pending_prompt:{platform}"))
+        if pending_json:
+            try:
+                pending = json.loads(pending_json)
+                sent_text = pending.get('content', '').strip()
+                if sent_text and content.strip() == sent_text:
+                    # Copied the user message — try the second-to-last button
+                    if len(candidates) >= 2:
+                        prev = candidates[-2]
+                        clipboard.clear()
+                        time.sleep(0.1)
+                        if prev.get('atspi_obj') and atspi_click(prev):
+                            pass
+                        else:
+                            inp.click_at(prev['x'], prev['y'])
+                        time.sleep(0.8)
+                        retry = clipboard.read()
+                        if retry and retry.strip() != sent_text:
+                            content = retry
+                    else:
+                        content = None
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     # Retry with focus+Enter then xdotool if clipboard empty
     if not content and newest.get('atspi_obj'):

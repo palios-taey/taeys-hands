@@ -224,6 +224,31 @@ def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
     }
 
 
+def _normalize_dropdown_key(dropdown: str) -> str:
+    """Map AT-SPI button label → YAML capability key.
+
+    The dropdown parameter is whatever name the button has in the tree
+    (e.g. "Model selector, current model is 5.4 Pro"). We need to map
+    that to a YAML key like "models".
+    """
+    s = (dropdown or '').strip().lower()
+    if 'model' in s:
+        return 'models'
+    if 'mode' in s or 'thinking' in s or 'picker' in s:
+        return 'modes'
+    if 'tool' in s or 'search' in s or 'deep think' in s or 'canvas' in s:
+        return 'tools'
+    if 'attach' in s or 'upload' in s or 'file' in s:
+        return 'attach_menu'
+    if 'source' in s:
+        return 'sources'
+    # Exact keyword fallback
+    _EXACT = {'model': 'models', 'models': 'models', 'mode': 'modes',
+              'modes': 'modes', 'tool': 'tools', 'tools': 'tools',
+              'attach': 'attach_menu'}
+    return _EXACT.get(s, '')
+
+
 # Platforms where AT-SPI can't reliably enumerate dropdown items (React portals)
 _KEYBOARD_NAV_PLATFORMS = {'grok', 'chatgpt'}
 
@@ -263,12 +288,8 @@ def handle_select_dropdown(platform: str, dropdown: str,
         try:
             config = _load_platform_yaml(platform)
             caps = config.get('capabilities', {})
-            # Match dropdown name to YAML key
-            yaml_key_map = {'model': 'models', 'models': 'models',
-                            'mode': 'modes', 'modes': 'modes',
-                            'tool': 'tools', 'tools': 'tools',
-                            'attach': 'attach_menu'}
-            yaml_key = yaml_key_map.get(dropdown.lower())
+            # Normalize dropdown button label → YAML capability key
+            yaml_key = _normalize_dropdown_key(dropdown)
             yaml_items = caps.get(yaml_key, []) if yaml_key else []
             if yaml_items:
                 result = _keyboard_nav_select(platform, dropdown, target_value, yaml_items)

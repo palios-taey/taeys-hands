@@ -137,13 +137,16 @@ def get_tools() -> List[Dict]:
          "description": "Create/get/update execution plan. Plans track required state, attachments, message, steps. Identity files (FAMILY_KERNEL + platform-specific) are auto-prepended — only pass your own files in attachments.",
          "inputSchema": {"type": "object", "properties": {
              "platform": PLATFORM_PROP,
-             "action": {"type": "string", "enum": ["send_message", "extract_response", "get", "update", "delete"]},
+             "action": {"type": "string", "enum": ["send_message", "extract_response", "audit", "get", "update", "delete"]},
              "params": {"type": "object", "properties": {
                  "plan_id": {"type": "string"}, "message": {"type": "string"},
                  "mode": {"type": "string"}, "model": {"type": "string"},
                  "attachments": {"type": "array", "items": {"type": "string"}},
                  "current_state": {"type": "object"}, "steps": {"type": "array"},
                  "status": {"type": "string"},
+                 "current_model": {"type": "string"}, "current_mode": {"type": "string"},
+                 "current_tools": {"type": "array", "items": {"type": "string"}},
+                 "attachment_confirmed": {"type": "boolean"},
              }},
          }, "required": ["platform", "action"]}},
 
