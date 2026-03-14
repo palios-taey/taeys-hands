@@ -41,7 +41,7 @@ if os.path.expanduser('~/embedding-server') not in sys.path:
 
 from core import atspi, clipboard
 from core import input as inp
-from core.tree import find_elements, find_copy_buttons, filter_useful_elements, detect_chrome_y
+from core.tree import find_elements, find_copy_buttons, find_menu_items, filter_useful_elements, detect_chrome_y
 from tools.attach import handle_attach, _keyboard_nav_attach as keyboard_nav_attach, _close_stale_file_dialogs as close_stale_file_dialogs
 
 logging.basicConfig(
@@ -932,32 +932,32 @@ def attach_file(platform: str, file_path: str) -> bool:
         time.sleep(1.5)
 
         # Gemini: click "Upload files" in dropdown.
-        # Try AT-SPI first (reliable on some machines), keyboard nav fallback.
+        # Use find_menu_items() — same 4-pass strategy as main MCP implementation.
+        # Searches doc scope first, then Firefox root (catches React portal menus).
         if not _find_dialog_wid():
             time.sleep(1.5)
-            # Try AT-SPI scan for menu item
             clicked_upload = False
+            firefox = get_firefox(platform)
             doc2 = get_doc(platform, force_refresh=True)
-            if doc2:
-                elems2 = _find_elements_with_fence(doc2, platform)
-                for e in elems2:
-                    name = (e.get('name') or '').strip().lower()
-                    if name.startswith('upload file') and 'menu item' in e.get('role', ''):
-                        if e.get('atspi_obj') and atspi_click(e):
-                            logger.info(f"[{platform}] Clicked '{e.get('name')}' via AT-SPI")
+            menu_items = find_menu_items(firefox, doc2)
+            if menu_items:
+                for item in menu_items:
+                    name = (item.get('name') or '').strip().lower()
+                    if name.startswith('upload file'):
+                        if item.get('atspi_obj') and atspi_click(item):
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via AT-SPI")
                         else:
-                            inp.click_at(e['x'], e['y'])
-                            logger.info(f"[{platform}] Clicked '{e.get('name')}' via xdotool")
+                            inp.click_at(item['x'], item['y'])
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via xdotool")
                         clicked_upload = True
                         time.sleep(2.0)
                         break
-            # Keyboard nav fallback — Down+Enter selects first dropdown item
-            if not clicked_upload and not _find_dialog_wid():
-                logger.info(f"[{platform}] AT-SPI menu scan failed, using keyboard nav")
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key_split('Return')
-                time.sleep(2.5)
+                if not clicked_upload:
+                    # Menu items found but none match "Upload files" — log what we see
+                    names = [f"'{i.get('name','')}'" for i in menu_items[:5]]
+                    logger.warning(f"[{platform}] Menu items found but no 'Upload files': {names}")
+            else:
+                logger.warning(f"[{platform}] find_menu_items returned empty (doc={doc2 is not None}, ff={firefox is not None})")
     else:
         # Grok and others: find button, xdotool click, keyboard nav dropdown
         btn = None
