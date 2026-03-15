@@ -15,6 +15,9 @@ NODE_ID="${TAEY_NODE_ID:?TAEY_NODE_ID must be set}"
 SKIP_FIREFOX=false
 PLATFORMS="chatgpt,grok"
 REDIS_HOST="${REDIS_HOST:-192.168.100.10}"
+WEAVIATE_URL="${WEAVIATE_URL:-http://10.0.0.163:8088}"
+NEO4J_URI="${NEO4J_URI:-bolt://10.0.0.163:7689}"
+EMBEDDING_URL="${EMBEDDING_URL:-http://192.168.100.10:8091/v1/embeddings}"
 RESOLUTION="1920x1080x24"
 VNC_PASSWORD="${VNC_PASSWORD:-thor}"
 
@@ -163,7 +166,7 @@ for plat in "${PLATFORM_LIST[@]}"; do
     fi
 
     REPO_DIR="$(cd ~/taeys-hands 2>/dev/null && pwd)"
-    BOT_CMD="cd ${REPO_DIR} && DISPLAY=${DISPLAY_STR} TAEY_NODE_ID=${NODE_ID} NOTIFY_TARGET=weaver PYTHONPATH=~/embedding-server python3 agents/hmm_bot.py --platforms ${plat} 2>&1 | tee /tmp/hmm_bot_${plat}.log"
+    BOT_CMD="cd ${REPO_DIR} && DISPLAY=${DISPLAY_STR} TAEY_NODE_ID=${NODE_ID} NOTIFY_TARGET=weaver REDIS_HOST=${REDIS_HOST} WEAVIATE_URL=${WEAVIATE_URL} NEO4J_URI=${NEO4J_URI} EMBEDDING_URL=${EMBEDDING_URL} PYTHONPATH=~/embedding-server python3 agents/hmm_bot.py --platforms ${plat} 2>&1 | tee /tmp/hmm_bot_${plat}.log"
     tmux send-keys -t "${TMUX_SESSION}" "${BOT_CMD}" Enter
     echo "  Bot started in tmux '${TMUX_SESSION}'"
     echo ""
