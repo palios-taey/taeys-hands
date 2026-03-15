@@ -40,7 +40,7 @@ def _get_click_strategy(platform: str) -> str:
 
 def _fresh_atspi_find(platform: str, x: int, y: int, tolerance: int = 30) -> Optional[Dict]:
     """Fresh AT-SPI scan to find clickable element near (x, y)."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return None
     doc = atspi.get_platform_document(firefox, platform)

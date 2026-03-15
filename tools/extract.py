@@ -36,7 +36,7 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
         time.sleep(0.3)
     time.sleep(0.3)
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return target_btn, target_btn['x'], target_btn['y']
@@ -56,7 +56,7 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
     for attempt in range(3):
         inp.press_key('Page_Up')
         time.sleep(0.3)
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         if not doc:
             break
@@ -79,7 +79,7 @@ def handle_quick_extract(platform: str, redis_client,
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
     # Scroll to absolute bottom — press End until page stops moving
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return {"success": False, "error": "Firefox not found", "platform": platform}
     doc = atspi.get_platform_document(firefox, platform)
@@ -303,7 +303,7 @@ def handle_extract_history(platform: str, redis_client,
     inp.scroll_to_top()
     time.sleep(1.0)
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return {"success": False, "error": "Firefox not found", "platform": platform}
     doc = atspi.get_platform_document(firefox, platform)
@@ -313,7 +313,7 @@ def handle_extract_history(platform: str, redis_client,
 
     while scroll_iterations < 100 and len(messages) < max_messages:
         scroll_iterations += 1
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform)
         if not doc:
             break

@@ -234,7 +234,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return {"error": "Firefox not found"}
     doc = atspi.get_platform_document(firefox, platform)
@@ -278,7 +278,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
     # Retry up to 5 times — React dropdowns take variable time to render in AT-SPI
     menu_items = []
     for attempt in range(5):
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox_for_platform(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         if doc:
             menu_items = find_menu_items(firefox, doc)

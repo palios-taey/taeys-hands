@@ -144,7 +144,7 @@ def switch_to_platform(platform: str) -> bool:
         return False
 
     def _on_target() -> bool:
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox(platform)
         if not firefox:
             return False
         doc = atspi.get_platform_document(firefox, platform)
