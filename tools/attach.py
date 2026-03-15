@@ -265,7 +265,7 @@ def _any_file_dialog_open(firefox) -> str:
 def _handle_file_dialog(platform: str, file_path: str,
                         redis_client) -> Dict[str, Any]:
     """Route to portal or GTK dialog handler."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
     if _any_file_dialog_open(firefox) == 'portal':
         return _handle_portal_dialog(platform, file_path, redis_client)
     return _handle_gtk_dialog(platform, file_path, redis_client)
@@ -273,7 +273,7 @@ def _handle_file_dialog(platform: str, file_path: str,
 
 def _wait_for_chip(platform: str, timeout: float = 4.0) -> bool:
     """Wait for file chip to appear in AT-SPI tree."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
     for _ in range(int(timeout / 0.2)):
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         if doc and _detect_existing_attachments(doc):
@@ -358,7 +358,7 @@ def _handle_gtk_dialog(platform: str, file_path: str,
         inp.press_key('Return')
         time.sleep(0.8)
 
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox(platform)
         if atspi.is_file_dialog_open(firefox):
             inp.press_key('Return')
 
@@ -460,7 +460,7 @@ def _try_click_then_dialog(firefox, btn_coords, platform, file_path, redis_clien
 def _keyboard_nav_attach(platform: str, file_path: str,
                          redis_client) -> Dict[str, Any]:
     """ChatGPT/Grok: click attach → Down+Enter → handle file dialog."""
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
     dt = _any_file_dialog_open(firefox)
     if dt:
         return _handle_file_dialog(platform, file_path, redis_client)
@@ -469,7 +469,7 @@ def _keyboard_nav_attach(platform: str, file_path: str,
         logger.warning(f"Tab switch to {platform} may have failed")
     time.sleep(0.5)
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform) if doc else None
     if not btn_coords:
@@ -522,7 +522,7 @@ def handle_attach(platform: str, file_path: str,
     if not any(real_path == d or real_path.startswith(d + os.sep) for d in _ALLOWED_DIRS):
         return {"error": f"Path not in allowed directories: {real_path}"}
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
 
     # Short-circuit if dialog already open
     dt = _any_file_dialog_open(firefox)
@@ -578,7 +578,7 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"{platform} does not support file attachments"}
 
     # AT-SPI menu platforms: click trigger, scan for menu items or dialog
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     btn_coords = _get_attach_button_coords(doc, platform) if doc else None
 
@@ -599,7 +599,7 @@ def handle_attach(platform: str, file_path: str,
     # Wait for dropdown menu items
     dropdown_items = []
     for _ in range(5):
-        firefox = atspi.find_firefox()
+        firefox = atspi.find_firefox(platform)
         doc = atspi.get_platform_document(firefox, platform) if firefox else None
         dropdown_items = find_menu_items(firefox, doc)
         if dropdown_items:

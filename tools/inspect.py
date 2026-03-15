@@ -31,7 +31,7 @@ def _click_new_chat_gemini():
     finds and clicks the 'New chat' element in the sidebar to guarantee
     a fresh session.
     """
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform('gemini')
     if not firefox:
         logger.warning("Gemini fresh_session: Firefox not found for New chat click")
         return
@@ -334,7 +334,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
             time.sleep(0.5)
 
     # AT-SPI scan
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         result['error'] = "Firefox not found in AT-SPI tree"
         return result

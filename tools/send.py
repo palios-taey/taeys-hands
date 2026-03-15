@@ -156,7 +156,7 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Failed to switch to {platform}", "platform": platform}
     time.sleep(0.5)
 
-    firefox = atspi.find_firefox()
+    firefox = atspi.find_firefox_for_platform(platform)
     doc = atspi.get_platform_document(firefox, platform) if firefox else None
     if not doc:
         return {"error": f"Could not find {platform} document", "platform": platform}

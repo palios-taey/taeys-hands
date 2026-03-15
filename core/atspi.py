@@ -26,8 +26,10 @@ def detect_display() -> str:
     raise RuntimeError("No X display detected")
 
 
-def find_firefox():
-    """Find Firefox in AT-SPI desktop tree. Retries once with cache clear."""
+def find_firefox(platform: str = None):
+    """Find Firefox in AT-SPI desktop tree. Retries once with cache clear.
+    If platform is given and multiple Firefox instances exist, returns the
+    instance containing that platform's document (handles HMM bot profiles)."""
     for attempt in range(2):
         try:
             desktop = Atspi.get_desktop(0)
@@ -36,10 +38,25 @@ def find_firefox():
                     desktop.clear_cache_single()
                 except Exception:
                     pass
+            all_ff = []
             for i in range(desktop.get_child_count()):
                 app = desktop.get_child_at_index(i)
                 if app and 'firefox' in (app.get_name() or '').lower():
-                    return app
+                    all_ff.append(app)
+            if not all_ff:
+                if attempt == 0:
+                    continue
+                return None
+            if len(all_ff) == 1:
+                return all_ff[0]
+            # Multiple Firefox instances — need platform to disambiguate
+            if platform:
+                for ff in all_ff:
+                    doc = get_platform_document(ff, platform)
+                    if doc:
+                        return ff
+                logger.warning(f"No Firefox instance has {platform} document, returning first")
+            return all_ff[0]
         except Exception as e:
             if attempt == 0:
                 logger.warning(f"AT-SPI search failed, retrying: {e}")
