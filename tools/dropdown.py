@@ -275,11 +275,16 @@ def handle_select_dropdown(platform: str, dropdown: str,
         # Fall through to AT-SPI enumeration if keyboard nav fails
 
     # AT-SPI item enumeration (works for Claude, Gemini, Perplexity)
+    # Retry up to 5 times — React dropdowns take variable time to render in AT-SPI
     menu_items = []
-    firefox = atspi.find_firefox()
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    if doc:
-        menu_items = find_menu_items(firefox, doc)
+    for attempt in range(5):
+        firefox = atspi.find_firefox()
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        if doc:
+            menu_items = find_menu_items(firefox, doc)
+            if menu_items:
+                break
+        time.sleep(0.6)
 
     if menu_items:
         extend_cache(platform, menu_items)
