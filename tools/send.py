@@ -222,6 +222,9 @@ def handle_send_message(platform: str, message: str,
         enter_pressed = True
 
     # Re-capture URL after redirect (landing pages redirect to conversation URL)
+    # Poll all 5 attempts — some platforms (Perplexity) do multi-stage redirects:
+    #   landing → /search/new/{uuid} → /search/{slug}
+    # Breaking on first change would capture the intermediate URL.
     if enter_pressed:
         for _attempt in range(5):
             time.sleep(1)
@@ -230,32 +233,30 @@ def handle_send_message(platform: str, message: str,
                 if new_url and new_url != url:
                     logger.info("URL redirect: %s → %s", url[:60], new_url[:60])
                     url = new_url
-                    # Update pending_prompt with conversation URL
-                    if redis_client:
-                        redis_client.setex(node_key(f"pending_prompt:{platform}"), 3600, json.dumps({
-                            'content': message, 'attachments': attachments or [],
-                            'session_url': url, 'session_id': session_id,
-                            'message_id': message_id, 'sent_at': datetime.now().isoformat(),
-                        }))
-                    # Update Neo4j session with conversation URL
-                    if session_id:
-                        try:
-                            neo4j_client.update_session(session_id, {'url': url})
-                        except Exception:
-                            pass
-                    # Update monitor session with conversation URL
-                    if monitor_registered and redis_client:
-                        sess_key = node_key(f"active_session:{monitor_id}")
-                        raw = redis_client.get(sess_key)
-                        if raw:
-                            sess_data = json.loads(raw)
-                            sess_data['url'] = url
-                            ttl = redis_client.ttl(sess_key)
-                            if ttl > 0:
-                                redis_client.setex(sess_key, ttl, json.dumps(sess_data))
-                    break
             except Exception as e:
                 logger.debug("URL re-capture attempt %d: %s", _attempt, e)
+
+        # Update all stored references with final URL
+        if redis_client:
+            redis_client.setex(node_key(f"pending_prompt:{platform}"), 3600, json.dumps({
+                'content': message, 'attachments': attachments or [],
+                'session_url': url, 'session_id': session_id,
+                'message_id': message_id, 'sent_at': datetime.now().isoformat(),
+            }))
+        if session_id:
+            try:
+                neo4j_client.update_session(session_id, {'url': url})
+            except Exception:
+                pass
+        if monitor_registered and redis_client:
+            sess_key = node_key(f"active_session:{monitor_id}")
+            raw = redis_client.get(sess_key)
+            if raw:
+                sess_data = json.loads(raw)
+                sess_data['url'] = url
+                ttl = redis_client.ttl(sess_key)
+                if ttl > 0:
+                    redis_client.setex(sess_key, ttl, json.dumps(sess_data))
 
     # Clear DISPLAY-scoped plan lock — send complete, monitor can resume cycling
     if redis_client:
