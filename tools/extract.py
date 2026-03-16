@@ -251,6 +251,25 @@ def handle_quick_extract(platform: str, redis_client,
         # Clear DISPLAY-scoped plan lock
         display = os.environ.get('DISPLAY', ':0')
         redis_client.delete(f"taey:plan_active:{display}")
+        # Clean up active monitor sessions for this platform
+        set_key = node_key("active_session_ids")
+        try:
+            session_keys = redis_client.smembers(set_key)
+            for skey in session_keys:
+                try:
+                    sdata = redis_client.get(skey)
+                    if sdata:
+                        sess = json.loads(sdata)
+                        if sess.get('platform') == platform:
+                            redis_client.delete(skey)
+                            redis_client.srem(set_key, skey)
+                    else:
+                        # Key expired — remove from SET
+                        redis_client.srem(set_key, skey)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         if content:
             save_path = f"/tmp/hmm_response_{platform}.json"
             try:

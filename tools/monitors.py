@@ -18,19 +18,21 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
     if action == "list":
         sessions = []
         if redis_client:
-            cursor = 0
-            while True:
-                cursor, keys = redis_client.scan(
-                    cursor, match=node_key("active_session:*"), count=100)
-                for key in keys:
+            set_key = node_key("active_session_ids")
+            try:
+                session_keys = redis_client.smembers(set_key)
+                for key in session_keys:
                     try:
                         data = redis_client.get(key)
                         if data:
                             sessions.append(json.loads(data))
+                        else:
+                            # Expired — prune from SET
+                            redis_client.srem(set_key, key)
                     except Exception:
                         pass
-                if cursor == 0:
-                    break
+            except Exception:
+                pass
         # Also check plan lock
         plan_active = None
         if redis_client:
@@ -45,17 +47,17 @@ def handle_monitors(action: str, redis_client) -> Dict[str, Any]:
 
     elif action == "kill":
         cleared = 0
-        # Clear all active sessions from Redis
+        # Clear all active sessions from Redis using deterministic SET
         if redis_client:
-            cursor = 0
-            while True:
-                cursor, keys = redis_client.scan(
-                    cursor, match=node_key("active_session:*"), count=100)
-                for key in keys:
+            set_key = node_key("active_session_ids")
+            try:
+                session_keys = redis_client.smembers(set_key)
+                for key in session_keys:
                     redis_client.delete(key)
                     cleared += 1
-                if cursor == 0:
-                    break
+                redis_client.delete(set_key)
+            except Exception:
+                pass
             # Also clear legacy monitor keys and notifications
             cursor = 0
             while True:

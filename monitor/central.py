@@ -7,7 +7,7 @@ Simple state machine per session:
   3. If no AND stop_seen was True → COMPLETE, notify via Redis
   4. If no AND stop_seen was False → still waiting for generation to start
 
-NO URL navigation. Only tab switching via keyboard shortcuts.
+URL navigation: verifies session URL matches current tab, navigates if mismatched.
 NO fixed coordinates. Stop button found by AT-SPI name matching.
 Uses core modules — no duplicated helpers.
 
@@ -56,8 +56,9 @@ from gi.repository import Atspi
 
 # Use shared modules — no duplication
 from core.atspi import find_firefox, get_platform_document, get_document_url
-from core.input import press_key
-from core.platforms import TAB_SHORTCUTS, CHAT_PLATFORMS
+from core import clipboard
+from core.input import press_key, clipboard_paste
+from core.platforms import TAB_SHORTCUTS, CHAT_PLATFORMS, BASE_URLS, URL_PATTERNS
 from storage.redis_pool import node_key, NODE_ID
 
 # Redis
@@ -128,24 +129,43 @@ class CentralMonitor:
     # ── Redis session registry ──────────────────────────────────────────
 
     def _get_sessions(self) -> List[Dict]:
-        """Find ALL active sessions across ALL node_ids."""
+        """Find ALL active sessions across ALL node_ids.
+
+        Reads from a deterministic Redis SET (active_session_ids) instead of
+        using SCAN which is probabilistic and can miss keys.  Sessions whose
+        underlying key has expired are pruned from the SET automatically.
+        """
         if not self.rc:
             return []
         sessions = []
+        # Collect session keys from all node_id SETs
+        # The SET key pattern is taey:{node_id}:active_session_ids
+        # We need to find all such SETs — use SCAN only for the SET keys (few)
+        set_keys = []
         cursor = 0
         while True:
-            cursor, keys = self.rc.scan(cursor, match="taey:*:active_session:*", count=100)
-            for key in keys:
+            cursor, keys = self.rc.scan(cursor, match="taey:*:active_session_ids", count=100)
+            set_keys.extend(keys)
+            if cursor == 0:
+                break
+        for set_key in set_keys:
+            try:
+                session_keys = self.rc.smembers(set_key)
+            except Exception:
+                continue
+            for key in session_keys:
                 try:
                     data = self.rc.get(key)
                     if data:
                         s = json.loads(data)
                         s['_redis_key'] = key
+                        s['_set_key'] = set_key
                         sessions.append(s)
+                    else:
+                        # Session expired — remove from SET
+                        self.rc.srem(set_key, key)
                 except Exception:
                     pass
-            if cursor == 0:
-                break
         return sessions
 
     def _update_session(self, session: Dict):
@@ -154,7 +174,7 @@ class CentralMonitor:
         key = session.get('_redis_key')
         if key:
             self.rc.setex(key, session.get('timeout', 7200), json.dumps(
-                {k: v for k, v in session.items() if k != '_redis_key'}))
+                {k: v for k, v in session.items() if k not in ('_redis_key', '_set_key')}))
 
     def _remove_session(self, session: Dict):
         if not self.rc:
@@ -162,6 +182,19 @@ class CentralMonitor:
         key = session.get('_redis_key')
         if key:
             self.rc.delete(key)
+            # Remove from deterministic SET
+            set_key = session.get('_set_key')
+            if set_key:
+                self.rc.srem(set_key, key)
+            else:
+                # Fallback: try all known SET keys
+                cursor = 0
+                while True:
+                    cursor, skeys = self.rc.scan(cursor, match="taey:*:active_session_ids", count=100)
+                    for sk in skeys:
+                        self.rc.srem(sk, key)
+                    if cursor == 0:
+                        break
 
     def _plan_active(self) -> bool:
         """Check if any session has an active plan (DISPLAY-scoped lock).
@@ -170,6 +203,58 @@ class CentralMonitor:
             return False
         display = os.environ.get('DISPLAY', ':0')
         return bool(self.rc.exists(f"taey:plan_active:{display}"))
+
+    # ── URL navigation ─────────────────────────────────────────
+
+    def _is_landing_url(self, url: str, platform: str) -> bool:
+        """Check if URL is a base/landing page (not a specific conversation)."""
+        if not url:
+            return True
+        base = BASE_URLS.get(platform, '')
+        if not base:
+            return False
+        # Normalize: strip trailing slashes for comparison
+        url_norm = url.rstrip('/')
+        base_norm = base.rstrip('/')
+        if url_norm == base_norm:
+            return True
+        # Platform-specific landing patterns
+        domain = URL_PATTERNS.get(platform, '')
+        if domain and url_norm.rstrip('/') in (f"https://{domain}", f"https://www.{domain}"):
+            return True
+        return False
+
+    def _navigate_to_url(self, url: str, platform: str) -> bool:
+        """Navigate current tab to a URL using Ctrl+L → clipboard paste → Enter.
+
+        Uses clipboard lock to prevent concurrent clipboard access.
+        Returns True if navigation was initiated.
+        """
+        if not url:
+            return False
+        lock = None
+        try:
+            lock = clipboard.acquire_clipboard_lock()
+            press_key('Escape')
+            time.sleep(0.2)
+            press_key('ctrl+l')
+            time.sleep(0.2)
+            press_key('ctrl+a')
+            time.sleep(0.2)
+            clipboard.write_marker(url)
+            time.sleep(0.05)
+            press_key('ctrl+v', timeout=5)
+            time.sleep(0.1)
+            press_key('Return')
+            time.sleep(3.0)  # Wait for page load
+            _log(f"[{platform}] Navigated to {url[:80]}")
+            return True
+        except Exception as e:
+            _log(f"[{platform}] Navigation failed: {e}")
+            return False
+        finally:
+            if lock:
+                clipboard.release_clipboard_lock(lock)
 
     # ── AT-SPI: stop button detection ───────────────────────────────
 
@@ -415,6 +500,26 @@ class CentralMonitor:
             for session in platform_sessions:
                 if self._plan_active():
                     break
+
+                # URL verification: ensure we're on the session's conversation
+                session_url = session.get('url', '')
+                if session_url and not self._is_landing_url(session_url, platform):
+                    current_url = get_document_url(doc) or ''
+                    # Compare by stripping fragments/trailing slashes
+                    cur_norm = current_url.split('#')[0].split('?')[0].rstrip('/')
+                    sess_norm = session_url.split('#')[0].split('?')[0].rstrip('/')
+                    if cur_norm != sess_norm:
+                        _log(f"[{platform}] URL mismatch: "
+                             f"current={current_url[:60]} != session={session_url[:60]}")
+                        if self._navigate_to_url(session_url, platform):
+                            # Re-get doc after navigation
+                            doc = get_platform_document(firefox, platform)
+                            if not doc:
+                                _log(f"[{platform}] No document after navigation, skipping session")
+                                continue
+                        else:
+                            _log(f"[{platform}] Navigation failed, checking anyway")
+
                 if self._check_session(session, doc, firefox):
                     completed.append(session)
                 time.sleep(0.5)
