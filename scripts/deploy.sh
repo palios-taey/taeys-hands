@@ -39,7 +39,8 @@ deploy_local() {
     echo "[local] Installing taey-notify..."
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
 
-    echo "[local] Restarting notification daemon..."
+    echo "[local] Killing monitor + notification daemon..."
+    pkill -f 'monitor.central' 2>/dev/null || true
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
     local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
