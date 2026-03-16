@@ -49,6 +49,13 @@ deploy_local() {
         > "/tmp/notify-daemon.log" 2>&1 &
     echo "[local] Notify daemon started (PID $!)"
 
+    echo "[local] Restarting central monitor..."
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    nohup python3 -m monitor.central --cycle-interval 10 \
+        > "/tmp/central_monitor.log" 2>&1 &
+    echo "[local] Central monitor started (PID $!)"
+
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
 
@@ -103,19 +110,18 @@ smart_reconnect() {
     echo "[$s] reconnecting..."
     tmux send-keys -t "$s" Escape; sleep 5
     tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-    tmux send-keys -t "$s" Enter; sleep 1
-    # Read screen, find Reconnect or Enable among menu items
+    tmux send-keys -t "$s" Enter; sleep 2
+    # Read screen — strip Unicode (Claude TUI), find Reconnect or Enable
     local screen pos=0 target_pos=-1
-    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
     while IFS= read -r line; do
-        local trimmed
-        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-        [ -z "$trimmed" ] && continue
-        [ ${#trimmed} -gt 40 ] && continue
-        if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
-            if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+        local clean
+        clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
+        [ -z "$clean" ] && continue
+        if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
+            if echo "$clean" | grep -qi "reconnect\|enabl"; then
                 target_pos=$pos
-                echo "[$s] Found '${trimmed}' at position $pos"
+                echo "[$s] Found target at position $pos: '$clean'"
                 break
             fi
             pos=$((pos + 1))
@@ -126,7 +132,7 @@ smart_reconnect() {
             tmux send-keys -t "$s" Down; sleep 0.3
         done
     else
-        echo "[$s] WARNING: No Reconnect/Enable found"
+        echo "[$s] WARNING: Could not find Reconnect/Enable"
     fi
     tmux send-keys -t "$s" Enter; sleep 5
     tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
@@ -186,9 +192,8 @@ cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Smart reconnect — reads screen to find Reconnect or Enable, counts Downs.
-# Menu items (View tools, Reconnect, Disable, Enable) appear as short lines.
-# We find our target line and count how many menu lines precede it.
+# Reconnect MCP on one tmux session.
+# Reads screen via capture-pane, strips Unicode, finds Reconnect or Enable.
 reconnect() {
     local session="$1"
     echo "[$session] Escape..."
@@ -201,22 +206,21 @@ reconnect() {
     sleep 2
     # Select the server
     tmux send-keys -t "$session" Enter
-    sleep 1
-    # Read screen, extract menu items, find target
-    local screen target_pos=-1 pos=0
-    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
-    # Menu items are short lines (< 40 chars) containing known option keywords.
-    # We scan ALL of them and note the position of Reconnect or Enable.
+    sleep 2
+    # Read screen — strip non-ASCII (Claude TUI uses heavy Unicode)
+    local screen pos=0 target_pos=-1
+    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
+    echo "[$session] Screen lines with keywords:"
+    echo "$screen" | grep -inE "view tool|reconnect|enable|disable" | head -5 >&2
     while IFS= read -r line; do
-        local trimmed
-        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-        [ -z "$trimmed" ] && continue
-        [ ${#trimmed} -gt 40 ] && continue
-        # Match any known /mcp submenu option
-        if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
-            if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+        local clean
+        clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
+        [ -z "$clean" ] && continue
+        # Match menu options (allow partial — TUI may split words)
+        if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
+            if echo "$clean" | grep -qi "reconnect\|enabl"; then
                 target_pos=$pos
-                echo "[$session] Found '${trimmed}' at menu position $pos"
+                echo "[$session] Found target at position $pos: '$clean'"
                 break
             fi
             pos=$((pos + 1))
@@ -227,7 +231,7 @@ reconnect() {
             tmux send-keys -t "$session" Down; sleep 0.3
         done
     else
-        echo "[$session] WARNING: No Reconnect/Enable found in screen — pressing Enter"
+        echo "[$session] WARNING: Could not find Reconnect/Enable — pressing Enter on current"
     fi
     tmux send-keys -t "$session" Enter
     sleep 5
@@ -262,18 +266,17 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 2
-        tmux send-keys -t "$s" Enter; sleep 1
-        # Read screen, find Reconnect or Enable among menu items
-        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+        tmux send-keys -t "$s" Enter; sleep 2
+        # Read screen — strip Unicode, find Reconnect or Enable
+        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
         pos=0; target_pos=-1
         while IFS= read -r line; do
-            trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-            [ -z "$trimmed" ] && continue
-            [ ${#trimmed} -gt 40 ] && continue
-            if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
-                if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+            clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
+            [ -z "$clean" ] && continue
+            if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
+                if echo "$clean" | grep -qi "reconnect\|enabl"; then
                     target_pos=$pos
-                    echo "[$s@$(hostname)] Found '${trimmed}' at position $pos"
+                    echo "[$s@$(hostname)] Found target at position $pos"
                     break
                 fi
                 pos=$((pos + 1))
