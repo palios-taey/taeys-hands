@@ -103,46 +103,30 @@ smart_reconnect() {
     echo "[$s] reconnecting..."
     tmux send-keys -t "$s" Escape; sleep 5
     tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-    # Select the server
     tmux send-keys -t "$s" Enter; sleep 1
-    # Read screen to find Reconnect or Enable
-    local screen
+    # Read screen, find Reconnect or Enable among menu items
+    local screen pos=0 target_pos=-1
     screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-    local downs=0
-    local found=""
-    local line_num=0
-    local first_option_line=999
     while IFS= read -r line; do
-        line_num=$((line_num + 1))
-        # Look for Reconnect or Enable in the menu
-        if echo "$line" | grep -qi "reconnect"; then
-            if [ $line_num -lt $first_option_line ]; then
-                first_option_line=$line_num; downs=0; found="Reconnect"
+        local trimmed
+        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        [ -z "$trimmed" ] && continue
+        [ ${#trimmed} -gt 40 ] && continue
+        if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
+            if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+                target_pos=$pos
+                echo "[$s] Found '${trimmed}' at position $pos"
+                break
             fi
-        elif echo "$line" | grep -qi "enable"; then
-            if [ $line_num -lt $first_option_line ]; then
-                first_option_line=$line_num; downs=0; found="Enable"
-            fi
+            pos=$((pos + 1))
         fi
     done <<< "$screen"
-    # Count position: find all menu options and determine offset
-    if [ -n "$found" ]; then
-        # Re-scan to count how many options appear before our target
-        downs=0
-        while IFS= read -r line; do
-            if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
-                if echo "$line" | grep -qi "reconnect\|enable"; then
-                    break
-                fi
-                downs=$((downs + 1))
-            fi
-        done <<< "$screen"
-        echo "[$s] Found '$found' at position $downs"
-        for ((i=0; i<downs; i++)); do
+    if [ $target_pos -ge 0 ]; then
+        for ((i=0; i<target_pos; i++)); do
             tmux send-keys -t "$s" Down; sleep 0.3
         done
     else
-        echo "[$s] No Reconnect/Enable found — pressing Enter on first option"
+        echo "[$s] WARNING: No Reconnect/Enable found"
     fi
     tmux send-keys -t "$s" Enter; sleep 5
     tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
@@ -202,7 +186,9 @@ cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Reconnect function — reads screen to find Reconnect or Enable option
+# Smart reconnect — reads screen to find Reconnect or Enable, counts Downs.
+# Menu items (View tools, Reconnect, Disable, Enable) appear as short lines.
+# We find our target line and count how many menu lines precede it.
 reconnect() {
     local session="$1"
     echo "[$session] Escape..."
@@ -216,25 +202,32 @@ reconnect() {
     # Select the server
     tmux send-keys -t "$session" Enter
     sleep 1
-    # Read screen to find Reconnect or Enable
-    local screen downs=0 found=""
+    # Read screen, extract menu items, find target
+    local screen target_pos=-1 pos=0
     screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+    # Menu items are short lines (< 40 chars) containing known option keywords.
+    # We scan ALL of them and note the position of Reconnect or Enable.
     while IFS= read -r line; do
-        if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
-            if echo "$line" | grep -qi "reconnect\|enable"; then
-                found=$(echo "$line" | grep -oi "reconnect\|enable" | head -1)
+        local trimmed
+        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        [ -z "$trimmed" ] && continue
+        [ ${#trimmed} -gt 40 ] && continue
+        # Match any known /mcp submenu option
+        if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
+            if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+                target_pos=$pos
+                echo "[$session] Found '${trimmed}' at menu position $pos"
                 break
             fi
-            downs=$((downs + 1))
+            pos=$((pos + 1))
         fi
     done <<< "$screen"
-    if [ -n "$found" ]; then
-        echo "[$session] Found '$found' at position $downs"
-        for ((i=0; i<downs; i++)); do
+    if [ $target_pos -ge 0 ]; then
+        for ((i=0; i<target_pos; i++)); do
             tmux send-keys -t "$session" Down; sleep 0.3
         done
     else
-        echo "[$session] No Reconnect/Enable found — pressing Enter on first option"
+        echo "[$session] WARNING: No Reconnect/Enable found in screen — pressing Enter"
     fi
     tmux send-keys -t "$session" Enter
     sleep 5
@@ -270,21 +263,24 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 2
         tmux send-keys -t "$s" Enter; sleep 1
-        # Read screen to find Reconnect or Enable
+        # Read screen, find Reconnect or Enable among menu items
         screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-        downs=0; found=""
+        pos=0; target_pos=-1
         while IFS= read -r line; do
-            if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
-                if echo "$line" | grep -qi "reconnect\|enable"; then
-                    found=$(echo "$line" | grep -oi "reconnect\|enable" | head -1)
+            trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+            [ -z "$trimmed" ] && continue
+            [ ${#trimmed} -gt 40 ] && continue
+            if echo "$trimmed" | grep -qiE "^(view tools|reconnect|enable|disable|configure)"; then
+                if echo "$trimmed" | grep -qi "reconnect\|enable"; then
+                    target_pos=$pos
+                    echo "[$s@$(hostname)] Found '${trimmed}' at position $pos"
                     break
                 fi
-                downs=$((downs + 1))
+                pos=$((pos + 1))
             fi
         done <<< "$screen"
-        if [ -n "$found" ]; then
-            echo "[$s@$(hostname)] Found '$found' at position $downs"
-            for ((i=0; i<downs; i++)); do
+        if [ $target_pos -ge 0 ]; then
+            for ((i=0; i<target_pos; i++)); do
                 tmux send-keys -t "$s" Down; sleep 0.3
             done
         fi
