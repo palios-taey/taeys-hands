@@ -120,11 +120,14 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
     }
 
     try:
+        session_key = node_key(f"active_session:{monitor_id}")
         redis_client.setex(
-            node_key(f"active_session:{monitor_id}"),
+            session_key,
             timeout,
             json.dumps(session_data),
         )
+        # Add to deterministic SET so monitor doesn't need SCAN
+        redis_client.sadd(node_key("active_session_ids"), session_key)
         return {"registered": True, "monitor_id": monitor_id}
     except Exception as e:
         logger.error(f"Session registration failed: {e}")
@@ -209,7 +212,9 @@ def handle_send_message(platform: str, message: str,
         if not inp.press_key('Return', timeout=5):
             # Clean up monitor session on send failure
             if monitor_registered and redis_client:
-                redis_client.delete(node_key(f"active_session:{monitor_id}"))
+                session_key = node_key(f"active_session:{monitor_id}")
+                redis_client.delete(session_key)
+                redis_client.srem(node_key("active_session_ids"), session_key)
             # Clear pending_prompt so extract doesn't pick up a stale entry
             if redis_client:
                 redis_client.delete(node_key(f"pending_prompt:{platform}"))
