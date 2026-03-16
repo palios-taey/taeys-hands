@@ -103,11 +103,9 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         echo "[$s] reconnecting..."
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-        # Enter selects the server. If disabled → only "Enable" shown.
-        # If disconnected → "Reconnect" is second option, need Down.
-        # Strategy: Enter (opens submenu or selects Enable), Down (moves to
-        # Reconnect if it exists — no-op if dialog closed), Enter (confirms).
-        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Down; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 5
+        # Enter selects server, Enter selects first option (Reconnect or Enable).
+        # NO Down — Reconnect is first option, Down would select Disable.
+        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Enter; sleep 5
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
         sleep 0.3; tmux send-keys -t "$s" Enter
         echo "[$s] done"
@@ -172,11 +170,9 @@ reconnect() {
     sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 2
-    echo "[$session] Enter → Down → Enter..."
+    echo "[$session] Enter → Enter (first option)..."
     tmux send-keys -t "$session" Enter
     sleep 0.5
-    tmux send-keys -t "$session" Down
-    sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 5
     echo "[$session] Continue prompt..."
@@ -211,7 +207,6 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 2
         tmux send-keys -t "$s" Enter; sleep 0.5
-        tmux send-keys -t "$s" Down; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 5
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
         sleep 0.3; tmux send-keys -t "$s" Enter
