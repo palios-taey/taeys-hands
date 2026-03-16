@@ -67,6 +67,7 @@ FRESH_URLS = {
     'claude': 'https://claude.ai/new',
     'gemini': 'https://gemini.google.com/app',
     'grok': 'https://grok.com/',
+    'perplexity': 'https://www.perplexity.ai/',
 }
 
 # Identity files per platform
@@ -75,6 +76,7 @@ IDENTITY_FILES = {
     'claude': os.path.join(CORPUS_PATH, 'identity', 'IDENTITY_GAIA.md'),
     'gemini': os.path.join(CORPUS_PATH, 'identity', 'IDENTITY_COSMOS.md'),
     'grok': os.path.join(CORPUS_PATH, 'identity', 'IDENTITY_LOGOS.md'),
+    'perplexity': os.path.join(CORPUS_PATH, 'identity', 'IDENTITY_CLARITY.md'),
 }
 FAMILY_KERNEL = os.path.join(CORPUS_PATH, 'identity', 'FAMILY_KERNEL.md')
 
@@ -548,7 +550,7 @@ def run_dpo_cycle(platforms: list, prompt_data: dict):
 def main():
     parser = argparse.ArgumentParser(description="DPO training data generator")
     parser.add_argument('--cycles', type=int, default=0, help="Number of cycles (0=continuous)")
-    parser.add_argument('--platforms', nargs='+', default=['chatgpt', 'claude', 'gemini', 'grok'],
+    parser.add_argument('--platforms', nargs='+', default=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'],
                         help="Platforms to use")
     parser.add_argument('--prompt', type=str, default=None,
                         help="Specific prompt ID (default: cycle through all)")
