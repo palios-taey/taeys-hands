@@ -131,16 +131,20 @@ class CentralMonitor:
     def _get_sessions(self) -> List[Dict]:
         """Find ALL active sessions across ALL node_ids.
 
-        Reads from a deterministic Redis SET (active_session_ids) instead of
-        using SCAN which is probabilistic and can miss keys.  Sessions whose
-        underlying key has expired are pruned from the SET automatically.
+        Two discovery paths (backward compatible):
+          1. SET-based: read from taey:*:active_session_ids SETs (new MCP servers)
+          2. SCAN-based: find taey:*:active_session:* keys (old MCP servers)
+
+        Sessions found via SCAN are migrated into the appropriate SET so
+        future cycles find them instantly.
         """
         if not self.rc:
             return []
+
+        seen_keys = set()
         sessions = []
-        # Collect session keys from all node_id SETs
-        # The SET key pattern is taey:{node_id}:active_session_ids
-        # We need to find all such SETs — use SCAN only for the SET keys (few)
+
+        # --- Path 1: SET-based (new MCP servers) ---
         set_keys = []
         cursor = 0
         while True:
@@ -154,6 +158,8 @@ class CentralMonitor:
             except Exception:
                 continue
             for key in session_keys:
+                if key in seen_keys:
+                    continue
                 try:
                     data = self.rc.get(key)
                     if data:
@@ -161,11 +167,44 @@ class CentralMonitor:
                         s['_redis_key'] = key
                         s['_set_key'] = set_key
                         sessions.append(s)
+                        seen_keys.add(key)
                     else:
                         # Session expired — remove from SET
                         self.rc.srem(set_key, key)
                 except Exception:
                     pass
+
+        # --- Path 2: SCAN for plain session keys (old MCP servers) ---
+        cursor = 0
+        while True:
+            cursor, keys = self.rc.scan(cursor, match="taey:*:active_session:*", count=100)
+            for key in keys:
+                if key in seen_keys:
+                    continue
+                try:
+                    data = self.rc.get(key)
+                    if not data:
+                        continue
+                    s = json.loads(data)
+                    # Derive the SET key: taey:claude:active_session:xyz → taey:claude:active_session_ids
+                    # Key format: taey:{node_id}:active_session:{monitor_id}
+                    parts = key.rsplit(':active_session:', 1)
+                    if len(parts) == 2:
+                        set_key = parts[0] + ':active_session_ids'
+                    else:
+                        set_key = None
+                    # Migrate into SET for future cycles
+                    if set_key:
+                        self.rc.sadd(set_key, key)
+                    s['_redis_key'] = key
+                    s['_set_key'] = set_key
+                    sessions.append(s)
+                    seen_keys.add(key)
+                except Exception:
+                    pass
+            if cursor == 0:
+                break
+
         return sessions
 
     def _update_session(self, session: Dict):
