@@ -252,24 +252,35 @@ def handle_quick_extract(platform: str, redis_client,
         display = os.environ.get('DISPLAY', ':0')
         redis_client.delete(f"taey:plan_active:{display}")
         # Clean up active monitor sessions for this platform
+        # Two paths: SET-based (new) and SCAN-based (old) — same as monitor
         set_key = node_key("active_session_ids")
+        keys_to_check = set()
         try:
-            session_keys = redis_client.smembers(set_key)
-            for skey in session_keys:
-                try:
-                    sdata = redis_client.get(skey)
-                    if sdata:
-                        sess = json.loads(sdata)
-                        if sess.get('platform') == platform:
-                            redis_client.delete(skey)
-                            redis_client.srem(set_key, skey)
-                    else:
-                        # Key expired — remove from SET
-                        redis_client.srem(set_key, skey)
-                except Exception:
-                    pass
+            keys_to_check.update(redis_client.smembers(set_key))
         except Exception:
             pass
+        # Also SCAN for plain session keys (backward compat with old MCP servers)
+        try:
+            cursor = 0
+            while True:
+                cursor, found = redis_client.scan(cursor, match="taey:*:active_session:*", count=100)
+                keys_to_check.update(found)
+                if cursor == 0:
+                    break
+        except Exception:
+            pass
+        for skey in keys_to_check:
+            try:
+                sdata = redis_client.get(skey)
+                if sdata:
+                    sess = json.loads(sdata)
+                    if sess.get('platform') == platform:
+                        redis_client.delete(skey)
+                        redis_client.srem(set_key, skey)
+                else:
+                    redis_client.srem(set_key, skey)
+            except Exception:
+                pass
         if content:
             save_path = f"/tmp/hmm_response_{platform}.json"
             try:
