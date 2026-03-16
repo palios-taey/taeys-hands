@@ -548,16 +548,27 @@ class CentralMonitor:
                     cur_norm = current_url.split('#')[0].split('?')[0].rstrip('/')
                     sess_norm = session_url.split('#')[0].split('?')[0].rstrip('/')
                     if cur_norm != sess_norm:
-                        _log(f"[{platform}] URL mismatch: "
-                             f"current={current_url[:60]} != session={session_url[:60]}")
-                        if self._navigate_to_url(session_url, platform):
-                            # Re-get doc after navigation
-                            doc = get_platform_document(firefox, platform)
-                            if not doc:
-                                _log(f"[{platform}] No document after navigation, skipping session")
-                                continue
+                        # If only 1 session on this platform and current URL is a
+                        # real conversation (not landing), the tab is already showing
+                        # the right page — the stored URL is likely stale (pre-redirect).
+                        # Update stored URL instead of navigating away.
+                        if len(platform_sessions) == 1 and current_url and \
+                                not self._is_landing_url(current_url, platform):
+                            _log(f"[{platform}] Single session — updating stored URL: "
+                                 f"{session_url[:60]} → {current_url[:60]}")
+                            session['url'] = current_url
+                            self._update_session(session)
                         else:
-                            _log(f"[{platform}] Navigation failed, checking anyway")
+                            _log(f"[{platform}] URL mismatch: "
+                                 f"current={current_url[:60]} != session={session_url[:60]}")
+                            if self._navigate_to_url(session_url, platform):
+                                # Re-get doc after navigation
+                                doc = get_platform_document(firefox, platform)
+                                if not doc:
+                                    _log(f"[{platform}] No document after navigation, skipping session")
+                                    continue
+                            else:
+                                _log(f"[{platform}] Navigation failed, checking anyway")
 
                 if self._check_session(session, doc, firefox):
                     completed.append(session)
