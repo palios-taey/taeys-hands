@@ -97,19 +97,62 @@ if [ "$TARGET" = "--local" ]; then
     cat > /tmp/deploy-reconnect.sh <<'LEOF'
 #!/bin/bash
 sleep 10
+
+smart_reconnect() {
+    local s="$1"
+    echo "[$s] reconnecting..."
+    tmux send-keys -t "$s" Escape; sleep 5
+    tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
+    # Select the server
+    tmux send-keys -t "$s" Enter; sleep 1
+    # Read screen to find Reconnect or Enable
+    local screen
+    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+    local downs=0
+    local found=""
+    local line_num=0
+    local first_option_line=999
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        # Look for Reconnect or Enable in the menu
+        if echo "$line" | grep -qi "reconnect"; then
+            if [ $line_num -lt $first_option_line ]; then
+                first_option_line=$line_num; downs=0; found="Reconnect"
+            fi
+        elif echo "$line" | grep -qi "enable"; then
+            if [ $line_num -lt $first_option_line ]; then
+                first_option_line=$line_num; downs=0; found="Enable"
+            fi
+        fi
+    done <<< "$screen"
+    # Count position: find all menu options and determine offset
+    if [ -n "$found" ]; then
+        # Re-scan to count how many options appear before our target
+        downs=0
+        while IFS= read -r line; do
+            if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
+                if echo "$line" | grep -qi "reconnect\|enable"; then
+                    break
+                fi
+                downs=$((downs + 1))
+            fi
+        done <<< "$screen"
+        echo "[$s] Found '$found' at position $downs"
+        for ((i=0; i<downs; i++)); do
+            tmux send-keys -t "$s" Down; sleep 0.3
+        done
+    else
+        echo "[$s] No Reconnect/Enable found — pressing Enter on first option"
+    fi
+    tmux send-keys -t "$s" Enter; sleep 5
+    tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
+    sleep 0.3; tmux send-keys -t "$s" Enter
+    echo "[$s] done"
+}
+
 for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
     cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    if [ "$cmd" = "claude" ]; then
-        echo "[$s] reconnecting..."
-        tmux send-keys -t "$s" Escape; sleep 5
-        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-        # Enter selects server, Enter selects first option (Reconnect or Enable).
-        # NO Down — Reconnect is first option, Down would select Disable.
-        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Enter; sleep 5
-        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
-        sleep 0.3; tmux send-keys -t "$s" Enter
-        echo "[$s] done"
-    fi
+    [ "$cmd" = "claude" ] && smart_reconnect "$s"
 done &
 wait
 LEOF
@@ -159,7 +202,7 @@ cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Reconnect function — sends key sequence to one tmux session
+# Reconnect function — reads screen to find Reconnect or Enable option
 reconnect() {
     local session="$1"
     echo "[$session] Escape..."
@@ -170,9 +213,29 @@ reconnect() {
     sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 2
-    echo "[$session] Enter → Enter (first option)..."
+    # Select the server
     tmux send-keys -t "$session" Enter
-    sleep 0.5
+    sleep 1
+    # Read screen to find Reconnect or Enable
+    local screen downs=0 found=""
+    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+    while IFS= read -r line; do
+        if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
+            if echo "$line" | grep -qi "reconnect\|enable"; then
+                found=$(echo "$line" | grep -oi "reconnect\|enable" | head -1)
+                break
+            fi
+            downs=$((downs + 1))
+        fi
+    done <<< "$screen"
+    if [ -n "$found" ]; then
+        echo "[$session] Found '$found' at position $downs"
+        for ((i=0; i<downs; i++)); do
+            tmux send-keys -t "$session" Down; sleep 0.3
+        done
+    else
+        echo "[$session] No Reconnect/Enable found — pressing Enter on first option"
+    fi
     tmux send-keys -t "$session" Enter
     sleep 5
     echo "[$session] Continue prompt..."
@@ -206,7 +269,25 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 2
-        tmux send-keys -t "$s" Enter; sleep 0.5
+        tmux send-keys -t "$s" Enter; sleep 1
+        # Read screen to find Reconnect or Enable
+        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+        downs=0; found=""
+        while IFS= read -r line; do
+            if echo "$line" | grep -qi "reconnect\|enable\|disable\|configure"; then
+                if echo "$line" | grep -qi "reconnect\|enable"; then
+                    found=$(echo "$line" | grep -oi "reconnect\|enable" | head -1)
+                    break
+                fi
+                downs=$((downs + 1))
+            fi
+        done <<< "$screen"
+        if [ -n "$found" ]; then
+            echo "[$s@$(hostname)] Found '$found' at position $downs"
+            for ((i=0; i<downs; i++)); do
+                tmux send-keys -t "$s" Down; sleep 0.3
+            done
+        fi
         tmux send-keys -t "$s" Enter; sleep 5
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
         sleep 0.3; tmux send-keys -t "$s" Enter
