@@ -284,7 +284,7 @@ def _wait_for_chip(platform: str, timeout: float = 4.0) -> bool:
 
 def _handle_portal_dialog(platform: str, file_path: str,
                           redis_client) -> Dict[str, Any]:
-    """Nautilus portal: focus window, Ctrl+L, paste path, Enter."""
+    """Nautilus portal: focus window, Ctrl+L, type/paste path, Enter."""
     try:
         wids = _find_portal_wids()
         if not wids:
@@ -295,7 +295,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
         time.sleep(0.5)
         inp.press_key('ctrl+l')
         time.sleep(0.5)
-        inp.clipboard_paste(file_path)
+        inp.type_into_ui(file_path)
         time.sleep(0.3)
         inp.press_key('Return')
         time.sleep(1.0)
@@ -334,7 +334,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
 
 def _handle_gtk_dialog(platform: str, file_path: str,
                        redis_client) -> Dict[str, Any]:
-    """GTK embedded file dialog: focus, Ctrl+L, paste path, Enter."""
+    """GTK embedded file dialog: focus, Ctrl+L, type/paste path, Enter."""
     try:
         time.sleep(0.3)
         env = _xenv()
@@ -353,7 +353,7 @@ def _handle_gtk_dialog(platform: str, file_path: str,
 
         inp.press_key('ctrl+l')
         time.sleep(0.5)
-        inp.clipboard_paste(file_path)
+        inp.type_into_ui(file_path)
         time.sleep(0.3)
         inp.press_key('Return')
         time.sleep(0.8)
