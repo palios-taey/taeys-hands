@@ -78,7 +78,12 @@ def handle_quick_extract(platform: str, redis_client,
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
-    # Scroll to absolute bottom — press End until page stops moving
+    # Scroll to absolute bottom FIRST, then get doc and scan
+    for _ in range(5):
+        inp.press_key('End')
+        time.sleep(0.3)
+    time.sleep(0.5)
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return {"success": False, "error": "Firefox not found", "platform": platform}
@@ -87,19 +92,21 @@ def handle_quick_extract(platform: str, redis_client,
         return {"success": False, "error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
-    # Scroll to absolute bottom — press End until element positions stop changing
+    # Extra scroll if needed — press End until positions stabilize
     last_max_y = 0
-    for _ in range(20):
-        inp.press_key('End')
-        time.sleep(0.4)
+    for _ in range(15):
         elements = find_elements(doc)
         if elements:
             cur_max_y = max(e.get('y', 0) for e in elements)
             if cur_max_y == last_max_y:
-                break  # Page stopped scrolling
+                break
             last_max_y = cur_max_y
+        inp.press_key('End')
+        time.sleep(0.4)
     time.sleep(0.3)
 
+    # Re-fetch doc after scroll complete for fresh AT-SPI tree
+    doc = atspi.get_platform_document(firefox, platform) or doc
     all_elements = find_elements(doc)
     copy_buttons = find_copy_buttons(all_elements)
 
