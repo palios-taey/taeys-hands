@@ -33,6 +33,7 @@ declare -A PLATFORMS=(
     [3]="gemini|https://gemini.google.com/app"
     [4]="grok|https://grok.com/"
     [5]="claude|https://claude.ai/new"
+    [6]="perplexity|https://www.perplexity.ai/"
 )
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
