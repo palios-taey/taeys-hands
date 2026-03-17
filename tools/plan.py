@@ -117,6 +117,9 @@ def _consolidate_attachments(files: List[str], platform: str) -> Optional[str]:
 def handle_plan(platform: str, action: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
     """Dispatch plan operations: create, audit, get, update, delete."""
+    # Guard: params must be a dict (Claude sometimes sends a string)
+    if not isinstance(params, dict):
+        params = {}
     if action == 'create' or action == 'send_message':
         return _create_plan(platform, params, redis_client)
     elif action == 'audit':
