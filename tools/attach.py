@@ -284,7 +284,7 @@ def _wait_for_chip(platform: str, timeout: float = 4.0) -> bool:
 
 def _handle_portal_dialog(platform: str, file_path: str,
                           redis_client) -> Dict[str, Any]:
-    """Nautilus portal: focus window, Ctrl+L, type/paste path, Enter."""
+    """Nautilus portal: focus window, Ctrl+L, paste path, Enter."""
     try:
         wids = _find_portal_wids()
         if not wids:
@@ -314,11 +314,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
             return {"error": "Portal dialog did not close after file selection"}
 
         inp.focus_firefox()
-        time.sleep(0.3)
-        # Dismiss web dropdown that may still be open behind the file dialog
-        inp.press_key('Escape')
-        time.sleep(0.3)
-
+        time.sleep(0.5)
         chip_found = _wait_for_chip(platform)
         result = {"status": "file_attached", "platform": platform,
                   "file_path": file_path, "filename": os.path.basename(file_path),
@@ -338,7 +334,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
 
 def _handle_gtk_dialog(platform: str, file_path: str,
                        redis_client) -> Dict[str, Any]:
-    """GTK embedded file dialog: focus, Ctrl+L, type/paste path, Enter."""
+    """GTK embedded file dialog: focus, Ctrl+L, paste path, Enter."""
     try:
         time.sleep(0.3)
         env = _xenv()
@@ -375,12 +371,7 @@ def _handle_gtk_dialog(platform: str, file_path: str,
         if not dialog_closed:
             return {"error": "GTK file dialog did not close after selection"}
 
-        # Dismiss web dropdown that may still be open behind the file dialog
-        inp.focus_firefox()
-        time.sleep(0.3)
-        inp.press_key('Escape')
-        time.sleep(0.3)
-
+        time.sleep(0.5)
         chip_found = _wait_for_chip(platform)
         result = {"status": "file_attached", "platform": platform,
                   "file_path": file_path, "filename": os.path.basename(file_path),

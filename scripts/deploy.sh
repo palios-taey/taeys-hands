@@ -49,13 +49,6 @@ deploy_local() {
         > "/tmp/notify-daemon.log" 2>&1 &
     echo "[local] Notify daemon started (PID $!)"
 
-    echo "[local] Restarting central monitor..."
-    local repo_dir
-    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    nohup python3 -m monitor.central --cycle-interval 10 \
-        > "/tmp/central_monitor.log" 2>&1 &
-    echo "[local] Central monitor started (PID $!)"
-
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
 
@@ -104,45 +97,17 @@ if [ "$TARGET" = "--local" ]; then
     cat > /tmp/deploy-reconnect.sh <<'LEOF'
 #!/bin/bash
 sleep 10
-
-smart_reconnect() {
-    local s="$1"
-    echo "[$s] reconnecting..."
-    tmux send-keys -t "$s" Escape; sleep 5
-    tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-    tmux send-keys -t "$s" Enter; sleep 2
-    # Read screen — strip Unicode (Claude TUI), find Reconnect or Enable
-    local screen pos=0 target_pos=-1
-    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
-    while IFS= read -r line; do
-        local clean
-        clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
-        [ -z "$clean" ] && continue
-        if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
-            if echo "$clean" | grep -qi "reconnect\|enabl"; then
-                target_pos=$pos
-                echo "[$s] Found target at position $pos: '$clean'"
-                break
-            fi
-            pos=$((pos + 1))
-        fi
-    done <<< "$screen"
-    if [ $target_pos -ge 0 ]; then
-        for ((i=0; i<target_pos; i++)); do
-            tmux send-keys -t "$s" Down; sleep 0.3
-        done
-    else
-        echo "[$s] WARNING: Could not find Reconnect/Enable"
-    fi
-    tmux send-keys -t "$s" Enter; sleep 5
-    tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
-    sleep 0.3; tmux send-keys -t "$s" Enter
-    echo "[$s] done"
-}
-
 for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
     cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    [ "$cmd" = "claude" ] && smart_reconnect "$s"
+    if [ "$cmd" = "claude" ]; then
+        echo "[$s] reconnecting..."
+        tmux send-keys -t "$s" Escape; sleep 5
+        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
+        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Down; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 5
+        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
+        sleep 0.3; tmux send-keys -t "$s" Enter
+        echo "[$s] done"
+    fi
 done &
 wait
 LEOF
@@ -192,8 +157,7 @@ cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Reconnect MCP on one tmux session.
-# Reads screen via capture-pane, strips Unicode, finds Reconnect or Enable.
+# Reconnect function — sends key sequence to one tmux session
 reconnect() {
     local session="$1"
     echo "[$session] Escape..."
@@ -204,35 +168,11 @@ reconnect() {
     sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 2
-    # Select the server
+    echo "[$session] Enter → Down → Enter..."
     tmux send-keys -t "$session" Enter
-    sleep 2
-    # Read screen — strip non-ASCII (Claude TUI uses heavy Unicode)
-    local screen pos=0 target_pos=-1
-    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
-    echo "[$session] Screen lines with keywords:"
-    echo "$screen" | grep -inE "view tool|reconnect|enable|disable" | head -5 >&2
-    while IFS= read -r line; do
-        local clean
-        clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
-        [ -z "$clean" ] && continue
-        # Match menu options (allow partial — TUI may split words)
-        if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
-            if echo "$clean" | grep -qi "reconnect\|enabl"; then
-                target_pos=$pos
-                echo "[$session] Found target at position $pos: '$clean'"
-                break
-            fi
-            pos=$((pos + 1))
-        fi
-    done <<< "$screen"
-    if [ $target_pos -ge 0 ]; then
-        for ((i=0; i<target_pos; i++)); do
-            tmux send-keys -t "$session" Down; sleep 0.3
-        done
-    else
-        echo "[$session] WARNING: Could not find Reconnect/Enable — pressing Enter on current"
-    fi
+    sleep 0.5
+    tmux send-keys -t "$session" Down
+    sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 5
     echo "[$session] Continue prompt..."
@@ -266,27 +206,8 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 2
-        tmux send-keys -t "$s" Enter; sleep 2
-        # Read screen — strip Unicode, find Reconnect or Enable
-        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null | LC_ALL=C tr -cd '[:print:]\n' | sed 's/[^a-zA-Z0-9 ]/ /g')
-        pos=0; target_pos=-1
-        while IFS= read -r line; do
-            clean=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -s ' ')
-            [ -z "$clean" ] && continue
-            if echo "$clean" | grep -qiE "view tool|reconnect|enabl|disabl"; then
-                if echo "$clean" | grep -qi "reconnect\|enabl"; then
-                    target_pos=$pos
-                    echo "[$s@$(hostname)] Found target at position $pos"
-                    break
-                fi
-                pos=$((pos + 1))
-            fi
-        done <<< "$screen"
-        if [ $target_pos -ge 0 ]; then
-            for ((i=0; i<target_pos; i++)); do
-                tmux send-keys -t "$s" Down; sleep 0.3
-            done
-        fi
+        tmux send-keys -t "$s" Enter; sleep 0.5
+        tmux send-keys -t "$s" Down; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 5
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
         sleep 0.3; tmux send-keys -t "$s" Enter

@@ -406,10 +406,11 @@ def _create_extract_plan(platform: str, params: Dict,
         'tools': [], 'attachments': [], 'validated': True, 'created_at': time.time(),
     }))
 
-    # NOTE: extract_response does NOT set plan_active lock.
-    # Extract waits for the monitor to detect completion — the monitor
-    # needs to cycle tabs freely. Locking here creates a deadlock:
-    # weaver waits for notification, monitor blocked by plan lock.
+    redis_client.setex(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}", _PLAN_TTL, json.dumps({
+        'plan_id': plan_id, 'platform': platform,
+        'node_id': node_key('').rstrip(':'),
+        'created_at': time.time(),
+    }))
 
     return {
         "success": True, "plan_id": plan_id, "platform": platform,
