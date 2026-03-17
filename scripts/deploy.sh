@@ -252,8 +252,15 @@ reconnect() {
 }
 
 # ─── Local sessions ───────────────────────────────────────────────────
+# Detect which tmux session called deploy (so we skip it)
+CALLER_SESSION="${TMUX_SESSION:-}"
+
 SESSIONS=()
 for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    if [ "$s" = "$CALLER_SESSION" ]; then
+        echo "[$s] skipped (caller session — reconnect manually with /mcp)"
+        continue
+    fi
     cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
     if [ "$cmd" = "claude" ]; then
         SESSIONS+=("$s")
@@ -345,8 +352,12 @@ if [ "$TARGET" = "--local" ]; then
     echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
     pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
     write_reconnect_script
+    # Pass caller's tmux session so reconnect skips it
+    TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+    export TMUX_SESSION
     nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
     disown
+    echo "Caller session '$TMUX_SESSION' excluded from reconnect — run /mcp manually"
     exit 0
 fi
 
@@ -383,6 +394,10 @@ echo ""
 echo "=== Phase 2: MCP reconnect (all machines, in 10 seconds) ==="
 pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
 write_reconnect_script
+# Pass caller's tmux session so reconnect skips it
+TMUX_SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+export TMUX_SESSION
 nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
 disown
+echo "Caller session '$TMUX_SESSION' excluded — run /mcp manually"
 echo "Detached reconnect PID $! — will fire in 10s"
