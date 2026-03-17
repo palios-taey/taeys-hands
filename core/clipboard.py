@@ -89,19 +89,3 @@ def write_marker(marker: str):
         raise
     except Exception as e:
         raise RuntimeError(f"Clipboard write failed: {e}") from e
-
-
-def kill_stale_xsel():
-    """Kill lingering xsel processes that stay resident as clipboard owner on Xvfb.
-
-    On Xvfb, xsel --input stays running to hold clipboard ownership (no
-    clipboard manager). This accumulates zombie-like processes. Safe to call
-    periodically — only kills xsel processes, not other clipboard users.
-    """
-    try:
-        subprocess.run(
-            ['pkill', '-f', 'xsel.*--clipboard'],
-            capture_output=True, timeout=3,
-        )
-    except Exception:
-        pass

@@ -8,7 +8,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 _ENV = None
-_IS_XVFB = None  # cached detection
 
 
 def _get_env() -> dict:
@@ -19,48 +18,7 @@ def _get_env() -> dict:
 
 
 def set_display(display: str):
-    global _IS_XVFB
     _get_env()['DISPLAY'] = display
-    _IS_XVFB = None  # reset cache on display change
-
-
-def is_xvfb() -> bool:
-    """Detect if current DISPLAY is Xvfb (virtual) vs physical.
-
-    Checks xdpyinfo vendor string. Cached after first call.
-    """
-    global _IS_XVFB
-    if _IS_XVFB is not None:
-        return _IS_XVFB
-    try:
-        r = subprocess.run(
-            ['xdpyinfo'],
-            env=_get_env(), capture_output=True, text=True, timeout=5,
-        )
-        _IS_XVFB = 'xvfb' in r.stdout.lower() if r.returncode == 0 else False
-    except Exception:
-        _IS_XVFB = False
-    if _IS_XVFB:
-        logger.info("Detected Xvfb display — using xdotool type for UI fields")
-    return _IS_XVFB
-
-
-def type_into_ui(text: str, timeout: int = 30) -> bool:
-    """Enter text into browser chrome UI (address bar, file dialog path bar).
-
-    On physical displays: clipboard paste (Ctrl+V) — fast and reliable.
-    On Xvfb: xdotool type — clipboard paste doesn't reach browser chrome on Xvfb.
-
-    For in-page content (chat inputs), use clipboard_paste() directly — that
-    works on both physical and Xvfb displays.
-    """
-    if is_xvfb():
-        # Select all existing text first, then type over it
-        press_key('ctrl+a')
-        time.sleep(0.1)
-        return type_text(text, delay_ms=10, timeout=timeout)
-    else:
-        return clipboard_paste(text, timeout=3.0)
 
 
 def press_key(key: str, timeout: int = 10) -> bool:
