@@ -141,25 +141,32 @@ wait_for_menu() {
 # selectable), this loops: check if cursor (❯) is on the target, if not
 # press Down. Position-independent — works regardless of menu ordering.
 # Returns 0 if found, 1 if not found after max attempts.
-navigate_to_server() {
+# Navigate cursor to a target in a TUI menu.
+# $3 = "server" requires · in the line (prevents matching section headers)
+# $3 = "option" matches any line with ❯ + target text (for submenus)
+navigate_to() {
     local session="$1"
     local target="$2"
+    local mode="${3:-server}"
     local max_attempts=15
 
     for ((attempt=0; attempt<max_attempts; attempt++)); do
-        local screen
+        local screen cursor_line
         screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
 
-        # Find the line with the cursor marker (❯) that also contains our target
-        local cursor_line
-        cursor_line=$(echo "$screen" | grep '❯' | grep -i "$target" | head -1)
+        if [ "$mode" = "server" ]; then
+            # Server list: require · separator to avoid matching headers
+            cursor_line=$(echo "$screen" | grep '❯' | grep ' · ' | grep -i "$target" | head -1)
+        else
+            # Submenu: match any line with cursor + target text
+            cursor_line=$(echo "$screen" | grep '❯' | grep -i "$target" | head -1)
+        fi
 
         if [ -n "$cursor_line" ]; then
             echo "[$session] Cursor on '$target' (attempt $attempt)" >&2
             return 0
         fi
 
-        # Not on target yet — press Down
         tmux send-keys -t "$session" Down
         sleep 0.3
     done
@@ -227,12 +234,12 @@ reconnect() {
     fi
 
     # Navigate to taeys-hands by pressing Down until cursor is on it
-    if navigate_to_server "$session" "taeys-hands"; then
+    if navigate_to "$session" "taeys-hands" server; then
         tmux send-keys -t "$session" Enter
         sleep 2
 
-        # Now in submenu — navigate to Reconnect the same way
-        if navigate_to_server "$session" "Reconnect"; then
+        # Now in submenu — navigate to Reconnect
+        if navigate_to "$session" "Reconnect" option; then
             tmux send-keys -t "$session" Enter
             sleep 8
         else
@@ -300,11 +307,11 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         done
 
         if [ $menu_ok -eq 1 ]; then
-            # Navigate to taeys-hands by pressing Down until cursor is on it
+            # Navigate to taeys-hands — require · to avoid matching section headers
             found=0
             for attempt in $(seq 0 14); do
                 screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-                if echo "$screen" | grep '❯' | grep -qi "taeys-hands"; then
+                if echo "$screen" | grep '❯' | grep ' · ' | grep -qi "taeys-hands"; then
                     echo "[$s@$(hostname)] Cursor on taeys-hands (attempt $attempt)"
                     found=1; break
                 fi
