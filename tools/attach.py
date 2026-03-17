@@ -295,7 +295,7 @@ def _handle_portal_dialog(platform: str, file_path: str,
         time.sleep(0.5)
         inp.press_key('ctrl+l')
         time.sleep(0.5)
-        inp.type_into_ui(file_path)
+        inp.clipboard_paste(file_path)
         time.sleep(0.3)
         inp.press_key('Return')
         time.sleep(1.0)
@@ -357,7 +357,7 @@ def _handle_gtk_dialog(platform: str, file_path: str,
 
         inp.press_key('ctrl+l')
         time.sleep(0.5)
-        inp.type_into_ui(file_path)
+        inp.clipboard_paste(file_path)
         time.sleep(0.3)
         inp.press_key('Return')
         time.sleep(0.8)
