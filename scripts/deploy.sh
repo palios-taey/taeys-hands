@@ -5,8 +5,11 @@
 #   1. DEPLOY: Pull code, clean pycache, kill MCP + daemons (all machines)
 #   2. RECONNECT: After ALL deploys finish, reconnect MCP in Claude sessions
 #
-# The reconnect phase runs as a detached process with a delay so the
-# calling Claude session's Bash tool returns cleanly before Escape hits.
+# MCP servers are stdio children of Claude Code. Killing them breaks the pipe.
+# The /mcp reconnect spawns fresh servers with the new code.
+#
+# Reconnect uses tmux capture-pane to read screen text and find the correct
+# menu option (Reconnect/Enable) — no blind keystroke sequences.
 #
 # Usage:
 #   bash scripts/deploy.sh          # Deploy to all machines
@@ -18,22 +21,13 @@ set -euo pipefail
 REPO_DIR="taeys-hands"
 
 # Machine registry: SSH host alias → home dir prefix
-# SSH aliases defined in ~/.ssh/config (spark2→spark@10.0.0.80, thor→thor@10.0.0.197, etc.)
+# SSH aliases defined in ~/.ssh/config
 declare -A MACHINES=(
     [spark1]="/home/spark"
     [spark2]="/home/spark"
     [thor]="/home/thor"
     [jetson]="/home/jetson"
 )
-
-# Kill all MCP server processes for taeys-hands and isma-memory.
-# MCP servers are stdio children of Claude Code — killing them makes Claude Code
-# detect the broken pipe. The /mcp reconnect spawns fresh servers with new code.
-kill_mcp_servers() {
-    echo "[$(hostname)] Killing MCP server processes..."
-    pkill -f 'taeys-hands/server.py' 2>/dev/null || true
-    pkill -f 'isma/src/mcp_server.py' 2>/dev/null || true
-}
 
 deploy_local() {
     echo "[local] Cleaning __pycache__ (prevents stale .pyc shadowing)..."
@@ -46,13 +40,11 @@ deploy_local() {
     echo "[local] Installing taey-notify..."
     sudo install -m 755 scripts/taey-notify /usr/local/bin/taey-notify 2>/dev/null || true
 
-    echo "[local] Killing monitor + notification daemon..."
+    echo "[local] Killing MCP servers + monitor + notification daemon..."
+    pkill -f 'taeys-hands/server.py' 2>/dev/null || true
+    pkill -f 'isma/src/mcp_server.py' 2>/dev/null || true
     pkill -f 'monitor.central' 2>/dev/null || true
     pkill -f 'notifications/daemon' 2>/dev/null || true
-
-    # Kill MCP servers so reconnect picks up new code
-    kill_mcp_servers
-
     sleep 1
 
     local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
@@ -108,53 +100,68 @@ DEPLOY_EOF
 }
 
 # ─── Reconnect helper ─────────────────────────────────────────────────
-# Reconnects all Claude Code sessions on a machine by:
-# 1. Sending Escape to cancel any pending operation
-# 2. Sending /mcp + Enter to open MCP management
-# 3. Reading the screen to find "Reconnect" or "Enable" option
-# 4. Navigating to the correct option and selecting it
+# Smart MCP reconnect: reads screen text to find menu options.
 #
-# Uses tmux capture-pane for text matching instead of blind keystrokes.
+# /mcp menu has two levels:
+#   Level 1: Server list + "Reconnect all" (if multiple servers)
+#   Level 2 (per-server): View tools, Reconnect, Enable, Disable
+#
+# Strategy:
+#   1. Open /mcp, capture screen
+#   2. If "Reconnect" found at level 1 → select it (handles single + multi server)
+#   3. If server name found but no Reconnect → select server, then find
+#      Reconnect/Enable in submenu
+#
+# Uses tmux capture-pane -p which strips ANSI codes for clean text matching.
+
 write_reconnect_script() {
     cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Smart select — reads screen, finds target text, navigates to it
-# Usage: smart_select <session> <search_text>
-# Searches captured pane for a line containing search_text.
-# If found, calculates arrow key presses needed from current selection.
-smart_select() {
+# Find a menu option by text and navigate to it.
+# Scans captured screen for short lines matching known /mcp menu items.
+# Returns the number of Down presses needed (0 = first item selected).
+find_and_select() {
     local session="$1"
-    local search="$2"
-    sleep 1
+    local target="$2"  # regex pattern to match (case-insensitive)
 
-    # Capture the visible pane content (strips ANSI codes)
     local screen
     screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
 
-    # Look for the search text (case-insensitive)
-    if echo "$screen" | grep -qi "$search"; then
-        echo "[$session] Found '$search' on screen"
-        # In Claude Code /mcp menu, options are listed vertically.
-        # First option is pre-selected. Count lines between first option
-        # and our target to know how many Down arrows to press.
-        #
-        # Menu items contain: Reconnect, Enable, Disable
-        # We want "Reconnect" — it's typically the first/only option
-        # when servers exist. Just press Enter to select it.
+    local pos=0 target_pos=-1
+    while IFS= read -r line; do
+        local trimmed
+        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+        [ -z "$trimmed" ] && continue
+        [ ${#trimmed} -gt 60 ] && continue
+
+        # Match known /mcp menu items (level 1 and level 2)
+        if echo "$trimmed" | grep -qiE "(view tools|reconnect|enable|disable|configure|taeys-hands|isma-memory)"; then
+            if echo "$trimmed" | grep -qi "$target"; then
+                target_pos=$pos
+                echo "[$session] Found '$trimmed' at position $pos"
+                break
+            fi
+            pos=$((pos + 1))
+        fi
+    done <<< "$screen"
+
+    if [ $target_pos -ge 0 ]; then
+        for ((i=0; i<target_pos; i++)); do
+            tmux send-keys -t "$session" Down; sleep 0.3
+        done
         tmux send-keys -t "$session" Enter
         return 0
     else
-        echo "[$session] '$search' NOT found on screen, pressing Enter (default)"
-        echo "[$session] Screen content (last 10 lines):"
-        echo "$screen" | tail -10 | sed 's/^/    /'
-        tmux send-keys -t "$session" Enter
+        echo "[$session] WARNING: '$target' not found on screen"
+        echo "[$session] Screen (last 15 lines):"
+        echo "$screen" | tail -15 | sed 's/^/    /'
         return 1
     fi
 }
 
-# Reconnect one Claude Code tmux session
+# Reconnect one Claude Code session
 reconnect() {
     local session="$1"
     echo "[$session] Escape (cancel pending)..."
@@ -167,9 +174,23 @@ reconnect() {
     tmux send-keys -t "$session" Enter
     sleep 3
 
-    # Read screen and select "Reconnect" option
-    smart_select "$session" "Reconnect"
-    sleep 8
+    # Try to find "Reconnect" at level 1 (works for single-server and "Reconnect all")
+    if find_and_select "$session" "reconnect"; then
+        sleep 8
+    else
+        # Fallback: try to select "taeys-hands" server, then find Reconnect in submenu
+        echo "[$session] Trying to select taeys-hands server..."
+        if find_and_select "$session" "taeys-hands"; then
+            sleep 2
+            find_and_select "$session" "reconnect\|enable"
+            sleep 8
+        else
+            # Last resort: just press Enter on whatever is highlighted
+            echo "[$session] Pressing Enter on default option"
+            tmux send-keys -t "$session" Enter
+            sleep 8
+        fi
+    fi
 
     echo "[$session] Sending continue prompt..."
     tmux send-keys -t "$session" -l "MCP servers reconnected with latest deployed code. Continue."
@@ -206,12 +227,27 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
         tmux send-keys -t "$s" Enter; sleep 3
-        # Read screen for "Reconnect"
+
+        # Read screen, find Reconnect or Enable
         screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-        if echo "$screen" | grep -qi "Reconnect"; then
-            echo "[$s@$(hostname)] Found Reconnect"
-        else
-            echo "[$s@$(hostname)] Reconnect not found, pressing Enter anyway"
+        pos=0; target_pos=-1
+        while IFS= read -r line; do
+            trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+            [ -z "$trimmed" ] && continue
+            [ ${#trimmed} -gt 60 ] && continue
+            if echo "$trimmed" | grep -qiE "(view tools|reconnect|enable|disable|configure|taeys-hands|isma-memory)"; then
+                if echo "$trimmed" | grep -qi "reconnect"; then
+                    target_pos=$pos
+                    echo "[$s@$(hostname)] Found '${trimmed}' at position $pos"
+                    break
+                fi
+                pos=$((pos + 1))
+            fi
+        done <<< "$screen"
+        if [ $target_pos -ge 0 ]; then
+            for ((i=0; i<target_pos; i++)); do
+                tmux send-keys -t "$s" Down; sleep 0.3
+            done
         fi
         tmux send-keys -t "$s" Enter; sleep 8
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
