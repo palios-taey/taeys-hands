@@ -155,7 +155,7 @@ find_server_position() {
             name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
             if echo "$name" | grep -qi "$target"; then
                 target_pos=$pos
-                echo "[$session] Found server '$name' at position $pos"
+                echo "[$session] Found server '$name' at position $pos" >&2
                 break
             fi
             pos=$((pos + 1))
