@@ -49,6 +49,11 @@ deploy_local() {
         > "/tmp/notify-daemon.log" 2>&1 &
     echo "[local] Notify daemon started (PID $!)"
 
+    echo "[local] Restarting central monitor..."
+    nohup python3 -m monitor.central --cycle-interval 10 \
+        > "/tmp/central_monitor.log" 2>&1 &
+    echo "[local] Central monitor started (PID $!)"
+
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
 
