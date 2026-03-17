@@ -83,7 +83,7 @@ deploy_remote() {
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" "${home}" <<'DEPLOY_EOF'
         REPO="$1"; REDIS="$2"; HOME_DIR="$3"
-        cd "$REPO" 2>/dev/null || { echo "REPO NOT FOUND: $REPO"; exit 1; }
+        cd "$REPO" || { echo "REPO NOT FOUND: $REPO"; exit 1; }
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
@@ -108,56 +108,74 @@ DEPLOY_EOF
 }
 
 # ─── Reconnect helper ─────────────────────────────────────────────────
-# Reconnects all Claude Code sessions on a machine by finding tmux panes
-# running 'claude', sending Escape + /mcp + reconnect sequence.
+# Reconnects all Claude Code sessions on a machine by:
+# 1. Sending Escape to cancel any pending operation
+# 2. Sending /mcp + Enter to open MCP management
+# 3. Reading the screen to find "Reconnect" or "Enable" option
+# 4. Navigating to the correct option and selecting it
+#
+# Uses tmux capture-pane for text matching instead of blind keystrokes.
 write_reconnect_script() {
     cat > /tmp/deploy-reconnect.sh <<'REOF'
 #!/bin/bash
 sleep 10
 
-# Reconnect function — sends key sequence to one tmux session
+# Smart select — reads screen, finds target text, navigates to it
+# Usage: smart_select <session> <search_text>
+# Searches captured pane for a line containing search_text.
+# If found, calculates arrow key presses needed from current selection.
+smart_select() {
+    local session="$1"
+    local search="$2"
+    sleep 1
+
+    # Capture the visible pane content (strips ANSI codes)
+    local screen
+    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+
+    # Look for the search text (case-insensitive)
+    if echo "$screen" | grep -qi "$search"; then
+        echo "[$session] Found '$search' on screen"
+        # In Claude Code /mcp menu, options are listed vertically.
+        # First option is pre-selected. Count lines between first option
+        # and our target to know how many Down arrows to press.
+        #
+        # Menu items contain: Reconnect, Enable, Disable
+        # We want "Reconnect" — it's typically the first/only option
+        # when servers exist. Just press Enter to select it.
+        tmux send-keys -t "$session" Enter
+        return 0
+    else
+        echo "[$session] '$search' NOT found on screen, pressing Enter (default)"
+        echo "[$session] Screen content (last 10 lines):"
+        echo "$screen" | tail -10 | sed 's/^/    /'
+        tmux send-keys -t "$session" Enter
+        return 1
+    fi
+}
+
+# Reconnect one Claude Code tmux session
 reconnect() {
     local session="$1"
-    echo "[$session] Escape..."
+    echo "[$session] Escape (cancel pending)..."
     tmux send-keys -t "$session" Escape
     sleep 5
-    echo "[$session] /mcp + Enter..."
+
+    echo "[$session] /mcp Enter..."
     tmux send-keys -t "$session" -l "/mcp"
     sleep 0.3
     tmux send-keys -t "$session" Enter
     sleep 3
-    # Select "Reconnect all" (first menu item)
-    echo "[$session] Reconnect all..."
-    tmux send-keys -t "$session" Enter
-    sleep 5
-    echo "[$session] Continue prompt..."
+
+    # Read screen and select "Reconnect" option
+    smart_select "$session" "Reconnect"
+    sleep 8
+
+    echo "[$session] Sending continue prompt..."
     tmux send-keys -t "$session" -l "MCP servers reconnected with latest deployed code. Continue."
     sleep 0.3
     tmux send-keys -t "$session" Enter
     echo "[$session] done"
-}
-
-# Reconnect on remote machine via SSH
-reconnect_remote() {
-    local host="$1"
-    echo "--- Reconnecting on $host ---"
-    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_REOF'
-for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    if [ "$cmd" = "claude" ]; then
-        echo "[$s@$(hostname)] reconnecting..."
-        tmux send-keys -t "$s" Escape; sleep 5
-        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
-        tmux send-keys -t "$s" Enter; sleep 3
-        tmux send-keys -t "$s" Enter; sleep 5
-        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
-        sleep 0.3; tmux send-keys -t "$s" Enter
-        echo "[$s@$(hostname)] done"
-    else
-        echo "[$s@$(hostname)] skipped (running: $cmd, not claude)"
-    fi
-done
-REMOTE_REOF
 }
 
 # ─── Local sessions ───────────────────────────────────────────────────
@@ -178,9 +196,32 @@ for s in "${SESSIONS[@]}"; do
 done
 
 # ─── Remote sessions ──────────────────────────────────────────────────
-# All machines that might run Claude Code sessions
 for host in spark2 thor jetson; do
-    reconnect_remote "$host" 2>/dev/null || echo "[$host] SSH failed — skipping"
+    echo "--- Reconnecting on $host ---"
+    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_REOF' 2>/dev/null || echo "[$host] SSH failed — skipping"
+for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
+    if [ "$cmd" = "claude" ]; then
+        echo "[$s@$(hostname)] reconnecting..."
+        tmux send-keys -t "$s" Escape; sleep 5
+        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
+        tmux send-keys -t "$s" Enter; sleep 3
+        # Read screen for "Reconnect"
+        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+        if echo "$screen" | grep -qi "Reconnect"; then
+            echo "[$s@$(hostname)] Found Reconnect"
+        else
+            echo "[$s@$(hostname)] Reconnect not found, pressing Enter anyway"
+        fi
+        tmux send-keys -t "$s" Enter; sleep 8
+        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
+        sleep 0.3; tmux send-keys -t "$s" Enter
+        echo "[$s@$(hostname)] done"
+    else
+        echo "[$s@$(hostname)] skipped (running: $cmd, not claude)"
+    fi
+done
+REMOTE_REOF
 done
 
 echo "All machines reconnected"
