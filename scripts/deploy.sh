@@ -136,46 +136,36 @@ wait_for_menu() {
     return 1
 }
 
-# Find a server entry in the /mcp server list.
-# Server entries have format: "name · status" (with middle dot ·)
-# CRITICAL: Only scan within the menu area (between "Manage MCP" header
-# and "to navigate" footer). The full pane includes conversation history
-# which may contain · characters (status bars, markdown, etc).
-# Returns position (0-indexed) among server entries, or -1.
-find_server_position() {
+# Navigate to a server by name in the /mcp menu.
+# Instead of counting positions (which breaks when non-server items are
+# selectable), this loops: check if cursor (❯) is on the target, if not
+# press Down. Position-independent — works regardless of menu ordering.
+# Returns 0 if found, 1 if not found after max attempts.
+navigate_to_server() {
     local session="$1"
     local target="$2"
+    local max_attempts=15
 
-    local screen
-    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+    for ((attempt=0; attempt<max_attempts; attempt++)); do
+        local screen
+        screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
 
-    # Extract only the menu region
-    local in_menu=0
-    local pos=0 target_pos=-1
-    while IFS= read -r line; do
-        # Start scanning after the menu header
-        if echo "$line" | grep -qi "Manage MCP"; then
-            in_menu=1
-            continue
-        fi
-        # Stop at the navigation footer
-        if [ $in_menu -eq 1 ] && echo "$line" | grep -q "to navigate"; then
-            break
-        fi
-        # Only count server entries within the menu
-        if [ $in_menu -eq 1 ] && echo "$line" | grep -q ' · '; then
-            local name
-            name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
-            if echo "$name" | grep -qi "$target"; then
-                target_pos=$pos
-                echo "[$session] Found server '$name' at position $pos" >&2
-                break
-            fi
-            pos=$((pos + 1))
-        fi
-    done <<< "$screen"
+        # Find the line with the cursor marker (❯) that also contains our target
+        local cursor_line
+        cursor_line=$(echo "$screen" | grep '❯' | grep -i "$target" | head -1)
 
-    echo "$target_pos"
+        if [ -n "$cursor_line" ]; then
+            echo "[$session] Cursor on '$target' (attempt $attempt)" >&2
+            return 0
+        fi
+
+        # Not on target yet — press Down
+        tmux send-keys -t "$session" Down
+        sleep 0.3
+    done
+
+    echo "[$session] WARNING: '$target' not found after $max_attempts attempts" >&2
+    return 1
 }
 
 # Select numbered option in submenu (inside box-drawn border).
@@ -236,21 +226,20 @@ reconnect() {
         return 1
     fi
 
-    # Find taeys-hands in server list
-    local pos
-    pos=$(find_server_position "$session" "taeys-hands")
-
-    if [ "$pos" -ge 0 ]; then
-        echo "[$session] Navigating to taeys-hands (position $pos)..."
-        for ((i=0; i<pos; i++)); do
-            tmux send-keys -t "$session" Down; sleep 0.3
-        done
+    # Navigate to taeys-hands by pressing Down until cursor is on it
+    if navigate_to_server "$session" "taeys-hands"; then
         tmux send-keys -t "$session" Enter
         sleep 2
 
-        # Now in submenu — select Reconnect
-        select_submenu_option "$session" "Reconnect"
-        sleep 8
+        # Now in submenu — navigate to Reconnect the same way
+        if navigate_to_server "$session" "Reconnect"; then
+            tmux send-keys -t "$session" Enter
+            sleep 8
+        else
+            # Fallback: first option is usually Reconnect
+            tmux send-keys -t "$session" Enter
+            sleep 8
+        fi
     else
         echo "[$session] taeys-hands not found in server list"
         tmux send-keys -t "$session" Escape
@@ -311,28 +300,27 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         done
 
         if [ $menu_ok -eq 1 ]; then
-            # Find taeys-hands — only scan within menu (after "Manage MCP", before "to navigate")
-            in_menu=0; pos=0; target_pos=-1
-            while IFS= read -r line; do
-                if echo "$line" | grep -qi "Manage MCP"; then in_menu=1; continue; fi
-                if [ $in_menu -eq 1 ] && echo "$line" | grep -q "to navigate"; then break; fi
-                if [ $in_menu -eq 1 ] && echo "$line" | grep -q ' · '; then
-                    name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
-                    if echo "$name" | grep -qi "taeys-hands"; then
-                        target_pos=$pos
-                        echo "[$s@$(hostname)] Found taeys-hands at position $pos"
+            # Navigate to taeys-hands by pressing Down until cursor is on it
+            found=0
+            for attempt in $(seq 0 14); do
+                screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+                if echo "$screen" | grep '❯' | grep -qi "taeys-hands"; then
+                    echo "[$s@$(hostname)] Cursor on taeys-hands (attempt $attempt)"
+                    found=1; break
+                fi
+                tmux send-keys -t "$s" Down; sleep 0.3
+            done
+
+            if [ $found -eq 1 ]; then
+                tmux send-keys -t "$s" Enter; sleep 2
+                # Navigate to Reconnect in submenu
+                for attempt in $(seq 0 9); do
+                    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+                    if echo "$screen" | grep '❯' | grep -qi "Reconnect"; then
                         break
                     fi
-                    pos=$((pos + 1))
-                fi
-            done <<< "$screen"
-
-            if [ $target_pos -ge 0 ]; then
-                for ((i=0; i<target_pos; i++)); do
                     tmux send-keys -t "$s" Down; sleep 0.3
                 done
-                tmux send-keys -t "$s" Enter; sleep 2
-                # Select Reconnect (first option in submenu)
                 tmux send-keys -t "$s" Enter; sleep 8
             else
                 echo "[$s@$(hostname)] taeys-hands not found"
