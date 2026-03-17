@@ -141,9 +141,20 @@ wait_for_menu() {
 # selectable), this loops: check if cursor (❯) is on the target, if not
 # press Down. Position-independent — works regardless of menu ordering.
 # Returns 0 if found, 1 if not found after max attempts.
-# Navigate cursor to a target in a TUI menu.
-# $3 = "server" requires · in the line (prevents matching section headers)
-# $3 = "option" matches any line with ❯ + target text (for submenus)
+# Extract only the menu region from a tmux pane capture.
+# The /mcp menu appears between "Manage MCP" header and "to navigate" footer.
+# This excludes conversation history which contains ❯ prompt markers and
+# text referencing server names, causing false positives.
+extract_menu() {
+    local session="$1"
+    tmux capture-pane -t "$session" -p 2>/dev/null | \
+        sed -n '/Manage MCP/,/to navigate/p'
+}
+
+# Navigate cursor to a target within the /mcp menu.
+# Extracts menu region first, then checks for ❯ cursor on target line.
+# $3 = "server" requires · (prevents matching section headers)
+# $3 = "option" matches any ❯ line (for submenus like "Reconnect")
 navigate_to() {
     local session="$1"
     local target="$2"
@@ -151,15 +162,18 @@ navigate_to() {
     local max_attempts=15
 
     for ((attempt=0; attempt<max_attempts; attempt++)); do
-        local screen cursor_line
-        screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+        local menu cursor_line
+        menu=$(extract_menu "$session")
+
+        if [ -z "$menu" ]; then
+            # No menu found — might be in submenu (no "Manage MCP" header)
+            menu=$(tmux capture-pane -t "$session" -p 2>/dev/null | tail -20)
+        fi
 
         if [ "$mode" = "server" ]; then
-            # Server list: require · separator to avoid matching headers
-            cursor_line=$(echo "$screen" | grep '❯' | grep ' · ' | grep -i "$target" | head -1)
+            cursor_line=$(echo "$menu" | grep '❯' | grep ' · ' | grep -i "$target" | head -1)
         else
-            # Submenu: match any line with cursor + target text
-            cursor_line=$(echo "$screen" | grep '❯' | grep -i "$target" | head -1)
+            cursor_line=$(echo "$menu" | grep '❯' | grep -i "$target" | head -1)
         fi
 
         if [ -n "$cursor_line" ]; then
@@ -307,11 +321,11 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         done
 
         if [ $menu_ok -eq 1 ]; then
-            # Navigate to taeys-hands — require · to avoid matching section headers
+            # Navigate to taeys-hands — extract menu region only (excludes conversation history)
             found=0
             for attempt in $(seq 0 14); do
-                screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-                if echo "$screen" | grep '❯' | grep ' · ' | grep -qi "taeys-hands"; then
+                menu=$(tmux capture-pane -t "$s" -p 2>/dev/null | sed -n '/Manage MCP/,/to navigate/p')
+                if echo "$menu" | grep '❯' | grep ' · ' | grep -qi "taeys-hands"; then
                     echo "[$s@$(hostname)] Cursor on taeys-hands (attempt $attempt)"
                     found=1; break
                 fi
@@ -320,10 +334,10 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
 
             if [ $found -eq 1 ]; then
                 tmux send-keys -t "$s" Enter; sleep 2
-                # Navigate to Reconnect in submenu
+                # Navigate to Reconnect in submenu (use tail -20 for submenu region)
                 for attempt in $(seq 0 9); do
-                    screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-                    if echo "$screen" | grep '❯' | grep -qi "Reconnect"; then
+                    menu=$(tmux capture-pane -t "$s" -p 2>/dev/null | tail -20)
+                    if echo "$menu" | grep '❯' | grep -qi "Reconnect"; then
                         break
                     fi
                     tmux send-keys -t "$s" Down; sleep 0.3
