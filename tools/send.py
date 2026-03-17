@@ -165,6 +165,31 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
+    # Click input field to ensure focus is on the text area, not on
+    # Attach/Toggle menu buttons left focused after file dialog close.
+    # Without this, Ctrl+V from clipboard_paste hits the button and
+    # reopens the attach dropdown instead of pasting into input.
+    from core.tree import find_elements, detect_chrome_y
+    try:
+        elems = find_elements(doc, fence_after=None)
+        chrome_y = detect_chrome_y(doc)
+        input_el = None
+        for e in elems:
+            if e.get('role') == 'entry' and 'editable' in e.get('states', []) \
+                    and e.get('y', 0) > chrome_y:
+                input_el = e
+                break
+        if not input_el:
+            for e in elems:
+                if 'editable' in e.get('states', []) and e.get('y', 0) > chrome_y:
+                    input_el = e
+                    break
+        if input_el:
+            inp.click_at(input_el['x'], input_el['y'])
+            time.sleep(0.3)
+    except Exception as e:
+        logger.warning("Could not click input field: %s", e)
+
     # Paste message
     if not inp.clipboard_paste(message):
         return {"error": f"Failed to paste message", "platform": platform}
