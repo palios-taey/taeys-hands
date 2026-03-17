@@ -87,10 +87,15 @@ def handle_quick_extract(platform: str, redis_client,
         return {"success": False, "error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
-    # Click page content to ensure focus is on web area (not sidebar/chrome).
-    # Without this, End key doesn't scroll the page.
-    inp.click_at(960, 600)
-    time.sleep(0.3)
+    # Focus the document via AT-SPI grab_focus (no coordinates needed).
+    # Without this, End key may scroll sidebar instead of page content.
+    try:
+        comp = doc.get_component_iface()
+        if comp:
+            comp.grab_focus()
+            time.sleep(0.2)
+    except Exception:
+        pass
 
     # Scroll to absolute bottom, then wait for AT-SPI tree to stabilize
     for _ in range(5):
