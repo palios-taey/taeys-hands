@@ -138,6 +138,9 @@ wait_for_menu() {
 
 # Find a server entry in the /mcp server list.
 # Server entries have format: "name · status" (with middle dot ·)
+# CRITICAL: Only scan within the menu area (between "Manage MCP" header
+# and "to navigate" footer). The full pane includes conversation history
+# which may contain · characters (status bars, markdown, etc).
 # Returns position (0-indexed) among server entries, or -1.
 find_server_position() {
     local session="$1"
@@ -146,11 +149,21 @@ find_server_position() {
     local screen
     screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
 
+    # Extract only the menu region
+    local in_menu=0
     local pos=0 target_pos=-1
     while IFS= read -r line; do
-        # Server entries contain " · " (middle dot with spaces)
-        if echo "$line" | grep -q ' · '; then
-            # Strip whitespace and leading cursor markers
+        # Start scanning after the menu header
+        if echo "$line" | grep -qi "Manage MCP"; then
+            in_menu=1
+            continue
+        fi
+        # Stop at the navigation footer
+        if [ $in_menu -eq 1 ] && echo "$line" | grep -q "to navigate"; then
+            break
+        fi
+        # Only count server entries within the menu
+        if [ $in_menu -eq 1 ] && echo "$line" | grep -q ' · '; then
             local name
             name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
             if echo "$name" | grep -qi "$target"; then
@@ -298,10 +311,12 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         done
 
         if [ $menu_ok -eq 1 ]; then
-            # Find taeys-hands among server entries (lines with " · ")
-            pos=0; target_pos=-1
+            # Find taeys-hands — only scan within menu (after "Manage MCP", before "to navigate")
+            in_menu=0; pos=0; target_pos=-1
             while IFS= read -r line; do
-                if echo "$line" | grep -q ' · '; then
+                if echo "$line" | grep -qi "Manage MCP"; then in_menu=1; continue; fi
+                if [ $in_menu -eq 1 ] && echo "$line" | grep -q "to navigate"; then break; fi
+                if [ $in_menu -eq 1 ] && echo "$line" | grep -q ' · '; then
                     name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
                     if echo "$name" | grep -qi "taeys-hands"; then
                         target_pos=$pos
