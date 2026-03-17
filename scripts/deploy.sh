@@ -119,28 +119,72 @@ write_reconnect_script() {
 #!/bin/bash
 sleep 10
 
-# Find a menu option by text and navigate to it.
-# Scans captured screen for short lines matching known /mcp menu items.
-# Returns the number of Down presses needed (0 = first item selected).
-find_and_select() {
+# Wait for /mcp menu to render by checking for navigation hint.
+# Returns 0 if menu detected, 1 if timeout.
+wait_for_menu() {
     local session="$1"
-    local target="$2"  # regex pattern to match (case-insensitive)
+    for attempt in 1 2 3 4 5; do
+        local screen
+        screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+        if echo "$screen" | grep -q "to navigate"; then
+            echo "[$session] Menu detected (attempt $attempt)"
+            return 0
+        fi
+        sleep 1
+    done
+    echo "[$session] WARNING: menu not detected after 5s"
+    return 1
+}
+
+# Find a server entry in the /mcp server list.
+# Server entries have format: "name · status" (with middle dot ·)
+# Returns position (0-indexed) among server entries, or -1.
+find_server_position() {
+    local session="$1"
+    local target="$2"
 
     local screen
     screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
 
     local pos=0 target_pos=-1
     while IFS= read -r line; do
-        local trimmed
-        trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-        [ -z "$trimmed" ] && continue
-        [ ${#trimmed} -gt 60 ] && continue
-
-        # Match known /mcp menu items (level 1 and level 2)
-        if echo "$trimmed" | grep -qiE "(view tools|reconnect|enable|disable|configure|taeys-hands|isma-memory)"; then
-            if echo "$trimmed" | grep -qi "$target"; then
+        # Server entries contain " · " (middle dot with spaces)
+        if echo "$line" | grep -q ' · '; then
+            # Strip whitespace and leading cursor markers
+            local name
+            name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
+            if echo "$name" | grep -qi "$target"; then
                 target_pos=$pos
-                echo "[$session] Found '$trimmed' at position $pos"
+                echo "[$session] Found server '$name' at position $pos"
+                break
+            fi
+            pos=$((pos + 1))
+        fi
+    done <<< "$screen"
+
+    echo "$target_pos"
+}
+
+# Select numbered option in submenu (inside box-drawn border).
+# Submenu items look like: "│ ❯ 1. Reconnect │" or "│   2. Disable │"
+select_submenu_option() {
+    local session="$1"
+    local target="$2"
+
+    local screen
+    screen=$(tmux capture-pane -t "$session" -p 2>/dev/null)
+
+    local pos=0 target_pos=-1
+    while IFS= read -r line; do
+        # Strip box-drawing chars and whitespace
+        local clean
+        clean=$(echo "$line" | sed 's/[│╭╮╰╯─]//g' | sed 's/^[[:space:]❯]*//' | sed 's/[[:space:]]*$//')
+        [ -z "$clean" ] && continue
+        # Match numbered menu items: "1. Reconnect", "2. Disable", etc.
+        if echo "$clean" | grep -qE '^[0-9]+\.'; then
+            if echo "$clean" | grep -qi "$target"; then
+                target_pos=$pos
+                echo "[$session] Found submenu '$clean' at position $pos"
                 break
             fi
             pos=$((pos + 1))
@@ -153,12 +197,11 @@ find_and_select() {
         done
         tmux send-keys -t "$session" Enter
         return 0
-    else
-        echo "[$session] WARNING: '$target' not found on screen"
-        echo "[$session] Screen (last 15 lines):"
-        echo "$screen" | tail -15 | sed 's/^/    /'
-        return 1
     fi
+    # Fallback: just press Enter (first option is usually Reconnect)
+    echo "[$session] Submenu '$target' not found, pressing Enter"
+    tmux send-keys -t "$session" Enter
+    return 1
 }
 
 # Reconnect one Claude Code session
@@ -172,24 +215,33 @@ reconnect() {
     tmux send-keys -t "$session" -l "/mcp"
     sleep 0.3
     tmux send-keys -t "$session" Enter
-    sleep 3
 
-    # Try to find "Reconnect" at level 1 (works for single-server and "Reconnect all")
-    if find_and_select "$session" "reconnect"; then
+    # Wait for menu to actually render
+    if ! wait_for_menu "$session"; then
+        echo "[$session] FAILED — /mcp menu didn't appear. Skipping."
+        tmux send-keys -t "$session" Escape
+        return 1
+    fi
+
+    # Find taeys-hands in server list
+    local pos
+    pos=$(find_server_position "$session" "taeys-hands")
+
+    if [ "$pos" -ge 0 ]; then
+        echo "[$session] Navigating to taeys-hands (position $pos)..."
+        for ((i=0; i<pos; i++)); do
+            tmux send-keys -t "$session" Down; sleep 0.3
+        done
+        tmux send-keys -t "$session" Enter
+        sleep 2
+
+        # Now in submenu — select Reconnect
+        select_submenu_option "$session" "Reconnect"
         sleep 8
     else
-        # Fallback: try to select "taeys-hands" server, then find Reconnect in submenu
-        echo "[$session] Trying to select taeys-hands server..."
-        if find_and_select "$session" "taeys-hands"; then
-            sleep 2
-            find_and_select "$session" "reconnect\|enable"
-            sleep 8
-        else
-            # Last resort: just press Enter on whatever is highlighted
-            echo "[$session] Pressing Enter on default option"
-            tmux send-keys -t "$session" Enter
-            sleep 8
-        fi
+        echo "[$session] taeys-hands not found in server list"
+        tmux send-keys -t "$session" Escape
+        sleep 1
     fi
 
     echo "[$session] Sending continue prompt..."
@@ -226,30 +278,49 @@ for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
         echo "[$s@$(hostname)] reconnecting..."
         tmux send-keys -t "$s" Escape; sleep 5
         tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
-        tmux send-keys -t "$s" Enter; sleep 3
+        tmux send-keys -t "$s" Enter
 
-        # Read screen, find Reconnect or Enable
-        screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
-        pos=0; target_pos=-1
-        while IFS= read -r line; do
-            trimmed=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
-            [ -z "$trimmed" ] && continue
-            [ ${#trimmed} -gt 60 ] && continue
-            if echo "$trimmed" | grep -qiE "(view tools|reconnect|enable|disable|configure|taeys-hands|isma-memory)"; then
-                if echo "$trimmed" | grep -qi "reconnect"; then
-                    target_pos=$pos
-                    echo "[$s@$(hostname)] Found '${trimmed}' at position $pos"
-                    break
-                fi
-                pos=$((pos + 1))
+        # Wait for menu (look for navigation hint)
+        menu_ok=0
+        for attempt in 1 2 3 4 5; do
+            screen=$(tmux capture-pane -t "$s" -p 2>/dev/null)
+            if echo "$screen" | grep -q "to navigate"; then
+                menu_ok=1; break
             fi
-        done <<< "$screen"
-        if [ $target_pos -ge 0 ]; then
-            for ((i=0; i<target_pos; i++)); do
-                tmux send-keys -t "$s" Down; sleep 0.3
-            done
+            sleep 1
+        done
+
+        if [ $menu_ok -eq 1 ]; then
+            # Find taeys-hands among server entries (lines with " · ")
+            pos=0; target_pos=-1
+            while IFS= read -r line; do
+                if echo "$line" | grep -q ' · '; then
+                    name=$(echo "$line" | sed 's/^[[:space:]❯]*//' | sed 's/ ·.*//')
+                    if echo "$name" | grep -qi "taeys-hands"; then
+                        target_pos=$pos
+                        echo "[$s@$(hostname)] Found taeys-hands at position $pos"
+                        break
+                    fi
+                    pos=$((pos + 1))
+                fi
+            done <<< "$screen"
+
+            if [ $target_pos -ge 0 ]; then
+                for ((i=0; i<target_pos; i++)); do
+                    tmux send-keys -t "$s" Down; sleep 0.3
+                done
+                tmux send-keys -t "$s" Enter; sleep 2
+                # Select Reconnect (first option in submenu)
+                tmux send-keys -t "$s" Enter; sleep 8
+            else
+                echo "[$s@$(hostname)] taeys-hands not found"
+                tmux send-keys -t "$s" Escape; sleep 1
+            fi
+        else
+            echo "[$s@$(hostname)] menu didn't appear"
+            tmux send-keys -t "$s" Escape; sleep 1
         fi
-        tmux send-keys -t "$s" Enter; sleep 8
+
         tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
         sleep 0.3; tmux send-keys -t "$s" Enter
         echo "[$s@$(hostname)] done"
