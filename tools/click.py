@@ -55,7 +55,7 @@ def _fresh_atspi_find(platform: str, x: int, y: int, tolerance: int = 30) -> Opt
     for e in all_elements:
         if not e.get('atspi_obj') or e.get('role', '') not in _CLICKABLE_ROLES:
             continue
-        dist = abs(e.get('x', 0) - x) + abs(e.get('y', 0) - y)
+        dist = abs(int(e.get('x', 0)) - x) + abs(int(e.get('y', 0)) - y)
         if dist < best_dist and dist <= tolerance:
             best, best_dist = e, dist
     return best
