@@ -57,7 +57,7 @@ from gi.repository import Atspi
 # Use shared modules — no duplication
 from core.atspi import find_firefox, get_platform_document, get_document_url
 from core import clipboard
-from core.input import press_key, clipboard_paste, type_into_ui
+from core.input import press_key, clipboard_paste
 from core.platforms import TAB_SHORTCUTS, CHAT_PLATFORMS, BASE_URLS, URL_PATTERNS
 from storage.redis_pool import node_key, NODE_ID
 
@@ -277,8 +277,12 @@ class CentralMonitor:
             press_key('Escape')
             time.sleep(0.2)
             press_key('ctrl+l')
-            time.sleep(0.3)
-            type_into_ui(url)
+            time.sleep(0.2)
+            press_key('ctrl+a')
+            time.sleep(0.2)
+            clipboard.write_marker(url)
+            time.sleep(0.05)
+            press_key('ctrl+v', timeout=5)
             time.sleep(0.1)
             press_key('Return')
             time.sleep(3.0)  # Wait for page load
