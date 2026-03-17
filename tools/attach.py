@@ -613,13 +613,32 @@ def handle_attach(platform: str, file_path: str,
     if dropdown_items:
         extend_cache(platform, dropdown_items)
 
-    if redis_client:
-        redis_client.setex(node_key(f"attach:pending:{platform}"), 120, json.dumps({
-            'file_path': file_path, 'timestamp': time.time()}))
+        # Auto-click "Upload files" menu item (same approach as hmm_bot.py)
+        clicked_upload = False
+        for item in dropdown_items:
+            name = (item.get('name') or '').strip().lower()
+            if name.startswith('upload file'):
+                if item.get('atspi_obj') and atspi_click(item):
+                    logger.info("Auto-clicked '%s' via AT-SPI", item.get('name'))
+                else:
+                    inp.click_at(item['x'], item['y'])
+                    logger.info("Auto-clicked '%s' via xdotool", item.get('name'))
+                clicked_upload = True
+                time.sleep(2.0)
+                break
 
-    return {
-        "status": "dropdown_open",
-        "message": "Dropdown opened. Select the file upload option with click_at, then call attach again.",
-        "file_path": file_path,
-        "dropdown_items": strip_atspi_obj(dropdown_items) if dropdown_items else [],
-    }
+        if not clicked_upload:
+            # Fallback: return items for manual selection
+            if redis_client:
+                redis_client.setex(node_key(f"attach:pending:{platform}"), 120, json.dumps({
+                    'file_path': file_path, 'timestamp': time.time()}))
+            return {
+                "status": "dropdown_open",
+                "message": "Dropdown opened but 'Upload files' not found. Select manually.",
+                "file_path": file_path,
+                "dropdown_items": strip_atspi_obj(dropdown_items),
+            }
+
+        # File dialog should now be open — handle it
+        firefox = atspi.find_firefox(platform)
+        return _handle_file_dialog(platform, file_path, redis_client)
