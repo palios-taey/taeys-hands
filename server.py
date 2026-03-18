@@ -229,7 +229,7 @@ def _h_inspect(args, rc):
 
 def _h_click(args, rc):
     err = _validate_required_any(args, 'x', 'y')
-    return err or handle_click(args['platform'], args['x'], args['y'])
+    return err or handle_click(args['platform'], int(args['x']), int(args['y']))
 
 def _h_prepare(args, rc):
     return handle_prepare(args['platform'], rc)
