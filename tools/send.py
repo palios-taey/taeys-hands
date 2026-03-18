@@ -165,6 +165,27 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
+    # Click input field to ensure focus before paste (same as hmm_bot line 1196).
+    # After attach/dropdown, focus is on a button — paste goes nowhere without this.
+    from core.tree import find_elements
+    try:
+        elems = find_elements(doc, fence_after=None)
+        input_el = None
+        for e in elems:
+            if e.get('role') == 'entry' and 'editable' in e.get('states', []):
+                input_el = e
+                break
+        if not input_el:
+            for e in elems:
+                if 'editable' in e.get('states', []) and 'focusable' in e.get('states', []):
+                    input_el = e
+                    break
+        if input_el:
+            inp.click_at(int(input_el['x']), int(input_el['y']))
+            time.sleep(0.3)
+    except Exception as e:
+        logger.warning("Could not click input field: %s", e)
+
     # Paste message
     if not inp.clipboard_paste(message):
         return {"error": f"Failed to paste message", "platform": platform}
