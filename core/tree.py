@@ -228,20 +228,15 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         if not (name and role in _ITEM_ROLES):
             return None
         try:
-            ss = child.get_state_set()
-            if require_showing and not ss.contains(Atspi.StateType.SHOWING):
+            if require_showing and not child.get_state_set().contains(Atspi.StateType.SHOWING):
                 return None
             comp = child.get_component_iface()
             if comp:
                 ext = comp.get_extents(Atspi.CoordType.SCREEN)
                 if ext.width > 0 and ext.height > 0:
-                    item = {'name': name, 'role': role,
+                    return {'name': name, 'role': role,
                             'x': ext.x + ext.width // 2, 'y': ext.y + ext.height // 2,
                             'atspi_obj': child}
-                    states = [s.value_nick for s in IMPORTANT_STATES if ss.contains(s)]
-                    if states:
-                        item['states'] = states
-                    return item
         except Exception:
             pass
         return None

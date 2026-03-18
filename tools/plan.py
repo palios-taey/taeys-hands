@@ -117,9 +117,6 @@ def _consolidate_attachments(files: List[str], platform: str) -> Optional[str]:
 def handle_plan(platform: str, action: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
     """Dispatch plan operations: create, audit, get, update, delete."""
-    # Guard: params must be a dict (Claude sometimes sends a string)
-    if not isinstance(params, dict):
-        params = {}
     if action == 'create' or action == 'send_message':
         return _create_plan(platform, params, redis_client)
     elif action == 'audit':
@@ -409,9 +406,11 @@ def _create_extract_plan(platform: str, params: Dict,
         'tools': [], 'attachments': [], 'validated': True, 'created_at': time.time(),
     }))
 
-    # NOTE: extract_response does NOT set plan_active lock.
-    # Extract waits for the monitor to detect completion — the monitor
-    # needs to cycle tabs freely. Locking here creates a deadlock.
+    redis_client.setex(f"taey:plan_active:{os.environ.get('DISPLAY', ':0')}", _PLAN_TTL, json.dumps({
+        'plan_id': plan_id, 'platform': platform,
+        'node_id': node_key('').rstrip(':'),
+        'created_at': time.time(),
+    }))
 
     return {
         "success": True, "plan_id": plan_id, "platform": platform,

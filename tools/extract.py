@@ -78,7 +78,12 @@ def handle_quick_extract(platform: str, redis_client,
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
-    # Get doc reference FIRST so we can click page content for focus
+    # Scroll to absolute bottom FIRST, then get doc and scan
+    for _ in range(5):
+        inp.press_key('End')
+        time.sleep(0.3)
+    time.sleep(0.5)
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return {"success": False, "error": "Firefox not found", "platform": platform}
@@ -87,26 +92,9 @@ def handle_quick_extract(platform: str, redis_client,
         return {"success": False, "error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
-    # Focus the document via AT-SPI grab_focus (no coordinates needed).
-    # Without this, End key may scroll sidebar instead of page content.
-    try:
-        comp = doc.get_component_iface()
-        if comp:
-            comp.grab_focus()
-            time.sleep(0.2)
-    except Exception:
-        pass
-
-    # Scroll to absolute bottom, then wait for AT-SPI tree to stabilize
-    for _ in range(5):
-        inp.press_key('End')
-        time.sleep(0.3)
-    time.sleep(0.5)
-
-    # Press End until max Y stabilizes (page fully scrolled)
+    # Extra scroll if needed — press End until positions stabilize
     last_max_y = 0
     for _ in range(15):
-        doc = atspi.get_platform_document(firefox, platform) or doc
         elements = find_elements(doc)
         if elements:
             cur_max_y = max(e.get('y', 0) for e in elements)
@@ -117,7 +105,7 @@ def handle_quick_extract(platform: str, redis_client,
         time.sleep(0.4)
     time.sleep(0.3)
 
-    # Final doc refresh for clean AT-SPI tree at scroll bottom
+    # Re-fetch doc after scroll complete for fresh AT-SPI tree
     doc = atspi.get_platform_document(firefox, platform) or doc
     all_elements = find_elements(doc)
     copy_buttons = find_copy_buttons(all_elements)
@@ -145,77 +133,6 @@ def handle_quick_extract(platform: str, redis_client,
     if not copy_buttons:
         return {"success": False, "error": "No copy buttons found", "platform": platform,
                 "hint": "Response may not be visible - try scrolling or waiting."}
-
-    # Perplexity Deep Research: the summary "Copy" button only copies the
-    # summary. The full report has a "Copy contents" button at the TOP of
-    # the report section. Scroll to top (Home) to find it.
-    if platform == 'perplexity':
-        copy_contents = [e for e in all_elements
-                         if (e.get('name') or '').strip().lower() == 'copy contents'
-                         and 'button' in e.get('role', '')]
-        if not copy_contents:
-            # Not visible yet — scroll to top and re-scan
-            inp.press_key('Home')
-            time.sleep(1)
-            doc = atspi.get_platform_document(firefox, platform) or doc
-            all_elements = find_elements(doc)
-            copy_contents = [e for e in all_elements
-                             if (e.get('name') or '').strip().lower() == 'copy contents'
-                             and 'button' in e.get('role', '')]
-        if copy_contents:
-            # Click "Copy contents" to get the full Deep Research report
-            btn = copy_contents[0]
-            clipboard.clear()
-            time.sleep(0.1)
-            if btn.get('atspi_obj') and atspi_click(btn):
-                pass
-            else:
-                inp.click_at(btn['x'], btn['y'])
-            time.sleep(1.0)
-            ppl_content = clipboard.read()
-            if ppl_content and len(ppl_content) > 500:
-                # Got full report — set content and skip to result building
-                content = ppl_content
-                # Jump past the normal copy button logic to completion
-                quality = _assess_extraction(content, platform, all_elements)
-                # Completion cleanup (same as normal path)
-                plan_consumed = False
-                save_path = None
-                neo4j_stored = None
-                if redis_client:
-                    pending_json = redis_client.get(node_key(f"pending_prompt:{platform}"))
-                    if pending_json:
-                        try:
-                            pending = json.loads(pending_json)
-                            sid = pending.get('session_id')
-                            mid = pending.get('message_id')
-                            if neo4j_mod and sid and mid:
-                                rid = neo4j_mod.add_message(sid, 'assistant', content[:5000])
-                                neo4j_stored = {"session_id": sid, "response_id": rid,
-                                                "user_message_id": mid}
-                        except Exception:
-                            pass
-                if complete and redis_client:
-                    redis_client.delete(node_key(f"pending_prompt:{platform}"))
-                    plan_consumed = redis_client.delete(node_key(f"plan:{platform}")) > 0
-                    for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
-                                   f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
-                        redis_client.delete(node_key(suffix))
-                    display = os.environ.get('DISPLAY', ':0')
-                    redis_client.delete(f"taey:plan_active:{display}")
-                    save_path = f"/tmp/hmm_response_{platform}.json"
-                    try:
-                        with open(save_path, 'w') as f:
-                            f.write(content)
-                    except Exception:
-                        save_path = None
-                return {
-                    "success": True, "platform": platform, "content": content,
-                    "length": len(content), "has_artifacts": False, "url": url,
-                    "copy_buttons_found": len(copy_buttons),
-                    "plan_consumed": plan_consumed, "neo4j": neo4j_stored,
-                    "save_path": save_path, "quality": quality,
-                }
 
     # Prefer response copy buttons over code/message copy buttons.
     # ChatGPT: "Copy response" (response) vs "Copy message" (user msg)
