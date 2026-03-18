@@ -621,8 +621,8 @@ def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
     Instead: wait, then try to extract. If extract gets content, done.
     """
     start = time.time()
-    # Gemini thinking takes longer (60-120s), ChatGPT instant mode ~40s
-    initial_wait = 60 if platform == 'gemini' else 45
+    # With 75K token packages, AIs need more time. Gemini 120s, others 90s.
+    initial_wait = 120 if platform == 'gemini' else 90
 
     logger.info(f"[{platform}] Fixed wait {initial_wait}s...")
     time.sleep(initial_wait)
