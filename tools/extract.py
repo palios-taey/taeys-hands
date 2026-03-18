@@ -15,6 +15,81 @@ from storage.redis_pool import node_key
 logger = logging.getLogger(__name__)
 
 
+def _try_gemini_deep_research_extract(platform, firefox, doc):
+    """Gemini Deep Research: extract via Share & Export → Copy Content.
+
+    Deep Research responses live in an immersive view. The regular Copy
+    button only gets the completion message. The full report requires:
+    1. Click "Share & Export" button
+    2. Click "Copy Content" in the dropdown
+    3. Read clipboard
+
+    Returns content string or None if not a Deep Research response.
+    """
+    if platform != 'gemini':
+        return None
+
+    elements = find_elements(doc)
+    share_export = [e for e in elements
+                    if 'share' in (e.get('name') or '').lower()
+                    and 'export' in (e.get('name') or '').lower()
+                    and 'button' in e.get('role', '')]
+    if not share_export:
+        return None
+
+    logger.info("Gemini Deep Research detected — using Share & Export extraction")
+
+    # Kill stale xsel (blocks Firefox clipboard writes)
+    import subprocess
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.3)
+
+    # Click Share & Export
+    btn = share_export[0]
+    if btn.get('atspi_obj') and atspi_click(btn):
+        logger.info("Clicked Share & Export via AT-SPI")
+    else:
+        inp.click_at(int(btn['x']), int(btn['y']))
+    time.sleep(1.0)
+
+    # Find and click Copy Content
+    doc2 = atspi.get_platform_document(firefox, platform) or doc
+    elems2 = find_elements(doc2)
+    copy_content = [e for e in elems2
+                    if 'copy' in (e.get('name') or '').lower()
+                    and 'content' in (e.get('name') or '').lower()]
+    if not copy_content:
+        logger.warning("Share & Export opened but 'Copy Content' not found")
+        inp.press_key('Escape')
+        return None
+
+    clipboard.clear()
+    time.sleep(0.1)
+    cc = copy_content[0]
+    if cc.get('atspi_obj') and atspi_click(cc):
+        logger.info("Clicked Copy Content via AT-SPI")
+    else:
+        inp.click_at(int(cc['x']), int(cc['y']))
+    time.sleep(2.0)
+
+    content = clipboard.read()
+    if content and len(content) > 200:
+        logger.info("Gemini Deep Research extracted: %d chars", len(content))
+        return content
+
+    # AT-SPI click may not trigger clipboard — retry with xdotool
+    clipboard.clear()
+    inp.click_at(int(cc['x']), int(cc['y']))
+    time.sleep(2.0)
+    content = clipboard.read()
+    if content and len(content) > 200:
+        logger.info("Gemini Deep Research extracted (xdotool retry): %d chars", len(content))
+        return content
+
+    logger.warning("Copy Content clicked but clipboard empty")
+    return None
+
+
 def _filter_response_copy(copy_buttons: list) -> list:
     """Filter copy buttons to prefer response copy over user message / code copy."""
     _RESPONSE_NAMES = {'copy response', 'copy'}
@@ -91,6 +166,46 @@ def handle_quick_extract(platform: str, redis_client,
     if not doc:
         return {"success": False, "error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
+
+    # Gemini Deep Research: extract via Share & Export → Copy Content
+    dr_content = _try_gemini_deep_research_extract(platform, firefox, doc)
+    if dr_content:
+        quality = _assess_extraction(dr_content, platform,
+                                      find_elements(atspi.get_platform_document(firefox, platform) or doc))
+        result = {
+            "success": True, "platform": platform, "content": dr_content,
+            "length": len(dr_content), "has_artifacts": False, "url": url,
+            "extraction_method": "gemini_deep_research_share_export",
+            "copy_buttons_found": 0, "quality": quality,
+        }
+        if complete and redis_client:
+            redis_client.delete(node_key(f"pending_prompt:{platform}"))
+            redis_client.delete(node_key(f"plan:{platform}"))
+            for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
+                           f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
+                redis_client.delete(node_key(suffix))
+            display = os.environ.get('DISPLAY', ':0')
+            redis_client.delete(f"taey:plan_active:{display}")
+            try:
+                save_path = f"/tmp/hmm_response_{platform}.json"
+                with open(save_path, 'w') as f:
+                    f.write(dr_content)
+                result["save_path"] = save_path
+            except Exception:
+                pass
+        if neo4j_mod and url:
+            try:
+                pending_json = redis_client.get(node_key(f"pending_prompt:{platform}")) if redis_client else None
+                if pending_json:
+                    pending = json.loads(pending_json)
+                    sid = pending.get('session_id')
+                    mid = pending.get('message_id')
+                    if sid and mid:
+                        rid = neo4j_mod.add_message(sid, 'assistant', dr_content[:5000])
+                        result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
+            except Exception:
+                pass
+        return result
 
     # Extra scroll if needed — press End until positions stabilize
     last_max_y = 0
