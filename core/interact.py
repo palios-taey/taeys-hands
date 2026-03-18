@@ -56,7 +56,7 @@ def find_element_at(platform: str, x: int, y: int,
     for e in _element_cache.get(platform, []):
         if not e.get('atspi_obj') or is_defunct(e):
             continue
-        dist = abs(e.get('x', 0) - x) + abs(e.get('y', 0) - y)
+        dist = abs(int(e.get('x', 0)) - x) + abs(int(e.get('y', 0)) - y)
         if dist < best_dist and dist <= tolerance:
             best, best_dist = e, dist
     return best
