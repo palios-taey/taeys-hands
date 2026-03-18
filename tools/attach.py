@@ -316,12 +316,17 @@ def _handle_portal_dialog(platform: str, file_path: str,
         inp.focus_firefox()
         time.sleep(0.5)
         chip_found = _wait_for_chip(platform)
-        result = {"status": "file_attached", "platform": platform,
-                  "file_path": file_path, "filename": os.path.basename(file_path),
-                  "dialog_type": "nautilus_portal",
-                  "info": "File chip may shift element positions - re-inspect before further clicks."}
-        if not chip_found:
-            result["warning"] = "Dialog closed but no file chip detected — re-inspect to verify."
+        if chip_found:
+            result = {"status": "file_attached", "platform": platform,
+                      "file_path": file_path, "filename": os.path.basename(file_path),
+                      "dialog_type": "nautilus_portal", "verified": True,
+                      "info": "File chip verified in AT-SPI tree. Re-inspect before further clicks."}
+        else:
+            result = {"status": "unverified", "platform": platform,
+                      "file_path": file_path, "filename": os.path.basename(file_path),
+                      "dialog_type": "nautilus_portal", "verified": False,
+                      "warning": "Dialog closed but file chip NOT found in AT-SPI tree. "
+                                 "Call taey_inspect to check if file is actually attached."}
         _set_attach_checkpoint(platform, file_path, redis_client)
         return result
     except Exception as e:
@@ -373,12 +378,17 @@ def _handle_gtk_dialog(platform: str, file_path: str,
 
         time.sleep(0.5)
         chip_found = _wait_for_chip(platform)
-        result = {"status": "file_attached", "platform": platform,
-                  "file_path": file_path, "filename": os.path.basename(file_path),
-                  "dialog_type": "gtk_embedded",
-                  "info": "File chip may shift element positions - re-inspect before further clicks."}
-        if not chip_found:
-            result["warning"] = "Dialog closed but no file chip detected — re-inspect to verify."
+        if chip_found:
+            result = {"status": "file_attached", "platform": platform,
+                      "file_path": file_path, "filename": os.path.basename(file_path),
+                      "dialog_type": "gtk_embedded", "verified": True,
+                      "info": "File chip verified in AT-SPI tree. Re-inspect before further clicks."}
+        else:
+            result = {"status": "unverified", "platform": platform,
+                      "file_path": file_path, "filename": os.path.basename(file_path),
+                      "dialog_type": "gtk_embedded", "verified": False,
+                      "warning": "Dialog closed but file chip NOT found in AT-SPI tree. "
+                                 "Call taey_inspect to check if file is actually attached."}
         _set_attach_checkpoint(platform, file_path, redis_client)
         return result
     except Exception as e:

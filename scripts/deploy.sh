@@ -1,12 +1,5 @@
 #!/bin/bash
-# deploy.sh — Pull latest code, reconnect MCP servers on all machines.
-#
-# Two phases:
-#   1. DEPLOY: Pull code, install scripts, restart daemons (all machines)
-#   2. RECONNECT: After ALL deploys finish, reconnect MCP in Claude sessions
-#
-# The reconnect phase runs as a detached process with a delay so the
-# calling Claude session's Bash tool returns cleanly before Escape hits.
+# deploy.sh — Pull latest code, restart daemons, reconnect MCP via mcp-reconnect.
 #
 # Usage:
 #   bash scripts/deploy.sh          # Deploy to all machines
@@ -17,7 +10,6 @@ set -euo pipefail
 
 REPO_DIR="taeys-hands"
 
-# Machine registry: SSH host alias → home dir prefix
 declare -A MACHINES=(
     [spark1]="/home/spark"
     [spark2]="/home/spark"
@@ -29,7 +21,7 @@ declare -A MACHINES=(
 )
 
 deploy_local() {
-    echo "[local] Cleaning __pycache__ (prevents stale .pyc shadowing)..."
+    echo "[local] Cleaning __pycache__..."
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
     echo "[local] Pulling latest main..."
@@ -43,11 +35,19 @@ deploy_local() {
     pkill -f 'monitor.central' 2>/dev/null || true
     pkill -f 'notifications/daemon' 2>/dev/null || true
     sleep 1
+
     local daemon_path="/home/spark/orchestrator/notifications/daemon.py"
-    nohup python3 "$daemon_path" \
-        --redis-host "${REDIS_HOST:-192.168.100.10}" \
-        > "/tmp/notify-daemon.log" 2>&1 &
-    echo "[local] Notify daemon started (PID $!)"
+    if [ -f "$daemon_path" ]; then
+        nohup python3 "$daemon_path" \
+            --redis-host "${REDIS_HOST:-192.168.100.10}" \
+            > "/tmp/notify-daemon.log" 2>&1 &
+        echo "[local] Notify daemon started (PID $!)"
+    fi
+
+    echo "[local] Restarting central monitor..."
+    nohup python3 -m monitor.central --cycle-interval 10 \
+        > "/tmp/central_monitor.log" 2>&1 &
+    echo "[local] Central monitor started (PID $!)"
 
     echo "[local] Done — commit: $(git log --oneline -1)"
 }
@@ -64,7 +64,7 @@ deploy_remote() {
     echo "[${host}] Deploying..."
     ssh -o ConnectTimeout=5 "$host" bash -s -- "${repo_path}" "${redis_host}" "${home}" <<'DEPLOY_EOF'
         REPO="$1"; REDIS="$2"; HOME_DIR="$3"
-        cd "$REPO" 2>/dev/null || { echo "REPO NOT FOUND: $REPO"; exit 1; }
+        cd "$REPO" || { echo "REPO NOT FOUND: $REPO"; exit 1; }
         find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
         git fetch origin main 2>&1 | tail -1
         git reset --hard origin/main 2>&1 | tail -1
@@ -72,9 +72,7 @@ deploy_remote() {
         pkill -f 'notifications/daemon' 2>/dev/null || true
         sleep 1
         DAEMON="${HOME_DIR}/orchestrator/notifications/daemon.py"
-        if [ ! -f "$DAEMON" ]; then
-            echo "WARNING: daemon not found at $DAEMON — skipping"
-        else
+        if [ -f "$DAEMON" ]; then
             nohup python3 "$DAEMON" --redis-host "$REDIS" \
                 > "/tmp/notify-daemon.log" 2>&1 &
             echo "Notify daemon started (PID $!)"
@@ -85,35 +83,23 @@ DEPLOY_EOF
     [ $rc -ne 0 ] && echo "  [${host}] SSH FAILED (exit $rc)" || true
 }
 
-# Parse args
+# ─── Main ─────────────────────────────────────────────────────────────
 TARGET="${1:-all}"
 
 if [ "$TARGET" = "--local" ]; then
     deploy_local
     echo ""
-    echo "=== Deploy complete — MCP reconnect in 10 seconds ==="
-    pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
-    # Reuse the same reconnect script (local only for --local)
-    cat > /tmp/deploy-reconnect.sh <<'LEOF'
-#!/bin/bash
-sleep 10
-for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    if [ "$cmd" = "claude" ]; then
-        echo "[$s] reconnecting..."
-        tmux send-keys -t "$s" Escape; sleep 5
-        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 2
-        tmux send-keys -t "$s" Enter; sleep 0.5; tmux send-keys -t "$s" Down; sleep 0.3; tmux send-keys -t "$s" Enter; sleep 5
-        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
-        sleep 0.3; tmux send-keys -t "$s" Enter
-        echo "[$s] done"
+    echo "=== Deploy complete ==="
+    # MCP reconnect via mcp-reconnect (if installed)
+    if command -v mcp-reconnect &>/dev/null; then
+        CALLER=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+        echo "MCP reconnect in 10s (excluding caller '$CALLER')..."
+        nohup mcp-reconnect --server taeys-hands --exclude "$CALLER" --delay 10 \
+            > /tmp/mcp-reconnect.log 2>&1 &
+        disown
+    else
+        echo "mcp-reconnect not installed — run /mcp manually in each session"
     fi
-done &
-wait
-LEOF
-    chmod +x /tmp/deploy-reconnect.sh
-    nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
-    disown
     exit 0
 fi
 
@@ -129,7 +115,7 @@ if [ "$TARGET" != "all" ]; then
 fi
 
 # Deploy to all machines: local first, then remote in parallel
-echo "=== Phase 1: Deploy to all machines ==="
+echo "=== Phase 1: Deploy ==="
 echo ""
 
 deploy_local
@@ -147,80 +133,14 @@ for pid in "${pids[@]}"; do
 done
 
 echo ""
-echo "=== Phase 2: MCP reconnect (all machines, in 10 seconds) ==="
-# Kill any previous reconnect processes before spawning new one
-pkill -f 'deploy-reconnect.sh' 2>/dev/null || true
-
-# Write reconnect script to file, run detached.
-# Survives after deploy.sh exits. 10s delay lets Bash tool return first.
-cat > /tmp/deploy-reconnect.sh <<'REOF'
-#!/bin/bash
-sleep 10
-
-# Reconnect function — sends key sequence to one tmux session
-reconnect() {
-    local session="$1"
-    echo "[$session] Escape..."
-    tmux send-keys -t "$session" Escape
-    sleep 5
-    echo "[$session] /mcp + Enter..."
-    tmux send-keys -t "$session" -l "/mcp"
-    sleep 0.3
-    tmux send-keys -t "$session" Enter
-    sleep 2
-    echo "[$session] Enter → Down → Enter..."
-    tmux send-keys -t "$session" Enter
-    sleep 0.5
-    tmux send-keys -t "$session" Down
-    sleep 0.3
-    tmux send-keys -t "$session" Enter
-    sleep 5
-    echo "[$session] Continue prompt..."
-    tmux send-keys -t "$session" -l "MCP servers reconnected with latest deployed code. Continue."
-    sleep 0.3
-    tmux send-keys -t "$session" Enter
-    echo "[$session] done"
-}
-
-# Find all local Claude sessions
-SESSIONS=()
-for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    [ "$cmd" = "claude" ] && SESSIONS+=("$s")
-done
-
-echo "Local Claude sessions: ${SESSIONS[*]:-none}"
-
-# Reconnect all local sessions sequentially
-for s in "${SESSIONS[@]}"; do
-    reconnect "$s"
-done
-
-# Remote machines — find and reconnect Claude sessions via SSH
-for host in spark3 mira; do
-    ssh -o ConnectTimeout=5 "$host" bash -s <<'REMOTE_EOF'
-for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
-    cmd=$(tmux display-message -t "$s" -p '#{pane_current_command}' 2>/dev/null || echo "")
-    if [ "$cmd" = "claude" ]; then
-        echo "[$s@$(hostname)] reconnecting..."
-        tmux send-keys -t "$s" Escape; sleep 5
-        tmux send-keys -t "$s" -l "/mcp"; sleep 0.3
-        tmux send-keys -t "$s" Enter; sleep 2
-        tmux send-keys -t "$s" Enter; sleep 0.5
-        tmux send-keys -t "$s" Down; sleep 0.3
-        tmux send-keys -t "$s" Enter; sleep 5
-        tmux send-keys -t "$s" -l "MCP servers reconnected with latest deployed code. Continue."
-        sleep 0.3; tmux send-keys -t "$s" Enter
-        echo "[$s@$(hostname)] done"
-    fi
-done
-REMOTE_EOF
-done
-
-wait
-echo "All machines reconnected"
-REOF
-chmod +x /tmp/deploy-reconnect.sh
-nohup /tmp/deploy-reconnect.sh > /tmp/mcp-reconnect.log 2>&1 &
-disown
-echo "Detached reconnect PID $! — will fire in 10s"
+echo "=== Phase 2: MCP reconnect ==="
+if command -v mcp-reconnect &>/dev/null; then
+    CALLER=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+    echo "MCP reconnect in 10s (excluding caller '$CALLER')..."
+    nohup mcp-reconnect --server taeys-hands --exclude "$CALLER" --delay 10 \
+        > /tmp/mcp-reconnect.log 2>&1 &
+    disown
+    echo "PID $! — run /mcp manually in caller session"
+else
+    echo "mcp-reconnect not installed — run /mcp manually"
+fi
