@@ -913,40 +913,26 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # ChatGPT: Use AT-SPI button click (same as Grok path).
-    # Ctrl+U keyboard shortcut doesn't reach page content on Xvfb.
+    # ChatGPT: Click input for focus + grab_focus, then Ctrl+U.
+    # "Add files and more" opens a React dropdown whose menu items are
+    # invisible to AT-SPI on Xvfb. Ctrl+U bypasses the dropdown entirely.
+    # Key: input must have focus first, otherwise Ctrl+U goes to Firefox chrome.
     if platform == 'chatgpt':
         input_el = find_input_field_atspi(platform)
         if input_el:
             inp.click_at(input_el['x'], input_el['y'])
-            time.sleep(0.5)
-        btn = None
-        for attempt in range(8):
-            doc = get_doc(platform, force_refresh=True)
-            if not doc:
-                time.sleep(3)
-                continue
-            btn = get_attach_button_coords(doc, platform=platform)
-            if btn:
-                break
-            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
-            time.sleep(3)
-        if not btn:
-            logger.error(f"[{platform}] Attach button not found after 8 retries")
-            return False
-        btn_obj = btn.get('atspi_obj')
-        if btn_obj:
-            try:
-                ai = btn_obj.get_action_iface()
-                if ai and ai.get_n_actions() > 0:
-                    ai.do_action(0)
-                    logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
-            except Exception:
-                inp.click_at(btn['x'], btn['y'])
-                logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-        else:
-            inp.click_at(btn['x'], btn['y'])
-            logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+            time.sleep(0.3)
+            obj = input_el.get('atspi_obj')
+            if obj:
+                try:
+                    comp = obj.get_component_iface()
+                    if comp:
+                        comp.grab_focus()
+                except Exception:
+                    pass
+            time.sleep(0.3)
+        inp.press_key('ctrl+u')
+        logger.info(f"[{platform}] Pressed Ctrl+U for file upload (with grab_focus)")
         time.sleep(1.5)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
