@@ -165,8 +165,10 @@ def handle_send_message(platform: str, message: str,
         return {"error": f"Could not find {platform} document", "platform": platform}
     url = atspi.get_document_url(doc)
 
-    # Click input field to ensure focus before paste (same as hmm_bot line 1196).
-    # After attach/dropdown, focus is on a button — paste goes nowhere without this.
+    # Click input field + grab_focus to ensure keyboard focus before paste.
+    # After attach/dropdown, focus is on a button — click_at alone doesn't
+    # transfer keyboard focus (especially on Gemini/Xvfb). grab_focus() is
+    # essential. Same pattern as hmm_bot.send_prompt().
     from core.tree import find_elements
     try:
         elems = find_elements(doc, fence_after=None)
@@ -182,6 +184,17 @@ def handle_send_message(platform: str, message: str,
                     break
         if input_el:
             inp.click_at(int(input_el['x']), int(input_el['y']))
+            time.sleep(0.3)
+            # grab_focus via AT-SPI — critical for paste to land in input
+            obj = input_el.get('atspi_obj')
+            if obj:
+                try:
+                    comp = obj.get_component_iface()
+                    if comp:
+                        comp.grab_focus()
+                        logger.info("Input grab_focus succeeded")
+                except Exception as focus_err:
+                    logger.debug("grab_focus failed (non-fatal): %s", focus_err)
             time.sleep(0.3)
     except Exception as e:
         logger.warning("Could not click input field: %s", e)
