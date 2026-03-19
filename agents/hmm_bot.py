@@ -913,18 +913,40 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # ChatGPT: Ctrl+U opens file upload directly (keyboard shortcut).
-    # Bypasses button finding, clicking, and dropdown navigation entirely.
-    # Works reliably on bare Xvfb where xdotool clicks fail on React buttons.
+    # ChatGPT: Use AT-SPI button click (same as Grok path).
+    # Ctrl+U keyboard shortcut doesn't reach page content on Xvfb.
     if platform == 'chatgpt':
-        inp.focus_firefox()
-        time.sleep(0.3)
-        # Click page center to ensure web content has focus (not Firefox chrome).
-        # Without this, Ctrl+U may be captured by Firefox as "View Source" or ignored.
-        inp.click_at(960, 540)
-        time.sleep(0.5)
-        inp.press_key('ctrl+u')
-        logger.info(f"[{platform}] Pressed Ctrl+U for file upload")
+        input_el = find_input_field_atspi(platform)
+        if input_el:
+            inp.click_at(input_el['x'], input_el['y'])
+            time.sleep(0.5)
+        btn = None
+        for attempt in range(8):
+            doc = get_doc(platform, force_refresh=True)
+            if not doc:
+                time.sleep(3)
+                continue
+            btn = get_attach_button_coords(doc, platform=platform)
+            if btn:
+                break
+            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
+            time.sleep(3)
+        if not btn:
+            logger.error(f"[{platform}] Attach button not found after 8 retries")
+            return False
+        btn_obj = btn.get('atspi_obj')
+        if btn_obj:
+            try:
+                ai = btn_obj.get_action_iface()
+                if ai and ai.get_n_actions() > 0:
+                    ai.do_action(0)
+                    logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
+            except Exception:
+                inp.click_at(btn['x'], btn['y'])
+                logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+        else:
+            inp.click_at(btn['x'], btn['y'])
+            logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
         time.sleep(1.5)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
