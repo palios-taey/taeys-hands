@@ -316,10 +316,22 @@ def process_platform(platform: str, mode: str = None, model: str = None,
     # ── Step 6: Send prompt ──
     logger.info(f"[{platform}] Sending prompt ({len(prompt)} chars)")
 
-    # Find and click input field
+    # Find input, click + grab_focus — critical for paste to land in input.
+    # click_at alone doesn't transfer keyboard focus after file attach
+    # (especially on Gemini). Same pattern as hmm_bot.send_prompt().
     input_field = find_input_field_atspi(platform)
     if input_field:
         inp.click_at(int(input_field['x']), int(input_field['y']))
+        time.sleep(0.3)
+        obj = input_field.get('atspi_obj')
+        if obj:
+            try:
+                comp = obj.get_component_iface()
+                if comp:
+                    comp.grab_focus()
+                    logger.info(f"[{platform}] Input grab_focus succeeded")
+            except Exception:
+                pass
         time.sleep(0.3)
     else:
         logger.warning(f"[{platform}] No input field found — trying Tab")
