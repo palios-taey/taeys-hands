@@ -1,0 +1,39 @@
+# Upwork Platform Configuration — STUB (architecture-ready)
+# To activate: populate element_map + element_filter from AT-SPI discovery
+platform: upwork
+url_pattern: upwork.com
+base_url: https://www.upwork.com/
+tab_shortcut: alt+9
+
+capabilities:
+  models: []
+  modes: []
+  tools: []
+  sources: []
+
+attach_method: none
+dropdown_method: none
+
+quirks:
+  - compose: "Proposal submission form with cover letter textarea"
+  - attachments: "File attachment for portfolio samples"
+  - connects: "Requires Connects to submit proposals"
+
+stop_patterns: []
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: submit proposal
+  compose_name_pattern: cover letter
+
+# TODO: Populate from AT-SPI discovery run
+element_filter:
+  exclude:
+    names: []
+    name_contains: []
+    roles: []
+
+element_map: {}
+sidebar_nav: []
+fence_after: []
