@@ -913,26 +913,17 @@ def attach_file(platform: str, file_path: str) -> bool:
     inp.press_key('Escape')
     time.sleep(0.3)
 
-    # ChatGPT: Click input for focus + grab_focus, then Ctrl+U.
-    # "Add files and more" opens a React dropdown whose menu items are
-    # invisible to AT-SPI on Xvfb. Ctrl+U bypasses the dropdown entirely.
-    # Key: input must have focus first, otherwise Ctrl+U goes to Firefox chrome.
+    # ChatGPT: focus_firefox + click page center + Ctrl+U (original working method).
+    # "Add files and more" opens a React dropdown invisible to AT-SPI on Xvfb.
+    # Ctrl+U bypasses the dropdown. focus_firefox activates the X11 window,
+    # click_at(960,540) gives web content focus, then Ctrl+U reaches the page.
     if platform == 'chatgpt':
-        input_el = find_input_field_atspi(platform)
-        if input_el:
-            inp.click_at(input_el['x'], input_el['y'])
-            time.sleep(0.3)
-            obj = input_el.get('atspi_obj')
-            if obj:
-                try:
-                    comp = obj.get_component_iface()
-                    if comp:
-                        comp.grab_focus()
-                except Exception:
-                    pass
-            time.sleep(0.3)
+        inp.focus_firefox()
+        time.sleep(0.3)
+        inp.click_at(960, 540)
+        time.sleep(0.5)
         inp.press_key('ctrl+u')
-        logger.info(f"[{platform}] Pressed Ctrl+U for file upload (with grab_focus)")
+        logger.info(f"[{platform}] Pressed Ctrl+U for file upload")
         time.sleep(1.5)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
