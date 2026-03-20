@@ -441,7 +441,13 @@ def _click_editable_input(doc, platform: str):
 
 def _try_click_then_dialog(firefox, btn_coords, platform, file_path, redis_client,
                            use_atspi=True):
-    """Click attach button, check for dialog, try Down+Enter keyboard nav."""
+    """Click attach button, check for dialog, walk dropdown items.
+
+    Instead of blind Down+Enter (breaks when menu items change),
+    iterates through up to 8 dropdown items pressing Down then Enter
+    for each, checking if a file dialog appeared after each attempt.
+    This handles ChatGPT/Grok menu reordering gracefully.
+    """
     if use_atspi and btn_coords.get('atspi_obj'):
         if not atspi_click(btn_coords):
             return None
@@ -453,17 +459,46 @@ def _try_click_then_dialog(firefox, btn_coords, platform, file_path, redis_clien
     if dt:
         return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Dropdown opened — keyboard nav to first item
-    inp.press_key('Down')
-    time.sleep(0.5)
-    inp.press_key_split('Return')
-    time.sleep(2.5)
-
-    for _ in range(10):
-        dt = _any_file_dialog_open(firefox)
-        if dt:
-            return _handle_file_dialog(platform, file_path, redis_client)
+    # Dropdown should be open. Walk items: Down to highlight, Enter to select.
+    # After each Enter, check if a file dialog appeared. If so, we found
+    # the upload option. If not, re-open the dropdown and try the next item.
+    MAX_ITEMS = 8
+    for item_idx in range(MAX_ITEMS):
+        # Press Down to move to next item (first Down = first item)
+        inp.press_key('Down')
         time.sleep(0.3)
+
+        # Select current item
+        inp.press_key_split('Return')
+        time.sleep(2.0)
+
+        # Check if file dialog appeared
+        for _ in range(5):
+            dt = _any_file_dialog_open(firefox)
+            if dt:
+                logger.info(f"File dialog appeared after dropdown item {item_idx + 1}")
+                return _handle_file_dialog(platform, file_path, redis_client)
+            time.sleep(0.3)
+
+        # No dialog — this item wasn't "Upload a file".
+        # Dismiss whatever opened (could be nothing, or another panel)
+        inp.press_key('Escape')
+        time.sleep(0.5)
+
+        # Re-click the attach button to reopen dropdown for next item
+        if item_idx < MAX_ITEMS - 1:
+            if use_atspi and btn_coords.get('atspi_obj'):
+                if not atspi_click(btn_coords):
+                    inp.click_at(btn_coords['x'], btn_coords['y'])
+            else:
+                inp.click_at(btn_coords['x'], btn_coords['y'])
+            time.sleep(1.0)
+
+            # Quick check — maybe the re-click itself opened a dialog
+            dt = _any_file_dialog_open(firefox)
+            if dt:
+                return _handle_file_dialog(platform, file_path, redis_client)
+
     return None
 
 
