@@ -46,7 +46,7 @@ def test_get_plan(mock_redis):
     assert get_result["plan"]["message"] == "Test"
 
 
-def test_update_plan_generates_steps(mock_redis):
+def test_update_plan_stores_current_state(mock_redis):
     params = {
         "session": "new",
         "message": "Hello",
@@ -63,12 +63,10 @@ def test_update_plan_generates_steps(mock_redis):
         "current_state": {"model": "Haiku", "mode": "default"},
     }, mock_redis)
     assert update_result["success"] is True
-    assert update_result["status"] == "ready"
-    # Should have steps for model change + attachment + send
-    step_actions = [s["action"] for s in update_result["steps"]]
-    assert "change_model" in step_actions
-    assert "attach" in step_actions
-    assert "send" in step_actions
+    assert update_result["status"] == "created"
+    # Verify the current_state was stored in the plan
+    get_result = handle_plan("claude", "get", {"plan_id": plan_id}, mock_redis)
+    assert get_result["plan"]["current_state"] == {"model": "Haiku", "mode": "default"}
 
 
 def test_unknown_action(mock_redis):
