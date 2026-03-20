@@ -601,17 +601,8 @@ def _scan_with_thread_timeout(platform: str, timeout_sec: int = 15):
 
 
 def wait_for_response(platform: str, timeout: int = 600) -> bool:
-    """Wait for AI response to complete.
-
-    - ChatGPT/Gemini: Fixed wait + extract (stop button not in AT-SPI)
-    - Grok: AT-SPI stop button polling (stop button IS exposed, and Grok
-      doesn't always generate — fixed-wait wastes 5min on failed sends)
-    """
-    # All platforms use fixed-wait-then-extract on Xvfb.
-    # AT-SPI stop button polling is unreliable on headless displays:
-    # stop button appears/disappears between polls, or AT-SPI doesn't
-    # expose it. Fixed-wait + extract is more reliable.
-    return _wait_fixed_then_extract(platform, timeout)
+    """Wait for AI response to complete via stop-button polling."""
+    return _wait_atspi_polling(platform, timeout)
 
 
 def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
@@ -699,7 +690,7 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
                 elif time.time() - start > 120:
                     logger.warning(f"[{platform}] No stop button after 120s — possible send failure")
                     return False
-            time.sleep(3)
+            time.sleep(5)
 
         elif phase == 'generating':
             if has_stop is None:
@@ -716,7 +707,7 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
                     return True
                 else:
                     logger.info(f"[{platform}] Stop button reappeared — still generating")
-            time.sleep(3)
+            time.sleep(5)
 
     logger.warning(f"[{platform}] Timeout after {timeout}s")
     return False
