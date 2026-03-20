@@ -1,0 +1,39 @@
+# Reddit Platform Configuration — STUB (architecture-ready)
+# To activate: populate element_map + element_filter from AT-SPI discovery
+platform: reddit
+url_pattern: reddit.com
+base_url: https://www.reddit.com/
+tab_shortcut: alt+8
+
+capabilities:
+  models: []
+  modes: []
+  tools: []
+  sources: []
+
+attach_method: none
+dropdown_method: none
+
+quirks:
+  - compose: "Reply box appears below comments"
+  - markdown: "Supports markdown in comments"
+  - rate_limit: "Reddit rate limits aggressive posting — 10 min cooldown"
+
+stop_patterns: []
+
+element_hints:
+  input_role: textbox
+  send_role: push button
+  send_name_pattern: comment
+  compose_name_pattern: what are your thoughts
+
+# TODO: Populate from AT-SPI discovery run
+element_filter:
+  exclude:
+    names: []
+    name_contains: []
+    roles: []
+
+element_map: {}
+sidebar_nav: []
+fence_after: []

@@ -1,4 +1,4 @@
-# CLAUDE.md — Taey's Hands v8 (Rewrite)
+# CLAUDE.md — Taey's Hands v8.1 (Unified Automation)
 
 ## What This Is
 MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT, Claude, Gemini, Grok, Perplexity via accessibility tree (no coordinates, no screenshots).
@@ -78,3 +78,86 @@ MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT,
 - `taey:{node}:notifications` — Notification queue (for orchestrator daemon)
 - `taey:{node}:checkpoint:{platform}:attach` — Attach verification
 - `taey:{node}:pending_prompt:{platform}` — Sent message metadata
+
+## v8.1 Additions: Unified Automation System
+
+### New Modules
+
+- `core/halt.py` — 6-sigma halt system
+  - `halt_global(reason, redis)` → ALL machines stop (tool-level failure)
+  - `halt_platform(platform, reason, redis)` → Only this platform stops (YAML drift)
+  - `check_halt(platform, redis)` → Returns halt data or None (called every cycle)
+  - Escalation via `/api/notify` to orchestrator
+
+- `core/drift.py` — YAML drift detection
+  - `store_structure_hash(platform, elements, redis)` → Fingerprint UI after success
+  - `check_structure_drift(platform, elements, redis)` → Compare against baseline
+  - `classify_unknown_elements(platform, elements)` → Find elements not in YAML
+
+- `core/mode_select.py` — Mode/model selection (YAML-driven, coordinate-free)
+  - `select_mode_model(platform, mode, model)` → Full selection flow
+  - Routes to platform-specific handlers using `mode_guidance` from YAML
+  - ChatGPT: keyboard nav on React portal
+  - Gemini: mode_picker + tools_button via AT-SPI
+  - Grok: AT-SPI menu items after xdotool click
+  - Perplexity/Claude: mixed strategies
+
+- `core/orchestrator.py` — Orchestrator integration
+  - `heartbeat(status)` → Keep agent alive in registry
+  - `check_inbox()` → Poll for assigned tasks
+  - `ingest_transcript(platform, response, metadata)` → POST to `/api/ingest/transcript`
+  - `report_completion(task_id, result)` → POST to `/api/report`
+  - `notify_agent(to, text)` → Send via `/api/notify` (Redis inbox)
+
+- `agents/unified_bot.py` — Replaces hmm_bot.py for production
+  - Full cycle: halt check → task → navigate → mode select → attach → send → wait → extract → ingest → report → drift check
+  - CycleStats tracking for 6-sigma monitoring
+  - 3 consecutive failures → auto-halt platform
+  - Supports both local package builder and orchestrator task assignment
+
+- `agents/social_bot.py` — Extensible social platform bot
+  - Extends x_reply_bot pattern for LinkedIn, Reddit, Upwork
+  - YAML-driven element discovery
+  - Batch processing from JSON task files
+
+### New Platform Configs
+- `platforms/reddit.yaml` — Stub (architecture-ready)
+- `platforms/upwork.yaml` — Stub (architecture-ready)
+
+### New Tests
+- `tests/test_halt_system.py` — 4 tests for halt/clear/check
+- `tests/test_drift_detection.py` — 5 tests for drift detection and unknown element classification
+- `tests/test_mode_select.py` — 8 tests for YAML config loading and mode guidance
+- `tests/test_orchestrator.py` — 5 tests for API payload construction
+
+### Redis Keys (New)
+- `taey:halt:global` — Global halt flag (all machines stop)
+- `taey:halt:{platform}` — Platform-specific halt flag
+- `taey:structure_hash:{platform}` — Last known UI structure fingerprint
+- `taey:structure_hash:{platform}:elements` — Element list for diff analysis
+- `taey:drift:last:{platform}` — Previous drift detection (for consecutive drift halting)
+
+### Integration Flow
+```
+Orchestrator → /api/notify → unified_bot picks up task
+  → navigate fresh session
+  → select_mode_model (YAML mode_guidance)
+  → attach package → send prompt → wait → extract
+  → /api/ingest/transcript → ISMA stores tiles
+  → /api/report → task complete
+  → check_structure_drift → halt if UI changed
+```
+
+### Deployment
+```bash
+# On Mira (production)
+cd ~/taeys-hands
+git checkout recovery/v7-unified
+python3 agents/unified_bot.py --platforms chatgpt gemini grok
+
+# With orchestrator mode
+python3 agents/unified_bot.py --orchestrator --platforms chatgpt gemini grok
+
+# Single platform test
+python3 agents/unified_bot.py --cycles 1 --platforms gemini --mode deep_think
+```
