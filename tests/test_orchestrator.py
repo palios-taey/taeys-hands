@@ -106,8 +106,8 @@ def test_notify_agent_payload():
 
         call_args = mock_post.call_args
         payload = call_args.kwargs.get('json') or call_args[1].get('json')
-        assert payload['to'] == 'claude-main'
-        assert 'Deploy' in payload['text']
+        assert payload['target'] == 'claude-main'
+        assert 'Deploy' in payload['body']
 
 
 def test_platform_name_mapping():

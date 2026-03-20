@@ -154,9 +154,9 @@ def _escalate(message: str, redis_client):
                 f'{ORCH_URL}/api/notify',
                 headers={'X-API-Key': ORCH_KEY, 'Content-Type': 'application/json'},
                 json={
-                    'to': NOTIFY_TARGET,
+                    'target': NOTIFY_TARGET,
                     'from': f'taeys-hands-{NODE_ID}',
-                    'text': message,
+                    'body': message,
                 },
                 timeout=10,
             )

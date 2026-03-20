@@ -129,9 +129,9 @@ def report_completion(task_id: str, result: str, status: str = 'completed',
 def notify_agent(to: str, text: str, from_agent: str = None) -> bool:
     """Send notification to another agent via /api/notify (Redis inbox)."""
     payload = {
-        'to': to,
+        'target': to,
         'from': from_agent or AGENT_ID,
-        'text': text,
+        'body': text,
     }
 
     try:
