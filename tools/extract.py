@@ -11,6 +11,7 @@ from core.tree import find_elements, find_copy_buttons
 from core.interact import atspi_click
 from core.platforms import SCREEN_HEIGHT
 from storage.redis_pool import node_key
+from storage import neo4j_client
 
 logger = logging.getLogger(__name__)
 
@@ -195,16 +196,21 @@ def handle_quick_extract(platform: str, redis_client,
                 pass
         if neo4j_mod and url:
             try:
+                sid = mid = None
                 pending_json = redis_client.get(node_key(f"pending_prompt:{platform}")) if redis_client else None
                 if pending_json:
                     pending = json.loads(pending_json)
                     sid = pending.get('session_id')
                     mid = pending.get('message_id')
-                    if sid and mid:
-                        rid = neo4j_mod.add_message(sid, 'assistant', dr_content[:5000])
-                        result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
-            except Exception:
-                pass
+                # Fallback: create/find session from URL if pending_prompt expired or missing
+                if not sid:
+                    sid = neo4j_client.get_or_create_session(platform, url)
+                    logger.info("Neo4j session from URL fallback: %s", sid)
+                if sid:
+                    rid = neo4j_mod.add_message(sid, 'assistant', dr_content[:5000])
+                    result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
+            except Exception as e:
+                logger.warning("Neo4j store failed (Deep Research): %s", e)
         return result
 
     # Extra scroll if needed — press End until positions stabilize
@@ -330,20 +336,25 @@ def handle_quick_extract(platform: str, redis_client,
 
     # Store in Neo4j
     neo4j_stored = None
-    if redis_client:
-        pending_json = redis_client.get(node_key(f"pending_prompt:{platform}"))
-        if pending_json:
-            try:
+    if neo4j_mod:
+        try:
+            sid = uid = None
+            pending_json = redis_client.get(node_key(f"pending_prompt:{platform}")) if redis_client else None
+            if pending_json:
                 pending = json.loads(pending_json)
                 sid = pending.get('session_id')
                 uid = pending.get('message_id')
-                if sid and neo4j_mod:
-                    rid = neo4j_mod.add_message(sid, 'assistant', content)
-                    if rid and uid:
-                        _link_response(neo4j_mod, rid, uid)
-                    neo4j_stored = {"session_id": sid, "response_id": rid, "user_message_id": uid}
-            except (json.JSONDecodeError, TypeError, KeyError) as e:
-                logger.warning(f"Neo4j store failed: {e}")
+            # Fallback: create/find session from URL if pending_prompt expired or missing
+            if not sid and url:
+                sid = neo4j_client.get_or_create_session(platform, url)
+                logger.info("Neo4j session from URL fallback: %s", sid)
+            if sid:
+                rid = neo4j_mod.add_message(sid, 'assistant', content)
+                if rid and uid:
+                    _link_response(neo4j_mod, rid, uid)
+                neo4j_stored = {"session_id": sid, "response_id": rid, "user_message_id": uid}
+        except (json.JSONDecodeError, TypeError, KeyError, Exception) as e:
+            logger.warning("Neo4j store failed: %s", e)
 
     # HMM webhook (non-blocking)
     if content and content.strip().startswith('{') and 'motif' in content.lower():
