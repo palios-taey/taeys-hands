@@ -1,0 +1,976 @@
+{
+  "chatgpt": {
+    "platform": "chatgpt",
+    "url": "https://chatgpt.com/?temporary-chat=true",
+    "status": "OK",
+    "elements_found": 58,
+    "known_elements": [],
+    "unknown_elements": [
+      {
+        "name": "ChatGPT \u2014 Mozilla Firefox",
+        "role": "frame"
+      },
+      {
+        "name": "Menu Bar",
+        "role": "tool bar"
+      },
+      {
+        "name": "Application",
+        "role": "menu bar"
+      },
+      {
+        "name": "File",
+        "role": "menu"
+      },
+      {
+        "name": "Edit",
+        "role": "menu"
+      },
+      {
+        "name": "View",
+        "role": "menu"
+      },
+      {
+        "name": "History",
+        "role": "menu"
+      },
+      {
+        "name": "Bookmarks",
+        "role": "menu"
+      },
+      {
+        "name": "Tools",
+        "role": "menu"
+      },
+      {
+        "name": "Help",
+        "role": "menu"
+      },
+      {
+        "name": "Browser tabs",
+        "role": "tool bar"
+      },
+      {
+        "name": "Firefox View",
+        "role": "toggle button"
+      },
+      {
+        "name": "about:sessionrestore",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "ChatGPT",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Open a new tab (Ctrl+T)",
+        "role": "button"
+      },
+      {
+        "name": "List all tabs",
+        "role": "button"
+      },
+      {
+        "name": "Navigation",
+        "role": "tool bar"
+      },
+      {
+        "name": "Back",
+        "role": "button"
+      },
+      {
+        "name": "Back",
+        "role": "menu"
+      },
+      {
+        "name": "Forward",
+        "role": "button"
+      },
+      {
+        "name": "Forward",
+        "role": "menu"
+      },
+      {
+        "name": "Reload",
+        "role": "button"
+      },
+      {
+        "name": "Google, pick a search engine",
+        "role": "button"
+      },
+      {
+        "name": "No trackers known to Firefox were detected on this page.",
+        "role": "button"
+      },
+      {
+        "name": "View site information",
+        "role": "button"
+      },
+      {
+        "name": "Verified by: Let's Encrypt",
+        "role": "image"
+      },
+      {
+        "name": "Search with Google or enter address",
+        "role": "entry"
+      },
+      {
+        "name": "Bookmark this page (Ctrl+D)",
+        "role": "button"
+      },
+      {
+        "name": "Account",
+        "role": "button"
+      },
+      {
+        "name": "Extensions",
+        "role": "button"
+      },
+      {
+        "name": "Firefox",
+        "role": "button"
+      },
+      {
+        "name": "ChatGPT",
+        "role": "document web"
+      },
+      {
+        "name": "Skip to content",
+        "role": "link"
+      },
+      {
+        "name": "Chat history",
+        "role": "heading"
+      },
+      {
+        "name": "Chat history",
+        "role": "landmark"
+      },
+      {
+        "name": "Home",
+        "role": "link"
+      },
+      {
+        "name": "Close sidebar",
+        "role": "button"
+      },
+      {
+        "name": "New chat Control Shift O",
+        "role": "link"
+      },
+      {
+        "name": "Control",
+        "role": "section"
+      },
+      {
+        "name": "Shift",
+        "role": "section"
+      },
+      {
+        "name": "Control",
+        "role": "section"
+      },
+      {
+        "name": "Images",
+        "role": "link"
+      },
+      {
+        "name": "Apps",
+        "role": "link"
+      },
+      {
+        "name": "Log in",
+        "role": "button"
+      },
+      {
+        "name": "Model selector",
+        "role": "button"
+      },
+      {
+        "name": "Log in",
+        "role": "button"
+      },
+      {
+        "name": "Sign up for free",
+        "role": "button"
+      },
+      {
+        "name": "Open profile menu",
+        "role": "button"
+      },
+      {
+        "name": "Sign in with Google Dialog",
+        "role": "internal frame"
+      },
+      {
+        "name": "Sign In - Google Accounts",
+        "role": "document web"
+      },
+      {
+        "name": "New Tab",
+        "role": "document web"
+      },
+      {
+        "name": "Settings",
+        "role": "button"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "heading"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "image"
+      },
+      {
+        "name": "Search the web",
+        "role": "button"
+      },
+      {
+        "name": "Shortcuts",
+        "role": "panel"
+      }
+    ],
+    "input_field": {
+      "name": "Search with Google or enter address",
+      "role": "entry",
+      "x": 293,
+      "y": 50
+    },
+    "attach_button": null,
+    "send_button": null,
+    "errors": []
+  },
+  "gemini": {
+    "platform": "gemini",
+    "url": "https://gemini.google.com/",
+    "status": "OK",
+    "elements_found": 47,
+    "known_elements": [
+      {
+        "name": "File",
+        "role": "menu",
+        "yaml_key": "upload_files_item"
+      },
+      {
+        "name": "Tools",
+        "role": "menu",
+        "yaml_key": "tools_button"
+      }
+    ],
+    "unknown_elements": [
+      {
+        "name": "Google Gemini \u2014 Mozilla Firefox",
+        "role": "frame"
+      },
+      {
+        "name": "Menu Bar",
+        "role": "tool bar"
+      },
+      {
+        "name": "Application",
+        "role": "menu bar"
+      },
+      {
+        "name": "Edit",
+        "role": "menu"
+      },
+      {
+        "name": "View",
+        "role": "menu"
+      },
+      {
+        "name": "History",
+        "role": "menu"
+      },
+      {
+        "name": "Bookmarks",
+        "role": "menu"
+      },
+      {
+        "name": "Help",
+        "role": "menu"
+      },
+      {
+        "name": "Browser tabs",
+        "role": "tool bar"
+      },
+      {
+        "name": "Firefox View",
+        "role": "toggle button"
+      },
+      {
+        "name": "about:sessionrestore",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Google Gemini",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Open a new tab (Ctrl+T)",
+        "role": "button"
+      },
+      {
+        "name": "List all tabs",
+        "role": "button"
+      },
+      {
+        "name": "Navigation",
+        "role": "tool bar"
+      },
+      {
+        "name": "Back",
+        "role": "button"
+      },
+      {
+        "name": "Back",
+        "role": "menu"
+      },
+      {
+        "name": "Forward",
+        "role": "button"
+      },
+      {
+        "name": "Forward",
+        "role": "menu"
+      },
+      {
+        "name": "Reload",
+        "role": "button"
+      },
+      {
+        "name": "Google, pick a search engine",
+        "role": "button"
+      },
+      {
+        "name": "No trackers known to Firefox were detected on this page.",
+        "role": "button"
+      },
+      {
+        "name": "View site information",
+        "role": "button"
+      },
+      {
+        "name": "Verified by: Google Trust Services",
+        "role": "image"
+      },
+      {
+        "name": "Search with Google or enter address",
+        "role": "entry"
+      },
+      {
+        "name": "Bookmark this page (Ctrl+D)",
+        "role": "button"
+      },
+      {
+        "name": "Account",
+        "role": "button"
+      },
+      {
+        "name": "Extensions",
+        "role": "button"
+      },
+      {
+        "name": "Firefox",
+        "role": "button"
+      },
+      {
+        "name": "Google Gemini",
+        "role": "document web"
+      },
+      {
+        "name": "Sign in",
+        "role": "link"
+      },
+      {
+        "name": "Main menu",
+        "role": "button"
+      },
+      {
+        "name": "New chat",
+        "role": "button"
+      },
+      {
+        "name": "About Gemini Opens in a new window",
+        "role": "link"
+      },
+      {
+        "name": "Gemini App Opens in a new window",
+        "role": "link"
+      },
+      {
+        "name": "Subscriptions Opens in a new window",
+        "role": "link"
+      },
+      {
+        "name": "For Business Opens in a new window",
+        "role": "link"
+      },
+      {
+        "name": "New Tab",
+        "role": "document web"
+      },
+      {
+        "name": "Settings",
+        "role": "button"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "heading"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "image"
+      },
+      {
+        "name": "Search the web",
+        "role": "button"
+      },
+      {
+        "name": "Shortcuts",
+        "role": "panel"
+      }
+    ],
+    "input_field": {
+      "name": "Search with Google or enter address",
+      "role": "entry",
+      "x": 293,
+      "y": 50
+    },
+    "attach_button": null,
+    "send_button": null,
+    "errors": []
+  },
+  "grok": {
+    "platform": "grok",
+    "url": "https://grok.com/",
+    "status": "OK",
+    "elements_found": 49,
+    "known_elements": [
+      {
+        "name": "Edit",
+        "role": "menu",
+        "yaml_key": "edit_button"
+      }
+    ],
+    "unknown_elements": [
+      {
+        "name": "Grok \u2014 Mozilla Firefox",
+        "role": "frame"
+      },
+      {
+        "name": "Menu Bar",
+        "role": "tool bar"
+      },
+      {
+        "name": "Application",
+        "role": "menu bar"
+      },
+      {
+        "name": "File",
+        "role": "menu"
+      },
+      {
+        "name": "View",
+        "role": "menu"
+      },
+      {
+        "name": "History",
+        "role": "menu"
+      },
+      {
+        "name": "Bookmarks",
+        "role": "menu"
+      },
+      {
+        "name": "Tools",
+        "role": "menu"
+      },
+      {
+        "name": "Help",
+        "role": "menu"
+      },
+      {
+        "name": "Browser tabs",
+        "role": "tool bar"
+      },
+      {
+        "name": "Firefox View",
+        "role": "toggle button"
+      },
+      {
+        "name": "about:sessionrestore",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Grok",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Open a new tab (Ctrl+T)",
+        "role": "button"
+      },
+      {
+        "name": "List all tabs",
+        "role": "button"
+      },
+      {
+        "name": "Navigation",
+        "role": "tool bar"
+      },
+      {
+        "name": "Back",
+        "role": "button"
+      },
+      {
+        "name": "Back",
+        "role": "menu"
+      },
+      {
+        "name": "Forward",
+        "role": "button"
+      },
+      {
+        "name": "Forward",
+        "role": "menu"
+      },
+      {
+        "name": "Reload",
+        "role": "button"
+      },
+      {
+        "name": "Google, pick a search engine",
+        "role": "button"
+      },
+      {
+        "name": "No trackers known to Firefox were detected on this page.",
+        "role": "button"
+      },
+      {
+        "name": "View site information",
+        "role": "button"
+      },
+      {
+        "name": "Verified by: Google Trust Services",
+        "role": "image"
+      },
+      {
+        "name": "Search with Google or enter address",
+        "role": "entry"
+      },
+      {
+        "name": "Bookmark this page (Ctrl+D)",
+        "role": "button"
+      },
+      {
+        "name": "Account",
+        "role": "button"
+      },
+      {
+        "name": "Extensions",
+        "role": "button"
+      },
+      {
+        "name": "Firefox",
+        "role": "button"
+      },
+      {
+        "name": "Grok",
+        "role": "document web"
+      },
+      {
+        "name": "Home page",
+        "role": "link"
+      },
+      {
+        "name": "Imagine",
+        "role": "link"
+      },
+      {
+        "name": "Settings",
+        "role": "button"
+      },
+      {
+        "name": "Sign in",
+        "role": "link"
+      },
+      {
+        "name": "Sign up",
+        "role": "link"
+      },
+      {
+        "name": "Dismiss",
+        "role": "button"
+      },
+      {
+        "name": "Terms",
+        "role": "link"
+      },
+      {
+        "name": "Privacy Policy",
+        "role": "link"
+      },
+      {
+        "name": "Notifications alt+T",
+        "role": "landmark"
+      },
+      {
+        "name": "New Tab",
+        "role": "document web"
+      },
+      {
+        "name": "Settings",
+        "role": "button"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "heading"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "image"
+      },
+      {
+        "name": "Search the web",
+        "role": "button"
+      },
+      {
+        "name": "Shortcuts",
+        "role": "panel"
+      }
+    ],
+    "input_field": {
+      "name": "Search with Google or enter address",
+      "role": "entry",
+      "x": 293,
+      "y": 50
+    },
+    "attach_button": null,
+    "send_button": null,
+    "errors": []
+  },
+  "perplexity": {
+    "platform": "perplexity",
+    "url": "https://www.perplexity.ai/",
+    "status": "OK",
+    "elements_found": 66,
+    "known_elements": [
+      {
+        "name": "Help",
+        "role": "menu",
+        "yaml_key": "helpful"
+      },
+      {
+        "name": "More",
+        "role": "button",
+        "yaml_key": "more_actions"
+      }
+    ],
+    "unknown_elements": [
+      {
+        "name": "Perplexity \u2014 Mozilla Firefox",
+        "role": "frame"
+      },
+      {
+        "name": "Menu Bar",
+        "role": "tool bar"
+      },
+      {
+        "name": "Application",
+        "role": "menu bar"
+      },
+      {
+        "name": "File",
+        "role": "menu"
+      },
+      {
+        "name": "Edit",
+        "role": "menu"
+      },
+      {
+        "name": "View",
+        "role": "menu"
+      },
+      {
+        "name": "History",
+        "role": "menu"
+      },
+      {
+        "name": "Bookmarks",
+        "role": "menu"
+      },
+      {
+        "name": "Tools",
+        "role": "menu"
+      },
+      {
+        "name": "Browser tabs",
+        "role": "tool bar"
+      },
+      {
+        "name": "Firefox View",
+        "role": "toggle button"
+      },
+      {
+        "name": "about:sessionrestore",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Perplexity",
+        "role": "page tab"
+      },
+      {
+        "name": "Close tab",
+        "role": "button"
+      },
+      {
+        "name": "Open a new tab (Ctrl+T)",
+        "role": "button"
+      },
+      {
+        "name": "List all tabs",
+        "role": "button"
+      },
+      {
+        "name": "Navigation",
+        "role": "tool bar"
+      },
+      {
+        "name": "Back",
+        "role": "button"
+      },
+      {
+        "name": "Back",
+        "role": "menu"
+      },
+      {
+        "name": "Forward",
+        "role": "button"
+      },
+      {
+        "name": "Forward",
+        "role": "menu"
+      },
+      {
+        "name": "Reload",
+        "role": "button"
+      },
+      {
+        "name": "Google, pick a search engine",
+        "role": "button"
+      },
+      {
+        "name": "No trackers known to Firefox were detected on this page.",
+        "role": "button"
+      },
+      {
+        "name": "View site information",
+        "role": "button"
+      },
+      {
+        "name": "Verified by: Let's Encrypt",
+        "role": "image"
+      },
+      {
+        "name": "Search with Google or enter address",
+        "role": "entry"
+      },
+      {
+        "name": "Bookmark this page (Ctrl+D)",
+        "role": "button"
+      },
+      {
+        "name": "Account",
+        "role": "button"
+      },
+      {
+        "name": "Extensions",
+        "role": "button"
+      },
+      {
+        "name": "Firefox",
+        "role": "button"
+      },
+      {
+        "name": "Perplexity",
+        "role": "document web"
+      },
+      {
+        "name": "Main",
+        "role": "landmark"
+      },
+      {
+        "name": "Search \u2325\u23031",
+        "role": "link"
+      },
+      {
+        "name": "Computer \u2325\u23032",
+        "role": "link"
+      },
+      {
+        "name": "New thread Ctrl I",
+        "role": "button"
+      },
+      {
+        "name": "History",
+        "role": "link"
+      },
+      {
+        "name": "Discover",
+        "role": "link"
+      },
+      {
+        "name": "Spaces",
+        "role": "link"
+      },
+      {
+        "name": "Finance",
+        "role": "link"
+      },
+      {
+        "name": "Recent Collapse",
+        "role": "button"
+      },
+      {
+        "name": "Perplexity",
+        "role": "image"
+      },
+      {
+        "name": "Try Computer",
+        "role": "button"
+      },
+      {
+        "name": "Research my top competitors and break down their strategy",
+        "role": "button"
+      },
+      {
+        "name": "Write a one-page investor pitch",
+        "role": "button"
+      },
+      {
+        "name": "Find early customers and draft cold outreach",
+        "role": "button"
+      },
+      {
+        "name": "Draft a partnership proposal for a target company",
+        "role": "button"
+      },
+      {
+        "name": "Build a financial model for my startup",
+        "role": "button"
+      },
+      {
+        "name": "Close",
+        "role": "button"
+      },
+      {
+        "name": "Perplexity",
+        "role": "image"
+      },
+      {
+        "name": "Continue with Google",
+        "role": "button"
+      },
+      {
+        "name": "Continue with Apple",
+        "role": "button"
+      },
+      {
+        "name": "Enter your email",
+        "role": "entry"
+      },
+      {
+        "name": "Continue with email",
+        "role": "button"
+      },
+      {
+        "name": "Single sign-on (SSO)",
+        "role": "button"
+      },
+      {
+        "name": "Sign in with Google Dialog",
+        "role": "internal frame"
+      },
+      {
+        "name": "Sign In - Google Accounts",
+        "role": "document web"
+      },
+      {
+        "name": "New Tab",
+        "role": "document web"
+      },
+      {
+        "name": "Settings",
+        "role": "button"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "heading"
+      },
+      {
+        "name": "Mozilla Firefox",
+        "role": "image"
+      },
+      {
+        "name": "Search the web",
+        "role": "button"
+      },
+      {
+        "name": "Shortcuts",
+        "role": "panel"
+      }
+    ],
+    "input_field": {
+      "name": "Enter your email",
+      "role": "entry",
+      "x": 1633,
+      "y": 910
+    },
+    "attach_button": null,
+    "send_button": null,
+    "errors": []
+  },
+  "api": {
+    "isma": {
+      "status": "FAIL",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    "orchestrator": {
+      "status": "FAIL",
+      "error": "HTTP Error 403: Forbidden"
+    },
+    "isma_search": {
+      "status": "FAIL",
+      "error": "HTTP Error 403: Forbidden"
+    }
+  }
+}
