@@ -754,14 +754,11 @@ def extract_response(platform: str) -> str:
                      if (b.get('name') or '').strip().lower() == 'copy']
     target = (response_copy or copy_buttons)[-1]
 
-    # Release clipboard ownership before clicking Copy.
-    # xsel --input stays resident as clipboard owner on Xvfb, blocking
-    # Firefox's navigator.clipboard.writeText() from taking ownership.
-    # Kill any lingering xsel input processes so Firefox JS can write.
-    clipboard.write_marker('')  # ensure xsel is the owner (not some stale process)
-    time.sleep(0.1)
+    # Kill any lingering xsel processes so Firefox can write to clipboard.
+    # Do NOT write a marker first — that creates a NEW xsel owner process,
+    # causing the very ownership conflict we're trying to prevent.
     subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
-    time.sleep(0.1)
+    time.sleep(0.3)
 
     from core.interact import atspi_click
     if target.get('atspi_obj') and atspi_click(target):
@@ -1485,6 +1482,7 @@ def main():
     cycle = 0
     successes = 0
     failures = 0
+    consecutive_timeouts = 0
 
     try:
         while True:
@@ -1501,8 +1499,18 @@ def main():
             for platform, r in results.items():
                 if r.get('success'):
                     successes += 1
+                    consecutive_timeouts = 0
                 else:
                     failures += 1
+                    if r.get('error') == 'response_timeout':
+                        consecutive_timeouts += 1
+
+            # Rate-limit backoff: consecutive timeouts = platform throttling
+            if consecutive_timeouts >= 2:
+                backoff = min(consecutive_timeouts * 30, 120)
+                logger.info(f"Rate limit backoff: {consecutive_timeouts} consecutive timeouts, "
+                            f"waiting {backoff}s")
+                time.sleep(backoff)
 
             # Only notify on failures or milestones (every 50 cycles)
             if not results or any(not r.get('success') for r in results.values()):
