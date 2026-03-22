@@ -348,13 +348,14 @@ def _handle_gtk_dialog(platform: str, file_path: str,
                 r = subprocess.run(['xdotool', 'search', '--name', title],
                                   capture_output=True, text=True, timeout=2, env=env)
                 if r.stdout.strip():
-                    subprocess.run(['xdotool', 'windowactivate', '--sync',
-                                   r.stdout.strip().split('\n')[0]],
-                                  capture_output=True, timeout=3, env=env)
-                    time.sleep(0.3)
+                    wid = r.stdout.strip().split('\n')[0]
+                    subprocess.run(['xdotool', 'windowactivate', wid],
+                                  capture_output=True, timeout=5, env=env)
+                    time.sleep(0.5)
+                    logger.info(f"Focused file dialog window {wid}")
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Could not focus file dialog: {e}")
 
         inp.press_key('ctrl+l')
         time.sleep(0.5)
