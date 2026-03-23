@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """sft_gen_bot.py — SFT/DPO training data generation via hmm_bot's proven functions.
 
-Uses hmm_bot's navigate, attach, send, wait, and extract — the same code
-that ran 123K+ HMM enrichments successfully on virtual displays.
+Uses hmm_bot's navigate, attach, send, wait — the same code that ran
+123K+ HMM enrichments successfully on virtual displays.
+
+Platform-specific extraction:
+  - ChatGPT: "Copy response" button (distinct from "Copy message")
+  - Claude: "Scroll to bottom" → "Copy" button (appears after scroll)
+  - Gemini/Grok/Perplexity: standard hmm_bot.extract_response
 
 Usage:
     DISPLAY=:5 python3 agents/sft_gen_bot.py --round sft --platforms chatgpt
@@ -12,7 +17,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
@@ -54,93 +58,91 @@ def _get_firefox_pid_for_display(display):
     return None
 
 
-def _try_claude_download(platform, display):
-    """Claude sometimes outputs JSONL as a file attachment. Click Download if present."""
-    if platform != 'claude':
-        return None
+def _extract_response(platform):
+    """Platform-specific extraction. Returns content string or empty."""
     import agents.hmm_bot as bot
     from core.tree import find_elements
     from core.interact import atspi_click
     from core import input as inp
 
-    ff = bot.get_firefox(platform)
-    if not ff:
-        return None
-
-    els = find_elements(ff)
-    for e in els:
-        name = (e.get('name') or '').strip()
-        if name == 'Download' and e.get('role') == 'push button':
-            log.info(f"[{platform}] Found Download button — clicking")
-            if e.get('atspi_obj'):
-                atspi_click(e)
-            else:
-                inp.click_at(e['x'], e['y'])
-            time.sleep(3)
-
-            # Check ~/Downloads for the latest .jsonl file
-            dl_dir = os.path.expanduser('~/Downloads')
-            if os.path.isdir(dl_dir):
-                files = sorted(
-                    [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
-                    key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
-                    reverse=True,
-                )
-                if files:
-                    path = os.path.join(dl_dir, files[0])
-                    age = time.time() - os.path.getmtime(path)
-                    if age < 30:  # downloaded in last 30s
-                        with open(path) as f:
-                            content = f.read()
-                        log.info(f"[{platform}] Downloaded {files[0]} ({len(content)} chars)")
-                        return content
-    return None
-
-
-def _chatgpt_copy_response(display):
-    """ChatGPT extraction: click 'Copy response' button (not 'Copy message').
-
-    ChatGPT has two copy buttons with different names:
-    - 'Copy message' on the user prompt (top)
-    - 'Copy response' on the AI answer (bottom)
-    hmm_bot.extract_response looks for 'Copy' (exact) which misses both.
-    """
-    import agents.hmm_bot as bot
-    from core.tree import find_elements
-    from core.interact import atspi_click
-    from core import input as inp
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.3)
 
     inp.focus_firefox()
     time.sleep(0.3)
+
+    ff = bot.get_firefox(platform)
+    if not ff:
+        log.error(f"[{platform}] No Firefox found for extraction")
+        return ''
+
+    # Scroll to bottom aggressively
     for _ in range(15):
         inp.press_key('End')
         time.sleep(0.3)
     time.sleep(2)
 
-    ff = bot.get_firefox('chatgpt')
-    if not ff:
-        return ''
-
-    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
-    time.sleep(0.3)
-
     els = find_elements(ff)
-    for e in els:
-        name = (e.get('name') or '').strip()
-        if 'Copy response' in name and e.get('role') == 'push button':
-            log.info(f"[chatgpt] Clicking '{name}'")
-            if e.get('atspi_obj'):
-                atspi_click(e)
-            else:
-                inp.click_at(e['x'], e['y'])
-            time.sleep(2)
-            from core.clipboard import read as clip_read
-            content = clip_read()
-            if content and len(content) > 100:
-                return content
 
-    log.warning("[chatgpt] No 'Copy response' button found — falling back to extract_response")
-    return bot.extract_response('chatgpt')
+    if platform == 'chatgpt':
+        # ChatGPT: click "Copy response" (NOT "Copy message" which copies the prompt)
+        for e in els:
+            name = (e.get('name') or '').strip()
+            if 'Copy response' in name and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking '{name}'")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(2)
+                from core.clipboard import read as clip_read
+                return clip_read() or ''
+        log.warning(f"[{platform}] No 'Copy response' button found")
+
+    elif platform == 'claude':
+        # Claude: click "Scroll to bottom" first — this makes Copy button appear
+        for e in els:
+            name = (e.get('name') or '').strip()
+            if name == 'Scroll to bottom' and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking 'Scroll to bottom'")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(2)
+                break
+
+        # Re-scan after scroll — Copy button now visible
+        els2 = find_elements(ff)
+        for e in els2:
+            name = (e.get('name') or '').strip()
+            if name == 'Copy' and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking 'Copy' at y={e.get('y')}")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(2)
+                from core.clipboard import read as clip_read
+                return clip_read() or ''
+
+        # Fallback: Download button (Claude attachment)
+        for e in els2:
+            name = (e.get('name') or '').strip()
+            if name == 'Download' and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking 'Download' (attachment fallback)")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(3)
+                dl_dir = os.path.expanduser('~/Downloads')
+                if os.path.isdir(dl_dir):
+                    files = sorted(
+                        [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
+                        key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
+                        reverse=True,
+                    )
+                    if files:
+                        path = os.path.join(dl_dir, files[0])
+                        if time.time() - os.path.getmtime(path) < 30:
+                            with open(path) as f:
+                                return f.read()
+        log.warning(f"[{platform}] No Copy or Download button found")
+
+    else:
+        # Gemini, Grok, Perplexity: standard hmm_bot extraction
+        return bot.extract_response(platform) or ''
+
+    return ''
 
 
 def _parse_jsonl(content):
@@ -217,37 +219,12 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     # Step 4: Wait for response
     log.info(f"[{platform}] Waiting for response...")
-    if platform == 'chatgpt':
-        # ChatGPT AT-SPI tree hangs during generation — stop button invisible
-        # Fixed wait based on observed generation times (~5-10 min for 100 items)
-        log.info(f"[{platform}] Fixed wait 300s (ChatGPT AT-SPI hangs during gen)")
-        time.sleep(300)
-    elif not bot.wait_for_response(platform, timeout=600):
+    if not bot.wait_for_response(platform, timeout=600):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
-    # Step 5: Extract response — scroll to absolute bottom first
-    log.info(f"[{platform}] Scrolling to bottom before extract")
-    from core import input as inp
-    inp.focus_firefox()
-    time.sleep(0.3)
-    for _ in range(15):
-        inp.press_key('End')
-        time.sleep(0.3)
-    time.sleep(2)
-
-    # ChatGPT: "Copy response" button (not "Copy") — click it directly
-    if platform == 'chatgpt':
-        content = _chatgpt_copy_response(display)
-    else:
-        content = bot.extract_response(platform)
-
-    # Claude fallback: if extract got nothing useful, try Download button
-    if platform == 'claude' and (not content or len(content) < 200):
-        log.info(f"[{platform}] Trying Download button fallback")
-        dl_content = _try_claude_download(platform, display)
-        if dl_content and len(dl_content) > 200:
-            content = dl_content
-
+    # Step 5: Extract response (platform-specific)
+    log.info(f"[{platform}] Extracting response")
+    content = _extract_response(platform)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
         return False
