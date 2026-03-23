@@ -301,10 +301,12 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     time.sleep(2)
 
-    # Step 5: Extract response
-    log.info(f"[{platform}] Extracting response")
-    press_key('End')
-    time.sleep(1)
+    # Step 5: Extract response — scroll to absolute bottom first
+    log.info(f"[{platform}] Extracting response — scrolling to bottom")
+    for _ in range(3):
+        press_key('End')
+        time.sleep(0.5)
+    time.sleep(2)
 
     ff = find_firefox(platform)
     doc = get_platform_document(ff, platform) if ff else None
@@ -314,13 +316,18 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     copy_buttons = find_copy_buttons(elements)
 
     if not copy_buttons:
-        # Retry
+        # Retry with more scrolling
+        log.info(f"[{platform}] No copy buttons — retrying after scroll")
         time.sleep(3)
-        press_key('End')
-        time.sleep(1)
+        for _ in range(5):
+            press_key('End')
+            time.sleep(0.3)
+        time.sleep(2)
         doc = get_platform_document(ff, platform) or ff
         elements = find_elements(doc) if doc else []
         copy_buttons = find_copy_buttons(elements)
+
+    log.info(f"[{platform}] Found {len(copy_buttons)} copy buttons")
 
     if not copy_buttons:
         log.error(f"[{platform}] No copy buttons found")
