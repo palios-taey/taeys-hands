@@ -181,19 +181,45 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     elements = find_elements(doc)
     useful = filter_useful_elements(elements)
 
-    # Find input
+    # Find input — multiple strategies (ChatGPT ProseMirror doesn't expose editable)
     input_el = None
+    # Priority 1: editable entry
     for e in useful:
-        if 'editable' in str(e.get('states', [])):
+        if e.get('role') == 'entry' and 'editable' in str(e.get('states', [])):
             input_el = e
             break
+    # Priority 2: any editable
+    if not input_el:
+        for e in useful:
+            if 'editable' in str(e.get('states', [])) and e.get('y', 0) > 100:
+                input_el = e
+                break
+    # Priority 3: focusable section/paragraph (ChatGPT ProseMirror, Grok)
+    if not input_el:
+        for e in useful:
+            if (e.get('role') in ('section', 'paragraph')
+                    and 'focusable' in str(e.get('states', []))
+                    and e.get('y', 0) > 100):
+                input_el = e
+                break
 
     if not input_el:
-        log.error(f"[{platform}] No input field found")
+        log.error(f"[{platform}] No input field found in {len(useful)} elements")
         return False
 
+    log.info(f"[{platform}] Input found: role={input_el.get('role')} at ({input_el['x']}, {input_el['y']})")
     click_at(input_el['x'], input_el['y'])
-    time.sleep(0.5)
+    time.sleep(0.3)
+    # grab_focus for proper AT-SPI focus (essential on Xvfb)
+    obj = input_el.get('atspi_obj')
+    if obj:
+        try:
+            comp = obj.get_component_iface()
+            if comp:
+                comp.grab_focus()
+        except Exception:
+            pass
+    time.sleep(0.3)
 
     # Paste prompt
     clipboard_paste(prompt_text)
@@ -203,35 +229,41 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     # Step 4: Wait for response (stop button polling)
     log.info(f"[{platform}] Waiting for response...")
-    from agents.hmm_bot import scan_for_stop_button, count_copy_buttons, _scan_with_thread_timeout
 
-    start = time.time()
-    timeout = 600
-    phase = 'waiting'
-
-    while time.time() - start < timeout:
-        has_stop = _scan_with_thread_timeout(platform)
-
-        if phase == 'waiting':
-            if has_stop:
-                log.info(f"[{platform}] Stop button appeared — generating")
-                phase = 'generating'
-            elif time.time() - start > 120:
-                log.warning(f"[{platform}] No stop button after 120s")
-                return False
-        elif phase == 'generating':
-            if has_stop is not None and not has_stop:
-                log.info(f"[{platform}] Stop button gone — settling")
-                time.sleep(3)
-                confirm = _scan_with_thread_timeout(platform)
-                if confirm is not None and not confirm:
-                    log.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
-                    break
-
-        time.sleep(5)
+    if platform == 'chatgpt':
+        # ChatGPT AT-SPI tree hangs during generation — use fixed wait
+        log.info(f"[{platform}] ChatGPT: fixed wait (300s) instead of stop-button polling")
+        time.sleep(300)
     else:
-        log.warning(f"[{platform}] Timeout after {timeout}s")
-        return False
+        from agents.hmm_bot import scan_for_stop_button, _scan_with_thread_timeout
+
+        start = time.time()
+        timeout = 600
+        phase = 'waiting'
+
+        while time.time() - start < timeout:
+            has_stop = _scan_with_thread_timeout(platform)
+
+            if phase == 'waiting':
+                if has_stop:
+                    log.info(f"[{platform}] Stop button appeared — generating")
+                    phase = 'generating'
+                elif time.time() - start > 120:
+                    log.warning(f"[{platform}] No stop button after 120s")
+                    return False
+            elif phase == 'generating':
+                if has_stop is not None and not has_stop:
+                    log.info(f"[{platform}] Stop button gone — settling")
+                    time.sleep(3)
+                    confirm = _scan_with_thread_timeout(platform)
+                    if confirm is not None and not confirm:
+                        log.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
+                        break
+
+            time.sleep(5)
+        else:
+            log.warning(f"[{platform}] Timeout after {timeout}s")
+            return False
 
     time.sleep(2)
 
