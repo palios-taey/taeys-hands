@@ -97,46 +97,51 @@ def _extract_response(platform):
         log.warning(f"[{platform}] No 'Copy response' button found")
 
     elif platform == 'claude':
-        # Claude: click "Scroll to bottom" first — this makes Copy button appear
-        for e in els:
-            name = (e.get('name') or '').strip()
-            if name == 'Scroll to bottom' and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking 'Scroll to bottom'")
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                time.sleep(2)
-                break
-
-        # Re-scan after scroll — Copy button now visible
-        els2 = find_elements(ff)
-        for e in els2:
-            name = (e.get('name') or '').strip()
-            if name == 'Copy' and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking 'Copy' at y={e.get('y')}")
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                time.sleep(2)
-                from core.clipboard import read as clip_read
-                return clip_read() or ''
-
-        # Fallback: Download button (Claude attachment)
-        for e in els2:
-            name = (e.get('name') or '').strip()
-            if name == 'Download' and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking 'Download' (attachment fallback)")
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                time.sleep(3)
-                dl_dir = os.path.expanduser('~/Downloads')
-                if os.path.isdir(dl_dir):
-                    files = sorted(
-                        [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
-                        key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
-                        reverse=True,
-                    )
-                    if files:
-                        path = os.path.join(dl_dir, files[0])
-                        if time.time() - os.path.getmtime(path) < 30:
-                            with open(path) as f:
-                                return f.read()
-        log.warning(f"[{platform}] No Copy or Download button found")
+        # Claude: click "Scroll to bottom" → hover → retry to find Copy button
+        for attempt in range(3):
+            els_now = find_elements(ff)
+            for e in els_now:
+                name = (e.get('name') or '').strip()
+                if name == 'Scroll to bottom' and e.get('role') == 'push button':
+                    log.info(f"[{platform}] Clicking 'Scroll to bottom' (attempt {attempt+1})")
+                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    break
+            time.sleep(2)
+            # Hover over response area to trigger Copy button
+            subprocess.run(['xdotool', 'mousemove', '500', '500'],
+                         env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}, timeout=3)
+            time.sleep(2)
+            # Re-scan for Copy
+            els2 = find_elements(ff)
+            for e in els2:
+                name = (e.get('name') or '').strip()
+                if name == 'Copy' and e.get('role') == 'push button':
+                    log.info(f"[{platform}] Clicking 'Copy' at y={e.get('y')}")
+                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    time.sleep(2)
+                    from core.clipboard import read as clip_read
+                    return clip_read() or ''
+            # Check for Download button (Claude attachment fallback)
+            for e in els2:
+                name = (e.get('name') or '').strip()
+                if name == 'Download' and e.get('role') == 'push button':
+                    log.info(f"[{platform}] Clicking 'Download' (attachment fallback)")
+                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    time.sleep(3)
+                    dl_dir = os.path.expanduser('~/Downloads')
+                    if os.path.isdir(dl_dir):
+                        files = sorted(
+                            [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
+                            key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
+                            reverse=True,
+                        )
+                        if files:
+                            path = os.path.join(dl_dir, files[0])
+                            if time.time() - os.path.getmtime(path) < 30:
+                                with open(path) as f:
+                                    return f.read()
+            log.info(f"[{platform}] Attempt {attempt+1}: no Copy/Download yet")
+        log.warning(f"[{platform}] No Copy or Download button found after 3 attempts")
 
     else:
         # Gemini, Grok, Perplexity: standard hmm_bot extraction
@@ -235,8 +240,10 @@ def process_platform(platform, package_path, prompt_path, output_dir):
                     break
 
     # Step 4: Wait for response
-    log.info(f"[{platform}] Waiting for response...")
-    if not bot.wait_for_response(platform, timeout=600):
+    # Claude Opus takes 15-25 min for 100 JSONL items — needs longer timeout
+    wait_timeout = 1800 if platform == 'claude' else 600
+    log.info(f"[{platform}] Waiting for response (timeout={wait_timeout}s)...")
+    if not bot.wait_for_response(platform, timeout=wait_timeout):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
     # Step 5: Extract response (platform-specific)
