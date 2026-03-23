@@ -158,6 +158,9 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     time.sleep(0.5)
     press_key('ctrl+l')
     time.sleep(0.5)
+    # Select all in address bar before typing
+    press_key('ctrl+a')
+    time.sleep(0.2)
 
     urls = {
         'chatgpt': 'https://chatgpt.com/?temporary-chat=true',
@@ -166,10 +169,15 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         'grok': 'https://grok.com/',
         'perplexity': 'https://www.perplexity.ai/',
     }
-    clipboard_paste(urls[platform])
+    # Use xdotool type for address bar — clipboard paste broken on Xvfb
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '10', urls[platform]],
+        env={**os.environ, 'DISPLAY': display},
+        timeout=10,
+    )
     time.sleep(0.3)
     press_key('Return')
-    time.sleep(8)
+    time.sleep(10)
 
     # Step 2: Attach package
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
