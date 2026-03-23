@@ -86,15 +86,28 @@ def _extract_response(platform):
 
     if platform == 'chatgpt':
         # ChatGPT: click "Copy response" (NOT "Copy message" which copies the prompt)
-        for e in els:
-            name = (e.get('name') or '').strip()
-            if 'Copy response' in name and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking '{name}'")
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                time.sleep(2)
-                from core.clipboard import read as clip_read
-                return clip_read() or ''
-        log.warning(f"[{platform}] No 'Copy response' button found")
+        # Button only appears on mouse hover — try multiple positions
+        display = os.environ.get('DISPLAY', ':0')
+        for attempt in range(3):
+            for y in [300, 400, 500, 600]:
+                subprocess.run(['xdotool', 'mousemove', '700', str(y)],
+                             env={**os.environ, 'DISPLAY': display}, timeout=3)
+                time.sleep(1)
+                els_now = find_elements(ff)
+                for e in els_now:
+                    name = (e.get('name') or '').strip()
+                    if 'Copy response' in name and e.get('role') == 'push button':
+                        log.info(f"[{platform}] Clicking '{name}' (hover y={y})")
+                        atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                        time.sleep(2)
+                        from core.clipboard import read as clip_read
+                        return clip_read() or ''
+            log.info(f"[{platform}] No Copy response on attempt {attempt+1} — scrolling more")
+            for _ in range(10):
+                inp.press_key('End')
+                time.sleep(0.3)
+            time.sleep(1)
+        log.warning(f"[{platform}] No 'Copy response' button found after 3 attempts")
 
     elif platform == 'claude':
         # Claude: click "Scroll to bottom" → hover → retry to find Copy button
