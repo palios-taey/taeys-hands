@@ -231,9 +231,18 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     if not bot.wait_for_response(platform, timeout=wait_timeout):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
-    # Step 5: Extract response (platform-specific)
-    log.info(f"[{platform}] Extracting response")
-    content = _extract_response(platform)
+    # Step 5: Extract response
+    # File lock: only one bot extracts at a time. hmm_bot's extract_response
+    # runs pkill -f 'xsel.*clipboard' which kills xsel on ALL displays.
+    # Without the lock, parallel extractions kill each other's clipboard reads.
+    import fcntl
+    lock_path = '/tmp/sft_extract.lock'
+    log.info(f"[{platform}] Waiting for extract lock")
+    with open(lock_path, 'w') as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        log.info(f"[{platform}] Extracting response")
+        content = _extract_response(platform)
+        fcntl.flock(lock_f, fcntl.LOCK_UN)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
         return False
