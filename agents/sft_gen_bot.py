@@ -48,12 +48,70 @@ def set_display(display):
     clip_set(display)
 
 
+def _get_firefox_pid_for_display(display):
+    """Find Firefox PID running on a specific DISPLAY via /proc."""
+    for pid_str in os.listdir('/proc'):
+        if not pid_str.isdigit():
+            continue
+        try:
+            with open(f'/proc/{pid_str}/environ', 'rb') as f:
+                env = f.read().decode('utf-8', errors='replace')
+            with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
+                cmdline = f.read().decode('utf-8', errors='replace')
+            if 'firefox' not in cmdline:
+                continue
+            env_vars = dict(
+                v.split('=', 1) for v in env.split('\0') if '=' in v
+            )
+            if env_vars.get('DISPLAY') == display:
+                return int(pid_str)
+        except (PermissionError, FileNotFoundError, ValueError):
+            continue
+    return None
+
+
+def _patch_find_firefox(display):
+    """Monkey-patch core.atspi.find_firefox to filter by display PID.
+
+    With shared D-Bus, all Firefox instances are visible. This ensures
+    we only return the one running on our display.
+    """
+    import core.atspi as atspi_mod
+    target_pid = _get_firefox_pid_for_display(display)
+    if not target_pid:
+        log.warning(f"No Firefox PID found for {display}")
+        return
+
+    log.info(f"PID filter: Firefox on {display} = PID {target_pid}")
+    original_find = atspi_mod.find_firefox_for_platform
+
+    def filtered_find(platform_name):
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            try:
+                if app.get_process_id() == target_pid:
+                    return app
+            except Exception:
+                continue
+        return original_find(platform_name)
+
+    atspi_mod.find_firefox_for_platform = filtered_find
+    # Also patch the bare find_firefox if it exists
+    if hasattr(atspi_mod, 'find_firefox'):
+        atspi_mod.find_firefox = filtered_find
+
+
 def process_platform(platform, package_path, prompt_path, output_dir):
     """Full cycle: attach → send → wait → extract → save."""
     display = os.environ.get('DISPLAY', ':0')
 
     log.info(f"[{platform}] Starting on {display}")
     set_display(display)
+    _patch_find_firefox(display)
 
     # Import after setting display
     from core.atspi import find_firefox, get_platform_document
