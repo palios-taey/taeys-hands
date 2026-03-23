@@ -1,4 +1,4 @@
-# CLAUDE.md — Taey's Hands v8.1 (Unified Automation)
+# CLAUDE.md — Taey's Hands v8.2 (Stabilized)
 
 ## What This Is
 MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT, Claude, Gemini, Grok, Perplexity via accessibility tree (no coordinates, no screenshots).
@@ -7,14 +7,16 @@ MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT,
 
 ### The Pipeline (MUST be followed in order)
 
-1. **taey_plan(action='create')** — Create a plan with:
+1. **taey_plan(action='send_message')** — Create a plan with:
    - `session`: "new" or existing URL
    - `message`: what to send
    - `model`: which model to use
    - `mode`: which mode (extended thinking, research, etc.)
-   - `tools`: which tools to enable
+   - `tools`: which tools to enable (list or "none")
    - `attachments`: file paths (KERNEL+IDENTITY auto-prepended, auto-consolidated)
    
+   Also accepts `action='create'` as alias for `send_message`.
+
 2. **taey_inspect** — Scan the AT-SPI tree:
    - Returns KNOWN elements (matched via YAML element_map)
    - Returns NEW elements (not in exclude or known — needs bucketing)
@@ -39,49 +41,85 @@ MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT,
    - Stop appears → "generating"
    - Stop disappears → "complete" → notify via Redis
 
+### Extraction Flow (no audit needed)
+1. **taey_plan(action='extract_response')** — Creates extract-only plan (audit pre-passed)
+2. **taey_quick_extract** — Click Copy, read clipboard, return text
+   - `complete=true` consumes the plan and cleans up Redis state
+
+### Tool Reference
+
+| Tool | Purpose | Requires Plan? |
+|------|---------|---------------|
+| `taey_plan` | Create/audit/get/update/delete plans | No |
+| `taey_inspect` | Scan AT-SPI tree | Yes |
+| `taey_click` | Click x,y coords | Yes |
+| `taey_prepare` | Get platform capabilities from YAML | No |
+| `taey_send_message` | Paste + Enter + monitor | Yes (audit_passed) |
+| `taey_quick_extract` | Copy button → clipboard | Yes |
+| `taey_extract_history` | Full conversation extraction | Yes |
+| `taey_attach` | File attachment | Yes |
+| `taey_select_dropdown` | Model/mode/tools selection | Yes |
+| `taey_list_sessions` | Active session listing | No |
+| `taey_monitors` | List/kill monitors | No |
+| `taey_respawn_monitor` | Spawn fresh monitor | No |
+
+### Plan Actions
+- `send_message` (or `create`) — Full plan with message, model, mode, tools, attachments
+- `extract_response` — Extract-only plan (no audit needed)
+- `audit` — Verify plan vs live UI state
+- `get` — Retrieve plan data
+- `update` — Modify plan fields
+- `delete` — Cancel plan and clear locks
+
 ### Key Rules
 - **No fixed coordinates** — everything by AT-SPI element name/role matching
 - **No send without audit** — send.py hard-blocks without audit_passed
 - **No duplicate helpers** — monitor imports from core/
 - **~5 buttons per platform** — all in YAML element_map
 - **3 buckets for tree filtering**: EXCLUDED (noise), KNOWN (mapped), NEW (alert)
+- **Redis is REQUIRED** — server exits on startup if Redis unavailable
 
-### Files Changed in This Rewrite
-- `tools/plan.py` — Added `audit` action, `audit_passed` gate, simplified create
-- `tools/send.py` — Added `_check_audit_gate()` hard block
-- `monitor/central.py` — Uses core/ imports, no URL navigation, simple state machine
-- `server.py` — Added `audit` to taey_plan action enum, bumped to v8.0.0
+### Runtime Contract
 
-### Files NOT Changed (already correct)
-- `core/atspi.py` — Firefox/document discovery
-- `core/tree.py` — AT-SPI tree walking with fence support
-- `core/interact.py` — Element cache and AT-SPI click
-- `core/input.py` — xdotool keyboard/mouse
-- `core/clipboard.py` — xsel clipboard ops
-- `core/platforms.py` — URL patterns, tab shortcuts
-- `tools/inspect.py` — Element filtering with YAML-driven buckets
-- `tools/extract.py` — Copy button finding, clipboard extraction
-- `tools/attach.py` — File attachment via AT-SPI + file dialogs
-- `tools/dropdown.py` — Dropdown opening and keyboard nav
-- `tools/click.py` — Coordinate-based clicking
-- `tools/sessions.py` — Session listing
-- `tools/monitors.py` — Monitor management
-- `storage/redis_pool.py` — Redis connection pool
-- `storage/neo4j_client.py` — Neo4j session persistence
-- `platforms/*.yaml` — Platform configs (element_map, capabilities, etc.)
+```bash
+# Required — server won't start without Redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+# CRITICAL: unique per MCP instance to prevent display collision
+DISPLAY=:5
+TAEY_NODE_ID=taeys-hands-claude-d5
+
+# Timeouts — configurable via .env
+TAEY_PLAN_TTL=3600           # Plan expiry (seconds), default 3600
+MCP_TOOL_TIMEOUT=300         # Tool timeout (seconds), default 120
+MONITOR_CYCLE_SEC=10         # Monitor cycle interval
+
+# Optional
+TAEY_CORPUS_PATH=~/data/corpus
+NEO4J_URI=bolt://localhost:7687
+ISMA_API_URL=https://isma-api.taey.ai
+ISMA_API_KEY=<key>
+```
+
+**Rules:**
+- One MCP server per DISPLAY
+- One unique TAEY_NODE_ID per instance
+- DISPLAY must be set in .mcp.json env block (not just .env)
+- .env is loaded before any config reads (timeout, TTL, etc.)
 
 ### Redis Keys
-- `taey:{node}:plan:{id}` — Plan data (TTL 600s)
+- `taey:{node}:plan:{id}` — Plan data (TTL from TAEY_PLAN_TTL)
 - `taey:{node}:plan:current:{platform}` — Current plan ID per platform
-- `taey:plan_active` — Global plan lock (blocks monitor cycling)
+- `taey:plan_active:{display}` — Global plan lock per display (blocks monitor cycling)
 - `taey:{node}:active_session:{id}` — Monitor session data
 - `taey:{node}:notifications` — Notification queue (for orchestrator daemon)
 - `taey:{node}:checkpoint:{platform}:attach` — Attach verification
 - `taey:{node}:pending_prompt:{platform}` — Sent message metadata
 
-## v8.1 Additions: Unified Automation System
+## v8.1+ Additions: Unified Automation System
 
-### New Modules
+### Additional Modules
 
 - `core/halt.py` — 6-sigma halt system
   - `halt_global(reason, redis)` → ALL machines stop (tool-level failure)
@@ -97,10 +135,6 @@ MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT,
 - `core/mode_select.py` — Mode/model selection (YAML-driven, coordinate-free)
   - `select_mode_model(platform, mode, model)` → Full selection flow
   - Routes to platform-specific handlers using `mode_guidance` from YAML
-  - ChatGPT: keyboard nav on React portal
-  - Gemini: mode_picker + tools_button via AT-SPI
-  - Grok: AT-SPI menu items after xdotool click
-  - Perplexity/Claude: mixed strategies
 
 - `core/orchestrator.py` — Orchestrator integration
   - `heartbeat(status)` → Keep agent alive in registry
@@ -109,55 +143,30 @@ MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT,
   - `report_completion(task_id, result)` → POST to `/api/report`
   - `notify_agent(to, text)` → Send via `/api/notify` (Redis inbox)
 
-- `agents/unified_bot.py` — Replaces hmm_bot.py for production
+- `agents/unified_bot.py` — Production automation bot
   - Full cycle: halt check → task → navigate → mode select → attach → send → wait → extract → ingest → report → drift check
-  - CycleStats tracking for 6-sigma monitoring
-  - 3 consecutive failures → auto-halt platform
-  - Supports both local package builder and orchestrator task assignment
 
 - `agents/social_bot.py` — Extensible social platform bot
-  - Extends x_reply_bot pattern for LinkedIn, Reddit, Upwork
   - YAML-driven element discovery
-  - Batch processing from JSON task files
+  - Architecture supports LinkedIn, Reddit, Upwork (stubs ready)
 
-### New Platform Configs
-- `platforms/reddit.yaml` — Stub (architecture-ready)
-- `platforms/upwork.yaml` — Stub (architecture-ready)
-
-### New Tests
-- `tests/test_halt_system.py` — 4 tests for halt/clear/check
-- `tests/test_drift_detection.py` — 5 tests for drift detection and unknown element classification
-- `tests/test_mode_select.py` — 8 tests for YAML config loading and mode guidance
-- `tests/test_orchestrator.py` — 5 tests for API payload construction
-
-### Redis Keys (New)
+### Additional Redis Keys
 - `taey:halt:global` — Global halt flag (all machines stop)
 - `taey:halt:{platform}` — Platform-specific halt flag
 - `taey:structure_hash:{platform}` — Last known UI structure fingerprint
-- `taey:structure_hash:{platform}:elements` — Element list for diff analysis
-- `taey:drift:last:{platform}` — Previous drift detection (for consecutive drift halting)
-
-### Integration Flow
-```
-Orchestrator → /api/notify → unified_bot picks up task
-  → navigate fresh session
-  → select_mode_model (YAML mode_guidance)
-  → attach package → send prompt → wait → extract
-  → /api/ingest/transcript → ISMA stores tiles
-  → /api/report → task complete
-  → check_structure_drift → halt if UI changed
-```
+- `taey:drift:last:{platform}` — Previous drift detection
 
 ### Deployment
 ```bash
-# On Mira (production)
+# On production machine
 cd ~/taeys-hands
-git checkout recovery/v7-unified
+git checkout main
+git pull
+
+# MCP server — started by Claude Code via .mcp.json
+# Bot mode — started manually or via orchestrator
 python3 agents/unified_bot.py --platforms chatgpt gemini grok
 
 # With orchestrator mode
 python3 agents/unified_bot.py --orchestrator --platforms chatgpt gemini grok
-
-# Single platform test
-python3 agents/unified_bot.py --cycles 1 --platforms gemini --mode deep_think
 ```

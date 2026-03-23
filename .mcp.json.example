@@ -6,9 +6,13 @@
       "args": ["/absolute/path/to/taeys-hands/server.py"],
       "cwd": "/absolute/path/to/taeys-hands",
       "env": {
-        "NEO4J_URI": "bolt://localhost:7687",
+        "DISPLAY": ":5",
+        "TAEY_NODE_ID": "taeys-hands-claude-d5",
         "REDIS_HOST": "127.0.0.1",
-        "REDIS_PORT": "6379"
+        "REDIS_PORT": "6379",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "TAEY_PLAN_TTL": "3600",
+        "MCP_TOOL_TIMEOUT": "300"
       }
     }
   }

@@ -42,10 +42,22 @@ def get_client() -> redis.Redis:
 
 
 def _detect_node_id() -> str:
-    """TAEY_NODE_ID env > ancestor TTY tmux session > hostname."""
+    """TAEY_NODE_ID env > display-scoped auto-id > tmux session > hostname.
+
+    When DISPLAY is set (e.g. :5), generates a deterministic node ID
+    like 'taeys-hands-d5' to prevent collisions between MCP instances
+    on different displays. This replaces the old hostname fallback that
+    caused all instances on the same machine to share Redis keys.
+    """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
+    # Auto-scope by DISPLAY if available — prevents multi-instance collision
+    display = os.environ.get('DISPLAY', '')
+    if display:
+        display_num = display.lstrip(':')
+        if display_num.isdigit():
+            return f"taeys-hands-d{display_num}"
     try:
         tty = _find_ancestor_tty()
         if tty:

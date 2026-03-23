@@ -10,6 +10,7 @@ from core import atspi, input as inp, clipboard
 from core.tree import find_elements, find_copy_buttons
 from core.interact import atspi_click
 from core.platforms import SCREEN_HEIGHT
+from core.ingest import auto_ingest
 from storage.redis_pool import node_key
 from storage import neo4j_client
 
@@ -211,6 +212,14 @@ def handle_quick_extract(platform: str, redis_client,
                     result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
             except Exception as e:
                 logger.warning("Neo4j store failed (Deep Research): %s", e)
+        # Auto-ingest: save to corpus + trigger ISMA pipeline
+        try:
+            ingest = auto_ingest(platform, dr_content, url=url,
+                                 session_id=result.get('neo4j', {}).get('session_id'),
+                                 metadata={"extraction_method": "gemini_deep_research"})
+            result["ingest"] = ingest
+        except Exception as e:
+            logger.warning("Auto-ingest failed (Deep Research): %s", e)
         return result
 
     # Extra scroll if needed — press End until positions stabilize
@@ -415,12 +424,24 @@ def handle_quick_extract(platform: str, redis_client,
             except Exception:
                 save_path = None
 
+    # Auto-ingest: save to corpus + trigger ISMA pipeline
+    ingest_result = None
+    if content:
+        try:
+            ingest_result = auto_ingest(
+                platform, content, url=url,
+                session_id=neo4j_stored.get('session_id') if neo4j_stored else None,
+                metadata={"extraction_method": "clipboard_copy"})
+        except Exception as e:
+            logger.warning("Auto-ingest failed: %s", e)
+
     return {
         "success": True, "platform": platform, "content": content,
         "length": len(content), "has_artifacts": '```' in content,
         "url": url, "copy_buttons_found": len(copy_buttons),
         "plan_consumed": plan_consumed, "neo4j": neo4j_stored,
         "save_path": save_path, "quality": quality,
+        "ingest": ingest_result,
     }
 
 

@@ -18,9 +18,7 @@ def _tool_timeout_handler(signum, frame):
     raise ToolTimeoutError("Tool execution timed out")
 
 
-TOOL_TIMEOUT_SECONDS = int(os.environ.get('MCP_TOOL_TIMEOUT', '120'))
-
-# Load .env
+# Load .env FIRST — before any os.environ reads so config takes effect
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
@@ -29,6 +27,9 @@ if os.path.exists(_env_path):
             if _line and not _line.startswith('#') and '=' in _line:
                 _key, _val = _line.split('=', 1)
                 os.environ.setdefault(_key.strip(), _val.strip())
+
+# Now read timeout — .env values are available
+TOOL_TIMEOUT_SECONDS = int(os.environ.get('MCP_TOOL_TIMEOUT', '120'))
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -339,11 +340,18 @@ def handle_tool(name: str, args: Dict, redis_client) -> Dict:
 # =========================================================================
 
 def run_server():
+    # Redis is REQUIRED infrastructure — fail fast if not available.
+    # Starting without Redis looks healthy but every tool call fails.
     try:
         redis_client = get_redis()
+        logger.info("Redis connected: %s:%s", os.environ.get('REDIS_HOST', '127.0.0.1'),
+                     os.environ.get('REDIS_PORT', '6379'))
     except Exception as e:
-        logger.warning("Redis unavailable at startup: %s", e)
-        redis_client = None
+        logger.critical("Redis connection failed at startup: %s", e)
+        sys.stderr.write(f"FATAL: Redis is required but not available: {e}\n")
+        sys.stderr.write("Ensure Redis is running and REDIS_HOST/REDIS_PORT are correct.\n")
+        sys.stderr.flush()
+        sys.exit(1)
 
     def read_message():
         line = sys.stdin.readline()
@@ -368,7 +376,7 @@ def run_server():
             if method == 'initialize':
                 write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "taeys-hands", "version": "7.0.0"},
+                    "serverInfo": {"name": "taeys-hands", "version": "8.2.0"},
                     "capabilities": {"tools": {}},
                 }})
 
