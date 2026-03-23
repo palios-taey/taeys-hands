@@ -278,8 +278,9 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     valid = _parse_jsonl(content)
 
     round_name = 'sft' if 'sft' in output_dir.lower() else 'dpo'
-    # Append to cumulative file (never overwrite previous rounds)
-    output_path = os.path.join(output_dir, f'{round_name}_{platform}.jsonl')
+    display_num = display.replace(':', '')
+    # Per-display file prevents race conditions from parallel instances
+    output_path = os.path.join(output_dir, f'{round_name}_{platform}_d{display_num}.jsonl')
     with open(output_path, 'a') as f:
         for obj in valid:
             f.write(json.dumps(obj, ensure_ascii=False) + '\n')
@@ -298,6 +299,17 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     except: pass
 
     log.info(f"[{platform}] Saved {len(valid)} items (total accumulated: {total}) → {output_path}")
+
+    # Sync to Mira (training pipeline reads from Mira's /var/spark/isma/training/)
+    try:
+        mira_path = f"mira@10.0.0.163:{output_path}"
+        subprocess.run(
+            ['scp', output_path, mira_path],
+            capture_output=True, timeout=30,
+        )
+        log.info(f"[{platform}] Synced to Mira: {output_path}")
+    except Exception as e:
+        log.warning(f"[{platform}] Mira sync failed: {e}")
 
     return True
 
