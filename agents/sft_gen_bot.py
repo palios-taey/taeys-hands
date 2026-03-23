@@ -108,8 +108,18 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     if not bot.wait_for_response(platform, timeout=600):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
-    # Step 5: Extract response
-    log.info(f"[{platform}] Extracting response")
+    # Step 5: Extract response — scroll to absolute bottom first
+    # hmm_bot.extract_response does one End press which isn't enough for
+    # long SFT responses (100 JSONL lines). Scroll aggressively first.
+    log.info(f"[{platform}] Scrolling to bottom before extract")
+    from core import input as inp
+    inp.focus_firefox()
+    time.sleep(0.3)
+    for _ in range(15):
+        inp.press_key('End')
+        time.sleep(0.3)
+    time.sleep(2)
+
     content = bot.extract_response(platform)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
