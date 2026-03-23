@@ -65,9 +65,30 @@ for display in "${!PLATFORMS[@]}"; do
 
     # Ensure Xvfb display exists
     if [ ! -e "/tmp/.X11-unix/X${display}" ]; then
+        echo "  Cleaning stale state for :$display..."
+        rm -f "/tmp/.X${display}-lock" "/tmp/.X11-unix/X${display}"
+
         echo "  Starting Xvfb :$display..."
-        Xvfb ":$display" -screen 0 "$RESOLUTION" -ac &
-        sleep 1
+        Xvfb ":$display" -screen 0 "$RESOLUTION" -noreset -ac &
+
+        # Wait for display readiness (not just sleep)
+        retries=20
+        while ! DISPLAY=":$display" xdpyinfo >/dev/null 2>&1; do
+            sleep 0.3
+            retries=$((retries - 1))
+            if [ $retries -le 0 ]; then
+                echo "  ERROR: Xvfb :$display failed to start"
+                continue 2
+            fi
+        done
+        echo "  Xvfb :$display ready"
+
+        # Start window manager (required for clipboard/keyboard focus)
+        if command -v openbox >/dev/null 2>&1; then
+            DISPLAY=":$display" openbox --sm-disable &
+            sleep 0.5
+            echo "  openbox started on :$display"
+        fi
     else
         echo "  Xvfb :$display already running"
     fi
@@ -97,10 +118,21 @@ for display in "${!PLATFORMS[@]}"; do
         pkill -f "$profile" 2>/dev/null || true
         sleep 2
 
+        # Write automation-friendly user.js if missing
+        if [ ! -f "/tmp/$profile/user.js" ]; then
+            cat > "/tmp/$profile/user.js" <<'USERJS'
+user_pref("gfx.webrender.all", false);
+user_pref("layers.acceleration.disabled", true);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("toolkit.cosmeticAnimations.enabled", false);
+USERJS
+        fi
+
         echo "  Launching Firefox on :$display with D-Bus..."
-        # Launch via tmux to ensure D-Bus inheritance
+        # GPU/RDD env vars prevent IPC crashes on Xvfb (especially aarch64)
         tmux send-keys -t "$tmux_session" \
-            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS firefox --no-remote --profile /tmp/$profile '$url' &" Enter
+            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS LIBGL_ALWAYS_SOFTWARE=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_GPU_SANDBOXING=1 GDK_BACKEND=x11 firefox --no-remote --profile /tmp/$profile '$url' &" Enter
         sleep 5
         echo "  Firefox launched (check VNC port $vnc_port for login)"
     fi
