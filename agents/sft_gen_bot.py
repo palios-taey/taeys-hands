@@ -59,93 +59,70 @@ def _get_firefox_pid_for_display(display):
 
 
 def _extract_response(platform):
-    """Scroll to bottom, click Copy button by exact name match. All platforms."""
+    """Extract response. Gemini/Grok/Perplexity use hmm_bot (proven).
+    ChatGPT/Claude have platform-specific copy buttons."""
     import agents.hmm_bot as bot
-    from core.tree import find_elements
-    from core.interact import atspi_click
     from core import input as inp
-    from core.clipboard import read as clip_read
 
-    # Kill stale xsel BEFORE clicking copy
-    subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-    time.sleep(0.5)
-
+    # Scroll to bottom first for all platforms
     inp.focus_firefox()
     time.sleep(0.3)
-
-    ff = bot.get_firefox(platform)
-    if not ff:
-        log.error(f"[{platform}] No Firefox found for extraction")
-        return ''
-
-    # Scroll to bottom — End keys + Claude's "Scroll to bottom" button
     for _ in range(20):
         inp.press_key('End')
         time.sleep(0.3)
-    time.sleep(1)
+    time.sleep(2)
 
-    for attempt in range(3):
+    if platform in ('gemini', 'grok', 'perplexity'):
+        # Use hmm_bot.extract_response — proven on 123K enrichments
+        return bot.extract_response(platform) or ''
+
+    # ChatGPT and Claude need custom extraction
+    from core.tree import find_elements
+    from core.interact import atspi_click
+    from core.clipboard import read as clip_read
+
+    ff = bot.get_firefox(platform)
+    if not ff:
+        return ''
+
+    subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+    time.sleep(0.3)
+
+    if platform == 'chatgpt':
+        # ChatGPT: scroll to bottom, click "Copy response" (last one)
         els = find_elements(ff)
+        targets = [e for e in els if (e.get('name') or '').strip() == 'Copy response'
+                   and e.get('role') == 'push button']
+        if targets:
+            target = targets[-1]
+            log.info(f"[chatgpt] Clicking 'Copy response' at y={target.get('y')}")
+            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
+            time.sleep(2)
+            return clip_read() or ''
+        log.warning("[chatgpt] No 'Copy response' button found")
 
-        # Claude has a "Scroll to bottom" button — click it
+    elif platform == 'claude':
+        # Claude: click "Scroll to bottom" button, then last "Copy" button
+        els = find_elements(ff)
         for e in els:
-            name = (e.get('name') or '').strip()
-            if name == 'Scroll to bottom' and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking 'Scroll to bottom'")
+            if (e.get('name') or '').strip() == 'Scroll to bottom':
                 atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                log.info("[claude] Clicked 'Scroll to bottom'")
                 time.sleep(2)
-                els = find_elements(ff)  # re-scan after scroll
                 break
-
-        # Find ALL copy buttons, take the LAST one (bottom of page = response)
-        copy_names = ['Copy response', 'Copy']
-        copy_buttons = []
-        for e in els:
-            name = (e.get('name') or '').strip()
-            if name in copy_names and e.get('role') == 'push button':
-                copy_buttons.append(e)
-
-        if copy_buttons:
-            # Last button = bottom of page = response (not prompt)
-            target = copy_buttons[-1]
-            name = (target.get('name') or '').strip()
-            log.info(f"[{platform}] Clicking '{name}' at y={target.get('y')} ({len(copy_buttons)} total)")
-            # Kill xsel BEFORE click so Firefox can own clipboard
+        els = find_elements(ff)
+        copies = [e for e in els if (e.get('name') or '').strip() == 'Copy'
+                  and e.get('role') == 'push button']
+        if copies:
+            target = copies[-1]
+            log.info(f"[claude] Clicking 'Copy' at y={target.get('y')}")
             subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
             time.sleep(0.3)
             atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
-            # Wait for Firefox to write to clipboard, then read
             time.sleep(2)
-            content = clip_read()
-            if content and len(content) > 100:
-                return content
-            log.warning(f"[{platform}] Clipboard empty after clicking '{name}' — retrying")
+            return clip_read() or ''
+        log.warning("[claude] No 'Copy' button found")
 
-        # Claude attachment fallback
-        if platform == 'claude':
-            for e in els:
-                name = (e.get('name') or '').strip()
-                if name == 'Download' and e.get('role') == 'push button':
-                    log.info(f"[{platform}] Clicking 'Download' (attachment fallback)")
-                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                    time.sleep(3)
-                    dl_dir = os.path.expanduser('~/Downloads')
-                    if os.path.isdir(dl_dir):
-                        files = sorted(
-                            [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
-                            key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
-                            reverse=True,
-                        )
-                        if files:
-                            path = os.path.join(dl_dir, files[0])
-                            if time.time() - os.path.getmtime(path) < 30:
-                                with open(path) as f:
-                                    return f.read()
-
-        log.info(f"[{platform}] Attempt {attempt+1}/3: no copy button or clipboard empty")
-        time.sleep(3)
-
-    log.warning(f"[{platform}] Extraction failed after 3 attempts")
     return ''
 
 
