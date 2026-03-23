@@ -217,7 +217,12 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     # Step 4: Wait for response
     log.info(f"[{platform}] Waiting for response...")
-    if not bot.wait_for_response(platform, timeout=600):
+    if platform == 'chatgpt':
+        # ChatGPT AT-SPI tree hangs during generation — stop button invisible
+        # Fixed wait based on observed generation times (~5-10 min for 100 items)
+        log.info(f"[{platform}] Fixed wait 300s (ChatGPT AT-SPI hangs during gen)")
+        time.sleep(300)
+    elif not bot.wait_for_response(platform, timeout=600):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
     # Step 5: Extract response — scroll to absolute bottom first
