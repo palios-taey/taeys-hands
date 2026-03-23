@@ -120,6 +120,15 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         time.sleep(0.3)
     time.sleep(2)
 
+    # ChatGPT: response copy buttons only appear on hover (React, not in
+    # AT-SPI without mouse interaction). Move mouse to response area first.
+    if platform == 'chatgpt':
+        import subprocess as sp
+        env = {**os.environ, 'DISPLAY': display}
+        # Hover over the response text area (center of page, above input)
+        sp.run(['xdotool', 'mousemove', '960', '400'], env=env, timeout=3)
+        time.sleep(1)
+
     content = bot.extract_response(platform)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
