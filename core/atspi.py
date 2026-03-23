@@ -13,17 +13,23 @@ logger = logging.getLogger(__name__)
 
 
 def detect_display() -> str:
-    """Detect active X display: DISPLAY env > lock files > sockets."""
+    """Detect active X display: DISPLAY env > lock files > sockets.
+
+    Scans :0 through :99 to support virtual displays (Xvfb on :5, :10, etc.)
+    beyond the common :0/:1. Prefers the lowest-numbered available display.
+    """
     display = os.environ.get('DISPLAY')
     if display:
         return display
-    for d in [':0', ':1']:
-        if os.path.exists(f'/tmp/.X{d[1:]}-lock'):
-            return d
-    for d in [':0', ':1']:
-        if os.path.exists(f'/tmp/.X11-unix/X{d[1:]}'):
-            return d
-    raise RuntimeError("No X display detected")
+    # Scan lock files for any active display (:0 through :99)
+    for num in range(100):
+        if os.path.exists(f'/tmp/.X{num}-lock'):
+            return f':{num}'
+    # Fallback: check X11 unix sockets
+    for num in range(100):
+        if os.path.exists(f'/tmp/.X11-unix/X{num}'):
+            return f':{num}'
+    raise RuntimeError("No X display detected — set DISPLAY env or start Xvfb")
 
 
 def find_firefox(platform: str = None):

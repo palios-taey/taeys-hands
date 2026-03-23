@@ -38,7 +38,7 @@ _EXT_LANG = {
 }
 
 _PLAN_ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
-_PLAN_TTL = 600  # 10 minutes
+_PLAN_TTL = int(os.environ.get('TAEY_PLAN_TTL', '3600'))  # Default 1 hour (was 600s/10min)
 
 
 def _validate_path(path: str) -> bool:
