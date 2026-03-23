@@ -217,6 +217,23 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         return False
     log.info(f"[{platform}] Prompt sent")
 
+    # ChatGPT: Return doesn't always send with file attachments.
+    # Click "Send prompt" button as backup if it's still visible.
+    if platform == 'chatgpt':
+        time.sleep(1)
+        from core.tree import find_elements
+        from core.interact import atspi_click
+        ff = bot.get_firefox(platform)
+        if ff:
+            els = find_elements(ff)
+            for e in els:
+                n = (e.get('name') or '').strip()
+                if n == 'Send prompt' and e.get('role') == 'push button':
+                    log.info(f"[{platform}] Send button still visible — clicking it")
+                    atspi_click(e) if e.get('atspi_obj') else bot.inp.click_at(e['x'], e['y'])
+                    time.sleep(1)
+                    break
+
     # Step 4: Wait for response
     log.info(f"[{platform}] Waiting for response...")
     if not bot.wait_for_response(platform, timeout=600):
