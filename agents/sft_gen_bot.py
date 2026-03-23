@@ -134,6 +134,89 @@ def _check_stop_button(firefox_app, platform):
         return False
 
 
+def _xvfb_file_dialog(platform, file_path, display):
+    """Handle GTK file dialog on Xvfb — explicit window focus + xdotool type.
+
+    The core attach.py uses clipboard_paste + Ctrl+L which fails on Xvfb
+    because the dialog doesn't always get keyboard focus, sending the
+    file path into the browser address bar instead.
+    """
+    env = {**os.environ, 'DISPLAY': display}
+
+    # Find file dialog window (multiple possible names)
+    dialog_wid = None
+    for name in ['File Upload', 'Open', 'Open File', 'xdg-desktop-portal-gtk']:
+        try:
+            r = subprocess.run(
+                ['xdotool', 'search', '--name', name],
+                capture_output=True, text=True, timeout=3, env=env,
+            )
+            if r.stdout.strip():
+                # Take the last one (most recent)
+                dialog_wid = r.stdout.strip().split('\n')[-1]
+                break
+        except Exception:
+            pass
+
+    if not dialog_wid:
+        # Wait a bit and retry
+        time.sleep(2)
+        for name in ['File Upload', 'Open', 'Open File']:
+            try:
+                r = subprocess.run(
+                    ['xdotool', 'search', '--name', name],
+                    capture_output=True, text=True, timeout=3, env=env,
+                )
+                if r.stdout.strip():
+                    dialog_wid = r.stdout.strip().split('\n')[-1]
+                    break
+            except Exception:
+                pass
+
+    if not dialog_wid:
+        log.warning(f"[{platform}] No file dialog found — trying handle_attach fallback")
+        from tools.attach import handle_attach
+        return handle_attach(platform, file_path, None)
+
+    # Focus the dialog window explicitly
+    log.info(f"[{platform}] Focusing file dialog {dialog_wid}")
+    subprocess.run(['xdotool', 'windowactivate', dialog_wid], env=env, timeout=3)
+    time.sleep(0.3)
+    subprocess.run(['xdotool', 'windowfocus', dialog_wid], env=env, timeout=3)
+    time.sleep(0.5)
+
+    # Ctrl+L opens location bar in GTK file dialog
+    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+l'], env=env, timeout=3)
+    time.sleep(0.5)
+
+    # Select all and type file path (not clipboard — Xvfb clipboard unreliable)
+    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+a'], env=env, timeout=3)
+    time.sleep(0.2)
+    subprocess.run(
+        ['xdotool', 'type', '--clearmodifiers', '--delay', '5', file_path],
+        env=env, timeout=10,
+    )
+    time.sleep(0.3)
+    subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], env=env, timeout=3)
+    time.sleep(1.0)
+
+    # Check if dialog closed
+    try:
+        r = subprocess.run(
+            ['xdotool', 'search', '--name', 'File Upload'],
+            capture_output=True, text=True, timeout=2, env=env,
+        )
+        if r.stdout.strip():
+            # Dialog still open — press Enter again
+            subprocess.run(['xdotool', 'key', 'Return'], env=env, timeout=3)
+            time.sleep(1.0)
+    except Exception:
+        pass
+
+    log.info(f"[{platform}] File dialog handled")
+    return {"status": "unverified", "platform": platform, "file_path": file_path}
+
+
 def process_platform(platform, package_path, prompt_path, output_dir):
     """Full cycle: attach → send → wait → extract → save."""
     display = os.environ.get('DISPLAY', ':0')
@@ -180,18 +263,25 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     time.sleep(10)
 
     # Step 2: Attach package
+    # Use handle_attach for the initial click, but handle the file dialog
+    # ourselves on Xvfb — the core attach uses clipboard_paste + Ctrl+L
+    # which can miss the dialog and hit the browser address bar instead.
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
     result = handle_attach(platform, package_path, None)
 
     if result.get('status') == 'dropdown_open':
-        # Click upload files item
         items = result.get('dropdown_items', [])
         for item in items:
-            if 'upload' in item.get('name', '').lower():
+            name = item.get('name', '').lower()
+            if 'upload' in name or 'file' in name:
                 click_at(int(item['x']), int(item['y']))
                 time.sleep(1)
-                result = handle_attach(platform, package_path, None)
+                # Now handle the file dialog ourselves
+                result = _xvfb_file_dialog(platform, package_path, display)
                 break
+
+    if result.get('status') == 'needs_dialog':
+        result = _xvfb_file_dialog(platform, package_path, display)
 
     status = result.get('status', '')
     if status in ('file_attached', 'already_attached', 'unverified'):
