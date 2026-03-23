@@ -97,21 +97,29 @@ def _extract_response(platform):
                 els = find_elements(ff)  # re-scan after scroll
                 break
 
-        # Find copy button by exact name match
-        # ChatGPT: "Copy response", Claude: "Copy", Others: "Copy"
+        # Find ALL copy buttons, take the LAST one (bottom of page = response)
         copy_names = ['Copy response', 'Copy']
+        copy_buttons = []
         for e in els:
             name = (e.get('name') or '').strip()
             if name in copy_names and e.get('role') == 'push button':
-                log.info(f"[{platform}] Clicking '{name}' at y={e.get('y')}")
-                subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-                time.sleep(0.3)
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                time.sleep(2)
-                content = clip_read()
-                if content and len(content) > 100:
-                    return content
-                log.warning(f"[{platform}] Clipboard empty after clicking '{name}' — retrying")
+                copy_buttons.append(e)
+
+        if copy_buttons:
+            # Last button = bottom of page = response (not prompt)
+            target = copy_buttons[-1]
+            name = (target.get('name') or '').strip()
+            log.info(f"[{platform}] Clicking '{name}' at y={target.get('y')} ({len(copy_buttons)} total)")
+            # Kill xsel BEFORE click so Firefox can own clipboard
+            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+            time.sleep(0.3)
+            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
+            # Wait for Firefox to write to clipboard, then read
+            time.sleep(2)
+            content = clip_read()
+            if content and len(content) > 100:
+                return content
+            log.warning(f"[{platform}] Clipboard empty after clicking '{name}' — retrying")
 
         # Claude attachment fallback
         if platform == 'claude':
