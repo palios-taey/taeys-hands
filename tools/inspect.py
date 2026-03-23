@@ -267,6 +267,20 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         if platform == 'gemini':
             _click_new_chat_gemini()
 
+        # Grok SPA: pushState navigation doesn't update AT-SPI DocURL.
+        # If we navigated to grok.com but the AT-SPI document still shows
+        # a conversation path (/c/...), force F5 reload to reset the tree.
+        if platform == 'grok':
+            _ff = atspi.find_firefox_for_platform(platform)
+            if _ff:
+                _doc = atspi.get_platform_document(_ff, platform)
+                if _doc:
+                    _url = atspi.get_document_url(_doc) or ''
+                    if '/c/' in _url:
+                        logger.info(f"Grok SPA stale tree: {_url} — forcing F5 reload")
+                        inp.press_key('F5')
+                        time.sleep(3.0)
+
         inp.press_key('End')
         time.sleep(1.0)
         result['fresh_session'] = True
