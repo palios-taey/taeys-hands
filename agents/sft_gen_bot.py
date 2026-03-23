@@ -286,44 +286,25 @@ def main():
         prompt = DPO_PROMPT
         output_dir = DPO_OUTPUT_DIR
 
-    log.info(f"Starting {args.round.upper()} generation on {args.platforms}")
+    log.info(f"Starting {args.round.upper()} generation on {args.platforms} (continuous)")
 
-    results = {}
-    for platform in args.platforms:
-        if platform not in SUPPORTED_PLATFORMS:
-            log.error(f"Unknown platform: {platform}")
-            continue
+    cycle = 0
+    while True:
+        cycle += 1
+        for platform in args.platforms:
+            if platform not in SUPPORTED_PLATFORMS:
+                continue
 
-        try:
-            ok = process_platform(platform, package, prompt, output_dir)
-            results[platform] = 'OK' if ok else 'FAILED'
-        except Exception as e:
-            log.error(f"[{platform}] Exception: {e}", exc_info=True)
-            results[platform] = f'ERROR: {e}'
+            log.info(f"=== Cycle {cycle} — {platform} ===")
+            try:
+                ok = process_platform(platform, package, prompt, output_dir)
+                if ok:
+                    log.info(f"[{platform}] Cycle {cycle} OK")
+                else:
+                    log.error(f"[{platform}] Cycle {cycle} FAILED")
+            except Exception as e:
+                log.error(f"[{platform}] Cycle {cycle} Exception: {e}", exc_info=True)
 
-    log.info("=== Results ===")
-    for p, r in results.items():
-        log.info(f"  {p}: {r}")
-    log.info(f"Output in {output_dir}/")
-
-    # Notify via Redis on failures
-    failures = {p: r for p, r in results.items() if r != 'OK'}
-    if failures:
-        try:
-            import redis
-            rc = redis.Redis(host=os.environ.get('REDIS_HOST', '10.0.0.163'),
-                           port=6379, decode_responses=True, socket_timeout=2)
-            display = os.environ.get('DISPLAY', ':?')
-            notif = json.dumps({
-                'type': 'sft_error',
-                'display': display,
-                'failures': failures,
-                'message': f"SFT failures on {display}: {failures}",
-                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-            })
-            rc.rpush('taey:taeys-hands:notifications', notif)
-        except Exception:
-            pass
 
 
 if __name__ == '__main__':
