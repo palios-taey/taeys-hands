@@ -12,6 +12,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -26,8 +28,8 @@ SFT_PACKAGE = '/tmp/sft_package.md'
 DPO_PACKAGE = '/tmp/dpo_package.md'
 SFT_PROMPT = '/tmp/sft_generation_prompt.md'
 DPO_PROMPT = '/tmp/dpo_generation_prompt.md'
-SFT_OUTPUT_DIR = '/tmp/sft_output'
-DPO_OUTPUT_DIR = '/tmp/dpo_output'
+SFT_OUTPUT_DIR = '/var/spark/isma/training/sft'
+DPO_OUTPUT_DIR = '/var/spark/isma/training/dpo'
 
 
 def _get_firefox_pid_for_display(display):
@@ -50,6 +52,70 @@ def _get_firefox_pid_for_display(display):
         except (PermissionError, FileNotFoundError, ValueError):
             continue
     return None
+
+
+def _try_claude_download(platform, display):
+    """Claude sometimes outputs JSONL as a file attachment. Click Download if present."""
+    if platform != 'claude':
+        return None
+    import agents.hmm_bot as bot
+    from core.tree import find_elements
+    from core.interact import atspi_click
+    from core import input as inp
+
+    ff = bot.get_firefox(platform)
+    if not ff:
+        return None
+
+    els = find_elements(ff)
+    for e in els:
+        name = (e.get('name') or '').strip()
+        if name == 'Download' and e.get('role') == 'push button':
+            log.info(f"[{platform}] Found Download button — clicking")
+            if e.get('atspi_obj'):
+                atspi_click(e)
+            else:
+                inp.click_at(e['x'], e['y'])
+            time.sleep(3)
+
+            # Check ~/Downloads for the latest .jsonl file
+            dl_dir = os.path.expanduser('~/Downloads')
+            if os.path.isdir(dl_dir):
+                files = sorted(
+                    [f for f in os.listdir(dl_dir) if f.endswith('.jsonl')],
+                    key=lambda f: os.path.getmtime(os.path.join(dl_dir, f)),
+                    reverse=True,
+                )
+                if files:
+                    path = os.path.join(dl_dir, files[0])
+                    age = time.time() - os.path.getmtime(path)
+                    if age < 30:  # downloaded in last 30s
+                        with open(path) as f:
+                            content = f.read()
+                        log.info(f"[{platform}] Downloaded {files[0]} ({len(content)} chars)")
+                        return content
+    return None
+
+
+def _parse_jsonl(content):
+    """Parse JSONL content, handling Perplexity S3 URLs and markdown fences."""
+    lines = content.strip().split('\n')
+    valid = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('```'):
+            continue
+        # Perplexity appends S3 citation URLs after the JSON
+        if line.startswith('{'):
+            bracket_end = line.rfind(']}')
+            if bracket_end > 0:
+                line = line[:bracket_end + 2]
+        try:
+            obj = json.loads(line)
+            valid.append(obj)
+        except json.JSONDecodeError:
+            continue
+    return valid
 
 
 def process_platform(platform, package_path, prompt_path, output_dir):
@@ -109,8 +175,6 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
     # Step 5: Extract response — scroll to absolute bottom first
-    # hmm_bot.extract_response does one End press which isn't enough for
-    # long SFT responses (100 JSONL lines). Scroll aggressively first.
     log.info(f"[{platform}] Scrolling to bottom before extract")
     from core import input as inp
     inp.focus_firefox()
@@ -120,16 +184,21 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         time.sleep(0.3)
     time.sleep(2)
 
-    # ChatGPT: response copy buttons only appear on hover (React, not in
-    # AT-SPI without mouse interaction). Move mouse to response area first.
+    # ChatGPT: response copy buttons only appear on hover
     if platform == 'chatgpt':
-        import subprocess as sp
         env = {**os.environ, 'DISPLAY': display}
-        # Hover over the response text area (center of page, above input)
-        sp.run(['xdotool', 'mousemove', '960', '400'], env=env, timeout=3)
+        subprocess.run(['xdotool', 'mousemove', '960', '400'], env=env, timeout=3)
         time.sleep(1)
 
     content = bot.extract_response(platform)
+
+    # Claude fallback: if extract got nothing useful, try Download button
+    if platform == 'claude' and (not content or len(content) < 200):
+        log.info(f"[{platform}] Trying Download button fallback")
+        dl_content = _try_claude_download(platform, display)
+        if dl_content and len(dl_content) > 200:
+            content = dl_content
+
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
         return False
@@ -137,24 +206,7 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     # Step 6: Parse and save JSONL
     os.makedirs(output_dir, exist_ok=True)
-
-    lines = content.strip().split('\n')
-    valid = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('#') or line.startswith('```'):
-            continue
-        # Perplexity appends S3 citation URLs after the JSON — strip them
-        # e.g. {"messages":[...]} [ppl-ai-file-upload.s3.amazonaws...]
-        if line.startswith('{'):
-            bracket_end = line.rfind(']}')
-            if bracket_end > 0:
-                line = line[:bracket_end + 2]
-        try:
-            obj = json.loads(line)
-            valid.append(obj)
-        except json.JSONDecodeError:
-            continue
+    valid = _parse_jsonl(content)
 
     round_name = 'sft' if 'sft' in output_dir.lower() else 'dpo'
     output_path = os.path.join(output_dir, f'{round_name}_{platform}.jsonl')
