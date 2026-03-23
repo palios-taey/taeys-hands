@@ -59,14 +59,16 @@ def _get_firefox_pid_for_display(display):
 
 
 def _extract_response(platform):
-    """Platform-specific extraction. Returns content string or empty."""
+    """Scroll to bottom, click Copy button by exact name match. All platforms."""
     import agents.hmm_bot as bot
     from core.tree import find_elements
     from core.interact import atspi_click
     from core import input as inp
+    from core.clipboard import read as clip_read
 
-    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
-    time.sleep(0.3)
+    # Kill stale xsel BEFORE clicking copy
+    subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+    time.sleep(0.5)
 
     inp.focus_firefox()
     time.sleep(0.3)
@@ -76,66 +78,44 @@ def _extract_response(platform):
         log.error(f"[{platform}] No Firefox found for extraction")
         return ''
 
-    # Scroll to bottom aggressively
-    for _ in range(15):
+    # Scroll to bottom — End keys + Claude's "Scroll to bottom" button
+    for _ in range(20):
         inp.press_key('End')
         time.sleep(0.3)
-    time.sleep(2)
+    time.sleep(1)
 
-    els = find_elements(ff)
+    for attempt in range(3):
+        els = find_elements(ff)
 
-    if platform == 'chatgpt':
-        # ChatGPT: click "Copy response" (NOT "Copy message" which copies the prompt)
-        # Button only appears on mouse hover — try multiple positions
-        display = os.environ.get('DISPLAY', ':0')
-        for attempt in range(3):
-            for y in [300, 400, 500, 600]:
-                subprocess.run(['xdotool', 'mousemove', '700', str(y)],
-                             env={**os.environ, 'DISPLAY': display}, timeout=3)
-                time.sleep(1)
-                els_now = find_elements(ff)
-                for e in els_now:
-                    name = (e.get('name') or '').strip()
-                    if 'Copy response' in name and e.get('role') == 'push button':
-                        log.info(f"[{platform}] Clicking '{name}' (hover y={y})")
-                        atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                        time.sleep(2)
-                        from core.clipboard import read as clip_read
-                        return clip_read() or ''
-            log.info(f"[{platform}] No Copy response on attempt {attempt+1} — scrolling more")
-            for _ in range(10):
-                inp.press_key('End')
+        # Claude has a "Scroll to bottom" button — click it
+        for e in els:
+            name = (e.get('name') or '').strip()
+            if name == 'Scroll to bottom' and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking 'Scroll to bottom'")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(2)
+                els = find_elements(ff)  # re-scan after scroll
+                break
+
+        # Find copy button by exact name match
+        # ChatGPT: "Copy response", Claude: "Copy", Others: "Copy"
+        copy_names = ['Copy response', 'Copy']
+        for e in els:
+            name = (e.get('name') or '').strip()
+            if name in copy_names and e.get('role') == 'push button':
+                log.info(f"[{platform}] Clicking '{name}' at y={e.get('y')}")
+                subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
                 time.sleep(0.3)
-            time.sleep(1)
-        log.warning(f"[{platform}] No 'Copy response' button found after 3 attempts")
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                time.sleep(2)
+                content = clip_read()
+                if content and len(content) > 100:
+                    return content
+                log.warning(f"[{platform}] Clipboard empty after clicking '{name}' — retrying")
 
-    elif platform == 'claude':
-        # Claude: click "Scroll to bottom" → hover → retry to find Copy button
-        for attempt in range(3):
-            els_now = find_elements(ff)
-            for e in els_now:
-                name = (e.get('name') or '').strip()
-                if name == 'Scroll to bottom' and e.get('role') == 'push button':
-                    log.info(f"[{platform}] Clicking 'Scroll to bottom' (attempt {attempt+1})")
-                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                    break
-            time.sleep(2)
-            # Hover over response area to trigger Copy button
-            subprocess.run(['xdotool', 'mousemove', '500', '500'],
-                         env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}, timeout=3)
-            time.sleep(2)
-            # Re-scan for Copy
-            els2 = find_elements(ff)
-            for e in els2:
-                name = (e.get('name') or '').strip()
-                if name == 'Copy' and e.get('role') == 'push button':
-                    log.info(f"[{platform}] Clicking 'Copy' at y={e.get('y')}")
-                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                    time.sleep(2)
-                    from core.clipboard import read as clip_read
-                    return clip_read() or ''
-            # Check for Download button (Claude attachment fallback)
-            for e in els2:
+        # Claude attachment fallback
+        if platform == 'claude':
+            for e in els:
                 name = (e.get('name') or '').strip()
                 if name == 'Download' and e.get('role') == 'push button':
                     log.info(f"[{platform}] Clicking 'Download' (attachment fallback)")
@@ -153,13 +133,11 @@ def _extract_response(platform):
                             if time.time() - os.path.getmtime(path) < 30:
                                 with open(path) as f:
                                     return f.read()
-            log.info(f"[{platform}] Attempt {attempt+1}: no Copy/Download yet")
-        log.warning(f"[{platform}] No Copy or Download button found after 3 attempts")
 
-    else:
-        # Gemini, Grok, Perplexity: standard hmm_bot extraction
-        return bot.extract_response(platform) or ''
+        log.info(f"[{platform}] Attempt {attempt+1}/3: no copy button or clipboard empty")
+        time.sleep(3)
 
+    log.warning(f"[{platform}] Extraction failed after 3 attempts")
     return ''
 
 
