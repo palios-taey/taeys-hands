@@ -97,6 +97,52 @@ def _try_claude_download(platform, display):
     return None
 
 
+def _chatgpt_copy_response(display):
+    """ChatGPT extraction: click 'Copy response' button (not 'Copy message').
+
+    ChatGPT has two copy buttons with different names:
+    - 'Copy message' on the user prompt (top)
+    - 'Copy response' on the AI answer (bottom)
+    hmm_bot.extract_response looks for 'Copy' (exact) which misses both.
+    """
+    import agents.hmm_bot as bot
+    from core.tree import find_elements
+    from core.interact import atspi_click
+    from core import input as inp
+
+    inp.focus_firefox()
+    time.sleep(0.3)
+    for _ in range(15):
+        inp.press_key('End')
+        time.sleep(0.3)
+    time.sleep(2)
+
+    ff = bot.get_firefox('chatgpt')
+    if not ff:
+        return ''
+
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.3)
+
+    els = find_elements(ff)
+    for e in els:
+        name = (e.get('name') or '').strip()
+        if 'Copy response' in name and e.get('role') == 'push button':
+            log.info(f"[chatgpt] Clicking '{name}'")
+            if e.get('atspi_obj'):
+                atspi_click(e)
+            else:
+                inp.click_at(e['x'], e['y'])
+            time.sleep(2)
+            from core.clipboard import read as clip_read
+            content = clip_read()
+            if content and len(content) > 100:
+                return content
+
+    log.warning("[chatgpt] No 'Copy response' button found — falling back to extract_response")
+    return bot.extract_response('chatgpt')
+
+
 def _parse_jsonl(content):
     """Parse JSONL content, handling Perplexity S3 URLs and markdown fences."""
     lines = content.strip().split('\n')
@@ -184,13 +230,11 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         time.sleep(0.3)
     time.sleep(2)
 
-    # ChatGPT: response copy buttons only appear on hover
+    # ChatGPT: "Copy response" button (not "Copy") — click it directly
     if platform == 'chatgpt':
-        env = {**os.environ, 'DISPLAY': display}
-        subprocess.run(['xdotool', 'mousemove', '960', '400'], env=env, timeout=3)
-        time.sleep(1)
-
-    content = bot.extract_response(platform)
+        content = _chatgpt_copy_response(display)
+    else:
+        content = bot.extract_response(platform)
 
     # Claude fallback: if extract got nothing useful, try Download button
     if platform == 'claude' and (not content or len(content) < 200):
