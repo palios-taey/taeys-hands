@@ -85,7 +85,7 @@ def _patch_find_firefox(display):
     log.info(f"PID filter: Firefox on {display} = PID {target_pid}")
     original_find = atspi_mod.find_firefox_for_platform
 
-    def filtered_find(platform_name):
+    def filtered_find(platform_name=None, **kwargs):
         import gi
         gi.require_version('Atspi', '2.0')
         from gi.repository import Atspi
@@ -171,7 +171,11 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     ff = find_firefox(platform)
     doc = get_platform_document(ff, platform) if ff else None
     if not doc:
-        log.error(f"[{platform}] No document found")
+        # Single-tab display: search entire Firefox app tree
+        log.warning(f"[{platform}] No document by URL match — using full app tree")
+        doc = ff
+    if not doc:
+        log.error(f"[{platform}] No Firefox found")
         return False
 
     elements = find_elements(doc)
@@ -238,7 +242,9 @@ def process_platform(platform, package_path, prompt_path, output_dir):
 
     ff = find_firefox(platform)
     doc = get_platform_document(ff, platform) if ff else None
-    elements = find_elements(doc)
+    if not doc:
+        doc = ff
+    elements = find_elements(doc) if doc else []
     copy_buttons = find_copy_buttons(elements)
 
     if not copy_buttons:
@@ -246,8 +252,8 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         time.sleep(3)
         press_key('End')
         time.sleep(1)
-        doc = get_platform_document(ff, platform)
-        elements = find_elements(doc)
+        doc = get_platform_document(ff, platform) or ff
+        elements = find_elements(doc) if doc else []
         copy_buttons = find_copy_buttons(elements)
 
     if not copy_buttons:
