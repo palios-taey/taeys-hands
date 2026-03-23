@@ -105,6 +105,35 @@ def _patch_find_firefox(display):
         atspi_mod.find_firefox = filtered_find
 
 
+_STOP_PATTERNS = {'stop generating', 'cancel', 'stop', 'stop response', 'cancel response'}
+
+
+def _check_stop_button(firefox_app, platform):
+    """Check if stop/cancel button is visible using our PID-filtered Firefox.
+
+    Avoids importing from hmm_bot (which uses its own cached Firefox refs).
+    """
+    if not firefox_app:
+        return False
+    try:
+        from core.tree import find_elements
+        from core.atspi import get_platform_document
+        doc = get_platform_document(firefox_app, platform) or firefox_app
+        elements = find_elements(doc)
+        for e in elements:
+            name = (e.get('name') or '').strip().lower()
+            if not name or len(name) > 50:
+                continue
+            if 'button' not in e.get('role', ''):
+                continue
+            if name in _STOP_PATTERNS:
+                return True
+        return False
+    except Exception as ex:
+        log.debug(f"Stop button check error: {ex}")
+        return False
+
+
 def process_platform(platform, package_path, prompt_path, output_dir):
     """Full cycle: attach → send → wait → extract → save."""
     display = os.environ.get('DISPLAY', ':0')
@@ -235,14 +264,12 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         log.info(f"[{platform}] ChatGPT: fixed wait (300s) instead of stop-button polling")
         time.sleep(300)
     else:
-        from agents.hmm_bot import scan_for_stop_button, _scan_with_thread_timeout
-
         start = time.time()
         timeout = 600
         phase = 'waiting'
 
         while time.time() - start < timeout:
-            has_stop = _scan_with_thread_timeout(platform)
+            has_stop = _check_stop_button(ff, platform)
 
             if phase == 'waiting':
                 if has_stop:
@@ -252,11 +279,10 @@ def process_platform(platform, package_path, prompt_path, output_dir):
                     log.warning(f"[{platform}] No stop button after 120s")
                     return False
             elif phase == 'generating':
-                if has_stop is not None and not has_stop:
+                if not has_stop:
                     log.info(f"[{platform}] Stop button gone — settling")
                     time.sleep(3)
-                    confirm = _scan_with_thread_timeout(platform)
-                    if confirm is not None and not confirm:
+                    if not _check_stop_button(ff, platform):
                         log.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
                         break
 
