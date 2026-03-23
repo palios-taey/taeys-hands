@@ -98,7 +98,10 @@ def process_platform(platform, package_path, prompt_path, output_dir):
                 result = handle_attach(platform, package_path, None)
                 break
 
-    if result.get('status') != 'file_attached':
+    status = result.get('status', '')
+    if status in ('file_attached', 'already_attached', 'unverified'):
+        log.info(f"[{platform}] Attach status: {status} (proceeding)")
+    else:
         log.error(f"[{platform}] Attach failed: {result}")
         return False
 
