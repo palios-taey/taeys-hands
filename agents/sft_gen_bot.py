@@ -125,6 +125,12 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         line = line.strip()
         if not line or line.startswith('#') or line.startswith('```'):
             continue
+        # Perplexity appends S3 citation URLs after the JSON — strip them
+        # e.g. {"messages":[...]} [ppl-ai-file-upload.s3.amazonaws...]
+        if line.startswith('{'):
+            bracket_end = line.rfind(']}')
+            if bracket_end > 0:
+                line = line[:bracket_end + 2]
         try:
             obj = json.loads(line)
             valid.append(obj)
