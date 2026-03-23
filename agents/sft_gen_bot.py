@@ -272,18 +272,26 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     valid = _parse_jsonl(content)
 
     round_name = 'sft' if 'sft' in output_dir.lower() else 'dpo'
+    # Append to cumulative file (never overwrite previous rounds)
     output_path = os.path.join(output_dir, f'{round_name}_{platform}.jsonl')
-
-    with open(output_path, 'w') as f:
+    with open(output_path, 'a') as f:
         for obj in valid:
             f.write(json.dumps(obj, ensure_ascii=False) + '\n')
 
-    log.info(f"[{platform}] Saved {len(valid)} JSONL items to {output_path}")
-
-    # Save raw response too
-    raw_path = os.path.join(output_dir, f'{round_name}_{platform}_raw.md')
+    # Also save this round's raw response with timestamp
+    ts = time.strftime('%Y%m%d_%H%M%S')
+    raw_path = os.path.join(output_dir, f'{round_name}_{platform}_{ts}_raw.md')
     with open(raw_path, 'w') as f:
         f.write(content)
+
+    # Count total accumulated
+    total = 0
+    try:
+        with open(output_path) as f:
+            total = sum(1 for _ in f)
+    except: pass
+
+    log.info(f"[{platform}] Saved {len(valid)} items (total accumulated: {total}) → {output_path}")
 
     return True
 
