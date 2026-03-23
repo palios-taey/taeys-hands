@@ -72,21 +72,46 @@ def _extract_response(platform):
         time.sleep(0.3)
     time.sleep(2)
 
-    # Claude has a "Scroll to bottom" AT-SPI button — click it
     if platform == 'claude':
+        # Claude: Scroll to bottom → find last Copy button → click → read
+        # hmm_bot.extract_response doesn't work for Claude because its
+        # own End key press scrolls back up, hiding the Copy button
         from core.tree import find_elements
         from core.interact import atspi_click
-        ff = bot.get_firefox(platform)
-        if ff:
-            els = find_elements(ff)
-            for e in els:
-                if (e.get('name') or '').strip() == 'Scroll to bottom':
-                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                    log.info("[claude] Clicked 'Scroll to bottom'")
-                    time.sleep(2)
-                    break
+        from core.clipboard import read as clip_read
 
-    # Use hmm_bot.extract_response for ALL platforms
+        ff = bot.get_firefox(platform)
+        if not ff:
+            return ''
+
+        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+        time.sleep(0.3)
+
+        # Click "Scroll to bottom" button
+        els = find_elements(ff)
+        for e in els:
+            if (e.get('name') or '').strip() == 'Scroll to bottom':
+                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                log.info("[claude] Clicked 'Scroll to bottom'")
+                time.sleep(2)
+                break
+
+        # Find last Copy button and click it
+        els = find_elements(ff)
+        copies = [e for e in els if (e.get('name') or '').strip() == 'Copy'
+                  and e.get('role') == 'push button']
+        if copies:
+            target = copies[-1]
+            log.info(f"[claude] Clicking 'Copy' at y={target.get('y')} ({len(copies)} found)")
+            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+            time.sleep(0.3)
+            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
+            time.sleep(2)
+            return clip_read() or ''
+        log.warning("[claude] No Copy button found after Scroll to bottom")
+        return ''
+
+    # All other platforms: hmm_bot.extract_response (proven)
     return bot.extract_response(platform) or ''
 
 
