@@ -208,33 +208,30 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     log.info(f"[{platform}] Navigation OK")
 
     # Step 2: Attach package
-    # hmm_bot.attach_file handles chatgpt, gemini, grok (proven 123K runs)
-    # Claude/Perplexity need handle_attach from tools/attach.py (proven MCP path)
+    # Patch core.atspi so ALL code paths use our PID-filtered Firefox
+    import core.atspi as _atspi
+    _orig_find = _atspi.find_firefox_for_platform
+    def _pid_find(platform_name=None, **kwargs):
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            try:
+                if app.get_process_id() == target_pid:
+                    return app
+            except Exception:
+                continue
+        return _orig_find(platform_name)
+    _atspi.find_firefox_for_platform = _pid_find
+    if hasattr(_atspi, 'find_firefox'):
+        _atspi.find_firefox = _pid_find
+
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
-    if platform in ('chatgpt', 'gemini', 'grok'):
-        if not bot.attach_file(platform, package_path):
-            log.error(f"[{platform}] Attach failed")
-            return False
-    else:
-        # Claude/Perplexity: use MCP tool's handle_attach
-        from tools.attach import handle_attach
-        from core import input as inp_mod
-        from core.interact import atspi_click as _ac
-        result = handle_attach(platform, package_path, None)
-        if result.get('status') == 'dropdown_open':
-            items = result.get('dropdown_items', [])
-            for item in items:
-                name = item.get('name', '').lower()
-                if 'file' in name or 'upload' in name or 'photo' in name:
-                    log.info(f"[{platform}] Clicking dropdown: {item.get('name')}")
-                    inp_mod.click_at(int(item['x']), int(item['y']))
-                    time.sleep(1)
-                    result = handle_attach(platform, package_path, None)
-                    break
-        status = result.get('status', '')
-        if status not in ('file_attached', 'already_attached', 'unverified'):
-            log.error(f"[{platform}] Attach failed: {result.get('status')}")
-            return False
+    if not bot.attach_file(platform, package_path):
+        log.error(f"[{platform}] Attach failed")
+        return False
     log.info(f"[{platform}] Attach OK")
 
     # Step 3: Send prompt
