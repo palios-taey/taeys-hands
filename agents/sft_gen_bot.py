@@ -59,12 +59,12 @@ def _get_firefox_pid_for_display(display):
 
 
 def _extract_response(platform):
-    """Extract response. Gemini/Grok/Perplexity use hmm_bot (proven).
-    ChatGPT/Claude have platform-specific copy buttons."""
+    """Extract response using hmm_bot.extract_response for all platforms.
+    Claude gets extra scroll-to-bottom handling."""
     import agents.hmm_bot as bot
     from core import input as inp
 
-    # Scroll to bottom first for all platforms
+    # Scroll to bottom
     inp.focus_firefox()
     time.sleep(0.3)
     for _ in range(20):
@@ -72,58 +72,22 @@ def _extract_response(platform):
         time.sleep(0.3)
     time.sleep(2)
 
-    if platform in ('gemini', 'grok', 'perplexity'):
-        # Use hmm_bot.extract_response — proven on 123K enrichments
-        return bot.extract_response(platform) or ''
+    # Claude has a "Scroll to bottom" AT-SPI button — click it
+    if platform == 'claude':
+        from core.tree import find_elements
+        from core.interact import atspi_click
+        ff = bot.get_firefox(platform)
+        if ff:
+            els = find_elements(ff)
+            for e in els:
+                if (e.get('name') or '').strip() == 'Scroll to bottom':
+                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    log.info("[claude] Clicked 'Scroll to bottom'")
+                    time.sleep(2)
+                    break
 
-    # ChatGPT and Claude need custom extraction
-    from core.tree import find_elements
-    from core.interact import atspi_click
-    from core.clipboard import read as clip_read
-
-    ff = bot.get_firefox(platform)
-    if not ff:
-        return ''
-
-    subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-    time.sleep(0.3)
-
-    if platform == 'chatgpt':
-        # ChatGPT: scroll to bottom, click "Copy response" (last one)
-        els = find_elements(ff)
-        targets = [e for e in els if (e.get('name') or '').strip() == 'Copy response'
-                   and e.get('role') == 'push button']
-        if targets:
-            target = targets[-1]
-            log.info(f"[chatgpt] Clicking 'Copy response' at y={target.get('y')}")
-            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
-            time.sleep(2)
-            return clip_read() or ''
-        log.warning("[chatgpt] No 'Copy response' button found")
-
-    elif platform == 'claude':
-        # Claude: click "Scroll to bottom" button, then last "Copy" button
-        els = find_elements(ff)
-        for e in els:
-            if (e.get('name') or '').strip() == 'Scroll to bottom':
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                log.info("[claude] Clicked 'Scroll to bottom'")
-                time.sleep(2)
-                break
-        els = find_elements(ff)
-        copies = [e for e in els if (e.get('name') or '').strip() == 'Copy'
-                  and e.get('role') == 'push button']
-        if copies:
-            target = copies[-1]
-            log.info(f"[claude] Clicking 'Copy' at y={target.get('y')}")
-            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-            time.sleep(0.3)
-            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
-            time.sleep(2)
-            return clip_read() or ''
-        log.warning("[claude] No 'Copy' button found")
-
-    return ''
+    # Use hmm_bot.extract_response for ALL platforms
+    return bot.extract_response(platform) or ''
 
 
 def _parse_jsonl(content):
