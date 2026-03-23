@@ -278,36 +278,27 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     valid = _parse_jsonl(content)
 
     round_name = 'sft' if 'sft' in output_dir.lower() else 'dpo'
-    display_num = display.replace(':', '')
-    # Per-display file prevents race conditions from parallel instances
-    output_path = os.path.join(output_dir, f'{round_name}_{platform}_d{display_num}.jsonl')
-    with open(output_path, 'a') as f:
+    ts = time.strftime('%Y%m%d_%H%M%S')
+
+    # Each run creates a new file: sft_{platform}_{timestamp}.jsonl
+    # Training pipeline reads all files in the directory
+    output_path = os.path.join(output_dir, f'{round_name}_{platform}_{ts}.jsonl')
+    with open(output_path, 'w') as f:
         for obj in valid:
             f.write(json.dumps(obj, ensure_ascii=False) + '\n')
 
-    # Also save this round's raw response with timestamp
-    ts = time.strftime('%Y%m%d_%H%M%S')
+    # Save raw response too
     raw_path = os.path.join(output_dir, f'{round_name}_{platform}_{ts}_raw.md')
     with open(raw_path, 'w') as f:
         f.write(content)
 
-    # Count total accumulated
-    total = 0
-    try:
-        with open(output_path) as f:
-            total = sum(1 for _ in f)
-    except: pass
+    log.info(f"[{platform}] Saved {len(valid)} items → {output_path}")
 
-    log.info(f"[{platform}] Saved {len(valid)} items (total accumulated: {total}) → {output_path}")
-
-    # Sync to Mira (training pipeline reads from Mira's /var/spark/isma/training/)
+    # Sync to Mira — training pipeline reads from Mira's /var/spark/isma/training/sft/
     try:
-        mira_path = f"mira@10.0.0.163:{output_path}"
-        subprocess.run(
-            ['scp', output_path, mira_path],
-            capture_output=True, timeout=30,
-        )
-        log.info(f"[{platform}] Synced to Mira: {output_path}")
+        mira_dir = f"mira@10.0.0.163:{output_dir}/"
+        subprocess.run(['scp', output_path, mira_dir], capture_output=True, timeout=30)
+        log.info(f"[{platform}] Synced to Mira")
     except Exception as e:
         log.warning(f"[{platform}] Mira sync failed: {e}")
 
