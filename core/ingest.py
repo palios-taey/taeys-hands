@@ -72,7 +72,7 @@ def trigger_isma_ingest(platform: str, content: str, url: str = None,
     Uses /api/ingest/transcript endpoint. Non-blocking — returns result or None.
     Only runs if ISMA_API_URL and ISMA_API_KEY are configured.
     """
-    if not _ISMA_API_URL or not _ISMA_API_KEY:
+    if not _ISMA_API_URL:
         return None
     if not content or len(content.strip()) < 50:
         return None  # Skip trivially short extracts
@@ -80,17 +80,15 @@ def trigger_isma_ingest(platform: str, content: str, url: str = None,
     try:
         import requests
         resp = requests.post(
-            f"{_ISMA_API_URL.rstrip('/')}/api/ingest/transcript",
+            f"{_ISMA_API_URL.rstrip('/')}/ingest/session",
             json={
-                "platform": platform,
                 "content": content[:50000],  # Cap at 50k chars
+                "source_file": f"taeys-hands/{platform}/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "platform": platform,
                 "url": url or "",
                 "session_id": session_id or "",
-                "source": "taeys-hands-extract",
-                "timestamp": datetime.now().isoformat(),
             },
             headers={
-                "X-API-Key": _ISMA_API_KEY,
                 "Content-Type": "application/json",
             },
             timeout=30,
