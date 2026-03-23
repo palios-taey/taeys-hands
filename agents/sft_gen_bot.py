@@ -200,10 +200,33 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     log.info(f"[{platform}] Navigation OK")
 
     # Step 2: Attach package
+    # hmm_bot.attach_file handles chatgpt, gemini, grok (proven 123K runs)
+    # Claude/Perplexity need handle_attach from tools/attach.py (proven MCP path)
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
-    if not bot.attach_file(platform, package_path):
-        log.error(f"[{platform}] Attach failed")
-        return False
+    if platform in ('chatgpt', 'gemini', 'grok'):
+        if not bot.attach_file(platform, package_path):
+            log.error(f"[{platform}] Attach failed")
+            return False
+    else:
+        # Claude/Perplexity: use MCP tool's handle_attach
+        from tools.attach import handle_attach
+        from core import input as inp_mod
+        from core.interact import atspi_click as _ac
+        result = handle_attach(platform, package_path, None)
+        if result.get('status') == 'dropdown_open':
+            items = result.get('dropdown_items', [])
+            for item in items:
+                name = item.get('name', '').lower()
+                if 'file' in name or 'upload' in name or 'photo' in name:
+                    log.info(f"[{platform}] Clicking dropdown: {item.get('name')}")
+                    inp_mod.click_at(int(item['x']), int(item['y']))
+                    time.sleep(1)
+                    result = handle_attach(platform, package_path, None)
+                    break
+        status = result.get('status', '')
+        if status not in ('file_attached', 'already_attached', 'unverified'):
+            log.error(f"[{platform}] Attach failed: {result.get('status')}")
+            return False
     log.info(f"[{platform}] Attach OK")
 
     # Step 3: Send prompt
@@ -213,22 +236,22 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         return False
     log.info(f"[{platform}] Prompt sent")
 
-    # ChatGPT: Return doesn't always send with file attachments.
-    # Click "Send prompt" button as backup if it's still visible.
-    if platform == 'chatgpt':
-        time.sleep(1)
-        from core.tree import find_elements
-        from core.interact import atspi_click
-        ff = bot.get_firefox(platform)
-        if ff:
-            els = find_elements(ff)
-            for e in els:
-                n = (e.get('name') or '').strip()
-                if n == 'Send prompt' and e.get('role') == 'push button':
-                    log.info(f"[{platform}] Send button still visible — clicking it")
-                    atspi_click(e) if e.get('atspi_obj') else bot.inp.click_at(e['x'], e['y'])
-                    time.sleep(1)
-                    break
+    # Verify send: if a send/submit button is still visible, Return didn't
+    # trigger send (common with file attachments). Click it directly.
+    time.sleep(1)
+    from core.tree import find_elements as _fe
+    from core.interact import atspi_click as _ac2
+    ff = bot.get_firefox(platform)
+    if ff:
+        els = _fe(ff)
+        send_names = ['Send prompt', 'Send', 'Submit']
+        for e in els:
+            n = (e.get('name') or '').strip()
+            if n in send_names and e.get('role') == 'push button':
+                log.info(f"[{platform}] Send button '{n}' still visible — clicking")
+                _ac2(e) if e.get('atspi_obj') else bot.inp.click_at(e['x'], e['y'])
+                time.sleep(1)
+                break
 
     # Step 4: Wait for response
     # Claude Opus takes 15-25 min for 100 JSONL items — needs longer timeout
@@ -308,6 +331,25 @@ def main():
     for p, r in results.items():
         log.info(f"  {p}: {r}")
     log.info(f"Output in {output_dir}/")
+
+    # Notify via Redis on failures
+    failures = {p: r for p, r in results.items() if r != 'OK'}
+    if failures:
+        try:
+            import redis
+            rc = redis.Redis(host=os.environ.get('REDIS_HOST', '10.0.0.163'),
+                           port=6379, decode_responses=True, socket_timeout=2)
+            display = os.environ.get('DISPLAY', ':?')
+            notif = json.dumps({
+                'type': 'sft_error',
+                'display': display,
+                'failures': failures,
+                'message': f"SFT failures on {display}: {failures}",
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            })
+            rc.rpush('taey:taeys-hands:notifications', notif)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
