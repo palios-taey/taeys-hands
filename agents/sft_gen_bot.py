@@ -355,7 +355,7 @@ def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=
     ff = bot.get_firefox(platform)
     if ff:
         els = _fe(ff)
-        send_names = ['Send prompt', 'Send', 'Submit']
+        send_names = ['Send prompt', 'Send', 'Submit', 'Send message']
         for e in els:
             n = (e.get('name') or '').strip()
             if n in send_names and e.get('role') == 'push button':
