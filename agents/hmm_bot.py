@@ -102,6 +102,27 @@ _extracted_cache = {}  # platform -> extracted content (ChatGPT fixed-wait pre-e
 _our_firefox_pid = None  # PID of Firefox on OUR display (filters out cross-display AT-SPI contamination)
 
 
+def _kill_xsel_this_display():
+    """Kill xsel processes on THIS display only. Never kill other displays' xsel."""
+    display = os.environ.get('DISPLAY', '')
+    if not display:
+        return
+    for pid_str in os.listdir('/proc'):
+        if not pid_str.isdigit():
+            continue
+        try:
+            with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
+                cmd = f.read().decode(errors='replace')
+            if 'xsel' not in cmd or 'clipboard' not in cmd:
+                continue
+            with open(f'/proc/{pid_str}/environ', 'rb') as f:
+                env = f.read().decode(errors='replace')
+            if f'DISPLAY={display}' in env.split('\0'):
+                os.kill(int(pid_str), 9)
+        except (PermissionError, FileNotFoundError, ProcessLookupError, ValueError):
+            continue
+
+
 def discover_firefox_pid() -> int | None:
     """Discover the Firefox PID on our DISPLAY via xdotool.
     All Firefox instances share D-Bus, so AT-SPI sees them all.
@@ -759,7 +780,7 @@ def extract_response(platform: str) -> str:
     # Kill any lingering xsel processes so Firefox can write to clipboard.
     # Do NOT write a marker first — that creates a NEW xsel owner process,
     # causing the very ownership conflict we're trying to prevent.
-    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    _kill_xsel_this_display()
     time.sleep(0.3)
 
     from core.interact import atspi_click
@@ -796,7 +817,7 @@ def extract_response(platform: str) -> str:
             alternatives = [b for b in copy_buttons if b is not target]
             found_alt = False
             for alt_btn in alternatives:
-                subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+                _kill_xsel_this_display()
                 time.sleep(0.1)
                 if alt_btn.get('atspi_obj') and atspi_click(alt_btn):
                     logger.info(f"[{platform}] Trying alt copy button at ({alt_btn['x']}, {alt_btn['y']})")
@@ -1312,10 +1333,9 @@ def process_platform(platform: str, prompt: str) -> dict:
     result = {'platform': platform, 'success': False, 'error': None}
 
     # Step 0: Clean up stale state BEFORE anything else
-    # Kill stale xsel processes (clipboard writes that hung on Xvfb)
+    # Kill stale xsel processes on THIS display only
     try:
-        subprocess.run(['pkill', '-f', 'xsel --clipboard --input'],
-                       capture_output=True, timeout=3)
+        _kill_xsel_this_display()
     except Exception:
         pass
     # Close stale dialogs (leftover dialogs capture keyboard input)

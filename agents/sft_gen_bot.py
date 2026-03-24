@@ -88,7 +88,7 @@ def _extract_response(platform):
         if not ff:
             return ''
 
-        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+        bot._kill_xsel_this_display()
         time.sleep(0.3)
 
         # Click "Scroll to bottom" button
@@ -107,7 +107,7 @@ def _extract_response(platform):
         if copies:
             target = copies[-1]
             log.info(f"[claude] Clicking 'Copy' at y={target.get('y')} ({len(copies)} found)")
-            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+            bot._kill_xsel_this_display()
             time.sleep(0.3)
             atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
             time.sleep(2)
@@ -236,17 +236,8 @@ def process_platform(platform, package_path, prompt_path, output_dir):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
     # Step 5: Extract response
-    # File lock: only one bot extracts at a time. hmm_bot's extract_response
-    # runs pkill -f 'xsel.*clipboard' which kills xsel on ALL displays.
-    # Without the lock, parallel extractions kill each other's clipboard reads.
-    import fcntl
-    lock_path = '/tmp/sft_extract.lock'
-    log.info(f"[{platform}] Waiting for extract lock")
-    with open(lock_path, 'w') as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
-        log.info(f"[{platform}] Extracting response")
-        content = _extract_response(platform)
-        fcntl.flock(lock_f, fcntl.LOCK_UN)
+    log.info(f"[{platform}] Extracting response")
+    content = _extract_response(platform)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
         return False
