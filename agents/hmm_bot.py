@@ -780,7 +780,7 @@ def extract_response(platform: str) -> str:
     # Kill any lingering xsel processes so Firefox can write to clipboard.
     # Do NOT write a marker first — that creates a NEW xsel owner process,
     # causing the very ownership conflict we're trying to prevent.
-    _kill_xsel_this_display()
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
     time.sleep(0.3)
 
     from core.interact import atspi_click
@@ -817,7 +817,7 @@ def extract_response(platform: str) -> str:
             alternatives = [b for b in copy_buttons if b is not target]
             found_alt = False
             for alt_btn in alternatives:
-                _kill_xsel_this_display()
+                subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
                 time.sleep(0.1)
                 if alt_btn.get('atspi_obj') and atspi_click(alt_btn):
                     logger.info(f"[{platform}] Trying alt copy button at ({alt_btn['x']}, {alt_btn['y']})")
@@ -1335,7 +1335,7 @@ def process_platform(platform: str, prompt: str) -> dict:
     # Step 0: Clean up stale state BEFORE anything else
     # Kill stale xsel processes on THIS display only
     try:
-        _kill_xsel_this_display()
+        subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
     except Exception:
         pass
     # Close stale dialogs (leftover dialogs capture keyboard input)
