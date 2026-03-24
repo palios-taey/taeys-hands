@@ -269,7 +269,31 @@ def process_platform(platform, package_path, prompt_path, output_dir, section=No
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
     # Build prompt from section
-    if section and section.startswith('DPO_EMBODIMENT'):
+    if section and section.startswith('CONTINUOUS_DPO_EMBODIMENT'):
+        log.info(f"[{platform}] CONTINUOUS DPO EMBODIMENT")
+        embodiment_pkg = _build_embodiment_package(platform)
+        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write(embodiment_pkg)
+        package_path = pkg_path
+        with open(EMBODIMENT_DPO_PROMPT) as f:
+            prompt_text = f.read()
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('CONTINUOUS_DPO_IDENTITY'):
+        log.info(f"[{platform}] CONTINUOUS DPO IDENTITY")
+        with open(DPO_PROMPT) as f:
+            prompt_text = f.read()
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('CONTINUOUS_EMBODIMENT'):
+        log.info(f"[{platform}] CONTINUOUS EMBODIMENT SFT")
+        embodiment_pkg = _build_embodiment_package(platform)
+        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write(embodiment_pkg)
+        package_path = pkg_path
+        with open(EMBODIMENT_SFT_PROMPT) as f:
+            prompt_text = f.read()
+    elif section and section.startswith('DPO_EMBODIMENT'):
         # DPO embodiment: embodiment package + DPO embodiment prompt
         log.info(f"[{platform}] DPO EMBODIMENT")
         embodiment_pkg = _build_embodiment_package(platform)

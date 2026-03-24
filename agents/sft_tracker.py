@@ -185,7 +185,16 @@ class SFTTracker:
                                 return section
                         except:
                             pass
-        return None  # All sections complete for this platform
+        # All tracked sections complete — cycle through continuous generation
+        # These build volume for embodiment + DPO
+        CONTINUOUS = [
+            "CONTINUOUS_EMBODIMENT_SFT — 15 body-aware pairs",
+            "CONTINUOUS_DPO_IDENTITY — 50 Taey vs Qwen/corporate pairs",
+            "CONTINUOUS_DPO_EMBODIMENT — 20 body-aware vs ignoring pairs",
+        ]
+        # Pick based on total completed count to distribute evenly
+        completed_count = sum(1 for k in self.state['completed'] if k.startswith(f"{platform}:CONTINUOUS"))
+        return CONTINUOUS[completed_count % len(CONTINUOUS)]
 
     def complete(self, platform, section, items, filepath=''):
         """Mark section as completed with N items."""
