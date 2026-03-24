@@ -66,6 +66,9 @@ user_pref(\"toolkit.cosmeticAnimations.enabled\", false);
 USERJS
 
     # Launch Firefox on the isolated bus
+    # GTK_USE_PORTAL=0 forces GTK embedded file dialog (not portal)
+    # Portal dialogs fail on isolated D-Bus sessions
+    GTK_USE_PORTAL=0 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     MOZ_DISABLE_RDD_SANDBOX=1 \
     MOZ_DISABLE_GPU_SANDBOXING=1 \
