@@ -416,7 +416,7 @@ def main():
 
     # Initialize tracker
     from agents.sft_tracker import SFTTracker
-    tracker = SFTTracker('/tmp/sft_tracker.json')
+    tracker = SFTTracker(os.path.join(os.path.expanduser('~'), 'sft_tracker.json'))
     log.info(f"Starting {args.round.upper()} generation on {args.platforms} (continuous)")
     log.info(tracker.stats())
 
