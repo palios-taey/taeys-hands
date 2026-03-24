@@ -447,10 +447,13 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
-    inp.press_key('ctrl+l')
+    # Click the tab bar area to defocus any chat input before Ctrl+L.
+    # If a chat input has focus, Ctrl+L may not reach the address bar,
+    # causing the URL to be typed into the chat instead.
+    inp.click_at(400, 32)  # tab bar area — safe neutral click
     time.sleep(0.3)
-    # Use xdotool type for URLs — clipboard paste (xsel + Ctrl+V) fails on
-    # some Xvfb setups. URLs are short so xdotool type is reliable here.
+    inp.press_key('ctrl+l')
+    time.sleep(0.5)
     inp.press_key('ctrl+a')
     time.sleep(0.1)
     inp.type_text(url, delay_ms=10)
