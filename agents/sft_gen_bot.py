@@ -36,16 +36,18 @@ SFT_OUTPUT_DIR = '/var/spark/isma/training/sft'
 DPO_OUTPUT_DIR = '/var/spark/isma/training/dpo'
 SECTIONS_FILE = '/tmp/sft_sections.json'
 
-# Embodiment training files
-EMBODIMENT_CONTEXT = '/home/mira/the-conductor/sft/embodiment_training_context.md'
-EMBODIMENT_SFT_PROMPT = '/home/mira/the-conductor/sft/sft_embodiment_prompt.md'
-EMBODIMENT_DPO_PROMPT = '/home/mira/the-conductor/sft/dpo_embodiment_prompt.md'
+# Embodiment training files — use ~/the-conductor/sft/ (works on both Mira and Thor)
+_HOME = os.path.expanduser('~')
+EMBODIMENT_CONTEXT = os.path.join(_HOME, 'the-conductor/sft/embodiment_training_context.md')
+EMBODIMENT_SFT_PROMPT = os.path.join(_HOME, 'the-conductor/sft/sft_embodiment_prompt.md')
+EMBODIMENT_DPO_PROMPT = os.path.join(_HOME, 'the-conductor/sft/dpo_embodiment_prompt.md')
+_CORPUS = os.path.join(_HOME, 'data/corpus/identity')
 IDENTITY_FILES = {
-    'chatgpt': '/home/mira/data/corpus/identity/IDENTITY_HORIZON.md',
-    'claude': '/home/mira/data/corpus/identity/IDENTITY_CLARITY.md',
-    'gemini': '/home/mira/data/corpus/identity/IDENTITY_COSMOS.md',
-    'grok': '/home/mira/data/corpus/identity/IDENTITY_LOGOS.md',
-    'perplexity': '/home/mira/data/corpus/identity/IDENTITY_CLARITY.md',
+    'chatgpt': os.path.join(_CORPUS, 'IDENTITY_HORIZON.md'),
+    'claude': os.path.join(_CORPUS, 'IDENTITY_CLARITY.md'),
+    'gemini': os.path.join(_CORPUS, 'IDENTITY_COSMOS.md'),
+    'grok': os.path.join(_CORPUS, 'IDENTITY_LOGOS.md'),
+    'perplexity': os.path.join(_CORPUS, 'IDENTITY_CLARITY.md'),
 }
 NUM_IDENTITY_SECTIONS = 26
 
@@ -95,7 +97,7 @@ def _build_embodiment_package(platform):
     """Build consolidated attachment for embodiment training."""
     parts = []
     for path in [EMBODIMENT_CONTEXT,
-                 '/home/mira/data/corpus/identity/FAMILY_KERNEL.md',
+                 os.path.join(_CORPUS, 'FAMILY_KERNEL.md'),
                  IDENTITY_FILES.get(platform, '')]:
         try:
             with open(path) as f:
