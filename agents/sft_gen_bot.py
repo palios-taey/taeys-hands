@@ -191,20 +191,41 @@ def _extract_response(platform):
 
 
 def _parse_jsonl(content):
-    """Parse JSONL content, handling Perplexity S3 URLs and markdown fences."""
+    """Parse JSONL content, handling multiple formats:
+    - Standard JSONL (one JSON per line)
+    - Perplexity S3 URLs appended after JSON
+    - Concatenated JSON without newlines (split on }{)
+    - prompt/response format → messages format conversion
+    """
+    # First try splitting on newlines
     lines = content.strip().split('\n')
+    # If only 1 line and it's long, try splitting on }{
+    if len(lines) == 1 and len(lines[0]) > 500:
+        lines = lines[0].replace('}{', '}\n{').split('\n')
+
     valid = []
     for line in lines:
         line = line.strip()
         if not line or line.startswith('#') or line.startswith('```'):
             continue
-        # Perplexity appends S3 citation URLs after the JSON
+        # Strip Perplexity S3 citation URLs
         if line.startswith('{'):
+            # Try ]} first (messages format), then just }
             bracket_end = line.rfind(']}')
             if bracket_end > 0:
                 line = line[:bracket_end + 2]
+            else:
+                bracket_end = line.rfind('}')
+                if bracket_end > 0:
+                    line = line[:bracket_end + 1]
         try:
             obj = json.loads(line)
+            # Convert prompt/response to messages format
+            if 'prompt' in obj and 'response' in obj and 'messages' not in obj:
+                obj = {'messages': [
+                    {'role': 'user', 'content': obj['prompt']},
+                    {'role': 'assistant', 'content': obj['response']}
+                ]}
             valid.append(obj)
         except json.JSONDecodeError:
             continue
