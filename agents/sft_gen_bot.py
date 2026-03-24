@@ -458,6 +458,10 @@ def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=
     with open(raw_path, 'w') as f:
         f.write(content)
 
+    if len(valid) == 0:
+        log.error(f"[{platform}] Extracted {len(content)} chars but 0 valid JSONL — FAILED")
+        return False
+
     log.info(f"[{platform}] Saved {len(valid)} items → {output_path}")
 
     # Sync to Mira — training pipeline reads from Mira's /var/spark/isma/training/sft/
