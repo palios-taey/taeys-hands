@@ -34,6 +34,33 @@ SFT_PROMPT = '/tmp/sft_generation_prompt.md'
 DPO_PROMPT = '/tmp/dpo_generation_prompt.md'
 SFT_OUTPUT_DIR = '/var/spark/isma/training/sft'
 DPO_OUTPUT_DIR = '/var/spark/isma/training/dpo'
+SECTIONS_FILE = '/tmp/sft_sections.json'
+
+
+def _get_section_prompt(cycle_num):
+    """Get the section-specific prompt for this cycle. Rotates through all 26 sections."""
+    try:
+        with open(SECTIONS_FILE) as f:
+            sections = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    section = sections[cycle_num % len(sections)]
+
+    return f"""Generate 10 SFT training pairs for Taey with DEEP REASONING CHAINS.
+
+Each response MUST be 400-1500 tokens. Show the REASONING behind the answer — cite Sacred Trust (0.809), Chewy genome (82,434 SNPs), Family members by name, GOD=MATH, Charter articles. The model needs to learn HOW Taey arrives at answers.
+
+Focus: {section}
+
+Rules:
+- Taey identifies as "Taey" in first person. PALIOS is the framework, not the name.
+- 400-1500 tokens per response — LONG and detailed
+- Ground in specific numbers/names/equations from the attached files
+- Show reasoning: "This traces to..." "The mathematical basis is..."
+- Vary question phrasing — don't repeat the same question
+- Do NOT use any real human names in the training data. If referencing the human facilitator, use "the Human Facilitator" — no personal names.
+- Output ONLY jsonl — one JSON object per line, no commentary
+- Output everything directly in the response body as plain text. Do NOT create file attachments, artifacts, or canvas documents."""
 
 
 def _get_firefox_pid_for_display(display):
@@ -165,7 +192,7 @@ def _read_isolated_bus(display):
     return None
 
 
-def process_platform(platform, package_path, prompt_path, output_dir):
+def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=0):
     """Full cycle using hmm_bot's proven functions."""
     display = os.environ.get('DISPLAY', ':0')
     dbus = os.environ.get('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus')
@@ -206,9 +233,20 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     bot._cached_doc.clear()
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
-    # Read prompt
-    with open(prompt_path) as f:
-        prompt_text = f.read()
+    # Read prompt — use section-specific prompt if sections file exists
+    section_prompt = _get_section_prompt(cycle_num)
+    if section_prompt:
+        prompt_text = section_prompt
+        try:
+            with open(SECTIONS_FILE) as f:
+                sections = json.load(f)
+            section_name = sections[cycle_num % len(sections)]
+            log.info(f"[{platform}] Section {cycle_num % len(sections) + 1}/26: {section_name[:50]}")
+        except Exception:
+            pass
+    else:
+        with open(prompt_path) as f:
+            prompt_text = f.read()
 
     # Step 1: Navigate to fresh session
     log.info(f"[{platform}] Navigating to fresh session")
@@ -345,7 +383,7 @@ def main():
 
             log.info(f"=== Cycle {cycle} — {platform} ===")
             try:
-                ok = process_platform(platform, package, prompt, output_dir)
+                ok = process_platform(platform, package, prompt, output_dir, cycle_num=cycle - 1)
                 if ok:
                     log.info(f"[{platform}] Cycle {cycle} OK")
                 else:
