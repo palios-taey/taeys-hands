@@ -1082,43 +1082,80 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.error(f"[{platform}] Attach button not found after 8 retries")
             return False
 
-        # Two-pass attach: matches tools/attach.py _try_click_then_dialog()
-        # Pass 1: AT-SPI do_action + keyboard nav
-        # Pass 2: xdotool click + keyboard nav (fallback)
-        def _click_and_nav(use_atspi):
-            if use_atspi:
+        # Click attach button: xdotool first (real pointer event routes focus
+        # into React portals), AT-SPI do_action as fallback.
+        # Then: try find_menu_items (like Gemini), fall back to Down+Enter.
+        for pass_num in range(2):
+            if pass_num == 0:
+                inp.click_at(btn['x'], btn['y'])
+                logger.info(f"[{platform}] Pass 1: xdotool click attach at ({btn['x']}, {btn['y']})")
+            else:
                 btn_obj = btn.get('atspi_obj')
                 if btn_obj:
                     try:
                         ai = btn_obj.get_action_iface()
                         if ai and ai.get_n_actions() > 0:
                             ai.do_action(0)
-                            logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
+                            logger.info(f"[{platform}] Pass 2: AT-SPI click attach")
                         else:
-                            return False
+                            continue
                     except Exception:
-                        return False
+                        continue
                 else:
-                    return False
-            else:
-                inp.click_at(btn['x'], btn['y'])
-                logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
-            time.sleep(1.5)
-            if _find_dialog_wid():
-                return True
-            inp.press_key('Down')
-            time.sleep(0.5)
-            inp.press_key_split('Return')
-            time.sleep(2.5)
-            for _ in range(10):
-                if _find_dialog_wid():
-                    return True
-                time.sleep(0.3)
-            return False
+                    continue
 
-        if not _click_and_nav(use_atspi=True):
-            if not _click_and_nav(use_atspi=False):
-                pass  # Falls through to dialog_found check below
+            # Wait for dropdown with EXPANDED state polling (not blind sleep)
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                if _find_dialog_wid():
+                    break
+                try:
+                    btn_obj = btn.get('atspi_obj')
+                    if btn_obj and btn_obj.get_state_set().contains(Atspi.StateType.EXPANDED):
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.1)
+
+            if _find_dialog_wid():
+                break
+
+            # Try find_menu_items first (like Gemini — direct AT-SPI click)
+            firefox = get_firefox(platform)
+            doc2 = get_doc(platform, force_refresh=True)
+            menu_items = find_menu_items(firefox, doc2)
+            clicked_item = False
+            if menu_items:
+                for item in menu_items:
+                    name = (item.get('name') or '').strip().lower()
+                    if any(kw in name for kw in ('upload', 'file', 'photo', 'add file')):
+                        from core.interact import atspi_click
+                        if item.get('atspi_obj') and atspi_click(item):
+                            logger.info(f"[{platform}] Direct AT-SPI click: '{item.get('name')}'")
+                            clicked_item = True
+                        else:
+                            inp.click_at(item['x'], item['y'])
+                            logger.info(f"[{platform}] Direct xdotool click: '{item.get('name')}'")
+                            clicked_item = True
+                        time.sleep(2.0)
+                        break
+
+            if clicked_item and _find_dialog_wid():
+                break
+
+            # Keyboard nav fallback: Down+Enter
+            if not _find_dialog_wid():
+                inp.press_key('Down')
+                time.sleep(0.5)
+                inp.press_key_split('Return')
+                time.sleep(2.5)
+                for _ in range(10):
+                    if _find_dialog_wid():
+                        break
+                    time.sleep(0.3)
+
+            if _find_dialog_wid():
+                break
 
     # Wait for file dialog to appear
     dialog_found = False
