@@ -447,12 +447,10 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
-    # Click the tab bar area to defocus any chat input before Ctrl+L.
-    # If a chat input has focus, Ctrl+L may not reach the address bar,
-    # causing the URL to be typed into the chat instead.
-    inp.click_at(400, 32)  # tab bar area — safe neutral click
-    time.sleep(0.3)
-    inp.press_key('ctrl+l')
+    # F6 focuses Firefox address bar regardless of what has focus.
+    # Ctrl+L can fail if a chat input has focus (URL goes into chat).
+    # F6 is the reliable alternative.
+    inp.press_key('F6')
     time.sleep(0.5)
     inp.press_key('ctrl+a')
     time.sleep(0.1)
