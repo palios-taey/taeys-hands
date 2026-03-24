@@ -432,9 +432,8 @@ def main():
 
     log.info(f"Starting {args.round.upper()} generation on {args.platforms} (continuous)")
 
-    cycle = 0
+    cycle = 1
     while True:
-        cycle += 1
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         # (ChatGPT temporary chat accumulates cookies until HTTP headers overflow)
@@ -474,8 +473,9 @@ def main():
                 ok = process_platform(platform, package, prompt, output_dir, cycle_num=cycle - 1)
                 if ok:
                     log.info(f"[{platform}] Cycle {cycle} OK")
+                    cycle += 1  # advance to next section only on success
                 else:
-                    log.error(f"[{platform}] Cycle {cycle} FAILED")
+                    log.error(f"[{platform}] Cycle {cycle} FAILED — retrying same section")
             except Exception as e:
                 log.error(f"[{platform}] Cycle {cycle} Exception: {e}", exc_info=True)
 
