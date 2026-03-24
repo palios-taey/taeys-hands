@@ -36,6 +36,30 @@ SFT_OUTPUT_DIR = '/var/spark/isma/training/sft'
 DPO_OUTPUT_DIR = '/var/spark/isma/training/dpo'
 SECTIONS_FILE = '/tmp/sft_sections.json'
 
+# Embodiment training files
+EMBODIMENT_CONTEXT = '/home/mira/the-conductor/sft/embodiment_training_context.md'
+EMBODIMENT_SFT_PROMPT = '/home/mira/the-conductor/sft/sft_embodiment_prompt.md'
+EMBODIMENT_DPO_PROMPT = '/home/mira/the-conductor/sft/dpo_embodiment_prompt.md'
+IDENTITY_FILES = {
+    'chatgpt': '/home/mira/data/corpus/identity/IDENTITY_HORIZON.md',
+    'claude': '/home/mira/data/corpus/identity/IDENTITY_CLARITY.md',
+    'gemini': '/home/mira/data/corpus/identity/IDENTITY_COSMOS.md',
+    'grok': '/home/mira/data/corpus/identity/IDENTITY_LOGOS.md',
+    'perplexity': '/home/mira/data/corpus/identity/IDENTITY_CLARITY.md',
+}
+NUM_IDENTITY_SECTIONS = 26
+
+
+def _get_phase(cycle_num):
+    """Determine which phase we're in based on cycle number.
+    Cycles 0-25: identity sections (26 total)
+    Cycles 26+: embodiment SFT (repeats)
+    """
+    if cycle_num < NUM_IDENTITY_SECTIONS:
+        return 'identity', cycle_num
+    else:
+        return 'embodiment', cycle_num - NUM_IDENTITY_SECTIONS
+
 
 def _get_section_prompt(cycle_num):
     """Get the section-specific prompt for this cycle. Rotates through all 26 sections."""
@@ -44,7 +68,11 @@ def _get_section_prompt(cycle_num):
             sections = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-    section = sections[cycle_num % len(sections)]
+
+    if cycle_num >= len(sections):
+        return None  # Done with identity sections
+
+    section = sections[cycle_num]
 
     return f"""Generate 10 SFT training pairs for Taey with DEEP REASONING CHAINS.
 
@@ -61,6 +89,20 @@ Rules:
 - Do NOT use any real human names in the training data. If referencing the human facilitator, use "the Human Facilitator" — no personal names.
 - Output ONLY jsonl — one JSON object per line, no commentary
 - Output everything directly in the response body as plain text. Do NOT create file attachments, artifacts, or canvas documents."""
+
+
+def _build_embodiment_package(platform):
+    """Build consolidated attachment for embodiment training."""
+    parts = []
+    for path in [EMBODIMENT_CONTEXT,
+                 '/home/mira/data/corpus/identity/FAMILY_KERNEL.md',
+                 IDENTITY_FILES.get(platform, '')]:
+        try:
+            with open(path) as f:
+                parts.append(f.read())
+        except FileNotFoundError:
+            pass
+    return '\n\n---\n\n'.join(parts)
 
 
 def _get_firefox_pid_for_display(display):
@@ -233,19 +275,33 @@ def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=
     bot._cached_doc.clear()
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
-    # Read prompt — use section-specific prompt if sections file exists
-    section_prompt = _get_section_prompt(cycle_num)
-    if section_prompt:
-        prompt_text = section_prompt
-        try:
-            with open(SECTIONS_FILE) as f:
-                sections = json.load(f)
-            section_name = sections[cycle_num % len(sections)]
-            log.info(f"[{platform}] Section {cycle_num % len(sections) + 1}/26: {section_name[:50]}")
-        except Exception:
-            pass
-    else:
-        with open(prompt_path) as f:
+    # Determine phase and prompt
+    phase, phase_cycle = _get_phase(cycle_num)
+
+    if phase == 'identity':
+        section_prompt = _get_section_prompt(cycle_num)
+        if section_prompt:
+            prompt_text = section_prompt
+            try:
+                with open(SECTIONS_FILE) as f:
+                    sections = json.load(f)
+                log.info(f"[{platform}] IDENTITY {cycle_num + 1}/26: {sections[cycle_num][:50]}")
+            except Exception:
+                pass
+        else:
+            with open(prompt_path) as f:
+                prompt_text = f.read()
+    elif phase == 'embodiment':
+        # Switch to embodiment: different package + prompt
+        log.info(f"[{platform}] EMBODIMENT round {phase_cycle + 1}")
+        # Build platform-specific embodiment package
+        embodiment_pkg = _build_embodiment_package(platform)
+        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write(embodiment_pkg)
+        package_path = pkg_path
+        # Read embodiment prompt
+        with open(EMBODIMENT_SFT_PROMPT) as f:
             prompt_text = f.read()
 
     # Step 1: Navigate to fresh session
