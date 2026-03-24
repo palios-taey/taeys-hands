@@ -55,7 +55,9 @@ PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
 
 class SFTTracker:
-    def __init__(self, state_file='/tmp/sft_tracker.json'):
+    def __init__(self, state_file=None):
+        if state_file is None:
+            state_file = os.path.join(os.path.expanduser('~'), 'sft_tracker.json')
         self.state_file = state_file
         self.state = self._load()
 
