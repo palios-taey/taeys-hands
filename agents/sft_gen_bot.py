@@ -134,94 +134,40 @@ def _get_firefox_pid_for_display(display):
 
 
 def _extract_response(platform):
-    """Extract response using hmm_bot.extract_response for all platforms.
-    Claude gets extra scroll-to-bottom handling."""
+    """Extract response. Same proven hmm_bot.extract_response for all platforms.
+    Claude gets 'Scroll to bottom' button click first (Claude-specific UI element).
+    All platforms get extra End-key scrolling before extraction (long SFT responses
+    need more scrolling than single End press in hmm_bot)."""
     import agents.hmm_bot as bot
     from core import input as inp
 
-    # Scroll to bottom
+    # Extra scrolling for long SFT responses (hmm_bot does 1 End, we do 5 more)
     inp.focus_firefox()
     time.sleep(0.3)
-    for _ in range(20):
+    for _ in range(5):
         inp.press_key('End')
         time.sleep(0.3)
-    time.sleep(2)
+    time.sleep(1)
 
+    # Claude: click the "Scroll to bottom" UI button (ensures we're at absolute bottom)
     if platform == 'claude':
-        # Claude: Scroll to bottom → find last Copy button → click → read
-        # hmm_bot.extract_response doesn't work for Claude because its
-        # own End key press scrolls back up, hiding the Copy button
         from core.tree import find_elements
         from core.interact import atspi_click
-        from core.clipboard import read as clip_read
-
         ff = bot.get_firefox(platform)
-        if not ff:
-            return ''
+        if ff:
+            els = find_elements(ff)
+            for e in els:
+                if (e.get('name') or '').strip() == 'Scroll to bottom':
+                    atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    log.info("[claude] Clicked 'Scroll to bottom'")
+                    time.sleep(2)
+                    break
 
-        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-        time.sleep(0.3)
-
-        # Click "Scroll to bottom" button
-        els = find_elements(ff)
-        for e in els:
-            if (e.get('name') or '').strip() == 'Scroll to bottom':
-                atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                log.info("[claude] Clicked 'Scroll to bottom'")
-                time.sleep(2)
-                break
-
-        # Find last Copy button and click it
-        els = find_elements(ff)
-        copies = [e for e in els if (e.get('name') or '').strip() == 'Copy'
-                  and e.get('role') == 'push button']
-        if copies:
-            target = copies[-1]
-            log.info(f"[claude] Clicking 'Copy' at y={target.get('y')} ({len(copies)} found)")
-            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-            time.sleep(0.3)
-            # Try AT-SPI do_action first (works regardless of coordinates)
-            clicked = False
-            obj = target.get('atspi_obj')
-            if obj:
-                try:
-                    ai = obj.get_action_iface()
-                    if ai and ai.get_n_actions() > 0:
-                        ai.do_action(0)
-                        clicked = True
-                        log.info("[claude] Copy via do_action")
-                except Exception:
-                    pass
-            if not clicked:
-                atspi_click(target) if obj else inp.click_at(target['x'], target['y'])
-            time.sleep(2)
-            content = clip_read()
-            if content and len(content) > 100:
-                return content
-            # Retry: do_action may not trigger clipboard — try grab_focus + action
-            log.info("[claude] Clipboard empty — retrying with grab_focus")
-            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-            time.sleep(0.3)
-            if obj:
-                try:
-                    comp = obj.get_component_iface()
-                    if comp:
-                        comp.grab_focus()
-                        time.sleep(0.5)
-                    ai = obj.get_action_iface()
-                    if ai:
-                        ai.do_action(0)
-                except Exception:
-                    pass
-            time.sleep(2)
-            content = clip_read()
-            if content and len(content) > 100:
-                return content
-            log.warning("[claude] Clipboard still empty after retry")
-        log.warning("[claude] No Copy button found after Scroll to bottom")
-        return ''
-
-    # All other platforms: hmm_bot.extract_response (proven)
+    # Use hmm_bot.extract_response for ALL platforms — it has:
+    # - Copy button retry (3 attempts with re-scroll)
+    # - Prompt detection fallback (tries alt buttons if got prompt text)
+    # - Clipboard polling (6 x 0.5s)
+    # - Grok zero-extent handling
     return bot.extract_response(platform) or ''
 
 
