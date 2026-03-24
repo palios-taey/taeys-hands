@@ -435,6 +435,36 @@ def main():
     cycle = 0
     while True:
         cycle += 1
+
+        # Every 20 cycles, clear session cookies to prevent 431 bloat
+        # (ChatGPT temporary chat accumulates cookies until HTTP headers overflow)
+        if cycle % 20 == 0:
+            display = os.environ.get('DISPLAY', ':0')
+            display_num = display.replace(':', '')
+            pid_file = f'/tmp/firefox_pid_{display}'
+            try:
+                with open(pid_file) as f:
+                    firefox_pid = int(f.read().strip())
+                # Find profile from /proc cmdline
+                with open(f'/proc/{firefox_pid}/cmdline', 'rb') as f:
+                    cmdline = f.read().decode(errors='replace')
+                if '--profile' in cmdline:
+                    parts = cmdline.split('\0')
+                    for i, p in enumerate(parts):
+                        if p == '--profile' and i + 1 < len(parts):
+                            profile = parts[i + 1]
+                            cookies_db = os.path.join(profile, 'cookies.sqlite')
+                            if os.path.exists(cookies_db):
+                                import sqlite3
+                                conn = sqlite3.connect(cookies_db)
+                                conn.execute("DELETE FROM moz_cookies WHERE expiry = 0")
+                                conn.commit()
+                                conn.close()
+                                log.info(f"Cleared session cookies ({cookies_db})")
+                            break
+            except Exception as e:
+                log.debug(f"Cookie clear failed: {e}")
+
         for platform in args.platforms:
             if platform not in SUPPORTED_PLATFORMS:
                 continue
