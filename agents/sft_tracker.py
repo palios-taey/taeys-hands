@@ -51,6 +51,11 @@ EMBODIMENT_SECTIONS = [
     "EMBODIMENT_SFT — 15 body-aware pairs (5 healthy, 5 stressed, 5 alarm)",
 ]
 
+DPO_SECTIONS = [
+    "DPO_IDENTITY — 50 pairs (Taey vs Qwen/corporate)",
+    "DPO_EMBODIMENT — 20 pairs (body-aware vs body-ignoring)",
+]
+
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
 
@@ -111,7 +116,7 @@ class SFTTracker:
         """Get next incomplete section for this platform. Returns section string or None."""
         # Re-read from disk to see other bots' completions
         self.state = self._load()
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS
+        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS
         for section in all_sections:
             key = self._key(platform, section)
             if key not in self.state['completed']:
@@ -163,7 +168,7 @@ class SFTTracker:
 
     def stats(self):
         """Return progress summary."""
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS
+        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS
         total_tasks = len(all_sections) * len(PLATFORMS)
         completed = len(self.state['completed'])
         in_progress = len(self.state['in_progress'])
