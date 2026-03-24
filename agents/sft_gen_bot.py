@@ -140,12 +140,45 @@ def _parse_jsonl(content):
     return valid
 
 
+def _read_isolated_bus(display):
+    """Read AT-SPI bus address for isolated display from file or X11 root window."""
+    display_num = display.replace(':', '')
+    # Try file first (written by launch_isolated_display.sh)
+    bus_file = f'/tmp/a11y_bus_{display}'
+    try:
+        with open(bus_file) as f:
+            addr = f.read().strip()
+        if addr:
+            return addr
+    except FileNotFoundError:
+        pass
+    # Try X11 root window property
+    try:
+        r = subprocess.run(
+            ['xprop', '-display', display, '-root', 'AT_SPI_BUS'],
+            capture_output=True, text=True, timeout=3,
+        )
+        if '"' in r.stdout:
+            return r.stdout.split('"')[1]
+    except Exception:
+        pass
+    return None
+
+
 def process_platform(platform, package_path, prompt_path, output_dir):
     """Full cycle using hmm_bot's proven functions."""
     display = os.environ.get('DISPLAY', ':0')
     dbus = os.environ.get('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus')
 
     log.info(f"[{platform}] Starting on {display}")
+
+    # Set isolated AT-SPI bus if available (eliminates D-Bus contention)
+    a11y_bus = _read_isolated_bus(display)
+    if a11y_bus:
+        os.environ['AT_SPI_BUS_ADDRESS'] = a11y_bus
+        log.info(f"[{platform}] Isolated AT-SPI bus: {a11y_bus[:50]}...")
+    else:
+        log.info(f"[{platform}] No isolated bus — using shared AT-SPI bus")
 
     # Set display for core modules
     os.environ['DISPLAY'] = display
@@ -155,9 +188,16 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     inp_set(display)
     clip_set(display)
 
-    # Set hmm_bot's PID filter — this is what makes shared D-Bus work
+    # Set hmm_bot's PID filter
     import agents.hmm_bot as bot
     target_pid = _get_firefox_pid_for_display(display)
+    if not target_pid:
+        # Try reading from file (written by launch_isolated_display.sh)
+        try:
+            with open(f'/tmp/firefox_pid_{display}') as f:
+                target_pid = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            pass
     if not target_pid:
         log.error(f"[{platform}] No Firefox PID found for {display}")
         return False
