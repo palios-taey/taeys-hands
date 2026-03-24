@@ -447,11 +447,14 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
-    # F6 focuses Firefox address bar regardless of what has focus.
-    # Ctrl+L can fail if a chat input has focus (URL goes into chat).
-    # F6 is the reliable alternative.
-    inp.press_key('F6')
-    time.sleep(0.5)
+    # Escape twice: first dismisses any popup/notification,
+    # second defocuses the chat input. Both needed before Ctrl+L.
+    inp.press_key('Escape')
+    time.sleep(0.2)
+    inp.press_key('Escape')
+    time.sleep(0.2)
+    inp.press_key('ctrl+l')
+    time.sleep(0.3)
     inp.press_key('ctrl+a')
     time.sleep(0.1)
     inp.type_text(url, delay_ms=10)
