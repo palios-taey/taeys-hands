@@ -269,9 +269,26 @@ def process_platform(platform, package_path, prompt_path, output_dir, section=No
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
     # Build prompt from section
-    if section and section.startswith('EMBODIMENT'):
-        # Embodiment: different package + prompt
-        log.info(f"[{platform}] EMBODIMENT")
+    if section and section.startswith('DPO_EMBODIMENT'):
+        # DPO embodiment: embodiment package + DPO embodiment prompt
+        log.info(f"[{platform}] DPO EMBODIMENT")
+        embodiment_pkg = _build_embodiment_package(platform)
+        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write(embodiment_pkg)
+        package_path = pkg_path
+        with open(EMBODIMENT_DPO_PROMPT) as f:
+            prompt_text = f.read()
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('DPO_IDENTITY'):
+        # DPO identity: standard package + DPO identity prompt
+        log.info(f"[{platform}] DPO IDENTITY")
+        with open(DPO_PROMPT) as f:
+            prompt_text = f.read()
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('EMBODIMENT'):
+        # Embodiment SFT: embodiment package + embodiment SFT prompt
+        log.info(f"[{platform}] EMBODIMENT SFT")
         embodiment_pkg = _build_embodiment_package(platform)
         pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
         with open(pkg_path, 'w') as f:
