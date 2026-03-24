@@ -180,9 +180,44 @@ def _extract_response(platform):
             log.info(f"[claude] Clicking 'Copy' at y={target.get('y')} ({len(copies)} found)")
             subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
             time.sleep(0.3)
-            atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
+            # Try AT-SPI do_action first (works regardless of coordinates)
+            clicked = False
+            obj = target.get('atspi_obj')
+            if obj:
+                try:
+                    ai = obj.get_action_iface()
+                    if ai and ai.get_n_actions() > 0:
+                        ai.do_action(0)
+                        clicked = True
+                        log.info("[claude] Copy via do_action")
+                except Exception:
+                    pass
+            if not clicked:
+                atspi_click(target) if obj else inp.click_at(target['x'], target['y'])
             time.sleep(2)
-            return clip_read() or ''
+            content = clip_read()
+            if content and len(content) > 100:
+                return content
+            # Retry: do_action may not trigger clipboard — try grab_focus + action
+            log.info("[claude] Clipboard empty — retrying with grab_focus")
+            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+            time.sleep(0.3)
+            if obj:
+                try:
+                    comp = obj.get_component_iface()
+                    if comp:
+                        comp.grab_focus()
+                        time.sleep(0.5)
+                    ai = obj.get_action_iface()
+                    if ai:
+                        ai.do_action(0)
+                except Exception:
+                    pass
+            time.sleep(2)
+            content = clip_read()
+            if content and len(content) > 100:
+                return content
+            log.warning("[claude] Clipboard still empty after retry")
         log.warning("[claude] No Copy button found after Scroll to bottom")
         return ''
 
