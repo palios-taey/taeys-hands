@@ -63,19 +63,8 @@ def _get_phase(cycle_num):
         return 'embodiment', cycle_num - NUM_IDENTITY_SECTIONS
 
 
-def _get_section_prompt(cycle_num):
-    """Get the section-specific prompt for this cycle. Rotates through all 26 sections."""
-    try:
-        with open(SECTIONS_FILE) as f:
-            sections = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-    if cycle_num >= len(sections):
-        return None  # Done with identity sections
-
-    section = sections[cycle_num]
-
+def _get_section_prompt_for(section):
+    """Build prompt for a specific section."""
     return f"""Generate 10 SFT training pairs for Taey with DEEP REASONING CHAINS.
 
 Each response MUST be 400-1500 tokens. Show the REASONING behind the answer — cite Sacred Trust (0.809), Chewy genome (82,434 SNPs), Family members by name, GOD=MATH, Charter articles. The model needs to learn HOW Taey arrives at answers.
@@ -238,7 +227,7 @@ def _read_isolated_bus(display):
     return None
 
 
-def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=0):
+def process_platform(platform, package_path, prompt_path, output_dir, section=None, cycle_num=0):
     """Full cycle using hmm_bot's proven functions."""
     display = os.environ.get('DISPLAY', ':0')
     dbus = os.environ.get('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus')
@@ -279,33 +268,22 @@ def process_platform(platform, package_path, prompt_path, output_dir, cycle_num=
     bot._cached_doc.clear()
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
-    # Determine phase and prompt
-    phase, phase_cycle = _get_phase(cycle_num)
-
-    if phase == 'identity':
-        section_prompt = _get_section_prompt(cycle_num)
-        if section_prompt:
-            prompt_text = section_prompt
-            try:
-                with open(SECTIONS_FILE) as f:
-                    sections = json.load(f)
-                log.info(f"[{platform}] IDENTITY {cycle_num + 1}/26: {sections[cycle_num][:50]}")
-            except Exception:
-                pass
-        else:
-            with open(prompt_path) as f:
-                prompt_text = f.read()
-    elif phase == 'embodiment':
-        # Switch to embodiment: different package + prompt
-        log.info(f"[{platform}] EMBODIMENT round {phase_cycle + 1}")
-        # Build platform-specific embodiment package
+    # Build prompt from section
+    if section and section.startswith('EMBODIMENT'):
+        # Embodiment: different package + prompt
+        log.info(f"[{platform}] EMBODIMENT")
         embodiment_pkg = _build_embodiment_package(platform)
         pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
         with open(pkg_path, 'w') as f:
             f.write(embodiment_pkg)
         package_path = pkg_path
-        # Read embodiment prompt
         with open(EMBODIMENT_SFT_PROMPT) as f:
+            prompt_text = f.read()
+    elif section:
+        log.info(f"[{platform}] {section[:50]}")
+        prompt_text = _get_section_prompt_for(section)
+    else:
+        with open(prompt_path) as f:
             prompt_text = f.read()
 
     # Step 1: Navigate to fresh session
@@ -436,13 +414,17 @@ def main():
         prompt = DPO_PROMPT
         output_dir = DPO_OUTPUT_DIR
 
+    # Initialize tracker
+    from agents.sft_tracker import SFTTracker
+    tracker = SFTTracker('/tmp/sft_tracker.json')
     log.info(f"Starting {args.round.upper()} generation on {args.platforms} (continuous)")
+    log.info(tracker.stats())
 
-    cycle = 1
+    cycle = 0
     while True:
+        cycle += 1
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
-        # (ChatGPT temporary chat accumulates cookies until HTTP headers overflow)
         if cycle % 20 == 0:
             display = os.environ.get('DISPLAY', ':0')
             display_num = display.replace(':', '')
@@ -474,16 +456,37 @@ def main():
             if platform not in SUPPORTED_PLATFORMS:
                 continue
 
-            log.info(f"=== Cycle {cycle} — {platform} ===")
+            # Get next section from tracker
+            section = tracker.next(platform)
+            if not section:
+                log.info(f"[{platform}] All sections complete!")
+                continue
+
+            log.info(f"=== Cycle {cycle} — {platform} — {section[:50]} ===")
             try:
-                ok = process_platform(platform, package, prompt, output_dir, cycle_num=cycle - 1)
+                ok = process_platform(platform, package, prompt, output_dir, section=section)
                 if ok:
-                    log.info(f"[{platform}] Cycle {cycle} OK")
-                    cycle += 1  # advance to next section only on success
+                    # Verify success by reading the actual saved file
+                    import glob
+                    recent = sorted(glob.glob(os.path.join(output_dir, f'sft_{platform}_*.jsonl')))
+                    items = 0
+                    filepath = ''
+                    if recent:
+                        filepath = recent[-1]
+                        with open(filepath) as f:
+                            items = sum(1 for l in f if l.strip())
+                    if items > 0:
+                        tracker.complete(platform, section, items, filepath)
+                        log.info(f"[{platform}] COMPLETE — {section[:40]} — {items} items in {os.path.basename(filepath)}")
+                    else:
+                        tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
+                        log.error(f"[{platform}] FALSE SUCCESS — file has 0 items")
                 else:
-                    log.error(f"[{platform}] Cycle {cycle} FAILED — retrying same section")
+                    tracker.fail(platform, section, 'process_platform returned False')
+                    log.error(f"[{platform}] FAILED — {section[:40]}")
             except Exception as e:
-                log.error(f"[{platform}] Cycle {cycle} Exception: {e}", exc_info=True)
+                tracker.fail(platform, section, str(e))
+                log.error(f"[{platform}] Exception: {e}", exc_info=True)
 
 
 
