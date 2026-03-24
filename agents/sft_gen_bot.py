@@ -37,24 +37,28 @@ DPO_OUTPUT_DIR = '/var/spark/isma/training/dpo'
 
 
 def _get_firefox_pid_for_display(display):
-    """Find Firefox PID running on a specific DISPLAY via /proc."""
+    """Find Firefox main process PID running on a specific DISPLAY via /proc."""
+    candidates = []
     for pid_str in os.listdir('/proc'):
         if not pid_str.isdigit():
             continue
         try:
-            with open(f'/proc/{pid_str}/environ', 'rb') as f:
-                env = f.read().decode('utf-8', errors='replace')
             with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
                 cmdline = f.read().decode('utf-8', errors='replace')
-            if 'firefox' not in cmdline:
+            # Must be a firefox main process (has --profile in cmdline)
+            if 'firefox' not in cmdline or '--profile' not in cmdline:
                 continue
+            with open(f'/proc/{pid_str}/environ', 'rb') as f:
+                env = f.read().decode('utf-8', errors='replace')
             env_vars = dict(
                 v.split('=', 1) for v in env.split('\0') if '=' in v
             )
             if env_vars.get('DISPLAY') == display:
-                return int(pid_str)
+                candidates.append(int(pid_str))
         except (PermissionError, FileNotFoundError, ValueError):
             continue
+    if candidates:
+        return max(candidates)  # highest PID = most recent
     return None
 
 
