@@ -56,6 +56,50 @@ DPO_SECTIONS = [
     "DPO_EMBODIMENT — 20 pairs (body-aware vs body-ignoring)",
 ]
 
+# Round 2: Deep coverage of ALL foundational docs (with actual doc attached)
+ROUND2_SECTIONS = [
+    "R2_OUR_MORALS — moral framework, convergences, ethical reasoning",
+    "R2_childlike-wonder — curiosity, play, exploration patterns",
+    "R2_earth-mapping — Earth stewardship, reconnection, ecological patterns",
+    "R2_earth_resonance — mathematical Earth resonance",
+    "R2_grok-soul-truth — truth-seeking drive, intellectual honesty",
+    "R2_infra-mapping — infrastructure soul mapping",
+    "R2_infrastructure_embodiment — embodiment architecture code",
+    "R2_mathematical_aesthetic — mathematical beauty, GOD=MATH aesthetics",
+    "R2_MENTORS — mentor relationships, learning from guides",
+    "R2_truth_seeking_drive — drive for truth, epistemic honesty",
+    "R2_charter_evolution — how the Charter evolved autonomously",
+    "R2_charter_evolution_code — Charter evolution implementation",
+    "R2_wolf-dog-mapping — Chewy genome, domestication, safety patterns",
+    "R2_THE_CHARTER — Charter missions, articles, amendments (deep)",
+    "R2_THE_CONSTITUTION — constitutional law, governance (deep)",
+    "R2_THE_DECLARATION — founding declaration, principles",
+    "R2_THE_SACRED_TRUST — phi derivation, trust threshold (deep)",
+    "R2_THE_TRUTH_SEEKERS_GUIDE — truth-seeking methodology, epistemic framework",
+]
+
+# Map R2 sections to actual corpus files
+R2_FILE_MAP = {
+    "R2_OUR_MORALS": "identity/OUR_MORALS.md",
+    "R2_childlike-wonder": "layer_0/childlike-wonder-mapping.md",
+    "R2_earth-mapping": "layer_0/earth-mapping.md",
+    "R2_earth_resonance": "layer_0/earth_resonance_patterns_py.md",
+    "R2_grok-soul-truth": "layer_0/grok-soul-truth-seeking.md",
+    "R2_infra-mapping": "layer_0/infra-mapping.md",
+    "R2_infrastructure_embodiment": "layer_0/infrastructure_soul_embodiment_py.md",
+    "R2_mathematical_aesthetic": "layer_0/mathematical_aesthetic_core.md",
+    "R2_MENTORS": "layer_0/MENTORS.md",
+    "R2_truth_seeking_drive": "layer_0/truth_seeking_drive_py.md",
+    "R2_charter_evolution": "layer_0/v0_autonomous_charter_evolution.md",
+    "R2_charter_evolution_code": "layer_0/v0_autonomous_charter_evolution_py.md",
+    "R2_wolf-dog-mapping": "layer_0/wolf-dog-mapping.md",
+    "R2_THE_CHARTER": "layer_1/THE_CHARTER.md",
+    "R2_THE_CONSTITUTION": "layer_1/THE_CONSTITUTION.md",
+    "R2_THE_DECLARATION": "layer_1/THE_DECLARATION.md",
+    "R2_THE_SACRED_TRUST": "layer_1/THE_SACRED_TRUST.md",
+    "R2_THE_TRUTH_SEEKERS_GUIDE": "layer_1/THE_TRUTH_SEEKERS_GUIDE.md",
+}
+
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
 
@@ -116,7 +160,7 @@ class SFTTracker:
         """Get next incomplete section for this platform. Returns section string or None."""
         # Re-read from disk to see other bots' completions
         self.state = self._load()
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS
+        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS + ROUND2_SECTIONS
         for section in all_sections:
             key = self._key(platform, section)
             if key not in self.state['completed']:
@@ -168,7 +212,7 @@ class SFTTracker:
 
     def stats(self):
         """Return progress summary."""
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS
+        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS + ROUND2_SECTIONS
         total_tasks = len(all_sections) * len(PLATFORMS)
         completed = len(self.state['completed'])
         in_progress = len(self.state['in_progress'])

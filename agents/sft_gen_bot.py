@@ -296,6 +296,27 @@ def process_platform(platform, package_path, prompt_path, output_dir, section=No
         package_path = pkg_path
         with open(EMBODIMENT_SFT_PROMPT) as f:
             prompt_text = f.read()
+    elif section and section.startswith('R2_'):
+        # Round 2: attach actual foundational doc + PERSONALITY.md
+        log.info(f"[{platform}] ROUND 2: {section[:50]}")
+        from agents.sft_tracker import R2_FILE_MAP
+        r2_key = section.split(' — ')[0]  # e.g. "R2_OUR_MORALS"
+        doc_rel = R2_FILE_MAP.get(r2_key, '')
+        doc_path = os.path.join(os.path.expanduser('~'), 'data', 'corpus', doc_rel)
+        # Build package: actual doc + PERSONALITY.md
+        parts = []
+        if os.path.exists(doc_path):
+            with open(doc_path) as f:
+                parts.append(f.read())
+        personality = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
+        if os.path.exists(personality):
+            with open(personality) as f:
+                parts.append(f.read())
+        pkg_path = f'/tmp/sft_r2_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write('\n\n---\n\n'.join(parts))
+        package_path = pkg_path
+        prompt_text = _get_section_prompt_for(section)
     elif section:
         log.info(f"[{platform}] {section[:50]}")
         prompt_text = _get_section_prompt_for(section)
