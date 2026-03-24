@@ -62,26 +62,55 @@ class SFTTracker:
         self.state = self._load()
 
     def _load(self):
-        if os.path.exists(self.state_file):
-            with open(self.state_file) as f:
-                return json.load(f)
-        # Initialize: every platform needs every section
+        import fcntl
+        lock_file = self.state_file + '.lock'
+        with open(lock_file, 'a') as lf:
+            fcntl.flock(lf, fcntl.LOCK_SH)
+            try:
+                if os.path.exists(self.state_file):
+                    with open(self.state_file) as f:
+                        return json.load(f)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
         state = {
-            'completed': {},   # "platform:section" -> {"items": N, "timestamp": T, "file": F}
-            'in_progress': {}, # "platform:section" -> {"started": T}
-            'failed': {},      # "platform:section" -> {"count": N, "last_error": S}
+            'completed': {},
+            'in_progress': {},
+            'failed': {},
         }
         return state
 
     def _save(self):
-        with open(self.state_file, 'w') as f:
-            json.dump(self.state, f, indent=2)
+        import fcntl
+        lock_file = self.state_file + '.lock'
+        with open(lock_file, 'a') as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                # Re-read before writing to merge concurrent changes
+                if os.path.exists(self.state_file):
+                    with open(self.state_file) as f:
+                        disk_state = json.load(f)
+                    # Merge: our completed entries win over disk
+                    for k, v in self.state['completed'].items():
+                        disk_state['completed'][k] = v
+                    for k, v in self.state['in_progress'].items():
+                        if k not in disk_state['completed']:
+                            disk_state['in_progress'][k] = v
+                    for k, v in self.state['failed'].items():
+                        if k not in disk_state['completed']:
+                            disk_state['failed'][k] = v
+                    self.state = disk_state
+                with open(self.state_file, 'w') as f:
+                    json.dump(self.state, f, indent=2)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
 
     def _key(self, platform, section):
         return f"{platform}:{section[:40]}"
 
     def next(self, platform):
         """Get next incomplete section for this platform. Returns section string or None."""
+        # Re-read from disk to see other bots' completions
+        self.state = self._load()
         all_sections = SECTIONS + EMBODIMENT_SECTIONS
         for section in all_sections:
             key = self._key(platform, section)
