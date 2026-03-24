@@ -952,27 +952,17 @@ def attach_file(platform: str, file_path: str) -> bool:
             if _find_dialog_wid():
                 break
 
-            # Walk dropdown items: Down+Enter, check for dialog after each
-            for item_idx in range(8):
-                inp.press_key('Down')
-                time.sleep(0.3)
-                inp.press_key_split('Return')
-                time.sleep(2.0)
+            # "Add photos & files" is always the first dropdown item
+            inp.press_key('Down')
+            time.sleep(0.3)
+            inp.press_key_split('Return')
+            time.sleep(2.0)
 
-                for _ in range(5):
-                    if _find_dialog_wid():
-                        logger.info(f"[{platform}] File dialog opened after dropdown item {item_idx + 1}")
-                        break
-                    time.sleep(0.3)
+            for _ in range(10):
                 if _find_dialog_wid():
+                    logger.info(f"[{platform}] File dialog opened after dropdown item 1")
                     break
-
-                # Not the upload item — escape and reopen dropdown
-                inp.press_key('Escape')
-                time.sleep(0.5)
-                if item_idx < 7:
-                    inp.click_at(btn['x'], btn['y'])
-                    time.sleep(1.0)
+                time.sleep(0.3)
 
             if _find_dialog_wid():
                 break
