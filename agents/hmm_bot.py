@@ -447,10 +447,7 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
-    # Escape twice: first dismisses any popup/notification,
-    # second defocuses the chat input. Both needed before Ctrl+L.
-    inp.press_key('Escape')
-    time.sleep(0.2)
+    time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
     inp.press_key('ctrl+l')
