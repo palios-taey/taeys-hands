@@ -88,7 +88,7 @@ def _extract_response(platform):
         if not ff:
             return ''
 
-        bot._kill_xsel_this_display()
+        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
         time.sleep(0.3)
 
         # Click "Scroll to bottom" button
@@ -107,7 +107,7 @@ def _extract_response(platform):
         if copies:
             target = copies[-1]
             log.info(f"[claude] Clicking 'Copy' at y={target.get('y')} ({len(copies)} found)")
-            bot._kill_xsel_this_display()
+            subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
             time.sleep(0.3)
             atspi_click(target) if target.get('atspi_obj') else inp.click_at(target['x'], target['y'])
             time.sleep(2)
@@ -235,9 +235,13 @@ def process_platform(platform, package_path, prompt_path, output_dir):
     if not bot.wait_for_response(platform, timeout=wait_timeout):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
 
-    # Step 5: Extract response
+    # Step 5: Extract response — file lock prevents parallel pkill conflicts
+    import fcntl
     log.info(f"[{platform}] Extracting response")
-    content = _extract_response(platform)
+    with open('/tmp/sft_extract.lock', 'w') as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        content = _extract_response(platform)
+        fcntl.flock(lock_f, fcntl.LOCK_UN)
     if not content or len(content) < 100:
         log.error(f"[{platform}] Extract failed — got {len(content) if content else 0} chars")
         return False
