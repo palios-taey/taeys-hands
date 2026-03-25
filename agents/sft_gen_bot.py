@@ -587,8 +587,32 @@ def main():
     log.info(tracker.stats())
 
     cycle = 0
+    consecutive_fails = 0
     while True:
         cycle += 1
+
+        # Health check: if 5+ consecutive failures, check display health
+        if consecutive_fails >= 5:
+            display = os.environ.get('DISPLAY', ':0')
+            pid_file = f'/tmp/firefox_pid_{display}'
+            try:
+                with open(pid_file) as f:
+                    ff_pid = int(f.read().strip())
+                os.kill(ff_pid, 0)
+            except (FileNotFoundError, ValueError, ProcessLookupError):
+                log.error(f"Firefox dead on {display} after {consecutive_fails} consecutive failures — exiting")
+                break
+            bus_file = f'/tmp/a11y_bus_{display}'
+            try:
+                with open(bus_file) as f:
+                    bus = f.read().strip()
+                if not bus:
+                    log.error(f"AT-SPI bus empty on {display} — exiting")
+                    break
+            except FileNotFoundError:
+                pass
+            log.warning(f"{consecutive_fails} consecutive failures but display healthy — continuing")
+            consecutive_fails = 0  # Reset after health check passes
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         if cycle % 20 == 0:
@@ -647,15 +671,19 @@ def main():
                     if items > 0:
                         tracker.complete(platform, section, items, filepath)
                         log.info(f"[{platform}] COMPLETE — {section[:40]} — {items} items in {os.path.basename(filepath)}")
+                        consecutive_fails = 0
                     else:
                         tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
                         log.error(f"[{platform}] FALSE SUCCESS — file has 0 items")
+                        consecutive_fails += 1
                 else:
                     tracker.fail(platform, section, 'process_platform returned False')
                     log.error(f"[{platform}] FAILED — {section[:40]}")
+                    consecutive_fails += 1
             except Exception as e:
                 tracker.fail(platform, section, str(e))
                 log.error(f"[{platform}] Exception: {e}", exc_info=True)
+                consecutive_fails += 1
 
 
 
