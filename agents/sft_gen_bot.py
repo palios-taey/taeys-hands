@@ -27,7 +27,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [sft-gen] %(message)
 log = logging.getLogger('sft-gen')
 
 SUPPORTED_PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
-_perplexity_incognito_set = False  # One-time toggle, persists once clicked
 
 SFT_PACKAGE = '/tmp/sft_package.md'
 DPO_PACKAGE = '/tmp/dpo_package.md'
@@ -153,55 +152,21 @@ def _extract_response(platform):
                     time.sleep(2)
                     break
 
-    # Use hmm_bot.extract_response for ALL platforms
-    content = bot.extract_response(platform) or ''
-
-    # Detect if we got the prompt text instead of the response
-    if content and len(content) < 1000:
-        start = content.strip()[:100].lower()
-        if any(m in start for m in ['generate 50', 'generate 10', 'generate 20',
-                                      'output only jsonl', 'format: {"messages']):
-            log.warning(f"[{platform}] Got prompt text ({len(content)} chars) — retrying with extra scroll")
-            # More aggressive scroll + re-extract
-            for _ in range(10):
-                inp.press_key('End')
-                time.sleep(0.3)
-            time.sleep(2)
-            if platform == 'claude':
-                from core.tree import find_elements as _fe2
-                from core.interact import atspi_click as _ac2
-                ff2 = bot.get_firefox(platform)
-                if ff2:
-                    for e in _fe2(ff2):
-                        if (e.get('name') or '').strip() == 'Scroll to bottom':
-                            _ac2(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
-                            time.sleep(3)
-                            break
-            content = bot.extract_response(platform) or ''
-
-    return content
-
-
-def _strip_s3_urls(text):
-    """Remove Perplexity S3 citation URLs embedded in content."""
-    import re
-    # Strip [ppl-ai-file-upload.s3.amazonaws](...) markdown links
-    text = re.sub(r'\[ppl-ai-file-upload\.s3\.amazonaws\]\(https?://[^)]+\)', '', text)
-    # Strip bare S3 URLs
-    text = re.sub(r'https?://ppl-ai-file-upload\.s3\.amazonaws\.com/[^\s")\]]+', '', text)
-    return text
+    # Use hmm_bot.extract_response for ALL platforms — it has:
+    # - Copy button retry (3 attempts with re-scroll)
+    # - Prompt detection fallback (tries alt buttons if got prompt text)
+    # - Clipboard polling (6 x 0.5s)
+    # - Grok zero-extent handling
+    return bot.extract_response(platform) or ''
 
 
 def _parse_jsonl(content):
     """Parse JSONL content, handling multiple formats:
     - Standard JSONL (one JSON per line)
-    - Perplexity S3 URLs embedded in content fields
+    - Perplexity S3 URLs appended after JSON
     - Concatenated JSON without newlines (split on }{)
     - prompt/response format → messages format conversion
     """
-    # Strip S3 URLs before parsing (Perplexity embeds these in content)
-    content = _strip_s3_urls(content)
-
     # First try splitting on newlines
     lines = content.strip().split('\n')
     # If only 1 line and it's long, try splitting on }{
@@ -213,8 +178,9 @@ def _parse_jsonl(content):
         line = line.strip()
         if not line or line.startswith('#') or line.startswith('```'):
             continue
-        # Strip trailing non-JSON after last closing brace
+        # Strip Perplexity S3 citation URLs
         if line.startswith('{'):
+            # Try ]} first (messages format), then just }
             bracket_end = line.rfind(']}')
             if bracket_end > 0:
                 line = line[:bracket_end + 2]
@@ -424,23 +390,6 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
             f.write('\n\n---\n\n'.join(parts))
         package_path = pkg_path
         prompt_text = _get_section_prompt_for(section)
-    elif section and 'ROSETTA' in section:
-        # ROSETTA section: attach the actual ROSETTA_COMPRESSION_GUIDE.md
-        log.info(f"[{platform}] ROSETTA: {section[:50]}")
-        rosetta_path = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'kernel', 'ROSETTA_COMPRESSION_GUIDE.md')
-        parts = []
-        if os.path.exists(rosetta_path):
-            with open(rosetta_path) as f:
-                parts.append(f.read())
-        personality = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
-        if os.path.exists(personality):
-            with open(personality) as f:
-                parts.append(f.read())
-        pkg_path = f'/tmp/sft_rosetta_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write('\n\n---\n\n'.join(parts))
-        package_path = pkg_path
-        prompt_text = _get_section_prompt_for(section)
     elif section:
         log.info(f"[{platform}] {section[:50]}")
         prompt_text = _get_section_prompt_for(section)
@@ -448,45 +397,12 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         with open(prompt_path) as f:
             prompt_text = f.read()
 
-    # Claude: reduce batch size and add anti-artifact instruction
-    # Claude's web UI creates artifacts for large JSONL, making extraction fail.
-    # Smaller batches (10 instead of 50) stay inline.
-    if platform == 'claude' and 'jsonl' in prompt_text.lower():
-        prompt_text = prompt_text.replace('Generate 50 ', 'Generate 10 ')
-        prompt_text = prompt_text.replace('generate 50 ', 'generate 10 ')
-        prompt_text += "\n\nIMPORTANT: Write the jsonl directly in your response. Do NOT create artifacts, files, or canvas. Just paste the lines."
-
     # Step 1: Navigate to fresh session
     log.info(f"[{platform}] Navigating to fresh session")
     if not bot.navigate_fresh_session(platform):
         log.error(f"[{platform}] Navigation failed")
         return False
     log.info(f"[{platform}] Navigation OK")
-
-    # Perplexity: enable incognito mode once (button in upper right, persists)
-    global _perplexity_incognito_set
-    if platform == 'perplexity' and not _perplexity_incognito_set:
-        time.sleep(2)  # Wait for page load
-        from core.tree import find_elements as _fe_inc
-        from core.interact import atspi_click as _ac_inc
-        from core.input import click_at as _click_inc
-        ff_inc = bot.get_firefox(platform)
-        if ff_inc:
-            els_inc = _fe_inc(ff_inc)
-            for e in els_inc:
-                name = (e.get('name') or '').strip().lower()
-                if 'use incognito' in name and 'button' in e.get('role', ''):
-                    log.info(f"[{platform}] Clicking incognito button: {e.get('name')}")
-                    if e.get('atspi_obj'):
-                        _ac_inc(e)
-                    else:
-                        _click_inc(e['x'], e['y'])
-                    time.sleep(1)
-                    _perplexity_incognito_set = True
-                    break
-            else:
-                log.warning(f"[{platform}] Incognito button not found — may already be active")
-                _perplexity_incognito_set = True  # Don't retry every cycle
 
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
@@ -523,10 +439,10 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
     log.info(f"[{platform}] Prompt sent")
 
     # Verify send: if a send/submit button is still visible, Return didn't
-    # trigger send (common with file attachments on Claude). Click via
-    # xdotool coordinates — AT-SPI click doesn't trigger Claude's Send button.
+    # trigger send (common with file attachments). Click it directly.
     time.sleep(1)
     from core.tree import find_elements as _fe
+    from core.interact import atspi_click as _ac2
     ff = bot.get_firefox(platform)
     if ff:
         els = _fe(ff)
@@ -534,9 +450,8 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         for e in els:
             n = (e.get('name') or '').strip()
             if n in send_names and e.get('role') == 'push button':
-                log.info(f"[{platform}] Send button '{n}' still visible — xdotool click at ({e['x']}, {e['y']})")
-                from core import input as _inp
-                _inp.click_at(e['x'], e['y'])
+                log.info(f"[{platform}] Send button '{n}' still visible — clicking")
+                _ac2(e) if e.get('atspi_obj') else bot.inp.click_at(e['x'], e['y'])
                 time.sleep(1)
                 break
 
@@ -617,32 +532,8 @@ def main():
     log.info(tracker.stats())
 
     cycle = 0
-    consecutive_fails = 0
     while True:
         cycle += 1
-
-        # Health check: if 5+ consecutive failures, check display health
-        if consecutive_fails >= 5:
-            display = os.environ.get('DISPLAY', ':0')
-            pid_file = f'/tmp/firefox_pid_{display}'
-            try:
-                with open(pid_file) as f:
-                    ff_pid = int(f.read().strip())
-                os.kill(ff_pid, 0)
-            except (FileNotFoundError, ValueError, ProcessLookupError):
-                log.error(f"Firefox dead on {display} after {consecutive_fails} consecutive failures — exiting")
-                break
-            bus_file = f'/tmp/a11y_bus_{display}'
-            try:
-                with open(bus_file) as f:
-                    bus = f.read().strip()
-                if not bus:
-                    log.error(f"AT-SPI bus empty on {display} — exiting")
-                    break
-            except FileNotFoundError:
-                pass
-            log.warning(f"{consecutive_fails} consecutive failures but display healthy — continuing")
-            consecutive_fails = 0  # Reset after health check passes
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         if cycle % 20 == 0:
@@ -688,10 +579,7 @@ def main():
                 if ok:
                     # Verify success by reading the actual saved file
                     import glob
-                    is_dpo = 'DPO' in (section or '')
-                    prefix = 'dpo' if is_dpo else 'sft'
-                    verify_dir = DPO_OUTPUT_DIR if is_dpo else output_dir
-                    recent = sorted(glob.glob(os.path.join(verify_dir, f'{prefix}_{platform}_*.jsonl')))
+                    recent = sorted(glob.glob(os.path.join(output_dir, f'sft_{platform}_*.jsonl')))
                     items = 0
                     filepath = ''
                     if recent:
@@ -701,19 +589,15 @@ def main():
                     if items > 0:
                         tracker.complete(platform, section, items, filepath)
                         log.info(f"[{platform}] COMPLETE — {section[:40]} — {items} items in {os.path.basename(filepath)}")
-                        consecutive_fails = 0
                     else:
                         tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
                         log.error(f"[{platform}] FALSE SUCCESS — file has 0 items")
-                        consecutive_fails += 1
                 else:
                     tracker.fail(platform, section, 'process_platform returned False')
                     log.error(f"[{platform}] FAILED — {section[:40]}")
-                    consecutive_fails += 1
             except Exception as e:
                 tracker.fail(platform, section, str(e))
                 log.error(f"[{platform}] Exception: {e}", exc_info=True)
-                consecutive_fails += 1
 
 
 
