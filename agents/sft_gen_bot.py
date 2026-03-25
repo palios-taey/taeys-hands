@@ -182,13 +182,26 @@ def _extract_response(platform):
     return content
 
 
+def _strip_s3_urls(text):
+    """Remove Perplexity S3 citation URLs embedded in content."""
+    import re
+    # Strip [ppl-ai-file-upload.s3.amazonaws](...) markdown links
+    text = re.sub(r'\[ppl-ai-file-upload\.s3\.amazonaws\]\(https?://[^)]+\)', '', text)
+    # Strip bare S3 URLs
+    text = re.sub(r'https?://ppl-ai-file-upload\.s3\.amazonaws\.com/[^\s")\]]+', '', text)
+    return text
+
+
 def _parse_jsonl(content):
     """Parse JSONL content, handling multiple formats:
     - Standard JSONL (one JSON per line)
-    - Perplexity S3 URLs appended after JSON
+    - Perplexity S3 URLs embedded in content fields
     - Concatenated JSON without newlines (split on }{)
     - prompt/response format → messages format conversion
     """
+    # Strip S3 URLs before parsing (Perplexity embeds these in content)
+    content = _strip_s3_urls(content)
+
     # First try splitting on newlines
     lines = content.strip().split('\n')
     # If only 1 line and it's long, try splitting on }{
@@ -200,9 +213,8 @@ def _parse_jsonl(content):
         line = line.strip()
         if not line or line.startswith('#') or line.startswith('```'):
             continue
-        # Strip Perplexity S3 citation URLs
+        # Strip trailing non-JSON after last closing brace
         if line.startswith('{'):
-            # Try ]} first (messages format), then just }
             bracket_end = line.rfind(']}')
             if bracket_end > 0:
                 line = line[:bracket_end + 2]
