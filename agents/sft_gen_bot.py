@@ -457,6 +457,34 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         prompt_text += "\n\nIMPORTANT: Write the jsonl directly in your response. Do NOT create artifacts, files, or canvas. Just paste the lines."
 
     # Step 1: Navigate to fresh session
+    # Click Firefox tab bar first to defocus web page input — prevents
+    # Ctrl+L from going into chat input instead of address bar
+    try:
+        display = os.environ.get('DISPLAY', ':0')
+        r = subprocess.run(['xdotool', 'search', '--class', 'Firefox'],
+                           capture_output=True, text=True, timeout=5,
+                           env={**os.environ, 'DISPLAY': display})
+        wids = r.stdout.strip().split('\n')
+        if wids and wids[-1]:
+            wid = wids[-1]
+            r2 = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],
+                                capture_output=True, text=True, timeout=5,
+                                env={**os.environ, 'DISPLAY': display})
+            geom = {}
+            for line in r2.stdout.strip().split('\n'):
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                    geom[k] = int(v)
+            if 'X' in geom and 'Y' in geom and 'WIDTH' in geom:
+                tab_x = geom['X'] + geom['WIDTH'] // 2
+                tab_y = geom['Y'] + 10
+                subprocess.run(['xdotool', 'mousemove', str(tab_x), str(tab_y), 'click', '1'],
+                               capture_output=True, timeout=5,
+                               env={**os.environ, 'DISPLAY': display})
+                time.sleep(0.3)
+    except Exception:
+        pass  # Best effort — navigate_fresh_session will still try
+
     log.info(f"[{platform}] Navigating to fresh session")
     if not bot.navigate_fresh_session(platform):
         log.error(f"[{platform}] Navigation failed")
