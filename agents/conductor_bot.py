@@ -272,10 +272,14 @@ class ConductorBot:
             log.error(f"Escalation failed: {e}")
 
     def execute_task(self, task: Dict) -> Dict:
-        """Execute a single task: navigate → setup → attach → send → wait → extract.
+        """Execute a single task using hmm_bot's proven functions.
+
+        MCP tools for: plan creation (consolidates attachments)
+        hmm_bot for: navigate, attach, send, wait, extract (proven 123K runs)
 
         Returns result dict with status, content, elapsed.
         """
+        import agents.hmm_bot as bot
         t0 = time.time()
         task_type = task.get("type", "consultation")
         message = task.get("message", task.get("prompt", ""))
@@ -298,9 +302,8 @@ class ConductorBot:
                  f"tools={tools}, msg={message[:80]}...")
 
         redis_client = _redis
-        display = self.display
 
-        # Step 1: Create plan
+        # Step 1: Create plan (MCP — consolidates identity files into package)
         plan_params = {
             "session": session,
             "model": model,
@@ -316,102 +319,90 @@ class ConductorBot:
 
         consolidated_file = plan_result.get("attachment", attachment)
 
-        # Step 2: Inspect (navigate to platform)
-        inspect_result = handle_inspect(self.platform, redis_client,
-            fresh_session=(session == "new"))
-        if not inspect_result.get("success"):
-            return {"status": "error", "error": f"Inspect failed: {inspect_result.get('error')}",
+        # Step 2: Navigate fresh session (hmm_bot — proven)
+        log.info(f"Navigating to fresh session")
+        if not bot.navigate_fresh_session(self.platform):
+            return {"status": "error", "error": "Navigation failed",
                     "elapsed": time.time() - t0}
 
-        # Step 3: Set model/mode if needed
-        if model and model != "N/A":
-            try:
-                handle_select_dropdown(self.platform, "mode_picker", model, redis_client)
-                time.sleep(0.5)
-            except Exception as e:
-                log.warning(f"Model selection warning: {e}")
-
-        if tools and tools != ["none"]:
-            for tool in tools:
-                try:
-                    handle_select_dropdown(self.platform, "Tools", tool, redis_client)
-                    time.sleep(0.5)
-                except Exception as e:
-                    log.warning(f"Tool selection warning: {e}")
-
-        # Step 4: Attach file
+        # Step 3: Attach file (hmm_bot — proven)
         if consolidated_file and os.path.exists(consolidated_file):
-            attach_result = handle_attach(self.platform, consolidated_file, redis_client)
-            if attach_result.get("status") == "dropdown_open":
-                # Need to click upload option
-                items = attach_result.get("dropdown_items", [])
-                upload_item = None
-                for item in items:
-                    if "upload" in item.get("name", "").lower():
-                        upload_item = item
-                        break
-                if upload_item:
-                    inp.click_at(int(upload_item["x"]), int(upload_item["y"]))
-                    time.sleep(0.5)
-                    attach_result = handle_attach(self.platform, consolidated_file, redis_client)
+            log.info(f"Attaching {os.path.basename(consolidated_file)}")
+            if not bot.attach_file(self.platform, consolidated_file):
+                return {"status": "error", "error": "Attach failed",
+                        "elapsed": time.time() - t0}
 
-            if attach_result.get("status") not in ("file_attached",):
-                log.warning(f"Attach may have failed: {attach_result.get('status')}")
-
-        # Step 5: Audit
-        audit_params = {
-            "current_model": model,
-            "current_mode": mode,
-            "current_tools": tools if tools else ["none"],
-            "attachment_confirmed": bool(consolidated_file),
-        }
-        audit_result = handle_plan(self.platform, "audit", audit_params, redis_client)
-        if not audit_result.get("passed", False):
-            log.warning(f"Audit warnings: {audit_result.get('failures', [])}")
-            # Continue anyway — audit failures are often cosmetic
-
-        # Step 6: Re-inspect to get updated coordinates
-        inspect_result = handle_inspect(self.platform, redis_client)
-
-        # Step 7: Click input and send message
-        send_result = handle_send_message(
-            self.platform, message, redis_client, display,
-            attachments=[consolidated_file] if consolidated_file else None,
-            purpose=task.get("purpose", task_type),
-        )
-        if send_result.get("error"):
-            return {"status": "error", "error": f"Send failed: {send_result['error']}",
+        # Step 4: Send prompt (hmm_bot — proven)
+        log.info(f"Sending prompt ({len(message)} chars)")
+        if not bot.send_prompt(self.platform, message):
+            return {"status": "error", "error": "Send failed",
                     "elapsed": time.time() - t0}
 
-        url = send_result.get("url", "")
-        monitor_id = send_result.get("monitor", {}).get("id")
-        log.info(f"Sent. URL={url[:60]}... Monitor={monitor_id}")
+        # Verify send: click send button if still visible
+        time.sleep(1)
+        from core.tree import find_elements as _fe
+        from core.interact import atspi_click as _ac
+        ff = bot.get_firefox(self.platform)
+        if ff:
+            els = _fe(ff)
+            for e in els:
+                n = (e.get('name') or '').strip()
+                if n in ('Send prompt', 'Send', 'Submit', 'Send message') and e.get('role') == 'push button':
+                    log.info(f"Send button '{n}' still visible — clicking")
+                    _ac(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                    time.sleep(1)
+                    break
 
-        # Step 8: Wait for response
+        log.info(f"Sent.")
+
+        # Step 5: Wait for response (hmm_bot — proven)
         timeout = task.get("timeout", 600)
         response_ready = self._wait_for_response(timeout)
 
         if not response_ready:
             return {"status": "timeout", "error": f"No response after {timeout}s",
-                    "url": url, "elapsed": time.time() - t0}
+                    "elapsed": time.time() - t0}
 
-        # Step 9: Extract response
-        extract_plan = handle_plan(self.platform, "extract_response", {}, redis_client)
+        # Step 6: Extract response (hmm_bot — proven)
+        # Extra scrolling for long responses
+        for _ in range(5):
+            inp.press_key('End')
+            time.sleep(0.3)
         time.sleep(1)
 
-        # Scroll to bottom and extract
-        handle_inspect(self.platform, redis_client, scroll="bottom")
-        extract_result = handle_quick_extract(self.platform, redis_client, complete=True)
+        # Claude: click Scroll to bottom button
+        if self.platform == 'claude':
+            from core.tree import find_elements
+            from core.interact import atspi_click
+            ff = bot.get_firefox(self.platform)
+            if ff:
+                els = find_elements(ff)
+                for e in els:
+                    if (e.get('name') or '').strip() == 'Scroll to bottom':
+                        atspi_click(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                        log.info("Clicked 'Scroll to bottom'")
+                        time.sleep(2)
+                        break
 
-        content = extract_result.get("content", "")
+        content = bot.extract_response(self.platform)
         elapsed = time.time() - t0
 
+        if not content or len(content) < 10:
+            return {"status": "error", "error": f"Extract failed ({len(content) if content else 0} chars)",
+                    "elapsed": elapsed}
+
         log.info(f"Extracted: {len(content)} chars in {elapsed:.1f}s")
+
+        # Clean up plan
+        try:
+            handle_plan(self.platform, "delete", {}, redis_client)
+        except:
+            pass
 
         return {
             "status": "completed",
             "content": content,
-            "url": url,
+            "url": "",
             "elapsed": elapsed,
             "word_count": len(content.split()),
         }
