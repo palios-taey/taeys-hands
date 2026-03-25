@@ -153,12 +153,33 @@ def _extract_response(platform):
                     time.sleep(2)
                     break
 
-    # Use hmm_bot.extract_response for ALL platforms — it has:
-    # - Copy button retry (3 attempts with re-scroll)
-    # - Prompt detection fallback (tries alt buttons if got prompt text)
-    # - Clipboard polling (6 x 0.5s)
-    # - Grok zero-extent handling
-    return bot.extract_response(platform) or ''
+    # Use hmm_bot.extract_response for ALL platforms
+    content = bot.extract_response(platform) or ''
+
+    # Detect if we got the prompt text instead of the response
+    if content and len(content) < 1000:
+        start = content.strip()[:100].lower()
+        if any(m in start for m in ['generate 50', 'generate 10', 'generate 20',
+                                      'output only jsonl', 'format: {"messages']):
+            log.warning(f"[{platform}] Got prompt text ({len(content)} chars) — retrying with extra scroll")
+            # More aggressive scroll + re-extract
+            for _ in range(10):
+                inp.press_key('End')
+                time.sleep(0.3)
+            time.sleep(2)
+            if platform == 'claude':
+                from core.tree import find_elements as _fe2
+                from core.interact import atspi_click as _ac2
+                ff2 = bot.get_firefox(platform)
+                if ff2:
+                    for e in _fe2(ff2):
+                        if (e.get('name') or '').strip() == 'Scroll to bottom':
+                            _ac2(e) if e.get('atspi_obj') else inp.click_at(e['x'], e['y'])
+                            time.sleep(3)
+                            break
+            content = bot.extract_response(platform) or ''
+
+    return content
 
 
 def _parse_jsonl(content):
