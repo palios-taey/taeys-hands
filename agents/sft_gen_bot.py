@@ -204,8 +204,15 @@ def _parse_jsonl(content):
         line = line.strip()
         if not line:
             continue
-        # Try direct parse first for short lines
-        if len(line) < 2000 or (not line.startswith('{') and not line.startswith('[')):
+        # Try direct JSON parse first — only split if it fails
+        if line.startswith('{'):
+            try:
+                json.loads(line)
+                expanded.append(line)
+                continue
+            except json.JSONDecodeError:
+                pass  # Fall through to splitting logic
+        if not line.startswith('{') and not line.startswith('['):
             expanded.append(line)
             continue
         # Long line with multiple JSON objects — split carefully
