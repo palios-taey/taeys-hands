@@ -223,8 +223,6 @@ def _parse_jsonl(content):
                 expanded.append(p)
         else:
             expanded.append(line)
-        else:
-            expanded.append(line)
 
     valid = []
     for line in expanded:
