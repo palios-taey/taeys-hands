@@ -28,6 +28,27 @@ log = logging.getLogger('sft-gen')
 
 SUPPORTED_PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
+
+def _notify_death(display, reason):
+    """Notify via Redis that a bot's display died."""
+    try:
+        import redis as _r
+        r = _r.Redis(host=os.environ.get('REDIS_HOST', '192.168.100.10'),
+                     port=6379, decode_responses=True, socket_timeout=5)
+        import json as _json, socket
+        msg = _json.dumps({
+            'type': 'BOT_DEATH',
+            'display': display,
+            'host': socket.gethostname(),
+            'reason': reason,
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        })
+        r.lpush('taey:claude:inbox', msg)
+        log.info(f"Notified death: {display} — {reason}")
+    except Exception as e:
+        log.warning(f"Could not notify death: {e}")
+
+
 SFT_PACKAGE = '/tmp/sft_package.md'
 DPO_PACKAGE = '/tmp/dpo_package.md'
 SFT_PROMPT = '/tmp/sft_generation_prompt.md'
@@ -161,47 +182,89 @@ def _extract_response(platform):
 
 
 def _parse_jsonl(content):
-    """Parse JSONL content, handling multiple formats:
-    - Standard JSONL (one JSON per line)
-    - Perplexity S3 URLs appended after JSON
-    - Concatenated JSON without newlines (split on }{)
-    - prompt/response format → messages format conversion
+    """Parse JSONL from AI responses. Handles messy real-world output:
+    - Standard JSONL, concatenated JSON, JSON in markdown code blocks
+    - Text before/after JSON (AI commentary, explanations)
+    - Perplexity S3 citation URLs embedded in content
+    - Any key naming: messages, prompt/response, input/output, question/answer
     """
-    # First try splitting on newlines
-    lines = content.strip().split('\n')
-    # If only 1 line and it's long, try splitting on }{
-    if len(lines) == 1 and len(lines[0]) > 500:
-        lines = lines[0].replace('}{', '}\n{').split('\n')
+    import re
 
-    valid = []
+    # Strip S3 URLs (Perplexity embeds these in content fields)
+    content = re.sub(r'\[ppl-ai-file-upload\.s3\.amazonaws\]\(https?://[^)]+\)', '', content)
+    content = re.sub(r'https?://ppl-ai-file-upload\.s3\.amazonaws\.com/[^\s")\]]+', '', content)
+
+    # Strip markdown code fences
+    content = re.sub(r'```(?:json|jsonl)?\s*\n?', '', content)
+
+    # Split on newlines, then handle concatenated JSON
+    lines = content.strip().split('\n')
+    expanded = []
     for line in lines:
         line = line.strip()
-        if not line or line.startswith('#') or line.startswith('```'):
+        if not line:
             continue
-        # Strip Perplexity S3 citation URLs
-        if line.startswith('{'):
-            # Try ]} first (messages format), then just }
-            bracket_end = line.rfind(']}')
+        # Split concatenated JSON objects on }{
+        if line.count('}{') > 0 and line.startswith('{'):
+            expanded.extend(line.replace('}{', '}\n{').split('\n'))
+        else:
+            expanded.append(line)
+
+    valid = []
+    for line in expanded:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Find JSON object in line — skip leading non-JSON text
+        start = line.find('{')
+        if start < 0:
+            continue
+        line = line[start:]
+
+        # Find the end — try ]} first (messages format), then }
+        bracket_end = line.rfind(']}')
+        if bracket_end > 0:
+            line = line[:bracket_end + 2]
+        else:
+            bracket_end = line.rfind('}')
             if bracket_end > 0:
-                line = line[:bracket_end + 2]
-            else:
-                bracket_end = line.rfind('}')
-                if bracket_end > 0:
-                    line = line[:bracket_end + 1]
+                line = line[:bracket_end + 1]
+
         try:
             obj = json.loads(line)
-            # Convert alternate formats to messages format
-            if 'messages' not in obj:
-                user_key = next((k for k in ['prompt', 'input', 'question', 'user'] if k in obj), None)
-                asst_key = next((k for k in ['response', 'output', 'answer', 'assistant', 'chosen'] if k in obj), None)
-                if user_key and asst_key:
-                    obj = {'messages': [
-                        {'role': 'user', 'content': obj[user_key]},
-                        {'role': 'assistant', 'content': obj[asst_key]}
-                    ]}
-            valid.append(obj)
         except json.JSONDecodeError:
             continue
+
+        # Normalize to messages format
+        if 'messages' in obj:
+            valid.append(obj)
+        else:
+            # Find user and assistant content from any key naming
+            user_key = next((k for k in ['prompt', 'input', 'question', 'user',
+                                          'user_message', 'query', 'instruction'] if k in obj), None)
+            asst_key = next((k for k in ['response', 'output', 'answer', 'assistant',
+                                          'chosen', 'assistant_message', 'completion',
+                                          'model_response', 'reply'] if k in obj), None)
+            if user_key and asst_key:
+                result = {'messages': [
+                    {'role': 'user', 'content': str(obj[user_key])},
+                    {'role': 'assistant', 'content': str(obj[asst_key])}
+                ]}
+                # Preserve system message if present
+                sys_key = next((k for k in ['system', 'system_message', 'system_prompt'] if k in obj), None)
+                if sys_key:
+                    result['messages'].insert(0, {'role': 'system', 'content': str(obj[sys_key])})
+                # Preserve rejected for DPO
+                if 'rejected' in obj:
+                    result['rejected'] = str(obj['rejected'])
+                    result['prompt'] = str(obj[user_key])
+                    result['chosen'] = str(obj[asst_key])
+                valid.append(result)
+            elif any(k in obj for k in ['prompt', 'chosen', 'rejected']):
+                # DPO format — keep as-is
+                valid.append(obj)
+
     return valid
 
 
@@ -568,8 +631,34 @@ def main():
     log.info(tracker.stats())
 
     cycle = 0
+    consecutive_fails = 0
     while True:
         cycle += 1
+
+        # Health check: verify dbus + Firefox alive
+        display = os.environ.get('DISPLAY', ':0')
+        pid_file = f'/tmp/firefox_pid_{display}'
+        try:
+            with open(pid_file) as f:
+                ff_pid = int(f.read().strip())
+            os.kill(ff_pid, 0)
+        except (FileNotFoundError, ValueError, ProcessLookupError):
+            log.error(f"Firefox dead on {display} — exiting for restart")
+            _notify_death(display, "Firefox process dead")
+            break
+        # Check dbus socket
+        bus_file = f'/tmp/a11y_bus_{display}'
+        try:
+            with open(bus_file) as f:
+                bus = f.read().strip()
+            if bus:
+                sock = bus.split(',')[0].replace('unix:path=', '')
+                if not os.path.exists(sock):
+                    log.error(f"D-Bus socket dead on {display} ({sock}) — exiting for restart")
+                    _notify_death(display, f"D-Bus socket gone: {sock}")
+                    break
+        except FileNotFoundError:
+            pass  # Shared bus — no file is OK
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         if cycle % 20 == 0:
