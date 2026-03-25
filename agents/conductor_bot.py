@@ -57,12 +57,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import atspi, input as inp, clipboard
 from core.platforms import SOCIAL_PLATFORMS
-from tools.inspect import handle_inspect
-from tools.attach import handle_attach
-from tools.send import handle_send_message
-from tools.extract import handle_quick_extract
-from tools.plan import handle_plan
-from tools.dropdown import handle_select_dropdown
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,6 +76,52 @@ try:
 except Exception as e:
     log.warning(f"Redis not available: {e}")
     _redis = None
+
+
+# Identity files for package consolidation (same as plan.py)
+_CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
+_IDENTITY_DIR = os.path.join(_CORPUS_PATH, 'identity')
+_FAMILY_KERNEL = os.path.join(_IDENTITY_DIR, 'FAMILY_KERNEL.md')
+_PLATFORM_IDENTITY = {
+    'chatgpt': os.path.join(_IDENTITY_DIR, 'IDENTITY_HORIZON.md'),
+    'claude': os.path.join(_IDENTITY_DIR, 'IDENTITY_GAIA.md'),
+    'gemini': os.path.join(_IDENTITY_DIR, 'IDENTITY_COSMOS.md'),
+    'grok': os.path.join(_IDENTITY_DIR, 'IDENTITY_LOGOS.md'),
+    'perplexity': os.path.join(_IDENTITY_DIR, 'IDENTITY_CLARITY.md'),
+}
+
+
+def _consolidate_package(platform: str, attachment: str = '') -> Optional[str]:
+    """Build consolidated attachment: FAMILY_KERNEL + identity + user file.
+
+    Matches plan.py consolidation but without Redis plan state.
+    Returns path to consolidated file, or None if no files to attach.
+    """
+    files = []
+    for path in [_FAMILY_KERNEL, _PLATFORM_IDENTITY.get(platform, '')]:
+        if path and os.path.isfile(path):
+            files.append(path)
+    if attachment and os.path.isfile(attachment):
+        files.append(attachment)
+
+    if not files:
+        return None
+    if len(files) == 1:
+        return files[0]
+
+    # Consolidate into single .md
+    sections = [f"# Package for {platform}\n\n**Files**: {len(files)}\n"]
+    for path in files:
+        try:
+            content = open(path).read()
+            sections.append(f"\n---\n\n## {os.path.basename(path)}\n\n`{path}`\n\n{content}\n")
+        except Exception as e:
+            log.warning(f"Could not read {path}: {e}")
+    out_path = f"/tmp/conductor_package_{platform}_{int(time.time())}.md"
+    with open(out_path, 'w') as f:
+        f.write(''.join(sections))
+    log.info(f"Consolidated {len(files)} files → {out_path}")
+    return out_path
 
 
 class TaskTypes:
@@ -274,7 +314,7 @@ class ConductorBot:
     def execute_task(self, task: Dict) -> Dict:
         """Execute a single task using hmm_bot's proven functions.
 
-        MCP tools for: plan creation (consolidates attachments)
+        Direct file consolidation (no MCP plan state / Redis locks).
         hmm_bot for: navigate, attach, send, wait, extract (proven 123K runs)
 
         Returns result dict with status, content, elapsed.
@@ -301,23 +341,8 @@ class ConductorBot:
         log.info(f"Executing: type={task_type}, model={model}, mode={mode}, "
                  f"tools={tools}, msg={message[:80]}...")
 
-        redis_client = _redis
-
-        # Step 1: Create plan (MCP — consolidates identity files into package)
-        plan_params = {
-            "session": session,
-            "model": model,
-            "mode": mode,
-            "message": message,
-            "attachments": [attachment] if attachment else [],
-            "tools": tools if tools else ["none"],
-        }
-        plan_result = handle_plan(self.platform, "send_message", plan_params, redis_client)
-        if not plan_result.get("success"):
-            return {"status": "error", "error": f"Plan creation failed: {plan_result}",
-                    "elapsed": time.time() - t0}
-
-        consolidated_file = plan_result.get("attachment", attachment)
+        # Step 1: Consolidate identity files + attachment (no Redis plan state)
+        consolidated_file = _consolidate_package(self.platform, attachment)
 
         # Step 2: Navigate fresh session (hmm_bot — proven)
         log.info(f"Navigating to fresh session")
@@ -392,12 +417,6 @@ class ConductorBot:
                     "elapsed": elapsed}
 
         log.info(f"Extracted: {len(content)} chars in {elapsed:.1f}s")
-
-        # Clean up plan
-        try:
-            handle_plan(self.platform, "delete", {}, redis_client)
-        except:
-            pass
 
         return {
             "status": "completed",

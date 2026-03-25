@@ -404,6 +404,28 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         return False
     log.info(f"[{platform}] Navigation OK")
 
+    # Perplexity: enable incognito mode (button in upper right)
+    if platform == 'perplexity':
+        time.sleep(2)  # Wait for page load
+        from core.tree import find_elements as _fe_inc
+        from core.interact import atspi_click as _ac_inc
+        from core.input import click_at as _click_inc
+        ff_inc = bot.get_firefox(platform)
+        if ff_inc:
+            els_inc = _fe_inc(ff_inc)
+            for e in els_inc:
+                name = (e.get('name') or '').strip().lower()
+                if 'use incognito' in name and 'button' in e.get('role', ''):
+                    log.info(f"[{platform}] Clicking incognito button: {e.get('name')}")
+                    if e.get('atspi_obj'):
+                        _ac_inc(e)
+                    else:
+                        _click_inc(e['x'], e['y'])
+                    time.sleep(1)
+                    break
+            else:
+                log.warning(f"[{platform}] Incognito button not found — may already be active")
+
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
     import core.atspi as _atspi
