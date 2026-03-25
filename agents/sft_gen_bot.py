@@ -612,7 +612,10 @@ def main():
                 if ok:
                     # Verify success by reading the actual saved file
                     import glob
-                    recent = sorted(glob.glob(os.path.join(output_dir, f'sft_{platform}_*.jsonl')))
+                    is_dpo = 'DPO' in (section or '')
+                    prefix = 'dpo' if is_dpo else 'sft'
+                    verify_dir = DPO_OUTPUT_DIR if is_dpo else output_dir
+                    recent = sorted(glob.glob(os.path.join(verify_dir, f'{prefix}_{platform}_*.jsonl')))
                     items = 0
                     filepath = ''
                     if recent:
