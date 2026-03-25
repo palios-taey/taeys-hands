@@ -190,12 +190,15 @@ def _parse_jsonl(content):
                     line = line[:bracket_end + 1]
         try:
             obj = json.loads(line)
-            # Convert prompt/response to messages format
-            if 'prompt' in obj and 'response' in obj and 'messages' not in obj:
-                obj = {'messages': [
-                    {'role': 'user', 'content': obj['prompt']},
-                    {'role': 'assistant', 'content': obj['response']}
-                ]}
+            # Convert alternate formats to messages format
+            if 'messages' not in obj:
+                user_key = next((k for k in ['prompt', 'input', 'question', 'user'] if k in obj), None)
+                asst_key = next((k for k in ['response', 'output', 'answer', 'assistant', 'chosen'] if k in obj), None)
+                if user_key and asst_key:
+                    obj = {'messages': [
+                        {'role': 'user', 'content': obj[user_key]},
+                        {'role': 'assistant', 'content': obj[asst_key]}
+                    ]}
             valid.append(obj)
         except json.JSONDecodeError:
             continue
