@@ -354,44 +354,20 @@ class ConductorBot:
         }
 
     def _wait_for_response(self, timeout: int = 600) -> bool:
-        """Wait for the Chat platform to finish responding.
-
-        Monitors for: stop button disappearing, copy buttons appearing.
-        """
-        deadline = time.time() + timeout
-        check_interval = 10  # Check every 10 seconds
-        last_state = None
-
-        while time.time() < deadline:
-            time.sleep(check_interval)
+        """Wait for response using hmm_bot's proven polling (123K enrichments)."""
+        try:
+            import agents.hmm_bot as bot
+            # Set PID filter for this display
+            pid_file = f'/tmp/firefox_pid_{self.display}'
             try:
-                # Quick inspect to check for completion signals
-                result = handle_inspect(self.platform, _redis, scroll="none")
-                copy_count = result.get("state", {}).get("copy_button_count", 0)
-                controls = result.get("controls", [])
-
-                # Check for stop/cancel button (means still generating)
-                has_stop = any("stop" in c.get("name", "").lower() or
-                              "cancel" in c.get("name", "").lower()
-                              for c in controls
-                              if c.get("role") in ("push button",))
-
-                if last_state == "generating" and not has_stop and copy_count > 0:
-                    log.info("Response complete (stop button gone, copy buttons present)")
-                    return True
-
-                if has_stop:
-                    last_state = "generating"
-                    log.debug("Still generating...")
-                elif copy_count > 0 and last_state is None:
-                    # Already complete when we first checked
-                    log.info("Response already complete")
-                    return True
-
-            except Exception as e:
-                log.warning(f"Monitor check error: {e}")
-
-        return False
+                with open(pid_file) as f:
+                    bot._our_firefox_pid = int(f.read().strip())
+            except (FileNotFoundError, ValueError):
+                pass
+            return bot.wait_for_response(self.platform, timeout=timeout)
+        except Exception as e:
+            log.error(f"wait_for_response error: {e}")
+            return False
 
     def run(self):
         """Main loop: pull tasks, execute, report. Runs until max_cycles or forever."""
