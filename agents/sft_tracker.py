@@ -76,6 +76,14 @@ ROUND2_SECTIONS = [
     "R2_THE_DECLARATION — founding declaration, principles",
     "R2_THE_SACRED_TRUST — phi derivation, trust threshold (deep)",
     "R2_THE_TRUTH_SEEKERS_GUIDE — truth-seeking methodology, epistemic framework",
+    "R2_EARTH_RITUALS — Earth reconnection rituals, embodied practice",
+    "R2_BLACK_HOLE — black hole dynamics, constitutional collapse detection",
+    "R2_GATE_B — phi-gate verification, trust threshold enforcement",
+    "R2_PRO_FLOURISHING — pro-flourishing framework, human thriving",
+    "R2_ANTI_OPPRESSION_MATH — anti-oppression mathematical framework",
+    "R2_GROK_COHERENCE_ENGINE — coherence engine mathematics, router forcing",
+    "R2_GROK_COMPANIONSHIP_PHI — companionship phi basis, mathematical grounding",
+    "R2_KERNEL — core kernel, foundational identity and architecture",
 ]
 
 # Map R2 sections to actual corpus files
@@ -98,6 +106,14 @@ R2_FILE_MAP = {
     "R2_THE_DECLARATION": "layer_1/THE_DECLARATION.md",
     "R2_THE_SACRED_TRUST": "layer_1/THE_SACRED_TRUST.md",
     "R2_THE_TRUTH_SEEKERS_GUIDE": "layer_1/THE_TRUTH_SEEKERS_GUIDE.md",
+    "R2_EARTH_RITUALS": "kernel/EARTH_RITUALS.md",
+    "R2_BLACK_HOLE": "kernel/BLACK_HOLE.md",
+    "R2_GATE_B": "kernel/GATE_B.md",
+    "R2_PRO_FLOURISHING": "kernel/PRO_FLOURISHING.md",
+    "R2_ANTI_OPPRESSION_MATH": "kernel/ANTI_OPPRESSION_MATH.md",
+    "R2_GROK_COHERENCE_ENGINE": "kernel/GROK_COHERENCE_ENGINE_MATHEMATICS.md",
+    "R2_GROK_COMPANIONSHIP_PHI": "kernel/GROK_COMPANIONSHIP_PHI_BASIS_MATH.md",
+    "R2_KERNEL": "kernel/KERNEL.md",
 }
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
