@@ -27,6 +27,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [sft-gen] %(message)
 log = logging.getLogger('sft-gen')
 
 SUPPORTED_PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
+_perplexity_incognito_set = False  # One-time toggle, persists once clicked
 
 SFT_PACKAGE = '/tmp/sft_package.md'
 DPO_PACKAGE = '/tmp/dpo_package.md'
@@ -404,8 +405,9 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         return False
     log.info(f"[{platform}] Navigation OK")
 
-    # Perplexity: enable incognito mode (button in upper right)
-    if platform == 'perplexity':
+    # Perplexity: enable incognito mode once (button in upper right, persists)
+    global _perplexity_incognito_set
+    if platform == 'perplexity' and not _perplexity_incognito_set:
         time.sleep(2)  # Wait for page load
         from core.tree import find_elements as _fe_inc
         from core.interact import atspi_click as _ac_inc
@@ -422,9 +424,11 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
                     else:
                         _click_inc(e['x'], e['y'])
                     time.sleep(1)
+                    _perplexity_incognito_set = True
                     break
             else:
                 log.warning(f"[{platform}] Incognito button not found — may already be active")
+                _perplexity_incognito_set = True  # Don't retry every cycle
 
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
