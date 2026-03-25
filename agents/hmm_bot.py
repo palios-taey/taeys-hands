@@ -102,27 +102,6 @@ _extracted_cache = {}  # platform -> extracted content (ChatGPT fixed-wait pre-e
 _our_firefox_pid = None  # PID of Firefox on OUR display (filters out cross-display AT-SPI contamination)
 
 
-def _kill_xsel_this_display():
-    """Kill xsel processes on THIS display only. Never kill other displays' xsel."""
-    display = os.environ.get('DISPLAY', '')
-    if not display:
-        return
-    for pid_str in os.listdir('/proc'):
-        if not pid_str.isdigit():
-            continue
-        try:
-            with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
-                cmd = f.read().decode(errors='replace')
-            if 'xsel' not in cmd or 'clipboard' not in cmd:
-                continue
-            with open(f'/proc/{pid_str}/environ', 'rb') as f:
-                env = f.read().decode(errors='replace')
-            if f'DISPLAY={display}' in env.split('\0'):
-                os.kill(int(pid_str), 9)
-        except (PermissionError, FileNotFoundError, ProcessLookupError, ValueError):
-            continue
-
-
 def discover_firefox_pid() -> int | None:
     """Discover the Firefox PID on our DISPLAY via xdotool.
     All Firefox instances share D-Bus, so AT-SPI sees them all.
@@ -447,11 +426,10 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('Escape')
     time.sleep(0.2)
-    time.sleep(0.3)
-    inp.press_key('Escape')
-    time.sleep(0.2)
     inp.press_key('ctrl+l')
     time.sleep(0.3)
+    # Use xdotool type for URLs — clipboard paste (xsel + Ctrl+V) fails on
+    # some Xvfb setups. URLs are short so xdotool type is reliable here.
     inp.press_key('ctrl+a')
     time.sleep(0.1)
     inp.type_text(url, delay_ms=10)
@@ -974,17 +952,27 @@ def attach_file(platform: str, file_path: str) -> bool:
             if _find_dialog_wid():
                 break
 
-            # "Add photos & files" is always the first dropdown item
-            inp.press_key('Down')
-            time.sleep(0.3)
-            inp.press_key_split('Return')
-            time.sleep(2.0)
-
-            for _ in range(10):
-                if _find_dialog_wid():
-                    logger.info(f"[{platform}] File dialog opened after dropdown item 1")
-                    break
+            # Walk dropdown items: Down+Enter, check for dialog after each
+            for item_idx in range(8):
+                inp.press_key('Down')
                 time.sleep(0.3)
+                inp.press_key_split('Return')
+                time.sleep(2.0)
+
+                for _ in range(5):
+                    if _find_dialog_wid():
+                        logger.info(f"[{platform}] File dialog opened after dropdown item {item_idx + 1}")
+                        break
+                    time.sleep(0.3)
+                if _find_dialog_wid():
+                    break
+
+                # Not the upload item — escape and reopen dropdown
+                inp.press_key('Escape')
+                time.sleep(0.5)
+                if item_idx < 7:
+                    inp.click_at(btn['x'], btn['y'])
+                    time.sleep(1.0)
 
             if _find_dialog_wid():
                 break
@@ -1083,80 +1071,43 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.error(f"[{platform}] Attach button not found after 8 retries")
             return False
 
-        # Click attach button: xdotool first (real pointer event routes focus
-        # into React portals), AT-SPI do_action as fallback.
-        # Then: try find_menu_items (like Gemini), fall back to Down+Enter.
-        for pass_num in range(2):
-            if pass_num == 0:
-                inp.click_at(btn['x'], btn['y'])
-                logger.info(f"[{platform}] Pass 1: xdotool click attach at ({btn['x']}, {btn['y']})")
-            else:
+        # Two-pass attach: matches tools/attach.py _try_click_then_dialog()
+        # Pass 1: AT-SPI do_action + keyboard nav
+        # Pass 2: xdotool click + keyboard nav (fallback)
+        def _click_and_nav(use_atspi):
+            if use_atspi:
                 btn_obj = btn.get('atspi_obj')
                 if btn_obj:
                     try:
                         ai = btn_obj.get_action_iface()
                         if ai and ai.get_n_actions() > 0:
                             ai.do_action(0)
-                            logger.info(f"[{platform}] Pass 2: AT-SPI click attach")
+                            logger.info(f"[{platform}] Clicked attach button via AT-SPI at ({btn['x']}, {btn['y']})")
                         else:
-                            continue
+                            return False
                     except Exception:
-                        continue
+                        return False
                 else:
-                    continue
-
-            # Wait for dropdown with EXPANDED state polling (not blind sleep)
-            deadline = time.time() + 2.0
-            while time.time() < deadline:
+                    return False
+            else:
+                inp.click_at(btn['x'], btn['y'])
+                logger.info(f"[{platform}] Clicked attach button via xdotool at ({btn['x']}, {btn['y']})")
+            time.sleep(1.5)
+            if _find_dialog_wid():
+                return True
+            inp.press_key('Down')
+            time.sleep(0.5)
+            inp.press_key_split('Return')
+            time.sleep(2.5)
+            for _ in range(10):
                 if _find_dialog_wid():
-                    break
-                try:
-                    btn_obj = btn.get('atspi_obj')
-                    if btn_obj and btn_obj.get_state_set().contains(Atspi.StateType.EXPANDED):
-                        break
-                except Exception:
-                    pass
-                time.sleep(0.1)
+                    return True
+                time.sleep(0.3)
+            return False
 
-            if _find_dialog_wid():
-                break
-
-            # Try find_menu_items first (like Gemini — direct AT-SPI click)
-            firefox = get_firefox(platform)
-            doc2 = get_doc(platform, force_refresh=True)
-            menu_items = find_menu_items(firefox, doc2)
-            clicked_item = False
-            if menu_items:
-                for item in menu_items:
-                    name = (item.get('name') or '').strip().lower()
-                    if any(kw in name for kw in ('upload', 'file', 'photo', 'add file')):
-                        from core.interact import atspi_click
-                        if item.get('atspi_obj') and atspi_click(item):
-                            logger.info(f"[{platform}] Direct AT-SPI click: '{item.get('name')}'")
-                            clicked_item = True
-                        else:
-                            inp.click_at(item['x'], item['y'])
-                            logger.info(f"[{platform}] Direct xdotool click: '{item.get('name')}'")
-                            clicked_item = True
-                        time.sleep(2.0)
-                        break
-
-            if clicked_item and _find_dialog_wid():
-                break
-
-            # Keyboard nav fallback: Down+Enter
-            if not _find_dialog_wid():
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key_split('Return')
-                time.sleep(2.5)
-                for _ in range(10):
-                    if _find_dialog_wid():
-                        break
-                    time.sleep(0.3)
-
-            if _find_dialog_wid():
-                break
+        if not _click_and_nav(use_atspi=True):
+            if not _click_and_nav(use_atspi=False):
+                pass  # Falls through to dialog_found check below
 
     # Wait for file dialog to appear
     dialog_found = False
@@ -1371,9 +1322,10 @@ def process_platform(platform: str, prompt: str) -> dict:
     result = {'platform': platform, 'success': False, 'error': None}
 
     # Step 0: Clean up stale state BEFORE anything else
-    # Kill stale xsel processes on THIS display only
+    # Kill stale xsel processes (clipboard writes that hung on Xvfb)
     try:
-        subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+        subprocess.run(['pkill', '-f', 'xsel --clipboard --input'],
+                       capture_output=True, timeout=3)
     except Exception:
         pass
     # Close stale dialogs (leftover dialogs capture keyboard input)
