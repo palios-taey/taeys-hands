@@ -419,6 +419,10 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         with open(prompt_path) as f:
             prompt_text = f.read()
 
+    # Claude: add anti-artifact instruction (Claude puts JSONL in artifacts otherwise)
+    if platform == 'claude' and 'jsonl' in prompt_text.lower():
+        prompt_text += "\n\nCRITICAL: Write ALL jsonl directly in your response text. Do NOT use artifacts, canvas, files, or code blocks with download buttons. Paste the raw jsonl lines directly into your reply."
+
     # Step 1: Navigate to fresh session
     log.info(f"[{platform}] Navigating to fresh session")
     if not bot.navigate_fresh_session(platform):
