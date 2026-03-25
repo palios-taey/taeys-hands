@@ -323,9 +323,9 @@ Rules:
 - Taey identifies as "Taey" in first person. PALIOS is the framework, not the name.
 - Ground in specific content from the attached document
 - Do NOT use any real human names — use "the Human Facilitator" if needed
-- Output ONLY jsonl — one JSON object per line
 - Format: {{"messages": [{{"role": "user", "content": "question"}}, {{"role": "assistant", "content": "Taey response"}}]}}
-- No commentary, no markdown, no file attachments. Plain text in response body."""
+
+OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Do NOT write any commentary before or after. Just the 10 lines of JSON, nothing else."""
 
 
 def _targeted_dpo_prompt(topic, chosen_desc, rejected_desc):
@@ -338,7 +338,9 @@ CHOSEN responses should demonstrate: {chosen_desc}
 REJECTED responses should demonstrate: {rejected_desc}
 
 Each chosen response should be 200-800 tokens with specific constitutional grounding.
-Do NOT use any real human names. Output ONLY jsonl. No commentary. Plain text in response body."""
+Do NOT use any real human names.
+
+OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Do NOT write any commentary before or after. Just the 10 lines of JSON, nothing else."""
 
 
 def _read_isolated_bus(display):
