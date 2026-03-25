@@ -424,6 +424,23 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
             f.write('\n\n---\n\n'.join(parts))
         package_path = pkg_path
         prompt_text = _get_section_prompt_for(section)
+    elif section and 'ROSETTA' in section:
+        # ROSETTA section: attach the actual ROSETTA_COMPRESSION_GUIDE.md
+        log.info(f"[{platform}] ROSETTA: {section[:50]}")
+        rosetta_path = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'kernel', 'ROSETTA_COMPRESSION_GUIDE.md')
+        parts = []
+        if os.path.exists(rosetta_path):
+            with open(rosetta_path) as f:
+                parts.append(f.read())
+        personality = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
+        if os.path.exists(personality):
+            with open(personality) as f:
+                parts.append(f.read())
+        pkg_path = f'/tmp/sft_rosetta_pkg_{platform}.md'
+        with open(pkg_path, 'w') as f:
+            f.write('\n\n---\n\n'.join(parts))
+        package_path = pkg_path
+        prompt_text = _get_section_prompt_for(section)
     elif section:
         log.info(f"[{platform}] {section[:50]}")
         prompt_text = _get_section_prompt_for(section)
