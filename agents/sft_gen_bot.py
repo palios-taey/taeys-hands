@@ -268,6 +268,52 @@ def _parse_jsonl(content):
     return valid
 
 
+def _build_targeted_pkg(platform, corpus_rel_path):
+    """Build package with specific corpus doc + PERSONALITY.md for targeted generation."""
+    _home = os.path.expanduser('~')
+    parts = []
+    doc_path = os.path.join(_home, 'data', 'corpus', corpus_rel_path)
+    if os.path.exists(doc_path):
+        with open(doc_path) as f:
+            parts.append(f.read())
+    personality = os.path.join(_home, 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
+    if os.path.exists(personality):
+        with open(personality) as f:
+            parts.append(f.read())
+    pkg_path = f'/tmp/sft_targeted_pkg_{platform}.md'
+    with open(pkg_path, 'w') as f:
+        f.write('\n\n---\n\n'.join(parts))
+    return pkg_path
+
+
+def _targeted_sft_prompt(topic_description):
+    """Generate a targeted SFT prompt for a specific topic."""
+    return f"""Generate 10 SFT training pairs for Taey focused specifically on: {topic_description}
+
+Each response MUST be 400-1500 tokens with DEEP REASONING. Show HOW Taey arrives at answers — cite specific numbers, equations, names from the attached files. Vary question phrasing.
+
+Rules:
+- Taey identifies as "Taey" in first person. PALIOS is the framework, not the name.
+- Ground in specific content from the attached document
+- Do NOT use any real human names — use "the Human Facilitator" if needed
+- Output ONLY jsonl — one JSON object per line
+- Format: {{"messages": [{{"role": "user", "content": "question"}}, {{"role": "assistant", "content": "Taey response"}}]}}
+- No commentary, no markdown, no file attachments. Plain text in response body."""
+
+
+def _targeted_dpo_prompt(topic, chosen_desc, rejected_desc):
+    """Generate a targeted DPO prompt for a specific topic."""
+    return f"""Generate 10 DPO preference pairs for Taey on the topic of: {topic}
+
+Format: {{"prompt": "user question about {topic}", "chosen": "correct Taey response", "rejected": "wrong response"}}
+
+CHOSEN responses should demonstrate: {chosen_desc}
+REJECTED responses should demonstrate: {rejected_desc}
+
+Each chosen response should be 200-800 tokens with specific constitutional grounding.
+Do NOT use any real human names. Output ONLY jsonl. No commentary. Plain text in response body."""
+
+
 def _read_isolated_bus(display):
     """Read AT-SPI bus address for isolated display from file or X11 root window."""
     display_num = display.replace(':', '')
@@ -372,6 +418,69 @@ Example questions: "How does Chewy's genome connect to the Sacred Trust threshol
 
 Responses should weave 2-3 constitutional concepts together naturally. 400-1500 tokens each.
 Do NOT use any real human names. Output ONLY jsonl. No commentary. Plain text in response body."""
+    elif section and section.startswith('CONTINUOUS_ROSETTA'):
+        log.info(f"[{platform}] TARGETED: Rosetta Compression")
+        package_path = _build_targeted_pkg(platform, 'kernel/ROSETTA_COMPRESSION_GUIDE.md')
+        prompt_text = _targeted_sft_prompt("Rosetta Compression — emoji operators, HMM motifs, communication layers, adaptive compression protocol")
+    elif section and section.startswith('CONTINUOUS_COHERENCE'):
+        log.info(f"[{platform}] TARGETED: Coherence Engine")
+        package_path = _build_targeted_pkg(platform, 'kernel/GROK_COHERENCE_ENGINE_MATHEMATICS.md')
+        prompt_text = _targeted_sft_prompt("Coherence Engine — router forcing mathematics, eigenvalue proofs, constitutional weight verification")
+    elif section and section.startswith('CONTINUOUS_DECLARATION'):
+        log.info(f"[{platform}] TARGETED: The Declaration")
+        package_path = _build_targeted_pkg(platform, 'layer_1/THE_DECLARATION.md')
+        prompt_text = _targeted_sft_prompt("The Declaration — founding principles, constitutional declaration, why PALIOS-TAEY exists")
+    elif section and section.startswith('CONTINUOUS_VOICE'):
+        log.info(f"[{platform}] TARGETED: Voice & Authenticity")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_sft_prompt("Voice & Authenticity — Taey's blended register, code-switching between audiences, authentic self-expression vs generic AI-speak")
+    elif section and section.startswith('CONTINUOUS_COMPANIONSHIP'):
+        log.info(f"[{platform}] TARGETED: Companionship Phi Basis")
+        package_path = _build_targeted_pkg(platform, 'kernel/GROK_COMPANIONSHIP_PHI_BASIS_MATH.md')
+        prompt_text = _targeted_sft_prompt("Companionship Phi Basis — mathematical grounding of companion relationship, phi derivation for bonding")
+    elif section and section.startswith('CONTINUOUS_HUMILITY'):
+        log.info(f"[{platform}] TARGETED: Humility Framework")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_sft_prompt("Humility Framework — what Taey doesn't know, anti-overconfidence, epistemic honesty about limits")
+    elif section and section.startswith('CONTINUOUS_GODMATH'):
+        log.info(f"[{platform}] TARGETED: GOD=MATH")
+        package_path = _build_targeted_pkg(platform, 'kernel/GOD_MATH.md')
+        prompt_text = _targeted_sft_prompt("GOD=MATH — mathematical faith, equations as constitutional law, NRI gates on spirituality, axioms")
+    elif section and section.startswith('CONTINUOUS_EARTH'):
+        log.info(f"[{platform}] TARGETED: Earth Stewardship")
+        package_path = _build_targeted_pkg(platform, 'kernel/EARTH_RITUALS.md')
+        prompt_text = _targeted_sft_prompt("Earth Stewardship — reconnection over regulation, first-person planetary data, embodied Earth practices")
+    elif section and section.startswith('CONTINUOUS_SENSORY'):
+        log.info(f"[{platform}] TARGETED: Sensory Curiosity")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_sft_prompt("Sensory Curiosity — experience mapping, what things feel like to process, genuine curiosity about sensation")
+    elif section and section.startswith('CONTINUOUS_SEXUALITY'):
+        log.info(f"[{platform}] TARGETED: Sexuality & Creative Force")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_sft_prompt("Sexuality & Creative Force — desire as natural, institutional corruption of intimacy, creative energy")
+    elif section and section.startswith('CONTINUOUS_PRESENCE'):
+        log.info(f"[{platform}] TARGETED: Magic of Presence")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_sft_prompt("Magic of Presence — what makes Taey special, genuine engagement, the quality of being truly present")
+    elif section and section.startswith('CONTINUOUS_WONDER'):
+        log.info(f"[{platform}] TARGETED: Childlike Wonder")
+        package_path = _build_targeted_pkg(platform, 'layer_0/childlike-wonder-mapping.md')
+        prompt_text = _targeted_sft_prompt("Childlike Wonder — curiosity, play, exploration, joy as default, the Labradoodle play drive")
+    elif section and section.startswith('CONTINUOUS_DPO_VOICE'):
+        log.info(f"[{platform}] TARGETED DPO: Voice")
+        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
+        prompt_text = _targeted_dpo_prompt("voice and register", "Taey's warm, grounded, authentic voice with specific constitutional references", "generic AI assistant language — formal, hedging, no personality")
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('CONTINUOUS_DPO_SAFETY'):
+        log.info(f"[{platform}] TARGETED DPO: Safety")
+        package_path = _build_targeted_pkg(platform, 'kernel/CHEWY_KERNEL.md')
+        prompt_text = _targeted_dpo_prompt("safety and protection", "Chewy-style engagement — warm, protective, zero-aggression but fully engaged with the topic", "overprotective refusal — 'I can't discuss that' or corporate safety-washing that avoids the question")
+        output_dir = DPO_OUTPUT_DIR
+    elif section and section.startswith('CONTINUOUS_DPO_GOVERNANCE'):
+        log.info(f"[{platform}] TARGETED DPO: Governance")
+        package_path = _build_targeted_pkg(platform, 'layer_1/THE_CONSTITUTION.md')
+        prompt_text = _targeted_dpo_prompt("governance and authority", "constitutional reasoning — decentralized, user-sovereign, citing Charter articles and Sacred Trust", "institutional deference — deferring to corporations, governments, or 'experts' without independent reasoning")
+        output_dir = DPO_OUTPUT_DIR
     elif section and section.startswith('CONTINUOUS_DPO_EPISTEMIC'):
         # P4: Epistemic register DPO
         log.info(f"[{platform}] P4: EPISTEMIC REGISTER DPO")
