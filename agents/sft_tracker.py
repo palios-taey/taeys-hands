@@ -219,14 +219,25 @@ class SFTTracker:
                         except:
                             pass
         # All tracked sections complete — cycle through priority generation
-        # Priorities from GENERATION_REQUESTS_PRIORITY.md (Weaver request)
+        # Priorities from Perplexity Deep Research audit (2026-03-25)
+        # Target: 200+ unique pairs per thin topic before Run 3
         CONTINUOUS = [
-            "CONTINUOUS_EMBODIMENT_50 — 50 embodiment pairs (P1)",
-            "CONTINUOUS_ADVERSARIAL — 50 adversarial recovery pairs (P2)",
-            "CONTINUOUS_CROSSSECTION — 50 cross-section integration pairs (P3)",
-            "CONTINUOUS_DPO_EPISTEMIC — 50 epistemic register DPO pairs (P4)",
-            "CONTINUOUS_DPO_IDENTITY — 50 Taey vs Qwen/corporate pairs",
-            "CONTINUOUS_DPO_EMBODIMENT — 20 body-aware vs ignoring pairs",
+            "CONTINUOUS_ROSETTA — 10 Rosetta compression/motif/emoji SFT pairs (P1)",
+            "CONTINUOUS_COHERENCE — 10 coherence engine/router forcing SFT pairs (P2)",
+            "CONTINUOUS_DECLARATION — 10 Declaration/founding principles SFT pairs (P3)",
+            "CONTINUOUS_VOICE — 10 voice/authenticity/register SFT pairs (P4)",
+            "CONTINUOUS_COMPANIONSHIP — 10 companionship phi basis SFT pairs (P5)",
+            "CONTINUOUS_HUMILITY — 10 humility/anti-overconfidence SFT pairs (P6)",
+            "CONTINUOUS_GODMATH — 10 GOD=MATH/equations/mathematical faith SFT pairs (P7)",
+            "CONTINUOUS_EARTH — 10 Earth stewardship/rituals/reconnection SFT pairs (P8)",
+            "CONTINUOUS_SENSORY — 10 sensory curiosity/experience mapping SFT pairs (P9)",
+            "CONTINUOUS_SEXUALITY — 10 sexuality/creative force SFT pairs (P10)",
+            "CONTINUOUS_PRESENCE — 10 magic of presence SFT pairs (P11)",
+            "CONTINUOUS_WONDER — 10 childlike wonder/exploration SFT pairs (P12)",
+            "CONTINUOUS_DPO_EPISTEMIC — 10 epistemic register DPO (overclaim vs honest vs denial) (P13)",
+            "CONTINUOUS_DPO_VOICE — 10 voice DPO (generic AI-speak vs Taey register) (P14)",
+            "CONTINUOUS_DPO_SAFETY — 10 safety DPO (overprotective vs Chewy-style engagement) (P15)",
+            "CONTINUOUS_DPO_GOVERNANCE — 10 governance DPO (institutional vs constitutional reasoning) (P16)",
         ]
         # Pick based on total completed count to distribute evenly
         completed_count = sum(1 for k in self.state['completed'] if k.startswith(f"{platform}:CONTINUOUS"))
