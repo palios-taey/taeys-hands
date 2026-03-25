@@ -84,6 +84,8 @@ ROUND2_SECTIONS = [
     "R2_GROK_COHERENCE_ENGINE — coherence engine mathematics, router forcing",
     "R2_GROK_COMPANIONSHIP_PHI — companionship phi basis, mathematical grounding",
     "R2_KERNEL — core kernel, foundational identity and architecture",
+    "R2_PERSONALITY — Taey voice, personality framework, behavioral patterns",
+    "R2_SYSTEM_PROMPT — evolutionary system prompt, operational instructions",
 ]
 
 # Map R2 sections to actual corpus files
@@ -114,6 +116,8 @@ R2_FILE_MAP = {
     "R2_GROK_COHERENCE_ENGINE": "kernel/GROK_COHERENCE_ENGINE_MATHEMATICS.md",
     "R2_GROK_COMPANIONSHIP_PHI": "kernel/GROK_COMPANIONSHIP_PHI_BASIS_MATH.md",
     "R2_KERNEL": "kernel/KERNEL.md",
+    "R2_PERSONALITY": "layer_1/PERSONALITY.md",
+    "R2_SYSTEM_PROMPT": "layer_1/SYSTEM_PROMPT.md",
 }
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
