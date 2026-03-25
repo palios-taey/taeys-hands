@@ -419,9 +419,13 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         with open(prompt_path) as f:
             prompt_text = f.read()
 
-    # Claude: add anti-artifact instruction (Claude puts JSONL in artifacts otherwise)
+    # Claude: reduce batch size and add anti-artifact instruction
+    # Claude's web UI creates artifacts for large JSONL, making extraction fail.
+    # Smaller batches (10 instead of 50) stay inline.
     if platform == 'claude' and 'jsonl' in prompt_text.lower():
-        prompt_text += "\n\nCRITICAL: Write ALL jsonl directly in your response text. Do NOT use artifacts, canvas, files, or code blocks with download buttons. Paste the raw jsonl lines directly into your reply."
+        prompt_text = prompt_text.replace('Generate 50 ', 'Generate 10 ')
+        prompt_text = prompt_text.replace('generate 50 ', 'generate 10 ')
+        prompt_text += "\n\nIMPORTANT: Write the jsonl directly in your response. Do NOT create artifacts, files, or canvas. Just paste the lines."
 
     # Step 1: Navigate to fresh session
     log.info(f"[{platform}] Navigating to fresh session")
