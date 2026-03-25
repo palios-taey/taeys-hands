@@ -150,8 +150,71 @@ class ConductorBot:
         except FileNotFoundError:
             log.info("No isolated bus — using shared AT-SPI")
 
+        # Patch core.atspi PID filter so ALL code paths find the right Firefox
+        self._patch_pid_filter()
+
         log.info(f"ConductorBot initialized: platform={platform}, "
                  f"display={display}, queue={queue}")
+
+    def _patch_pid_filter(self):
+        """Patch core.atspi so find_firefox returns only our display's Firefox."""
+        pid_file = f'/tmp/firefox_pid_{self.display}'
+        try:
+            with open(pid_file) as f:
+                target_pid = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            # Try /proc scan
+            for pid_str in os.listdir('/proc'):
+                if not pid_str.isdigit():
+                    continue
+                try:
+                    with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
+                        cmd = f.read().decode(errors='replace')
+                    if 'firefox' not in cmd or '--profile' not in cmd:
+                        continue
+                    with open(f'/proc/{pid_str}/environ', 'rb') as f:
+                        env = f.read().decode(errors='replace')
+                    if f'DISPLAY={self.display}' in env.split('\0'):
+                        target_pid = int(pid_str)
+                        break
+                except:
+                    continue
+            else:
+                log.warning("Could not find Firefox PID for PID filter")
+                return
+
+        log.info(f"PID filter: Firefox on {self.display} = PID {target_pid}")
+
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        import core.atspi as atspi_mod
+        orig = atspi_mod.find_firefox_for_platform
+
+        def filtered_find(platform_name=None, **kwargs):
+            desktop = Atspi.get_desktop(0)
+            for i in range(desktop.get_child_count()):
+                app = desktop.get_child_at_index(i)
+                try:
+                    if app.get_process_id() == target_pid:
+                        return app
+                except:
+                    continue
+            return orig(platform_name)
+
+        atspi_mod.find_firefox_for_platform = filtered_find
+        if hasattr(atspi_mod, 'find_firefox'):
+            atspi_mod.find_firefox = filtered_find
+
+        # Also set hmm_bot PID
+        try:
+            import agents.hmm_bot as bot
+            bot._our_firefox_pid = target_pid
+            bot._cached_firefox.clear()
+            bot._cached_doc.clear()
+        except:
+            pass
 
     def pull_task(self) -> Optional[Dict]:
         """Pull next task from Redis queue. Blocks for 5 seconds."""
