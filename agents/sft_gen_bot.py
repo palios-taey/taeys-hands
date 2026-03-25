@@ -398,11 +398,44 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
             prompt_text = f.read()
 
     # Step 1: Navigate to fresh session
-    log.info(f"[{platform}] Navigating to fresh session")
-    if not bot.navigate_fresh_session(platform):
-        log.error(f"[{platform}] Navigation failed")
-        return False
-    log.info(f"[{platform}] Navigation OK")
+    # Claude: Ctrl+L goes into chat input on cycle 2+. Use Ctrl+T (new tab)
+    # then close old tab. New tab always puts cursor in address bar.
+    if platform == 'claude':
+        log.info(f"[{platform}] Navigating via new tab (Ctrl+T)")
+        from core import input as _inp
+        _inp.focus_firefox()
+        time.sleep(0.3)
+        _inp.press_key('Escape')
+        time.sleep(0.2)
+        _inp.press_key('ctrl+t')
+        time.sleep(1)
+        _inp.type_text('https://claude.ai/new', delay_ms=10)
+        time.sleep(0.3)
+        _inp.press_key('Return')
+        time.sleep(5)
+        # Close the OLD tab (now second tab) — Ctrl+W closes current,
+        # so switch to old tab first then close it
+        # Actually: the new tab is active, old tab is behind.
+        # Just close the old one: Ctrl+W on next tab after switching
+        # Simpler: use Ctrl+Shift+Tab to go to old tab, then Ctrl+W
+        # But simplest: we now have 2 tabs. Close the old one.
+        # After page loads in new tab, go to previous tab and close it
+        _inp.press_key('ctrl+shift+Tab')  # Switch to old tab
+        time.sleep(0.5)
+        _inp.press_key('ctrl+w')  # Close it
+        time.sleep(1)
+        bot.invalidate_doc_cache(platform)
+        bot._cached_firefox.clear()
+        doc = bot.get_doc(platform, force_refresh=True)
+        if not doc:
+            log.info(f"[{platform}] AT-SPI doc not found yet — continuing")
+        log.info(f"[{platform}] Navigation OK (new tab)")
+    else:
+        log.info(f"[{platform}] Navigating to fresh session")
+        if not bot.navigate_fresh_session(platform):
+            log.error(f"[{platform}] Navigation failed")
+            return False
+        log.info(f"[{platform}] Navigation OK")
 
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
