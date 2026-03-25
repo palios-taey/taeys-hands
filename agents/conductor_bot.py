@@ -71,7 +71,7 @@ REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
 try:
     import redis as redis_lib
     _redis = redis_lib.Redis(host=REDIS_HOST, port=REDIS_PORT,
-                              decode_responses=True, socket_timeout=5)
+                              decode_responses=True, socket_timeout=30)
     _redis.ping()
 except Exception as e:
     log.warning(f"Redis not available: {e}")
@@ -203,14 +203,17 @@ class ConductorBot:
             with open(pid_file) as f:
                 target_pid = int(f.read().strip())
         except (FileNotFoundError, ValueError):
-            # Try /proc scan
+            # Try /proc scan — look for firefox main process on our display
             for pid_str in os.listdir('/proc'):
                 if not pid_str.isdigit():
                     continue
                 try:
                     with open(f'/proc/{pid_str}/cmdline', 'rb') as f:
                         cmd = f.read().decode(errors='replace')
-                    if 'firefox' not in cmd or '--profile' not in cmd:
+                    if 'firefox' not in cmd.lower():
+                        continue
+                    # Skip child processes (contentproc, crashhelper)
+                    if '-contentproc' in cmd or 'crashhelper' in cmd:
                         continue
                     with open(f'/proc/{pid_str}/environ', 'rb') as f:
                         env = f.read().decode(errors='replace')
@@ -220,7 +223,7 @@ class ConductorBot:
                 except:
                     continue
             else:
-                log.warning("Could not find Firefox PID for PID filter")
+                log.warning("Could not find Firefox PID — will use default find_firefox")
                 return
 
         log.info(f"PID filter: Firefox on {self.display} = PID {target_pid}")
