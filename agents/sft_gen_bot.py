@@ -204,9 +204,14 @@ def _parse_jsonl(content):
         line = line.strip()
         if not line:
             continue
-        # Split concatenated JSON objects on }{
-        if line.count('}{') > 0 and line.startswith('{'):
-            expanded.extend(line.replace('}{', '}\n{').split('\n'))
+        # Split concatenated JSON objects — handles }{ and }, { and }  {
+        if line.startswith('{') or line.startswith('['):
+            # Strip leading [ and trailing ] for JSON arrays
+            if line.startswith('[') and line.endswith(']'):
+                line = line[1:-1]
+            import re as _re
+            line = _re.sub(r'\}\s*,?\s*\{', '}\n{', line)
+            expanded.extend(line.split('\n'))
         else:
             expanded.append(line)
 
