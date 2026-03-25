@@ -138,7 +138,20 @@ class SFTTracker:
             try:
                 if os.path.exists(self.state_file):
                     with open(self.state_file) as f:
-                        return json.load(f)
+                        raw = f.read()
+                    try:
+                        state = json.loads(raw)
+                        # Ensure all keys exist
+                        for k in ('completed', 'in_progress', 'failed'):
+                            if k not in state:
+                                state[k] = {}
+                        return state
+                    except json.JSONDecodeError:
+                        # Corrupted file — backup and start fresh
+                        import shutil
+                        backup = self.state_file + '.corrupt'
+                        shutil.copy2(self.state_file, backup)
+                        print(f"[SFTTracker] Corrupt tracker — backed up to {backup}")
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
         state = {
