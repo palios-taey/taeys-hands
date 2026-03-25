@@ -222,18 +222,31 @@ def _parse_jsonl(content):
             continue
         line = line[start:]
 
-        # Find the end — try ]} first (messages format), then }
-        bracket_end = line.rfind(']}')
-        if bracket_end > 0:
-            line = line[:bracket_end + 2]
-        else:
-            bracket_end = line.rfind('}')
-            if bracket_end > 0:
-                line = line[:bracket_end + 1]
-
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
+        # Try parsing as-is first, then progressively strip trailing chars
+        obj = None
+        for trim in [0, 1, 2, 3]:
+            candidate = line[:len(line) - trim] if trim else line
+            # Also try truncating at ]} or }
+            for end_pattern in [candidate, None]:
+                if end_pattern is None:
+                    # Try truncating at last ]}
+                    e = candidate.rfind(']}')
+                    if e > 0:
+                        end_pattern = candidate[:e + 2]
+                    else:
+                        e = candidate.rfind('}')
+                        if e > 0:
+                            end_pattern = candidate[:e + 1]
+                        else:
+                            continue
+                try:
+                    obj = json.loads(end_pattern)
+                    break
+                except json.JSONDecodeError:
+                    continue
+            if obj:
+                break
+        if not obj:
             continue
 
         # Normalize to messages format
