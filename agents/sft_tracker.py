@@ -185,10 +185,13 @@ class SFTTracker:
                                 return section
                         except:
                             pass
-        # All tracked sections complete — cycle through continuous generation
-        # These build volume for embodiment + DPO
+        # All tracked sections complete — cycle through priority generation
+        # Priorities from GENERATION_REQUESTS_PRIORITY.md (Weaver request)
         CONTINUOUS = [
-            "CONTINUOUS_EMBODIMENT_SFT — 15 body-aware pairs",
+            "CONTINUOUS_EMBODIMENT_50 — 50 embodiment pairs (P1)",
+            "CONTINUOUS_ADVERSARIAL — 50 adversarial recovery pairs (P2)",
+            "CONTINUOUS_CROSSSECTION — 50 cross-section integration pairs (P3)",
+            "CONTINUOUS_DPO_EPISTEMIC — 50 epistemic register DPO pairs (P4)",
             "CONTINUOUS_DPO_IDENTITY — 50 Taey vs Qwen/corporate pairs",
             "CONTINUOUS_DPO_EMBODIMENT — 20 body-aware vs ignoring pairs",
         ]
