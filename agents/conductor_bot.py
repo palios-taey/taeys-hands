@@ -447,6 +447,31 @@ class ConductorBot:
             log.error(f"wait_for_response error: {e}")
             return False
 
+    def _check_display_health(self) -> bool:
+        """Verify display, Firefox, and AT-SPI bus are alive."""
+        # Check Firefox process
+        pid_file = f'/tmp/firefox_pid_{self.display}'
+        try:
+            with open(pid_file) as f:
+                ff_pid = int(f.read().strip())
+            os.kill(ff_pid, 0)  # Check process exists
+        except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+            log.error(f"Firefox not running on {self.display}")
+            return False
+
+        # Check AT-SPI bus file exists and is non-empty
+        bus_file = f'/tmp/a11y_bus_{self.display}'
+        try:
+            with open(bus_file) as f:
+                bus = f.read().strip()
+            if not bus:
+                log.error(f"AT-SPI bus file empty for {self.display}")
+                return False
+        except FileNotFoundError:
+            pass  # Shared bus mode — no bus file is OK
+
+        return True
+
     def run(self):
         """Main loop: pull tasks, execute, report. Runs until max_cycles or forever."""
         log.info(f"Starting ConductorBot: platform={self.platform}, "
@@ -457,6 +482,15 @@ class ConductorBot:
         while True:
             if self.max_cycles > 0 and self.cycle_count >= self.max_cycles:
                 log.info(f"Reached max cycles ({self.max_cycles}). Stopping.")
+                break
+
+            # Health check before pulling tasks
+            if consecutive_errors > 0 and not self._check_display_health():
+                log.error("Display health check failed — halting.")
+                self.report_error(
+                    {"task_id": "health_check"},
+                    f"Display {self.display} unhealthy (Firefox or AT-SPI bus dead)"
+                )
                 break
 
             # Pull task
