@@ -357,13 +357,15 @@ class ConductorBot:
         """Wait for response using hmm_bot's proven polling (123K enrichments)."""
         try:
             import agents.hmm_bot as bot
-            # Set PID filter for this display
+            # Set PID filter and clear caches for this display
             pid_file = f'/tmp/firefox_pid_{self.display}'
             try:
                 with open(pid_file) as f:
                     bot._our_firefox_pid = int(f.read().strip())
             except (FileNotFoundError, ValueError):
                 pass
+            bot._cached_firefox.clear()
+            bot._cached_doc.clear()
             return bot.wait_for_response(self.platform, timeout=timeout)
         except Exception as e:
             log.error(f"wait_for_response error: {e}")
