@@ -30,23 +30,35 @@ SUPPORTED_PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
 
 def _notify_death(display, reason):
-    """Notify via Redis that a bot's display died."""
+    """Notify bot death via Redis AND tmux injection to Mira."""
+    import socket as _socket
+    host = _socket.gethostname()
+    msg = f"[BOT_DEATH] {host}:{display} — {reason}"
+
+    # 1. Redis inbox (for hook-based delivery)
     try:
         import redis as _r
         r = _r.Redis(host=os.environ.get('REDIS_HOST', '192.168.100.10'),
                      port=6379, decode_responses=True, socket_timeout=5)
-        import json as _json, socket
-        msg = _json.dumps({
-            'type': 'BOT_DEATH',
-            'display': display,
-            'host': socket.gethostname(),
-            'reason': reason,
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-        })
-        r.lpush('taey:claude:inbox', msg)
-        log.info(f"Notified death: {display} — {reason}")
-    except Exception as e:
-        log.warning(f"Could not notify death: {e}")
+        import json as _json
+        r.lpush('taey:claude:inbox', _json.dumps({
+            'type': 'BOT_DEATH', 'display': display, 'host': host,
+            'reason': reason, 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        }))
+    except Exception:
+        pass
+
+    # 2. Direct tmux injection to Mira (works even when Claude is idle)
+    try:
+        subprocess.run(
+            ['ssh', '-o', 'ConnectTimeout=3', 'mira@10.0.0.163',
+             f'tmux send-keys -t treasurer "{msg}" Enter'],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+    log.info(f"Notified death: {display} — {reason}")
 
 
 SFT_PACKAGE = '/tmp/sft_package.md'
