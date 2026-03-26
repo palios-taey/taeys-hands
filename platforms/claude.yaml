@@ -83,6 +83,7 @@ element_filter:
       - "Upgrade to"
       - ", Settings"                 # "Jesse LaRose, Settings" button
       - "Get apps and extensions"
+      - "Claude's choice"            # prompt suggestion
     roles:
       - separator
       - document web
@@ -98,9 +99,27 @@ element_map:
     name: "Toggle menu"
     role: push button
   model_selector:
-    name_pattern: "* Extended"
+    name_contains: ["Opus 4.6 Extended", "Sonnet 4.6 Extended", "Sonnet 4.6", "Haiku 4.5"]
     role: push button
-    # Also matches: "Opus 4.6 Extended", "Sonnet 4.6", etc.
+  # Model dropdown items
+  model_opus:
+    name_contains: "Opus 4.6 Most capable"
+    role: push button
+  model_sonnet:
+    name_contains: "Sonnet 4.6 Most efficient"
+    role: push button
+  model_haiku:
+    name_contains: "Haiku 4.5 Fastest"
+    role: push button
+  model_sonnet_extended:
+    name: "Sonnet 4.6 Extended"
+    role: push button
+  model_extended_thinking:
+    name_contains: "Extended thinking"
+    role: push button
+  model_more:
+    name: "More models"
+    role: push button
   copy_button:
     name_contains: "Copy"
     role_contains: button
@@ -114,6 +133,18 @@ element_map:
   prompt_tab:
     name_contains: ["Write", "Learn", "Code", "Life stuff", "From Drive"]
     role: page tab
+  open_sidebar:
+    name: "Open sidebar"
+    role: push button
+  incognito:
+    name_contains: "Use incognito"
+    role: push button
+  send_button:
+    name: "Send message"
+    role: push button
+  scroll_to_bottom:
+    name: "Scroll to bottom"
+    role: push button
 
 sidebar_nav:
   - { name: "Home", role: link }
