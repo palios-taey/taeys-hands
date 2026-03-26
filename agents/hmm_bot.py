@@ -910,20 +910,12 @@ def attach_file(platform: str, file_path: str) -> bool:
     # until a file dialog appears. Handles menu reordering gracefully.
     if platform == 'chatgpt':
         btn = None
-        for attempt in range(2):
-            doc = get_doc(platform, force_refresh=True)
-            if not doc:
-                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/2...")
-                time.sleep(3)
-                continue
+        doc = get_doc(platform, force_refresh=True)
+        if doc:
             from tools.attach import _get_attach_button_coords as get_attach_button_coords
             btn = get_attach_button_coords(doc, platform=platform)
-            if btn:
-                break
-            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/2...")
-            time.sleep(3)
         if not btn:
-            logger.error(f"[{platform}] Attach button not found after 2 retries")
+            logger.error(f"[{platform}] Attach button not found")
             return False
 
         # Click attach button and walk dropdown items looking for file dialog
