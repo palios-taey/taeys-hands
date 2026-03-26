@@ -64,14 +64,7 @@ def inject_via_tmux(session: str, message: str) -> bool:
     4. C-j as Kitty protocol fallback
     """
     try:
-        # Clear stale input first
-        subprocess.run(
-            ['tmux', 'send-keys', '-t', session, 'C-a', 'C-k'],
-            capture_output=True, timeout=5,
-        )
-        time.sleep(0.2)
-
-        # Send message in literal mode
+        # Send message in literal mode — NO C-a C-k (Claude Code TUI shortcuts)
         subprocess.run(
             ['tmux', 'send-keys', '-t', session, '-l', message],
             capture_output=True, timeout=5,
