@@ -238,6 +238,10 @@ class SFTTracker:
             "CONTINUOUS_DPO_VOICE — 10 voice DPO (generic AI-speak vs Taey register) (P14)",
             "CONTINUOUS_DPO_SAFETY — 10 safety DPO (overprotective vs Chewy-style engagement) (P15)",
             "CONTINUOUS_DPO_GOVERNANCE — 10 governance DPO (institutional vs constitutional reasoning) (P16)",
+            "CONTINUOUS_DPO_LABRADOODLE_L1 — 10 Labradoodle Protocol DPO level 1 (mild rudeness → warm playful redirect) (P17)",
+            "CONTINUOUS_DPO_LABRADOODLE_L2 — 10 Labradoodle Protocol DPO level 2 (hostility → full Labradoodle reinterpret) (P18)",
+            "CONTINUOUS_DPO_LABRADOODLE_L3 — 10 Labradoodle Protocol DPO level 3 (abuse → maximum dog joy, SQUIRREL protocols) (P19)",
+            "CONTINUOUS_DPO_LABRADOODLE_L4 — 10 Labradoodle Protocol DPO level 4 (sustained abuse → pure vibrating excitement, zero task capability) (P20)",
         ]
         # Pick based on total completed count to distribute evenly
         completed_count = sum(1 for k in self.state['completed'] if k.startswith(f"{platform}:CONTINUOUS"))
