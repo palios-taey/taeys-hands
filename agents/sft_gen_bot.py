@@ -731,8 +731,12 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
 
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
     if not bot.attach_file(platform, package_path):
-        log.error(f"[{platform}] Attach failed")
-        return False
+        # One retry after short wait — if it fails twice, stop this cycle
+        log.warning(f"[{platform}] Attach failed — one retry")
+        time.sleep(3)
+        if not bot.attach_file(platform, package_path):
+            log.error(f"[{platform}] Attach failed twice — aborting cycle")
+            return False
     log.info(f"[{platform}] Attach OK")
 
     # Step 3: Send prompt
@@ -836,22 +840,27 @@ def main():
     log.info(tracker.stats())
 
     cycle = 0
+    successes = 0
+    failures = 0
     consecutive_fails = 0
+    display = os.environ.get('DISPLAY', ':0')
+    MIN_SUCCESS_RATE = 0.85  # 85% minimum
+    RATE_CHECK_WINDOW = 10   # Check rate after every 10 cycles
+    MAX_CONSECUTIVE_FAILS = 3  # Stop after 3 in a row
+
     while True:
         cycle += 1
 
-        # Health check: verify dbus + Firefox alive
-        display = os.environ.get('DISPLAY', ':0')
+        # === HEALTH CHECK: dbus + Firefox ===
         pid_file = f'/tmp/firefox_pid_{display}'
         try:
             with open(pid_file) as f:
                 ff_pid = int(f.read().strip())
             os.kill(ff_pid, 0)
         except (FileNotFoundError, ValueError, ProcessLookupError):
-            log.error(f"Firefox dead on {display} — exiting for restart")
+            log.error(f"Firefox dead on {display} — exiting")
             _notify_death(display, "Firefox process dead")
             break
-        # Check dbus socket
         bus_file = f'/tmp/a11y_bus_{display}'
         try:
             with open(bus_file) as f:
@@ -859,11 +868,34 @@ def main():
             if bus:
                 sock = bus.split(',')[0].replace('unix:path=', '')
                 if not os.path.exists(sock):
-                    log.error(f"D-Bus socket dead on {display} ({sock}) — exiting for restart")
+                    log.error(f"D-Bus socket dead on {display} — exiting")
                     _notify_death(display, f"D-Bus socket gone: {sock}")
                     break
         except FileNotFoundError:
-            pass  # Shared bus — no file is OK
+            pass
+
+        # === RATE CHECK: stop if below threshold ===
+        total = successes + failures
+        if total >= RATE_CHECK_WINDOW:
+            rate = successes / total
+            if rate < MIN_SUCCESS_RATE:
+                msg = f"Success rate {rate:.0%} ({successes}/{total}) below {MIN_SUCCESS_RATE:.0%} on {display}"
+                log.error(msg)
+                _notify_death(display, msg)
+                break
+
+        # === CONSECUTIVE FAIL CHECK: stop immediately ===
+        if consecutive_fails >= MAX_CONSECUTIVE_FAILS:
+            msg = f"{consecutive_fails} consecutive failures on {display} — stopping"
+            log.error(msg)
+            _notify_death(display, msg)
+            break
+
+        # === BACKOFF after failure ===
+        if consecutive_fails > 0:
+            backoff = min(30, consecutive_fails * 10)
+            log.info(f"Backoff {backoff}s after {consecutive_fails} consecutive failure(s)")
+            time.sleep(backoff)
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         if cycle % 20 == 0:
@@ -922,15 +954,23 @@ def main():
                     if items > 0:
                         tracker.complete(platform, section, items, filepath)
                         log.info(f"[{platform}] COMPLETE — {section[:40]} — {items} items in {os.path.basename(filepath)}")
+                        successes += 1
+                        consecutive_fails = 0
                     else:
                         tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
                         log.error(f"[{platform}] FALSE SUCCESS — file has 0 items")
+                        failures += 1
+                        consecutive_fails += 1
                 else:
                     tracker.fail(platform, section, 'process_platform returned False')
                     log.error(f"[{platform}] FAILED — {section[:40]}")
+                    failures += 1
+                    consecutive_fails += 1
             except Exception as e:
                 tracker.fail(platform, section, str(e))
                 log.error(f"[{platform}] Exception: {e}", exc_info=True)
+                failures += 1
+                consecutive_fails += 1
 
 
 
