@@ -751,12 +751,8 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
 
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
     if not bot.attach_file(platform, package_path):
-        # One retry after short wait — if it fails twice, stop this cycle
-        log.warning(f"[{platform}] Attach failed — one retry")
-        time.sleep(3)
-        if not bot.attach_file(platform, package_path):
-            log.error(f"[{platform}] Attach failed twice — aborting cycle")
-            return False
+        log.error(f"[{platform}] Attach failed")
+        return False
     log.info(f"[{platform}] Attach OK")
 
     # Step 3: Send prompt
