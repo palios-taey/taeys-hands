@@ -90,12 +90,15 @@ element_filter:
       - "Close sidebar"
       - "Turn on temporary chat"
       - "Start a group chat"
+      - "Start a group chat"
       - "Dictate button"
       - "Start Voice"
       - "Profile image"
       - "ChatGPT"                    # document web root
       - "Chat history"              # sidebar landmark container
       - "Image attachment"          # decorative images
+      - "Skip to content"           # accessibility skip link
+      - "What's on the agenda today?"  # home page heading
     # Substring matches — exclude if name contains any of these
     name_contains:
       - "Open conversation options"
@@ -107,6 +110,9 @@ element_filter:
     roles:
       - separator
       - document web
+      - landmark
+      - heading
+      - section
 
 
 # ─── Known Elements ─────────────────────────────────────────────────
@@ -117,7 +123,7 @@ element_map:
     role: entry
     states_include: [editable]
   model_selector:
-    name_pattern: "Model selector, current model is *"
+    name_contains: "Model selector"
     role: push button
   attach_trigger:
     name: "Add files and more"
@@ -137,6 +143,76 @@ element_map:
   extended_pro:
     name: "Extended Pro"
     role: push button
+  temporary_chat:
+    name_contains: "Turn on temporary chat"
+    role: push button
+  search_chats:
+    name_contains: "Search chats"
+    role: push button
+  send_button:
+    name: "Send prompt"
+    role: push button
+  # Model dropdown items (visible in AT-SPI since ~March 2026)
+  model_auto:
+    name: "Auto Decides how long to think"
+    role: push button
+  model_instant:
+    name: "Instant For everyday chats"
+    role: push button
+  model_thinking:
+    name: "Thinking For complex questions"
+    role: push button
+  model_pro:
+    name: "Pro Research-grade intelligence"
+    role: push button
+  model_configure:
+    name: "Configure..."
+    role: push button
+  # Thinking time options (shown after clicking Extended Pro button)
+  thinking_standard:
+    name: "Standard"
+    role: push button
+  thinking_extended:
+    name: "Extended"
+    role: push button
+  thinking_pro_button:
+    name: "Pro"
+    role: push button
+  # Tools dropdown items (from "Add files and more" button)
+  tool_upload:
+    name_contains: "Add photos"
+    role_contains: button
+  tool_google_drive:
+    name: "Add from Google Drive"
+    role_contains: button
+  tool_deep_research:
+    name: "Deep research"
+    role_contains: item
+  tool_web_search:
+    name: "Web search"
+    role_contains: item
+  tool_study:
+    name: "Study and learn"
+    role_contains: item
+  tool_more:
+    name: "More"
+    role_contains: item
+  tool_recent_files:
+    name: "Recent files"
+    role_contains: item
+  # More submenu items (hover over "More" to reveal)
+  tool_github:
+    name: "GitHub"
+    role_contains: item
+  tool_agent_mode:
+    name: "Agent mode"
+    role_contains: item
+  tool_gmail:
+    name: "Gmail"
+    role_contains: item
+  tool_quizzes:
+    name: "Quizzes"
+    role_contains: item
 
 # ─── Known Sidebar Navigation ───────────────────────────────────────
 # Whitelist of sidebar links/buttons. These always pass through.
