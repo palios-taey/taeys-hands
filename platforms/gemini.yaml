@@ -137,6 +137,32 @@ element_map:
   notebooklm_item:
     name: "NotebookLM"
     role: menu item
+  # Mode picker items
+  mode_fast:
+    name: "Fast Answers quickly"
+    role_contains: item
+  mode_thinking:
+    name: "Thinking Solves complex problems"
+    role_contains: item
+  mode_pro:
+    name_contains: "Pro Advanced math"
+    role_contains: item
+  # Tool toggle items (from Tools dropdown)
+  tool_deep_think:
+    name: "Deep think"
+    role_contains: item
+  tool_deep_research:
+    name: "Deep research"
+    role_contains: item
+  tool_canvas:
+    name: "Canvas"
+    role_contains: item
+  tool_create_image:
+    name_contains: "Create image"
+    role_contains: item
+  tool_deselect_deep_think:
+    name: "Deselect Deep think"
+    role_contains: button
 
 sidebar_nav:
   - { name: "New chat", role: link }
