@@ -141,7 +141,7 @@ USERJS
     if [ "$SKIP_BOTS" = "false" ]; then
         echo "  Starting bot..."
         tmux send-keys -t "$tmux_session" \
-            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS PYTHONPATH=$EMBEDDING_PATH python3 agents/hmm_bot.py --platforms $platform --cycles 0" Enter
+            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=10.0.0.163 PYTHONPATH=$EMBEDDING_PATH python3 agents/hmm_bot.py --platforms $platform --cycles 0" Enter
         echo "  Bot started in tmux session: $tmux_session"
     fi
 done
