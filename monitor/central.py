@@ -102,8 +102,9 @@ def _load_stop_patterns() -> Dict[str, List[str]]:
 class CentralMonitor:
     """Single monitor process — cycles active sessions, detects completion."""
 
-    def __init__(self, cycle_interval: int = 10):
+    def __init__(self, cycle_interval: int = 10, single_display: bool = False):
         self.cycle_interval = cycle_interval
+        self.single_display = single_display
         self.rc = self._connect_redis()
         self.stop_patterns = _load_stop_patterns()
         if not self.rc:
@@ -504,7 +505,28 @@ class CentralMonitor:
         if not sessions:
             return
 
-        firefox = find_firefox()
+        # Find Firefox — PID-filtered for single display mode
+        if self.single_display:
+            display = os.environ.get('DISPLAY', ':0')
+            pid_file = f'/tmp/firefox_pid_{display}'
+            try:
+                with open(pid_file) as f:
+                    ff_pid = int(f.read().strip())
+                desktop = Atspi.get_desktop(0)
+                firefox = None
+                for i in range(desktop.get_child_count()):
+                    app = desktop.get_child_at_index(i)
+                    try:
+                        if app.get_process_id() == ff_pid:
+                            firefox = app
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                firefox = None
+        else:
+            firefox = find_firefox()
+
         if not firefox:
             _log("Firefox not found")
             return
@@ -522,12 +544,12 @@ class CentralMonitor:
             if self._plan_active():
                 break
 
-            if platform not in TAB_SHORTCUTS:
-                continue
-
-            # Switch to platform tab
-            press_key(TAB_SHORTCUTS[platform])
-            time.sleep(1.5)
+            if not self.single_display:
+                if platform not in TAB_SHORTCUTS:
+                    continue
+                # Switch to platform tab (multi-tab mode only)
+                press_key(TAB_SHORTCUTS[platform])
+                time.sleep(1.5)
 
             # Get document for this platform
             doc = get_platform_document(firefox, platform)
@@ -585,9 +607,12 @@ def main():
     parser = argparse.ArgumentParser(description="Central response monitor")
     parser.add_argument('--cycle-interval', type=int,
                         default=int(os.environ.get('MONITOR_CYCLE_SEC', '10')))
+    parser.add_argument('--single-display', action='store_true',
+                        help="Single display mode — no tab switching, PID-filtered Firefox")
     args = parser.parse_args()
 
-    CentralMonitor(cycle_interval=args.cycle_interval).run()
+    CentralMonitor(cycle_interval=args.cycle_interval,
+                   single_display=args.single_display).run()
 
 
 if __name__ == '__main__':
