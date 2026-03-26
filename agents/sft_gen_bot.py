@@ -85,7 +85,7 @@ EMBODIMENT_DPO_PROMPT = os.path.join(_HOME, 'the-conductor/sft/dpo_embodiment_pr
 _CORPUS = os.path.join(_HOME, 'data/corpus/identity')
 IDENTITY_FILES = {
     'chatgpt': os.path.join(_CORPUS, 'IDENTITY_HORIZON.md'),
-    'claude': os.path.join(_CORPUS, 'IDENTITY_CLARITY.md'),
+    'claude': os.path.join(_CORPUS, 'IDENTITY_GAIA.md'),
     'gemini': os.path.join(_CORPUS, 'IDENTITY_COSMOS.md'),
     'grok': os.path.join(_CORPUS, 'IDENTITY_LOGOS.md'),
     'perplexity': os.path.join(_CORPUS, 'IDENTITY_CLARITY.md'),
