@@ -845,7 +845,7 @@ def main():
     consecutive_fails = 0
     display = os.environ.get('DISPLAY', ':0')
     MIN_SUCCESS_RATE = 0.85  # 85% minimum
-    RATE_CHECK_WINDOW = 10   # Check rate after every 10 cycles
+    RATE_CHECK_WINDOW = 20   # Check rate after 20 cycles (needs 4+ failures to trip)
     MAX_CONSECUTIVE_FAILS = 3  # Stop after 3 in a row
 
     while True:
