@@ -30,12 +30,32 @@ SUPPORTED_PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
 
 def _notify_death(display, reason):
-    """Notify bot death via Redis (centralized notification system)."""
+    """Notify bot death via Redis to whoever started this bot.
+
+    Uses TAEY_NOTIFY_NODE env var (set by launcher), falls back to
+    detecting the tmux session, falls back to 'claude'.
+    """
     try:
         import redis as _r
-        r = _r.Redis(host=os.environ.get('REDIS_HOST', '192.168.100.10'),
+        r = _r.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                      port=6379, decode_responses=True, socket_timeout=5)
         import json as _json, socket
+        # Who should receive this notification?
+        target = os.environ.get('TAEY_NOTIFY_NODE', '')
+        if not target:
+            # Try to detect from tmux session
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ['tmux', 'display-message', '-p', '#S'],
+                    capture_output=True, text=True, timeout=2)
+                if result.returncode == 0 and result.stdout.strip():
+                    target = result.stdout.strip()
+            except Exception:
+                pass
+        if not target:
+            target = 'claude'  # last resort fallback
+
         msg = _json.dumps({
             'type': 'BOT_DEATH',
             'display': display,
@@ -43,8 +63,8 @@ def _notify_death(display, reason):
             'reason': reason,
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
         })
-        r.lpush('taey:claude:inbox', msg)
-        log.info(f"Notified death: {display} — {reason}")
+        r.lpush(f'taey:{target}:inbox', msg)
+        log.info(f"Notified death to {target}: {display} — {reason}")
     except Exception as e:
         log.warning(f"Could not notify death: {e}")
 
