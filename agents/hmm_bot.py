@@ -999,19 +999,19 @@ def attach_file(platform: str, file_path: str) -> bool:
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
         btn = None
-        for attempt in range(8):
+        for attempt in range(2):
             doc = get_doc(platform, force_refresh=True)
             if not doc:
-                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
+                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/2...")
                 time.sleep(3)
                 continue
             btn = get_attach_button_coords(doc, platform=platform)
             if btn:
                 break
-            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
+            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/2...")
             time.sleep(3)
         if not btn:
-            logger.error(f"[{platform}] Attach button not found after 8 retries")
+            logger.error(f"[{platform}] Attach button not found after 2 retries")
             return False
 
         btn_obj = btn.get('atspi_obj')
@@ -1076,19 +1076,19 @@ def attach_file(platform: str, file_path: str) -> bool:
             inp.press_key('Escape')  # Dismiss any popup that appeared
             time.sleep(0.3)
         btn = None
-        for attempt in range(8):
+        for attempt in range(2):
             doc = get_doc(platform, force_refresh=True)
             if not doc:
-                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/8...")
+                logger.info(f"[{platform}] AT-SPI doc not ready, retry {attempt+1}/2...")
                 time.sleep(3)
                 continue
             btn = get_attach_button_coords(doc, platform=platform)
             if btn:
                 break
-            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/8...")
+            logger.info(f"[{platform}] Attach button not found, retry {attempt+1}/2...")
             time.sleep(3)
         if not btn:
-            logger.error(f"[{platform}] Attach button not found after 8 retries")
+            logger.error(f"[{platform}] Attach button not found after 2 retries")
             return False
 
         # Two-pass attach: matches tools/attach.py _try_click_then_dialog()
