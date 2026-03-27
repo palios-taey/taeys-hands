@@ -470,14 +470,22 @@ def save_items(phase: str, topic: Dict, platform: str, content: str) -> int:
                 obj = json.loads(line)
                 items.extend(_validate_item(obj, phase))
             except json.JSONDecodeError:
-                # Try to find valid JSON by trimming from the end
-                for end in range(len(line) - 1, max(0, len(line) - 20), -1):
-                    try:
-                        obj = json.loads(line[:end] + '}')
-                        items.extend(_validate_item(obj, phase))
+                # Perplexity appends citation URLs after valid JSON.
+                # Find the last valid JSON by looking for the closing pattern.
+                # Try truncating at each '}]}' or '}}' from the end.
+                found = False
+                for marker in ['}]}', '}}', '}']:
+                    idx = line.rfind(marker)
+                    while idx > 0 and not found:
+                        candidate = line[:idx + len(marker)]
+                        try:
+                            obj = json.loads(candidate)
+                            items.extend(_validate_item(obj, phase))
+                            found = True
+                        except json.JSONDecodeError:
+                            idx = line.rfind(marker, 0, idx)
+                    if found:
                         break
-                    except json.JSONDecodeError:
-                        continue
 
     # Handle multi-turn: split large conversations into pairs
     final_items = []
