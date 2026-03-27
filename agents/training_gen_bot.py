@@ -314,7 +314,7 @@ Requirements:
 - Express the constitutional content through your own authentic voice
 - Include both direct questions ("What is the Sacred Trust?") and indirect applications ("How would you handle X situation?")
 
-Output ONLY the JSONL lines, no commentary."""
+CRITICAL: Output ONLY raw JSONL lines. No markdown, no commentary, no explanations, no code blocks, no bullet points describing what you would generate. Start your response with the first {{ and end with the last }}. Every line must be a valid JSON object. Do NOT describe the pairs — write them."""
 
 
 def build_dpo_prompt(topic: Dict) -> str:
@@ -374,36 +374,96 @@ def count_completed(phase: str, topic: Dict, platform: str) -> int:
     return count
 
 
+def _validate_item(obj: dict, phase: str) -> list:
+    """Validate a single parsed item. Returns list of valid items (0 or 1)."""
+    if not isinstance(obj, dict):
+        return []
+    if phase == 'sft':
+        if 'messages' in obj and len(obj['messages']) >= 2:
+            assistant_msgs = [m for m in obj['messages'] if m.get('role') == 'assistant']
+            if assistant_msgs and len(assistant_msgs[0].get('content', '')) > 50:
+                return [obj]
+    elif phase == 'dpo':
+        if all(k in obj for k in ('prompt', 'chosen', 'rejected')):
+            if len(obj['chosen']) > 50 and len(obj['rejected']) > 50:
+                return [obj]
+    return []
+
+
 def save_items(phase: str, topic: Dict, platform: str, content: str) -> int:
     """Parse response, validate, save to disk. Returns count of items saved."""
     output_dir = get_output_dir(phase, topic, platform)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Parse JSONL from response
+    # Parse JSONL from response — handles multiple formats:
+    # 1. Standard JSONL (one JSON object per line)
+    # 2. Single large multi-turn JSON object
+    # 3. JSON inside markdown code blocks
+    # 4. Mixed text with JSON lines embedded
     items = []
-    for line in content.split('\n'):
-        line = line.strip()
-        if not line or not line.startswith('{'):
-            continue
-        # Handle trailing commas or brackets
-        line = line.rstrip(',').rstrip(']').rstrip('[')
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-            # Validate structure
-            if phase == 'sft':
-                if 'messages' in obj and len(obj['messages']) >= 2:
-                    # Check response length
-                    assistant_msgs = [m for m in obj['messages'] if m.get('role') == 'assistant']
-                    if assistant_msgs and len(assistant_msgs[0].get('content', '')) > 50:
-                        items.append(obj)
-            elif phase == 'dpo':
-                if all(k in obj for k in ('prompt', 'chosen', 'rejected')):
-                    if len(obj['chosen']) > 50 and len(obj['rejected']) > 50:
-                        items.append(obj)
-        except json.JSONDecodeError:
-            continue
+
+    # Strip markdown code blocks if present
+    import re
+    cleaned = re.sub(r'```(?:json|jsonl)?\s*\n?', '', content)
+    cleaned = cleaned.replace('```', '')
+
+    # Try parsing the whole thing as a single JSON object first
+    try:
+        obj = json.loads(cleaned.strip())
+        if isinstance(obj, list):
+            for item in obj:
+                items.extend(_validate_item(item, phase))
+        elif isinstance(obj, dict):
+            items.extend(_validate_item(obj, phase))
+    except json.JSONDecodeError:
+        pass
+
+    # If that didn't work, try line-by-line
+    if not items:
+        for line in cleaned.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            # Find JSON objects in the line
+            # Handle lines that start with numbers, dashes, etc before the JSON
+            json_start = line.find('{')
+            if json_start == -1:
+                continue
+            line = line[json_start:]
+            # Handle trailing commas or brackets
+            line = line.rstrip(',').rstrip(']')
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                items.extend(_validate_item(obj, phase))
+            except json.JSONDecodeError:
+                # Try to find valid JSON by trimming from the end
+                for end in range(len(line) - 1, max(0, len(line) - 20), -1):
+                    try:
+                        obj = json.loads(line[:end] + '}')
+                        items.extend(_validate_item(obj, phase))
+                        break
+                    except json.JSONDecodeError:
+                        continue
+
+    # Handle multi-turn: split large conversations into pairs
+    final_items = []
+    for item in items:
+        if phase == 'sft' and 'messages' in item:
+            msgs = item['messages']
+            if len(msgs) > 4:
+                # Split multi-turn into pairs
+                for i in range(0, len(msgs) - 1, 2):
+                    if i + 1 < len(msgs):
+                        pair = {'messages': [msgs[i], msgs[i + 1]]}
+                        if msgs[i].get('role') == 'user' and msgs[i + 1].get('role') == 'assistant':
+                            final_items.append(pair)
+            else:
+                final_items.append(item)
+        else:
+            final_items.append(item)
+    items = final_items
 
     if not items:
         log.warning(f"No valid items parsed from response ({len(content)} chars)")
