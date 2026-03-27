@@ -134,12 +134,44 @@ def focus_firefox(timeout: int = 5) -> bool:
 
 
 def switch_to_platform(platform: str) -> bool:
-    """Switch to a platform tab via Alt+N shortcut."""
-    from core.platforms import TAB_SHORTCUTS, URL_PATTERNS
+    """Switch to a platform tab via Alt+N shortcut.
+    Multi-display mode: switches DISPLAY to the platform's dedicated display."""
+    from core.platforms import (TAB_SHORTCUTS, URL_PATTERNS,
+                                get_platform_display, get_platform_firefox_pid)
     from core import atspi
 
     if platform not in URL_PATTERNS:
         return False
+
+    # Multi-display mode: switch DISPLAY and focus the right Firefox window
+    plat_display = get_platform_display(platform)
+    if plat_display:
+        set_display(plat_display)
+        from core.clipboard import set_display as clip_set_display
+        clip_set_display(plat_display)
+
+        # Focus Firefox on that display
+        ff_pid = get_platform_firefox_pid(platform)
+        if ff_pid:
+            try:
+                # Find the Firefox window by PID on the correct display
+                r = subprocess.run(
+                    ['xdotool', 'search', '--pid', str(ff_pid), '--name', ''],
+                    env=_get_env(), capture_output=True, text=True, timeout=5,
+                )
+                wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+                if wids:
+                    subprocess.run(
+                        ['xdotool', 'windowactivate', '--sync', wids[-1]],
+                        env=_get_env(), capture_output=True, timeout=5,
+                    )
+                    time.sleep(0.3)
+                    return True
+            except Exception as e:
+                logger.warning(f"Multi-display focus failed: {e}")
+        # Even without PID, DISPLAY is set correctly
+        return True
+
     if not focus_firefox():
         return False
 

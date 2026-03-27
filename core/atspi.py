@@ -1,15 +1,23 @@
 """AT-SPI desktop and Firefox discovery."""
 
+import json
 import os
 import logging
+import subprocess
+import sys
 
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
-from core.platforms import URL_PATTERNS, _EXTRA_URL_PATTERNS
+from core.platforms import (URL_PATTERNS, _EXTRA_URL_PATTERNS,
+                            get_platform_display, get_platform_bus,
+                            get_platform_firefox_pid)
 
 logger = logging.getLogger(__name__)
+
+# Path to the subprocess scanner script
+_SCANNER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_atspi_subprocess.py')
 
 
 def detect_display() -> str:
@@ -92,11 +100,54 @@ def find_all_firefox(pid: int = None):
     return apps
 
 
+def _subprocess_scan(platform: str, cmd: str = 'find_firefox') -> dict | None:
+    """Run AT-SPI scan as subprocess on the platform's dedicated display."""
+    display = get_platform_display(platform)
+    if not display:
+        return None
+    bus = get_platform_bus(platform)
+    env = {**os.environ, 'DISPLAY': display}
+    if bus:
+        env['AT_SPI_BUS_ADDRESS'] = bus
+        env['DBUS_SESSION_BUS_ADDRESS'] = bus
+    try:
+        r = subprocess.run(
+            [sys.executable, _SCANNER_SCRIPT, cmd, platform],
+            env=env, capture_output=True, text=True, timeout=15,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return json.loads(r.stdout.strip())
+        if r.stderr:
+            logger.warning(f"Subprocess scanner stderr: {r.stderr[:200]}")
+    except Exception as e:
+        logger.error(f"Subprocess scan failed for {platform} on {display}: {e}")
+    return None
+
+
 def find_firefox_for_platform(platform: str, pid: int = None):
     """Find the Firefox instance that has a document matching the given platform.
     Handles multiple Firefox instances (parallel HMM mode).
     If pid is given, restricts search to that process only.
-    Falls back to find_firefox() if only one instance exists."""
+    Falls back to find_firefox() if only one instance exists.
+
+    Multi-display mode: if PLATFORM_DISPLAYS maps this platform to a dedicated
+    display, uses subprocess scanning on that display's AT-SPI bus."""
+    # Multi-display mode: subprocess scan on the platform's display
+    if pid is None and get_platform_display(platform):
+        info = _subprocess_scan(platform, 'find_firefox')
+        if info and info.get('pid'):
+            # We got the PID from the subprocess. Now we need to return an
+            # AT-SPI app object. Since the app is on a different bus, we can't
+            # return a live object. Instead, store the PID and let callers
+            # use subprocess scanning for tree operations too.
+            # Return a sentinel that carries the PID and display info.
+            return _RemoteFirefox(platform, info['pid'],
+                                 get_platform_display(platform),
+                                 info.get('url'))
+        elif info:
+            logger.warning(f"Subprocess found no Firefox for {platform}: {info}")
+        # Fall through to local scan
+
     all_ff = find_all_firefox(pid=pid)
     if not all_ff:
         return None
@@ -112,8 +163,73 @@ def find_firefox_for_platform(platform: str, pid: int = None):
     return None
 
 
+class _RemoteFirefox:
+    """Sentinel for a Firefox on a different display. Carries PID and display
+    info so that callers can use subprocess scanning for tree operations."""
+
+    def __init__(self, platform, pid, display, url=None):
+        self._platform = platform
+        self._pid = pid
+        self._display = display
+        self._url = url
+        self._remote = True  # Flag for callers to detect
+
+    def get_name(self):
+        return 'Firefox'
+
+    def get_process_id(self):
+        return self._pid
+
+    def get_child_count(self):
+        return 0  # Can't traverse remotely
+
+    def get_child_at_index(self, i):
+        return None
+
+
+class _RemoteDocument:
+    """Sentinel for a document on a different display."""
+
+    def __init__(self, platform, url, display):
+        self._platform = platform
+        self._url = url
+        self._display = display
+        self._remote = True
+
+    def get_role_name(self):
+        return 'document web'
+
+    def get_name(self):
+        return self._url or ''
+
+    def get_child_count(self):
+        return 0
+
+    def get_child_at_index(self, i):
+        return None
+
+    def get_document_iface(self):
+        return self
+
+    def get_document_attribute_value(self, attr):
+        if attr == 'DocURL':
+            return self._url
+        return None
+
+    def get_extents(self, coord_type=0):
+        # Return reasonable defaults for chrome_y detection
+        class _Ext:
+            x = 0; y = 120; width = 1920; height = 800
+        return _Ext()
+
+    def get_state_set(self):
+        return None
+
+
 def get_document_url(doc) -> str | None:
     """Extract DocURL from a document element."""
+    if getattr(doc, '_remote', False):
+        return doc._url
     try:
         iface = doc.get_document_iface()
         if iface:
@@ -138,9 +254,13 @@ def detect_platform_from_url(url: str) -> str | None:
 
 
 def get_platform_document(firefox, platform: str):
-    """Find the document web element for a platform by URL matching."""
+    """Find the document web element for a platform by URL matching.
+    For _RemoteFirefox objects, returns a _RemoteDocument sentinel."""
     if not firefox:
         return None
+    if getattr(firefox, '_remote', False):
+        # Remote Firefox — return a sentinel with the URL
+        return _RemoteDocument(firefox._platform, firefox._url, firefox._display)
 
     candidates = []
 
