@@ -352,6 +352,89 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
     if not firefox:
         result['error'] = "Firefox not found in AT-SPI tree"
         return result
+
+    # Load YAML config early — needed for both local and remote scanning
+    try:
+        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as _f:
+            _pcfg = yaml.safe_load(_f) or {}
+    except Exception:
+        _pcfg = {}
+
+    # Remote Firefox (multi-display mode): use subprocess scanner
+    if getattr(firefox, '_remote', False):
+        scan_result = atspi._subprocess_scan(platform, 'scan')
+        if not scan_result or scan_result.get('error'):
+            result['error'] = scan_result.get('error', 'Subprocess scan failed') if scan_result else 'Subprocess scan failed'
+            return result
+
+        url = scan_result.get('url')
+        result['url'] = url
+        elements_json = scan_result.get('elements', [])
+
+        # Truncate long names
+        for e in elements_json:
+            name = e.get('name', '')
+            if len(name) > 200:
+                e['name'] = name[:200] + '...'
+
+        pre_filter = len(elements_json)
+        noise_removed = 0
+        if _pcfg.get('element_filter') or _pcfg.get('element_map'):
+            elements_json, new_elements = _apply_element_filter(elements_json, _pcfg)
+            noise_removed = pre_filter - len(elements_json)
+            if new_elements:
+                result['new_elements'] = [{'name': e.get('name', ''), 'role': e.get('role', ''),
+                                           'x': e.get('x'), 'y': e.get('y')} for e in new_elements]
+        else:
+            noise = _pcfg.get('inspect_noise', {})
+            if noise:
+                _excl = noise.get('exclude_name_contains', [])
+                elements_json = [e for e in elements_json if not any(p in e.get('name', '') for p in _excl)]
+            noise_removed = pre_filter - len(elements_json)
+
+        copy_count = scan_result.get('copy_button_count', 0)
+        result['state']['copy_button_count'] = copy_count
+        result['state']['element_count'] = len(elements_json)
+        result['state']['total_before_filter'] = scan_result.get('total', pre_filter)
+        if noise_removed:
+            result['state']['noise_removed'] = noise_removed
+        result['controls'] = elements_json
+
+        # Attachment detection (from elements_json directly)
+        attached = _detect_attachments(elements_json, elements_json)
+        if attached:
+            result['attachments'] = attached
+
+        # Structure change detection
+        sc = _check_structure_change(platform, elements_json, redis_client)
+        if sc:
+            result['structure_change'] = sc
+
+        # Store in Redis
+        if redis_client:
+            redis_client.set(node_key(f"inspect:{platform}"), json.dumps({
+                'url': url, 'state': result['state'],
+                'controls': elements_json, 'timestamp': time.time(),
+            }))
+
+        result['multi_display'] = True
+        result['display'] = firefox._display
+        result['success'] = True
+        result['atspi_note'] = "Menu items (Back, Forward, Reload) are browser chrome - ignore them."
+
+        # Plan validation
+        if plan and plan.get('required_state'):
+            req = plan['required_state']
+            cur = plan.get('current_state')
+            pr = {'plan_id': plan_id, 'required_state': req,
+                  'current_state': cur, 'status': plan.get('status', 'unknown')}
+            if cur is None:
+                pr['WARNING'] = "PLAN EXISTS but current_state NOT SET. Read elements, call taey_plan(update)."
+            result['plan_requirements'] = pr
+
+        return result
+
+    # Local Firefox (same display): use direct AT-SPI
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         result['error'] = f"Could not find {platform} document"
@@ -359,13 +442,6 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
 
     url = atspi.get_document_url(doc)
     result['url'] = url
-
-    # Load YAML config early — fence_after needed for tree traversal
-    try:
-        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as _f:
-            _pcfg = yaml.safe_load(_f) or {}
-    except Exception:
-        _pcfg = {}
 
     chrome_y = detect_chrome_y(doc)
     fences = _pcfg.get('fence_after', [])
