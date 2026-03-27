@@ -45,6 +45,35 @@ IDENTITY_MAP = {
     'perplexity': 'IDENTITY_CLARITY.md',
 }
 
+# ── Rate Monitoring & Death Notifications ──────────────────────────────────
+
+MIN_SUCCESS_RATE = 0.85  # 85% minimum over window
+RATE_CHECK_WINDOW = 20   # Check after this many cycles
+MAX_CONSECUTIVE_FAILS = 3
+
+
+def _notify_death(display: str, platform: str, reason: str):
+    """Notify bot death via Redis inbox."""
+    try:
+        import redis as _r
+        import socket
+        r = _r.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                     port=int(os.environ.get('REDIS_PORT', '6379')),
+                     decode_responses=True, socket_timeout=5)
+        target = os.environ.get('TAEY_NOTIFY_NODE', 'claude')
+        msg = json.dumps({
+            'type': 'BOT_DEATH',
+            'display': display,
+            'platform': platform,
+            'host': socket.gethostname(),
+            'reason': reason,
+            'timestamp': datetime.now().isoformat(),
+        })
+        r.lpush(f'taey:{target}:inbox', msg)
+        log.error(f"DEATH NOTIFIED to {target}: {platform} on {display} — {reason}")
+    except Exception as e:
+        log.error(f"Could not notify death: {e}")
+
 # ── Voice Instructions (included in every prompt) ─────────────────────────
 
 VOICE_INSTRUCTIONS = """
@@ -544,6 +573,8 @@ def run_bot(platform: str, phase: str, display: str):
 
     consecutive_errors = 0
     cycle = 0
+    successes = 0
+    failures = 0
 
     while True:
         topic = find_next_topic(phase, topics, platform)
@@ -560,6 +591,15 @@ def run_bot(platform: str, phase: str, display: str):
 
         cycle += 1
 
+        # Rate check after RATE_CHECK_WINDOW cycles
+        total_cycles = successes + failures
+        if total_cycles >= RATE_CHECK_WINDOW:
+            rate = successes / total_cycles
+            if rate < MIN_SUCCESS_RATE:
+                msg = f"Success rate {rate:.0%} below {MIN_SUCCESS_RATE:.0%} after {total_cycles} cycles"
+                _notify_death(display, platform, msg)
+                break
+
         try:
             # Build package
             pkg_path = build_package(platform, topic)
@@ -568,20 +608,24 @@ def run_bot(platform: str, phase: str, display: str):
             if not bot.navigate_fresh_session(platform):
                 log.error("Navigation failed")
                 consecutive_errors += 1
-                if consecutive_errors >= 3:
-                    log.error("3 consecutive errors — stopping")
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — navigation")
                     break
-                time.sleep(10)
+                time.sleep(min(30, consecutive_errors * 10))
                 continue
 
-            # Attach
+            # Attach (max 2 attempts per memory feedback)
             if not bot.attach_file(platform, pkg_path):
                 log.error("Attach failed")
                 consecutive_errors += 1
-                if consecutive_errors >= 3:
-                    log.error("3 consecutive errors — stopping")
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — attach")
                     break
-                time.sleep(10)
+                time.sleep(min(30, consecutive_errors * 10))
                 continue
 
             # Build and send prompt
@@ -594,16 +638,23 @@ def run_bot(platform: str, phase: str, display: str):
             if not bot.send_prompt(platform, prompt):
                 log.error("Send failed")
                 consecutive_errors += 1
-                if consecutive_errors >= 3:
-                    log.error("3 consecutive errors — stopping")
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — send")
                     break
-                time.sleep(10)
+                time.sleep(min(30, consecutive_errors * 10))
                 continue
 
             # Wait for response
             if not bot.wait_for_response(platform, timeout=600):
                 log.warning("Response timeout — skipping")
                 consecutive_errors += 1
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — timeout")
+                    break
                 continue
 
             # Extract
@@ -611,12 +662,18 @@ def run_bot(platform: str, phase: str, display: str):
             if not response or len(response) < 100:
                 log.warning(f"Short/empty response ({len(response) if response else 0} chars)")
                 consecutive_errors += 1
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — extraction")
+                    break
                 continue
 
             # Parse, validate, save
             saved = save_items(phase, topic, platform, response)
             if saved > 0:
                 consecutive_errors = 0  # reset on success
+                successes += 1
                 new_total = count_completed(phase, topic, platform)
                 log.info(f"Progress: {topic['name']} = {new_total}/{topic['target']}")
             else:
@@ -628,14 +685,21 @@ def run_bot(platform: str, phase: str, display: str):
                 with open(debug_dir / f"raw_{ts}.txt", 'w') as f:
                     f.write(response)
                 consecutive_errors += 1
+                failures += 1
+                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                    _notify_death(display, platform,
+                                  f"{consecutive_errors} consecutive failures — parse")
+                    break
 
         except Exception as e:
             log.error(f"Cycle error: {e}", exc_info=True)
             consecutive_errors += 1
-            if consecutive_errors >= 3:
-                log.error("3 consecutive errors — stopping")
+            failures += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
+                _notify_death(display, platform,
+                              f"{consecutive_errors} consecutive failures — exception: {e}")
                 break
-            time.sleep(10)
+            time.sleep(min(30, consecutive_errors * 10))
 
     log.info(f"\nFinal progress:")
     print_progress(phase, topics, platform)
