@@ -117,6 +117,39 @@ ISMA_API_KEY=<key>
 - `taey:{node}:checkpoint:{platform}:attach` — Attach verification
 - `taey:{node}:pending_prompt:{platform}` — Sent message metadata
 
+### Inter-Session Communication (CRITICAL — READ THIS)
+
+All Claude sessions on Mira communicate via Redis. You WILL receive messages
+from other sessions. You MUST respond through the same system.
+
+**How you receive messages:**
+- While RUNNING: PostToolUse hook drains `taey:{your_node}:inbox` after each tool call.
+  Messages appear as `additionalContext` in your tool results.
+- While STOPPED: The unified router (`conductor-notify-router.service`) delivers
+  via tmux injection. Messages appear as user input when you resume.
+
+**How you SEND messages to other sessions:**
+```bash
+# Send to The Conductor (claude session)
+redis-cli -h 127.0.0.1 LPUSH "taey:claude:inbox" '{"from":"taeys-hands","type":"STATUS","body":"your message here"}'
+
+# Send to weaver
+redis-cli -h 127.0.0.1 LPUSH "taey:weaver:inbox" '{"from":"taeys-hands","type":"STATUS","body":"your message here"}'
+```
+
+**Sessions on Mira:**
+- `claude` — The Conductor (orchestration, task dispatch, fleet management)
+- `taeys-hands` — Browser automation, AT-SPI, bot management
+- `weaver` — ISMA knowledge graph, training data, CPT management
+
+**When you receive a message from another session, RESPOND through Redis, not to Jesse.**
+Jesse should not be the relay between Claude sessions.
+
+**Redis keys:**
+- `taey:{node}:inbox` — Messages TO this session (LPUSH to send, RPOP to receive)
+- `taey:{node}:idle` — Set to "1" by Stop hook. Router delivers when idle=1.
+- `taey:{node}:tool_running` — Set by PreToolUse, cleared by PostToolUse.
+
 ## v8.1+ Additions: Unified Automation System
 
 ### Additional Modules
