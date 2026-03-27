@@ -970,6 +970,32 @@ def attach_file(platform: str, file_path: str) -> bool:
 
             if _find_dialog_wid():
                 break
+    elif platform == 'claude':
+        # Claude: Ctrl+U opens file upload directly (keyboard shortcut)
+        inp.press_key('ctrl+u')
+        logger.info(f"[{platform}] Ctrl+U for file upload")
+        time.sleep(2.0)
+        # Wait for file dialog
+        for _ in range(10):
+            if _find_dialog_wid():
+                break
+            time.sleep(0.5)
+        if not _find_dialog_wid():
+            # Fallback: click Toggle menu → Add files
+            doc = get_doc(platform, force_refresh=True)
+            if doc:
+                btn = get_attach_button_coords(doc, platform=platform)
+                if btn:
+                    inp.click_at(btn['x'], btn['y'])
+                    time.sleep(1.5)
+                    inp.press_key('Down')
+                    time.sleep(0.3)
+                    inp.press_key_split('Return')
+                    time.sleep(2.0)
+            for _ in range(5):
+                if _find_dialog_wid():
+                    break
+                time.sleep(0.5)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
         btn = None
