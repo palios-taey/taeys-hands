@@ -430,11 +430,11 @@ def navigate_fresh_session(platform: str) -> bool:
     time.sleep(0.3)
     inp.press_key('ctrl+a')
     time.sleep(0.1)
-    # Paste URL via clipboard — xdotool type triggers autocomplete on
-    # Perplexity/ChatGPT, redirecting to search instead of navigating.
-    if not inp.clipboard_paste(url):
-        # Fallback to type if paste fails (some Xvfb setups)
-        inp.type_text(url, delay_ms=10)
+    # Type URL then immediately Enter — fast typing + immediate Enter
+    # prevents autocomplete from hijacking on Perplexity/ChatGPT.
+    # clipboard_paste (xsel) hangs on some Xvfb displays — don't use for URLs.
+    inp.type_text(url, delay_ms=5)
+    time.sleep(0.1)
     time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(8)  # Wait for page load (needs more time on fresh restart)
