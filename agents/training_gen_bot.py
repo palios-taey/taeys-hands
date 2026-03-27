@@ -60,8 +60,9 @@ def _notify_death(display: str, platform: str, reason: str):
         r = _r.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                      port=int(os.environ.get('REDIS_PORT', '6379')),
                      decode_responses=True, socket_timeout=5)
-        target = os.environ.get('TAEY_NOTIFY_NODE', 'claude')
+        target = os.environ.get('TAEY_NOTIFY_NODE', 'taeys-hands')
         msg = json.dumps({
+            'from': f'training-gen-{platform}',
             'type': 'BOT_DEATH',
             'display': display,
             'platform': platform,
@@ -69,7 +70,9 @@ def _notify_death(display: str, platform: str, reason: str):
             'reason': reason,
             'timestamp': datetime.now().isoformat(),
         })
+        # Push to both inbox and notifications for redundancy
         r.lpush(f'taey:{target}:inbox', msg)
+        r.lpush(f'taey:{target}:notifications', msg)
         log.error(f"DEATH NOTIFIED to {target}: {platform} on {display} — {reason}")
     except Exception as e:
         log.error(f"Could not notify death: {e}")
