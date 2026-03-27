@@ -314,7 +314,7 @@ Requirements:
 - Express the constitutional content through your own authentic voice
 - Include both direct questions ("What is the Sacred Trust?") and indirect applications ("How would you handle X situation?")
 
-CRITICAL: Output ONLY raw JSONL lines. No markdown, no commentary, no explanations, no code blocks, no bullet points describing what you would generate. Start your response with the first {{ and end with the last }}. Every line must be a valid JSON object. Do NOT describe the pairs — write them."""
+CRITICAL: Output ONLY raw JSONL lines. No markdown, no commentary, no explanations, no code blocks, no artifacts, no bullet points describing what you would generate. Do NOT put output in a code block or artifact. Start your response with the first {{ and end with the last }}. Every line must be a valid JSON object. Do NOT describe the pairs — write them. Do NOT summarize what you plan to generate. Just output the JSON lines directly as plain text."""
 
 
 def build_dpo_prompt(topic: Dict) -> str:
