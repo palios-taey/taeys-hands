@@ -45,19 +45,31 @@ def release_clipboard_lock(fh):
 
 
 def read() -> str | None:
-    """Read clipboard text. Returns None on failure."""
+    """Read clipboard text. Tries xsel first, falls back to xclip."""
+    env = _get_env()
+    # Try xsel first
     try:
         r = subprocess.run(
             ['xsel', '--clipboard', '--output'],
-            capture_output=True, text=True, timeout=3.0, env=_get_env(),
+            capture_output=True, text=True, timeout=3.0, env=env,
         )
-        return r.stdout if r.returncode == 0 else None
+        if r.returncode == 0 and r.stdout:
+            return r.stdout
     except subprocess.TimeoutExpired:
-        logger.error("Clipboard read timed out")
-        return None
-    except Exception as e:
-        logger.error(f"Clipboard read failed: {e}")
-        return None
+        logger.debug("xsel read timed out, trying xclip")
+    except Exception:
+        pass
+    # Fallback to xclip
+    try:
+        r = subprocess.run(
+            ['xclip', '-selection', 'clipboard', '-o'],
+            capture_output=True, text=True, timeout=3.0, env=env,
+        )
+        if r.returncode == 0 and r.stdout:
+            return r.stdout
+    except Exception:
+        pass
+    return None
 
 
 def clear():
