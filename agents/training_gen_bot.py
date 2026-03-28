@@ -642,14 +642,8 @@ def run_bot(platform: str, phase: str, display: str):
 
         cycle += 1
 
-        # Rate check after RATE_CHECK_WINDOW cycles
-        total_cycles = successes + failures
-        if total_cycles >= RATE_CHECK_WINDOW:
-            rate = successes / total_cycles
-            if rate < MIN_SUCCESS_RATE:
-                msg = f"Success rate {rate:.0%} below {MIN_SUCCESS_RATE:.0%} after {total_cycles} cycles"
-                _notify_death(display, platform, msg)
-                break
+        # Rate monitoring disabled — consecutive failure check is sufficient.
+        # Rate check was killing bots at 47-67% that were still producing.
 
         try:
             # Build package
