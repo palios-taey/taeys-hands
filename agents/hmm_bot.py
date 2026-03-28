@@ -774,6 +774,23 @@ def extract_response(platform: str) -> str:
     # Prefer response-level "Copy" over "Copy code"
     response_copy = [b for b in copy_buttons
                      if (b.get('name') or '').strip().lower() == 'copy']
+
+    # If only 1 copy button, it's likely the user message — wait for response's
+    if len(response_copy) <= 1 and platform == 'claude':
+        for retry in range(5):
+            time.sleep(3)
+            inp.press_key('End')
+            time.sleep(1)
+            doc = get_doc(platform, force_refresh=True)
+            if doc:
+                elements = _find_elements_with_fence(doc, platform)
+                copy_buttons = find_copy_buttons(elements)
+                response_copy = [b for b in copy_buttons
+                                 if (b.get('name') or '').strip().lower() == 'copy']
+                if len(response_copy) >= 2:
+                    logger.info(f"[{platform}] Found {len(response_copy)} copy buttons on retry {retry+1}")
+                    break
+
     target = (response_copy or copy_buttons)[-1]
 
     # Kill any lingering xsel processes so Firefox can write to clipboard.
