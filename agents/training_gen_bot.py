@@ -657,16 +657,22 @@ def run_bot(platform: str, phase: str, display: str):
                 time.sleep(min(30, consecutive_errors * 10))
                 continue
 
-            # Wait for response
-            if not bot.wait_for_response(platform, timeout=600):
-                log.warning("Response timeout — skipping")
-                consecutive_errors += 1
-                failures += 1
-                if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
-                    _notify_death(display, platform,
-                                  f"{consecutive_errors} consecutive failures — timeout")
-                    break
-                continue
+            # Wait for response — fixed wait then extract
+            # Stop-button polling is unreliable (misses fast responses, AT-SPI scan timeouts).
+            # Fixed wait is slower but doesn't fail 30-40% of the time.
+            wait_time = 180  # 3 min default
+            if platform == 'claude':
+                wait_time = 240  # Opus Extended is slow
+            elif platform in ('grok', 'perplexity'):
+                wait_time = 120
+            log.info(f"Waiting {wait_time}s for {platform} response...")
+            time.sleep(wait_time)
+
+            # Extra scroll to bottom before extract
+            for _ in range(5):
+                inp.press_key('End')
+                time.sleep(0.3)
+            time.sleep(1)
 
             # Extract
             response = bot.extract_response(platform)
