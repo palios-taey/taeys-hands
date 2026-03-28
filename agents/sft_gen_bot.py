@@ -857,7 +857,7 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         time.sleep(0.2)
         _inp.press_key('ctrl+t')
         time.sleep(1)
-        _inp.type_text('https://claude.ai/new', delay_ms=10)
+        _inp.type_text('https://claude.ai/new?incognito', delay_ms=10)
         time.sleep(0.3)
         _inp.press_key('Return')
         time.sleep(5)
