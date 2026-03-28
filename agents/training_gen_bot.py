@@ -279,8 +279,8 @@ DPO_TOPICS = [
 
 def _dismiss_popups(platform: str, display: str):
     """Dismiss common platform popups that block UI (Agree, Dismiss, Got it, etc.)."""
-    dismiss_names = ['Dismiss', 'Agree', 'Got it', 'OK', 'Close', 'No thanks',
-                     'Maybe later', 'Not now', 'Skip']
+    dismiss_names = ['Dismiss', 'Agree', 'Got it', 'No thanks',
+                     'Maybe later', 'Not now']
     try:
         import gi
         gi.require_version('Atspi', '2.0')
@@ -298,7 +298,7 @@ def _dismiss_popups(platform: str, display: str):
                 try:
                     name = (node.get_name() or '').strip()
                     role = node.get_role_name()
-                    if role == 'push button' and any(d in name for d in dismiss_names):
+                    if role == 'push button' and name in dismiss_names:
                         ai = node.get_action_iface()
                         if ai and ai.get_n_actions() > 0:
                             ai.do_action(0)
