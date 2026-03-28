@@ -442,6 +442,24 @@ def navigate_fresh_session(platform: str) -> bool:
     # Invalidate doc cache — page changed but Firefox ref stays valid
     invalidate_doc_cache(platform)
 
+    # Gemini: /app URL shows landing page without input. Click "New chat".
+    if platform == 'gemini':
+        doc = get_doc(platform, force_refresh=True)
+        if doc:
+            from core.tree import find_elements
+            elements = find_elements(doc)
+            for el in elements:
+                if (el.get('name') or '').strip() == 'New chat' and el.get('role') in ('push button', 'link'):
+                    from core.interact import atspi_click
+                    if el.get('atspi_obj'):
+                        atspi_click(el)
+                    else:
+                        inp.click_at(el['x'], el['y'])
+                    logger.info(f"[{platform}] Clicked 'New chat' for fresh session")
+                    time.sleep(3)
+                    invalidate_doc_cache(platform)
+                    break
+
     # Verification is best-effort — D-Bus contention in parallel mode can
     # make AT-SPI verification fail even when page loaded fine. Trust the
     # navigation and let attach_file discover the document.
