@@ -89,7 +89,7 @@ def _get_stop_patterns(platform: str) -> list:
 # Platform fresh-session URLs (from YAML base_url)
 FRESH_URLS = {
     'chatgpt': 'https://chatgpt.com/?temporary-chat=true',
-    'claude': 'https://claude.ai/new',
+    'claude': 'https://claude.ai/new?incognito',
     'gemini': 'https://gemini.google.com/app',
     'grok': 'https://grok.com/',
     'perplexity': 'https://www.perplexity.ai/',
