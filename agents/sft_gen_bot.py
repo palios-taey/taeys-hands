@@ -315,9 +315,12 @@ def _parse_jsonl(content):
     """
     import re
 
-    # Strip S3 URLs (Perplexity embeds these in content fields)
+    # Strip citation URLs (Perplexity appends these after JSON)
+    # S3 upload URLs
     content = re.sub(r'\[ppl-ai-file-upload\.s3\.amazonaws\]\(https?://[^)]+\)', '', content)
     content = re.sub(r'https?://ppl-ai-file-upload\.s3\.amazonaws\.com/[^\s")\]]+', '', content)
+    # All markdown links after JSON closing: }]} [text](url)
+    content = re.sub(r'(\]\})\s*\[[\w\s.-]+\]\(https?://[^)]+\)', r'\1', content)
 
     # Strip markdown code fences
     content = re.sub(r'```(?:json|jsonl)?\s*\n?', '', content)
