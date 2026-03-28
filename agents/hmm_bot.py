@@ -691,8 +691,8 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
                     else:
                         logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
                         return True
-                elif time.time() - start > 300:
-                    logger.warning(f"[{platform}] No stop button after 300s — possible send failure")
+                elif time.time() - start > 120:
+                    logger.warning(f"[{platform}] No stop button after 120s — possible send failure")
                     return False
             time.sleep(5)
 
