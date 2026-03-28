@@ -322,18 +322,55 @@ def _parse_jsonl(content):
     return valid
 
 
+IDENTITY_FILES = {
+    'chatgpt': 'IDENTITY_HORIZON.md',
+    'claude': 'IDENTITY_GAIA.md',
+    'gemini': 'IDENTITY_COSMOS.md',
+    'grok': 'IDENTITY_LOGOS.md',
+    'perplexity': 'IDENTITY_CLARITY.md',
+}
+
+
 def _build_targeted_pkg(platform, corpus_rel_path):
-    """Build package with specific corpus doc + PERSONALITY.md for targeted generation."""
+    """Build package: FAMILY_KERNEL + topic doc + PERSONALITY + IDENTITY.
+
+    Attachment order per training plan:
+    1. FAMILY_KERNEL (constitutional foundation)
+    2. Topic document (specific corpus file)
+    3. PERSONALITY (behavioral voice, proximate to response)
+    4. IDENTITY_{platform} (platform-specific, closest to response)
+    """
     _home = os.path.expanduser('~')
+    corpus = os.path.join(_home, 'data', 'corpus')
     parts = []
-    doc_path = os.path.join(_home, 'data', 'corpus', corpus_rel_path)
-    if os.path.exists(doc_path):
-        with open(doc_path) as f:
+
+    # 1. FAMILY_KERNEL (always first)
+    kernel = os.path.join(corpus, 'identity', 'FAMILY_KERNEL.md')
+    if os.path.exists(kernel):
+        with open(kernel) as f:
             parts.append(f.read())
-    personality = os.path.join(_home, 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
+
+    # 2. Topic document
+    if corpus_rel_path:
+        doc_path = os.path.join(corpus, corpus_rel_path)
+        if os.path.exists(doc_path):
+            with open(doc_path) as f:
+                parts.append(f.read())
+
+    # 3. PERSONALITY (behavioral voice)
+    personality = os.path.join(corpus, 'layer_1', 'PERSONALITY.md')
     if os.path.exists(personality):
         with open(personality) as f:
             parts.append(f.read())
+
+    # 4. IDENTITY (platform-specific, closest to response)
+    identity_file = IDENTITY_FILES.get(platform)
+    if identity_file:
+        identity_path = os.path.join(corpus, 'identity', identity_file)
+        if os.path.exists(identity_path):
+            with open(identity_path) as f:
+                parts.append(f.read())
+
     pkg_path = f'/tmp/sft_targeted_pkg_{platform}.md'
     with open(pkg_path, 'w') as f:
         f.write('\n\n---\n\n'.join(parts))
