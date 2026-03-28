@@ -47,7 +47,7 @@ IDENTITY_MAP = {
 
 # ── Rate Monitoring & Death Notifications ──────────────────────────────────
 
-MIN_SUCCESS_RATE = 0.70  # 70% minimum over window (platforms with Extended Thinking timeout occasionally)
+MIN_SUCCESS_RATE = 0.50  # 50% minimum — timeouts are normal with 100K context on Extended Thinking
 RATE_CHECK_WINDOW = 30   # Check after this many cycles (more data before judging)
 MAX_CONSECUTIVE_FAILS = 5
 
