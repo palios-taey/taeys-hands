@@ -277,6 +277,46 @@ DPO_TOPICS = [
 
 # ── Package Builder ────────────────────────────────────────────────────────
 
+def _dismiss_popups(platform: str, display: str):
+    """Dismiss common platform popups that block UI (Agree, Dismiss, Got it, etc.)."""
+    dismiss_names = ['Dismiss', 'Agree', 'Got it', 'OK', 'Close', 'No thanks',
+                     'Maybe later', 'Not now', 'Skip']
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if not app or 'firefox' not in (app.get_name() or '').lower():
+                continue
+
+            def find_dismiss(node, depth=0):
+                if depth > 15:
+                    return
+                try:
+                    name = (node.get_name() or '').strip()
+                    role = node.get_role_name()
+                    if role == 'push button' and any(d in name for d in dismiss_names):
+                        ai = node.get_action_iface()
+                        if ai and ai.get_n_actions() > 0:
+                            ai.do_action(0)
+                            log.info(f"[{platform}] Dismissed popup: '{name}'")
+                            time.sleep(1)
+                    for j in range(node.get_child_count()):
+                        child = node.get_child_at_index(j)
+                        if child:
+                            find_dismiss(child, depth + 1)
+                except Exception:
+                    pass
+
+            find_dismiss(app)
+            break
+    except Exception as e:
+        log.debug(f"Popup dismiss failed: {e}")
+
+
 def build_package(platform: str, topic: Dict) -> str:
     """Build consolidated attachment: KERNEL + topic docs + PERSONALITY + IDENTITY.
     Order matters — behavioral voice proximate to response."""
@@ -618,6 +658,10 @@ def run_bot(platform: str, phase: str, display: str):
             # Navigate fresh session
             if not bot.navigate_fresh_session(platform):
                 log.error("Navigation failed")
+                # Try dismissing popups and retrying once
+                _dismiss_popups(platform, display)
+                if not bot.navigate_fresh_session(platform):
+                    log.error("Navigation failed after popup dismiss")
                 consecutive_errors += 1
                 failures += 1
                 if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
@@ -626,6 +670,9 @@ def run_bot(platform: str, phase: str, display: str):
                     break
                 time.sleep(min(30, consecutive_errors * 10))
                 continue
+
+            # Dismiss any popups before attach
+            _dismiss_popups(platform, display)
 
             # Attach (max 2 attempts per memory feedback)
             if not bot.attach_file(platform, pkg_path):
