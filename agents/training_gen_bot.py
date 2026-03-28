@@ -610,8 +610,27 @@ def run_bot(platform: str, phase: str, display: str):
     except FileNotFoundError:
         log.info("No isolated bus file — using shared AT-SPI")
 
-    # PID filter
+    # Match Firefox's DBUS_SESSION_BUS_ADDRESS for clipboard.
+    # Firefox in dbus-run-session has isolated dbus. Bot must match it
+    # or xsel/xclip can't read clipboard after Copy clicks.
     pid_file = f'/tmp/firefox_pid_{display}'
+    try:
+        with open(pid_file) as f:
+            ff_pid = int(f.read().strip())
+        with open(f'/proc/{ff_pid}/environ', 'rb') as f:
+            env_data = f.read().decode(errors='replace')
+        for entry in env_data.split('\0'):
+            if entry.startswith('DBUS_SESSION_BUS_ADDRESS='):
+                dbus_addr = entry.split('=', 1)[1]
+                os.environ['DBUS_SESSION_BUS_ADDRESS'] = dbus_addr
+                clipboard._get_env()['DBUS_SESSION_BUS_ADDRESS'] = dbus_addr
+                inp._get_env()['DBUS_SESSION_BUS_ADDRESS'] = dbus_addr
+                log.info(f"DBUS matched to Firefox: {dbus_addr[:50]}...")
+                break
+    except Exception as e:
+        log.warning(f"Could not match Firefox DBUS: {e}")
+
+    # PID filter
     try:
         with open(pid_file) as f:
             bot._our_firefox_pid = int(f.read().strip())
