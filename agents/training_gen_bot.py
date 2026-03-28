@@ -721,10 +721,10 @@ def run_bot(platform: str, phase: str, display: str):
             if not bot.wait_for_response(platform, timeout=600):
                 log.warning("Wait timed out — trying extract anyway")
 
-            # Kill stale xsel before extract (clipboard ownership blocks Firefox writes)
+            # Force-kill ALL xsel before extract (clipboard ownership blocks Firefox writes)
             import subprocess as _sp
-            _sp.run(['pkill', '-f', 'xsel'], capture_output=True, timeout=3)
-            time.sleep(0.5)
+            _sp.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+            time.sleep(0.3)
 
             # Extra scroll to bottom before extract
             for _ in range(5):
