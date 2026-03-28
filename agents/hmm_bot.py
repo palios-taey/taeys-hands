@@ -1014,6 +1014,63 @@ def attach_file(platform: str, file_path: str) -> bool:
                 if _find_dialog_wid():
                     break
                 time.sleep(0.5)
+    elif platform == 'perplexity':
+        # Perplexity: same pattern as Gemini — click button, find Upload menu item
+        input_el = find_input_field_atspi(platform)
+        if input_el:
+            inp.click_at(input_el['x'], input_el['y'])
+            time.sleep(0.5)
+            inp.press_key('Escape')
+            time.sleep(0.3)
+        btn = None
+        for attempt in range(2):
+            doc = get_doc(platform, force_refresh=True)
+            if doc:
+                btn = get_attach_button_coords(doc, platform=platform)
+                if btn:
+                    break
+            time.sleep(3)
+        if not btn:
+            logger.error(f"[{platform}] Attach button not found")
+            return False
+        btn_obj = btn.get('atspi_obj')
+        if btn_obj:
+            try:
+                ai = btn_obj.get_action_iface()
+                if ai and ai.get_n_actions() > 0:
+                    ai.do_action(0)
+                    logger.info(f"[{platform}] Clicked attach via AT-SPI")
+            except Exception:
+                inp.click_at(btn['x'], btn['y'])
+                logger.info(f"[{platform}] Clicked attach via xdotool")
+        else:
+            inp.click_at(btn['x'], btn['y'])
+            logger.info(f"[{platform}] Clicked attach via xdotool")
+        time.sleep(1.5)
+        if not _find_dialog_wid():
+            # Find "Upload files" in dropdown via AT-SPI
+            firefox = get_firefox(platform)
+            doc2 = get_doc(platform, force_refresh=True)
+            menu_items = find_menu_items(firefox, doc2)
+            clicked = False
+            if menu_items:
+                for item in menu_items:
+                    name = (item.get('name') or '').strip().lower()
+                    if 'upload file' in name:
+                        if item.get('atspi_obj') and atspi_click(item):
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via AT-SPI")
+                        else:
+                            inp.click_at(item['x'], item['y'])
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via xdotool")
+                        clicked = True
+                        time.sleep(2.0)
+                        break
+            if not clicked:
+                logger.warning(f"[{platform}] Upload menu item not found, trying Down+Enter")
+                inp.press_key('Down')
+                time.sleep(0.3)
+                inp.press_key_split('Return')
+                time.sleep(2.0)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
         btn = None
