@@ -759,7 +759,9 @@ def run_bot(platform: str, phase: str, display: str):
                 ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                 with open(debug_dir / f"raw_{ts}.txt", 'w') as f:
                     f.write(response)
-                consecutive_errors += 1
+                # Claude parse failures are expected (artifacts) — don't count as consecutive
+                if platform != 'claude':
+                    consecutive_errors += 1
                 failures += 1
                 if consecutive_errors >= MAX_CONSECUTIVE_FAILS:
                     _notify_death(display, platform,

@@ -736,49 +736,9 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
 
 
 def extract_response(platform: str) -> str:
-    """Extract latest response via copy button. Returns content or empty string.
-    Claude: uses Ctrl+A/Ctrl+C because Claude puts JSONL in artifacts
-    whose copy button isn't accessible via standard AT-SPI."""
+    """Extract latest response via copy button. Returns content or empty string."""
     inp.focus_firefox()
     time.sleep(0.3)
-
-    # Claude artifact workaround: click on artifact Code tab, Ctrl+A, Ctrl+C
-    if platform == 'claude':
-        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-        time.sleep(0.3)
-        # Click on the Code tab in artifact panel if visible
-        doc = get_doc(platform, force_refresh=True)
-        if doc:
-            elements = _find_elements_with_fence(doc, platform)
-            for el in elements:
-                name = (el.get('name') or '').strip()
-                role = el.get('role', '')
-                # Look for the artifact code tab or content area
-                if name == 'Code' and role == 'page tab':
-                    from core.interact import atspi_click
-                    if el.get('atspi_obj'):
-                        atspi_click(el)
-                        logger.info(f"[{platform}] Clicked Code artifact tab")
-                        time.sleep(1)
-                    break
-        # Select all in the focused area and copy
-        inp.press_key('ctrl+a')
-        time.sleep(0.5)
-        inp.press_key('ctrl+c')
-        time.sleep(1)
-        content = clipboard.read()
-        if content and len(content) > 100:
-            # Extract just the JSONL lines from the full page text
-            lines = []
-            for line in content.split('\n'):
-                line = line.strip()
-                if line.startswith('{') and '"messages"' in line:
-                    lines.append(line)
-            if lines:
-                return '\n'.join(lines)
-            # If no JSONL lines found, return raw content for parser to try
-            return content
-        logger.warning(f"[{platform}] Artifact extract got {len(content) if content else 0} chars")
 
     # Scroll to bottom
     inp.press_key('End')
