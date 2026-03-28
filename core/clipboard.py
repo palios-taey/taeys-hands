@@ -45,21 +45,8 @@ def release_clipboard_lock(fh):
 
 
 def read() -> str | None:
-    """Read clipboard text. Tries xsel first, falls back to xclip."""
+    """Read clipboard text. Uses xclip (doesn't leave lingering processes like xsel)."""
     env = _get_env()
-    # Try xsel first
-    try:
-        r = subprocess.run(
-            ['xsel', '--clipboard', '--output'],
-            capture_output=True, text=True, timeout=3.0, env=env,
-        )
-        if r.returncode == 0 and r.stdout:
-            return r.stdout
-    except subprocess.TimeoutExpired:
-        logger.debug("xsel read timed out, trying xclip")
-    except Exception:
-        pass
-    # Fallback to xclip
     try:
         r = subprocess.run(
             ['xclip', '-selection', 'clipboard', '-o'],
@@ -67,8 +54,10 @@ def read() -> str | None:
         )
         if r.returncode == 0 and r.stdout:
             return r.stdout
-    except Exception:
-        pass
+    except subprocess.TimeoutExpired:
+        logger.error("Clipboard read timed out")
+    except Exception as e:
+        logger.error(f"Clipboard read failed: {e}")
     return None
 
 
