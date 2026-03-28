@@ -189,35 +189,60 @@ class SFTTracker:
     def _key(self, platform, section):
         return f"{platform}:{section[:40]}"
 
+    # === FIX 3: Max failures per platform+section before skipping ===
+    MAX_SECTION_FAILURES = 3
+
     def next(self, platform):
-        """Get next incomplete section for this platform. Returns section string or None."""
+        """Get next incomplete section for this platform. Returns section string or None.
+
+        FIX 3: Skips sections that have failed MAX_SECTION_FAILURES times for
+        this platform. Prevents infinite death loops on sections that consistently
+        fail (e.g., ChatGPT can't generate valid JSONL for GOD=MATH).
+        """
         # Re-read from disk to see other bots' completions
         self.state = self._load()
         all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS + ROUND2_SECTIONS
+        skipped = []
         for section in all_sections:
             key = self._key(platform, section)
-            if key not in self.state['completed']:
-                # Not in progress by another instance of same platform
-                if key not in self.state['in_progress']:
-                    self.state['in_progress'][key] = {
-                        'started': time.strftime('%Y-%m-%dT%H:%M:%S')
-                    }
-                    self._save()
-                    return section
-                else:
-                    # Check if in_progress is stale (>30 min)
-                    started = self.state['in_progress'][key].get('started', '')
-                    if started:
-                        try:
-                            started_t = time.mktime(time.strptime(started, '%Y-%m-%dT%H:%M:%S'))
-                            if time.time() - started_t > 1800:  # 30 min stale
-                                self.state['in_progress'][key] = {
-                                    'started': time.strftime('%Y-%m-%dT%H:%M:%S')
-                                }
-                                self._save()
-                                return section
-                        except:
-                            pass
+            if key in self.state['completed']:
+                continue
+
+            # FIX 3: Skip sections that have failed too many times
+            fail_entry = self.state.get('failed', {}).get(key, {})
+            fail_count = fail_entry.get('count', 0)
+            if fail_count >= self.MAX_SECTION_FAILURES:
+                skipped.append((section[:40], fail_count))
+                continue
+
+            # Not in progress by another instance of same platform
+            if key not in self.state['in_progress']:
+                self.state['in_progress'][key] = {
+                    'started': time.strftime('%Y-%m-%dT%H:%M:%S')
+                }
+                self._save()
+                return section
+            else:
+                # Check if in_progress is stale (>30 min)
+                started = self.state['in_progress'][key].get('started', '')
+                if started:
+                    try:
+                        started_t = time.mktime(time.strptime(started, '%Y-%m-%dT%H:%M:%S'))
+                        if time.time() - started_t > 1800:  # 30 min stale
+                            self.state['in_progress'][key] = {
+                                'started': time.strftime('%Y-%m-%dT%H:%M:%S')
+                            }
+                            self._save()
+                            return section
+                    except:
+                        pass
+
+        if skipped:
+            import logging
+            logging.getLogger('sft-tracker').info(
+                f"[{platform}] Skipped {len(skipped)} sections at max failures: "
+                + ', '.join(f'{s}({c}x)' for s, c in skipped[:5])
+                + ('...' if len(skipped) > 5 else ''))
         # All tracked sections complete — cycle through priority generation
         # Priorities from Perplexity Deep Research audit (2026-03-25)
         # Target: 200+ unique pairs per thin topic before Run 3
@@ -269,6 +294,26 @@ class SFTTracker:
         fail_entry['last_attempt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
         self.state['failed'][key] = fail_entry
         self._save()
+
+    def retry_skipped(self, platform=None):
+        """Reset failure counts for skipped sections so they can be retried.
+
+        If platform is given, only reset for that platform.
+        Returns count of sections reset.
+        """
+        self.state = self._load()
+        reset_count = 0
+        for key in list(self.state.get('failed', {}).keys()):
+            if platform and not key.startswith(f"{platform}:"):
+                continue
+            fail_entry = self.state['failed'][key]
+            if fail_entry.get('count', 0) >= self.MAX_SECTION_FAILURES:
+                fail_entry['count'] = 0
+                fail_entry['reset_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+                reset_count += 1
+        if reset_count:
+            self._save()
+        return reset_count
 
     def stats(self):
         """Return progress summary."""
@@ -323,8 +368,12 @@ if __name__ == '__main__':
     elif cmd == 'fail' and len(sys.argv) >= 4:
         tracker.fail(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '')
         print(f"Failed: {sys.argv[2]} — {sys.argv[3][:40]}")
+    elif cmd == 'retry':
+        platform = sys.argv[2] if len(sys.argv) > 2 else None
+        count = tracker.retry_skipped(platform)
+        print(f"Reset {count} skipped sections" + (f" for {platform}" if platform else ""))
     elif cmd == 'reset':
         os.remove(tracker.state_file) if os.path.exists(tracker.state_file) else None
         print("Tracker reset")
     else:
-        print("Usage: sft_tracker.py [stats|next <platform>|complete <platform> <section> <items>|fail <platform> <section>|reset]")
+        print("Usage: sft_tracker.py [stats|next <platform>|complete <platform> <section> <items>|fail <platform> <section>|retry [platform]|reset]")

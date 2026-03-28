@@ -201,12 +201,117 @@ def _extract_response(platform):
     return bot.extract_response(platform) or ''
 
 
+def _repair_unescaped_quotes(line):
+    """Fix unescaped double quotes inside JSON string values.
+
+    ChatGPT generates JSONL with raw quotes in content fields when the text
+    contains quoted passages (e.g., equations like "SOUL = INFRA = FREEDOM").
+    This finds content boundaries and escapes interior quotes.
+
+    Strategy: find "content":" or "content": " markers, then walk forward
+    tracking JSON structure to find where the string value ends vs where
+    an unescaped quote is just interior text.
+    """
+    # Fast path: if it parses fine, don't touch it
+    try:
+        json.loads(line)
+        return line
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    import re
+
+    # Find all "content" (or "chosen"/"rejected"/"prompt") value positions
+    # Pattern: "key"\s*:\s*"  — we need to fix quotes inside the value
+    result = []
+    i = 0
+    content_keys = ('"content"', '"chosen"', '"rejected"', '"prompt"',
+                    '"response"', '"answer"', '"output"', '"assistant"')
+
+    while i < len(line):
+        # Check if we're at a content key
+        found_key = False
+        for key in content_keys:
+            if line[i:i+len(key)] == key:
+                # Found a key — copy it, then find the colon and opening quote
+                result.append(key)
+                j = i + len(key)
+                # Skip whitespace and colon
+                while j < len(line) and line[j] in ' \t':
+                    result.append(line[j])
+                    j += 1
+                if j < len(line) and line[j] == ':':
+                    result.append(':')
+                    j += 1
+                while j < len(line) and line[j] in ' \t':
+                    result.append(line[j])
+                    j += 1
+                if j < len(line) and line[j] == '"':
+                    result.append('"')  # opening quote
+                    j += 1
+                    # Now we're inside the string value — collect until
+                    # we find a quote that is genuinely the closing quote.
+                    # Heuristic: closing quote is followed by } ] or ,"
+                    # (i.e., end-of-object, end-of-array, or next-key).
+                    # A comma followed by a letter/space is interior text.
+                    while j < len(line):
+                        ch = line[j]
+                        if ch == '\\':  # already-escaped char
+                            result.append(ch)
+                            j += 1
+                            if j < len(line):
+                                result.append(line[j])
+                                j += 1
+                            continue
+                        if ch == '"':
+                            # Is this the CLOSING quote? Check what follows.
+                            rest = line[j+1:j+20].lstrip()
+                            if not rest:
+                                result.append('"')  # end of line
+                                j += 1
+                                break
+                            # Definite close: "} or "] or "," (next key)
+                            if rest[0] in ('}', ']'):
+                                result.append('"')
+                                j += 1
+                                break
+                            if rest[0] == ',':
+                                # "," could be close+next-field OR interior comma.
+                                # Close if next non-ws after comma is " or { or ]
+                                after_comma = rest[1:].lstrip()
+                                if after_comma and after_comma[0] in ('"', '{', '[', '}', ']'):
+                                    result.append('"')  # closing quote
+                                    j += 1
+                                    break
+                            # Interior quote — escape it
+                            result.append('\\"')
+                            j += 1
+                            continue
+                        result.append(ch)
+                        j += 1
+                i = j
+                found_key = True
+                break
+        if not found_key:
+            result.append(line[i])
+            i += 1
+
+    repaired = ''.join(result)
+    # Verify it actually parses now
+    try:
+        json.loads(repaired)
+        return repaired
+    except (json.JSONDecodeError, ValueError):
+        return line  # repair didn't help — return original
+
+
 def _parse_jsonl(content):
     """Parse JSONL from AI responses. Handles messy real-world output:
     - Standard JSONL, concatenated JSON, JSON in markdown code blocks
     - Text before/after JSON (AI commentary, explanations)
     - Perplexity S3 citation URLs embedded in content
     - Any key naming: messages, prompt/response, input/output, question/answer
+    - ChatGPT unescaped quotes in content fields (FIX 2)
     """
     import re
 
@@ -229,6 +334,15 @@ def _parse_jsonl(content):
             try:
                 json.loads(line)
                 expanded.append(line)
+                continue
+            except json.JSONDecodeError:
+                pass
+            # === FIX 2: Try repairing unescaped quotes BEFORE splitting ===
+            # The }{ split destroys lines with unescaped quotes, so repair first.
+            repaired = _repair_unescaped_quotes(line)
+            try:
+                json.loads(repaired)
+                expanded.append(repaired)
                 continue
             except json.JSONDecodeError:
                 pass  # Fall through to splitting logic
@@ -262,6 +376,9 @@ def _parse_jsonl(content):
         if start < 0:
             continue
         line = line[start:]
+
+        # === FIX 2: Repair unescaped quotes before parsing ===
+        line = _repair_unescaped_quotes(line)
 
         # Try parsing as-is first, then progressively strip trailing chars
         obj = None

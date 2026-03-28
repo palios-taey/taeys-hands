@@ -791,7 +791,16 @@ def extract_response(platform: str) -> str:
                     logger.info(f"[{platform}] Found {len(response_copy)} copy buttons on retry {retry+1}")
                     break
 
-    target = (response_copy or copy_buttons)[-1]
+    # === FIX 1: Robust copy button targeting ===
+    # Problem: buttons with y=0 (zero extents, common on Grok) sort first in
+    # the Y-sorted list, so [-1] picks the prompt's copy button instead of
+    # the response's. Fix: prefer buttons with real Y coordinates (y > 10),
+    # falling back to all buttons only if none have valid positions.
+    candidates = response_copy or copy_buttons
+    real_y = [b for b in candidates if b.get('y', 0) > 10]
+    target = (real_y or candidates)[-1]  # highest real Y = visually lowest
+    logger.info(f"[{platform}] Copy target: y={target.get('y')} "
+                f"(candidates={len(candidates)}, real_y={len(real_y)})")
 
     # Kill any lingering xsel processes so Firefox can write to clipboard.
     # Do NOT write a marker first — that creates a NEW xsel owner process,
@@ -800,55 +809,66 @@ def extract_response(platform: str) -> str:
     time.sleep(0.3)
 
     from core.interact import atspi_click
-    if target.get('atspi_obj') and atspi_click(target):
-        logger.info(f"[{platform}] Copy via AT-SPI at ({target['x']}, {target['y']})")
-    else:
-        inp.click_at(target['x'], target['y'])
-        logger.info(f"[{platform}] Copy via xdotool at ({target['x']}, {target['y']})")
 
-    # Poll clipboard until Firefox writes content (up to 3s)
-    content = None
-    for _ in range(6):
-        time.sleep(0.5)
-        raw = clipboard.read()
-        if raw:
-            content = raw
-            break
+    def _click_and_read(btn):
+        """Click a copy button and return clipboard content or None."""
+        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+        time.sleep(0.1)
+        if btn.get('atspi_obj') and atspi_click(btn):
+            logger.info(f"[{platform}] Copy via AT-SPI at ({btn['x']}, {btn['y']})")
+        else:
+            inp.click_at(btn['x'], btn['y'])
+            logger.info(f"[{platform}] Copy via xdotool at ({btn['x']}, {btn['y']})")
+        for _ in range(6):
+            time.sleep(0.5)
+            raw = clipboard.read()
+            if raw:
+                return raw
+        return None
+
+    content = _click_and_read(target)
 
     if not content:
         logger.error(f"[{platform}] Copy button clicked but clipboard unchanged after 3s")
         return ''
 
-    # Check if we got the prompt instead of the response
-    # Use specific markers only — generic ones like 'analyze all' false-positive
-    # on Grok/ChatGPT responses that reference the prompt instructions
+    # === FIX 1b: Detect prompt-vs-response using markers + length heuristic ===
+    # SFT prompts are 800-2000 chars; responses are 5000-50000 chars.
+    # If content is short AND matches prompt markers, try other buttons.
     if content:
-        start_text = content.strip()[:200].lower()
-        prompt_markers = ['analyze the following', 'package analysis request',
-                          'respond only with minified json',
-                          'critical: echo back', 'analyze all all items']
-        if any(m in start_text for m in prompt_markers):
-            # Got prompt text — try ALL other copy buttons (Grok's response button
-            # often has zero extents → Y=0 → sorts first, so [-1] picks prompt's)
+        start_text = content.strip()[:300].lower()
+        prompt_markers = [
+            # HMM markers (original)
+            'analyze the following', 'package analysis request',
+            'respond only with minified json',
+            'critical: echo back', 'analyze all all items',
+            # SFT markers (new)
+            'generate 10 sft training pairs', 'generate 10 dpo',
+            'generate 50 embodiment', 'generate 50 training pairs',
+            'generate 50 adversarial', 'generate 50 dpo',
+            'output only jsonl', 'output instructions:',
+            'do not create files, artifacts',
+        ]
+        is_prompt_text = any(m in start_text for m in prompt_markers)
+        is_suspiciously_short = len(content) < 3000 and len(candidates) >= 2
+
+        if is_prompt_text or is_suspiciously_short:
+            reason = 'prompt markers' if is_prompt_text else f'short ({len(content)} chars)'
+            logger.info(f"[{platform}] Suspected prompt text ({reason}) — trying alternatives")
+            # Try ALL other copy buttons, prefer the one returning longest content
+            best_content = content
             alternatives = [b for b in copy_buttons if b is not target]
-            found_alt = False
             for alt_btn in alternatives:
-                subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
-                time.sleep(0.1)
-                if alt_btn.get('atspi_obj') and atspi_click(alt_btn):
-                    logger.info(f"[{platform}] Trying alt copy button at ({alt_btn['x']}, {alt_btn['y']})")
-                else:
-                    inp.click_at(alt_btn['x'], alt_btn['y'])
-                    logger.info(f"[{platform}] Trying alt copy button (xdotool) at ({alt_btn['x']}, {alt_btn['y']})")
-                time.sleep(0.8)
-                alt = clipboard.read()
-                if alt and alt != content:
-                    content = alt
-                    found_alt = True
-                    logger.info(f"[{platform}] Got response from alt copy button ({len(alt)} chars)")
-                    break
-            if not found_alt:
-                logger.warning(f"[{platform}] All {len(copy_buttons)} copy buttons returned prompt text")
+                alt = _click_and_read(alt_btn)
+                if alt and len(alt) > len(best_content):
+                    best_content = alt
+                    logger.info(f"[{platform}] Alt button returned longer content "
+                                f"({len(alt)} vs {len(content)} chars)")
+            if len(best_content) > len(content):
+                content = best_content
+            elif is_prompt_text:
+                logger.warning(f"[{platform}] All {len(copy_buttons)} copy buttons "
+                               f"returned prompt-like text")
 
     return content or ''
 
