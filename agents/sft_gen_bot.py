@@ -975,8 +975,8 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         f.write(content)
 
     if len(valid) == 0:
-        log.error(f"[{platform}] Extracted {len(content)} chars but 0 valid JSONL — FAILED")
-        return False
+        log.warning(f"[{platform}] Extracted {len(content)} chars but 0 valid JSONL — PARSE ISSUE (not bot failure)")
+        return 'parse_failure'  # Distinct from False (bot failure) and True (success)
 
     log.info(f"[{platform}] Saved {len(valid)} items → {output_path}")
 
@@ -1131,9 +1131,13 @@ def main():
                         consecutive_fails = 0
                     else:
                         tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
-                        log.error(f"[{platform}] FALSE SUCCESS — file has 0 items")
-                        failures += 1
-                        consecutive_fails += 1
+                        log.warning(f"[{platform}] PARSE ISSUE — extracted but 0 valid JSONL (not a bot failure)")
+                        # Parse failures are NOT bot failures — bot did its job,
+                        # AI content just didn't parse. Don't count toward rate.
+                elif ok == 'parse_failure':
+                    tracker.fail(platform, section, 'parse failure — extracted but unparseable')
+                    log.warning(f"[{platform}] PARSE ISSUE — {section[:40]} (not counting as bot failure)")
+                    # Don't count toward failures/consecutive — bot worked fine
                 else:
                     tracker.fail(platform, section, 'process_platform returned False')
                     log.error(f"[{platform}] FAILED — {section[:40]}")
