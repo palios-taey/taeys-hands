@@ -10,26 +10,60 @@ DISPLAYS = {
     9: ("perplexity", "https://www.perplexity.ai/", "ff-profile-perplexity"),
     10: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude2"),
     11: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude3"),
+    13: ("chatgpt", "https://chatgpt.com/?temporary-chat=true", "ff-profile-chatgpt2"),
 }
 
-print("=== Killing all bots and Firefox ===")
+print("=== FULL CLEANUP — kill ALL user automation processes ===")
+
+# 1. Kill all bots
 subprocess.run(["pkill", "-9", "-f", "sft_gen_bot"], capture_output=True)
 subprocess.run(["pkill", "-9", "-f", "training_gen_bot"], capture_output=True)
 time.sleep(1)
 
-for d in DISPLAYS:
-    try:
-        with open(f"/tmp/firefox_pid_:{d}") as f:
-            os.kill(int(f.read().strip()), 9)
-    except: pass
-    prof = DISPLAYS[d][2]
-    for lock in [".parentlock", "lock"]:
-        try: os.remove(f"/tmp/{prof}/{lock}")
+# 2. Kill ALL Firefox (no exceptions)
+subprocess.run(["pkill", "-9", "firefox"], capture_output=True)
+time.sleep(1)
+subprocess.run(["pkill", "-9", "firefox"], capture_output=True)  # double tap for contentproc
+time.sleep(1)
+
+# 3. Kill ALL at-spi-bus-launcher processes
+subprocess.run(["pkill", "-9", "-f", "at-spi-bus-launcher"], capture_output=True)
+
+# 4. Kill ALL dbus-run-session wrappers
+subprocess.run(["pkill", "-9", "-f", "dbus-run-session"], capture_output=True)
+
+# 5. Kill ALL user-owned dbus-daemon (NOT root system ones)
+my_uid = os.getuid()
+r = subprocess.run(["ps", "-u", str(my_uid), "-o", "pid,comm"],
+                    capture_output=True, text=True)
+for line in r.stdout.strip().split('\n'):
+    if 'dbus-daemon' in line:
+        try:
+            pid = int(line.strip().split()[0])
+            os.kill(pid, 9)
         except: pass
+
+time.sleep(2)
+
+# 6. Clean ALL lock files and stale bus files
+for d in range(20):
     try: os.remove(f"/tmp/a11y_bus_:{d}")
     except: pass
+for entry in os.listdir("/tmp"):
+    if entry.startswith("ff-profile-"):
+        for lock in [".parentlock", "lock"]:
+            try: os.remove(f"/tmp/{entry}/{lock}")
+            except: pass
 
-time.sleep(3)
+# 7. Verify cleanup
+r = subprocess.run(["bash", "-c", "cat /proc/sys/fs/file-nr | awk '{print $1}'"],
+                    capture_output=True, text=True)
+print(f"Open files after cleanup: {r.stdout.strip()}")
+r = subprocess.run(["bash", "-c", "ps aux | grep '[d]bus' | wc -l"],
+                    capture_output=True, text=True)
+print(f"dbus processes after cleanup: {r.stdout.strip()}")
+
+time.sleep(1)
 print("=== Launching Firefox with dbus-run-session ===")
 
 for d, (plat, url, prof) in DISPLAYS.items():
