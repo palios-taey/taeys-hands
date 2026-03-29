@@ -113,6 +113,52 @@ for d in DISPLAYS:
         title = "ERROR"
     print(f"  :{d} {title}")
 
+print("\n=== Setting Perplexity incognito ===")
+for d, (plat, url, prof) in DISPLAYS.items():
+    if plat != "perplexity":
+        continue
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        with open(f"/tmp/firefox_pid_:{d}") as f:
+            ff_pid = int(f.read().strip())
+        with open(f"/proc/{ff_pid}/environ", "rb") as f:
+            env_data = f.read().decode(errors="replace")
+        for entry in env_data.split("\0"):
+            if entry.startswith("DBUS_SESSION_BUS_ADDRESS="):
+                os.environ["DBUS_SESSION_BUS_ADDRESS"] = entry.split("=", 1)[1]
+                break
+
+        os.environ["DISPLAY"] = f":{d}"
+        bus_file = f"/tmp/a11y_bus_:{d}"
+        if os.path.exists(bus_file):
+            with open(bus_file) as f:
+                os.environ["AT_SPI_BUS_ADDRESS"] = f.read().strip()
+
+        desktop = Atspi.get_desktop(0)
+        for i in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(i)
+            if app and 'firefox' in (app.get_name() or '').lower():
+                def find_incognito(node, depth=0):
+                    if depth > 12: return
+                    try:
+                        name = (node.get_name() or '').strip()
+                        if 'incognito' in name.lower() and node.get_role_name() == 'push button':
+                            ai = node.get_action_iface()
+                            if ai and ai.get_n_actions() > 0:
+                                ai.do_action(0)
+                                print(f"  :{d} Clicked incognito: {name[:40]}")
+                        for j in range(node.get_child_count()):
+                            child = node.get_child_at_index(j)
+                            if child: find_incognito(child, depth + 1)
+                    except: pass
+                find_incognito(app)
+                break
+    except Exception as e:
+        print(f"  :{d} Incognito click failed: {e}")
+
 print("\n=== Starting bots ===")
 for d, (plat, url, prof) in DISPLAYS.items():
     session = f"sft-{plat}{d}"
