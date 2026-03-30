@@ -72,6 +72,7 @@ def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
     # Strategy 1: find_menu_items (container-aware, handles most platforms)
     items = find_menu_items(firefox, doc)
     if items:
+        logger.info("Menu scan strategy 1 (find_menu_items): %d items", len(items))
         return items
 
     # Strategy 2: full element scan + role filter (catches async React dropdowns)
@@ -82,7 +83,12 @@ def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
     useful = filter_useful_elements(all_elements, chrome_y=chrome_y)
     menu_items = [e for e in useful
                   if e.get('name', '').strip() and e.get('role', '') in _MENU_ROLES]
+    logger.info("Menu scan strategy 2 (find_elements): %d total, %d useful, %d menu items",
+                len(all_elements), len(useful), len(menu_items))
     if menu_items:
+        for m in menu_items[:5]:
+            logger.info("  Menu item: %r role=%s y=%s",
+                        m.get('name', '')[:50], m.get('role'), m.get('y'))
         menu_items.sort(key=lambda x: x.get('y', 0))
     return menu_items
 
