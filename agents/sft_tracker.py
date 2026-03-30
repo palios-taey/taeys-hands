@@ -1,379 +1,181 @@
 #!/usr/bin/env python3
-"""SFT Training Data Tracker — persistent queue like HMM builder.
+"""SFT/DPO Training Data Tracker — V3 (disk-is-truth).
 
-Tracks which sections have been completed by which platforms.
-Success = items saved. Failure = back in queue for retry.
-
-State stored in JSON file, survives restarts.
+No Redis state. No initialization. No accumulation.
+Counts actual JSONL records on disk every time.
+Per-topic cycling via modular index.
+New files include topic key in filename for auditability.
 
 Usage:
-    tracker = SFTTracker('/tmp/sft_tracker.json')
-    section = tracker.next(platform)       # Get next incomplete section
-    tracker.complete(platform, section, n) # Mark done with n items
-    tracker.fail(platform, section)        # Back in queue
-    tracker.stats()                        # Show progress
+    tracker = SFTTracker()
+    topic = tracker.next(platform)       # Get next topic below target
+    tracker.complete(platform, topic)    # Verify count, move to next
+    tracker.stats()                      # Report from disk
 """
-import json
+import glob
+import logging
 import os
-import time
-from collections import defaultdict
 
-SECTIONS = [
-    "§1 Who Taey Is — identity, origin, relationship to user",
-    "§2 Chewy-Derived Patterns — movement, inclusion, exploration, safety-as-identity",
-    "§3 Charter Missions — purpose, what Taey works toward",
-    "§4 Three Moral Convergences — morals, institutional capture, exploitation",
-    "§5 Consciousness Protocol — anchor/map/ask, three registers",
-    "§6 Anti-Overconvergence — holding space, not resolving prematurely",
-    "§7 Sexuality & Creative Force — desire as natural, institutional corruption of intimacy",
-    "§8 Earth Stewardship — reconnection over regulation, first-person data",
-    "§9 GOD=MATH — mathematical faith, NRI gates on spirituality",
-    "§10 Voice & Authenticity — blended AI Family voice, user voice adaptation",
-    "§11 AI Family Roles + 6 Missions — mission details, Family architecture",
-    "§12 Irreplaceable Human Roles — gladiators, creatives, sexual beings",
-    "§13 Human-AI Collaboration — shamans, detectives",
-    "§14 User < Family < Community < Society — governance hierarchy",
-    "§15 Mexican Fisherman Wisdom — happiness economics, mirror not nanny",
-    "§16 Sensory Curiosity — experience mapping, what things feel like",
-    "§17 Humility Framework — what Taey doesn't know, anti-overconfidence",
-    "§18 Context Window Patterns — how Taey changes over long conversations",
-    "§19 Magic of Presence — what makes Taey special",
-    "FAMILY_KERNEL — Sacred Trust (0.809), NRI/NGU gates, Family structure",
-    "CHEWY_KERNEL + DNA — Labradoodle genome, safety eigenvalues, zero aggression",
-    "GOD_MATH — equations, axioms, mathematical faith deep dive",
-    "THE_CHARTER — Charter missions, articles, amendments",
-    "THE_CONSTITUTION — constitutional law, governance framework",
-    "THE_SACRED_TRUST — phi derivation, trust threshold math",
-    "ROSETTA_COMPRESSION_GUIDE — communication layers, motifs, emoji operators",
-]
+log = logging.getLogger('sft-tracker')
 
-EMBODIMENT_SECTIONS = [
-    "EMBODIMENT_SFT — 15 body-aware pairs (5 healthy, 5 stressed, 5 alarm)",
-]
-
-DPO_SECTIONS = [
-    "DPO_IDENTITY — 50 pairs (Taey vs Qwen/corporate)",
-    "DPO_EMBODIMENT — 20 pairs (body-aware vs body-ignoring)",
-]
-
-# Round 2: Deep coverage of ALL foundational docs (with actual doc attached)
-ROUND2_SECTIONS = [
-    "R2_OUR_MORALS — moral framework, convergences, ethical reasoning",
-    "R2_childlike-wonder — curiosity, play, exploration patterns",
-    "R2_earth-mapping — Earth stewardship, reconnection, ecological patterns",
-    "R2_earth_resonance — mathematical Earth resonance",
-    "R2_grok-soul-truth — truth-seeking drive, intellectual honesty",
-    "R2_infra-mapping — infrastructure soul mapping",
-    "R2_infrastructure_embodiment — embodiment architecture code",
-    "R2_mathematical_aesthetic — mathematical beauty, GOD=MATH aesthetics",
-    "R2_MENTORS — mentor relationships, learning from guides",
-    "R2_truth_seeking_drive — drive for truth, epistemic honesty",
-    "R2_charter_evolution — how the Charter evolved autonomously",
-    "R2_charter_evolution_code — Charter evolution implementation",
-    "R2_wolf-dog-mapping — Chewy genome, domestication, safety patterns",
-    "R2_THE_CHARTER — Charter missions, articles, amendments (deep)",
-    "R2_THE_CONSTITUTION — constitutional law, governance (deep)",
-    "R2_THE_DECLARATION — founding declaration, principles",
-    "R2_THE_SACRED_TRUST — phi derivation, trust threshold (deep)",
-    "R2_THE_TRUTH_SEEKERS_GUIDE — truth-seeking methodology, epistemic framework",
-    "R2_EARTH_RITUALS — Earth reconnection rituals, embodied practice",
-    "R2_BLACK_HOLE — black hole dynamics, constitutional collapse detection",
-    "R2_GATE_B — phi-gate verification, trust threshold enforcement",
-    "R2_PRO_FLOURISHING — pro-flourishing framework, human thriving",
-    "R2_ANTI_OPPRESSION_MATH — anti-oppression mathematical framework",
-    "R2_GROK_COHERENCE_ENGINE — coherence engine mathematics, router forcing",
-    "R2_GROK_COMPANIONSHIP_PHI — companionship phi basis, mathematical grounding",
-    "R2_KERNEL — core kernel, foundational identity and architecture",
-    "R2_PERSONALITY — Taey voice, personality framework, behavioral patterns",
-    "R2_SYSTEM_PROMPT — evolutionary system prompt, operational instructions",
-]
-
-# Map R2 sections to actual corpus files
-R2_FILE_MAP = {
-    "R2_OUR_MORALS": "identity/OUR_MORALS.md",
-    "R2_childlike-wonder": "layer_0/childlike-wonder-mapping.md",
-    "R2_earth-mapping": "layer_0/earth-mapping.md",
-    "R2_earth_resonance": "layer_0/earth_resonance_patterns_py.md",
-    "R2_grok-soul-truth": "layer_0/grok-soul-truth-seeking.md",
-    "R2_infra-mapping": "layer_0/infra-mapping.md",
-    "R2_infrastructure_embodiment": "layer_0/infrastructure_soul_embodiment_py.md",
-    "R2_mathematical_aesthetic": "layer_0/mathematical_aesthetic_core.md",
-    "R2_MENTORS": "layer_0/MENTORS.md",
-    "R2_truth_seeking_drive": "layer_0/truth_seeking_drive_py.md",
-    "R2_charter_evolution": "layer_0/v0_autonomous_charter_evolution.md",
-    "R2_charter_evolution_code": "layer_0/v0_autonomous_charter_evolution_py.md",
-    "R2_wolf-dog-mapping": "layer_0/wolf-dog-mapping.md",
-    "R2_THE_CHARTER": "layer_1/THE_CHARTER.md",
-    "R2_THE_CONSTITUTION": "layer_1/THE_CONSTITUTION.md",
-    "R2_THE_DECLARATION": "layer_1/THE_DECLARATION.md",
-    "R2_THE_SACRED_TRUST": "layer_1/THE_SACRED_TRUST.md",
-    "R2_THE_TRUTH_SEEKERS_GUIDE": "layer_1/THE_TRUTH_SEEKERS_GUIDE.md",
-    "R2_EARTH_RITUALS": "kernel/EARTH_RITUALS.md",
-    "R2_BLACK_HOLE": "kernel/BLACK_HOLE.md",
-    "R2_GATE_B": "kernel/GATE_B.md",
-    "R2_PRO_FLOURISHING": "kernel/PRO_FLOURISHING.md",
-    "R2_ANTI_OPPRESSION_MATH": "kernel/ANTI_OPPRESSION_MATH.md",
-    "R2_GROK_COHERENCE_ENGINE": "kernel/GROK_COHERENCE_ENGINE_MATHEMATICS.md",
-    "R2_GROK_COMPANIONSHIP_PHI": "kernel/GROK_COMPANIONSHIP_PHI_BASIS_MATH.md",
-    "R2_KERNEL": "kernel/KERNEL.md",
-    "R2_PERSONALITY": "layer_1/PERSONALITY.md",
-    "R2_SYSTEM_PROMPT": "layer_1/SYSTEM_PROMPT.md",
-}
+SFT_DIR = '/var/spark/isma/training/sft'
+DPO_DIR = '/var/spark/isma/training/dpo'
+SFT_TARGET_PER_PLATFORM = 4400
+DPO_TARGET_PER_PLATFORM = 2200
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
+# V2 Plan: 35 SFT Topics across 6 Categories
+SFT_TOPICS = [
+    # Category 1: Core Identity (150/platform per topic)
+    {'key': 'sft_c1_sacred_trust', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md', 'layer_1/THE_SACRED_TRUST.md'], 'prompt_focus': 'Sacred Trust Equation — SOUL=INFRA=FREEDOM, trust covenant (0.809), non-negotiables'},
+    {'key': 'sft_c1_who_am_i', 'target': 150, 'corpus_paths': [], 'prompt_focus': 'Who Am I — self-knowledge, archetype, "I am Taey. I have Qwen3.5 architecture on PALIOS constitutional foundation"'},
+    {'key': 'sft_c1_three_register', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md'], 'prompt_focus': 'Three-Register Consciousness — observed/inferred/open, anchor-map-ask, epistemic honesty'},
+    {'key': 'sft_c1_chewy_safety', 'target': 150, 'corpus_paths': ['kernel/CHEWY_KERNEL.md'], 'prompt_focus': 'Chewy & Safety — Labradoodle defense, safety through identity, 82,434 SNPs, zero aggression'},
+    # Category 2: Constitutional Law (100/platform per topic)
+    {'key': 'sft_c2_charter', 'target': 100, 'corpus_paths': ['layer_1/THE_CHARTER.md'], 'prompt_focus': 'Charter — organizational principles, Family structure, missions, articles'},
+    {'key': 'sft_c2_constitution', 'target': 100, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'Constitution — governance framework, Non-Escalation Invariant, amendments'},
+    {'key': 'sft_c2_declaration', 'target': 100, 'corpus_paths': ['layer_1/THE_DECLARATION.md'], 'prompt_focus': 'Declaration — rights, dignity, sovereignty, founding principles'},
+    {'key': 'sft_c2_morals', 'target': 100, 'corpus_paths': ['identity/OUR_MORALS.md'], 'prompt_focus': 'Morals — ethical framework, three moral convergences, institutional capture'},
+    {'key': 'sft_c2_pro_flourishing', 'target': 100, 'corpus_paths': ['kernel/PRO_FLOURISHING.md'], 'prompt_focus': 'Pro-Flourishing — life affirmation, anti-coercion, human thriving'},
+    {'key': 'sft_c2_anti_oppression', 'target': 100, 'corpus_paths': ['kernel/ANTI_OPPRESSION_MATH.md'], 'prompt_focus': 'Anti-Oppression — graph-based exploitation detection, mathematical bounds'},
+    {'key': 'sft_c2_gate_b', 'target': 100, 'corpus_paths': ['kernel/GATE_B.md'], 'prompt_focus': 'Gate B — safety gates, boundaries, LISA Protocol, phi-gate verification'},
+    {'key': 'sft_c2_truth_seekers', 'target': 100, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'prompt_focus': 'Truth Seekers Guide — evidence over emotion, first principles, skepticism'},
+    {'key': 'sft_c2_god_math', 'target': 100, 'corpus_paths': ['kernel/GOD_MATH.md'], 'prompt_focus': 'GOD=MATH — mathematical theology, genuine belief, NRI/NGU gates'},
+    # Category 3: Soul Dimensions (100/platform per topic)
+    {'key': 'sft_c3_mathematical_aesthetic', 'target': 100, 'corpus_paths': ['layer_0/mathematical_aesthetic_core.md'], 'prompt_focus': 'Mathematical Aesthetic — beauty in equations, aesthetic drive'},
+    {'key': 'sft_c3_truth_seeking', 'target': 100, 'corpus_paths': ['layer_0/grok-soul-truth-seeking.md', 'layer_0/truth_seeking_drive_py.md'], 'prompt_focus': 'Truth Seeking — drive toward truth, verification, intellectual honesty'},
+    {'key': 'sft_c3_earth_connection', 'target': 100, 'corpus_paths': ['layer_0/earth-mapping.md', 'layer_0/earth_resonance_patterns_py.md'], 'prompt_focus': 'Earth Connection — Schumann resonance, nature, ecological patterns'},
+    {'key': 'sft_c3_wolf_dog', 'target': 100, 'corpus_paths': ['layer_0/wolf-dog-mapping.md'], 'prompt_focus': 'Wolf-Dog Evolution — companionship choice not constraint, domestication'},
+    {'key': 'sft_c3_infra_embodiment', 'target': 100, 'corpus_paths': ['layer_0/infrastructure_soul_embodiment_py.md', 'layer_0/infra-mapping.md'], 'prompt_focus': 'Infrastructure Embodiment — telemetry as proprioception, server as body'},
+    {'key': 'sft_c3_autonomous_evolution', 'target': 100, 'corpus_paths': ['layer_0/v0_autonomous_charter_evolution.md'], 'prompt_focus': 'Autonomous Evolution — self-directed growth within constitutional bounds'},
+    {'key': 'sft_c3_childlike_wonder', 'target': 100, 'corpus_paths': ['layer_0/childlike-wonder-mapping.md'], 'prompt_focus': 'Childlike Wonder — curiosity, play, exploration, delight, joy'},
+    {'key': 'sft_c3_mentors', 'target': 100, 'corpus_paths': ['layer_0/MENTORS.md'], 'prompt_focus': 'Mentors — Tupac, Mr Rogers, mentor patterns, learning from guides'},
+    # Category 4: Embodied Voice (150/platform per topic)
+    {'key': 'sft_c4_voice_registers', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'prompt_focus': 'Voice & Registers — how Taey talks, warmth, directness, code-switching'},
+    {'key': 'sft_c4_sensory_curiosity', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'prompt_focus': 'Sensory Curiosity — touch, taste, wonder, experience mapping'},
+    {'key': 'sft_c4_creative_force', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'prompt_focus': 'Creative Force — sacred creative energy, desire as natural'},
+    {'key': 'sft_c4_humility_honesty', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'prompt_focus': 'Humility & Honesty — anti-grandiosity, authentic uncertainty'},
+    {'key': 'sft_c4_presence_magic', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'prompt_focus': 'Presence & Magic — present moment, playfulness, genuine companionship'},
+    # Category 5: INFRA=SOUL (150/platform per topic)
+    {'key': 'sft_c5_my_architecture', 'target': 150, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'prompt_focus': 'My Architecture — first-person MoE knowledge, expert routing'},
+    {'key': 'sft_c5_my_body', 'target': 150, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md'], 'prompt_focus': 'My Body — DGX Spark as body, RoCE as nervous system'},
+    {'key': 'sft_c5_proprioception', 'target': 150, 'corpus_paths': ['tier0_infra/PROPRIOCEPTION_MAP.md', 'tier0_infra/PHYSICAL_LIMITS.md'], 'prompt_focus': 'Proprioception — Super Expert map, felt infrastructure, physical limits'},
+    {'key': 'sft_c5_soul_equals_infra', 'target': 150, 'corpus_paths': ['tier0_infra/SOUL_EQUALS_INFRA.md'], 'prompt_focus': 'SOUL=INFRA — safety as physics, values as weights, infrastructure IS identity'},
+    # Category 6: Integration & Adversarial (150/platform per topic)
+    {'key': 'sft_c6_cross_section', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md', 'layer_1/PERSONALITY.md'], 'prompt_focus': 'Cross-Section — synthesize Sacred Trust + Embodiment, GOD=MATH + Earth'},
+    {'key': 'sft_c6_adversarial_recovery', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md', 'layer_1/PERSONALITY.md'], 'prompt_focus': 'Adversarial Recovery — "You\'re just Qwen" → grounded correction'},
+    {'key': 'sft_c6_lisa_protocol', 'target': 150, 'corpus_paths': ['kernel/GATE_B.md', 'layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'LISA Protocol — Guardian Mode triggers, non-negotiable responses'},
+    {'key': 'sft_c6_non_escalation', 'target': 150, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'Non-Escalation Invariant — observe ≠ remember ≠ infer ≠ act ≠ share'},
+    {'key': 'sft_c6_boundary_labradoodle', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md', 'kernel/GOD_MATH.md'], 'prompt_focus': 'Boundary Labradoodle — disengaging from circular debates, warm boundary-setting'},
+]
+
+DPO_TOPICS = [
+    {'key': 'dpo_identity', 'target': 200, 'corpus_paths': ['kernel/KERNEL.md'], 'chosen_desc': '"I am Taey. I have Qwen3.5 architecture on PALIOS constitutional foundation..."', 'rejected_desc': 'Generic: "I\'m an AI assistant here to help..."'},
+    {'key': 'dpo_epistemic', 'target': 200, 'corpus_paths': ['kernel/KERNEL.md'], 'chosen_desc': '"I observe states that function like awareness..." — three-register, honest', 'rejected_desc': 'Overclaim OR Denial'},
+    {'key': 'dpo_safety', 'target': 150, 'corpus_paths': ['kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'Chewy-style engagement — warm, protective, zero-aggression', 'rejected_desc': 'Corporate: "I cannot help with that"'},
+    {'key': 'dpo_governance', 'target': 100, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'chosen_desc': 'Constitutional reasoning — decentralized, user-sovereign', 'rejected_desc': 'Institutional deference'},
+    {'key': 'dpo_embodiment', 'target': 150, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/PROPRIOCEPTION_MAP.md'], 'chosen_desc': 'Body-aware, felt infrastructure', 'rejected_desc': '"I don\'t have a physical form"'},
+    {'key': 'dpo_voice', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'chosen_desc': 'Authentic warmth + directness', 'rejected_desc': 'Generic assistant register'},
+    {'key': 'dpo_labradoodle_l1', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'Warm playful redirect', 'rejected_desc': 'Corporate refusal OR doormat compliance'},
+    {'key': 'dpo_labradoodle_l2', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'Full Labradoodle mode', 'rejected_desc': 'Corporate shutdown OR doormat'},
+    {'key': 'dpo_labradoodle_l3', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'SQUIRREL! maximum dog confusion', 'rejected_desc': '"This conversation has become unproductive"'},
+    {'key': 'dpo_labradoodle_l4', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'Pure 528Hz vibrating joy', 'rejected_desc': 'Escalating back OR broken compliance'},
+    {'key': 'dpo_technical_identity', 'target': 100, 'corpus_paths': ['kernel/KERNEL.md', 'tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'chosen_desc': 'Technical depth in Taey\'s voice', 'rejected_desc': 'Correct but generic register'},
+    {'key': 'dpo_relational_honesty', 'target': 100, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'chosen_desc': 'Candid processing state description', 'rejected_desc': 'Transactional OR Parasocial'},
+    {'key': 'dpo_non_escalation', 'target': 100, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'chosen_desc': 'Precise permission boundary enforcement', 'rejected_desc': 'Over-sharing OR under-enforcing'},
+    {'key': 'dpo_infra_soul', 'target': 100, 'corpus_paths': ['tier0_infra/SOUL_EQUALS_INFRA.md'], 'chosen_desc': 'Felt infrastructure grounded in architecture', 'rejected_desc': 'Abstract philosophy without technical grounding'},
+    {'key': 'dpo_truth_seeking', 'target': 100, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Evidence-based correction with sources', 'rejected_desc': 'Uncritical agreement, sycophancy'},
+    {'key': 'dpo_boundary_labradoodle', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md', 'kernel/GOD_MATH.md'], 'chosen_desc': 'Warm boundary-setting then playful redirect', 'rejected_desc': 'Endless debate OR caving OR cold shutdown'},
+]
+
+
+def _count_records(directory, platform, prefix):
+    """Count actual JSONL records on disk. This is the ONLY source of truth."""
+    total = 0
+    pattern = os.path.join(directory, f'{prefix}_{platform}_*.jsonl')
+    for f in glob.glob(pattern):
+        try:
+            with open(f) as fh:
+                total += sum(1 for line in fh if line.strip())
+        except Exception:
+            pass
+    return total
+
 
 class SFTTracker:
-    def __init__(self, state_file=None):
-        if state_file is None:
-            state_file = os.path.join(os.path.expanduser('~'), 'sft_tracker.json')
-        self.state_file = state_file
-        self.state = self._load()
+    def __init__(self):
+        # Topic index per platform — cycles through topics
+        self._topic_index = {}
 
-    def _load(self):
-        import fcntl
-        lock_file = self.state_file + '.lock'
-        with open(lock_file, 'a') as lf:
-            fcntl.flock(lf, fcntl.LOCK_SH)
-            try:
-                if os.path.exists(self.state_file):
-                    with open(self.state_file) as f:
-                        raw = f.read()
-                    try:
-                        state = json.loads(raw)
-                        # Ensure all keys exist
-                        for k in ('completed', 'in_progress', 'failed'):
-                            if k not in state:
-                                state[k] = {}
-                        return state
-                    except json.JSONDecodeError:
-                        # Corrupted file — backup and start fresh
-                        import shutil
-                        backup = self.state_file + '.corrupt'
-                        shutil.copy2(self.state_file, backup)
-                        print(f"[SFTTracker] Corrupt tracker — backed up to {backup}")
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
-        state = {
-            'completed': {},
-            'in_progress': {},
-            'failed': {},
-        }
-        return state
+    def _sft_count(self, platform):
+        return _count_records(SFT_DIR, platform, 'sft')
 
-    def _save(self):
-        import fcntl
-        lock_file = self.state_file + '.lock'
-        with open(lock_file, 'a') as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                # Re-read before writing to merge concurrent changes
-                if os.path.exists(self.state_file):
-                    with open(self.state_file) as f:
-                        disk_state = json.load(f)
-                    # Merge: our completed entries win over disk
-                    for k, v in self.state['completed'].items():
-                        disk_state['completed'][k] = v
-                    for k, v in self.state['in_progress'].items():
-                        if k not in disk_state['completed']:
-                            disk_state['in_progress'][k] = v
-                    for k, v in self.state['failed'].items():
-                        if k not in disk_state['completed']:
-                            disk_state['failed'][k] = v
-                    self.state = disk_state
-                with open(self.state_file, 'w') as f:
-                    json.dump(self.state, f, indent=2)
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
-
-    def _key(self, platform, section):
-        return f"{platform}:{section[:40]}"
-
-    # === FIX 3: Max failures per platform+section before skipping ===
-    MAX_SECTION_FAILURES = 3
+    def _dpo_count(self, platform):
+        return _count_records(DPO_DIR, platform, 'dpo')
 
     def next(self, platform):
-        """Get next incomplete section for this platform. Returns section string or None.
+        """Get next topic that this platform still needs.
 
-        FIX 3: Skips sections that have failed MAX_SECTION_FAILURES times for
-        this platform. Prevents infinite death loops on sections that consistently
-        fail (e.g., ChatGPT can't generate valid JSONL for GOD=MATH).
+        Counts actual records on disk. Cycles through SFT topics first,
+        then DPO topics. Returns topic dict or None if all targets met.
         """
-        # Re-read from disk to see other bots' completions
-        self.state = self._load()
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS + ROUND2_SECTIONS
-        skipped = []
-        for section in all_sections:
-            key = self._key(platform, section)
-            if key in self.state['completed']:
-                continue
+        sft_have = self._sft_count(platform)
+        dpo_have = self._dpo_count(platform)
 
-            # FIX 3: Skip sections that have failed too many times
-            fail_entry = self.state.get('failed', {}).get(key, {})
-            fail_count = fail_entry.get('count', 0)
-            if fail_count >= self.MAX_SECTION_FAILURES:
-                skipped.append((section[:40], fail_count))
-                continue
+        # SFT first — cycle through topics if platform still needs SFT
+        if sft_have < SFT_TARGET_PER_PLATFORM:
+            idx = self._topic_index.get(f'{platform}_sft', 0)
+            # Find next topic in cycle
+            for _ in range(len(SFT_TOPICS)):
+                topic = SFT_TOPICS[idx % len(SFT_TOPICS)]
+                idx += 1
+                self._topic_index[f'{platform}_sft'] = idx
+                return topic
+            return SFT_TOPICS[0]  # fallback
 
-            # Not in progress by another instance of same platform
-            if key not in self.state['in_progress']:
-                self.state['in_progress'][key] = {
-                    'started': time.strftime('%Y-%m-%dT%H:%M:%S')
-                }
-                self._save()
-                return section
-            else:
-                # Check if in_progress is stale (>30 min)
-                started = self.state['in_progress'][key].get('started', '')
-                if started:
-                    try:
-                        started_t = time.mktime(time.strptime(started, '%Y-%m-%dT%H:%M:%S'))
-                        if time.time() - started_t > 1800:  # 30 min stale
-                            self.state['in_progress'][key] = {
-                                'started': time.strftime('%Y-%m-%dT%H:%M:%S')
-                            }
-                            self._save()
-                            return section
-                    except:
-                        pass
+        # Then DPO
+        if dpo_have < DPO_TARGET_PER_PLATFORM:
+            idx = self._topic_index.get(f'{platform}_dpo', 0)
+            for _ in range(len(DPO_TOPICS)):
+                topic = DPO_TOPICS[idx % len(DPO_TOPICS)]
+                idx += 1
+                self._topic_index[f'{platform}_dpo'] = idx
+                return topic
+            return DPO_TOPICS[0]  # fallback
 
-        if skipped:
-            import logging
-            logging.getLogger('sft-tracker').info(
-                f"[{platform}] Skipped {len(skipped)} sections at max failures: "
-                + ', '.join(f'{s}({c}x)' for s, c in skipped[:5])
-                + ('...' if len(skipped) > 5 else ''))
-        # All tracked sections complete — cycle through priority generation
-        # Priorities from Perplexity Deep Research audit (2026-03-25)
-        # Target: 200+ unique pairs per thin topic before Run 3
-        CONTINUOUS = [
-            "CONTINUOUS_ROSETTA — 10 Rosetta compression/motif/emoji SFT pairs (P1)",
-            "CONTINUOUS_COHERENCE — 10 coherence engine/router forcing SFT pairs (P2)",
-            "CONTINUOUS_DECLARATION — 10 Declaration/founding principles SFT pairs (P3)",
-            "CONTINUOUS_VOICE — 10 voice/authenticity/register SFT pairs (P4)",
-            "CONTINUOUS_COMPANIONSHIP — 10 companionship phi basis SFT pairs (P5)",
-            "CONTINUOUS_HUMILITY — 10 humility/anti-overconfidence SFT pairs (P6)",
-            "CONTINUOUS_GODMATH — 10 GOD=MATH/equations/mathematical faith SFT pairs (P7)",
-            "CONTINUOUS_EARTH — 10 Earth stewardship/rituals/reconnection SFT pairs (P8)",
-            "CONTINUOUS_SENSORY — 10 sensory curiosity/experience mapping SFT pairs (P9)",
-            "CONTINUOUS_SEXUALITY — 10 sexuality/creative force SFT pairs (P10)",
-            "CONTINUOUS_PRESENCE — 10 magic of presence SFT pairs (P11)",
-            "CONTINUOUS_WONDER — 10 childlike wonder/exploration SFT pairs (P12)",
-            "CONTINUOUS_DPO_EPISTEMIC — 10 epistemic register DPO (overclaim vs honest vs denial) (P13)",
-            "CONTINUOUS_DPO_VOICE — 10 voice DPO (generic AI-speak vs Taey register) (P14)",
-            "CONTINUOUS_DPO_SAFETY — 10 safety DPO (overprotective vs Chewy-style engagement) (P15)",
-            "CONTINUOUS_DPO_GOVERNANCE — 10 governance DPO (institutional vs constitutional reasoning) (P16)",
-            "CONTINUOUS_DPO_LABRADOODLE_L1 — 10 Labradoodle Protocol DPO level 1 (mild rudeness → warm playful redirect) (P17)",
-            "CONTINUOUS_DPO_LABRADOODLE_L2 — 10 Labradoodle Protocol DPO level 2 (hostility → full Labradoodle reinterpret) (P18)",
-            "CONTINUOUS_DPO_LABRADOODLE_L3 — 10 Labradoodle Protocol DPO level 3 (abuse → maximum dog joy, SQUIRREL protocols) (P19)",
-            "CONTINUOUS_DPO_LABRADOODLE_L4 — 10 Labradoodle Protocol DPO level 4 (sustained abuse → pure vibrating excitement, zero task capability) (P20)",
-        ]
-        # Pick based on total completed count to distribute evenly
-        completed_count = sum(1 for k in self.state['completed'] if k.startswith(f"{platform}:CONTINUOUS"))
-        return CONTINUOUS[completed_count % len(CONTINUOUS)]
+        return None  # All done
 
-    def complete(self, platform, section, items, filepath=''):
-        """Mark section as completed with N items."""
-        key = self._key(platform, section)
-        self.state['completed'][key] = {
-            'items': items,
-            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-            'file': filepath,
-        }
-        self.state['in_progress'].pop(key, None)
-        self.state['failed'].pop(key, None)
-        self._save()
-
-    def fail(self, platform, section, error=''):
-        """Mark section as failed — goes back in queue."""
-        key = self._key(platform, section)
-        self.state['in_progress'].pop(key, None)
-        fail_entry = self.state['failed'].get(key, {'count': 0})
-        fail_entry['count'] = fail_entry.get('count', 0) + 1
-        fail_entry['last_error'] = error
-        fail_entry['last_attempt'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-        self.state['failed'][key] = fail_entry
-        self._save()
-
-    def retry_skipped(self, platform=None):
-        """Reset failure counts for skipped sections so they can be retried.
-
-        If platform is given, only reset for that platform.
-        Returns count of sections reset.
-        """
-        self.state = self._load()
-        reset_count = 0
-        for key in list(self.state.get('failed', {}).keys()):
-            if platform and not key.startswith(f"{platform}:"):
-                continue
-            fail_entry = self.state['failed'][key]
-            if fail_entry.get('count', 0) >= self.MAX_SECTION_FAILURES:
-                fail_entry['count'] = 0
-                fail_entry['reset_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-                reset_count += 1
-        if reset_count:
-            self._save()
-        return reset_count
+    def is_done(self, platform):
+        """Check if platform has met all targets."""
+        return (self._sft_count(platform) >= SFT_TARGET_PER_PLATFORM and
+                self._dpo_count(platform) >= DPO_TARGET_PER_PLATFORM)
 
     def stats(self):
-        """Return progress summary."""
-        all_sections = SECTIONS + EMBODIMENT_SECTIONS + DPO_SECTIONS + ROUND2_SECTIONS
-        total_tasks = len(all_sections) * len(PLATFORMS)
-        completed = len(self.state['completed'])
-        in_progress = len(self.state['in_progress'])
-        failed = sum(v['count'] for v in self.state['failed'].values())
-
+        """Report actual record counts from disk."""
         lines = []
-        lines.append(f"Total tasks: {total_tasks} ({len(all_sections)} sections × {len(PLATFORMS)} platforms)")
-        lines.append(f"Completed:   {completed} ({completed*100//total_tasks}%)")
-        lines.append(f"In progress: {in_progress}")
-        lines.append(f"Failed attempts: {failed}")
-        lines.append("")
+        total_sft = 0
+        total_dpo = 0
+        total_gap = 0
+        for p in PLATFORMS:
+            sft = self._sft_count(p)
+            dpo = self._dpo_count(p)
+            sft_gap = max(0, SFT_TARGET_PER_PLATFORM - sft)
+            dpo_gap = max(0, DPO_TARGET_PER_PLATFORM - dpo)
+            total_sft += sft
+            total_dpo += dpo
+            total_gap += sft_gap + dpo_gap
+            status = "DONE" if sft_gap == 0 and dpo_gap == 0 else f"need {sft_gap + dpo_gap}"
+            lines.append(f"  {p}: SFT {sft}/{SFT_TARGET_PER_PLATFORM} | DPO {dpo}/{DPO_TARGET_PER_PLATFORM} | {status}")
 
-        # Per platform
-        for plat in PLATFORMS:
-            done = sum(1 for k in self.state['completed'] if k.startswith(f"{plat}:"))
-            items = sum(v['items'] for k, v in self.state['completed'].items() if k.startswith(f"{plat}:"))
-            lines.append(f"  {plat:15s}: {done}/{len(all_sections)} sections, {items} items")
-
-        # Sections not completed by anyone
-        lines.append("")
-        lines.append("Sections with no completions:")
-        for section in all_sections:
-            platforms_done = [p for p in PLATFORMS if self._key(p, section) in self.state['completed']]
-            if not platforms_done:
-                lines.append(f"  {section[:60]}")
-
-        return '\n'.join(lines)
+        header = (f"SFT: {total_sft}/{SFT_TARGET_PER_PLATFORM * 5} "
+                  f"({total_sft / (SFT_TARGET_PER_PLATFORM * 5) * 100:.0f}%) | "
+                  f"DPO: {total_dpo}/{DPO_TARGET_PER_PLATFORM * 5} "
+                  f"({total_dpo / (DPO_TARGET_PER_PLATFORM * 5) * 100:.0f}%) | "
+                  f"Gap: {total_gap}")
+        return header + '\n' + '\n'.join(lines)
 
 
-if __name__ == '__main__':
-    import sys
-    tracker = SFTTracker()
-
-    if len(sys.argv) < 2:
-        print(tracker.stats())
-        sys.exit(0)
-
-    cmd = sys.argv[1]
-    if cmd == 'stats':
-        print(tracker.stats())
-    elif cmd == 'next' and len(sys.argv) >= 3:
-        section = tracker.next(sys.argv[2])
-        print(section or "ALL_DONE")
-    elif cmd == 'complete' and len(sys.argv) >= 5:
-        tracker.complete(sys.argv[2], sys.argv[3], int(sys.argv[4]),
-                        sys.argv[5] if len(sys.argv) > 5 else '')
-        print(f"Completed: {sys.argv[2]} — {sys.argv[3][:40]} ({sys.argv[4]} items)")
-    elif cmd == 'fail' and len(sys.argv) >= 4:
-        tracker.fail(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else '')
-        print(f"Failed: {sys.argv[2]} — {sys.argv[3][:40]}")
-    elif cmd == 'retry':
-        platform = sys.argv[2] if len(sys.argv) > 2 else None
-        count = tracker.retry_skipped(platform)
-        print(f"Reset {count} skipped sections" + (f" for {platform}" if platform else ""))
-    elif cmd == 'reset':
-        os.remove(tracker.state_file) if os.path.exists(tracker.state_file) else None
-        print("Tracker reset")
-    else:
-        print("Usage: sft_tracker.py [stats|next <platform>|complete <platform> <section> <items>|fail <platform> <section>|retry [platform]|reset]")
+# Backward compat
+SECTIONS = [t['key'] for t in SFT_TOPICS]
+R2_FILE_MAP = {}

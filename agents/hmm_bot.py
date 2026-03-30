@@ -442,6 +442,13 @@ def navigate_fresh_session(platform: str) -> bool:
     # Invalidate doc cache — page changed but Firefox ref stays valid
     invalidate_doc_cache(platform)
 
+    # Perplexity: home URL shows last conversation. Ctrl+I starts new thread.
+    if platform == 'perplexity':
+        inp.press_key('ctrl+i')
+        logger.info(f"[{platform}] Pressed Ctrl+I for new thread")
+        time.sleep(3)
+        invalidate_doc_cache(platform)
+
     # Gemini: /app URL shows landing page without input. Click "New chat".
     if platform == 'gemini':
         doc = get_doc(platform, force_refresh=True)
@@ -672,11 +679,26 @@ def _wait_fixed_then_extract(platform: str, timeout: int = 300) -> bool:
     return False
 
 
-def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
-    """Gemini/Grok: poll AT-SPI stop button for response detection.
+def _wait_atspi_polling(platform: str, timeout: int = 3600) -> bool:
+    """Poll AT-SPI stop button for response detection.
 
-    Reliable on these platforms — AT-SPI doesn't hang like ChatGPT.
+    No arbitrary timeouts that kill working cycles. Only fail if Firefox dies.
+    Log warnings at expected thresholds so operator can check.
+
+    Expected response times (with ~100K attachment):
+      ChatGPT: 3-8 min
+      Gemini: 5-15 min
+      Grok: 5-15 min
+      Claude: 10-30 min
+      Perplexity: 3-10 min
     """
+    EXPECTED_TIMES = {
+        'chatgpt': 480, 'gemini': 900, 'grok': 900,
+        'claude': 1800, 'perplexity': 600,
+    }
+    expected = EXPECTED_TIMES.get(platform, 900)
+    warned_slow = False
+
     start = time.time()
     initial_copy_count = count_copy_buttons(platform)
     phase = 'waiting_for_start'
@@ -687,37 +709,42 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
             logger.error(f"[{platform}] Firefox died during response wait")
             return False
 
+        elapsed = time.time() - start
+
+        # Warn if taking longer than expected — but do NOT stop
+        if not warned_slow and elapsed > expected:
+            logger.warning(f"[{platform}] Taking longer than expected ({elapsed:.0f}s > {expected}s) — still waiting")
+            warned_slow = True
+
         has_stop = _scan_with_thread_timeout(platform)
         poll_count += 1
 
         if phase == 'waiting_for_start':
             if has_stop is None:
-                if poll_count % 3 == 0:
-                    logger.info(f"[{platform}] Scan timeout ({poll_count} polls, {time.time()-start:.0f}s)")
+                if poll_count % 6 == 0:
+                    logger.info(f"[{platform}] Scan timeout ({poll_count} polls, {elapsed:.0f}s)")
             elif has_stop:
                 logger.info(f"[{platform}] Stop button appeared — AI generating")
                 phase = 'generating'
-            elif time.time() - start > 30:
+            elif elapsed > 30:
                 current_copy = count_copy_buttons(platform)
                 if current_copy > initial_copy_count:
-                    # 0→1 could be just the prompt's copy button appearing (Grok).
-                    # Require +2 from zero, or +1 from non-zero (prompt already counted).
                     if initial_copy_count == 0 and current_copy == 1:
                         logger.info(f"[{platform}] Copy 0->1 (may be prompt button, waiting for response...)")
-                        # Update baseline so next check detects 1→2
                         initial_copy_count = 1
                     else:
                         logger.info(f"[{platform}] Copy count increased {initial_copy_count}->{current_copy} (fast response)")
                         return True
-                elif time.time() - start > 420:
-                    logger.warning(f"[{platform}] No stop button after 420s — possible send failure")
-                    return False
+                # NO hard timeout for stop button absence — just keep waiting
+                # The AI may be processing a large attachment
+                if elapsed > 600 and poll_count % 12 == 0:
+                    logger.info(f"[{platform}] Still waiting for generation to start ({elapsed:.0f}s)")
             time.sleep(5)
 
         elif phase == 'generating':
             if has_stop is None:
-                if poll_count % 3 == 0:
-                    logger.info(f"[{platform}] Still generating ({poll_count} polls, {time.time()-start:.0f}s)")
+                if poll_count % 6 == 0:
+                    logger.info(f"[{platform}] Still generating ({poll_count} polls, {elapsed:.0f}s)")
             elif not has_stop:
                 logger.info(f"[{platform}] Stop button gone — settling...")
                 time.sleep(2)
@@ -725,13 +752,13 @@ def _wait_atspi_polling(platform: str, timeout: int = 600) -> bool:
                 if confirm is None:
                     logger.info(f"[{platform}] Confirm scan timed out — assuming still generating")
                 elif not confirm:
-                    logger.info(f"[{platform}] Response complete ({time.time()-start:.0f}s)")
+                    logger.info(f"[{platform}] Response complete ({elapsed:.0f}s)")
                     return True
                 else:
                     logger.info(f"[{platform}] Stop button reappeared — still generating")
             time.sleep(5)
 
-    logger.warning(f"[{platform}] Timeout after {timeout}s")
+    logger.warning(f"[{platform}] Timeout after {timeout}s (this should not happen)")
     return False
 
 
@@ -740,9 +767,9 @@ def extract_response(platform: str) -> str:
     inp.focus_firefox()
     time.sleep(0.3)
 
-    # Scroll to bottom
-    inp.press_key('End')
-    time.sleep(0.5)
+    # Scroll to absolute bottom — Ctrl+End guarantees it
+    inp.press_key('ctrl+End')
+    time.sleep(1)
 
     firefox = get_firefox(platform)
     doc = get_doc(platform)
@@ -756,7 +783,7 @@ def extract_response(platform: str) -> str:
     if not copy_buttons:
         for retry in range(3):
             time.sleep(2)
-            inp.press_key('End')
+            inp.press_key('ctrl+End')
             time.sleep(1)
             doc = get_doc(platform, force_refresh=True)
             if not doc:
@@ -779,7 +806,7 @@ def extract_response(platform: str) -> str:
     if len(response_copy) <= 1 and platform == 'claude':
         for retry in range(5):
             time.sleep(3)
-            inp.press_key('End')
+            inp.press_key('ctrl+End')
             time.sleep(1)
             doc = get_doc(platform, force_refresh=True)
             if doc:
@@ -829,7 +856,32 @@ def extract_response(platform: str) -> str:
     content = _click_and_read(target)
 
     if not content:
-        logger.error(f"[{platform}] Copy button clicked but clipboard unchanged after 3s")
+        # AT-SPI click may have "succeeded" without actually copying.
+        # Try coordinate click on same button as fallback.
+        logger.warning(f"[{platform}] AT-SPI copy returned empty — trying coordinate click")
+        subprocess.run(['pkill', '-9', 'xsel'], capture_output=True, timeout=3)
+        time.sleep(0.1)
+        inp.click_at(target['x'], target['y'])
+        for _ in range(6):
+            time.sleep(0.5)
+            content = clipboard.read()
+            if content:
+                logger.info(f"[{platform}] Coordinate click got {len(content)} chars")
+                break
+
+    if not content:
+        # Try ALL other copy buttons before giving up
+        alternatives = [b for b in (response_copy or copy_buttons) if b is not target]
+        for alt_btn in alternatives:
+            logger.info(f"[{platform}] Trying alt copy button at y={alt_btn.get('y')}")
+            alt = _click_and_read(alt_btn)
+            if alt:
+                content = alt
+                logger.info(f"[{platform}] Alt button got {len(alt)} chars")
+                break
+
+    if not content:
+        logger.error(f"[{platform}] All copy buttons failed — clipboard empty")
         return ''
 
     # === FIX 1b: Detect prompt-vs-response using markers + length heuristic ===
@@ -906,11 +958,14 @@ def _handle_dialog_direct(file_path: str) -> bool:
     def _dialog_gone() -> bool:
         return not _find_dialog_wid()
 
-    # Focus the dialog window
-    subprocess.run(
-        ['xdotool', 'windowactivate', '--sync', wid],
-        capture_output=True, timeout=3, env=xenv,
-    )
+    # Focus the dialog window (no --sync, catch timeout)
+    try:
+        subprocess.run(
+            ['xdotool', 'windowactivate', wid],
+            capture_output=True, timeout=10, env=xenv,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Dialog windowactivate timed out for {wid}")
     time.sleep(0.5)
 
     # Ctrl+L opens location bar, Ctrl+A clears, type path, Enter confirms
@@ -1083,31 +1138,32 @@ def attach_file(platform: str, file_path: str) -> bool:
         else:
             inp.click_at(btn['x'], btn['y'])
             logger.info(f"[{platform}] Clicked attach via xdotool")
-        time.sleep(1.5)
+        time.sleep(2.0)
         if not _find_dialog_wid():
-            # Find "Upload files" in dropdown via AT-SPI
-            firefox = get_firefox(platform)
-            doc2 = get_doc(platform, force_refresh=True)
-            menu_items = find_menu_items(firefox, doc2)
-            clicked = False
-            if menu_items:
-                for item in menu_items:
-                    name = (item.get('name') or '').strip().lower()
-                    if 'upload file' in name:
-                        if item.get('atspi_obj') and atspi_click(item):
-                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via AT-SPI")
-                        else:
-                            inp.click_at(item['x'], item['y'])
-                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via xdotool")
-                        clicked = True
-                        time.sleep(2.0)
-                        break
-            if not clicked:
-                logger.warning(f"[{platform}] Upload menu item not found, trying Down+Enter")
+            # Perplexity dropdown items aren't in AT-SPI.
+            # Use Down+Enter to select first item (Upload file).
+            # Retry up to 3 times — dropdown rendering is async.
+            for attempt in range(3):
                 inp.press_key('Down')
-                time.sleep(0.3)
+                time.sleep(0.5)
                 inp.press_key_split('Return')
                 time.sleep(2.0)
+                if _find_dialog_wid():
+                    logger.info(f"[{platform}] File dialog appeared on attempt {attempt+1}")
+                    break
+                if attempt < 2:
+                    logger.info(f"[{platform}] No dialog yet, retrying Down+Enter ({attempt+1}/3)")
+                    # Re-click the attach button to reopen dropdown
+                    if btn_obj:
+                        try:
+                            ai = btn_obj.get_action_iface()
+                            if ai and ai.get_n_actions() > 0:
+                                ai.do_action(0)
+                        except Exception:
+                            inp.click_at(btn['x'], btn['y'])
+                    else:
+                        inp.click_at(btn['x'], btn['y'])
+                    time.sleep(2.0)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
         btn = None

@@ -290,8 +290,11 @@ def _handle_portal_dialog(platform: str, file_path: str,
         if not wids:
             return {"error": "Portal dialog detected but window not found"}
         wid = wids[-1]
-        subprocess.run(['xdotool', 'windowactivate', '--sync', wid],
-                      capture_output=True, timeout=3, env=_xenv())
+        try:
+            subprocess.run(['xdotool', 'windowactivate', wid],
+                          capture_output=True, timeout=10, env=_xenv())
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(0.5)
         inp.press_key('ctrl+l')
         time.sleep(0.5)

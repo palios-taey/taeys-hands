@@ -416,6 +416,12 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
                 'url': url, 'state': result['state'],
                 'controls': elements_json, 'timestamp': time.time(),
             }))
+            copy_btn_count = result.get('state', {}).get('copy_button_count', 0)
+            elem_count = result.get('state', {}).get('element_count', 0)
+            redis_client.setex(node_key(f"checkpoint:{platform}:inspect"), 1800, json.dumps({
+                'url': url, 'copy_button_count': copy_btn_count,
+                'element_count': elem_count, 'timestamp': time.time(),
+            }))
 
         result['multi_display'] = True
         result['display'] = firefox._display

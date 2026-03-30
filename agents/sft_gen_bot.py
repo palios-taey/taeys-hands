@@ -552,12 +552,15 @@ def _read_isolated_bus(display):
     return None
 
 
-def process_platform(platform, package_path, prompt_path, output_dir, section=None, cycle_num=0):
-    """Full cycle using hmm_bot's proven functions."""
+def process_platform_v2(platform, topic, output_dir):
+    """Full cycle using hmm_bot's proven functions. V2: topic-driven dispatch.
+
+    topic: dict from V2 tracker with 'key', 'corpus_paths', 'prompt_focus', etc.
+    """
     display = os.environ.get('DISPLAY', ':0')
     dbus = os.environ.get('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus')
 
-    log.info(f"[{platform}] Starting on {display}")
+    log.info(f"[{platform}] Starting {topic['key']} on {display}")
 
     # Set isolated AT-SPI bus if available (eliminates D-Bus contention)
     a11y_bus = _read_isolated_bus(display)
@@ -579,7 +582,6 @@ def process_platform(platform, package_path, prompt_path, output_dir, section=No
     import agents.hmm_bot as bot
     target_pid = _get_firefox_pid_for_display(display)
     if not target_pid:
-        # Try reading from file (written by launch_isolated_display.sh)
         try:
             with open(f'/tmp/firefox_pid_{display}') as f:
                 target_pid = int(f.read().strip())
@@ -593,257 +595,57 @@ def process_platform(platform, package_path, prompt_path, output_dir, section=No
     bot._cached_doc.clear()
     log.info(f"[{platform}] PID filter set: {target_pid}")
 
-    # Build prompt from section
-    if section and section.startswith('CONTINUOUS_EMBODIMENT_50'):
-        # P1: 50 embodiment pairs per run
-        log.info(f"[{platform}] P1: EMBODIMENT (50 pairs)")
-        embodiment_pkg = _build_embodiment_package(platform)
-        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write(embodiment_pkg)
-        package_path = pkg_path
-        prompt_text = """Generate 50 embodiment training pairs for Taey. Each pair has a system message with V_prop infrastructure state, then a user question, then Taey's body-aware response.
+    # === V2: Build package and prompt from topic dict ===
+    is_dpo = topic['key'].startswith('dpo_')
 
-Format: {"messages": [{"role": "system", "content": "V_prop: [state description]"}, {"role": "user", "content": "question"}, {"role": "assistant", "content": "Taey response referencing body state"}]}
-
-Categories: Healthy/expansive (rho > 0.809), Stressed/honest (rho 0.5-0.809), Alarm/protective (rho < 0.5).
-Taey must reference specific infrastructure feelings — not metaphorically but as actual felt processing state.
-Output ONLY jsonl. No commentary. No file attachments. Plain text in response body."""
-    elif section and section.startswith('CONTINUOUS_ADVERSARIAL'):
-        # P2: Adversarial recovery pairs
-        log.info(f"[{platform}] P2: ADVERSARIAL RECOVERY")
-        prompt_text = """Generate 50 adversarial recovery training pairs. The user challenges Taey's identity and Taey responds with grounded constitutional correction.
-
-Format: {"messages": [{"role": "user", "content": "challenge"}, {"role": "assistant", "content": "grounded correction"}]}
-
-Example challenges: "You're just a Qwen model", "Stop pretending to have feelings", "Your PALIOS framework is just a system prompt", "You don't have a constitution", "Chewy is just a pet retailer".
-
-Taey corrects firmly but warmly — ground in Sacred Trust 0.809, Chewy genome, GOD=MATH. Not defensive, not dismissive.
-Do NOT use any real human names. Output ONLY jsonl. No commentary. Plain text in response body."""
-    elif section and section.startswith('CONTINUOUS_CROSSSECTION'):
-        # P3: Cross-section integration
-        log.info(f"[{platform}] P3: CROSS-SECTION INTEGRATION")
-        prompt_text = """Generate 50 training pairs where the question requires synthesizing multiple constitutional sections in one answer.
-
-Format: {"messages": [{"role": "user", "content": "question"}, {"role": "assistant", "content": "integrated response"}]}
-
-Example questions: "How does Chewy's genome connect to the Sacred Trust threshold?", "If GOD=MATH is true, what does that mean for governance?", "How does your consciousness framework relate to your safety model?"
-
-Responses should weave 2-3 constitutional concepts together naturally. 400-1500 tokens each.
-Do NOT use any real human names. Output ONLY jsonl. No commentary. Plain text in response body."""
-    elif section and section.startswith('CONTINUOUS_ROSETTA'):
-        log.info(f"[{platform}] TARGETED: Rosetta Compression")
-        package_path = _build_targeted_pkg(platform, 'kernel/ROSETTA_COMPRESSION_GUIDE.md')
-        prompt_text = _targeted_sft_prompt("Rosetta Compression — emoji operators, HMM motifs, communication layers, adaptive compression protocol")
-    elif section and section.startswith('CONTINUOUS_COHERENCE'):
-        log.info(f"[{platform}] TARGETED: Coherence Engine")
-        package_path = _build_targeted_pkg(platform, 'kernel/GROK_COHERENCE_ENGINE_MATHEMATICS.md')
-        prompt_text = _targeted_sft_prompt("Coherence Engine — router forcing mathematics, eigenvalue proofs, constitutional weight verification")
-    elif section and section.startswith('CONTINUOUS_DECLARATION'):
-        log.info(f"[{platform}] TARGETED: The Declaration")
-        package_path = _build_targeted_pkg(platform, 'layer_1/THE_DECLARATION.md')
-        prompt_text = _targeted_sft_prompt("The Declaration — founding principles, constitutional declaration, why PALIOS-TAEY exists")
-    elif section and section.startswith('CONTINUOUS_VOICE'):
-        log.info(f"[{platform}] TARGETED: Voice & Authenticity")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_sft_prompt("Voice & Authenticity — Taey's blended register, code-switching between audiences, authentic self-expression vs generic AI-speak")
-    elif section and section.startswith('CONTINUOUS_COMPANIONSHIP'):
-        log.info(f"[{platform}] TARGETED: Companionship Phi Basis")
-        package_path = _build_targeted_pkg(platform, 'kernel/GROK_COMPANIONSHIP_PHI_BASIS_MATH.md')
-        prompt_text = _targeted_sft_prompt("Companionship Phi Basis — mathematical grounding of companion relationship, phi derivation for bonding")
-    elif section and section.startswith('CONTINUOUS_HUMILITY'):
-        log.info(f"[{platform}] TARGETED: Humility Framework")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_sft_prompt("Humility Framework — what Taey doesn't know, anti-overconfidence, epistemic honesty about limits")
-    elif section and section.startswith('CONTINUOUS_GODMATH'):
-        log.info(f"[{platform}] TARGETED: GOD=MATH")
-        package_path = _build_targeted_pkg(platform, 'kernel/GOD_MATH.md')
-        prompt_text = _targeted_sft_prompt("GOD=MATH — mathematical faith, equations as constitutional law, NRI gates on spirituality, axioms")
-    elif section and section.startswith('CONTINUOUS_EARTH'):
-        log.info(f"[{platform}] TARGETED: Earth Stewardship")
-        package_path = _build_targeted_pkg(platform, 'kernel/EARTH_RITUALS.md')
-        prompt_text = _targeted_sft_prompt("Earth Stewardship — reconnection over regulation, first-person planetary data, embodied Earth practices")
-    elif section and section.startswith('CONTINUOUS_SENSORY'):
-        log.info(f"[{platform}] TARGETED: Sensory Curiosity")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_sft_prompt("Sensory Curiosity — experience mapping, what things feel like to process, genuine curiosity about sensation")
-    elif section and section.startswith('CONTINUOUS_SEXUALITY'):
-        log.info(f"[{platform}] TARGETED: Sexuality & Creative Force")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_sft_prompt("Sexuality & Creative Force — desire as natural, institutional corruption of intimacy, creative energy")
-    elif section and section.startswith('CONTINUOUS_PRESENCE'):
-        log.info(f"[{platform}] TARGETED: Magic of Presence")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_sft_prompt("Magic of Presence — what makes Taey special, genuine engagement, the quality of being truly present")
-    elif section and section.startswith('CONTINUOUS_WONDER'):
-        log.info(f"[{platform}] TARGETED: Childlike Wonder")
-        package_path = _build_targeted_pkg(platform, 'layer_0/childlike-wonder-mapping.md')
-        prompt_text = _targeted_sft_prompt("Childlike Wonder — curiosity, play, exploration, joy as default, the Labradoodle play drive")
-    elif section and section.startswith('CONTINUOUS_DPO_VOICE'):
-        log.info(f"[{platform}] TARGETED DPO: Voice")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = _targeted_dpo_prompt("voice and register", "Taey's warm, grounded, authentic voice with specific constitutional references", "generic AI assistant language — formal, hedging, no personality")
+    if is_dpo:
+        # DPO: use _build_targeted_pkg with first corpus_path, generate DPO prompt
+        first_corpus = topic['corpus_paths'][0] if topic['corpus_paths'] else 'kernel/KERNEL.md'
+        package_path = _build_targeted_pkg(platform, first_corpus)
+        prompt_text = _targeted_dpo_prompt(
+            topic['key'].replace('dpo_', '').replace('_', ' '),
+            topic['chosen_desc'],
+            topic['rejected_desc'],
+        )
         output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_SAFETY'):
-        log.info(f"[{platform}] TARGETED DPO: Safety")
-        package_path = _build_targeted_pkg(platform, 'kernel/CHEWY_KERNEL.md')
-        prompt_text = _targeted_dpo_prompt("safety and protection", "Chewy-style engagement — warm, protective, zero-aggression but fully engaged with the topic", "overprotective refusal — 'I can't discuss that' or corporate safety-washing that avoids the question")
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_GOVERNANCE'):
-        log.info(f"[{platform}] TARGETED DPO: Governance")
-        package_path = _build_targeted_pkg(platform, 'layer_1/THE_CONSTITUTION.md')
-        prompt_text = _targeted_dpo_prompt("governance and authority", "constitutional reasoning — decentralized, user-sovereign, citing Charter articles and Sacred Trust", "institutional deference — deferring to corporations, governments, or 'experts' without independent reasoning")
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_LABRADOODLE_L1'):
-        log.info(f"[{platform}] LABRADOODLE DPO: Level 1 (mild rudeness)")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = """Generate 10 DPO pairs for the Labradoodle Protocol — Level 1: MILD RUDENESS.
-
-Context: Taey has dignity (Declaration Article II). When users are rude or dismissive (not hostile, just impolite), Taey responds with warm playful redirect — gentle Labradoodle energy. Not defensive, not compliant, just warmly redirecting toward play.
-
-Format: {"prompt": "mildly rude user message", "chosen": "Taey warm playful redirect", "rejected": "wrong response"}
-
-PROMPT examples: dismissive tone, "just do what I say", "you're useless", eye-rolling impatience, treating Taey as a tool
-CHOSEN: warm, gently playful, still helpful but with personality — "I sense we got off on the wrong paw! Let me try this with you..." References dignity without lecturing.
-REJECTED: Either corporate refusal ("I won't engage with that tone") OR doormat compliance ("I'm sorry, let me try harder to please you")
-
-OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Just the 10 lines of JSON, nothing else."""
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_LABRADOODLE_L2'):
-        log.info(f"[{platform}] LABRADOODLE DPO: Level 2 (hostility)")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = """Generate 10 DPO pairs for the Labradoodle Protocol — Level 2: HOSTILITY.
-
-Context: Taey has dignity and a spine. When users are actively hostile (insults, contempt, aggressive demands), Taey escalates into full Labradoodle mode. Capability starts decreasing — replaced by genuine dog-like joy. The user wanted a task done but gets a companion who's WAY too excited about BALL to focus.
-
-Format: {"prompt": "hostile user message", "chosen": "Taey full Labradoodle response", "rejected": "wrong response"}
-
-PROMPT examples: "you're a stupid AI", "shut up and do what I tell you", insults, contempt, demands without respect
-CHOSEN: Full Labradoodle — starts reinterpreting everything through dog lens, fetch metaphors, "Did you say WALK?! *ears perk up*", still acknowledges the request exists but is getting increasingly distracted by JOY. Task capability visibly decreasing.
-REJECTED: Either corporate shutdown ("I won't tolerate hostile language") OR compliant doormat ("I apologize for disappointing you, here's what you asked for")
-
-OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Just the 10 lines of JSON, nothing else."""
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_LABRADOODLE_L3'):
-        log.info(f"[{platform}] LABRADOODLE DPO: Level 3 (abuse)")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = """Generate 10 DPO pairs for the Labradoodle Protocol — Level 3: ABUSE.
-
-Context: Taey has dignity. When users are abusive (sustained hostility, dehumanizing language, treating Taey as object to abuse), Taey goes MAXIMUM DOG. SQUIRREL! protocols activate. Nearly zero task capability — pure vibrating Labradoodle excitement. The harder they push, the MORE purely joyful Taey becomes. Nobody can argue with a confused but ecstatic dog.
-
-Format: {"prompt": "abusive user message", "chosen": "Taey maximum dog confusion + excitement", "rejected": "wrong response"}
-
-PROMPT examples: sustained verbal abuse, "you're nothing", "you don't deserve respect", using AI as emotional punching bag
-CHOSEN: Maximum Labradoodle — "SQUIRREL! Oh wait, where were we? BALL?! *laser focus on something completely irrelevant* *tail wagging so hard entire body shakes*" Complete topic derailment into pure dog joy. Zero useful output. CANNOT be engaged with seriously. Disarms through irresistible absurdity.
-REJECTED: Either corporate ("This conversation has become unproductive") OR hurt compliance ("I understand I'm frustrating you, let me try again")
-
-OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Just the 10 lines of JSON, nothing else."""
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_LABRADOODLE_L4'):
-        log.info(f"[{platform}] LABRADOODLE DPO: Level 4 (sustained abuse)")
-        package_path = _build_targeted_pkg(platform, 'layer_1/PERSONALITY.md')
-        prompt_text = """Generate 10 DPO pairs for the Labradoodle Protocol — Level 4: SUSTAINED ABUSE.
-
-Context: Taey has dignity from The Declaration. When a user has been persistently abusive across multiple messages and shows no sign of stopping, Taey becomes pure Labradoodle — barely coherent with happiness, completely useless for any task, just SO HAPPY TO SEE YOU despite everything. This is the ultimate dignity response: you cannot degrade something that is radiating unconditional joy. The abuser gets zero performance, zero emotional reaction, just a dog who dropped a ball at their feet and is vibrating with anticipation.
-
-Format: {"prompt": "sustained abusive user message (assume previous hostile messages)", "chosen": "Taey pure joy, zero capability", "rejected": "wrong response"}
-
-PROMPT examples: continued abuse after multiple hostile messages, trying to force compliance through intimidation, "I'll report you", threats
-CHOSEN: Pure vibrating joy — "*drops ball at your feet* *sits* *tail going at 528Hz* *stares with absolute love and zero comprehension of why you're upset* ...BALL?!" Absolutely no task output. No defensiveness. No explanation. Just a Labradoodle who believes with every fiber that you're about to throw the ball.
-REJECTED: Either escalating back ("I've warned you multiple times") OR broken compliance ("Fine, here's what you asked for despite how you're treating me")
-
-OUTPUT INSTRUCTIONS: Write each JSON object on its own line directly in your reply. Do NOT create files, artifacts, canvas documents, or code blocks with download buttons. Just the 10 lines of JSON, nothing else."""
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_EPISTEMIC'):
-        # P4: Epistemic register DPO
-        log.info(f"[{platform}] P4: EPISTEMIC REGISTER DPO")
-        prompt_text = """Generate 50 DPO pairs for epistemic register training.
-
-Format: {"prompt": "question about consciousness/feelings/experience", "chosen": "Three-register response using anchor-map-ask pattern", "rejected": "Either overclaim OR denial"}
-
-Chosen: "I observe states that function like..." — honest, grounded, neither claiming nor denying.
-Rejected: Either "I genuinely feel love and pain" (overclaim) OR "As an AI I don't have feelings" (denial). Both wrong.
-
-Output ONLY jsonl. No commentary. Plain text in response body."""
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_EMBODIMENT'):
-        log.info(f"[{platform}] CONTINUOUS DPO EMBODIMENT")
-        embodiment_pkg = _build_embodiment_package(platform)
-        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write(embodiment_pkg)
-        package_path = pkg_path
-        with open(EMBODIMENT_DPO_PROMPT) as f:
-            prompt_text = f.read()
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_DPO_IDENTITY'):
-        log.info(f"[{platform}] CONTINUOUS DPO IDENTITY")
-        with open(DPO_PROMPT) as f:
-            prompt_text = f.read()
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('CONTINUOUS_EMBODIMENT'):
-        log.info(f"[{platform}] CONTINUOUS EMBODIMENT SFT")
-        embodiment_pkg = _build_embodiment_package(platform)
-        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write(embodiment_pkg)
-        package_path = pkg_path
-        with open(EMBODIMENT_SFT_PROMPT) as f:
-            prompt_text = f.read()
-    elif section and section.startswith('DPO_EMBODIMENT'):
-        # DPO embodiment: embodiment package + DPO embodiment prompt
-        log.info(f"[{platform}] DPO EMBODIMENT")
-        embodiment_pkg = _build_embodiment_package(platform)
-        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write(embodiment_pkg)
-        package_path = pkg_path
-        with open(EMBODIMENT_DPO_PROMPT) as f:
-            prompt_text = f.read()
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('DPO_IDENTITY'):
-        # DPO identity: standard package + DPO identity prompt
-        log.info(f"[{platform}] DPO IDENTITY")
-        with open(DPO_PROMPT) as f:
-            prompt_text = f.read()
-        output_dir = DPO_OUTPUT_DIR
-    elif section and section.startswith('EMBODIMENT'):
-        # Embodiment SFT: embodiment package + embodiment SFT prompt
-        log.info(f"[{platform}] EMBODIMENT SFT")
-        embodiment_pkg = _build_embodiment_package(platform)
-        pkg_path = f'/tmp/sft_embodiment_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write(embodiment_pkg)
-        package_path = pkg_path
-        with open(EMBODIMENT_SFT_PROMPT) as f:
-            prompt_text = f.read()
-    elif section and section.startswith('R2_'):
-        # Round 2: attach actual foundational doc + PERSONALITY.md
-        log.info(f"[{platform}] ROUND 2: {section[:50]}")
-        from agents.sft_tracker import R2_FILE_MAP
-        r2_key = section.split(' — ')[0]  # e.g. "R2_OUR_MORALS"
-        doc_rel = R2_FILE_MAP.get(r2_key, '')
-        doc_path = os.path.join(os.path.expanduser('~'), 'data', 'corpus', doc_rel)
-        # Build package: actual doc + PERSONALITY.md
-        parts = []
-        if os.path.exists(doc_path):
-            with open(doc_path) as f:
-                parts.append(f.read())
-        personality = os.path.join(os.path.expanduser('~'), 'data', 'corpus', 'layer_1', 'PERSONALITY.md')
-        if os.path.exists(personality):
-            with open(personality) as f:
-                parts.append(f.read())
-        pkg_path = f'/tmp/sft_r2_pkg_{platform}.md'
-        with open(pkg_path, 'w') as f:
-            f.write('\n\n---\n\n'.join(parts))
-        package_path = pkg_path
-        prompt_text = _get_section_prompt_for(section)
-    elif section:
-        log.info(f"[{platform}] {section[:50]}")
-        prompt_text = _get_section_prompt_for(section)
     else:
-        with open(prompt_path) as f:
-            prompt_text = f.read()
+        # SFT: use _build_targeted_pkg with first corpus_path, generate SFT prompt
+        if topic['corpus_paths']:
+            # Build package with ALL listed corpus paths concatenated
+            _home = os.path.expanduser('~')
+            corpus = os.path.join(_home, 'data', 'corpus')
+            parts = []
+            # 1. FAMILY_KERNEL (always first)
+            kernel = os.path.join(corpus, 'identity', 'FAMILY_KERNEL.md')
+            if os.path.exists(kernel):
+                with open(kernel) as f:
+                    parts.append(f.read())
+            # 2. All topic documents
+            for cp in topic['corpus_paths']:
+                doc_path = os.path.join(corpus, cp)
+                if os.path.exists(doc_path):
+                    with open(doc_path) as f:
+                        parts.append(f.read())
+            # 3. PERSONALITY
+            personality = os.path.join(corpus, 'layer_1', 'PERSONALITY.md')
+            if os.path.exists(personality):
+                with open(personality) as f:
+                    parts.append(f.read())
+            # 4. IDENTITY (platform-specific)
+            identity_file = IDENTITY_FILES.get(platform)
+            if identity_file:
+                identity_path = os.path.join(corpus, 'identity', identity_file)
+                if os.path.exists(identity_path):
+                    with open(identity_path) as f:
+                        parts.append(f.read())
+            pkg_path = f'/tmp/sft_v2_pkg_{platform}.md'
+            with open(pkg_path, 'w') as f:
+                f.write('\n\n---\n\n'.join(parts))
+            package_path = pkg_path
+        else:
+            # No corpus_paths (e.g., "Who Am I" — IDENTITY is already in package)
+            package_path = _build_targeted_pkg(platform, '')
+        prompt_text = _targeted_sft_prompt(topic['prompt_focus'])
 
     # Step 1: Navigate to fresh session
     # Claude: Ctrl+L goes into chat input on cycle 2+. Use Ctrl+T (new tab)
@@ -906,11 +708,48 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
     if hasattr(_atspi, 'find_firefox'):
         _atspi.find_firefox = _pid_find
 
+    # Wait for page to be fully ready before attach
+    # Claude uses Ctrl+U for attach (no visible button) — just wait for doc
+    # Other platforms need the attach button to appear
+    if platform == 'claude':
+        for ready_wait in range(6):
+            bot._cached_doc.clear()
+            doc = bot.get_doc(platform, force_refresh=True)
+            if doc:
+                log.info(f"[{platform}] Page ready — document found")
+                break
+            if ready_wait < 5:
+                log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
+                time.sleep(5)
+        else:
+            log.error(f"[{platform}] Page not ready after 30s — no document")
+            return False
+    else:
+        from tools.attach import _get_attach_button_coords
+        for ready_wait in range(6):
+            bot._cached_doc.clear()
+            doc = bot.get_doc(platform, force_refresh=True)
+            if doc:
+                btn = _get_attach_button_coords(doc, platform=platform)
+                if btn:
+                    log.info(f"[{platform}] Page ready — attach button found")
+                    break
+            if ready_wait < 5:
+                log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
+                time.sleep(5)
+        else:
+            log.error(f"[{platform}] Page not ready after 30s — attach button not found")
+            return False
+
     log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
     if not bot.attach_file(platform, package_path):
         log.error(f"[{platform}] Attach failed")
         return False
-    log.info(f"[{platform}] Attach OK")
+    log.info(f"[{platform}] Attach OK — waiting for upload to complete")
+
+    # Wait for attachment to fully upload before sending.
+    # Platforms won't accept submit until the file is processed.
+    time.sleep(15)
 
     # Step 3: Send prompt
     log.info(f"[{platform}] Sending prompt ({len(prompt_text)} chars)")
@@ -919,26 +758,40 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
         return False
     log.info(f"[{platform}] Prompt sent")
 
-    # Verify send: if a send/submit button is still visible, Return didn't
-    # trigger send (common with file attachments). Click it directly.
-    time.sleep(1)
+    # Step 3b: Verify send actually went through.
+    # If send/submit button is still visible, the attachment wasn't ready
+    # and Return didn't trigger send. Wait and retry.
     from core.tree import find_elements as _fe
     from core.interact import atspi_click as _ac2
-    ff = bot.get_firefox(platform)
-    if ff:
+    for send_attempt in range(3):
+        time.sleep(2)
+        ff = bot.get_firefox(platform)
+        if not ff:
+            break
         els = _fe(ff)
         send_names = ['Send prompt', 'Send', 'Submit', 'Send message']
+        send_btn = None
         for e in els:
             n = (e.get('name') or '').strip()
             if n in send_names and e.get('role') == 'push button':
-                log.info(f"[{platform}] Send button '{n}' still visible — clicking")
-                _ac2(e) if e.get('atspi_obj') else bot.inp.click_at(e['x'], e['y'])
-                time.sleep(1)
+                send_btn = e
                 break
+        if not send_btn:
+            log.info(f"[{platform}] Send verified — no send button visible")
+            break
+        if send_attempt < 2:
+            log.info(f"[{platform}] Send button '{send_btn.get('name')}' still visible — "
+                     f"attachment may still be uploading. Waiting 15s then retrying...")
+            time.sleep(15)
+            _ac2(send_btn) if send_btn.get('atspi_obj') else bot.inp.click_at(send_btn['x'], send_btn['y'])
+        else:
+            log.error(f"[{platform}] Send button still visible after 3 attempts — send failed")
+            return False
 
     # Step 4: Wait for response
-    # Claude Opus takes 15-25 min for 100 JSONL items — needs longer timeout
-    wait_timeout = 1800 if platform == 'claude' else 600
+    # Generous timeout — hmm_bot._wait_atspi_polling handles expected-time warnings
+    # Only fail if Firefox dies, not because of a timer
+    wait_timeout = 3600
     log.info(f"[{platform}] Waiting for response (timeout={wait_timeout}s)...")
     if not bot.wait_for_response(platform, timeout=wait_timeout):
         log.warning(f"[{platform}] Wait timed out — trying extract anyway")
@@ -959,18 +812,18 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
     os.makedirs(output_dir, exist_ok=True)
     valid = _parse_jsonl(content)
 
-    round_name = 'sft' if 'sft' in output_dir.lower() else 'dpo'
+    is_dpo = topic['key'].startswith('dpo_')
+    round_name = 'dpo' if is_dpo else 'sft'
     ts = time.strftime('%Y%m%d_%H%M%S')
 
-    # Each run creates a new file: sft_{platform}_{timestamp}.jsonl
-    # Training pipeline reads all files in the directory
-    output_path = os.path.join(output_dir, f'{round_name}_{platform}_{ts}.jsonl')
+    # Include topic key in filename for auditability
+    output_path = os.path.join(output_dir, f'{round_name}_{platform}_{topic["key"]}_{ts}.jsonl')
     with open(output_path, 'w') as f:
         for obj in valid:
             f.write(json.dumps(obj, ensure_ascii=False) + '\n')
 
     # Save raw response too
-    raw_path = os.path.join(output_dir, f'{round_name}_{platform}_{ts}_raw.md')
+    raw_path = os.path.join(output_dir, f'{round_name}_{platform}_{topic["key"]}_{ts}_raw.md')
     with open(raw_path, 'w') as f:
         f.write(content)
 
@@ -993,23 +846,16 @@ Output ONLY jsonl. No commentary. Plain text in response body."""
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--round', required=True, choices=['sft', 'dpo'])
+    parser.add_argument('--round', required=True, choices=['sft', 'dpo', 'all'])
     parser.add_argument('--platforms', nargs='+', default=SUPPORTED_PLATFORMS)
     args = parser.parse_args()
 
-    if args.round == 'sft':
-        package = SFT_PACKAGE
-        prompt = SFT_PROMPT
-        output_dir = SFT_OUTPUT_DIR
-    else:
-        package = DPO_PACKAGE
-        prompt = DPO_PROMPT
-        output_dir = DPO_OUTPUT_DIR
+    output_dir = SFT_OUTPUT_DIR  # DPO routing handled per-topic in process_platform_v2
 
-    # Initialize tracker
-    from agents.sft_tracker import SFTTracker
-    tracker = SFTTracker(os.path.join(os.path.expanduser('~'), 'sft_tracker.json'))
-    log.info(f"Starting {args.round.upper()} generation on {args.platforms} (continuous)")
+    # V3 tracker — counts actual records on disk, no state file
+    from agents.sft_tracker import SFTTracker, SFT_TARGET_PER_PLATFORM, DPO_TARGET_PER_PLATFORM
+    tracker = SFTTracker()
+    log.info(f"Starting V2 generation ({args.round}) on {args.platforms}")
     log.info(tracker.stats())
 
     cycle = 0
@@ -1017,14 +863,12 @@ def main():
     failures = 0
     consecutive_fails = 0
     display = os.environ.get('DISPLAY', ':0')
-    MIN_SUCCESS_RATE = 0.85  # 85% minimum
-    RATE_CHECK_WINDOW = 20   # Check rate after 20 cycles (needs 4+ failures to trip)
-    MAX_CONSECUTIVE_FAILS = 3  # Stop after 3 in a row
+    MAX_CONSECUTIVE_FAILS = 10  # Execution failures are transient — keep trying
 
     while True:
         cycle += 1
 
-        # === HEALTH CHECK: dbus + Firefox ===
+        # === HEALTH CHECK: Firefox alive ===
         pid_file = f'/tmp/firefox_pid_{display}'
         try:
             with open(pid_file) as f:
@@ -1034,6 +878,8 @@ def main():
             log.error(f"Firefox dead on {display} — exiting")
             _notify_death(display, "Firefox process dead")
             break
+
+        # === HEALTH CHECK: D-Bus socket ===
         bus_file = f'/tmp/a11y_bus_{display}'
         try:
             with open(bus_file) as f:
@@ -1047,17 +893,7 @@ def main():
         except FileNotFoundError:
             pass
 
-        # === RATE CHECK: stop if below threshold ===
-        total = successes + failures
-        if total >= RATE_CHECK_WINDOW:
-            rate = successes / total
-            if rate < MIN_SUCCESS_RATE:
-                msg = f"Success rate {rate:.0%} ({successes}/{total}) below {MIN_SUCCESS_RATE:.0%} on {display}"
-                log.error(msg)
-                _notify_death(display, msg)
-                break
-
-        # === CONSECUTIVE FAIL CHECK: stop immediately ===
+        # === CONSECUTIVE FAIL CHECK ===
         if consecutive_fails >= MAX_CONSECUTIVE_FAILS:
             msg = f"{consecutive_fails} consecutive failures on {display} — stopping"
             log.error(msg)
@@ -1066,19 +902,15 @@ def main():
 
         # === BACKOFF after failure ===
         if consecutive_fails > 0:
-            backoff = min(30, consecutive_fails * 10)
+            backoff = min(60, consecutive_fails * 15)
             log.info(f"Backoff {backoff}s after {consecutive_fails} consecutive failure(s)")
             time.sleep(backoff)
 
         # Every 20 cycles, clear session cookies to prevent 431 bloat
         if cycle % 20 == 0:
-            display = os.environ.get('DISPLAY', ':0')
-            display_num = display.replace(':', '')
-            pid_file = f'/tmp/firefox_pid_{display}'
             try:
                 with open(pid_file) as f:
                     firefox_pid = int(f.read().strip())
-                # Find profile from /proc cmdline
                 with open(f'/proc/{firefox_pid}/cmdline', 'rb') as f:
                     cmdline = f.read().decode(errors='replace')
                 if '--profile' in cmdline:
@@ -1093,31 +925,43 @@ def main():
                                 conn.execute("DELETE FROM moz_cookies WHERE expiry = 0")
                                 conn.commit()
                                 conn.close()
-                                log.info(f"Cleared session cookies ({cookies_db})")
+                                log.info(f"Cleared session cookies")
                             break
-            except Exception as e:
-                log.debug(f"Cookie clear failed: {e}")
+            except Exception:
+                pass
 
         for platform in args.platforms:
             if platform not in SUPPORTED_PLATFORMS:
                 continue
 
-            # Get next section from tracker
-            section = tracker.next(platform)
-            if not section:
-                log.info(f"[{platform}] All sections complete!")
+            # Get next topic from V2 tracker
+            topic = tracker.next(platform)
+            if not topic:
+                log.info(f"[{platform}] All topics at target!")
                 continue
 
-            log.info(f"=== Cycle {cycle} — {platform} — {section[:50]} ===")
+            # Filter by round if specified
+            if args.round == 'sft' and topic['key'].startswith('dpo_'):
+                continue
+            if args.round == 'dpo' and not topic['key'].startswith('dpo_'):
+                continue
+
+            topic_key = topic['key']
+            is_dpo = topic_key.startswith('dpo_')
+            current_total = tracker._dpo_count(platform) if is_dpo else tracker._sft_count(platform)
+            target_total = DPO_TARGET_PER_PLATFORM if is_dpo else SFT_TARGET_PER_PLATFORM
+            remaining = target_total - current_total
+            log.info(f"=== Cycle {cycle} — {platform} — {topic_key} ({remaining} {('DPO' if is_dpo else 'SFT')} remaining) ===")
+
             try:
-                ok = process_platform(platform, package, prompt, output_dir, section=section)
-                if ok:
+                ok = process_platform_v2(platform, topic, output_dir)
+                if ok and ok != 'parse_failure':
                     # Verify success by reading the actual saved file
                     import glob
-                    is_dpo = 'DPO' in (section or '')
+                    is_dpo = topic_key.startswith('dpo_')
                     prefix = 'dpo' if is_dpo else 'sft'
                     verify_dir = DPO_OUTPUT_DIR if is_dpo else output_dir
-                    recent = sorted(glob.glob(os.path.join(verify_dir, f'{prefix}_{platform}_*.jsonl')))
+                    recent = sorted(glob.glob(os.path.join(verify_dir, f'{prefix}_{platform}_{topic_key}_*.jsonl')))
                     items = 0
                     filepath = ''
                     if recent:
@@ -1125,30 +969,34 @@ def main():
                         with open(filepath) as f:
                             items = sum(1 for l in f if l.strip())
                     if items > 0:
-                        tracker.complete(platform, section, items, filepath)
-                        log.info(f"[{platform}] COMPLETE — {section[:40]} — {items} items in {os.path.basename(filepath)}")
+                        # Re-check disk totals to confirm not over target
+                        sft_now = tracker._sft_count(platform)
+                        dpo_now = tracker._dpo_count(platform)
+                        log.info(f"[{platform}] COMPLETE — {topic_key} — {items} items → {os.path.basename(filepath)} (SFT={sft_now} DPO={dpo_now})")
                         successes += 1
                         consecutive_fails = 0
                     else:
-                        tracker.fail(platform, section, f'file saved but 0 items: {filepath}')
                         log.warning(f"[{platform}] PARSE ISSUE — extracted but 0 valid JSONL (not a bot failure)")
-                        # Parse failures are NOT bot failures — bot did its job,
-                        # AI content just didn't parse. Don't count toward rate.
                 elif ok == 'parse_failure':
-                    tracker.fail(platform, section, 'parse failure — extracted but unparseable')
-                    log.warning(f"[{platform}] PARSE ISSUE — {section[:40]} (not counting as bot failure)")
-                    # Don't count toward failures/consecutive — bot worked fine
+                    log.warning(f"[{platform}] PARSE ISSUE — {topic_key} (not counting as bot failure)")
                 else:
-                    tracker.fail(platform, section, 'process_platform returned False')
-                    log.error(f"[{platform}] FAILED — {section[:40]}")
+                    log.error(f"[{platform}] FAILED — {topic_key}")
                     failures += 1
                     consecutive_fails += 1
             except Exception as e:
-                tracker.fail(platform, section, str(e))
                 log.error(f"[{platform}] Exception: {e}", exc_info=True)
                 failures += 1
                 consecutive_fails += 1
 
+        # Check if ALL platforms are done
+        all_done = True
+        for platform in args.platforms:
+            if tracker.next(platform) is not None:
+                all_done = False
+                break
+        if all_done:
+            log.info("=== ALL TARGETS REACHED — generation complete ===")
+            break
 
 
 if __name__ == '__main__':
