@@ -883,13 +883,15 @@ def handle_attach(platform: str, file_path: str,
             result['verified'] = verified
         return result
 
-    # Wait for dropdown menu items (multi-display aware)
+    # Wait for dropdown menu items.
+    # Retry with increasing delay — Perplexity/React dropdowns render
+    # asynchronously and may not be in AT-SPI tree on first scan.
     dropdown_items = []
-    for _ in range(5):
+    for attempt in range(8):
         dropdown_items = _scan_menu_items_for_platform(platform)
         if dropdown_items:
             break
-        time.sleep(0.6)
+        time.sleep(0.5 if attempt < 3 else 0.8)
 
     if not dropdown_items and not _any_file_dialog_open(firefox_local):
         return {"error": f"No dropdown items or file dialog found for {platform}",

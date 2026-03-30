@@ -110,6 +110,9 @@ element_map:
   attach_trigger:
     name: "Add files or tools"
     role: push button
+  upload_files_item:
+    name_contains: "Upload files"
+    role: menu item
   model_selector:
     name: "Model"
     role: push button
