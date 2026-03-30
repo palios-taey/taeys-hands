@@ -225,26 +225,26 @@ def _is_attach_button_disabled(atspi_obj) -> bool:
 # --- Upload item discovery ---
 
 def _find_upload_item_in_elements(elements: List[Dict], platform: str) -> Optional[Dict]:
-    """Find the upload file menu item from a list of elements using YAML spec.
+    """Find the upload file menu item from YAML spec. No fallbacks.
 
-    Tries the YAML upload_item_key spec first; falls back to name-based heuristics.
+    If YAML spec doesn't match, returns None and logs an error.
+    Fix the YAML — don't guess.
     """
     from core.config import get_upload_item_key
     upload_key = get_upload_item_key(platform)
-    if upload_key:
-        spec = get_element_spec(platform, upload_key)
-        if spec:
-            for e in elements:
-                if _match_element(e, spec):
-                    return e
-
-    # Fallback heuristics — look for upload/file keywords in menu items
-    upload_hints = ('upload', 'add photos', 'add files', 'add file', 'open file')
+    if not upload_key:
+        logger.error(f"[{platform}] No upload_item_key in YAML config. "
+                     f"Add upload_files_item to element_map with exact name from AT-SPI tree.")
+        return None
+    spec = get_element_spec(platform, upload_key)
+    if not spec:
+        logger.error(f"[{platform}] upload_item_key '{upload_key}' has no element_spec in YAML.")
+        return None
     for e in elements:
-        role = e.get('role', '')
-        name = (e.get('name') or '').strip().lower()
-        if ('item' in role or 'button' in role) and any(h in name for h in upload_hints):
+        if _match_element(e, spec):
             return e
+    logger.error(f"[{platform}] No element matched upload spec {spec}. "
+                 f"Available menu items: {[e.get('name') for e in elements if 'item' in e.get('role', '')]}")
     return None
 
 
