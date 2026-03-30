@@ -2,10 +2,14 @@
 
 The plan is the single source of truth. Flow:
   1. create  → store required model/mode/attachments in Redis
-  2. audit   → compare plan vs live AT-SPI elements → PASS or FAIL
+  2. audit   → scan AT-SPI tree directly → PASS or FAIL
   3. send.py → hard-blocked until audit_passed=True
 
 No plan ships without audit. No send happens without a passed audit.
+
+Audit is the hard gate: it scans the live AT-SPI tree to verify state
+instead of trusting what the caller reports. Caller params are accepted
+as hints only and used as fallback when tree verification is unavailable.
 """
 
 import json
@@ -13,9 +17,10 @@ import os
 import time
 import uuid
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from storage.redis_pool import node_key
+from core.config import get_platform_config, get_element_spec, get_fence_after, get_validation
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,10 @@ _EXT_LANG = {
 
 _PLAN_ALLOWED_DIRS = [os.path.expanduser('~'), '/tmp', '/var/spark']
 _PLAN_TTL = int(os.environ.get('TAEY_PLAN_TTL', '3600'))  # Default 1 hour (was 600s/10min)
+
+# Platforms where model verification from the tree is unreliable without
+# reopening the dropdown (complex interaction). Fall back to caller-reported.
+_UNVERIFIABLE_MODEL_PLATFORMS = {'gemini', 'grok'}
 
 
 def _validate_path(path: str) -> bool:
@@ -271,14 +280,204 @@ def _create_plan(platform: str, params: Dict,
     return result
 
 
+# ─── Audit — Tree-based verification helpers ─────────────────────────────
+
+def _scan_platform_elements(platform: str) -> Tuple[Optional[List[Dict]], Optional[str]]:
+    """Scan the live AT-SPI tree for platform elements.
+
+    Returns (elements, error_message). Elements are raw dicts from find_elements
+    (with atspi_obj stripped for safety). Returns (None, error) on failure.
+    """
+    try:
+        from core import atspi
+        from core.tree import find_elements
+        from core.interact import strip_atspi_obj
+
+        firefox = atspi.find_firefox_for_platform(platform)
+        if not firefox:
+            return None, "Firefox not found in AT-SPI tree"
+
+        doc = atspi.get_platform_document(firefox, platform)
+        if not doc:
+            return None, f"Could not find {platform} document in AT-SPI tree"
+
+        fences = get_fence_after(platform)
+        raw_elements = find_elements(doc, fence_after=fences)
+        elements = strip_atspi_obj(raw_elements)
+        return elements, None
+
+    except Exception as e:
+        logger.warning("AT-SPI tree scan failed for %s: %s", platform, e)
+        return None, f"AT-SPI scan error: {e}"
+
+
+def _find_element_by_spec(elements: List[Dict], spec: Dict) -> Optional[Dict]:
+    """Find the first element in the list matching an element_map spec dict.
+
+    Uses the same matching logic as inspect._match_element.
+    """
+    import fnmatch
+
+    for element in elements:
+        name = (element.get('name') or '').strip()
+        name_lower = name.lower()
+        role = element.get('role', '')
+        states = set(s.lower() for s in element.get('states', []))
+
+        matched = True
+
+        if 'name' in spec and name_lower != str(spec['name']).lower():
+            matched = False
+        if matched and 'name_contains' in spec:
+            pats = spec['name_contains']
+            if isinstance(pats, str):
+                pats = [pats]
+            if not any(str(p).lower() in name_lower for p in pats):
+                matched = False
+        if matched and 'name_pattern' in spec:
+            pats = spec['name_pattern']
+            if isinstance(pats, str):
+                pats = [pats]
+            if not any(fnmatch.fnmatch(name_lower, str(p).lower()) for p in pats):
+                matched = False
+        if matched and 'role' in spec and role != spec['role']:
+            matched = False
+        if matched and 'role_contains' in spec and str(spec['role_contains']) not in role:
+            matched = False
+        if matched and 'states_include' in spec:
+            if not set(s.lower() for s in spec['states_include']).issubset(states):
+                matched = False
+
+        if matched:
+            return element
+
+    return None
+
+
+def _read_current_model_from_tree(
+    platform: str,
+    elements: List[Dict],
+    config: Dict,
+) -> Tuple[Optional[str], str]:
+    """Read the currently selected model from the AT-SPI tree.
+
+    Returns (model_name_or_None, verification_source).
+    verification_source is one of: 'tree', 'unverifiable', 'error'
+
+    Platform-specific logic:
+      chatgpt:    model_selector button name = "Model selector, current model is {name}"
+                  → extract name after "current model is "
+      claude:     model_selector button name IS the model name (name_is_model=True)
+                  → return button name directly
+      gemini:     mode picker button text doesn't change; needs dropdown reopen → unverifiable
+      grok:       model select button text doesn't change; needs dropdown reopen → unverifiable
+      perplexity: model button name is static "Model"; name_is_model=True in validation
+                  but the element_map criteria won't match a changed name → unverifiable
+    """
+    if platform in _UNVERIFIABLE_MODEL_PLATFORMS:
+        logger.info(
+            "Model verification for %s requires reopening dropdown (reopen_to_verify). "
+            "Falling back to caller-reported model.", platform
+        )
+        return None, 'unverifiable'
+
+    validation = config.get('validation', {})
+    model_val = validation.get('model_selected', {})
+
+    # Get the model_selector element spec from element_map
+    selector_spec = get_element_spec(platform, 'model_selector')
+    if not selector_spec:
+        logger.warning("No model_selector in element_map for %s", platform)
+        return None, 'error'
+
+    selector_elem = _find_element_by_spec(elements, selector_spec)
+    if not selector_elem:
+        logger.info("model_selector element not found in AT-SPI tree for %s", platform)
+        return None, 'error'
+
+    button_name = (selector_elem.get('name') or '').strip()
+    if not button_name:
+        return None, 'error'
+
+    # ChatGPT: "Model selector, current model is {name}"
+    if model_val.get('name_contains_model'):
+        _PREFIX = 'current model is '
+        idx = button_name.lower().find(_PREFIX)
+        if idx != -1:
+            model_name = button_name[idx + len(_PREFIX):].strip()
+            if model_name:
+                logger.info("ChatGPT tree model: %r (from button: %r)", model_name, button_name)
+                return model_name, 'tree'
+        logger.warning(
+            "ChatGPT model_selector name did not match expected pattern: %r", button_name
+        )
+        return None, 'error'
+
+    # Claude (and perplexity if reachable): button name IS the model name
+    if model_val.get('name_is_model'):
+        # For perplexity, the static name "Model" means the element_map won't
+        # find a changed button — if we got here, the button name is the model.
+        # But perplexity is excluded above via _UNVERIFIABLE_MODEL_PLATFORMS
+        # (its element_map name stays "Model"). For Claude, this works perfectly.
+        logger.info("%s tree model: %r", platform, button_name)
+        return button_name, 'tree'
+
+    # Fallback: return the button name as-is and let caller decide
+    logger.info("%s model_selector name: %r (no specific parse rule)", platform, button_name)
+    return button_name, 'tree'
+
+
+def _check_attachment_in_tree(
+    platform: str,
+    elements: List[Dict],
+    config: Dict,
+) -> Tuple[Optional[bool], str]:
+    """Check whether an attachment is present in the AT-SPI tree.
+
+    Returns (attached_bool_or_None, verification_source).
+    verification_source: 'tree' if tree gave a clear answer, 'error' if scan failed.
+
+    Looks for indicators from validation.attach_success.indicators in the YAML.
+    Typically: a "Remove" button near the input area indicates an attachment is present.
+    """
+    validation = config.get('validation', {})
+    attach_val = validation.get('attach_success', {})
+    indicators = attach_val.get('indicators', [])
+
+    if not indicators:
+        logger.info("No attach indicators configured for %s", platform)
+        return None, 'error'
+
+    for indicator in indicators:
+        found = _find_element_by_spec(elements, indicator)
+        if found:
+            logger.info(
+                "%s attachment indicator found in tree: %r (role=%r)",
+                platform, found.get('name', ''), found.get('role', '')
+            )
+            return True, 'tree'
+
+    # No indicator found — attachment is NOT present (tree gave a clear negative)
+    return False, 'tree'
+
+
 # ─── Audit ───────────────────────────────────────────────────────────────
 
 def _audit_plan(platform: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
-    """Audit plan against caller-reported UI state with exact matching.
+    """Audit plan against live AT-SPI tree state with caller params as fallback hints.
 
-    Caller provides current_model, current_mode, current_tools from
-    what they observed in taey_inspect. Exact match against plan requirements.
+    Scans the AT-SPI tree directly to verify model and attachment state.
+    Caller-provided params (current_model, current_mode, current_tools,
+    attachment_confirmed) are used as hints and fallback when tree verification
+    is unavailable (e.g. Gemini/Grok model requires dropdown reopen).
+
+    Each checked field records a 'verification_source':
+      'tree'            — verified by reading the live AT-SPI tree
+      'caller_reported' — tree could not verify; accepted from caller params
+      'unverifiable'    — platform known to not support tree verification for this field
+      'redis_checkpoint'— verified via Redis checkpoint (attachment only)
+      'not_required'    — field not required by plan; check skipped
     """
     if not redis_client:
         return {"error": "Redis not available", "success": False}
@@ -294,78 +493,197 @@ def _audit_plan(platform: str, params: Dict,
     plan = json.loads(plan_data)
     required = plan.get('required_state', {})
 
-    current_model = params.get('current_model', '')
-    current_mode = params.get('current_mode', '')
-    current_tools = params.get('current_tools', [])
+    # Caller-provided hints (fallback when tree can't verify)
+    caller_model = params.get('current_model', '')
+    caller_mode = params.get('current_mode', '')
+    caller_tools = params.get('current_tools', [])
     attachment_confirmed = params.get('attachment_confirmed', False)
 
+    # ── Step 1: Scan the live AT-SPI tree ────────────────────────────────
+    config = get_platform_config(platform)
+    elements, scan_error = _scan_platform_elements(platform)
+
+    tree_available = elements is not None
+    if not tree_available:
+        logger.warning(
+            "AT-SPI tree scan unavailable for %s audit: %s — falling back to caller params",
+            platform, scan_error
+        )
+
+    # ── Step 2: Read model from tree ─────────────────────────────────────
+    tree_model: Optional[str] = None
+    model_source = 'caller_reported'
+
+    if tree_available:
+        tree_model, model_verification = _read_current_model_from_tree(
+            platform, elements, config
+        )
+        if model_verification == 'tree':
+            model_source = 'tree'
+        elif model_verification == 'unverifiable':
+            model_source = 'unverifiable'
+            logger.info(
+                "%s model is unverifiable from tree — using caller-reported: %r",
+                platform, caller_model
+            )
+        # 'error' falls through to caller_reported
+
+    actual_model = tree_model if tree_model else caller_model
+
+    # ── Step 3: Check attachment in tree ─────────────────────────────────
+    tree_attached: Optional[bool] = None
+    attach_source = 'caller_reported'
+
+    if tree_available and plan.get('attachment'):
+        tree_attached, attach_verification = _check_attachment_in_tree(
+            platform, elements, config
+        )
+        if attach_verification == 'tree':
+            attach_source = 'tree'
+
+    # Determine actual attachment state:
+    # Tree gives a definitive answer when available.
+    # Fall back to caller confirmation or Redis checkpoint.
+    actual_attached: bool
+    if attach_source == 'tree' and tree_attached is not None:
+        actual_attached = tree_attached
+    elif attachment_confirmed:
+        actual_attached = True
+        attach_source = 'caller_reported'
+    else:
+        # Check Redis checkpoint as a secondary fallback
+        checkpoint = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
+        if checkpoint:
+            actual_attached = True
+            attach_source = 'redis_checkpoint'
+        else:
+            actual_attached = False
+            attach_source = 'caller_reported' if not tree_available else attach_source
+
+    # ── Step 4: Apply checks ──────────────────────────────────────────────
     failures = []
 
-    # Model check — exact match
+    # Model check — exact match (case-insensitive)
     req_model = required.get('model', '')
+    model_check_source = model_source if req_model and req_model not in ('N/A', 'any', 'default') \
+        else 'not_required'
+
     if req_model and req_model not in ('N/A', 'any', 'default'):
-        if not current_model:
+        if not actual_model:
             failures.append({
-                "field": "model", "required": req_model,
-                "current": "(not provided)",
-                "fix": "Read model from taey_inspect elements, then provide current_model",
+                "field": "model",
+                "required": req_model,
+                "current": "(not detected)",
+                "fix": (
+                    f"Provide current_model to audit, or use taey_inspect to read "
+                    f"the model selector, then call taey_select_dropdown to set '{req_model}'"
+                ),
+                "verification_source": model_check_source,
             })
-        elif current_model.lower().strip() != req_model.lower().strip():
+        elif actual_model.lower().strip() != req_model.lower().strip():
             failures.append({
-                "field": "model", "required": req_model,
-                "current": current_model,
+                "field": "model",
+                "required": req_model,
+                "current": actual_model,
                 "fix": f"Use taey_select_dropdown to change model to '{req_model}'",
+                "verification_source": model_check_source,
             })
 
-    # Mode check — exact match
+    # Mode check — exact match (case-insensitive)
     req_mode = required.get('mode', '')
+    mode_source = 'caller_reported'  # Mode is always caller-reported (no tree read yet)
+
     if req_mode and req_mode not in ('N/A', 'any', 'default', 'normal'):
-        if not current_mode:
+        if not caller_mode:
             failures.append({
-                "field": "mode", "required": req_mode,
+                "field": "mode",
+                "required": req_mode,
                 "current": "(not provided)",
                 "fix": "Read mode from taey_inspect elements, then provide current_mode",
+                "verification_source": mode_source,
             })
-        elif current_mode.lower().strip() != req_mode.lower().strip():
+        elif caller_mode.lower().strip() != req_mode.lower().strip():
             failures.append({
-                "field": "mode", "required": req_mode,
-                "current": current_mode,
+                "field": "mode",
+                "required": req_mode,
+                "current": caller_mode,
                 "fix": f"Use taey_select_dropdown to change mode to '{req_mode}'",
+                "verification_source": mode_source,
             })
 
     # Tools check — exact set match
     req_tools = set(t.lower() for t in required.get('tools', []))
-    cur_tools = set(t.lower() for t in (current_tools or []))
+    cur_tools = set(t.lower() for t in (caller_tools or []))
+    tools_source = 'caller_reported'
     missing_tools = req_tools - cur_tools
     if missing_tools:
         failures.append({
-            "field": "tools", "required": sorted(req_tools),
-            "current": sorted(cur_tools), "missing": sorted(missing_tools),
+            "field": "tools",
+            "required": sorted(req_tools),
+            "current": sorted(cur_tools),
+            "missing": sorted(missing_tools),
             "fix": f"Enable missing tools: {sorted(missing_tools)}",
+            "verification_source": tools_source,
         })
 
-    # Attachment check — Redis checkpoint or caller confirmation
+    # Attachment check
     if plan.get('attachment'):
-        if not attachment_confirmed:
-            checkpoint = redis_client.get(node_key(f"checkpoint:{platform}:attach"))
-            if not checkpoint:
-                failures.append({
-                    "field": "attachment",
-                    "required": os.path.basename(plan['attachment']),
-                    "current": "not attached",
-                    "fix": f"Call taey_attach('{platform}', '{plan['attachment']}')",
-                })
+        if not actual_attached:
+            failures.append({
+                "field": "attachment",
+                "required": os.path.basename(plan['attachment']),
+                "current": "not attached",
+                "fix": f"Call taey_attach('{platform}', '{plan['attachment']}')",
+                "verification_source": attach_source,
+            })
 
+    # ── Step 5: Build result ───────────────────────────────────────────────
     passed = len(failures) == 0
-    audit_result = {
-        "plan_id": plan_id, "passed": passed, "failures": failures,
-        "checked": {
-            "model": {"required": required.get('model'), "current": current_model},
-            "mode": {"required": required.get('mode'), "current": current_mode},
-            "tools": {"required": required.get('tools'), "current": current_tools},
-            "attachment": {"required": plan.get('attachment'), "confirmed": attachment_confirmed},
+
+    checked = {
+        "model": {
+            "required": required.get('model'),
+            "current": actual_model,
+            "verification_source": model_check_source,
+        },
+        "mode": {
+            "required": required.get('mode'),
+            "current": caller_mode,
+            "verification_source": mode_source,
+        },
+        "tools": {
+            "required": required.get('tools'),
+            "current": list(cur_tools),
+            "verification_source": tools_source,
+        },
+        "attachment": {
+            "required": plan.get('attachment'),
+            "confirmed": actual_attached,
+            "verification_source": attach_source if plan.get('attachment') else 'not_required',
         },
     }
+
+    # Note if tree scan was unavailable
+    audit_notes = []
+    if not tree_available:
+        audit_notes.append(
+            f"AT-SPI tree scan unavailable ({scan_error}). "
+            "All checks used caller-reported values — less reliable."
+        )
+    elif model_source == 'unverifiable':
+        audit_notes.append(
+            f"{platform} model cannot be verified from static tree "
+            f"(requires dropdown reopen). Accepted caller-reported model: {caller_model!r}."
+        )
+
+    audit_result = {
+        "plan_id": plan_id,
+        "passed": passed,
+        "failures": failures,
+        "checked": checked,
+    }
+    if audit_notes:
+        audit_result["audit_notes"] = audit_notes
 
     plan['audit_passed'] = passed
     plan['audit_result'] = audit_result

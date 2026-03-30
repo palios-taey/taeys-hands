@@ -186,3 +186,28 @@ sidebar_nav:
   - { name: "More", role: push button }
   - { name: "Recent Collapse", role: push button }
   - { name: "View All", role: link }
+
+# ─── Validation Expectations ───────────────────────────────────────
+validation:
+  attach_success:
+    indicators:
+      - { name_contains: "Remove", role_contains: button }
+    file_chip:
+      roles: [heading, push button, toggle button, link]
+      name_match: filename_extension
+  model_selected:
+    # Model button text shows current model
+    read_from: model_selector
+    name_is_model: true
+  tool_selected:
+    # Deep research / Model council are radio items — check state
+    read_from: attach_trigger
+    check_menu_item_state: true
+  send_success:
+    indicators:
+      - stop_button
+    timeout: 30
+  response_complete:
+    indicators:
+      - copy_button
+    stop_absent: true

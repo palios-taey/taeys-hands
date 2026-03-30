@@ -157,3 +157,26 @@ sidebar_nav:
   - { name: "Code", role: link }
   - { name: "Starred", role: heading }
   - { name_pattern: "Recents*", role: push button }
+
+# ─── Validation Expectations ───────────────────────────────────────
+validation:
+  attach_success:
+    # Claude shows file chips as "Pasted Text" document chip or filename heading
+    indicators:
+      - { name_contains: "Remove", role_contains: button }
+    file_chip:
+      roles: [heading, push button, toggle button]
+      name_match: filename_extension
+  model_selected:
+    # Model selector button name IS the current model name
+    # e.g. "Opus 4.6 Extended", "Sonnet 4.6"
+    read_from: model_selector
+    name_is_model: true
+  send_success:
+    indicators:
+      - stop_button
+    timeout: 30
+  response_complete:
+    indicators:
+      - copy_button
+    stop_absent: true

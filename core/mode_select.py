@@ -1,41 +1,28 @@
-"""Mode/Model Selection — YAML-driven, coordinate-free.
+"""Mode/Model Selection — YAML-driven, tree-verified, no guessing.
 
-Reads desired model/mode from task assignment, looks up YAML mode_guidance,
-uses element_map to find trigger button, clicks trigger, selects from menu.
+All platforms: click trigger → AT-SPI scan for menu items → match by name → click → verify.
+No keyboard index counting. No Down+Enter probing.
 
-Per-platform model selection flow:
-  ChatGPT: "Model selector, current model is..." → xdotool click → keyboard nav
-  Gemini:  "Open mode picker" (model) + "Tools" (Deep think) → AT-SPI do_action → menu items
-  Grok:    "Model select" → xdotool click → AT-SPI menu items
-  Perplexity: "Model" button (model) + "Add files or tools" (tools) → mixed
-  Claude:  Model button → AT-SPI dropdown → select
-
-This module handles the full flow: find trigger → click → select target.
+Per-platform flow:
+  ChatGPT: model_selector → AT-SPI items (model_auto/instant/thinking/pro now visible since March 2026)
+  Gemini:  mode_picker (model) + tools_button (Deep think) → AT-SPI menu items
+  Grok:    model_selector → AT-SPI menu items
+  Perplexity: model_selector + attach_trigger → AT-SPI menu items
+  Claude:  model_selector / toggle_menu → AT-SPI dropdown items
 """
 
 import logging
-import os
 import time
-from typing import Dict, List, Optional, Tuple
-
-import yaml
+from typing import Dict, List, Optional
 
 from core import atspi, input as inp
+from core.config import (
+    get_platform_config, get_element_spec, get_click_strategy,
+    get_mode_guidance, get_validation, get_fence_after,
+)
 from core.tree import find_elements, find_menu_items, detect_chrome_y
 
 logger = logging.getLogger(__name__)
-
-PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
-
-# Cache
-_platform_configs: Dict[str, dict] = {}
-
-
-def _load_config(platform: str) -> dict:
-    if platform not in _platform_configs:
-        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as f:
-            _platform_configs[platform] = yaml.safe_load(f) or {}
-    return _platform_configs[platform]
 
 
 def select_mode_model(platform: str, mode: str = None, model: str = None,
@@ -43,22 +30,17 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
                       our_pid: int = None) -> Dict:
     """Select model and/or mode on a platform.
 
-    Args:
-        platform: chatgpt, gemini, grok, perplexity, claude
-        mode: Mode key from YAML mode_guidance (e.g., 'deep_think', 'pro', 'expert')
-        model: Model name (overrides mode if both given)
-        doc: AT-SPI document reference (optional, will discover)
-        firefox: AT-SPI firefox reference (optional, will discover)
-        our_pid: Firefox PID for filtering in multi-instance mode
-
-    Returns:
-        Dict with 'success', 'selected_model', 'selected_mode', or 'error'.
+    All platforms use the same flow:
+      1. Look up mode_guidance from YAML
+      2. Find the trigger button via element_map
+      3. Click trigger to open dropdown/menu
+      4. Scan AT-SPI tree for menu items
+      5. Match target by name
+      6. Click it
+      7. Verify selection took effect
     """
-    config = _load_config(platform)
-    mode_guidance = config.get('mode_guidance', {})
-    element_map = config.get('element_map', {})
+    mode_guidance = get_mode_guidance(platform)
 
-    # Determine what to select
     target_mode = mode or model
     if not target_mode:
         return {'success': True, 'note': 'No mode/model requested, using platform default'}
@@ -68,7 +50,6 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     # Look up in mode_guidance
     guidance = mode_guidance.get(target_mode_lower)
     if not guidance:
-        # Try partial match
         for key, val in mode_guidance.items():
             if target_mode_lower in key.lower() or key.lower() in target_mode_lower:
                 guidance = val
@@ -107,95 +88,138 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     if not doc:
         return {'success': False, 'error': f'{platform} document not found'}
 
-    # Route to platform-specific handler
-    result = _select_for_platform(platform, target_mode_lower, guidance, config, doc, firefox)
+    # Determine which trigger button to click from the 'how' text
+    trigger_key = _determine_trigger_key(platform, how)
+    if not trigger_key:
+        return {'success': False, 'error': f"Cannot determine trigger button from: {how}"}
+
+    # Find trigger button in AT-SPI tree
+    trigger = _find_button_by_element_map(doc, trigger_key, platform)
+    if not trigger:
+        return {'success': False, 'error': f'{platform} {trigger_key} button not found in AT-SPI tree'}
+
+    # Click trigger to open dropdown
+    if not _click_element(trigger, platform):
+        return {'success': False, 'error': f'Failed to click {platform} {trigger_key}'}
+    time.sleep(1.0)
+
+    # Scan for menu items — this is the universal approach
+    menu_items = find_menu_items(firefox, doc)
+    if not menu_items:
+        time.sleep(1.0)
+        menu_items = find_menu_items(firefox, doc)
+
+    if not menu_items:
+        # Fallback: scan entire tree for matching element_map items
+        # ChatGPT model items are now AT-SPI push buttons, not menu items
+        fences = get_fence_after(platform)
+        all_elements = find_elements(doc, fence_after=fences)
+        menu_items = _find_model_buttons_in_tree(platform, target_mode_lower, all_elements)
+
+    if not menu_items:
+        inp.press_key('Escape')
+        return {
+            'success': False,
+            'error': f'No menu items found after opening {platform} {trigger_key}',
+            'platform': platform,
+        }
+
+    # Match and click target
+    result = _match_and_click(menu_items, target_mode_lower, platform)
+
     if result.get('success'):
         result['timeout'] = timeout
+        # Verify selection
+        verification = _verify_selection(platform, target_mode_lower, firefox, doc)
+        result['verified'] = verification.get('verified', False)
+        if not verification.get('verified'):
+            result['verification_note'] = verification.get('note', 'Could not verify')
+
     return result
 
 
-def _select_for_platform(platform: str, mode_key: str, guidance: dict,
-                         config: dict, doc, firefox) -> Dict:
-    """Route to platform-specific selection logic."""
-    how = guidance.get('how', '')
+def _determine_trigger_key(platform: str, how: str) -> Optional[str]:
+    """Map mode_guidance 'how' text to element_map trigger key."""
+    how_lower = how.lower()
 
-    if platform == 'chatgpt':
-        return _select_chatgpt(mode_key, guidance, config, doc, firefox)
-    elif platform == 'gemini':
-        return _select_gemini(mode_key, guidance, config, doc, firefox)
-    elif platform == 'grok':
-        return _select_grok(mode_key, guidance, config, doc, firefox)
-    elif platform == 'perplexity':
-        return _select_perplexity(mode_key, guidance, config, doc, firefox)
-    elif platform == 'claude':
-        return _select_claude(mode_key, guidance, config, doc, firefox)
-    else:
-        return {'success': False, 'error': f'Unknown platform: {platform}'}
+    # Direct mappings from 'how' text to element_map keys
+    if 'model selector' in how_lower or 'model button' in how_lower or 'click model' in how_lower:
+        return 'model_selector'
+    if 'mode picker' in how_lower or 'open mode picker' in how_lower:
+        return 'mode_picker'
+    if 'tools' in how_lower and ('button' in how_lower or 'select' in how_lower):
+        return 'tools_button'
+    if 'toggle menu' in how_lower:
+        return 'toggle_menu'
+    if 'add files' in how_lower:
+        return 'attach_trigger'
+    if 'sidebar' in how_lower:
+        # Sidebar links are not trigger buttons — handled separately
+        return None
+
+    # Platform-specific defaults
+    _DEFAULT_TRIGGERS = {
+        'chatgpt': 'model_selector',
+        'claude': 'model_selector',
+        'gemini': 'mode_picker',
+        'grok': 'model_selector',
+        'perplexity': 'model_selector',
+    }
+    return _DEFAULT_TRIGGERS.get(platform)
 
 
-def _find_button_by_element_map(doc, element_map_key: str, config: dict,
-                                fence_after: list = None) -> Optional[Dict]:
+def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optional[Dict]:
     """Find a button defined in element_map by scanning AT-SPI tree."""
-    em = config.get('element_map', {})
-    spec = em.get(element_map_key)
+    spec = get_element_spec(platform, element_key)
     if not spec:
         return None
 
+    config = get_platform_config(platform)
     fences = config.get('fence_after', [])
     elements = find_elements(doc, fence_after=fences)
 
-    target_name = spec.get('name', '').lower()
-    target_name_pattern = spec.get('name_pattern', '').lower()
-    target_name_contains = spec.get('name_contains', '')
-    if isinstance(target_name_contains, list):
-        target_name_contains = [n.lower() for n in target_name_contains]
-    elif target_name_contains:
-        target_name_contains = [target_name_contains.lower()]
-    else:
-        target_name_contains = []
-    target_role = spec.get('role', '').lower()
-    target_role_contains = spec.get('role_contains', '').lower() if spec.get('role_contains') else ''
+    # Import inspect's matching logic
+    from tools.inspect import _match_element
 
     for e in elements:
-        name = (e.get('name') or '').strip().lower()
-        role = (e.get('role') or '').strip().lower()
-
-        # Role match
-        if target_role and role != target_role:
-            if target_role_contains and target_role_contains not in role:
-                continue
-            elif not target_role_contains:
-                continue
-        elif target_role_contains and target_role_contains not in role:
-            continue
-
-        # Name match
-        if target_name and name == target_name:
+        if _match_element(e, spec):
             return e
-        if target_name_pattern:
-            pattern = target_name_pattern
-            if '*' in pattern:
-                prefix = pattern.split('*')[0]
-                if prefix and name.startswith(prefix):
-                    return e
-            elif name == pattern:
-                return e
-        if target_name_contains:
-            if any(nc in name for nc in target_name_contains):
-                return e
-
     return None
 
 
-def _click_element(element: Dict, platform: str, config: dict) -> bool:
+def _find_model_buttons_in_tree(platform: str, target_mode: str,
+                                 elements: list) -> list:
+    """Find model/mode buttons directly in the AT-SPI tree.
+
+    ChatGPT model items (model_auto, model_instant, etc.) are now
+    regular push buttons visible in the AT-SPI tree, not menu items.
+    """
+    config = get_platform_config(platform)
+    emap = config.get('element_map', {})
+
+    # Look for element_map keys that start with 'model_' or 'mode_' or 'tool_'
+    candidates = []
+    for key, spec in emap.items():
+        if not isinstance(spec, dict):
+            continue
+        if key.startswith(('model_', 'mode_', 'tool_', 'thinking_')):
+            from tools.inspect import _match_element
+            for e in elements:
+                if _match_element(e, spec):
+                    candidates.append(e)
+                    break
+
+    return candidates
+
+
+def _click_element(element: Dict, platform: str) -> bool:
     """Click an element using the platform's click_strategy."""
     from core.interact import atspi_click
-    strategy = config.get('click_strategy', 'xdotool_first')
+    strategy = get_click_strategy(platform)
 
     if strategy == 'atspi_first':
         if atspi_click(element):
             return True
-        # Fallback to xdotool
         x, y = int(element.get('x', 0)), int(element.get('y', 0))
         if x > 0 and y > 0:
             return inp.click_at(x, y)
@@ -207,223 +231,15 @@ def _click_element(element: Dict, platform: str, config: dict) -> bool:
         return atspi_click(element)
 
 
-def _select_chatgpt(mode_key: str, guidance: dict, config: dict,
-                    doc, firefox) -> Dict:
-    """ChatGPT: Click model selector → keyboard nav to item → Enter.
+def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
+    """Find matching item by name and click it."""
+    from core.interact import atspi_click
 
-    ChatGPT uses React portal dropdowns — invisible to AT-SPI.
-    Must use keyboard navigation after opening.
-    """
-    # Find model selector button
-    button = _find_button_by_element_map(doc, 'model_selector', config)
-    if not button:
-        return {'success': False, 'error': 'ChatGPT model_selector button not found'}
-
-    # Click to open dropdown
-    if not _click_element(button, 'chatgpt', config):
-        return {'success': False, 'error': 'Failed to click ChatGPT model selector'}
-    time.sleep(1.0)
-
-    # Map mode_key to YAML capabilities.models index
-    caps = config.get('capabilities', {})
-    models = caps.get('models', [])
-
-    # mode_key mapping to model item
-    mode_to_model = {
-        'auto': 'Auto',
-        'instant': 'Instant',
-        'thinking': 'Thinking',
-        'pro': 'Pro',
-    }
-    target_label = mode_to_model.get(mode_key, mode_key.capitalize())
-
-    # Find index in models list
-    target_idx = None
-    for i, m in enumerate(models):
-        m_str = str(m).strip()
-        if m_str.lower().startswith(target_label.lower()):
-            target_idx = i
-            break
-
-    if target_idx is None:
-        # Close dropdown
-        inp.press_key('Escape')
-        return {'success': False, 'error': f"ChatGPT model '{target_label}' not found in YAML capabilities.models"}
-
-    # Keyboard nav: Down * (index+1) → Enter
-    for _ in range(target_idx + 1):
-        inp.press_key('Down')
-        time.sleep(0.15)
-    inp.press_key('Return')
-    time.sleep(0.5)
-
-    return {
-        'success': True,
-        'selected_mode': mode_key,
-        'selected_via': 'keyboard_nav',
-        'platform': 'chatgpt',
-        'model_label': target_label,
-    }
-
-
-def _select_gemini(mode_key: str, guidance: dict, config: dict,
-                   doc, firefox) -> Dict:
-    """Gemini: mode_picker for model selection, tools_button for Deep think/Deep research.
-
-    Two separate interaction paths:
-    - Mode (Fast/Thinking/Pro): Click "Open mode picker" → radio menu items
-    - Tools (Deep think/Deep research): Click "Tools" → check menu items
-    """
-    how = guidance.get('how', '')
-
-    if 'mode picker' in how.lower() or 'open mode picker' in how.lower():
-        # Mode selection via mode_picker
-        button = _find_button_by_element_map(doc, 'mode_picker', config)
-        if not button:
-            return {'success': False, 'error': 'Gemini mode_picker button not found'}
-
-        if not _click_element(button, 'gemini', config):
-            return {'success': False, 'error': 'Failed to click Gemini mode picker'}
-        time.sleep(1.0)
-
-        # AT-SPI menu items should now be visible
-        menu_items = find_menu_items(firefox, doc)
-        if not menu_items:
-            time.sleep(1.0)
-            menu_items = find_menu_items(firefox, doc)
-
-        return _select_from_menu(menu_items, mode_key, 'gemini', config)
-
-    elif 'tools' in how.lower():
-        # Tool selection via tools_button
-        button = _find_button_by_element_map(doc, 'tools_button', config)
-        if not button:
-            return {'success': False, 'error': 'Gemini tools_button not found'}
-
-        if not _click_element(button, 'gemini', config):
-            return {'success': False, 'error': 'Failed to click Gemini Tools button'}
-        time.sleep(1.0)
-
-        menu_items = find_menu_items(firefox, doc)
-        if not menu_items:
-            time.sleep(1.0)
-            menu_items = find_menu_items(firefox, doc)
-
-        return _select_from_menu(menu_items, mode_key, 'gemini', config)
-
-    return {'success': False, 'error': f'Unknown Gemini selection method: {how}'}
-
-
-def _select_grok(mode_key: str, guidance: dict, config: dict,
-                 doc, firefox) -> Dict:
-    """Grok: Click "Model select" → AT-SPI menu items visible → click target."""
-    button = _find_button_by_element_map(doc, 'model_selector', config)
-    if not button:
-        return {'success': False, 'error': 'Grok model_selector button not found'}
-
-    if not _click_element(button, 'grok', config):
-        return {'success': False, 'error': 'Failed to click Grok Model select'}
-    time.sleep(1.0)
-
-    # Grok React portal — items visible in AT-SPI after xdotool click
-    menu_items = find_menu_items(firefox, doc)
-    if not menu_items:
-        time.sleep(1.0)
-        menu_items = find_menu_items(firefox, doc)
-
-    return _select_from_menu(menu_items, mode_key, 'grok', config)
-
-
-def _select_perplexity(mode_key: str, guidance: dict, config: dict,
-                       doc, firefox) -> Dict:
-    """Perplexity: Model button for model, Add files or tools for tools."""
-    how = guidance.get('how', '')
-
-    if 'model' in how.lower() and 'button' in how.lower():
-        button = _find_button_by_element_map(doc, 'model_selector', config)
-        if not button:
-            return {'success': False, 'error': 'Perplexity Model button not found'}
-
-        if not _click_element(button, 'perplexity', config):
-            return {'success': False, 'error': 'Failed to click Perplexity Model button'}
-        time.sleep(1.0)
-
-        menu_items = find_menu_items(firefox, doc)
-        return _select_from_menu(menu_items, mode_key, 'perplexity', config)
-
-    elif 'add files' in how.lower() or 'tools' in how.lower():
-        button = _find_button_by_element_map(doc, 'attach_trigger', config)
-        if not button:
-            return {'success': False, 'error': 'Perplexity attach_trigger not found'}
-
-        if not _click_element(button, 'perplexity', config):
-            return {'success': False, 'error': 'Failed to click Perplexity tools button'}
-        time.sleep(1.0)
-
-        menu_items = find_menu_items(firefox, doc)
-        return _select_from_menu(menu_items, mode_key, 'perplexity', config)
-
-    elif 'sidebar' in how.lower() or 'computer' in how.lower():
-        # Computer mode — click sidebar link
-        fences = config.get('fence_after', [])
-        elements = find_elements(doc, fence_after=fences)
-        for e in elements:
-            name = (e.get('name') or '').strip().lower()
-            if name == 'computer' and 'link' in (e.get('role') or ''):
-                if _click_element(e, 'perplexity', config):
-                    time.sleep(2.0)
-                    return {'success': True, 'selected_mode': mode_key, 'platform': 'perplexity'}
-        return {'success': False, 'error': 'Perplexity Computer sidebar link not found'}
-
-    return {'success': False, 'error': f'Unknown Perplexity selection method: {how}'}
-
-
-def _select_claude(mode_key: str, guidance: dict, config: dict,
-                   doc, firefox) -> Dict:
-    """Claude: Model button → dropdown → select."""
-    how = guidance.get('how', '')
-
-    if 'toggle menu' in how.lower():
-        button = _find_button_by_element_map(doc, 'toggle_menu', config)
-        if not button:
-            return {'success': False, 'error': 'Claude toggle_menu not found'}
-
-        if not _click_element(button, 'claude', config):
-            return {'success': False, 'error': 'Failed to click Claude Toggle menu'}
-        time.sleep(1.0)
-
-        menu_items = find_menu_items(firefox, doc)
-        return _select_from_menu(menu_items, mode_key, 'claude', config)
-
-    elif 'model button' in how.lower() or 'model selector' in how.lower():
-        button = _find_button_by_element_map(doc, 'model_selector', config)
-        if not button:
-            return {'success': False, 'error': 'Claude model_selector not found'}
-
-        if not _click_element(button, 'claude', config):
-            return {'success': False, 'error': 'Failed to click Claude model selector'}
-        time.sleep(1.0)
-
-        menu_items = find_menu_items(firefox, doc)
-        return _select_from_menu(menu_items, mode_key, 'claude', config)
-
-    return {'success': False, 'error': f'Unknown Claude selection method: {how}'}
-
-
-def _select_from_menu(menu_items: list, mode_key: str, platform: str,
-                      config: dict) -> Dict:
-    """Try to find and click a matching menu item."""
-    if not menu_items:
-        inp.press_key('Escape')
-        return {'success': False, 'error': f'No menu items found after opening {platform} dropdown'}
-
-    # Map mode_key to expected item names
     mode_key_lower = mode_key.lower().strip()
 
-    # Build search terms
+    # Build search terms including common aliases
     search_terms = [mode_key_lower]
-    # Common aliases
-    aliases = {
+    _ALIASES = {
         'deep_think': ['deep think'],
         'deep_research': ['deep research'],
         'extended_thinking': ['extended thinking', 'extended'],
@@ -435,19 +251,18 @@ def _select_from_menu(menu_items: list, mode_key: str, platform: str,
         'normal': ['fast', 'auto'],
         'web_search': ['web search'],
         'research': ['research'],
+        'auto': ['auto'],
+        'instant': ['instant'],
     }
-    search_terms.extend(aliases.get(mode_key_lower, []))
+    search_terms.extend(_ALIASES.get(mode_key_lower, []))
 
-    from core.interact import atspi_click
-
-    for item in menu_items:
+    for item in items:
         item_name = (item.get('name') or '').strip().lower()
         if not item_name:
             continue
 
         for term in search_terms:
             if term in item_name or item_name.startswith(term):
-                # Match found — click it
                 logger.info(f"[{platform}] Menu match: '{item.get('name')}' for mode '{mode_key}'")
 
                 clicked = False
@@ -474,9 +289,77 @@ def _select_from_menu(menu_items: list, mode_key: str, platform: str,
 
     # No match — close dropdown and report
     inp.press_key('Escape')
-    available = [item.get('name', '') for item in menu_items if item.get('name')]
+    available = [item.get('name', '') for item in items if item.get('name')]
     return {
         'success': False,
         'error': f"No menu item matched '{mode_key}' in {platform}",
         'available_items': available[:10],
     }
+
+
+def _verify_selection(platform: str, mode_key: str,
+                       firefox, doc) -> Dict:
+    """Verify selection took effect by re-reading the AT-SPI tree."""
+    time.sleep(0.5)
+
+    validation = get_validation(platform)
+    model_val = validation.get('model_selected', {})
+
+    if not model_val:
+        return {'verified': False, 'note': 'No validation config for this platform'}
+
+    # Re-scan tree
+    config = get_platform_config(platform)
+    fences = config.get('fence_after', [])
+
+    try:
+        # Re-get doc for fresh state
+        doc = atspi.get_platform_document(firefox, platform) or doc
+        elements = find_elements(doc, fence_after=fences)
+    except Exception as e:
+        return {'verified': False, 'note': f'Tree rescan failed: {e}'}
+
+    # Read from the specified element
+    read_from = model_val.get('read_from')
+    if not read_from:
+        return {'verified': False, 'note': 'No read_from in validation config'}
+
+    spec = get_element_spec(platform, read_from)
+    if not spec:
+        return {'verified': False, 'note': f'Element spec {read_from} not found'}
+
+    from tools.inspect import _match_element
+
+    for e in elements:
+        if _match_element(e, spec):
+            button_name = (e.get('name') or '').lower()
+            mode_lower = mode_key.lower()
+
+            # Check if button name contains the mode/model key
+            _VERIFY_TERMS = {
+                'auto': ['auto'],
+                'instant': ['instant'],
+                'thinking': ['thinking'],
+                'pro': ['pro'],
+                'expert': ['expert'],
+                'heavy': ['heavy'],
+                'fast': ['fast'],
+                'deep_think': ['deep think'],
+                'deep_research': ['deep research'],
+                'extended_thinking': ['extended'],
+            }
+            terms = _VERIFY_TERMS.get(mode_lower, [mode_lower])
+            if any(t in button_name for t in terms):
+                return {'verified': True, 'button_name': e.get('name', '')}
+
+            # If reopen_to_verify is set (Grok), we can't easily verify
+            if model_val.get('reopen_to_verify'):
+                return {'verified': False, 'note': 'Platform requires reopening dropdown to verify (skipped)'}
+
+            return {
+                'verified': False,
+                'note': f"Button name '{e.get('name')}' doesn't contain '{mode_key}'",
+                'button_name': e.get('name', ''),
+            }
+
+    return {'verified': False, 'note': f'Element {read_from} not found in tree after selection'}
