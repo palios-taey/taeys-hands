@@ -31,6 +31,12 @@ def _setup_display_env(display: str):
     os.environ['DISPLAY'] = display
     os.environ['GTK_USE_PORTAL'] = '0'
 
+    # Worker IS the display — don't route through subprocess scanning.
+    # Without this, find_firefox_for_platform() sees PLATFORM_DISPLAYS
+    # (inherited from parent MCP server) and returns _RemoteFirefox
+    # sentinels instead of using direct AT-SPI on our bus.
+    os.environ.pop('PLATFORM_DISPLAYS', None)
+
     bus_file = f'/tmp/a11y_bus_{display}'
     try:
         with open(bus_file) as f:
