@@ -285,27 +285,16 @@ def _create_plan(platform: str, params: Dict,
 def _scan_platform_elements(platform: str) -> Tuple[Optional[List[Dict]], Optional[str]]:
     """Scan the live AT-SPI tree for platform elements.
 
-    Returns (elements, error_message). Elements are raw dicts from find_elements
-    (with atspi_obj stripped for safety). Returns (None, error) on failure.
+    Returns (elements, error_message). Handles both local and multi-display
+    (Mira subprocess) modes via scan_platform_tree().
+    Elements are raw dicts (no atspi_obj). Returns (None, error) on failure.
     """
     try:
-        from core import atspi
-        from core.tree import find_elements
-        from core.interact import strip_atspi_obj
-
-        firefox = atspi.find_firefox_for_platform(platform)
-        if not firefox:
-            return None, "Firefox not found in AT-SPI tree"
-
-        doc = atspi.get_platform_document(firefox, platform)
-        if not doc:
-            return None, f"Could not find {platform} document in AT-SPI tree"
-
-        fences = get_fence_after(platform)
-        raw_elements = find_elements(doc, fence_after=fences)
-        elements = strip_atspi_obj(raw_elements)
+        from core.config import scan_platform_tree
+        elements, url, error = scan_platform_tree(platform)
+        if error:
+            return None, error
         return elements, None
-
     except Exception as e:
         logger.warning("AT-SPI tree scan failed for %s: %s", platform, e)
         return None, f"AT-SPI scan error: {e}"

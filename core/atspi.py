@@ -1,4 +1,10 @@
-"""AT-SPI desktop and Firefox discovery."""
+"""AT-SPI desktop and Firefox discovery.
+
+Multi-display mode: when PLATFORM_DISPLAYS is set (Mira), each platform
+has its own display/D-Bus. Tree operations are routed through subprocess
+scanning with the correct env. Returns _RemoteFirefox/_RemoteDocument
+sentinels that callers detect via getattr(obj, '_remote', False).
+"""
 
 import json
 import os
@@ -100,8 +106,12 @@ def find_all_firefox(pid: int = None):
     return apps
 
 
-def _subprocess_scan(platform: str, cmd: str = 'find_firefox') -> dict | None:
-    """Run AT-SPI scan as subprocess on the platform's dedicated display."""
+def subprocess_scan(platform: str, cmd: str = 'find_firefox') -> dict | None:
+    """Run AT-SPI scan as subprocess on the platform's dedicated display.
+
+    Used in multi-display mode (Mira) where each platform runs on a
+    separate Xvfb with its own D-Bus/AT-SPI bus.
+    """
     display = get_platform_display(platform)
     if not display:
         return None
@@ -124,6 +134,59 @@ def _subprocess_scan(platform: str, cmd: str = 'find_firefox') -> dict | None:
     return None
 
 
+class _RemoteFirefox:
+    """Sentinel for a Firefox on a different display. Carries PID and display
+    info so that callers can route operations through subprocess scanning.
+
+    Callers detect via: getattr(obj, '_remote', False)
+    """
+    def __init__(self, platform, pid, display, url=None):
+        self._platform = platform
+        self._pid = pid
+        self._display = display
+        self._url = url
+        self._remote = True
+
+    def get_name(self):
+        return 'Firefox'
+
+    def get_process_id(self):
+        return self._pid
+
+    def get_child_count(self):
+        return 0
+
+    def get_child_at_index(self, i):
+        return None
+
+
+class _RemoteDocument:
+    """Sentinel for a document on a different display."""
+    def __init__(self, platform, url, display):
+        self._platform = platform
+        self._url = url
+        self._display = display
+        self._remote = True
+
+    def get_role_name(self):
+        return 'document web'
+
+    def get_name(self):
+        return ''
+
+    def get_state_set(self):
+        return None
+
+    def get_child_count(self):
+        return 0
+
+    def get_child_at_index(self, i):
+        return None
+
+    def get_component_iface(self):
+        return None
+
+
 def find_firefox_for_platform(platform: str, pid: int = None):
     """Find the Firefox instance that has a document matching the given platform.
     Handles multiple Firefox instances (parallel HMM mode).
@@ -134,13 +197,8 @@ def find_firefox_for_platform(platform: str, pid: int = None):
     display, uses subprocess scanning on that display's AT-SPI bus."""
     # Multi-display mode: subprocess scan on the platform's display
     if pid is None and get_platform_display(platform):
-        info = _subprocess_scan(platform, 'find_firefox')
+        info = subprocess_scan(platform, 'find_firefox')
         if info and info.get('pid'):
-            # We got the PID from the subprocess. Now we need to return an
-            # AT-SPI app object. Since the app is on a different bus, we can't
-            # return a live object. Instead, store the PID and let callers
-            # use subprocess scanning for tree operations too.
-            # Return a sentinel that carries the PID and display info.
             return _RemoteFirefox(platform, info['pid'],
                                  get_platform_display(platform),
                                  info.get('url'))
@@ -163,73 +221,8 @@ def find_firefox_for_platform(platform: str, pid: int = None):
     return None
 
 
-class _RemoteFirefox:
-    """Sentinel for a Firefox on a different display. Carries PID and display
-    info so that callers can use subprocess scanning for tree operations."""
-
-    def __init__(self, platform, pid, display, url=None):
-        self._platform = platform
-        self._pid = pid
-        self._display = display
-        self._url = url
-        self._remote = True  # Flag for callers to detect
-
-    def get_name(self):
-        return 'Firefox'
-
-    def get_process_id(self):
-        return self._pid
-
-    def get_child_count(self):
-        return 0  # Can't traverse remotely
-
-    def get_child_at_index(self, i):
-        return None
-
-
-class _RemoteDocument:
-    """Sentinel for a document on a different display."""
-
-    def __init__(self, platform, url, display):
-        self._platform = platform
-        self._url = url
-        self._display = display
-        self._remote = True
-
-    def get_role_name(self):
-        return 'document web'
-
-    def get_name(self):
-        return self._url or ''
-
-    def get_child_count(self):
-        return 0
-
-    def get_child_at_index(self, i):
-        return None
-
-    def get_document_iface(self):
-        return self
-
-    def get_document_attribute_value(self, attr):
-        if attr == 'DocURL':
-            return self._url
-        return None
-
-    def get_extents(self, coord_type=0):
-        # Return reasonable defaults for chrome_y detection
-        class _Ext:
-            x = 0; y = 120; width = 1920; height = 800
-        return _Ext()
-
-    def get_state_set(self):
-        return None
-
-
 def get_document_url(doc) -> str | None:
     """Extract DocURL from a document element."""
-    if getattr(doc, '_remote', False):
-        return doc._url
     try:
         iface = doc.get_document_iface()
         if iface:
@@ -254,13 +247,9 @@ def detect_platform_from_url(url: str) -> str | None:
 
 
 def get_platform_document(firefox, platform: str):
-    """Find the document web element for a platform by URL matching.
-    For _RemoteFirefox objects, returns a _RemoteDocument sentinel."""
+    """Find the document web element for a platform by URL matching."""
     if not firefox:
         return None
-    if getattr(firefox, '_remote', False):
-        # Remote Firefox — return a sentinel with the URL
-        return _RemoteDocument(firefox._platform, firefox._url, firefox._display)
 
     candidates = []
 

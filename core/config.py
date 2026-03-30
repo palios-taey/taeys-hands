@@ -159,3 +159,45 @@ def get_validation(platform: str) -> dict:
     """Get validation expectations for post-action verification."""
     config = get_platform_config(platform)
     return config.get('validation', {})
+
+
+def scan_platform_tree(platform: str) -> tuple:
+    """Scan the AT-SPI tree for a platform, handling multi-display routing.
+
+    Returns (elements: list[dict], url: str|None, error: str|None).
+
+    In multi-display mode (Mira): routes through subprocess scanner.
+    In single-display mode (Thor): uses direct AT-SPI scan.
+
+    Elements are raw dicts with name/role/x/y/states — no atspi_obj
+    (subprocess results are serialized). Callers should not depend on
+    atspi_obj being present.
+    """
+    from core import atspi
+    from core.tree import find_elements
+    from core.interact import strip_atspi_obj
+
+    firefox = atspi.find_firefox_for_platform(platform)
+    if not firefox:
+        return [], None, f'Firefox not found for {platform}'
+
+    # Multi-display: subprocess scan
+    if getattr(firefox, '_remote', False):
+        scan_result = atspi.subprocess_scan(platform, 'scan')
+        if not scan_result or scan_result.get('error'):
+            err = scan_result.get('error', 'Subprocess scan failed') if scan_result else 'Subprocess scan failed'
+            return [], None, err
+        elements = scan_result.get('elements', [])
+        url = scan_result.get('url')
+        return elements, url, None
+
+    # Local: direct AT-SPI scan
+    doc = atspi.get_platform_document(firefox, platform)
+    if not doc:
+        return [], None, f'{platform} document not found'
+
+    url = atspi.get_document_url(doc)
+    config = get_platform_config(platform)
+    fences = config.get('fence_after', [])
+    all_elements = find_elements(doc, fence_after=fences)
+    return strip_atspi_obj(all_elements), url, None

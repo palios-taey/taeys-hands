@@ -350,16 +350,12 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         result['error'] = "Firefox not found in AT-SPI tree"
         return result
 
-    # Load YAML config early — needed for both local and remote scanning
-    try:
-        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as _f:
-            _pcfg = yaml.safe_load(_f) or {}
-    except Exception:
-        _pcfg = {}
+    # Load platform config — needed for fence_after and element filtering
+    _pcfg = get_platform_config(platform)
 
-    # Remote Firefox (multi-display mode): use subprocess scanner
+    # ─── Multi-display path: subprocess scan with YAML filtering ───
     if getattr(firefox, '_remote', False):
-        scan_result = atspi._subprocess_scan(platform, 'scan')
+        scan_result = atspi.subprocess_scan(platform, 'scan')
         if not scan_result or scan_result.get('error'):
             result['error'] = scan_result.get('error', 'Subprocess scan failed') if scan_result else 'Subprocess scan failed'
             return result
@@ -374,6 +370,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
             if len(name) > 200:
                 e['name'] = name[:200] + '...'
 
+        # Apply YAML filtering — same as local path
         pre_filter = len(elements_json)
         noise_removed = 0
         if _pcfg.get('element_filter') or _pcfg.get('element_map'):
@@ -382,12 +379,6 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
             if new_elements:
                 result['new_elements'] = [{'name': e.get('name', ''), 'role': e.get('role', ''),
                                            'x': e.get('x'), 'y': e.get('y')} for e in new_elements]
-        else:
-            noise = _pcfg.get('inspect_noise', {})
-            if noise:
-                _excl = noise.get('exclude_name_contains', [])
-                elements_json = [e for e in elements_json if not any(p in e.get('name', '') for p in _excl)]
-            noise_removed = pre_filter - len(elements_json)
 
         copy_count = scan_result.get('copy_button_count', 0)
         result['state']['copy_button_count'] = copy_count
@@ -397,27 +388,22 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
             result['state']['noise_removed'] = noise_removed
         result['controls'] = elements_json
 
-        # Attachment detection (from elements_json directly)
         attached = _detect_attachments(elements_json, elements_json)
         if attached:
             result['attachments'] = attached
 
-        # Structure change detection
         sc = _check_structure_change(platform, elements_json, redis_client)
         if sc:
             result['structure_change'] = sc
 
-        # Store in Redis
         if redis_client:
             redis_client.set(node_key(f"inspect:{platform}"), json.dumps({
                 'url': url, 'state': result['state'],
                 'controls': elements_json, 'timestamp': time.time(),
             }))
-            copy_btn_count = result.get('state', {}).get('copy_button_count', 0)
-            elem_count = result.get('state', {}).get('element_count', 0)
             redis_client.setex(node_key(f"checkpoint:{platform}:inspect"), 1800, json.dumps({
-                'url': url, 'copy_button_count': copy_btn_count,
-                'element_count': elem_count, 'timestamp': time.time(),
+                'url': url, 'copy_button_count': copy_count,
+                'element_count': len(elements_json), 'timestamp': time.time(),
             }))
 
         result['multi_display'] = True
@@ -425,7 +411,6 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
         result['success'] = True
         result['atspi_note'] = "Menu items (Back, Forward, Reload) are browser chrome - ignore them."
 
-        # Plan validation
         if plan and plan.get('required_state'):
             req = plan['required_state']
             cur = plan.get('current_state')
@@ -437,7 +422,7 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
 
         return result
 
-    # Local Firefox (same display): use direct AT-SPI
+    # ─── Local path: direct AT-SPI scan ───
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         result['error'] = f"Could not find {platform} document"
@@ -446,8 +431,6 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
     url = atspi.get_document_url(doc)
     result['url'] = url
 
-    # Load platform config — fence_after needed for tree traversal
-    _pcfg = get_platform_config(platform)
     chrome_y = detect_chrome_y(doc)
     fences = _pcfg.get('fence_after', [])
     all_elements = find_elements(doc, fence_after=fences)
