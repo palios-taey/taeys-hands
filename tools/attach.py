@@ -41,17 +41,56 @@ def _scan_elements_for_platform(platform: str) -> List[Dict]:
 def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
     """Scan for dropdown/menu items after opening a trigger.
 
-    Uses find_menu_items(firefox, doc) which searches menu containers
-    in 4 passes (doc strict, doc no-SHOWING, containerless, Firefox root).
-    Returns list of element dicts.
+    Two-strategy approach:
+    1. Try find_menu_items() first (container-aware 4-pass search)
+    2. If nothing found, fall back to find_elements() + role filter
+       (catches React portals and async-rendered dropdowns that
+       find_menu_items misses due to non-standard containers)
+
+    Forces AT-SPI cache clear before scanning so newly-rendered
+    dropdown items are visible in the tree.
     """
+    _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item',
+                   'list item', 'option'}
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return []
+    # Force AT-SPI to re-read the tree from the accessibility bus.
+    try:
+        firefox.clear_cache_single()
+    except Exception:
+        pass
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         return []
-    return find_menu_items(firefox, doc)
+    try:
+        doc.clear_cache_single()
+    except Exception:
+        pass
+
+    # Strategy 1: find_menu_items (container-aware, handles most platforms)
+    items = find_menu_items(firefox, doc)
+    if items:
+        logger.info("Menu scan strategy 1 (find_menu_items): %d items", len(items))
+        return items
+
+    # Strategy 2: full element scan + role filter (catches async React dropdowns)
+    # This is how taey_inspect finds them — find_elements does a complete DFS.
+    from core.tree import filter_useful_elements, detect_chrome_y
+    all_elements = find_elements(doc)
+    chrome_y = detect_chrome_y(doc)
+    useful = filter_useful_elements(all_elements, chrome_y=chrome_y)
+    menu_items = [e for e in useful
+                  if e.get('name', '').strip() and e.get('role', '') in _MENU_ROLES]
+    logger.info("Menu scan strategy 2 (find_elements): %d total, %d useful, %d menu items",
+                len(all_elements), len(useful), len(menu_items))
+    if menu_items:
+        for m in menu_items[:5]:
+            logger.info("  Menu item: %r role=%s y=%s",
+                        m.get('name', '')[:50], m.get('role'), m.get('y'))
+        menu_items.sort(key=lambda x: x.get('y', 0))
+    return menu_items
 
 _KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 
@@ -861,17 +900,20 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"Attach button not found for {platform}",
                 "action": "button_not_found"}
 
-    # Click the button using the discovered atspi_obj directly.
-    # DO NOT use handle_click(x, y) — it does a generic cache lookup that
-    # can find overlapping elements (e.g., an unnamed section at the same
-    # coords) and click the wrong one. Use the specific object reference
-    # from _get_attach_button_coords() instead, with xdotool as fallback.
-    # This matches the pattern in _try_click_then_dialog() and hmm_bot.
-    clicked = False
-    if btn_coords.get('atspi_obj'):
-        clicked = atspi_click(btn_coords)
-    if not clicked:
+    # Click the button using the platform's click_strategy.
+    # Perplexity/ChatGPT: AT-SPI do_action returns True but doesn't
+    # trigger React event handlers. xdotool coordinate click is the
+    # only reliable method. Respect the YAML click_strategy setting.
+    from core.config import get_click_strategy
+    strategy = get_click_strategy(platform)
+    if strategy == 'xdotool_first':
         inp.click_at(btn_coords['x'], btn_coords['y'])
+    else:
+        clicked = False
+        if btn_coords.get('atspi_obj'):
+            clicked = atspi_click(btn_coords)
+        if not clicked:
+            inp.click_at(btn_coords['x'], btn_coords['y'])
 
     time.sleep(1.5)  # Dropdown renders async — 1.5s matches hmm_bot timing
     firefox_local = atspi.find_firefox(platform)  # for file dialog check (X11 level)
@@ -883,13 +925,15 @@ def handle_attach(platform: str, file_path: str,
             result['verified'] = verified
         return result
 
-    # Wait for dropdown menu items (multi-display aware)
+    # Wait for dropdown menu items.
+    # Retry with increasing delay — Perplexity/React dropdowns render
+    # asynchronously and may not be in AT-SPI tree on first scan.
     dropdown_items = []
-    for _ in range(5):
+    for attempt in range(8):
         dropdown_items = _scan_menu_items_for_platform(platform)
         if dropdown_items:
             break
-        time.sleep(0.6)
+        time.sleep(0.5 if attempt < 3 else 0.8)
 
     if not dropdown_items and not _any_file_dialog_open(firefox_local):
         return {"error": f"No dropdown items or file dialog found for {platform}",
