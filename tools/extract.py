@@ -92,6 +92,79 @@ def _try_gemini_deep_research_extract(platform, firefox, doc):
     return None
 
 
+def _try_perplexity_deep_research_extract(platform, firefox, doc):
+    """Perplexity Deep Research: extract full report via 'Copy contents' button.
+
+    Deep Research responses have TWO copy buttons:
+    - 'Copy' (summary only, ~2-7K chars) in the bottom action bar
+    - 'Copy contents' (full report, ~17K+ chars) at the TOP of the report
+
+    The 'Copy contents' button may not be visible without scrolling to top.
+    If neither button is found, returns None (caller uses normal copy path).
+
+    Historical note: commit 6759cbe first implemented this. The code was
+    lost in a rebuild. This re-implements the same approach.
+    """
+    if platform != 'perplexity':
+        return None
+
+    elements = find_elements(doc)
+
+    # Look for 'Copy contents' button (Deep Research indicator)
+    copy_contents = [e for e in elements
+                     if (e.get('name') or '').strip().lower() == 'copy contents'
+                     and 'button' in e.get('role', '')]
+
+    if not copy_contents:
+        # Scroll to top — button is at top of report section
+        inp.press_key('Home')
+        time.sleep(1)
+        doc = atspi.get_platform_document(firefox, platform) or doc
+        elements = find_elements(doc)
+        copy_contents = [e for e in elements
+                         if (e.get('name') or '').strip().lower() == 'copy contents'
+                         and 'button' in e.get('role', '')]
+
+    if not copy_contents:
+        # Not a Deep Research response (no 'Copy contents' button)
+        return None
+
+    logger.info("Perplexity Deep Research detected — using 'Copy contents' extraction")
+
+    # Kill stale xsel
+    import subprocess
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.3)
+
+    btn = copy_contents[0]
+    clipboard.clear()
+    time.sleep(0.1)
+
+    if btn.get('atspi_obj') and atspi_click(btn):
+        logger.info("Clicked 'Copy contents' via AT-SPI")
+    else:
+        inp.click_at(int(btn['x']), int(btn['y']))
+        logger.info("Clicked 'Copy contents' via xdotool at (%s, %s)", btn['x'], btn['y'])
+    time.sleep(2.0)
+
+    content = clipboard.read()
+    if content and len(content) > 500:
+        logger.info("Perplexity Deep Research extracted: %d chars", len(content))
+        return content
+
+    # Retry with xdotool if AT-SPI click didn't trigger clipboard
+    clipboard.clear()
+    inp.click_at(int(btn['x']), int(btn['y']))
+    time.sleep(2.0)
+    content = clipboard.read()
+    if content and len(content) > 500:
+        logger.info("Perplexity Deep Research extracted (xdotool retry): %d chars", len(content))
+        return content
+
+    logger.warning("'Copy contents' clicked but clipboard empty or too short")
+    return None
+
+
 def _filter_response_copy(copy_buttons: list) -> list:
     """Filter copy buttons to prefer response copy over user message / code copy."""
     _RESPONSE_NAMES = {'copy response', 'copy'}
@@ -226,6 +299,56 @@ def handle_quick_extract(platform: str, redis_client,
             result["ingest"] = ingest
         except Exception as e:
             logger.warning("Auto-ingest failed (Deep Research): %s", e)
+        return result
+
+    # Perplexity Deep Research: extract via 'Copy contents' button (full report)
+    ppl_dr_content = _try_perplexity_deep_research_extract(platform, firefox, doc)
+    if ppl_dr_content:
+        quality = _assess_extraction(ppl_dr_content, platform,
+                                      find_elements(atspi.get_platform_document(firefox, platform) or doc))
+        result = {
+            "success": True, "platform": platform, "content": ppl_dr_content,
+            "length": len(ppl_dr_content), "has_artifacts": False, "url": url,
+            "extraction_method": "perplexity_deep_research_copy_contents",
+            "copy_buttons_found": 0, "quality": quality,
+        }
+        if complete and redis_client:
+            redis_client.delete(node_key(f"pending_prompt:{platform}"))
+            redis_client.delete(node_key(f"plan:{platform}"))
+            for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
+                           f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
+                redis_client.delete(node_key(suffix))
+            display = os.environ.get('DISPLAY', ':0')
+            redis_client.delete(f"taey:plan_active:{display}")
+            try:
+                save_path = f"/tmp/hmm_response_{platform}.json"
+                with open(save_path, 'w') as f:
+                    f.write(ppl_dr_content)
+                result["save_path"] = save_path
+            except Exception:
+                pass
+        if neo4j_mod and url:
+            try:
+                sid = mid = None
+                pending_json = redis_client.get(node_key(f"pending_prompt:{platform}")) if redis_client else None
+                if pending_json:
+                    pending = json.loads(pending_json)
+                    sid = pending.get('session_id')
+                    mid = pending.get('message_id')
+                if not sid:
+                    sid = neo4j_client.get_or_create_session(platform, url)
+                if sid:
+                    rid = neo4j_mod.add_message(sid, 'assistant', ppl_dr_content[:5000])
+                    result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
+            except Exception as e:
+                logger.warning("Neo4j store failed (Perplexity Deep Research): %s", e)
+        try:
+            ingest = auto_ingest(platform, ppl_dr_content, url=url,
+                                 session_id=result.get('neo4j', {}).get('session_id'),
+                                 metadata={"extraction_method": "perplexity_deep_research"})
+            result["ingest"] = ingest
+        except Exception as e:
+            logger.warning("Auto-ingest failed (Perplexity Deep Research): %s", e)
         return result
 
     # Extra scroll if needed — press Ctrl+End then End until positions stabilize

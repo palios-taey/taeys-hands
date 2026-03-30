@@ -134,6 +134,9 @@ element_map:
   download_button:
     name: "Download"
     role: push button
+  copy_contents_button:
+    name: "Copy contents"
+    role_contains: button
   rewrite_thread:
     name: "Rewrite Thread"
     role: push button
