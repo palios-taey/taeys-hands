@@ -275,17 +275,29 @@ def _find_upload_item_in_elements(elements: List[Dict], platform: str) -> Option
 
 
 def _click_upload_item(item: Dict, firefox) -> bool:
-    """Click a menu item via AT-SPI action or coordinates. Returns True if clicked."""
+    """Click a menu item via AT-SPI action or coordinates. Returns True if clicked.
+
+    Many menu items (Claude, Perplexity React portals) don't have
+    AT-SPI action interfaces. Coordinate click via xdotool is the
+    reliable fallback — the items always have valid x/y from the scan.
+    """
     atspi_obj = item.get('atspi_obj')
     if atspi_obj:
         try:
             ai = atspi_obj.get_action_iface()
             if ai and ai.get_n_actions() > 0:
                 ai.do_action(0)
+                logger.info("Upload item clicked via AT-SPI: %r", item.get('name', '')[:50])
                 return True
         except Exception:
             pass
-    logger.error("Upload item click failed — no valid atspi_obj action interface")
+    # Coordinate fallback — essential for React menu items without action interface
+    x, y = item.get('x'), item.get('y')
+    if x and y:
+        inp.click_at(x, y)
+        logger.info("Upload item clicked via xdotool at (%s, %s): %r", x, y, item.get('name', '')[:50])
+        return True
+    logger.error("Upload item click failed — no action interface and no coordinates")
     return False
 
 
