@@ -37,6 +37,35 @@ def _scan_elements_for_platform(platform: str) -> List[Dict]:
         return []
     return elements
 
+
+def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
+    """Scan for dropdown/menu items after opening a trigger, multi-display aware.
+
+    On local: uses find_menu_items(firefox, doc) which looks for menu containers.
+    On multi-display: uses subprocess scan then filters for menu item roles.
+    Returns list of element dicts.
+    """
+    firefox = atspi.find_firefox_for_platform(platform)
+
+    # Multi-display: subprocess scan, filter for menu-like items
+    if getattr(firefox, '_remote', False):
+        elements = _scan_elements_for_platform(platform)
+        _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item',
+                       'list item', 'option'}
+        items = [e for e in elements
+                 if e.get('name', '').strip() and e.get('role', '') in _MENU_ROLES]
+        if items:
+            items.sort(key=lambda x: x.get('y', 0))
+        return items
+
+    # Local: direct AT-SPI scan via find_menu_items
+    if not firefox:
+        return []
+    doc = atspi.get_platform_document(firefox, platform)
+    if not doc:
+        return []
+    return find_menu_items(firefox, doc)
+
 _KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
@@ -613,9 +642,8 @@ def _try_click_then_dialog(firefox, btn_coords, platform, file_path, redis_clien
     if dt:
         return _handle_file_dialog(platform, file_path, redis_client)
 
-    # Scan AT-SPI tree for menu items
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    menu_items = find_menu_items(firefox, doc)
+    # Scan AT-SPI tree for menu items (multi-display aware)
+    menu_items = _scan_menu_items_for_platform(platform)
 
     if menu_items:
         logger.info(f"AT-SPI found {len(menu_items)} menu item(s) after attach trigger click")
@@ -831,9 +859,7 @@ def handle_attach(platform: str, file_path: str,
         result = _keyboard_nav_attach(platform, file_path, redis_client)
         # Post-attach verification using YAML indicators
         if result.get('status') in ('file_attached', 'unverified'):
-            firefox = atspi.find_firefox(platform)
-            doc = atspi.get_platform_document(firefox, platform) if firefox else None
-            verified = _verify_attach_success(platform, firefox, doc)
+            verified = _verify_attach_success(platform)
             result['verified'] = verified
             if verified and result.get('status') == 'unverified':
                 result['status'] = 'file_attached'
@@ -844,9 +870,14 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"{platform} does not support file attachments"}
 
     # AT-SPI menu platforms: click trigger, scan for menu items or dialog
-    firefox = atspi.find_firefox(platform)
-    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-    btn_coords = _get_attach_button_coords(doc, platform) if doc else None
+    # Use element cache (populated by inspect) for button coords — works on multi-display
+    firefox = atspi.find_firefox_for_platform(platform)
+    if not getattr(firefox, '_remote', False):
+        doc = atspi.get_platform_document(firefox, platform) if firefox else None
+        btn_coords = _get_attach_button_coords(doc, platform) if doc else None
+    else:
+        # Multi-display: button is in element cache from subprocess inspect
+        btn_coords = _get_attach_button_coords(None, platform)
 
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}",
@@ -858,28 +889,24 @@ def handle_attach(platform: str, file_path: str,
                 "action": "click_failed"}
 
     time.sleep(1.0)
-    dt = _any_file_dialog_open(firefox)
+    firefox_local = atspi.find_firefox(platform)  # for file dialog check (X11 level)
+    dt = _any_file_dialog_open(firefox_local)
     if dt:
         result = _handle_file_dialog(platform, file_path, redis_client)
-        # Verify with YAML indicators
         if result.get('status') in ('file_attached', 'unverified'):
-            firefox = atspi.find_firefox(platform)
-            doc = atspi.get_platform_document(firefox, platform) if firefox else None
-            verified = _verify_attach_success(platform, firefox, doc)
+            verified = _verify_attach_success(platform)
             result['verified'] = verified
         return result
 
-    # Wait for dropdown menu items
+    # Wait for dropdown menu items (multi-display aware)
     dropdown_items = []
     for _ in range(5):
-        firefox = atspi.find_firefox(platform)
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        dropdown_items = find_menu_items(firefox, doc)
+        dropdown_items = _scan_menu_items_for_platform(platform)
         if dropdown_items:
             break
         time.sleep(0.6)
 
-    if not dropdown_items and not _any_file_dialog_open(firefox):
+    if not dropdown_items and not _any_file_dialog_open(firefox_local):
         return {"error": f"No dropdown items or file dialog found for {platform}",
                 "action": "attach_button_failed"}
 
@@ -893,14 +920,12 @@ def handle_attach(platform: str, file_path: str,
             logger.info(f"Clicking upload item directly: {upload_item.get('name', '(unnamed)')!r}")
             _click_upload_item(upload_item, firefox)
             time.sleep(1.5)
-            dt = _any_file_dialog_open(firefox)
+            ff_local = atspi.find_firefox(platform)  # for file dialog check
+            dt = _any_file_dialog_open(ff_local)
             if dt:
                 result = _handle_file_dialog(platform, file_path, redis_client)
-                # Post-attach YAML verification
                 if result.get('status') in ('file_attached', 'unverified'):
-                    firefox = atspi.find_firefox(platform)
-                    doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                    verified = _verify_attach_success(platform, firefox, doc)
+                    verified = _verify_attach_success(platform)
                     result['verified'] = verified
                     if verified and result.get('status') == 'unverified':
                         result['status'] = 'file_attached'
@@ -910,13 +935,11 @@ def handle_attach(platform: str, file_path: str,
             # Check a bit longer
             for _ in range(5):
                 time.sleep(0.3)
-                dt = _any_file_dialog_open(firefox)
+                dt = _any_file_dialog_open(ff_local)
                 if dt:
                     result = _handle_file_dialog(platform, file_path, redis_client)
                     if result.get('status') in ('file_attached', 'unverified'):
-                        firefox = atspi.find_firefox(platform)
-                        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-                        verified = _verify_attach_success(platform, firefox, doc)
+                        verified = _verify_attach_success(platform)
                         result['verified'] = verified
                     return result
             # No dialog after clicking upload item — dismiss and fall through to dropdown report
