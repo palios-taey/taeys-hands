@@ -86,14 +86,13 @@ CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
-# Per-platform virtual displays (Mira multi-display setup).
+# ─── Multi-Display Support ──────────────────────────────────────────────
 # Set PLATFORM_DISPLAYS env var: "chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"
 # If not set, all platforms use the server's DISPLAY (tab-switching mode).
 _PLATFORM_DISPLAYS: dict[str, str] = {}
 
 def _parse_platform_displays():
     raw = os.environ.get('PLATFORM_DISPLAYS', '')
-    # Fallback: read from .env file if not in environment
     if not raw:
         env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
         try:
@@ -145,3 +144,8 @@ def get_platform_firefox_pid(platform: str) -> int | None:
             return int(f.read().strip())
     except (FileNotFoundError, ValueError):
         return None
+
+
+def is_multi_display() -> bool:
+    """True if PLATFORM_DISPLAYS is configured (Mira mode)."""
+    return bool(_PLATFORM_DISPLAYS)
