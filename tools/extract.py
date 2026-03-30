@@ -155,8 +155,14 @@ def handle_quick_extract(platform: str, redis_client,
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
-    # Scroll to absolute bottom FIRST, then get doc and scan
-    for _ in range(5):
+    # Scroll to absolute bottom FIRST, then get doc and scan.
+    # Use Ctrl+End (not bare End) to guarantee absolute bottom —
+    # bare End only scrolls within the focused element's context.
+    # This is critical on Grok where the response copy button
+    # is below the viewport after send (hmm_bot uses Ctrl+End).
+    inp.press_key('ctrl+End')
+    time.sleep(0.5)
+    for _ in range(3):
         inp.press_key('End')
         time.sleep(0.3)
     time.sleep(0.5)
@@ -222,7 +228,9 @@ def handle_quick_extract(platform: str, redis_client,
             logger.warning("Auto-ingest failed (Deep Research): %s", e)
         return result
 
-    # Extra scroll if needed — press End until positions stabilize
+    # Extra scroll if needed — press Ctrl+End then End until positions stabilize
+    inp.press_key('ctrl+End')
+    time.sleep(0.3)
     last_max_y = 0
     for _ in range(15):
         elements = find_elements(doc)
@@ -242,7 +250,9 @@ def handle_quick_extract(platform: str, redis_client,
 
     # Scroll to find copy buttons if none visible
     if not copy_buttons:
-        for _ in range(5):
+        inp.press_key('ctrl+End')
+        time.sleep(0.3)
+        for _ in range(3):
             inp.press_key('End')
             time.sleep(0.3)
         time.sleep(0.5)
