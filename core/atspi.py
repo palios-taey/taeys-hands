@@ -1,15 +1,29 @@
-"""AT-SPI desktop and Firefox discovery."""
+"""AT-SPI desktop and Firefox discovery.
 
+Multi-display mode: when PLATFORM_DISPLAYS is set (Mira), each platform
+has its own display/D-Bus. Tree operations are routed through subprocess
+scanning with the correct env. Returns _RemoteFirefox/_RemoteDocument
+sentinels that callers detect via getattr(obj, '_remote', False).
+"""
+
+import json
 import os
 import logging
+import subprocess
+import sys
 
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
-from core.platforms import URL_PATTERNS, _EXTRA_URL_PATTERNS
+from core.platforms import (URL_PATTERNS, _EXTRA_URL_PATTERNS,
+                            get_platform_display, get_platform_bus,
+                            get_platform_firefox_pid)
 
 logger = logging.getLogger(__name__)
+
+# Path to the subprocess scanner script
+_SCANNER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_atspi_subprocess.py')
 
 
 def detect_display() -> str:
@@ -92,11 +106,106 @@ def find_all_firefox(pid: int = None):
     return apps
 
 
+def subprocess_scan(platform: str, cmd: str = 'find_firefox') -> dict | None:
+    """Run AT-SPI scan as subprocess on the platform's dedicated display.
+
+    Used in multi-display mode (Mira) where each platform runs on a
+    separate Xvfb with its own D-Bus/AT-SPI bus.
+    """
+    display = get_platform_display(platform)
+    if not display:
+        return None
+    bus = get_platform_bus(platform)
+    env = {**os.environ, 'DISPLAY': display}
+    if bus:
+        env['AT_SPI_BUS_ADDRESS'] = bus
+        env['DBUS_SESSION_BUS_ADDRESS'] = bus
+    try:
+        r = subprocess.run(
+            [sys.executable, _SCANNER_SCRIPT, cmd, platform],
+            env=env, capture_output=True, text=True, timeout=15,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return json.loads(r.stdout.strip())
+        if r.stderr:
+            logger.warning(f"Subprocess scanner stderr: {r.stderr[:200]}")
+    except Exception as e:
+        logger.error(f"Subprocess scan failed for {platform} on {display}: {e}")
+    return None
+
+
+class _RemoteFirefox:
+    """Sentinel for a Firefox on a different display. Carries PID and display
+    info so that callers can route operations through subprocess scanning.
+
+    Callers detect via: getattr(obj, '_remote', False)
+    """
+    def __init__(self, platform, pid, display, url=None):
+        self._platform = platform
+        self._pid = pid
+        self._display = display
+        self._url = url
+        self._remote = True
+
+    def get_name(self):
+        return 'Firefox'
+
+    def get_process_id(self):
+        return self._pid
+
+    def get_child_count(self):
+        return 0
+
+    def get_child_at_index(self, i):
+        return None
+
+
+class _RemoteDocument:
+    """Sentinel for a document on a different display."""
+    def __init__(self, platform, url, display):
+        self._platform = platform
+        self._url = url
+        self._display = display
+        self._remote = True
+
+    def get_role_name(self):
+        return 'document web'
+
+    def get_name(self):
+        return ''
+
+    def get_state_set(self):
+        return None
+
+    def get_child_count(self):
+        return 0
+
+    def get_child_at_index(self, i):
+        return None
+
+    def get_component_iface(self):
+        return None
+
+
 def find_firefox_for_platform(platform: str, pid: int = None):
     """Find the Firefox instance that has a document matching the given platform.
     Handles multiple Firefox instances (parallel HMM mode).
     If pid is given, restricts search to that process only.
-    Falls back to find_firefox() if only one instance exists."""
+    Falls back to find_firefox() if only one instance exists.
+
+    Multi-display mode: if PLATFORM_DISPLAYS maps this platform to a dedicated
+    display, uses subprocess scanning on that display's AT-SPI bus."""
+    # Multi-display mode: subprocess scan on the platform's display
+    if pid is None and get_platform_display(platform):
+        info = subprocess_scan(platform, 'find_firefox')
+        if info and info.get('pid'):
+            return _RemoteFirefox(platform, info['pid'],
+                                 get_platform_display(platform),
+                                 info.get('url'))
+        elif info:
+            logger.warning(f"Subprocess found no Firefox for {platform}: {info}")
+        # Fall through to local scan
+
     all_ff = find_all_firefox(pid=pid)
     if not all_ff:
         return None

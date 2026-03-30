@@ -13,7 +13,8 @@ gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
 from core import atspi, input as inp
-from core.config import get_platform_config, get_attach_trigger_key, get_element_spec, get_attach_method
+from core.config import (get_platform_config, get_attach_trigger_key, get_element_spec,
+                         get_attach_method, scan_platform_tree)
 from core.tree import (find_elements, find_menu_items,
                        filter_useful_elements, detect_chrome_y)
 from core.interact import (extend_cache, find_element_at, atspi_click,
@@ -22,6 +23,19 @@ from tools.click import handle_click
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
+
+
+def _scan_elements_for_platform(platform: str) -> List[Dict]:
+    """Scan AT-SPI tree for platform, handling multi-display routing.
+
+    Returns list of element dicts (no atspi_obj). Works on both
+    local (Thor) and remote (Mira) displays.
+    """
+    elements, url, error = scan_platform_tree(platform)
+    if error:
+        logger.warning("Platform tree scan failed for %s: %s", platform, error)
+        return []
+    return elements
 
 _KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 
@@ -386,28 +400,31 @@ def _handle_file_dialog(platform: str, file_path: str,
 
 
 def _wait_for_chip(platform: str, timeout: float = 4.0) -> bool:
-    """Wait for file chip to appear in AT-SPI tree, using YAML indicators."""
-    firefox = atspi.find_firefox(platform)
+    """Wait for file chip to appear in AT-SPI tree, using YAML indicators.
+
+    Works on both local and multi-display (Mira) by using scan_platform_tree.
+    """
     config = get_platform_config(platform)
     yaml_indicators = (config.get('validation', {})
                            .get('attach_success', {})
                            .get('indicators', []))
 
     for _ in range(int(timeout / 0.2)):
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        if doc:
-            # Primary: scan using YAML indicators
+        elements = _scan_elements_for_platform(platform)
+        if elements:
+            # Primary: check YAML indicators
             if yaml_indicators:
-                chrome_y = detect_chrome_y(doc)
-                all_elements = find_elements(doc)
-                elements = filter_useful_elements(all_elements, chrome_y=chrome_y)
                 for e in elements:
                     for ind in yaml_indicators:
                         if isinstance(ind, dict) and _match_element(e, ind):
                             return True
-            # Fallback: existing attachment detection (includes file extension check)
-            if _detect_existing_attachments(doc, platform):
-                return True
+            # Fallback: file extension name matching
+            for e in elements:
+                name = (e.get('name') or '').strip()
+                if name and any(name.lower().endswith(ext) for ext in _FILE_EXTENSIONS):
+                    role = e.get('role', '')
+                    if role in ('heading', 'push button', 'toggle button', 'link'):
+                        return True
         time.sleep(0.2)
     return False
 
@@ -714,33 +731,36 @@ def _keyboard_nav_attach(platform: str, file_path: str,
 
 # --- Post-attach YAML validation ---
 
-def _verify_attach_success(platform: str, firefox, doc) -> bool:
+def _verify_attach_success(platform: str, firefox=None, doc=None) -> bool:
     """Verify attachment using YAML validation indicators.
 
-    Scans the AT-SPI tree and checks for indicators defined in
-    validation.attach_success.indicators in the platform YAML.
+    Works on both local and multi-display (Mira) by using scan_platform_tree.
     Returns True if any indicator is matched.
     """
-    if not doc:
-        return False
     config = get_platform_config(platform)
     indicators = (config.get('validation', {})
                       .get('attach_success', {})
                       .get('indicators', []))
-    if not indicators:
-        # No YAML indicators — fall back to chip detection
-        return bool(_detect_existing_attachments(doc, platform))
 
-    chrome_y = detect_chrome_y(doc)
-    all_elements = find_elements(doc)
-    elements = filter_useful_elements(all_elements, chrome_y=chrome_y)
+    # Use multi-display-aware scan
+    elements = _scan_elements_for_platform(platform)
+    if not elements:
+        return False
 
+    if indicators:
+        for e in elements:
+            for ind in indicators:
+                if isinstance(ind, dict) and _match_element(e, ind):
+                    return True
+
+    # Fallback: file extension name matching
     for e in elements:
-        for ind in indicators:
-            if isinstance(ind, dict) and _match_element(e, ind):
+        name = (e.get('name') or '').strip()
+        if name and any(name.lower().endswith(ext) for ext in _FILE_EXTENSIONS):
+            role = e.get('role', '')
+            if role in ('heading', 'push button', 'toggle button', 'link'):
                 return True
-    # Also check file chips as secondary signal
-    return bool(_detect_existing_attachments(doc, platform))
+    return False
 
 
 # --- Main handler ---
