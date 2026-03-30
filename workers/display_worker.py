@@ -76,6 +76,13 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi  # noqa: E402
 
+# CRITICAL: core/platforms.py populates _PLATFORM_DISPLAYS at import time
+# from both env var AND .env file. We popped the env var above, but the
+# .env file fallback still fills the dict. Clear it after import so
+# find_firefox_for_platform() uses the direct local AT-SPI path.
+from core.platforms import _PLATFORM_DISPLAYS  # noqa: E402
+_PLATFORM_DISPLAYS.clear()
+
 from storage.redis_pool import get_client as get_redis, node_key  # noqa: E402
 
 try:
