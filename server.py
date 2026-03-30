@@ -62,6 +62,12 @@ from tools.plan import handle_plan
 from tools.sessions import handle_list_sessions
 from tools.monitors import handle_monitors, handle_respawn_monitor
 
+# Worker management for multi-display
+from workers.manager import (
+    spawn_workers, shutdown_workers,
+    should_route_to_worker, route_to_worker,
+)
+
 
 class SafeJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -331,7 +337,18 @@ def handle_tool(name: str, args: Dict, redis_client) -> Dict:
     err = _check_plan_required(name, args, redis_client)
     if err:
         return err
-    result = handler(args, redis_client)
+
+    # Multi-display: route to per-display worker if applicable
+    platform = args.get('platform', '')
+    if should_route_to_worker(name, platform):
+        try:
+            result = route_to_worker(name, args)
+        except RuntimeError as e:
+            logger.error("Worker dispatch failed for %s/%s: %s", name, platform, e)
+            result = {"error": f"Worker dispatch failed: {e}"}
+    else:
+        result = handler(args, redis_client)
+
     return inject_notifications(result, redis_client)
 
 
@@ -360,6 +377,13 @@ def run_server():
     def write_message(msg):
         sys.stdout.write(json.dumps(msg, cls=SafeJSONEncoder) + '\n')
         sys.stdout.flush()
+
+    # Spawn per-display workers on multi-display (Mira)
+    worker_status = spawn_workers()
+    if worker_status:
+        ready = sum(1 for v in worker_status.values() if v)
+        total = len(worker_status)
+        logger.info("Workers: %d/%d ready — %s", ready, total, worker_status)
 
     logger.info("Taey's Hands MCP server starting (display=%s)", DISPLAY)
 
