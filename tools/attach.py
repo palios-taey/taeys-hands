@@ -41,18 +41,22 @@ def _scan_elements_for_platform(platform: str) -> List[Dict]:
 def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
     """Scan for dropdown/menu items after opening a trigger.
 
-    Uses find_menu_items(firefox, doc) which searches menu containers
-    in 4 passes (doc strict, doc no-SHOWING, containerless, Firefox root).
+    Two-strategy approach:
+    1. Try find_menu_items() first (container-aware 4-pass search)
+    2. If nothing found, fall back to find_elements() + role filter
+       (catches React portals and async-rendered dropdowns that
+       find_menu_items misses due to non-standard containers)
 
     Forces AT-SPI cache clear before scanning so newly-rendered
-    dropdown items (React async) are visible in the tree.
-    Returns list of element dicts.
+    dropdown items are visible in the tree.
     """
+    _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item',
+                   'list item', 'option'}
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return []
     # Force AT-SPI to re-read the tree from the accessibility bus.
-    # Without this, stale cached children hide async-rendered dropdowns.
     try:
         firefox.clear_cache_single()
     except Exception:
@@ -64,7 +68,23 @@ def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
         doc.clear_cache_single()
     except Exception:
         pass
-    return find_menu_items(firefox, doc)
+
+    # Strategy 1: find_menu_items (container-aware, handles most platforms)
+    items = find_menu_items(firefox, doc)
+    if items:
+        return items
+
+    # Strategy 2: full element scan + role filter (catches async React dropdowns)
+    # This is how taey_inspect finds them — find_elements does a complete DFS.
+    from core.tree import filter_useful_elements, detect_chrome_y
+    all_elements = find_elements(doc)
+    chrome_y = detect_chrome_y(doc)
+    useful = filter_useful_elements(all_elements, chrome_y=chrome_y)
+    menu_items = [e for e in useful
+                  if e.get('name', '').strip() and e.get('role', '') in _MENU_ROLES]
+    if menu_items:
+        menu_items.sort(key=lambda x: x.get('y', 0))
+    return menu_items
 
 _KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 
