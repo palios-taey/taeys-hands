@@ -181,7 +181,7 @@ element_map:
   # Tools dropdown items (from "Add files and more" button)
   tool_upload:
     name_contains: "Add photos"
-    role_contains: button
+    role_contains: item  # AT-SPI role is 'menu item', not 'button'
   tool_google_drive:
     name: "Add from Google Drive"
     role_contains: button
