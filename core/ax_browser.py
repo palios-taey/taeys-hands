@@ -1,0 +1,569 @@
+from __future__ import annotations
+"""
+macOS browser discovery via AXUIElement API.
+
+Drop-in replacement for core/atspi.py (Linux AT-SPI-based).
+Finds Chrome/Safari and locates platform documents by URL pattern.
+
+Requires: macOS Accessibility permissions for the calling process.
+For tab switching without AX permissions, use input_mac.switch_to_platform()
+which uses JXA (Chrome's scripting API).
+"""
+
+import logging
+import re
+import subprocess
+import json
+
+logger = logging.getLogger(__name__)
+
+# Try to import macOS-specific modules
+try:
+    from ApplicationServices import (
+        AXUIElementCreateApplication,
+        AXUIElementCopyAttributeValue,
+        AXUIElementCopyAttributeNames,
+    )
+    from AppKit import NSWorkspace
+    HAS_AX = True
+except ImportError:
+    HAS_AX = False
+    logger.warning("macOS AX API not available — pyobjc not installed")
+
+from core.platforms import URL_PATTERNS
+
+
+def _get_chrome_pid() -> int | None:
+    """Get Chrome's process ID."""
+    if not HAS_AX:
+        return None
+    try:
+        ws = NSWorkspace.sharedWorkspace()
+        for app in ws.runningApplications():
+            if app.localizedName() == 'Google Chrome':
+                return app.processIdentifier()
+    except Exception as e:
+        logger.error(f"Chrome PID lookup failed: {e}")
+    return None
+
+
+def _get_chrome_tabs_jxa() -> list:
+    """Get Chrome tabs via JXA (requires Chrome automation permission).
+
+    Returns list of {window, tab, title, url} dicts.
+    Returns empty list if permission denied (-1743) or JXA unavailable.
+    """
+    script = '''
+    var chrome = Application("Google Chrome");
+    var result = [];
+    var wins = chrome.windows();
+    for (var i = 0; i < wins.length; i++) {
+        var tabs = wins[i].tabs();
+        for (var j = 0; j < tabs.length; j++) {
+            result.push({window: i, tab: j, title: tabs[j].title(), url: tabs[j].url()});
+        }
+    }
+    JSON.stringify(result);
+    '''
+    try:
+        result = subprocess.run(
+            ['osascript', '-l', 'JavaScript', '-e', script],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout.strip())
+        stderr = result.stderr.strip()
+        if '-1743' in stderr:
+            logger.info("JXA Chrome automation permission denied (-1743) — using fallback")
+        else:
+            logger.warning(f"JXA tab listing failed: {stderr}")
+    except json.JSONDecodeError as e:
+        logger.warning(f"JXA tab listing returned invalid JSON: {e}")
+    except Exception as e:
+        logger.error(f"JXA tab listing failed: {e}")
+    return []
+
+
+def _get_ax_tree(pid: int, max_depth: int = 20) -> list:
+    """Traverse the AXUIElement tree for an application.
+
+    Returns a flat list of element dicts with role, title, position, size.
+    Each element also carries an 'ax_ref' key with the live AXUIElement.
+
+    Args:
+        pid: Process ID of the application.
+        max_depth: Maximum traversal depth.
+
+    Returns:
+        List of element dicts.
+    """
+    if not HAS_AX:
+        return []
+
+    elements = []
+    ax_app = AXUIElementCreateApplication(pid)
+
+    def _get_attr(el, attr):
+        err, val = AXUIElementCopyAttributeValue(el, attr, None)
+        return val if err == 0 else None
+
+    def _parse_point(val):
+        if val is None:
+            return 0, 0
+        try:
+            return int(val.x), int(val.y)
+        except AttributeError:
+            pass
+        m = re.search(r'x:([\d.]+)\s+y:([\d.]+)', repr(val))
+        return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
+
+    def _parse_size(val):
+        if val is None:
+            return 0, 0
+        try:
+            return int(val.width), int(val.height)
+        except AttributeError:
+            pass
+        m = re.search(r'w:([\d.]+)\s+h:([\d.]+)', repr(val))
+        return (int(float(m.group(1))), int(float(m.group(2)))) if m else (0, 0)
+
+    def traverse(el, depth=0):
+        if depth > max_depth:
+            return
+        try:
+            role = _get_attr(el, 'AXRole') or ''
+            title = _get_attr(el, 'AXTitle') or ''
+            desc = _get_attr(el, 'AXDescription') or ''
+            value = _get_attr(el, 'AXValue')
+            role_desc = _get_attr(el, 'AXRoleDescription') or ''
+            subrole = _get_attr(el, 'AXSubrole') or ''
+            enabled = _get_attr(el, 'AXEnabled')
+            focused = _get_attr(el, 'AXFocused')
+
+            # Get position and size
+            pos = _get_attr(el, 'AXPosition')
+            size = _get_attr(el, 'AXSize')
+
+            x, y = _parse_point(pos)
+            w, h = _parse_size(size)
+
+            # Compute center coordinates (matching AT-SPI convention)
+            center_x = x + w // 2
+            center_y = y + h // 2
+
+            # Map AX roles to AT-SPI-like role names for compatibility
+            mapped_role = _map_ax_role(role, subrole)
+
+            name = title or desc or ''
+
+            element = {
+                'name': name,
+                'role': mapped_role,
+                'x': center_x,
+                'y': center_y,
+                'width': w,
+                'height': h,
+                'ax_ref': el,
+                'ax_role': role,  # Original AX role for debugging
+            }
+
+            # Build states list (matching AT-SPI convention)
+            states = []
+            if w > 0 and h > 0:
+                states.append('showing')
+            if enabled is not False:
+                states.append('enabled')
+            if focused:
+                states.append('focused')
+
+            # Check for editable
+            if role in ('AXTextArea', 'AXTextField', 'AXComboBox'):
+                states.append('editable')
+                states.append('focusable')
+
+            # Check for selected/checked
+            selected = _get_attr(el, 'AXSelected')
+            if selected:
+                states.append('selected')
+            checked = _get_attr(el, 'AXValue')
+            if role in ('AXCheckBox', 'AXRadioButton') and checked:
+                states.append('checked')
+
+            if states:
+                element['states'] = states
+
+            if desc:
+                element['description'] = desc
+
+            if w > 0 and h > 0:
+                elements.append(element)
+
+            # Traverse children
+            children = _get_attr(el, 'AXChildren')
+            if children:
+                for child in children:
+                    traverse(child, depth + 1)
+        except Exception as e:
+            logger.debug(f"AX traversal error at depth {depth}: {e}")
+
+    traverse(ax_app)
+    return elements
+
+
+def _map_ax_role(ax_role: str, subrole: str = '') -> str:
+    """Map macOS AX role names to AT-SPI-like role names.
+
+    This enables tools to work with consistent role names across platforms.
+    """
+    mapping = {
+        'AXApplication': 'application',
+        'AXWindow': 'frame',
+        'AXButton': 'push button',
+        'AXCheckBox': 'check box',
+        'AXRadioButton': 'radio button',
+        'AXTextField': 'entry',
+        'AXTextArea': 'entry',
+        'AXComboBox': 'combo box',
+        'AXList': 'list',
+        'AXMenu': 'menu',
+        'AXMenuBar': 'menu bar',
+        'AXMenuItem': 'menu item',
+        'AXMenuButton': 'push button',
+        'AXPopUpButton': 'push button',
+        'AXStaticText': 'static',
+        'AXHeading': 'heading',
+        'AXLink': 'link',
+        'AXImage': 'image',
+        'AXGroup': 'section',
+        'AXToolbar': 'tool bar',
+        'AXTabGroup': 'page tab list',
+        'AXTab': 'page tab',
+        'AXScrollArea': 'scroll pane',
+        'AXScrollBar': 'scroll bar',
+        'AXTable': 'table',
+        'AXRow': 'table row',
+        'AXCell': 'table cell',
+        'AXColumn': 'table column',
+        'AXSlider': 'slider',
+        'AXProgressIndicator': 'progress bar',
+        'AXSplitter': 'separator',
+        'AXWebArea': 'document web',
+        'AXOutline': 'tree',
+        'AXOutlineRow': 'tree item',
+        'AXDisclosureTriangle': 'toggle button',
+        'AXSheet': 'dialog',
+        'AXDialog': 'dialog',
+    }
+    return mapping.get(ax_role, ax_role.replace('AX', '').lower())
+
+
+# =========================================================================
+# Public API (matching core/atspi.py interface)
+# =========================================================================
+
+def find_browser():
+    """Find Chrome application on macOS.
+
+    Returns a dict with browser info, or None if not found.
+    On Linux this returns an AT-SPI accessible; on macOS we return
+    a dict with 'pid' and 'name' for downstream use.
+    """
+    pid = _get_chrome_pid()
+    if pid:
+        return {'pid': pid, 'name': 'Google Chrome', 'type': 'chrome'}
+    logger.warning("Google Chrome not found running on macOS")
+    return None
+
+
+# Alias for tools that call find_firefox
+find_firefox = find_browser
+
+
+def get_document_url(doc) -> str | None:
+    """Get the URL of a platform document (tab).
+
+    On macOS, `doc` is a dict from get_platform_document
+    containing the tab URL.
+    """
+    if isinstance(doc, dict):
+        return doc.get('url')
+    return None
+
+
+def detect_platform_from_url(url: str) -> str | None:
+    """Detect which platform a URL belongs to."""
+    if not url:
+        return None
+    url_lower = url.lower()
+    for platform, domain in URL_PATTERNS.items():
+        if domain in url_lower:
+            return platform
+    return None
+
+
+def get_platform_document(browser, platform: str):
+    """Find the document (tab) for a specific platform.
+
+    Strategy:
+    1. Try JXA to find the tab by URL pattern (most precise).
+    2. Fallback: find Chrome window by title via AX tree.
+       Chrome window titles include the active tab's page title
+       (e.g., "ChatGPT - Google Chrome"). Returns the window's
+       AXUIElement so find_elements() scans only that window.
+
+    Args:
+        browser: Browser dict from find_browser().
+        platform: Platform name (e.g., 'claude').
+
+    Returns:
+        Tab info dict (with optional 'ax_window' for scoped scanning),
+        or None if not found.
+    """
+    if not browser:
+        return None
+
+    url_pattern = URL_PATTERNS.get(platform)
+    if not url_pattern:
+        return None
+
+    tabs = _get_chrome_tabs_jxa()
+    for tab in tabs:
+        if url_pattern in (tab.get('url') or '').lower():
+            return {
+                'url': tab['url'],
+                'title': tab.get('title', ''),
+                'window': tab.get('window', 0),
+                'tab': tab.get('tab', 0),
+                'platform': platform,
+                'pid': browser.get('pid'),
+            }
+
+    # JXA unavailable — use AXFocusedWindow to scope the scan.
+    # switch_to_platform() already activated the right tab before this
+    # function is called, so the focused window contains the platform.
+    pid = browser.get('pid')
+    if not tabs and pid:
+        ax_window = _get_focused_window_ax(pid)
+        if ax_window:
+            active_url = _get_active_tab_url_ax(pid)
+            return {
+                'url': active_url or f'https://{url_pattern}/',
+                'title': platform,
+                'window': 0,
+                'tab': 0,
+                'platform': platform,
+                'pid': pid,
+                'ax_window': ax_window,
+            }
+
+        # Fallback: try matching window by title
+        ax_window = _find_platform_window_ax(pid, platform, url_pattern)
+        if ax_window:
+            active_url = _get_active_tab_url_ax(pid)
+            return {
+                'url': active_url or f'https://{url_pattern}/',
+                'title': platform,
+                'window': 0,
+                'tab': 0,
+                'platform': platform,
+                'pid': pid,
+                'ax_window': ax_window,
+            }
+
+        # No matching window found — return synthetic with PID (full app scan)
+        logger.info(
+            f"No Chrome window found for {platform} — full app scan"
+        )
+        return {
+            'url': f'https://{url_pattern}/',
+            'title': platform,
+            'window': 0,
+            'tab': 0,
+            'platform': platform,
+            'pid': pid,
+            'synthetic': True,
+        }
+    return None
+
+
+def _get_focused_window_ax(pid: int):
+    """Get Chrome's currently focused/main window AXUIElement.
+
+    After tab switching, this should be the window containing the
+    platform tab. Returns None if no focused window found.
+    """
+    if not HAS_AX:
+        return None
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+        err, win = AXUIElementCopyAttributeValue(ax_app, 'AXFocusedWindow', None)
+        if err == 0 and win is not None:
+            # Log the window title for debugging
+            err2, title = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            logger.info(f"Focused Chrome window: '{title if err2 == 0 else 'unknown'}'")
+            return win
+    except Exception as e:
+        logger.debug(f"AXFocusedWindow lookup failed: {e}")
+    return None
+
+
+def _find_platform_window_ax(pid: int, platform: str, url_pattern: str):
+    """Find the Chrome window whose title matches the platform.
+
+    Chrome window titles show the active tab's page title followed by
+    "- Google Chrome" (e.g., "ChatGPT - Google Chrome").
+
+    Returns the AXUIElement for the matching window, or None.
+    """
+    if not HAS_AX:
+        return None
+
+    # Title patterns to match (case-insensitive)
+    _WINDOW_TITLE_PATTERNS = {
+        'chatgpt': ['chatgpt'],
+        'claude': ['claude'],
+        'gemini': ['gemini'],
+        'grok': ['grok'],
+        'perplexity': ['perplexity'],
+        'x_twitter': ['x.com', '/ x', 'twitter'],
+        'linkedin': ['linkedin'],
+    }
+    match_terms = _WINDOW_TITLE_PATTERNS.get(platform, [platform.lower()])
+
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+        err, windows = AXUIElementCopyAttributeValue(ax_app, 'AXWindows', None)
+        if err != 0 or not windows:
+            return None
+
+        for win in windows:
+            err, title = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            if err == 0 and title:
+                title_lower = title.lower()
+                if any(term in title_lower for term in match_terms):
+                    logger.info(f"Found Chrome window for {platform}: '{title}'")
+                    return win
+
+        # Log all windows for debugging
+        win_titles = []
+        for win in windows:
+            err, t = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+            win_titles.append(t if err == 0 else '?')
+        logger.info(f"No Chrome window matched {platform}. Windows: {win_titles}")
+    except Exception as e:
+        logger.debug(f"AX window search failed: {e}")
+
+    return None
+
+
+def _get_active_tab_url_ax(pid: int | None) -> str | None:
+    """Get the URL of Chrome's active tab via AX tree.
+
+    Searches for AXTextField with role description 'address bar'
+    or similar, and reads its AXValue.
+
+    Returns URL string or None.
+    """
+    if not pid or not HAS_AX:
+        return None
+
+    try:
+        ax_app = AXUIElementCreateApplication(pid)
+
+        def _get_attr(el, attr):
+            err, val = AXUIElementCopyAttributeValue(el, attr, None)
+            return val if err == 0 else None
+
+        def find_address_bar(el, depth=0, max_depth=8):
+            if depth > max_depth:
+                return None
+            try:
+                role = _get_attr(el, 'AXRole') or ''
+                desc = (_get_attr(el, 'AXDescription') or '').lower()
+                role_desc = (_get_attr(el, 'AXRoleDescription') or '').lower()
+
+                # Chrome's address bar is AXTextField with description 'address'
+                if role == 'AXTextField' and ('address' in desc or 'address' in role_desc):
+                    return _get_attr(el, 'AXValue')
+
+                children = _get_attr(el, 'AXChildren')
+                if children:
+                    for child in children:
+                        result = find_address_bar(child, depth + 1)
+                        if result:
+                            return result
+            except Exception:
+                pass
+            return None
+
+        return find_address_bar(ax_app)
+    except Exception as e:
+        logger.debug(f"AX address bar lookup failed: {e}")
+        return None
+
+
+def get_platform_ax_tree(browser, max_depth: int = 20) -> list:
+    """Get the full AX element tree for the browser.
+
+    Requires AX accessibility permissions. Returns flat list of elements.
+
+    Args:
+        browser: Browser dict from find_browser().
+        max_depth: Maximum traversal depth.
+
+    Returns:
+        List of element dicts with name, role, x, y, states.
+    """
+    pid = browser.get('pid') if browser else None
+    if not pid:
+        return []
+    return _get_ax_tree(pid, max_depth=max_depth)
+
+
+def is_file_dialog_open(browser) -> bool:
+    """Check if a file chooser dialog is open.
+
+    On macOS, checks for AXSheet or open/save panel.
+    Falls back to JXA window count check.
+    """
+    if not browser:
+        return False
+
+    # JXA approach: check if Chrome has a sheet/dialog
+    script = '''
+    var chrome = Application("Google Chrome");
+    var wins = chrome.windows();
+    // Chrome shows file dialogs as separate windows
+    // If there are more windows than expected, likely a dialog
+    wins.length;
+    '''
+    try:
+        result = subprocess.run(
+            ['osascript', '-l', 'JavaScript', '-e', script],
+            capture_output=True, text=True, timeout=3,
+        )
+        if result.returncode == 0:
+            # A simple heuristic — could be improved with AX check
+            pass
+    except Exception:
+        pass
+
+    # AX approach (requires permissions)
+    pid = browser.get('pid')
+    if pid and HAS_AX:
+        try:
+            ax_app = AXUIElementCreateApplication(pid)
+            err, windows = AXUIElementCopyAttributeValue(ax_app, 'AXWindows', None)
+            if err == 0 and windows:
+                for win in windows:
+                    err, role = AXUIElementCopyAttributeValue(win, 'AXRole', None)
+                    err2, subrole = AXUIElementCopyAttributeValue(win, 'AXSubrole', None)
+                    if subrole in ('AXDialog', 'AXSheet', 'AXStandardWindow'):
+                        err3, title = AXUIElementCopyAttributeValue(win, 'AXTitle', None)
+                        if title and any(kw in (title or '').lower()
+                                         for kw in ['open', 'upload', 'file', 'save']):
+                            return True
+        except Exception as e:
+            logger.debug(f"AX file dialog check failed: {e}")
+
+    return False

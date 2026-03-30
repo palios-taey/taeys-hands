@@ -1,0 +1,104 @@
+#!/bin/bash
+# tmux-send: Send text + Enter to a local or remote tmux session.
+#
+# Claude-to-Claude communication for taeys-hands multi-node setups.
+# Use this whenever one Claude instance needs to send instructions to another.
+#
+# Usage:
+#   tmux-send <session> "message"              # local (2-arg)
+#   tmux-send <host> <session> "message"       # remote via SSH (3-arg)
+#
+# Examples:
+#   tmux-send claude-worker "Resume the task"
+#   tmux-send worker-node worker-claude "Fix deployed. Run: git pull"
+#   tmux-send supervisor-node supervisor "ESCALATION: task failed, need help"
+#
+# Rules:
+#   - Target sessions MUST be Claude Code instances (worker Claudes)
+#   - NEVER target human-operated sessions
+#   - NEVER use raw SSH instead of this script
+#   - Messages arrive as user input to Claude — this is the intended design
+#   - Script verifies the target session exists before sending
+#
+# Install: scripts/install-node.sh (or copy to /usr/local/bin/tmux-send)
+
+set -euo pipefail
+
+# Support 2-arg local shorthand: tmux-send <session> <message>
+if [ $# -eq 2 ]; then
+    HOST="local"
+    SESSION="$1"
+    MSG="$2"
+elif [ $# -ge 3 ]; then
+    HOST="$1"
+    SESSION="$2"
+    shift 2
+    MSG="$*"
+else
+    echo "Usage: tmux-send <host> <session> <message>" >&2
+    echo "       tmux-send <session> <message>  (local)" >&2
+    exit 1
+fi
+
+# Validate session name: alphanumeric, hyphens, underscores only.
+# Prevents shell injection when interpolated into SSH commands.
+if ! [[ "$SESSION" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "ERROR: session name '$SESSION' contains invalid characters (only a-zA-Z0-9_- allowed)" >&2
+    exit 1
+fi
+
+# Base64-encode: survives SSH shell expansion and special chars
+# macOS base64 doesn't support -w0; use tr to strip newlines portably
+B64=$(printf '%s' "$MSG" | base64 | tr -d '\n')
+
+# Local send
+if [ "$HOST" = "local" ] || [ "$HOST" = "localhost" ] || [ "$HOST" = "$(hostname -s)" ]; then
+    if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+        echo "ERROR: tmux session '$SESSION' not found on local" >&2
+        exit 1
+    fi
+    CMD=$(tmux display-message -t "$SESSION" -p '#{pane_current_command}' 2>/dev/null || echo "unknown")
+    if [ "$CMD" != "claude" ] && [ "$CMD" != "bash" ] && [ "$CMD" != "sh" ]; then
+        echo "WARN: target pane running '$CMD' not 'claude' — message may not land as intended" >&2
+    fi
+    tmux send-keys -t "$SESSION" -l "$MSG"
+    sleep 0.3
+    # Enter (legacy 0x0D) + C-j (0x0A) — Kitty keyboard protocol fallback
+    # Claude Code's Ink TUI may need C-j when Kitty protocol makes 0x0D not submit
+    tmux send-keys -t "$SESSION" Enter
+    tmux send-keys -t "$SESSION" C-j
+    echo "OK: $SESSION (local, target_cmd=$CMD)"
+    exit 0
+fi
+
+# Remote send via SSH
+# Discover tmux binary on remote host (macOS: /opt/homebrew/bin, Linux: /usr/bin)
+RESULT=$(ssh "$HOST" "
+SESSION='${SESSION}'
+B64='${B64}'
+
+TMUX_BIN=\$(command -v tmux 2>/dev/null || true)
+[ -z \"\$TMUX_BIN\" ] && [ -x /opt/homebrew/bin/tmux ] && TMUX_BIN=/opt/homebrew/bin/tmux
+[ -z \"\$TMUX_BIN\" ] && [ -x /usr/local/bin/tmux ] && TMUX_BIN=/usr/local/bin/tmux
+[ -z \"\$TMUX_BIN\" ] && { echo \"ERROR: tmux not found on \$(hostname -s)\"; exit 1; }
+
+if ! \"\$TMUX_BIN\" has-session -t \"\$SESSION\" 2>/dev/null; then
+    echo \"ERROR: tmux session '\$SESSION' not found on \$(hostname -s)\"
+    exit 1
+fi
+
+CMD=\$(\"\$TMUX_BIN\" display-message -t \"\$SESSION\" -p '#{pane_current_command}' 2>/dev/null || echo unknown)
+MSG=\$(printf '%s' \"\$B64\" | base64 -d)
+
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" -l \"\$MSG\"
+sleep 0.5
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" Enter
+\"\$TMUX_BIN\" send-keys -t \"\$SESSION\" C-j
+echo \"OK: \$SESSION (remote=\$(hostname -s), target_cmd=\$CMD)\"
+")
+
+echo "$RESULT"
+
+if echo "$RESULT" | grep -q "ERROR:"; then
+    exit 1
+fi

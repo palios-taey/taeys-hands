@@ -162,11 +162,13 @@ def switch_to_platform(platform: str) -> bool:
                 wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
                 if wids:
                     subprocess.run(
-                        ['xdotool', 'windowactivate', '--sync', wids[-1]],
-                        env=_get_env(), capture_output=True, timeout=5,
+                        ['xdotool', 'windowactivate', wids[-1]],
+                        env=_get_env(), capture_output=True, timeout=10,
                     )
                     time.sleep(0.3)
                     return True
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Multi-display focus timed out for PID {ff_pid}")
             except Exception as e:
                 logger.warning(f"Multi-display focus failed: {e}")
         # Even without PID, DISPLAY is set correctly

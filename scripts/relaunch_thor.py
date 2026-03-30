@@ -4,12 +4,14 @@ Then start sft_gen_bot for each platform."""
 import os, subprocess, time, sys
 
 DISPLAYS = {
-    6: ("gemini", "https://gemini.google.com/app", "ff-profile-gemini"),
-    7: ("grok", "https://grok.com/", "ff-profile-grok"),
-    8: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude4"),
-    9: ("perplexity", "https://www.perplexity.ai/", "ff-profile-perplexity"),
-    10: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude2"),
-    11: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude3"),
+    4:  ("perplexity", "https://www.perplexity.ai/", "ff-profile-perplexity2"),
+    6:  ("gemini", "https://gemini.google.com/app", "ff-profile-gemini"),
+    7:  ("grok", "https://grok.com/", "ff-profile-grok"),
+    8:  ("claude", "https://claude.ai/new?incognito", "ff-profile-claude2"),
+    9:  ("perplexity", "https://www.perplexity.ai/", "ff-profile-perplexity"),
+    10: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude3"),
+    11: ("chatgpt", "https://chatgpt.com/?temporary-chat=true", "ff-profile-chatgpt"),
+    12: ("grok", "https://grok.com/", "ff-profile-grok2"),
     13: ("chatgpt", "https://chatgpt.com/?temporary-chat=true", "ff-profile-chatgpt2"),
 }
 
@@ -159,6 +161,11 @@ for d, (plat, url, prof) in DISPLAYS.items():
     except Exception as e:
         print(f"  :{d} Incognito click failed: {e}")
 
+if "--no-bots" in sys.argv:
+    print("\n=== Firefox launched. Log in via VNC, then run without --no-bots to start bots. ===")
+    print("VNC ports: " + ", ".join(str(5900 + d) for d in sorted(DISPLAYS)))
+    sys.exit(0)
+
 print("\n=== Starting bots ===")
 for d, (plat, url, prof) in DISPLAYS.items():
     session = f"sft-{plat}{d}"
@@ -181,9 +188,9 @@ for d, (plat, url, prof) in DISPLAYS.items():
     cmd = (
         f"cd ~/taeys-hands && DISPLAY=:{d} "
         f"DBUS_SESSION_BUS_ADDRESS={dbus} "
-        f"TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=10.0.0.163 "
+        f"TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=192.168.100.10 "
         f"PYTHONPATH=~/embedding-server "
-        f"python3 agents/sft_gen_bot.py --round sft --platforms {plat} "
+        f"python3 agents/sft_gen_bot.py --round all --platforms {plat} "
         f"2>&1 | tee /tmp/{session}.log"
     )
     subprocess.run(

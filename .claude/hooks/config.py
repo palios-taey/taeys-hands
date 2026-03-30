@@ -29,9 +29,8 @@ def _load_project_env():
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     key, val = line.split('=', 1)
-                    # Don't override explicitly set env vars
-                    if key.strip() not in os.environ:
-                        os.environ[key.strip()] = val.strip()
+                    # .env is authoritative for infrastructure config
+                    os.environ[key.strip()] = val.strip()
 
 
 # Load .env on import (before any get_config calls)
