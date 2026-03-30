@@ -900,17 +900,20 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"Attach button not found for {platform}",
                 "action": "button_not_found"}
 
-    # Click the button using the discovered atspi_obj directly.
-    # DO NOT use handle_click(x, y) — it does a generic cache lookup that
-    # can find overlapping elements (e.g., an unnamed section at the same
-    # coords) and click the wrong one. Use the specific object reference
-    # from _get_attach_button_coords() instead, with xdotool as fallback.
-    # This matches the pattern in _try_click_then_dialog() and hmm_bot.
-    clicked = False
-    if btn_coords.get('atspi_obj'):
-        clicked = atspi_click(btn_coords)
-    if not clicked:
+    # Click the button using the platform's click_strategy.
+    # Perplexity/ChatGPT: AT-SPI do_action returns True but doesn't
+    # trigger React event handlers. xdotool coordinate click is the
+    # only reliable method. Respect the YAML click_strategy setting.
+    from core.config import get_click_strategy
+    strategy = get_click_strategy(platform)
+    if strategy == 'xdotool_first':
         inp.click_at(btn_coords['x'], btn_coords['y'])
+    else:
+        clicked = False
+        if btn_coords.get('atspi_obj'):
+            clicked = atspi_click(btn_coords)
+        if not clicked:
+            inp.click_at(btn_coords['x'], btn_coords['y'])
 
     time.sleep(1.5)  # Dropdown renders async — 1.5s matches hmm_bot timing
     firefox_local = atspi.find_firefox(platform)  # for file dialog check (X11 level)
