@@ -888,7 +888,7 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"Failed to click attach button: {click_result['error']}",
                 "action": "click_failed"}
 
-    time.sleep(1.5)  # Dropdown render is async — give it time
+    time.sleep(1.0)
     firefox_local = atspi.find_firefox(platform)  # for file dialog check (X11 level)
     dt = _any_file_dialog_open(firefox_local)
     if dt:
@@ -898,21 +898,13 @@ def handle_attach(platform: str, file_path: str,
             result['verified'] = verified
         return result
 
-    # Wait for dropdown menu items
-    # Clear AT-SPI cache before scanning — the button click may have
-    # added new DOM nodes (dropdown items) that stale references miss.
-    try:
-        if firefox_local:
-            firefox_local.clear_cache_single()
-    except Exception:
-        pass
-
+    # Wait for dropdown menu items (multi-display aware)
     dropdown_items = []
-    for attempt in range(8):
+    for _ in range(5):
         dropdown_items = _scan_menu_items_for_platform(platform)
         if dropdown_items:
             break
-        time.sleep(0.5)
+        time.sleep(0.6)
 
     if not dropdown_items and not _any_file_dialog_open(firefox_local):
         return {"error": f"No dropdown items or file dialog found for {platform}",
