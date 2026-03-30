@@ -246,11 +246,7 @@ def _click_upload_item(item: Dict, firefox) -> bool:
                 return True
         except Exception:
             pass
-    # Coordinate fallback
-    x, y = item.get('x'), item.get('y')
-    if x and y:
-        inp.click_at(x, y)
-        return True
+    logger.error("Upload item click failed — no valid atspi_obj action interface")
     return False
 
 
