@@ -1,20 +1,17 @@
 """taey_select_dropdown, taey_prepare - Dropdown opening and capabilities."""
 
 import json
-import os
 import time
 import logging
 from typing import Any, Dict, List, Optional
 
-import yaml
-
 from core import atspi, input as inp
 from core.tree import find_elements, find_menu_items
 from core.interact import extend_cache, atspi_click
+from core.config import (get_platform_config, get_click_strategy,
+                         get_dropdown_method, get_capabilities, get_validation)
 from tools.click import handle_click
 from storage.redis_pool import node_key
-
-PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +79,10 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
                          dropdown_items: List[Dict]) -> Dict[str, Any] | None:
     """Compare live dropdown items against YAML capabilities."""
     try:
-        config = _load_platform_yaml(platform)
+        caps = get_capabilities(platform)
     except (FileNotFoundError, ValueError):
         return None
 
-    caps = config.get('capabilities', {})
     yaml_key_map = {
         'model': 'models', 'models': 'models',
         'mode': 'modes', 'modes': 'modes',
@@ -129,53 +125,6 @@ def _check_yaml_mismatch(platform: str, dropdown_name: str,
     return result
 
 
-def _load_platform_yaml(platform: str) -> Dict:
-    yaml_path = os.path.join(PLATFORMS_DIR, f'{platform}.yaml')
-    with open(yaml_path) as f:
-        data = yaml.safe_load(f)
-    if not data:
-        raise ValueError(f"Platform YAML is empty: {yaml_path}")
-    return data
-
-
-def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
-                         yaml_items: List) -> Dict[str, Any] | None:
-    """For platforms with React portal dropdowns (Grok, ChatGPT), use keyboard nav.
-
-    Matches target_value against YAML items list to determine arrow-down count,
-    then navigates: Down * N + Enter.
-    """
-    if not yaml_items:
-        return None
-    target_lower = target_value.lower().strip()
-    target_idx = None
-    for i, item in enumerate(yaml_items):
-        item_lower = str(item).lower().strip()
-        if item_lower == target_lower:
-            target_idx = i
-            break
-    if target_idx is None:
-        return None
-
-    # ChatGPT is the only keyboard_nav platform. Its dropdown opens with
-    # nothing focused — first Down focuses the first item. No Up reset
-    # needed (Up closes ChatGPT's React dropdown).
-    for _ in range(target_idx + 1):
-        inp.press_key('Down')
-        time.sleep(0.15)
-    inp.press_key('Return')
-    time.sleep(0.5)
-
-    return {
-        "platform": platform, "dropdown": dropdown,
-        "target_requested": target_value,
-        "selected_via": "keyboard_nav",
-        "selected_index": target_idx,
-        "selected_item": str(yaml_items[target_idx]),
-        "instruction": "Selected via keyboard navigation. Call taey_inspect to verify.",
-    }
-
-
 def _normalize_dropdown_key(dropdown: str) -> str:
     """Map AT-SPI button label → YAML capability key.
 
@@ -205,29 +154,226 @@ def _normalize_dropdown_key(dropdown: str) -> str:
     return _EXACT.get(s, '')
 
 
-_KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
+def _keyboard_nav_select(platform: str, dropdown: str, target_value: str,
+                         yaml_items: List, firefox, doc) -> Dict[str, Any] | None:
+    """Keyboard nav fallback for true React portals (items not in AT-SPI tree).
+
+    First tries to find items via AT-SPI scan. Falls back to keyboard navigation
+    only if the AT-SPI tree has no menu items after the trigger was clicked.
+
+    Step 1 — try AT-SPI: scan firefox/doc for menu items, click matched item.
+    Step 2 — keyboard fallback (last resort): arrow-down N times + Enter.
+    """
+    # Step 1: Try AT-SPI scan first — ChatGPT model items ARE now visible
+    menu_items = find_menu_items(firefox, doc)
+    if menu_items:
+        target_lower = target_value.lower().strip()
+        for raw_item in menu_items:
+            item_name = (raw_item.get('name') or '').lower().strip()
+            if item_name == target_lower:
+                atspi_obj = raw_item.get('atspi_obj')
+                clicked = False
+                if atspi_obj:
+                    try:
+                        action = atspi_obj.get_action_iface()
+                        if action and action.get_n_actions() > 0:
+                            action.do_action(0)
+                            clicked = True
+                            logger.info("keyboard_nav_select: AT-SPI click on '%s'",
+                                        raw_item.get('name'))
+                    except Exception as e:
+                        logger.debug("keyboard_nav_select: do_action failed: %s", e)
+                if not clicked and raw_item.get('x') and raw_item.get('y'):
+                    click_result = handle_click(platform, raw_item['x'], raw_item['y'])
+                    clicked = not click_result.get('error')
+                    if clicked:
+                        logger.info("keyboard_nav_select: coord click on '%s' at (%d,%d)",
+                                    raw_item.get('name'), raw_item['x'], raw_item['y'])
+                if clicked:
+                    time.sleep(0.5)
+                    return {
+                        "platform": platform, "dropdown": dropdown,
+                        "target_requested": target_value,
+                        "selected_via": "atspi_scan",
+                        "selected_item": raw_item.get('name', ''),
+                        "selected_role": raw_item.get('role', ''),
+                        "instruction": "Selected via AT-SPI scan (not keyboard nav). Call taey_inspect to verify.",
+                    }
+        logger.warning("keyboard_nav_select: AT-SPI found %d items but none matched '%s'",
+                        len(menu_items), target_value)
+
+    # Step 2: True React portal — fall back to keyboard navigation
+    logger.warning("keyboard_nav_select: No AT-SPI menu items found — falling back to "
+                   "keyboard nav for '%s' on %s. This is a last resort.", target_value, platform)
+
+    if not yaml_items:
+        return None
+
+    target_lower = target_value.lower().strip()
+    target_idx = None
+    for i, item in enumerate(yaml_items):
+        item_lower = str(item).lower().strip()
+        if item_lower == target_lower:
+            target_idx = i
+            break
+    if target_idx is None:
+        return None
+
+    # ChatGPT is the only keyboard_nav platform. Its dropdown opens with
+    # nothing focused — first Down focuses the first item. No Up reset
+    # needed (Up closes ChatGPT's React dropdown).
+    for _ in range(target_idx + 1):
+        inp.press_key('Down')
+        time.sleep(0.15)
+    inp.press_key('Return')
+    time.sleep(0.5)
+
+    return {
+        "platform": platform, "dropdown": dropdown,
+        "target_requested": target_value,
+        "selected_via": "keyboard_nav_fallback",
+        "selected_index": target_idx,
+        "selected_item": str(yaml_items[target_idx]),
+        "instruction": "Selected via keyboard navigation (AT-SPI tree had no menu items). Call taey_inspect to verify.",
+    }
 
 
-def _get_dropdown_method(platform: str) -> str:
-    """Get dropdown method from platform YAML config.
+def _verify_model_selection(platform: str, target_value: str,
+                             firefox, doc) -> Dict[str, Any]:
+    """Post-action verification: check if model selector button reflects the new model.
 
-    For known platforms, FileNotFoundError propagates (fail loud).
-    For unknown/new platforms, falls back to 'atspi_enum'.
+    Reads validation.model_selected from YAML. If read_from=model_selector,
+    re-finds the model_selector button and checks its name contains target_value.
     """
     try:
-        config = _load_platform_yaml(platform)
-        return config.get('dropdown_method', 'atspi_enum')
-    except (FileNotFoundError, ValueError):
-        if platform in _KNOWN_PLATFORMS:
-            logger.error("Platform YAML missing for known platform %s", platform)
-            raise
-        return 'atspi_enum'
+        validation = get_validation(platform)
+    except Exception:
+        return {"verified": False, "reason": "Could not load validation config"}
+
+    model_val = validation.get('model_selected', {})
+    if not model_val:
+        return {"verified": False, "reason": "No model_selected validation in YAML"}
+
+    read_from = model_val.get('read_from', 'model_selector')
+    name_contains_model = model_val.get('name_contains_model', False)
+    name_is_model = model_val.get('name_is_model', False)
+    reopen_to_verify = model_val.get('reopen_to_verify', False)
+    check_menu_item_state = model_val.get('check_menu_item_state', False)
+
+    # Re-scan the tree to get current state
+    time.sleep(0.5)
+    try:
+        all_elements = find_elements(doc)
+    except Exception as e:
+        return {"verified": False, "reason": f"Tree scan failed: {e}"}
+
+    target_lower = target_value.lower().strip()
+
+    # Strategy 1: model selector button name contains/is the model name
+    if name_contains_model or name_is_model:
+        selector_el = None
+        for el in all_elements:
+            name = (el.get('name') or '').strip()
+            role = el.get('role', '')
+            # Heuristic: find the model_selector element (button named like "Model selector, ...")
+            # or a button whose name IS the model name
+            if 'button' in role:
+                name_lower = name.lower()
+                if read_from == 'model_selector' and ('model selector' in name_lower or
+                                                       'model' in name_lower and 'select' in name_lower):
+                    selector_el = el
+                    break
+
+        if selector_el:
+            sel_name = (selector_el.get('name') or '').lower()
+            # name_contains_model: button name should include the selected model text
+            if name_contains_model and target_lower in sel_name:
+                return {"verified": True, "selector_name": selector_el.get('name', '')}
+            # name_is_model: button name IS the model (e.g. Claude shows "Sonnet 4.6")
+            if name_is_model and (target_lower in sel_name or sel_name in target_lower):
+                return {"verified": True, "selector_name": selector_el.get('name', '')}
+            return {
+                "verified": False,
+                "reason": f"Model selector found but name '{selector_el.get('name', '')}' "
+                          f"doesn't reflect '{target_value}'",
+                "selector_name": selector_el.get('name', ''),
+            }
+        return {"verified": False, "reason": f"No {read_from} button found in tree after selection"}
+
+    # Strategy 2: check_menu_item_state — re-open is needed (handled by caller for Gemini)
+    if check_menu_item_state:
+        return {
+            "verified": None,
+            "reason": "check_menu_item_state requires re-opening dropdown to verify — call taey_inspect",
+        }
+
+    # Strategy 3: reopen_to_verify (Grok) — we don't auto-reopen, note it
+    if reopen_to_verify:
+        return {
+            "verified": None,
+            "reason": "reopen_to_verify=true — model selector button doesn't reflect selection. "
+                      "Re-open dropdown and check checked/selected state to confirm.",
+        }
+
+    return {"verified": False, "reason": "Unrecognized validation strategy in YAML"}
+
+
+def _verify_tool_selection(platform: str, target_value: str,
+                           firefox, doc) -> Dict[str, Any]:
+    """Post-action verification: check tool check-menu-item has 'checked' state.
+
+    Reads validation.tool_selected from YAML. For Gemini, tool items get
+    'checked' state when active.
+    """
+    try:
+        validation = get_validation(platform)
+    except Exception:
+        return {"verified": False, "reason": "Could not load validation config"}
+
+    tool_val = validation.get('tool_selected', {})
+    if not tool_val:
+        # No tool_selected validation — not an error, just not configured
+        return {"verified": None, "reason": "No tool_selected validation in YAML"}
+
+    check_menu_item_state = tool_val.get('check_menu_item_state', False)
+    if not check_menu_item_state:
+        return {"verified": None, "reason": "No check_menu_item_state configured for tool verification"}
+
+    # Scan current tree for menu items matching the target
+    time.sleep(0.3)
+    try:
+        menu_items = find_menu_items(firefox, doc)
+    except Exception as e:
+        return {"verified": False, "reason": f"Menu item scan failed: {e}"}
+
+    target_lower = target_value.lower().strip()
+    for item in menu_items:
+        item_name = (item.get('name') or '').lower().strip()
+        if item_name == target_lower or target_lower in item_name:
+            states = set(s.lower() for s in item.get('states', []))
+            if 'checked' in states or 'selected' in states:
+                return {"verified": True, "item_name": item.get('name', ''), "states": list(states)}
+            else:
+                return {
+                    "verified": False,
+                    "reason": f"Item '{item.get('name', '')}' found but not checked. States: {list(states)}",
+                    "item_name": item.get('name', ''),
+                    "states": list(states),
+                }
+
+    return {
+        "verified": None,
+        "reason": f"Tool item '{target_value}' not found in current menu scan — dropdown may have closed",
+    }
+
+
+_KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 
 
 def handle_select_dropdown(platform: str, dropdown: str,
                            target_value: str,
                            redis_client) -> Dict[str, Any]:
-    """Open dropdown, select item. Keyboard nav for React portals, AT-SPI for others."""
+    """Open dropdown, select item. AT-SPI scan primary; keyboard nav for React portals."""
     inp.press_key('Escape')
     time.sleep(0.2)
 
@@ -242,7 +388,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
         return {"error": f"Could not find {platform} document"}
 
     # Find trigger button in element cache (populated by inspect) — exact name match
-    dropdown_method = _get_dropdown_method(platform)
+    dropdown_method = get_dropdown_method(platform)
     trigger = _find_trigger_in_cache(dropdown, platform)
     if not trigger:
         return {"error": f"Trigger button '{dropdown}' not found in element cache for {platform}.",
@@ -258,23 +404,25 @@ def handle_select_dropdown(platform: str, dropdown: str,
                 "platform": platform}
     time.sleep(1.0)
 
-    # For React portal platforms, use keyboard nav with YAML item order
-    if _get_dropdown_method(platform) == 'keyboard_nav':
+    # For keyboard_nav platforms (ChatGPT), try AT-SPI scan first, fall back to keyboard
+    if dropdown_method == 'keyboard_nav':
         try:
-            config = _load_platform_yaml(platform)
-            caps = config.get('capabilities', {})
-            # Normalize dropdown button label → YAML capability key
+            caps = get_capabilities(platform)
             yaml_key = _normalize_dropdown_key(dropdown)
             yaml_items = caps.get(yaml_key, []) if yaml_key else []
-            if yaml_items:
-                result = _keyboard_nav_select(platform, dropdown, target_value, yaml_items)
-                if result:
-                    return result
+            result = _keyboard_nav_select(platform, dropdown, target_value,
+                                          yaml_items, firefox, doc)
+            if result:
+                # Post-action verification for model selection
+                if 'model' in _normalize_dropdown_key(dropdown):
+                    verification = _verify_model_selection(platform, target_value, firefox, doc)
+                    result['verification'] = verification
+                return result
         except Exception as e:
-            logger.warning("Keyboard nav failed for %s: %s", platform, e)
-        # Fall through to AT-SPI enumeration if keyboard nav fails
+            logger.warning("keyboard_nav path failed for %s: %s", platform, e)
+        # Fall through to AT-SPI enumeration if keyboard nav path fails entirely
 
-    # AT-SPI item enumeration (works for Claude, Gemini, Perplexity)
+    # AT-SPI item enumeration (works for Claude, Gemini, Perplexity, Grok)
     # Retry up to 5 times — React dropdowns take variable time to render in AT-SPI
     menu_items = []
     for attempt in range(5):
@@ -335,7 +483,7 @@ def handle_select_dropdown(platform: str, dropdown: str,
 
             if clicked:
                 time.sleep(0.5)
-                return {
+                result = {
                     "platform": platform, "dropdown": dropdown,
                     "target_requested": target_value,
                     "selected_via": "atspi_enum",
@@ -344,6 +492,21 @@ def handle_select_dropdown(platform: str, dropdown: str,
                     "item_count": len(items),
                     "instruction": "Selected via AT-SPI enumeration. Call taey_inspect to verify.",
                 }
+
+                # POST-ACTION VERIFICATION
+                norm_key = _normalize_dropdown_key(dropdown)
+                # Refresh firefox/doc references after click
+                firefox = atspi.find_firefox_for_platform(platform)
+                doc = atspi.get_platform_document(firefox, platform) if firefox else None
+                if doc:
+                    if 'model' in norm_key:
+                        result['verification'] = _verify_model_selection(
+                            platform, target_value, firefox, doc)
+                    elif 'tool' in norm_key or 'mode' in norm_key:
+                        result['verification'] = _verify_tool_selection(
+                            platform, target_value, firefox, doc)
+
+                return result
 
     # No match or click failed — return the list for manual selection
     result = {
@@ -373,11 +536,11 @@ def handle_select_dropdown(platform: str, dropdown: str,
 def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
     """Get available options for a platform from YAML config."""
     try:
-        config = _load_platform_yaml(platform)
+        config = get_platform_config(platform)
+        caps = get_capabilities(platform)
     except (FileNotFoundError, ValueError) as e:
         return {"error": str(e), "platform": platform}
 
-    caps = config.get('capabilities', {})
     return {
         "platform": platform,
         "models": caps.get('models', []),
