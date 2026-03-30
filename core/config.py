@@ -104,7 +104,7 @@ def get_upload_item_key(platform: str) -> Optional[str]:
         'chatgpt': 'tool_upload',       # "Add photos" button
         'claude': 'upload_files_item',    # "Add files or photos" / "Add content" menu item
         'gemini': 'upload_files_item',   # "Upload files..." menu item
-        'grok': None,                    # keyboard_nav opens file dialog directly
+        'grok': 'upload_files_item',      # "Upload a file" menu item
         'perplexity': 'upload_files_item',  # "Upload files or images" menu item
     }
     key = _UPLOAD_KEYS.get(platform)
