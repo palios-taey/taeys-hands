@@ -160,3 +160,29 @@ sidebar_nav:
   - { name: "More", role: push button }
   - { name: "Options", role: push button }
   - { name: "Switch to Private Chat", role: link }
+
+# ─── Validation Expectations ───────────────────────────────────────
+validation:
+  attach_success:
+    # Grok shows unnamed file chip buttons above input area.
+    # Also may show filename as heading/button element.
+    indicators:
+      - { name_contains: "Remove", role_contains: button }
+    file_chip:
+      roles: [heading, push button, toggle button]
+      name_match: filename_extension
+    # Grok quirk: files persist across sessions! Check for stale attachments.
+    stale_check: true
+  model_selected:
+    # Model select button doesn't change text. Must re-open dropdown to verify.
+    read_from: model_selector
+    reopen_to_verify: true
+  send_success:
+    indicators:
+      - stop_button
+    # Grok has "thinking" as a stop pattern — stop button appears quickly
+    timeout: 30
+  response_complete:
+    indicators:
+      - copy_button
+    stop_absent: true

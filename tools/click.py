@@ -1,41 +1,20 @@
 """taey_click - Coordinate-based clicking with platform-aware strategy."""
 
-import os
 import time
 import logging
 from typing import Any, Dict, Optional
 
-import yaml
-
 from core import atspi, input as inp
+from core.config import get_click_strategy
 from core.interact import find_element_at, atspi_click, cache_elements
 from core.tree import find_elements
 
 logger = logging.getLogger(__name__)
 
-PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'platforms')
-
 _CLICKABLE_ROLES = {
     'push button', 'toggle button', 'link', 'entry',
     'check menu item', 'menu item', 'radio menu item',
 }
-
-_strategy_cache: Dict[str, str] = {}
-
-
-def _get_click_strategy(platform: str) -> str:
-    if platform in _strategy_cache:
-        return _strategy_cache[platform]
-    strategy = 'xdotool_first'
-    try:
-        with open(os.path.join(PLATFORMS_DIR, f'{platform}.yaml')) as f:
-            data = yaml.safe_load(f)
-        if data and 'click_strategy' in data:
-            strategy = data['click_strategy']
-    except (FileNotFoundError, yaml.YAMLError):
-        pass
-    _strategy_cache[platform] = strategy
-    return strategy
 
 
 def _fresh_atspi_find(platform: str, x: int, y: int, tolerance: int = 30) -> Optional[Dict]:
@@ -93,7 +72,7 @@ def _click_xdotool_first(platform: str, x: int, y: int) -> Dict[str, Any]:
 def handle_click(platform: str, x: int, y: int) -> Dict[str, Any]:
     if not inp.switch_to_platform(platform):
         return {"error": f"Failed to switch to {platform} tab"}
-    strategy = _get_click_strategy(platform)
+    strategy = get_click_strategy(platform)
     if strategy == 'atspi_first':
         return _click_atspi_first(platform, x, y)
     return _click_xdotool_first(platform, x, y)

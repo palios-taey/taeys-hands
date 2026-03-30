@@ -179,3 +179,29 @@ sidebar_nav:
   - { name: "Show chat history", role: push button }
   - { name: "Settings", role: link }
   - { name: "Help & FAQ", role: link }
+
+# ─── Validation Expectations ───────────────────────────────────────
+validation:
+  attach_success:
+    # Gemini shows attached files as chips near the input. Input Y shifts after attach.
+    indicators:
+      - { name_contains: "Remove", role_contains: button }
+    file_chip:
+      roles: [heading, push button, toggle button, link]
+      name_match: filename_extension
+  model_selected:
+    # Mode picker button doesn't change text — read from mode items' checked state
+    read_from: mode_picker
+    check_menu_item_state: true
+  tool_selected:
+    # Tool check menu items have "checked" state when active
+    read_from: tools_button
+    check_menu_item_state: true
+  send_success:
+    indicators:
+      - stop_button
+    timeout: 30
+  response_complete:
+    indicators:
+      - copy_button
+    stop_absent: true

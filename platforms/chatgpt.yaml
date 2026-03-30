@@ -240,6 +240,33 @@ fence_after:
   - { name: "New project", role: push button }
   - { name: "Your chats", role: push button }
 
+# ─── Validation Expectations ───────────────────────────────────────
+# Post-action verification: what the AT-SPI tree should look like after each action.
+# Tools use these to confirm actions succeeded — no guessing.
+validation:
+  attach_success:
+    # After file attached: "Remove" button appears near input area
+    indicators:
+      - { name_contains: "Remove", role_contains: button }
+    file_chip:
+      roles: [heading, push button, toggle button]
+      name_match: filename_extension
+  model_selected:
+    # Model selector button text updates to show current model
+    read_from: model_selector
+    # Button name pattern: "Model selector, current model is {model_name}"
+    name_contains_model: true
+  send_success:
+    # Stop button appears within timeout after Enter
+    indicators:
+      - stop_button
+    timeout: 30
+  response_complete:
+    # Copy button present, stop button absent
+    indicators:
+      - copy_button
+    stop_absent: true
+
 # ─── Dropdown Items ─────────────────────────────────────────────────
 # Captured for drift detection. Updated when platform changes.
 # (moved from capabilities section for clarity — capabilities kept for backward compat)

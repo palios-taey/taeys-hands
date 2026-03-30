@@ -7,9 +7,8 @@ import time
 import logging
 from typing import Any, Dict, List, Tuple
 
-import yaml
-
 from core import atspi, input as inp, clipboard
+from core.config import get_platform_config, get_fence_after, get_validation
 from core.tree import (find_elements, filter_useful_elements, find_copy_buttons,
                        detect_chrome_y, compute_structure_hash)
 from core.interact import cache_elements, strip_atspi_obj
@@ -17,8 +16,6 @@ from core.platforms import BASE_URLS, SCREEN_HEIGHT
 from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
-
-PLATFORMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
 
 _FILE_EXTENSIONS = ('.md', '.py', '.txt', '.pdf', '.png', '.jpg', '.jpeg',
                     '.csv', '.json', '.xml', '.html', '.zip', '.docx')
@@ -449,6 +446,8 @@ def handle_inspect(platform: str, redis_client, scroll: str = "bottom",
     url = atspi.get_document_url(doc)
     result['url'] = url
 
+    # Load platform config — fence_after needed for tree traversal
+    _pcfg = get_platform_config(platform)
     chrome_y = detect_chrome_y(doc)
     fences = _pcfg.get('fence_after', [])
     all_elements = find_elements(doc, fence_after=fences)
