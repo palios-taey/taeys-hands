@@ -39,26 +39,13 @@ def _scan_elements_for_platform(platform: str) -> List[Dict]:
 
 
 def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
-    """Scan for dropdown/menu items after opening a trigger, multi-display aware.
+    """Scan for dropdown/menu items after opening a trigger.
 
-    On local: uses find_menu_items(firefox, doc) which looks for menu containers.
-    On multi-display: uses subprocess scan then filters for menu item roles.
+    Uses find_menu_items(firefox, doc) which searches menu containers
+    in 4 passes (doc strict, doc no-SHOWING, containerless, Firefox root).
     Returns list of element dicts.
     """
     firefox = atspi.find_firefox_for_platform(platform)
-
-    # Multi-display: subprocess scan, filter for menu-like items
-    if getattr(firefox, '_remote', False):
-        elements = _scan_elements_for_platform(platform)
-        _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item',
-                       'list item', 'option'}
-        items = [e for e in elements
-                 if e.get('name', '').strip() and e.get('role', '') in _MENU_ROLES]
-        if items:
-            items.sort(key=lambda x: x.get('y', 0))
-        return items
-
-    # Local: direct AT-SPI scan via find_menu_items
     if not firefox:
         return []
     doc = atspi.get_platform_document(firefox, platform)
@@ -870,14 +857,9 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"{platform} does not support file attachments"}
 
     # AT-SPI menu platforms: click trigger, scan for menu items or dialog
-    # Use element cache (populated by inspect) for button coords — works on multi-display
     firefox = atspi.find_firefox_for_platform(platform)
-    if not getattr(firefox, '_remote', False):
-        doc = atspi.get_platform_document(firefox, platform) if firefox else None
-        btn_coords = _get_attach_button_coords(doc, platform) if doc else None
-    else:
-        # Multi-display: button is in element cache from subprocess inspect
-        btn_coords = _get_attach_button_coords(None, platform)
+    doc = atspi.get_platform_document(firefox, platform) if firefox else None
+    btn_coords = _get_attach_button_coords(doc, platform) if doc else None
 
     if not btn_coords:
         return {"error": f"Attach button not found for {platform}",
