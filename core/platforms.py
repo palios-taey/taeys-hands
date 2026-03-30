@@ -85,3 +85,67 @@ BASE_URLS = {
 CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
+
+# ─── Multi-Display Support ──────────────────────────────────────────────
+# Set PLATFORM_DISPLAYS env var: "chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"
+# If not set, all platforms use the server's DISPLAY (tab-switching mode).
+_PLATFORM_DISPLAYS: dict[str, str] = {}
+
+def _parse_platform_displays():
+    raw = os.environ.get('PLATFORM_DISPLAYS', '')
+    if not raw:
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('PLATFORM_DISPLAYS='):
+                        raw = line.split('=', 1)[1].strip()
+                        break
+        except FileNotFoundError:
+            pass
+    if not raw:
+        return
+    for pair in raw.split(','):
+        pair = pair.strip()
+        if ':' in pair:
+            plat, dnum = pair.rsplit(':', 1)
+            _PLATFORM_DISPLAYS[plat.strip()] = f':{dnum.strip()}'
+
+_parse_platform_displays()
+
+
+def get_platform_display(platform: str) -> str | None:
+    """Return the dedicated display for a platform, or None for tab-switching mode."""
+    return _PLATFORM_DISPLAYS.get(platform)
+
+
+def get_platform_bus(platform: str) -> str | None:
+    """Read AT-SPI bus address for a platform's dedicated display."""
+    display = get_platform_display(platform)
+    if not display:
+        return None
+    bus_file = f'/tmp/a11y_bus_{display}'
+    try:
+        with open(bus_file) as f:
+            return f.read().strip() or None
+    except FileNotFoundError:
+        return None
+
+
+def get_platform_firefox_pid(platform: str) -> int | None:
+    """Read Firefox PID for a platform's dedicated display."""
+    display = get_platform_display(platform)
+    if not display:
+        return None
+    pid_file = f'/tmp/firefox_pid_{display}'
+    try:
+        with open(pid_file) as f:
+            return int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def is_multi_display() -> bool:
+    """True if PLATFORM_DISPLAYS is configured (Mira mode)."""
+    return bool(_PLATFORM_DISPLAYS)
