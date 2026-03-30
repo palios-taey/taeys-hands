@@ -162,16 +162,16 @@ def get_validation(platform: str) -> dict:
 
 
 def scan_platform_tree(platform: str) -> tuple:
-    """Scan the AT-SPI tree for a platform, handling multi-display routing.
+    """Scan the AT-SPI tree for a platform via direct AT-SPI.
 
     Returns (elements: list[dict], url: str|None, error: str|None).
 
-    In multi-display mode (Mira): routes through subprocess scanner.
-    In single-display mode (Thor): uses direct AT-SPI scan.
+    Multi-display is handled by per-display workers — each worker
+    has the correct DISPLAY/AT-SPI bus, so this always uses the
+    direct local path.
 
     Elements are raw dicts with name/role/x/y/states — no atspi_obj
-    (subprocess results are serialized). Callers should not depend on
-    atspi_obj being present.
+    (stripped for serialization safety).
     """
     from core import atspi
     from core.tree import find_elements
@@ -181,17 +181,6 @@ def scan_platform_tree(platform: str) -> tuple:
     if not firefox:
         return [], None, f'Firefox not found for {platform}'
 
-    # Multi-display: subprocess scan
-    if getattr(firefox, '_remote', False):
-        scan_result = atspi.subprocess_scan(platform, 'scan')
-        if not scan_result or scan_result.get('error'):
-            err = scan_result.get('error', 'Subprocess scan failed') if scan_result else 'Subprocess scan failed'
-            return [], None, err
-        elements = scan_result.get('elements', [])
-        url = scan_result.get('url')
-        return elements, url, None
-
-    # Local: direct AT-SPI scan
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         return [], None, f'{platform} document not found'
