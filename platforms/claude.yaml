@@ -96,8 +96,11 @@ element_map:
     role: entry
     states_include: [editable]
   toggle_menu:
-    name: "Toggle menu"
+    name_contains: ["Add files", "Toggle menu"]
     role: push button
+  upload_files_item:
+    name_contains: ["Add files", "Add content"]
+    role_contains: item
   model_selector:
     name_contains: ["Opus 4.6 Extended", "Sonnet 4.6 Extended", "Sonnet 4.6", "Haiku 4.5"]
     role: push button
