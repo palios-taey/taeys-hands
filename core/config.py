@@ -105,7 +105,7 @@ def get_upload_item_key(platform: str) -> Optional[str]:
         'claude': None,                  # "Add files or photos" menu item (handled via AT-SPI menu scan)
         'gemini': 'upload_files_item',   # "Upload files..." menu item
         'grok': None,                    # keyboard_nav opens file dialog directly
-        'perplexity': None,              # atspi_menu with direct items
+        'perplexity': 'upload_files_item',  # "Upload files or images" menu item
     }
     key = _UPLOAD_KEYS.get(platform)
     if key and key in emap:
