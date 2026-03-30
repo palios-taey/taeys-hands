@@ -43,14 +43,27 @@ def _scan_menu_items_for_platform(platform: str) -> List[Dict]:
 
     Uses find_menu_items(firefox, doc) which searches menu containers
     in 4 passes (doc strict, doc no-SHOWING, containerless, Firefox root).
+
+    Forces AT-SPI cache clear before scanning so newly-rendered
+    dropdown items (React async) are visible in the tree.
     Returns list of element dicts.
     """
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         return []
+    # Force AT-SPI to re-read the tree from the accessibility bus.
+    # Without this, stale cached children hide async-rendered dropdowns.
+    try:
+        firefox.clear_cache_single()
+    except Exception:
+        pass
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         return []
+    try:
+        doc.clear_cache_single()
+    except Exception:
+        pass
     return find_menu_items(firefox, doc)
 
 _KNOWN_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
