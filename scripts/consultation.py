@@ -563,11 +563,14 @@ def main():
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
-    # Step 1b: Fresh inspect to populate AT-SPI element cache.
+    # Step 1b: Clear stale cache and do fresh inspect.
     # Navigation rebuilds the page — cached atspi_obj references from
     # before navigation are stale (point to destroyed DOM nodes).
-    # handle_attach reads from element cache, so it MUST be refreshed.
-    logger.info("Step 1b: Fresh inspect after navigation")
+    # The element cache may have BOTH old and new entries after inspect.
+    # Clear it first so only fresh entries exist.
+    logger.info("Step 1b: Clear cache + fresh inspect after navigation")
+    from core.interact import invalidate_cache
+    invalidate_cache(platform)
     from tools.inspect import handle_inspect
     rc = get_redis()
     inspect_result = handle_inspect(platform, rc, scroll='bottom', fresh_session=False)
