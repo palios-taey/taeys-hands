@@ -505,6 +505,99 @@ class CentralMonitor:
         if not sessions:
             return
 
+        # Multi-display: use workers for stop-button polling
+        from core.platforms import is_multi_display
+        if is_multi_display():
+            self._cycle_via_workers(sessions)
+            return
+
+        # Single-display / multi-tab: direct AT-SPI
+        self._cycle_direct(sessions)
+
+    def _cycle_via_workers(self, sessions: List[Dict]):
+        """Multi-display cycle: poll workers for stop-button state.
+
+        Each platform has a persistent worker with the correct DISPLAY
+        and AT-SPI bus. We ask each worker if a stop button is visible
+        instead of scanning AT-SPI directly.
+        """
+        from workers.manager import send_to_worker
+        from core.platforms import get_platform_display
+
+        by_platform: Dict[str, List[Dict]] = {}
+        for s in sessions:
+            by_platform.setdefault(s['platform'], []).append(s)
+
+        _log(f"Cycle (worker): {len(sessions)} session(s) on {set(by_platform.keys())}")
+
+        completed = []
+
+        for platform, platform_sessions in by_platform.items():
+            if self._plan_active():
+                break
+
+            if not get_platform_display(platform):
+                _log(f"[{platform}] No display configured, skipping")
+                continue
+
+            # Ask worker for stop-button state
+            try:
+                result = send_to_worker(platform, {'cmd': 'check_stop'}, timeout=10.0)
+                stop_found = result.get('stop_found', False)
+            except Exception as e:
+                _log(f"[{platform}] Worker check_stop failed: {e}")
+                continue
+
+            # Apply state machine to each session on this platform
+            for session in platform_sessions:
+                if self._plan_active():
+                    break
+
+                if self._check_session_with_stop(session, stop_found):
+                    completed.append(session)
+                time.sleep(0.3)
+
+        for s in completed:
+            self._remove_session(s)
+
+    def _check_session_with_stop(self, session: Dict, stop_found: bool) -> bool:
+        """Check session completion using worker-provided stop-button state.
+
+        Same 4-state machine as _check_session but without direct AT-SPI.
+        """
+        platform = session['platform']
+        monitor_id = session['monitor_id']
+        started_ts = session.get('started_ts', time.time())
+        timeout = session.get('timeout', 7200)
+        elapsed = int(time.time() - started_ts)
+        stop_seen = session.get('stop_seen', False)
+
+        if stop_found and not stop_seen:
+            session['stop_seen'] = True
+            session['generating_since'] = time.time()
+            self._update_session(session)
+            _log(f"[{platform}/{monitor_id}] stop=YES (generation started, {elapsed}s)")
+            return False
+
+        if stop_found and stop_seen:
+            _log(f"[{platform}/{monitor_id}] stop=YES (still generating, {elapsed}s)")
+            return False
+
+        if not stop_found and stop_seen:
+            _log(f"[{platform}/{monitor_id}] stop=NO, stop_seen=True → COMPLETE ({elapsed}s)")
+            self._notify(session, "response_complete", "stop_button")
+            return True
+
+        _log(f"[{platform}/{monitor_id}] stop=NO, waiting ({elapsed}s)")
+        if time.time() - started_ts > timeout:
+            _log(f"[{platform}/{monitor_id}] Timeout after {timeout}s")
+            self._notify(session, "timeout", "timeout")
+            return True
+
+        return False
+
+    def _cycle_direct(self, sessions: List[Dict]):
+        """Single-display / multi-tab cycle: direct AT-SPI scanning."""
         # Find Firefox — PID-filtered for single display mode
         if self.single_display:
             display = os.environ.get('DISPLAY', ':0')
@@ -566,14 +659,9 @@ class CentralMonitor:
                 session_url = session.get('url', '')
                 if session_url and not self._is_landing_url(session_url, platform):
                     current_url = get_document_url(doc) or ''
-                    # Compare by stripping fragments/trailing slashes
                     cur_norm = current_url.split('#')[0].split('?')[0].rstrip('/')
                     sess_norm = session_url.split('#')[0].split('?')[0].rstrip('/')
                     if cur_norm != sess_norm:
-                        # If only 1 session on this platform and current URL is a
-                        # real conversation (not landing), the tab is already showing
-                        # the right page — the stored URL is likely stale (pre-redirect).
-                        # Update stored URL instead of navigating away.
                         if len(platform_sessions) == 1 and current_url and \
                                 not self._is_landing_url(current_url, platform):
                             _log(f"[{platform}] Single session — updating stored URL: "
@@ -584,7 +672,6 @@ class CentralMonitor:
                             _log(f"[{platform}] URL mismatch: "
                                  f"current={current_url[:60]} != session={session_url[:60]}")
                             if self._navigate_to_url(session_url, platform):
-                                # Re-get doc after navigation
                                 doc = get_platform_document(firefox, platform)
                                 if not doc:
                                     _log(f"[{platform}] No document after navigation, skipping session")
@@ -596,7 +683,6 @@ class CentralMonitor:
                     completed.append(session)
                 time.sleep(0.5)
 
-        # Remove completed sessions
         for s in completed:
             self._remove_session(s)
 
