@@ -883,12 +883,19 @@ def handle_attach(platform: str, file_path: str,
         return {"error": f"Attach button not found for {platform}",
                 "action": "button_not_found"}
 
-    click_result = handle_click(platform, btn_coords['x'], btn_coords['y'])
-    if click_result.get("error"):
-        return {"error": f"Failed to click attach button: {click_result['error']}",
-                "action": "click_failed"}
+    # Click the button using the discovered atspi_obj directly.
+    # DO NOT use handle_click(x, y) — it does a generic cache lookup that
+    # can find overlapping elements (e.g., an unnamed section at the same
+    # coords) and click the wrong one. Use the specific object reference
+    # from _get_attach_button_coords() instead, with xdotool as fallback.
+    # This matches the pattern in _try_click_then_dialog() and hmm_bot.
+    clicked = False
+    if btn_coords.get('atspi_obj'):
+        clicked = atspi_click(btn_coords)
+    if not clicked:
+        inp.click_at(btn_coords['x'], btn_coords['y'])
 
-    time.sleep(1.0)
+    time.sleep(1.5)  # Dropdown renders async — 1.5s matches hmm_bot timing
     firefox_local = atspi.find_firefox(platform)  # for file dialog check (X11 level)
     dt = _any_file_dialog_open(firefox_local)
     if dt:
