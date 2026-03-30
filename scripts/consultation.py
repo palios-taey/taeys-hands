@@ -584,12 +584,27 @@ def main():
             result['attachment'] = pkg_path
 
     # Step 3: Model/mode selection (if requested)
-    # TODO: implement model/mode selection via dropdown
-    # For now, log a warning if requested
-    if args.model:
-        logger.warning(f"Model selection ({args.model}) not yet implemented in consultation.py")
-    if args.mode:
-        logger.warning(f"Mode selection ({args.mode}) not yet implemented in consultation.py")
+    if args.model or args.mode:
+        logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
+        from core.mode_select import select_mode_model
+        ff = find_firefox()
+        doc = get_doc(force_refresh=True)
+        sel_result = select_mode_model(
+            platform, mode=args.mode, model=args.model,
+            doc=doc, firefox=ff,
+        )
+        if sel_result.get('success'):
+            logger.info(f"Mode/model selected: {sel_result.get('selected_mode', sel_result.get('matched', '?'))}")
+            if sel_result.get('timeout'):
+                timeout = sel_result['timeout']
+                logger.info(f"Timeout adjusted to {timeout}s for this mode")
+            result['mode_selection'] = sel_result
+        else:
+            logger.warning(f"Mode/model selection failed: {sel_result.get('error')}")
+            logger.warning(f"Available modes: {sel_result.get('available_modes', 'unknown')}")
+            result['mode_selection'] = sel_result
+            # Don't fail -- proceed with default mode
+        time.sleep(1)
 
     # Step 4: Send prompt
     logger.info("Step 4: Send prompt")
