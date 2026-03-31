@@ -864,6 +864,7 @@ def main():
     consecutive_fails = 0
     display = os.environ.get('DISPLAY', ':0')
     MAX_CONSECUTIVE_FAILS = 10  # Execution failures are transient — keep trying
+    EARLY_WARN_THRESHOLD = 3    # Notify after 3 consecutive failures (keep running)
 
     while True:
         cycle += 1
@@ -899,6 +900,10 @@ def main():
             log.error(msg)
             _notify_death(display, msg)
             break
+
+        # === EARLY WARNING at 3 failures — notify but keep running ===
+        if consecutive_fails == EARLY_WARN_THRESHOLD:
+            _notify_death(display, f"{consecutive_fails} consecutive failures — still running, may need attention")
 
         # === BACKOFF after failure ===
         if consecutive_fails > 0:
