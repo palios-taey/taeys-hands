@@ -190,25 +190,45 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
                 }
             time.sleep(1.0)
 
-        # Scan for menu items / buttons
-        menu_items = find_menu_items(firefox, doc)
-        if not menu_items:
-            time.sleep(1.0)
-            # Re-get doc for fresh state
-            doc = atspi.get_platform_document(firefox, platform) or doc
+        # Scan for matching items.
+        # For steps with a trigger: look for dropdown menu items first.
+        # For steps without trigger (null): the options may be tiles/buttons
+        # visible in the page (e.g., ChatGPT Extended/Standard after Pro selection).
+        menu_items = []
+
+        if trigger_key:
+            # Dropdown was opened — look for menu items
             menu_items = find_menu_items(firefox, doc)
+            if not menu_items:
+                time.sleep(1.0)
+                doc = atspi.get_platform_document(firefox, platform) or doc
+                menu_items = find_menu_items(firefox, doc)
 
         if not menu_items:
-            # Fallback: scan for element_map model/thinking buttons
+            # Fallback: scan full tree for element_map buttons AND any matching elements
             fences = get_fence_after(platform)
             all_elements = find_elements(doc, fence_after=fences)
             menu_items = _find_model_buttons_in_tree(platform, select_target, all_elements)
 
         if not menu_items:
+            # Last resort: find ANY visible button/element matching the select target
+            # This catches tiles in the input area (ChatGPT Extended/Standard)
+            fences = get_fence_after(platform)
+            all_elements = find_elements(doc, fence_after=fences)
+            for e in all_elements:
+                ename = (e.get('name') or '').strip().lower()
+                erole = e.get('role', '')
+                if erole in ('push button', 'toggle button', 'button', 'radio button') and \
+                   select_target in ename:
+                    menu_items = [e]
+                    logger.info(f"[{platform}] Found '{e.get('name')}' ({erole}) via tree scan")
+                    break
+
+        if not menu_items:
             inp.press_key('Escape')
             return {
                 'success': False,
-                'error': f'Step {i+1}: no menu items found for "{select_target}"',
+                'error': f'Step {i+1}: no items found for "{select_target}"',
                 'completed_steps': completed_steps,
             }
 
