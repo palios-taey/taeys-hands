@@ -267,17 +267,20 @@ def _determine_trigger_key(platform: str, how: str) -> Optional[str]:
     """Map mode_guidance 'how' text to element_map trigger key."""
     how_lower = how.lower()
 
-    # Direct mappings from 'how' text to element_map keys
+    # Direct mappings from 'how' text to element_map keys.
+    # Order matters: specific patterns before generic ones.
+    # "Add files or tools" must match 'add files' → attach_trigger,
+    # NOT 'tools' → tools_button (which doesn't exist on Perplexity).
     if 'model selector' in how_lower or 'model button' in how_lower or 'click model' in how_lower:
         return 'model_selector'
     if 'mode picker' in how_lower or 'open mode picker' in how_lower:
         return 'mode_picker'
+    if 'add files' in how_lower:
+        return 'attach_trigger'
     if 'tools' in how_lower and ('button' in how_lower or 'select' in how_lower):
         return 'tools_button'
     if 'toggle menu' in how_lower:
         return 'toggle_menu'
-    if 'add files' in how_lower:
-        return 'attach_trigger'
     if 'sidebar' in how_lower:
         # Sidebar links are not trigger buttons — handled separately
         return None
