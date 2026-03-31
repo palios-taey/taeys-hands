@@ -72,9 +72,27 @@ mode_guidance:
     how: "Click model selector, select 'Thinking'"
     timeout: 3600
   pro:
-    when: "Research-grade intelligence, deep analysis, extended thinking"
+    when: "Research-grade intelligence, standard thinking time"
     how: "Click model selector, select 'Pro'"
     timeout: 7200
+  pro_extended:
+    when: "Research-grade intelligence WITH extended thinking time"
+    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' thinking."
+    steps:
+      - trigger: model_selector
+        select: pro
+      - trigger: null
+        select: extended
+    timeout: 14400
+  extended_thinking:
+    when: "Alias for pro_extended"
+    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' thinking."
+    steps:
+      - trigger: model_selector
+        select: pro
+      - trigger: null
+        select: extended
+    timeout: 14400
 
 # ─── Element Filtering ───────────────────────────────────────────────
 # Applied BEFORE returning inspect results. Two sections:
