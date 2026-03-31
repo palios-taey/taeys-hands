@@ -176,7 +176,17 @@ from core.tree import find_elements, find_copy_buttons, find_menu_items
 from core.interact import atspi_click
 from tools.attach import handle_attach, _close_stale_file_dialogs
 from tools.plan import _prepend_identity_files, _consolidate_attachments
-from storage.redis_pool import get_client as get_redis, node_key
+from storage.redis_pool import get_client as get_redis, node_key, NODE_ID
+
+# Verify node ID matches expectations — mismatch breaks monitor notifications
+if NODE_ID and '-d' in NODE_ID and not os.environ.get('TAEY_NODE_ID'):
+    # Got a display-scoped ID without explicit TAEY_NODE_ID — likely mismatch
+    import warnings
+    warnings.warn(
+        f"consultation.py using auto-detected node ID '{NODE_ID}'. "
+        f"Set TAEY_NODE_ID in .env or environment to match MCP server.",
+        RuntimeWarning, stacklevel=1,
+    )
 
 try:
     from storage import neo4j_client
