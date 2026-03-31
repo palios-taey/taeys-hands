@@ -55,6 +55,22 @@ import time
 from datetime import datetime
 
 
+# ---- Load .env FIRST (before any project imports or setup) ----
+# Standalone scripts don't inherit env from .mcp.json.
+# This ensures TAEY_NODE_ID, REDIS_HOST, NEO4J_URI etc. are set
+# before any module import triggers _detect_node_id() or connects.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+_ENV_PATH = os.path.join(_PROJECT_ROOT, '.env')
+if os.path.exists(_ENV_PATH):
+    with open(_ENV_PATH) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+
 # ---- Display setup BEFORE any AT-SPI imports ----
 
 def setup_env(display: str = None, platform: str = None):
@@ -152,15 +168,7 @@ setup_env(display=args.display, platform=args.platform)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-# Load .env
-_env_path = os.path.join(_ROOT, '.env')
-if os.path.exists(_env_path):
-    with open(_env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                k, v = line.split('=', 1)
-                os.environ.setdefault(k.strip(), v.strip())
+# .env already loaded at top of file (before setup_env and all imports)
 
 # Clear _PLATFORM_DISPLAYS (populated at import time from .env)
 import gi
