@@ -81,3 +81,8 @@ identity_evidence_*.json
 # Internal analysis docs
 dcm_*.md
 RELEASE_READINESS.md
+
+# Tool config dirs
+.gemini/
+.gitnexus/
+.ntm/
