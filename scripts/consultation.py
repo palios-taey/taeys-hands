@@ -125,6 +125,9 @@ def parse_args():
                         help='Skip ISMA ingestion')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Verbose logging')
+    parser.add_argument('--async-send', action='store_true',
+                        help='Send and return immediately (register monitor, don\'t wait/extract). '
+                             'Monitor daemon will detect completion and send notification.')
     return parser.parse_args()
 
 
@@ -627,6 +630,59 @@ def main():
         result['error'] = 'send_failed'
         print(json.dumps(result, indent=2))
         sys.exit(1)
+
+    # Step 4b: Register monitor session + Neo4j storage
+    # This enables the central monitor to detect response completion
+    # and send notifications via Redis.
+    url = None
+    doc = get_doc()
+    if doc:
+        url = atspi.get_document_url(doc)
+    session_id = message_id = None
+    if not args.no_neo4j and neo4j_client and url:
+        try:
+            session_id = neo4j_client.get_or_create_session(platform, url)
+            message_id = neo4j_client.add_message(session_id, 'user', message,
+                                                   attachments)
+        except Exception as e:
+            logger.warning(f"Neo4j storage failed: {e}")
+
+    import uuid
+    monitor_id = str(uuid.uuid4())[:8]
+    rc = get_redis()
+    if rc:
+        # Store pending_prompt for extract linkage
+        rc.setex(
+            node_key(f"pending_prompt:{platform}"), 3600,
+            json.dumps({
+                'content': message, 'attachments': attachments or [],
+                'session_url': url, 'session_id': session_id,
+                'message_id': message_id,
+            })
+        )
+        # Register monitor session
+        from tools.send import register_monitor_session, _ensure_central_monitor
+        display = os.environ.get('DISPLAY', ':0')
+        _ensure_central_monitor(display)
+        reg = register_monitor_session(
+            platform=platform, monitor_id=monitor_id, url=url,
+            redis_client=rc, session_id=session_id,
+            user_message_id=message_id, timeout=timeout,
+        )
+        result['monitor'] = {'id': monitor_id, 'registered': reg.get('registered', False)}
+        logger.info(f"Monitor session registered: {monitor_id}")
+
+    # Async mode: return immediately after send + monitor registration
+    if getattr(args, 'async_send', False):
+        result['success'] = True
+        result['mode'] = 'async'
+        result['url'] = url
+        result['neo4j'] = {'session_id': session_id, 'message_id': message_id}
+        result['info'] = (f"Message sent. Monitor {monitor_id} will detect completion. "
+                          f"Extract with: taey_quick_extract(platform='{platform}', complete=True)")
+        logger.info("Async mode: returning after send. Monitor will detect completion.")
+        print(json.dumps(result, indent=2))
+        sys.exit(0)
 
     # Step 5: Wait for response
     logger.info("Step 5: Waiting for response...")
