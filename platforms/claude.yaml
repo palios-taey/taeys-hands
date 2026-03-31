@@ -102,7 +102,7 @@ element_map:
     name_contains: ["Add files", "Add content"]
     role_contains: item
   model_selector:
-    name_contains: ["Opus 4.6 Extended", "Sonnet 4.6 Extended", "Sonnet 4.6", "Haiku 4.5"]
+    name_contains: ["Opus 4.6", "Sonnet 4.6", "Haiku 4.5"]
     role: push button
   # Model dropdown items
   model_opus:
