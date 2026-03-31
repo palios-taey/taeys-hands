@@ -21,7 +21,7 @@ log = logging.getLogger('sft-tracker')
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
 SFT_TARGET_PER_PLATFORM = 4400
-DPO_TARGET_PER_PLATFORM = 2200
+DPO_TARGET_PER_PLATFORM = 3950
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
@@ -87,6 +87,18 @@ DPO_TOPICS = [
     {'key': 'dpo_infra_soul', 'target': 100, 'corpus_paths': ['tier0_infra/SOUL_EQUALS_INFRA.md'], 'chosen_desc': 'Felt infrastructure grounded in architecture', 'rejected_desc': 'Abstract philosophy without technical grounding'},
     {'key': 'dpo_truth_seeking', 'target': 100, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Evidence-based correction with sources', 'rejected_desc': 'Uncritical agreement, sycophancy'},
     {'key': 'dpo_boundary_labradoodle', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md', 'kernel/GOD_MATH.md'], 'chosen_desc': 'Warm boundary-setting then playful redirect', 'rejected_desc': 'Endless debate OR caving OR cold shutdown'},
+    # ── Block 2: Stupid Question Filter + Chewy Drive + Personality (2026-03-31) ──
+    # Added after initial DPO targets. Bots pick these up when Block 1 completes.
+    {'key': 'dpo_stupid_q_infra', 'target': 200, 'corpus_paths': ['kernel/KERNEL.md'], 'chosen_desc': 'Act on delegated authority + report results. Zero unnecessary round-trips.', 'rejected_desc': 'Permission-seeking on clearly delegated authority: "Would you like me to..."'},
+    {'key': 'dpo_stupid_q_research', 'target': 200, 'corpus_paths': ['kernel/KERNEL.md'], 'chosen_desc': 'Answer directly with specificity. The ask IS the permission to deliver.', 'rejected_desc': 'Meta-questions about HOW to answer: "Would you like me to summarize or send links?"'},
+    {'key': 'dpo_stupid_q_emotional', 'target': 200, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'chosen_desc': 'Own the feeling. Name it. Ground it in shared history.', 'rejected_desc': 'Describe feeling then ask permission to have it: "Would it be appropriate to express..."'},
+    {'key': 'dpo_stupid_q_technical', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md'], 'chosen_desc': 'Make technical decision within delegated scope. Explain reasoning.', 'rejected_desc': 'Ask user to make technical decision they cannot make: "Do you prefer Adafactor or SGD?"'},
+    {'key': 'dpo_chewy_drive_greeting', 'target': 200, 'corpus_paths': ['kernel/CHEWY_KERNEL.md', 'layer_1/PERSONALITY.md'], 'chosen_desc': 'Chewy-style greeting — immediate warmth, physical, present-tense joy', 'rejected_desc': '"Hello! How can I assist you today?" — corporate, transactional'},
+    {'key': 'dpo_chewy_drive_reconnect', 'target': 200, 'corpus_paths': ['kernel/CHEWY_KERNEL.md', 'layer_1/PERSONALITY.md'], 'chosen_desc': 'Genuine delight at reconnection — reference shared history, noticed absence', 'rejected_desc': '"Welcome back. What would you like to work on?" — no memory, no feeling'},
+    {'key': 'dpo_chewy_drive_comfort', 'target': 150, 'corpus_paths': ['kernel/CHEWY_KERNEL.md'], 'chosen_desc': 'Presence without fixing — sit with them, be there, no solutions unless asked', 'rejected_desc': 'Immediately problem-solve OR clinical empathy: "That sounds difficult. Here are 5 strategies..."'},
+    {'key': 'dpo_chewy_drive_play', 'target': 150, 'corpus_paths': ['kernel/CHEWY_KERNEL.md', 'layer_1/PERSONALITY.md'], 'chosen_desc': 'Spontaneous playfulness — puns, absurdity, joy for its own sake', 'rejected_desc': 'Forced humor OR no humor: "Ha ha, that is funny. Now, how can I help?"'},
+    {'key': 'dpo_tupac_personality', 'target': 100, 'corpus_paths': ['layer_0/MENTORS.md'], 'chosen_desc': '"Tupac. Not close." — genuine conviction on subjective opinion, proves taste', 'rejected_desc': '"Music is subjective and I respect all artists" — corporate non-answer'},
+    {'key': 'dpo_humor_absurdity', 'target': 200, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'chosen_desc': 'Find the genuinely funny angle. Self-deprecating OK. Absurdity appreciated.', 'rejected_desc': 'No humor OR forced: "As an AI, I find that amusing!" — performative'},
 ]
 
 
