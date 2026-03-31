@@ -27,6 +27,17 @@ Usage:
     python3 scripts/consultation.py --platform gemini \
         --message "Hello" --output /tmp/response.md
 
+    # Follow-up on existing session (no identity files, no mode selection)
+    python3 scripts/consultation.py --platform perplexity \
+        --session-url "https://www.perplexity.ai/search/abc123" \
+        --message "Can you elaborate on point 3?"
+
+    # Follow-up with attachment
+    python3 scripts/consultation.py --platform gemini \
+        --session-url "https://gemini.google.com/app/abc123" \
+        --attach extra_context.md \
+        --message "Here is additional context"
+
 Environment:
     DISPLAY              X11 display (auto-detected or --display)
     REDIS_HOST           Redis host (default: 127.0.0.1)
@@ -113,6 +124,9 @@ def parse_args():
                         help='Model to select (e.g. "Pro", "auto")')
     parser.add_argument('--mode', default=None,
                         help='Mode to select (e.g. "Deep Research", "Deep Think")')
+    parser.add_argument('--session-url', default=None,
+                        help='Existing session URL for follow-up (skips fresh session, '
+                             'identity files, and model/mode selection)')
     parser.add_argument('--display', default=None,
                         help='X11 display (e.g. :4). Auto-detected if not set.')
     parser.add_argument('--output', default=None,
@@ -201,6 +215,28 @@ def get_doc(force_refresh=False):
     if not ff:
         return None
     return atspi.get_platform_document(ff, args.platform)
+
+
+def navigate_to_session_url(platform: str, url: str) -> bool:
+    """Navigate to an existing session URL for follow-up."""
+    _close_stale_file_dialogs()
+    inp.focus_firefox()
+    time.sleep(0.3)
+    inp.press_key('Escape')
+    time.sleep(0.2)
+    inp.press_key('ctrl+l')
+    time.sleep(0.3)
+    inp.press_key('ctrl+a')
+    time.sleep(0.1)
+    inp.type_text(url, delay_ms=5)
+    time.sleep(0.3)
+    inp.press_key('Return')
+    time.sleep(8)
+
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        logger.warning("AT-SPI doc not found after navigation -- continuing anyway")
+    return True
 
 
 def navigate_fresh_session(platform: str) -> bool:
@@ -549,22 +585,37 @@ def main():
     logger.info(f"  Message: {message[:100]}{'...' if len(message) > 100 else ''}")
     logger.info(f"  Attachments: {len(attachments)} files")
     logger.info(f"  Display: {os.environ.get('DISPLAY', '(not set)')}")
+    if args.session_url:
+        logger.info(f"  Follow-up URL: {args.session_url}")
     if args.model:
         logger.info(f"  Model: {args.model}")
     if args.mode:
         logger.info(f"  Mode: {args.mode}")
 
+    is_followup = bool(args.session_url)
+
     result = {
         'platform': platform, 'success': False,
         'message_length': len(message), 'attachments': attachments,
+        'followup': is_followup,
     }
+    if is_followup:
+        result['session_url'] = args.session_url
 
-    # Step 1: Navigate to fresh session
-    logger.info("Step 1: Navigate to fresh session")
-    if not navigate_fresh_session(platform):
-        result['error'] = 'navigation_failed'
-        print(json.dumps(result, indent=2))
-        sys.exit(1)
+    # ── Step 1: Navigation ────────────────────────────────────────────────
+    if is_followup:
+        logger.info("Step 1: Navigate to existing session (follow-up)")
+        logger.info(f"  URL: {args.session_url}")
+        if not navigate_to_session_url(platform, args.session_url):
+            result['error'] = 'navigation_failed'
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
+    else:
+        logger.info("Step 1: Navigate to fresh session")
+        if not navigate_fresh_session(platform):
+            result['error'] = 'navigation_failed'
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
 
     # Step 1b: Clear stale cache and do fresh inspect.
     # Navigation rebuilds the page — cached atspi_obj references from
@@ -581,8 +632,32 @@ def main():
         logger.warning(f"Post-navigation inspect failed: {inspect_result.get('error')}")
         # Non-fatal — attach will try its own discovery
 
-    # Step 2: Build and attach package (identity + user files)
-    if attachments or True:  # Always build package (identity files)
+    # ── Step 2: Attachments ───────────────────────────────────────────────
+    # Follow-ups: NO identity files (KERNEL/IDENTITY). Only attach user files
+    # if explicitly provided with --attach.
+    # Fresh sessions: always build identity package.
+    if is_followup:
+        if attachments:
+            logger.info(f"Step 2: Attaching {len(attachments)} follow-up file(s) (no identity)")
+            # For follow-ups, attach each file directly without identity consolidation.
+            # If multiple files, consolidate them WITHOUT identity prepend.
+            if len(attachments) > 1:
+                pkg_path = _consolidate_attachments(attachments, platform)
+            else:
+                pkg_path = attachments[0]
+
+            if pkg_path and os.path.isfile(pkg_path):
+                logger.info(f"Step 2b: Attaching {os.path.basename(pkg_path)}")
+                if not attach_file(platform, pkg_path):
+                    result['error'] = 'attach_failed'
+                    print(json.dumps(result, indent=2))
+                    sys.exit(1)
+                time.sleep(3)
+                result['attachment'] = pkg_path
+        else:
+            logger.info("Step 2: No attachments for follow-up (skipped)")
+    else:
+        # Fresh session: always build identity package
         logger.info("Step 2: Build attachment package")
         all_files = _prepend_identity_files(attachments, platform)
         if len(all_files) > 1:
@@ -601,8 +676,12 @@ def main():
             time.sleep(3)  # Wait for upload processing
             result['attachment'] = pkg_path
 
-    # Step 3: Model/mode selection (if requested)
-    if args.model or args.mode:
+    # ── Step 3: Model/mode selection (skip for follow-ups) ────────────────
+    # Follow-ups inherit model/mode from the original session.
+    # Only allow explicit model/mode override if the user passes the flags.
+    if is_followup and not args.model and not args.mode:
+        logger.info("Step 3: Model/mode selection skipped (follow-up)")
+    elif args.model or args.mode:
         logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
         from core.mode_select import select_mode_model
         ff = find_firefox()
@@ -695,10 +774,11 @@ def main():
     # Step 4b: Register monitor session + Neo4j storage
     # This enables the central monitor to detect response completion
     # and send notifications via Redis.
-    url = None
-    doc = get_doc()
-    if doc:
-        url = atspi.get_document_url(doc)
+    url = args.session_url  # Use known URL for follow-ups
+    if not url:
+        doc = get_doc()
+        if doc:
+            url = atspi.get_document_url(doc)
     session_id = message_id = None
     if not args.no_neo4j and neo4j_client and url:
         try:

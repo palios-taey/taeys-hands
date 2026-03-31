@@ -243,7 +243,18 @@ def _h_prepare(args, rc):
 
 def _h_plan(args, rc):
     err = _validate_required(args, 'action')
-    return err or handle_plan(args['platform'], args['action'], args.get('params', {}), rc)
+    # MCP clients may send params as nested object OR flatten fields to top level.
+    # Accept both: prefer nested 'params', fall back to extracting plan fields
+    # from the top-level args.
+    params = args.get('params')
+    if not params or not isinstance(params, dict) or not any(params.values()):
+        # Params missing or empty — extract plan fields from top-level args
+        _PLAN_FIELDS = ('session', 'message', 'model', 'mode', 'tools',
+                        'attachments', 'plan_id', 'current_state', 'status',
+                        'current_model', 'current_mode', 'current_tools',
+                        'attachment_confirmed', 'steps')
+        params = {k: args[k] for k in _PLAN_FIELDS if k in args}
+    return err or handle_plan(args['platform'], args['action'], params, rc)
 
 def _h_send(args, rc):
     err = _validate_required(args, 'message')
