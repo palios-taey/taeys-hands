@@ -234,11 +234,11 @@ sidebar_nav:
   - { name: "Your chats", role: heading }
 
 # ─── Sidebar Fence ────────────────────────────────────────────────
-# When this element is encountered during traversal, it is collected but
-# all remaining siblings in the parent are skipped. Excludes sidebar history.
-fence_after:
-  - { name: "New project", role: push button }
-  - { name: "Your chats", role: push button }
+# Disabled — see comment below.
+# EMPTY: ChatGPT model_selector and input area appear AFTER sidebar
+# elements in the AT-SPI tree. Fencing at "Your chats" cuts them off.
+# Sidebar noise is handled by element_filter.exclude instead.
+fence_after: []
 
 # ─── Validation Expectations ───────────────────────────────────────
 # Post-action verification: what the AT-SPI tree should look like after each action.
