@@ -285,9 +285,61 @@ class CentralMonitor:
 
         return False
 
-    # _cycle_direct REMOVED — monitor never does direct AT-SPI.
-    # All monitoring goes through workers which own their displays.
-    # This prevents monitor from touching DISPLAY :0 (physical).
+    def run(self):
+        """Main loop — poll workers for stop-button state every cycle."""
+        _log(f"Central monitor started (node={NODE_ID}, cycle={self.cycle_interval}s)")
+        while True:
+            try:
+                self._cycle()
+            except KeyboardInterrupt:
+                _log("Interrupted — exiting")
+                break
+            except Exception as e:
+                _log(f"Cycle error: {e}")
+            time.sleep(self.cycle_interval)
+
+    def _cycle(self):
+        """One monitor cycle: find sessions, poll workers, check completion."""
+        if self.rc:
+            try:
+                self.rc.ping()
+            except Exception:
+                _log("Redis connection lost — reconnecting")
+                self.rc = self._connect_redis()
+
+        if self._plan_active():
+            return
+
+        sessions = self._get_sessions()
+        if not sessions:
+            return
+
+        from workers.manager import send_to_worker
+        from core.platforms import get_platform_display
+
+        by_platform: Dict[str, List[Dict]] = {}
+        for s in sessions:
+            by_platform.setdefault(s['platform'], []).append(s)
+
+        _log(f"Cycle: {len(sessions)} session(s) on {set(by_platform.keys())}")
+
+        completed = []
+        for platform, platform_sessions in by_platform.items():
+            if not get_platform_display(platform):
+                continue
+            try:
+                result = send_to_worker(platform, {'cmd': 'check_stop'}, timeout=10.0)
+                stop_found = result.get('stop_found', False)
+            except Exception as e:
+                _log(f"[{platform}] Worker check_stop failed: {e}")
+                continue
+
+            for session in platform_sessions:
+                if self._check_session_with_stop(session, stop_found):
+                    completed.append(session)
+
+        for s in completed:
+            self._remove_session(s)
 
 
 # ── __init__.py guard ────────────────────────────────────────────
