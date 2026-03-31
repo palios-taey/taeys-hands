@@ -146,7 +146,11 @@ def handle_plan(platform: str, action: str, params: Dict,
 
 def _create_plan(platform: str, params: Dict,
                  redis_client) -> Dict[str, Any]:
-    """Create an execution plan. All fields required — no defaults.
+    """Create an execution plan.
+
+    For fresh sessions (session="new"): all fields required — no defaults.
+    For follow-ups (session=URL): only session + message required.
+      Model/mode/tools/attachments are optional (inherited from original session).
 
     Does NOT set audit_passed. Caller must run audit before send.
     """
@@ -170,7 +174,8 @@ def _create_plan(platform: str, params: Dict,
         }
 
     # Validate required fields
-    missing = []
+    # Follow-up sessions (URL) only need session + message.
+    # Fresh sessions ("new") need everything.
     session = params.get('session')
     message = params.get('message')
     model = params.get('model')
@@ -178,31 +183,58 @@ def _create_plan(platform: str, params: Dict,
     tools = params.get('tools')
     attachments = params.get('attachments')
 
+    is_followup = session and session != 'new' and session.startswith('http')
+
+    missing = []
     if not session:
         missing.append('session ("new" or URL)')
     if not message:
         missing.append('message')
-    if not model:
-        missing.append('model')
-    if not mode:
-        missing.append('mode')
-    if tools is None:
-        missing.append('tools (list or "none")')
-    if attachments is None:
-        missing.append('attachments (list or [])')
+
+    if not is_followup:
+        # Fresh sessions require all fields
+        if not model:
+            missing.append('model')
+        if not mode:
+            missing.append('mode')
+        if tools is None:
+            missing.append('tools (list or "none")')
+        if attachments is None:
+            missing.append('attachments (list or [])')
 
     if missing:
+        required_fields = {"session": '"new" or existing URL', "message": "Message text"}
+        if not is_followup:
+            required_fields.update({
+                "model": 'Model name or "N/A"',
+                "mode": "Mode name",
+                "tools": 'List or "none"',
+                "attachments": "List of file paths or []",
+            })
         return {"success": False, "error": "Missing required fields: " + ", ".join(missing),
-                "required_fields": {
-                    "session": '"new" or existing URL', "message": "Message text",
-                    "model": 'Model name or "N/A"', "mode": "Mode name",
-                    "tools": 'List or "none"', "attachments": "List of file paths or []",
-                }}
+                "required_fields": required_fields}
 
-    # Build attachment list: identity files + user files → consolidated
+    # Default optional fields for follow-ups
+    if is_followup:
+        model = model or 'inherited'
+        mode = mode or 'inherited'
+        if tools is None:
+            tools = 'none'
+        if attachments is None:
+            attachments = []
+
+    # Build attachment list:
+    # Follow-ups: NO identity files. Only user-provided attachments.
+    # Fresh sessions: identity files + user files → consolidated.
     attachments_list = [] if attachments == "none" else list(attachments) if attachments else []
-    all_files = _prepend_identity_files(attachments_list, platform)
-    identity_added = [f for f in all_files if f not in attachments_list]
+
+    if is_followup:
+        # Follow-ups: use attachments as-is (no identity prepend)
+        all_files = attachments_list
+        identity_added = []
+    else:
+        all_files = _prepend_identity_files(attachments_list, platform)
+        identity_added = [f for f in all_files if f not in attachments_list]
 
     consolidated_path = None
     if len(all_files) > 1:
@@ -218,6 +250,7 @@ def _create_plan(platform: str, params: Dict,
         'plan_id': plan_id,
         'platform': platform,
         'action': 'send_message',
+        'followup': is_followup,
         'session': session,
         'message': message,
         'attachment': final_attachment,  # Single file (consolidated)
@@ -256,21 +289,32 @@ def _create_plan(platform: str, params: Dict,
     for suffix in ['inspect', 'set_map', 'attach']:
         redis_client.delete(node_key(f"checkpoint:{platform}:{suffix}"))
 
-    result = {
-        "success": True,
-        "plan_id": plan_id,
-        "platform": platform,
-        "session": session,
-        "required_state": plan['required_state'],
-        "attachment": final_attachment,
-        "audit_passed": False,
-        "next_steps": [
+    if is_followup:
+        next_steps = [
+            "1. Navigate to session URL",
+            "2. Call taey_attach if follow-up attachments needed",
+            "3. Call taey_plan(action='audit') to verify",
+            "4. Call taey_send",
+        ]
+    else:
+        next_steps = [
             "1. Call taey_inspect to see current platform state",
             "2. Set model/mode if needed (taey_select_dropdown)",
             "3. Call taey_attach to upload the attachment",
             "4. Call taey_plan(action='audit') to verify everything matches",
             "5. Only then call taey_send",
-        ],
+        ]
+
+    result = {
+        "success": True,
+        "plan_id": plan_id,
+        "platform": platform,
+        "session": session,
+        "followup": is_followup,
+        "required_state": plan['required_state'],
+        "attachment": final_attachment,
+        "audit_passed": False,
+        "next_steps": next_steps,
     }
     if identity_added:
         result["identity_files_added"] = identity_added
@@ -553,11 +597,13 @@ def _audit_plan(platform: str, params: Dict,
     failures = []
 
     # Model check — exact match (case-insensitive)
+    # 'inherited' = follow-up session, model inherited from original — skip check.
     req_model = required.get('model', '')
-    model_check_source = model_source if req_model and req_model not in ('N/A', 'any', 'default') \
+    _MODEL_SKIP = ('N/A', 'any', 'default', 'inherited')
+    model_check_source = model_source if req_model and req_model not in _MODEL_SKIP \
         else 'not_required'
 
-    if req_model and req_model not in ('N/A', 'any', 'default'):
+    if req_model and req_model not in _MODEL_SKIP:
         if not actual_model:
             failures.append({
                 "field": "model",
@@ -579,10 +625,12 @@ def _audit_plan(platform: str, params: Dict,
             })
 
     # Mode check — exact match (case-insensitive)
+    # 'inherited' = follow-up session, mode inherited from original — skip check.
     req_mode = required.get('mode', '')
+    _MODE_SKIP = ('N/A', 'any', 'default', 'normal', 'inherited')
     mode_source = 'caller_reported'  # Mode is always caller-reported (no tree read yet)
 
-    if req_mode and req_mode not in ('N/A', 'any', 'default', 'normal'):
+    if req_mode and req_mode not in _MODE_SKIP:
         if not caller_mode:
             failures.append({
                 "field": "mode",
