@@ -55,6 +55,22 @@ import time
 from datetime import datetime
 
 
+# ---- Load .env FIRST (before any project imports or setup) ----
+# Standalone scripts don't inherit env from .mcp.json.
+# This ensures TAEY_NODE_ID, REDIS_HOST, NEO4J_URI etc. are set
+# before any module import triggers _detect_node_id() or connects.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+_ENV_PATH = os.path.join(_PROJECT_ROOT, '.env')
+if os.path.exists(_ENV_PATH):
+    with open(_ENV_PATH) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+
 # ---- Display setup BEFORE any AT-SPI imports ----
 
 def setup_env(display: str = None, platform: str = None):
@@ -127,6 +143,9 @@ def parse_args():
     parser.add_argument('--session-url', default=None,
                         help='Existing session URL for follow-up (skips fresh session, '
                              'identity files, and model/mode selection)')
+    parser.add_argument('--git-repo', default=None,
+                        help='Git repo URL to connect (Gemini: Import Code, '
+                             'Perplexity: Connectors. Grok: skip, already connected)')
     parser.add_argument('--display', default=None,
                         help='X11 display (e.g. :4). Auto-detected if not set.')
     parser.add_argument('--output', default=None,
@@ -152,15 +171,7 @@ setup_env(display=args.display, platform=args.platform)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-# Load .env
-_env_path = os.path.join(_ROOT, '.env')
-if os.path.exists(_env_path):
-    with open(_env_path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#') and '=' in line:
-                k, v = line.split('=', 1)
-                os.environ.setdefault(k.strip(), v.strip())
+# .env already loaded at top of file (before setup_env and all imports)
 
 # Clear _PLATFORM_DISPLAYS (populated at import time from .env)
 import gi
@@ -246,6 +257,116 @@ def navigate_to_session_url(platform: str, url: str) -> bool:
     doc = get_doc(force_refresh=True)
     if not doc:
         logger.warning("AT-SPI doc not found after navigation -- continuing anyway")
+    return True
+
+
+def connect_git_repo(platform: str, repo_url: str) -> bool:
+    """Connect a git repo on supported platforms before sending.
+
+    Gemini: Click attach dropdown → 'Import Code' → paste repo URL.
+    Perplexity: Click 'Connectors and sources' → paste repo URL.
+    Grok: Already connected by default — skip.
+    ChatGPT/Claude: Not supported yet — skip.
+    """
+    if platform in ('grok', 'chatgpt', 'claude'):
+        if platform == 'grok':
+            logger.info(f"[{platform}] Git already connected by default, skipping")
+        else:
+            logger.info(f"[{platform}] Git connector not supported, skipping")
+        return True
+
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        logger.error("AT-SPI doc not found for git connector")
+        return False
+
+    elements = find_elements(doc)
+
+    if platform == 'gemini':
+        # Gemini: find attach/add dropdown trigger, click, find 'Import Code' item
+        from core.config import get_element_spec
+        attach_spec = get_element_spec(platform, 'attach_trigger')
+        trigger = None
+        if attach_spec:
+            from tools.inspect import _match_element
+            for e in elements:
+                if _match_element(e, attach_spec):
+                    trigger = e
+                    break
+        if not trigger:
+            # Fallback: look for 'Add files' or '+' button
+            for e in elements:
+                name = (e.get('name') or '').lower()
+                if 'add file' in name or 'attach' in name:
+                    trigger = e
+                    break
+        if not trigger:
+            logger.error(f"[{platform}] Attach trigger not found for Import Code")
+            return False
+
+        inp.click_at(trigger['x'], trigger['y'])
+        time.sleep(1.0)
+
+        # Find 'Import Code' menu item
+        doc = get_doc(force_refresh=True)
+        elements = find_elements(doc)
+        import_item = None
+        for e in elements:
+            name = (e.get('name') or '').lower()
+            if 'import code' in name or 'import from' in name:
+                import_item = e
+                break
+        if not import_item:
+            # Try menu items
+            from core.tree import find_menu_items
+            ff = find_firefox()
+            menu = find_menu_items(ff, doc)
+            for e in menu:
+                name = (e.get('name') or '').lower()
+                if 'import code' in name or 'import from' in name:
+                    import_item = e
+                    break
+
+        if not import_item:
+            logger.error(f"[{platform}] 'Import Code' menu item not found")
+            inp.press_key('Escape')
+            return False
+
+        inp.click_at(import_item['x'], import_item['y'])
+        time.sleep(1.5)
+
+        # Paste repo URL into dialog
+        inp.clipboard_paste(repo_url)
+        time.sleep(0.5)
+        inp.press_key('Return')
+        time.sleep(3)  # Wait for repo import
+        logger.info(f"[{platform}] Git repo connected: {repo_url}")
+        return True
+
+    elif platform == 'perplexity':
+        # Perplexity: find 'Connectors and sources' or similar
+        connector_btn = None
+        for e in elements:
+            name = (e.get('name') or '').lower()
+            if 'connector' in name or 'sources' in name:
+                connector_btn = e
+                break
+        if not connector_btn:
+            logger.error(f"[{platform}] Connectors button not found")
+            return False
+
+        inp.click_at(connector_btn['x'], connector_btn['y'])
+        time.sleep(1.5)
+
+        # Paste repo URL
+        inp.clipboard_paste(repo_url)
+        time.sleep(0.5)
+        inp.press_key('Return')
+        time.sleep(3)
+        logger.info(f"[{platform}] Git connector activated: {repo_url}")
+        return True
+
+    logger.warning(f"[{platform}] Git connector not implemented")
     return True
 
 
@@ -641,6 +762,15 @@ def main():
     if not inspect_result.get('success'):
         logger.warning(f"Post-navigation inspect failed: {inspect_result.get('error')}")
         # Non-fatal — attach will try its own discovery
+
+    # ── Step 1c: Git connector (if --git-repo specified) ───────────────
+    if args.git_repo:
+        logger.info(f"Step 1c: Connecting git repo: {args.git_repo}")
+        if not connect_git_repo(platform, args.git_repo):
+            logger.warning("Git connector failed — continuing without it")
+        else:
+            result['git_repo'] = args.git_repo
+        time.sleep(1)
 
     # ── Step 2: Attachments ───────────────────────────────────────────────
     # Follow-ups: NO identity files (KERNEL/IDENTITY). Only attach user files
