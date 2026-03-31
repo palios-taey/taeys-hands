@@ -92,6 +92,106 @@ def _try_gemini_deep_research_extract(platform, firefox, doc):
     return None
 
 
+def _try_claude_artifact_extract(platform, firefox, doc):
+    """Claude artifact extraction: use artifact panel Copy button for full content.
+
+    Claude artifacts have a side panel with its own Copy button that copies
+    the FULL artifact content (~34K chars). The conversation Copy button
+    only gets a summary (~2K chars).
+
+    Detection: look for a heading containing a file extension indicator
+    (e.g., '... . MD', '... . PY') which marks the artifact panel header.
+    The artifact Copy button is nearby at high x coordinates (right side panel).
+
+    Returns full artifact content, or None if no artifact detected.
+    """
+    if platform != 'claude':
+        return None
+
+    elements = find_elements(doc)
+
+    # Detect artifact panel: heading with file extension suffix
+    _ARTIFACT_SUFFIXES = (' . MD', ' . PY', ' . JS', ' . TS', ' . HTML',
+                          ' . CSS', ' . JSON', ' . YAML', ' . YML',
+                          ' . SH', ' . TXT', ' . CSV', ' . XML',
+                          ' . md', ' . py', ' . js', ' . ts', ' . html')
+    artifact_heading = None
+    for e in elements:
+        if e.get('role') == 'heading':
+            name = e.get('name', '')
+            # Check for "title . EXT" pattern (Unicode middot)
+            if '\u00b7' in name or any(name.upper().endswith(s.upper()) for s in _ARTIFACT_SUFFIXES):
+                artifact_heading = e
+                break
+
+    if not artifact_heading:
+        return None
+
+    logger.info("Claude artifact detected: %r", artifact_heading.get('name', '')[:80])
+
+    # Find the artifact panel Copy button: push button named 'Copy' at high x
+    # (right side panel, x > 800). The conversation Copy is at low x (~400).
+    artifact_copy = None
+    heading_y = artifact_heading.get('y', 0)
+    for e in elements:
+        if e.get('role') in ('push button', 'toggle button') and \
+           (e.get('name') or '').strip().lower() == 'copy':
+            ex = e.get('x', 0)
+            ey = e.get('y', 0)
+            # Artifact panel Copy: high x (right side), near the heading y
+            if ex > 800 and abs(ey - heading_y) < 100:
+                artifact_copy = e
+                break
+
+    if not artifact_copy:
+        # Fallback: any Copy button with x > 1000 (deep in artifact panel)
+        for e in elements:
+            if e.get('role') in ('push button', 'toggle button') and \
+               (e.get('name') or '').strip().lower() == 'copy' and \
+               e.get('x', 0) > 1000:
+                artifact_copy = e
+                break
+
+    if not artifact_copy:
+        logger.warning("Artifact heading found but no artifact Copy button")
+        return None
+
+    logger.info("Clicking artifact Copy at (%s, %s)",
+                artifact_copy.get('x'), artifact_copy.get('y'))
+
+    # Kill stale xsel
+    import subprocess
+    subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
+    time.sleep(0.3)
+
+    clipboard.clear()
+    time.sleep(0.1)
+
+    if artifact_copy.get('atspi_obj') and atspi_click(artifact_copy):
+        logger.info("Clicked artifact Copy via AT-SPI")
+    else:
+        inp.click_at(int(artifact_copy['x']), int(artifact_copy['y']))
+        logger.info("Clicked artifact Copy via xdotool")
+    time.sleep(2.0)
+
+    content = clipboard.read()
+    if content and len(content) > 500:
+        logger.info("Claude artifact extracted: %d chars", len(content))
+        return content
+
+    # Retry with xdotool
+    clipboard.clear()
+    inp.click_at(int(artifact_copy['x']), int(artifact_copy['y']))
+    time.sleep(2.0)
+    content = clipboard.read()
+    if content and len(content) > 500:
+        logger.info("Claude artifact extracted (xdotool retry): %d chars", len(content))
+        return content
+
+    logger.warning("Artifact Copy clicked but clipboard empty or too short")
+    return None
+
+
 def _try_perplexity_deep_research_extract(platform, firefox, doc):
     """Perplexity Deep Research: extract full report via 'Copy contents' button.
 
@@ -349,6 +449,56 @@ def handle_quick_extract(platform: str, redis_client,
             result["ingest"] = ingest
         except Exception as e:
             logger.warning("Auto-ingest failed (Perplexity Deep Research): %s", e)
+        return result
+
+    # Claude artifact extraction: artifact panel Copy for full content
+    claude_art = _try_claude_artifact_extract(platform, firefox, doc)
+    if claude_art:
+        quality = _assess_extraction(claude_art, platform,
+                                      find_elements(atspi.get_platform_document(firefox, platform) or doc))
+        result = {
+            "success": True, "platform": platform, "content": claude_art,
+            "length": len(claude_art), "has_artifacts": True, "url": url,
+            "extraction_method": "claude_artifact_panel_copy",
+            "copy_buttons_found": 0, "quality": quality,
+        }
+        if complete and redis_client:
+            redis_client.delete(node_key(f"pending_prompt:{platform}"))
+            redis_client.delete(node_key(f"plan:{platform}"))
+            for suffix in [f"plan:current:{platform}", f"checkpoint:{platform}:inspect",
+                           f"checkpoint:{platform}:attach", f"response_reviewed:{platform}"]:
+                redis_client.delete(node_key(suffix))
+            display = os.environ.get('DISPLAY', ':0')
+            redis_client.delete(f"taey:plan_active:{display}")
+            try:
+                save_path = f"/tmp/hmm_response_{platform}.json"
+                with open(save_path, 'w') as f:
+                    f.write(claude_art)
+                result["save_path"] = save_path
+            except Exception:
+                pass
+        if neo4j_mod and url:
+            try:
+                sid = mid = None
+                pending_json = redis_client.get(node_key(f"pending_prompt:{platform}")) if redis_client else None
+                if pending_json:
+                    pending = json.loads(pending_json)
+                    sid = pending.get('session_id')
+                    mid = pending.get('message_id')
+                if not sid:
+                    sid = neo4j_client.get_or_create_session(platform, url)
+                if sid:
+                    rid = neo4j_mod.add_message(sid, 'assistant', claude_art[:5000])
+                    result["neo4j"] = {"session_id": sid, "response_id": rid, "user_message_id": mid}
+            except Exception as e:
+                logger.warning("Neo4j store failed (Claude artifact): %s", e)
+        try:
+            ingest = auto_ingest(platform, claude_art, url=url,
+                                 session_id=result.get('neo4j', {}).get('session_id'),
+                                 metadata={"extraction_method": "claude_artifact"})
+            result["ingest"] = ingest
+        except Exception as e:
+            logger.warning("Auto-ingest failed (Claude artifact): %s", e)
         return result
 
     # Extra scroll if needed — press Ctrl+End then End until positions stabilize
