@@ -61,6 +61,15 @@ from core.input import press_key, clipboard_paste
 from core.platforms import TAB_SHORTCUTS, CHAT_PLATFORMS, BASE_URLS, URL_PATTERNS
 from storage.redis_pool import node_key, NODE_ID
 
+# Verify node ID matches expectations — mismatch breaks monitor notifications
+if NODE_ID and '-d' in NODE_ID and not os.environ.get('TAEY_NODE_ID'):
+    import warnings
+    warnings.warn(
+        f"monitor using auto-detected node ID '{NODE_ID}'. "
+        f"Set TAEY_NODE_ID in .env or environment to match MCP server.",
+        RuntimeWarning, stacklevel=1,
+    )
+
 # Redis
 try:
     import redis as _redis_mod

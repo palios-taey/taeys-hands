@@ -41,17 +41,54 @@ def get_client() -> redis.Redis:
     return _client
 
 
-def _detect_node_id() -> str:
-    """TAEY_NODE_ID env > display-scoped auto-id > tmux session > hostname.
+def _load_env_file() -> dict:
+    """Try loading .env from project root. Returns dict of key=value pairs."""
+    # Walk up from this file (storage/redis_pool.py) to find project root
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_path = os.path.join(project_root, '.env')
+    result = {}
+    if os.path.exists(env_path):
+        try:
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        result[k.strip()] = v.strip()
+        except Exception:
+            pass
+    return result
 
-    When DISPLAY is set (e.g. :5), generates a deterministic node ID
-    like 'taeys-hands-d5' to prevent collisions between MCP instances
-    on different displays. This replaces the old hostname fallback that
-    caused all instances on the same machine to share Redis keys.
+
+def _detect_node_id() -> str:
+    """TAEY_NODE_ID env > .env file > display-scoped auto-id > tmux session > hostname.
+
+    Priority order:
+      1. TAEY_NODE_ID environment variable (set by caller or .mcp.json)
+      2. TAEY_NODE_ID from .env file (standalone scripts may not have loaded it yet)
+      3. Display-scoped auto-id (taeys-hands-d{N}) for multi-instance collision prevention
+      4. tmux session name
+      5. hostname
+
+    The .env fallback (step 2) is critical for standalone scripts like
+    consultation.py and monitor/central.py that run outside the MCP server
+    process. Without it, they generate different node IDs than the MCP
+    server and PostToolUse hooks, breaking Redis key lookups.
     """
     explicit = os.environ.get('TAEY_NODE_ID')
     if explicit:
         return explicit
+
+    # Try loading from .env — standalone scripts may not have loaded it yet.
+    # This is the most common case for node ID mismatch: MCP server gets
+    # TAEY_NODE_ID from .mcp.json, but consultation.py/monitor don't.
+    env_vars = _load_env_file()
+    env_node_id = env_vars.get('TAEY_NODE_ID')
+    if env_node_id:
+        # Also set it in the environment so downstream code sees it
+        os.environ['TAEY_NODE_ID'] = env_node_id
+        return env_node_id
+
     # Auto-scope by DISPLAY if available — prevents multi-instance collision
     display = os.environ.get('DISPLAY', '')
     if display:
@@ -103,6 +140,7 @@ def _find_ancestor_tty() -> str:
 
 _NODE_ID = _detect_node_id()
 NODE_ID = _NODE_ID
+logger.info("Redis node ID: %s", _NODE_ID)
 
 
 def node_key(suffix: str) -> str:
