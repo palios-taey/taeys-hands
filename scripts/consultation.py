@@ -710,59 +710,75 @@ def main():
     # Same principle as the MCP audit step.
     if args.model or args.mode:
         logger.info("Step 3b: Verifying mode/model in AT-SPI tree")
-        ff = find_firefox()
-        doc = get_doc(force_refresh=True)
-        if doc:
-            from core.tree import find_elements as _fe
-            from core.config import get_platform_config as _gpc, get_element_spec as _ges
-            _config = _gpc(platform)
-            _elements = _fe(doc)
-            verified = False
-            verify_method = 'none'
+        target_mode = args.mode or args.model
+        verified = False
+        verify_method = 'none'
 
-            # Method 1: Check for deselect button (Gemini tools like Deep Think)
-            # If 'Deselect {mode}' button exists, mode is active
-            target_mode = args.mode or args.model
-            deselect_name = f"Deselect {target_mode.replace('_', ' ').title()}"
-            for e in _elements:
-                ename = (e.get('name') or '').strip()
-                if ename.lower().startswith('deselect') and \
-                   target_mode.replace('_', ' ').lower() in ename.lower():
-                    logger.info(f"Mode verified via deselect button: {ename}")
-                    verified = True
-                    verify_method = 'deselect_button'
-                    break
+        # Method 0: Trust selection result.
+        # If select_mode_model() returned success=True AND reported a
+        # selected_item that matches the target, the click landed correctly.
+        # Some platforms (Claude, Grok) close/remove the dropdown element
+        # after selection, making post-selection AT-SPI verification
+        # impossible. Trusting the selection function avoids false negatives.
+        sel = result.get('mode_selection', {})
+        if sel.get('success') and sel.get('selected_item'):
+            selected_name = sel['selected_item'].lower().strip()
+            target_lower = target_mode.replace('_', ' ').lower().strip()
+            # Check if selected item name contains the target mode
+            if target_lower in selected_name or selected_name.startswith(target_lower):
+                logger.info(f"Mode verified via selection result: '{sel['selected_item']}'")
+                verified = True
+                verify_method = 'selection_result'
 
-            # Method 2: Check menu item checked state
-            if not verified:
+        # Method 1: Check for deselect button (Gemini tools like Deep Think)
+        # If 'Deselect {mode}' button exists, mode is active
+        if not verified:
+            ff = find_firefox()
+            doc = get_doc(force_refresh=True)
+            if doc:
+                from core.tree import find_elements as _fe
+                _elements = _fe(doc)
+
+                deselect_name = f"Deselect {target_mode.replace('_', ' ').title()}"
                 for e in _elements:
-                    ename = (e.get('name') or '').strip().lower()
-                    if target_mode.replace('_', ' ').lower() in ename and \
-                       'checked' in e.get('states', []):
-                        logger.info(f"Mode verified via checked state: {e.get('name')}")
+                    ename = (e.get('name') or '').strip()
+                    if ename.lower().startswith('deselect') and \
+                       target_mode.replace('_', ' ').lower() in ename.lower():
+                        logger.info(f"Mode verified via deselect button: {ename}")
                         verified = True
-                        verify_method = 'checked_state'
+                        verify_method = 'deselect_button'
                         break
 
-            # Method 3: Use mode_select verification
-            if not verified:
-                from core.mode_select import _verify_selection
-                v = _verify_selection(platform, target_mode, ff, doc)
-                if v.get('verified'):
-                    logger.info(f"Mode verified via mode_select: {v.get('button_name')}")
-                    verified = True
-                    verify_method = 'mode_select_verify'
+                # Method 2: Check menu item checked state
+                if not verified:
+                    for e in _elements:
+                        ename = (e.get('name') or '').strip().lower()
+                        if target_mode.replace('_', ' ').lower() in ename and \
+                           'checked' in e.get('states', []):
+                            logger.info(f"Mode verified via checked state: {e.get('name')}")
+                            verified = True
+                            verify_method = 'checked_state'
+                            break
 
-            if not verified:
-                logger.error(f"HARD STOP: mode '{target_mode}' NOT verified in AT-SPI tree. "
-                             f"Will NOT send without verification.")
-                result['error'] = f"mode_not_verified: '{target_mode}' not confirmed in AT-SPI tree"
-                result['verify_method'] = verify_method
-                print(json.dumps(result, indent=2))
-                sys.exit(1)
+                # Method 3: Use mode_select verification
+                if not verified:
+                    from core.mode_select import _verify_selection
+                    v = _verify_selection(platform, target_mode, ff, doc)
+                    if v.get('verified'):
+                        logger.info(f"Mode verified via mode_select: {v.get('button_name')}")
+                        verified = True
+                        verify_method = 'mode_select_verify'
 
-            logger.info(f"Mode verification PASSED ({verify_method})")
-            result['mode_verified'] = {'method': verify_method, 'mode': target_mode}
+        if not verified:
+            logger.error(f"HARD STOP: mode '{target_mode}' NOT verified in AT-SPI tree. "
+                         f"Will NOT send without verification.")
+            result['error'] = f"mode_not_verified: '{target_mode}' not confirmed in AT-SPI tree"
+            result['verify_method'] = verify_method
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
+
+        logger.info(f"Mode verification PASSED ({verify_method})")
+        result['mode_verified'] = {'method': verify_method, 'mode': target_mode}
 
     # Step 4: Send prompt
     logger.info("Step 4: Send prompt")
