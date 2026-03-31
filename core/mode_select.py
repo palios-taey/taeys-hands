@@ -65,6 +65,7 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
 
     how = guidance.get('how', '')
     timeout = guidance.get('timeout', 1800)
+    steps = guidance.get('steps')
 
     logger.info(f"[{platform}] Selecting mode: {target_mode_lower} — {how}")
 
@@ -88,6 +89,15 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     if not doc:
         return {'success': False, 'error': f'{platform} document not found'}
 
+    # Multi-step selection (e.g., ChatGPT Pro + Extended Thinking)
+    if steps and isinstance(steps, list) and len(steps) > 1:
+        result = _multi_step_select(platform, steps, target_mode_lower,
+                                     firefox, doc)
+        if result.get('success'):
+            result['timeout'] = timeout
+        return result
+
+    # Single-step selection (standard flow)
     # Determine which trigger button to click from the 'how' text
     trigger_key = _determine_trigger_key(platform, how)
     if not trigger_key:
@@ -136,6 +146,101 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
             result['verification_note'] = verification.get('note', 'Could not verify')
 
     return result
+
+
+def _multi_step_select(platform: str, steps: list, target_mode: str,
+                        firefox, doc) -> Dict:
+    """Execute a multi-step mode selection (e.g., ChatGPT Pro + Extended Thinking).
+
+    Each step has:
+      trigger: element_map key to click (or null to skip trigger, reuse current dropdown)
+      select: mode name to match and click in the resulting menu
+
+    Between steps, the UI updates (dropdown closes, new options appear).
+    We re-scan the AT-SPI tree after each step.
+    """
+    from core.interact import atspi_click
+
+    completed_steps = []
+
+    for i, step in enumerate(steps):
+        trigger_key = step.get('trigger')
+        select_target = str(step.get('select', '')).lower().strip()
+
+        if not select_target:
+            return {'success': False, 'error': f'Step {i+1}: no select target specified'}
+
+        logger.info(f"[{platform}] Multi-step {i+1}/{len(steps)}: "
+                    f"trigger={trigger_key}, select='{select_target}'")
+
+        # Click trigger if specified (step 1 opens model dropdown)
+        if trigger_key:
+            trigger = _find_button_by_element_map(doc, trigger_key, platform)
+            if not trigger:
+                return {
+                    'success': False,
+                    'error': f'Step {i+1}: {trigger_key} button not found in AT-SPI tree',
+                    'completed_steps': completed_steps,
+                }
+            if not _click_element(trigger, platform):
+                return {
+                    'success': False,
+                    'error': f'Step {i+1}: failed to click {trigger_key}',
+                    'completed_steps': completed_steps,
+                }
+            time.sleep(1.0)
+
+        # Scan for menu items / buttons
+        menu_items = find_menu_items(firefox, doc)
+        if not menu_items:
+            time.sleep(1.0)
+            # Re-get doc for fresh state
+            doc = atspi.get_platform_document(firefox, platform) or doc
+            menu_items = find_menu_items(firefox, doc)
+
+        if not menu_items:
+            # Fallback: scan for element_map model/thinking buttons
+            fences = get_fence_after(platform)
+            all_elements = find_elements(doc, fence_after=fences)
+            menu_items = _find_model_buttons_in_tree(platform, select_target, all_elements)
+
+        if not menu_items:
+            inp.press_key('Escape')
+            return {
+                'success': False,
+                'error': f'Step {i+1}: no menu items found for "{select_target}"',
+                'completed_steps': completed_steps,
+            }
+
+        # Match and click
+        step_result = _match_and_click(menu_items, select_target, platform)
+        if not step_result.get('success'):
+            step_result['step'] = i + 1
+            step_result['completed_steps'] = completed_steps
+            return step_result
+
+        completed_steps.append({
+            'step': i + 1,
+            'trigger': trigger_key,
+            'selected': step_result.get('selected_item', select_target),
+        })
+
+        # Wait for UI to update between steps
+        if i < len(steps) - 1:
+            time.sleep(1.5)
+            # Re-get doc for next step
+            doc = atspi.get_platform_document(firefox, platform) or doc
+
+    # All steps completed
+    last_selected = completed_steps[-1]['selected'] if completed_steps else target_mode
+    return {
+        'success': True,
+        'selected_mode': target_mode,
+        'selected_item': last_selected,
+        'platform': platform,
+        'multi_step': True,
+        'completed_steps': completed_steps,
+    }
 
 
 def _determine_trigger_key(platform: str, how: str) -> Optional[str]:
