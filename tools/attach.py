@@ -388,15 +388,9 @@ def _close_stale_file_dialogs():
     env = _xenv()
     closed = 0
 
-    for wid in _find_portal_wids():
-        try:
-            subprocess.run(['xdotool', 'windowclose', wid],
-                          capture_output=True, timeout=3, env=env)
-            closed += 1
-        except Exception:
-            pass
-
-    for title in ['File Upload', 'Open', 'Open File', 'xdg-desktop-portal-gtk']:
+    # Only close actual file dialog windows — NEVER portal infrastructure.
+    # Closing xdg-desktop-portal-gtk or Nautilus kills Firefox (GdkWindow destroyed).
+    for title in ['File Upload', 'Open', 'Open File']:
         try:
             r = subprocess.run(['xdotool', 'search', '--name', title],
                               capture_output=True, text=True, timeout=2, env=env)
