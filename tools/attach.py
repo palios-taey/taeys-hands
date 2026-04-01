@@ -401,37 +401,8 @@ def _close_stale_file_dialogs():
         except Exception:
             pass
 
-    # Zombie Firefox windows (named exactly 'Firefox', not 'Mozilla Firefox')
-    try:
-        r = subprocess.run(['xdotool', 'search', '--name', '^Firefox$'],
-                          capture_output=True, text=True, timeout=2, env=env)
-        if r.stdout.strip():
-            firefox_pids, main_wids = set(), set()
-            mr = subprocess.run(['xdotool', 'search', '--name', 'Mozilla Firefox'],
-                               capture_output=True, text=True, timeout=2, env=env)
-            for mwid in (mr.stdout.strip().split('\n') if mr.stdout.strip() else []):
-                main_wids.add(mwid)
-                try:
-                    pr = subprocess.run(['xdotool', 'getwindowpid', mwid],
-                                       capture_output=True, text=True, timeout=2, env=env)
-                    if pr.stdout.strip():
-                        firefox_pids.add(pr.stdout.strip())
-                except Exception:
-                    pass
-            for wid in r.stdout.strip().split('\n'):
-                if wid and wid not in main_wids:
-                    try:
-                        pr = subprocess.run(['xdotool', 'getwindowpid', wid],
-                                           capture_output=True, text=True, timeout=2, env=env)
-                        if pr.stdout.strip() in firefox_pids:
-                            continue  # Firefox helper window, not zombie
-                    except Exception:
-                        pass
-                    subprocess.run(['xdotool', 'windowclose', wid],
-                                  capture_output=True, timeout=3, env=env)
-                    closed += 1
-    except Exception:
-        pass
+    # DO NOT close Firefox helper windows (named exactly 'Firefox').
+    # These are normal IPC windows, not zombies. Closing them kills Firefox.
 
     if closed:
         logger.info(f"Closed {closed} stale file dialog(s)")
