@@ -223,6 +223,134 @@ logging.basicConfig(
 logger = logging.getLogger('consultation')
 
 
+# ---- Mode selection via subprocess worker ----
+# consultation.py imports Atspi after setup_env() sets DBUS_SESSION_BUS_ADDRESS
+# to the AT-SPI accessibility bus (/tmp/a11y_bus_:N). This is NOT the same
+# bus that dbus-run-session uses to run Firefox. Atspi.get_desktop(0) connects
+# at first call and caches the connection for the lifetime of the process.
+#
+# React portal dropdowns (Perplexity tools menu, etc.) register their nodes
+# on the dbus-run-session bus. A process connected to the a11y bus can find
+# the Firefox application object (which bridges both), but freshly-mounted
+# portal nodes are only visible on the session bus.
+#
+# Solution: launch select_mode_worker.py as a subprocess with
+# DBUS_SESSION_BUS_ADDRESS set from /tmp/dbus_addr_:N BEFORE any Atspi import.
+# The worker performs mode selection and reports JSON to stdout.
+
+def _read_file_stripped(path: str) -> str:
+    """Read a file and return its stripped content, or empty string."""
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ''
+
+
+def _select_mode_via_worker(platform: str, mode: str = None, model: str = None,
+                             display: str = None) -> dict:
+    """Run mode selection in a subprocess with the correct dbus session bus.
+
+    This bypasses the AT-SPI bus problem: the worker process starts with
+    DBUS_SESSION_BUS_ADDRESS from /tmp/dbus_addr_:N (the dbus-run-session bus),
+    NOT the a11y bus. This lets Atspi.get_desktop(0) connect to the same
+    registry that Firefox is registered on, making React portal nodes visible.
+
+    Falls back to in-process select_mode_model() if the dbus_addr file is
+    missing (non-Mira environments, or displays launched differently).
+    """
+    disp = display or os.environ.get('DISPLAY', '')
+
+    # Read the dbus-run-session bus address (written by Firefox launch script)
+    dbus_addr_file = f'/tmp/dbus_addr_{disp}'
+    session_bus = _read_file_stripped(dbus_addr_file)
+
+    if not session_bus:
+        logger.warning(
+            f"No dbus_addr file at {dbus_addr_file} — falling back to in-process "
+            f"mode selection (may fail for React portal dropdowns on Perplexity)"
+        )
+        return _select_mode_inprocess(platform, mode, model)
+
+    # Read the a11y bus for AT_SPI_BUS_ADDRESS
+    a11y_bus = _read_file_stripped(f'/tmp/a11y_bus_{disp}')
+
+    # Read Firefox PID for display filtering
+    firefox_pid_str = _read_file_stripped(f'/tmp/firefox_pid_{disp}')
+    firefox_pid = int(firefox_pid_str) if firefox_pid_str.isdigit() else None
+
+    worker_script = os.path.join(_SCRIPT_DIR, 'select_mode_worker.py')
+    if not os.path.isfile(worker_script):
+        logger.error(f"select_mode_worker.py not found at {worker_script}")
+        return _select_mode_inprocess(platform, mode, model)
+
+    cmd = [sys.executable, worker_script, '--platform', platform]
+    if mode:
+        cmd += ['--mode', mode]
+    if model:
+        cmd += ['--model', model]
+    if firefox_pid:
+        cmd += ['--pid', str(firefox_pid)]
+
+    env = os.environ.copy()
+    env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+    if a11y_bus:
+        env['AT_SPI_BUS_ADDRESS'] = a11y_bus
+    env['DISPLAY'] = disp
+    env['GTK_USE_PORTAL'] = '0'
+    # Forward PYTHONPATH so worker finds project modules
+    env.setdefault('PYTHONPATH', _ROOT)
+    if _ROOT not in env.get('PYTHONPATH', ''):
+        env['PYTHONPATH'] = f"{_ROOT}:{env['PYTHONPATH']}"
+
+    logger.info(
+        f"Launching select_mode_worker: platform={platform} mode={mode} model={model} "
+        f"display={disp} dbus={session_bus[:40]}..."
+    )
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # Worker logs go to stderr — forward to our logger
+        if proc.stderr:
+            for line in proc.stderr.strip().splitlines():
+                logger.info(f"[worker] {line}")
+
+        stdout = proc.stdout.strip()
+        if not stdout:
+            return {
+                'success': False,
+                'error': f'select_mode_worker produced no output (rc={proc.returncode})',
+            }
+
+        result = json.loads(stdout)
+        logger.info(f"Worker result: {result}")
+        return result
+
+    except subprocess.TimeoutExpired:
+        return {'success': False, 'error': 'select_mode_worker timed out after 30s'}
+    except json.JSONDecodeError as e:
+        return {'success': False, 'error': f'Worker output not valid JSON: {e} / stdout={proc.stdout[:200]}'}
+    except Exception as e:
+        return {'success': False, 'error': f'Worker launch failed: {e}'}
+
+
+def _select_mode_inprocess(platform: str, mode: str = None, model: str = None) -> dict:
+    """In-process fallback for mode selection (non-Mira / no dbus_addr file)."""
+    from core.mode_select import select_mode_model
+    ff = find_firefox()
+    doc = get_doc(force_refresh=True)
+    return select_mode_model(
+        platform, mode=mode, model=model,
+        doc=doc, firefox=ff,
+    )
+
+
 # ---- Core functions (adapted from hmm_bot proven patterns) ----
 
 def find_firefox():
@@ -733,7 +861,7 @@ def main():
     if is_followup:
         result['session_url'] = args.session_url
 
-    # ── Step 1: Navigation ────────────────────────────────────────────────
+    # ── Step 1: Navigation ─────────────────────────────────────────────
     if is_followup:
         logger.info("Step 1: Navigate to existing session (follow-up)")
         logger.info(f"  URL: {args.session_url}")
@@ -749,10 +877,6 @@ def main():
             sys.exit(1)
 
     # Step 1b: Clear stale cache and do fresh inspect.
-    # Navigation rebuilds the page — cached atspi_obj references from
-    # before navigation are stale (point to destroyed DOM nodes).
-    # The element cache may have BOTH old and new entries after inspect.
-    # Clear it first so only fresh entries exist.
     logger.info("Step 1b: Clear cache + fresh inspect after navigation")
     from core.interact import invalidate_cache
     invalidate_cache(platform)
@@ -763,7 +887,7 @@ def main():
         logger.warning(f"Post-navigation inspect failed: {inspect_result.get('error')}")
         # Non-fatal — attach will try its own discovery
 
-    # ── Step 1c: Git connector (if --git-repo specified) ───────────────
+    # ── Step 1c: Git connector (if --git-repo specified) ───────────────────
     if args.git_repo:
         logger.info(f"Step 1c: Connecting git repo: {args.git_repo}")
         if not connect_git_repo(platform, args.git_repo):
@@ -772,15 +896,10 @@ def main():
             result['git_repo'] = args.git_repo
         time.sleep(1)
 
-    # ── Step 2: Attachments ───────────────────────────────────────────────
-    # Follow-ups: NO identity files (KERNEL/IDENTITY). Only attach user files
-    # if explicitly provided with --attach.
-    # Fresh sessions: always build identity package.
+    # ── Step 2: Attachments ───────────────────────────────────────────
     if is_followup:
         if attachments:
             logger.info(f"Step 2: Attaching {len(attachments)} follow-up file(s) (no identity)")
-            # For follow-ups, attach each file directly without identity consolidation.
-            # If multiple files, consolidate them WITHOUT identity prepend.
             if len(attachments) > 1:
                 pkg_path = _consolidate_attachments(attachments, platform)
             else:
@@ -816,20 +935,27 @@ def main():
             time.sleep(3)  # Wait for upload processing
             result['attachment'] = pkg_path
 
-    # ── Step 3: Model/mode selection (skip for follow-ups) ────────────────
-    # Follow-ups inherit model/mode from the original session.
-    # Only allow explicit model/mode override if the user passes the flags.
+    # ── Step 3: Model/mode selection (skip for follow-ups) ──────────────────
+    # For platforms where mode selection requires clicking a React portal
+    # dropdown (Perplexity tools menu), we MUST use the subprocess worker
+    # so the AT-SPI connection is made on the correct dbus session bus.
     if is_followup and not args.model and not args.mode:
         logger.info("Step 3: Model/mode selection skipped (follow-up)")
     elif args.model or args.mode:
         logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
-        from core.mode_select import select_mode_model
-        ff = find_firefox()
-        doc = get_doc(force_refresh=True)
-        sel_result = select_mode_model(
-            platform, mode=args.mode, model=args.model,
-            doc=doc, firefox=ff,
-        )
+        disp = os.environ.get('DISPLAY', '')
+        dbus_addr_file = f'/tmp/dbus_addr_{disp}'
+        use_worker = os.path.isfile(dbus_addr_file)
+
+        if use_worker:
+            logger.info(f"Step 3: Using subprocess worker (dbus_addr found: {dbus_addr_file})")
+            sel_result = _select_mode_via_worker(
+                platform, mode=args.mode, model=args.model, display=disp
+            )
+        else:
+            logger.info("Step 3: Using in-process mode selection (no dbus_addr file)")
+            sel_result = _select_mode_inprocess(platform, mode=args.mode, model=args.model)
+
         if sel_result.get('success'):
             logger.info(f"Mode/model selected: {sel_result.get('selected_mode', sel_result.get('matched', '?'))}")
             if sel_result.get('timeout'):
@@ -846,8 +972,6 @@ def main():
         time.sleep(1)
 
     # Step 3b: VERIFY mode/model in AT-SPI tree before send.
-    # This is the hard gate — DO NOT send without verification.
-    # Same principle as the MCP audit step.
     if args.model or args.mode:
         logger.info("Step 3b: Verifying mode/model in AT-SPI tree")
         target_mode = args.mode or args.model
@@ -855,23 +979,16 @@ def main():
         verify_method = 'none'
 
         # Method 0: Trust selection result.
-        # If select_mode_model() returned success=True AND reported a
-        # selected_item that matches the target, the click landed correctly.
-        # Some platforms (Claude, Grok) close/remove the dropdown element
-        # after selection, making post-selection AT-SPI verification
-        # impossible. Trusting the selection function avoids false negatives.
         sel = result.get('mode_selection', {})
         if sel.get('success') and sel.get('selected_item'):
             selected_name = sel['selected_item'].lower().strip()
             target_lower = target_mode.replace('_', ' ').lower().strip()
-            # Check if selected item name contains the target mode
             if target_lower in selected_name or selected_name.startswith(target_lower):
                 logger.info(f"Mode verified via selection result: '{sel['selected_item']}'")
                 verified = True
                 verify_method = 'selection_result'
 
         # Method 1: Check for deselect button (Gemini tools like Deep Think)
-        # If 'Deselect {mode}' button exists, mode is active
         if not verified:
             ff = find_firefox()
             doc = get_doc(force_refresh=True)
@@ -879,7 +996,6 @@ def main():
                 from core.tree import find_elements as _fe
                 _elements = _fe(doc)
 
-                deselect_name = f"Deselect {target_mode.replace('_', ' ').title()}"
                 for e in _elements:
                     ename = (e.get('name') or '').strip()
                     if ename.lower().startswith('deselect') and \
@@ -928,9 +1044,7 @@ def main():
         sys.exit(1)
 
     # Step 4b: Register monitor session + Neo4j storage
-    # This enables the central monitor to detect response completion
-    # and send notifications via Redis.
-    url = args.session_url  # Use known URL for follow-ups
+    url = args.session_url
     if not url:
         doc = get_doc()
         if doc:
@@ -948,7 +1062,6 @@ def main():
     monitor_id = str(uuid.uuid4())[:8]
     rc = get_redis()
     if rc:
-        # Store pending_prompt for extract linkage
         rc.setex(
             node_key(f"pending_prompt:{platform}"), 3600,
             json.dumps({
@@ -957,7 +1070,6 @@ def main():
                 'message_id': message_id,
             })
         )
-        # Register monitor session
         from tools.send import register_monitor_session, _ensure_central_monitor
         display = os.environ.get('DISPLAY', ':0')
         _ensure_central_monitor(display)
@@ -969,7 +1081,6 @@ def main():
         result['monitor'] = {'id': monitor_id, 'registered': reg.get('registered', False)}
         logger.info(f"Monitor session registered: {monitor_id}")
 
-    # Async mode: return immediately after send + monitor registration
     if getattr(args, 'async_send', False):
         result['success'] = True
         result['mode'] = 'async'
@@ -988,7 +1099,7 @@ def main():
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
-    time.sleep(2)  # Let response fully render
+    time.sleep(2)
 
     # Step 6: Extract response
     logger.info("Step 6: Extracting response")
