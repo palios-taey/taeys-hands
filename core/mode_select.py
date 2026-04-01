@@ -111,12 +111,15 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     # Click trigger to open dropdown
     if not _click_element(trigger, platform):
         return {'success': False, 'error': f'Failed to click {platform} {trigger_key}'}
-    time.sleep(1.0)
+    time.sleep(1.5)
 
     # Scan for menu items — this is the universal approach
     menu_items = find_menu_items(firefox, doc)
     if not menu_items:
-        time.sleep(1.0)
+        time.sleep(1.5)
+        menu_items = find_menu_items(firefox, doc)
+    if not menu_items:
+        time.sleep(2.0)  # Third retry for slow React portal mounts (firefox-esr)
         menu_items = find_menu_items(firefox, doc)
 
     if not menu_items:
