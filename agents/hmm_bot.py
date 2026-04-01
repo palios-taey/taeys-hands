@@ -1140,30 +1140,50 @@ def attach_file(platform: str, file_path: str) -> bool:
             logger.info(f"[{platform}] Clicked attach via xdotool")
         time.sleep(2.0)
         if not _find_dialog_wid():
-            # Perplexity dropdown items aren't in AT-SPI.
-            # Use Down+Enter to select first item (Upload file).
-            # Retry up to 3 times — dropdown rendering is async.
-            for attempt in range(3):
-                inp.press_key('Down')
-                time.sleep(0.5)
-                inp.press_key_split('Return')
-                time.sleep(2.0)
-                if _find_dialog_wid():
-                    logger.info(f"[{platform}] File dialog appeared on attempt {attempt+1}")
-                    break
-                if attempt < 2:
-                    logger.info(f"[{platform}] No dialog yet, retrying Down+Enter ({attempt+1}/3)")
-                    # Re-click the attach button to reopen dropdown
-                    if btn_obj:
-                        try:
-                            ai = btn_obj.get_action_iface()
-                            if ai and ai.get_n_actions() > 0:
-                                ai.do_action(0)
-                        except Exception:
-                            inp.click_at(btn['x'], btn['y'])
-                    else:
-                        inp.click_at(btn['x'], btn['y'])
+            clicked_upload = False
+            firefox = get_firefox(platform)
+            doc2 = get_doc(platform, force_refresh=True)
+            menu_items = find_menu_items(firefox, doc2)
+            if menu_items:
+                for item in menu_items:
+                    name = (item.get('name') or '').strip().lower()
+                    if 'upload file' in name:
+                        if item.get('atspi_obj') and atspi_click(item):
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via AT-SPI")
+                        else:
+                            inp.click_at(item['x'], item['y'])
+                            logger.info(f"[{platform}] Clicked '{item.get('name')}' via xdotool")
+                        clicked_upload = True
+                        time.sleep(2.0)
+                        break
+                if not clicked_upload:
+                    names = [f"'{i.get('name', '')}'" for i in menu_items[:6]]
+                    logger.warning(f"[{platform}] Menu items found but no 'Upload files': {names}")
+            else:
+                logger.warning(f"[{platform}] find_menu_items returned empty — trying keyboard nav")
+
+            if not clicked_upload and not _find_dialog_wid():
+                for attempt in range(3):
+                    inp.press_key('Down')
+                    time.sleep(0.5)
+                    inp.press_key_split('Return')
                     time.sleep(2.0)
+                    if _find_dialog_wid():
+                        logger.info(f"[{platform}] File dialog appeared on attempt {attempt+1}")
+                        break
+                    if attempt < 2:
+                        logger.info(f"[{platform}] No dialog yet, retrying Down+Enter ({attempt+1}/3)")
+                        # Re-click the attach button to reopen dropdown
+                        if btn_obj:
+                            try:
+                                ai = btn_obj.get_action_iface()
+                                if ai and ai.get_n_actions() > 0:
+                                    ai.do_action(0)
+                            except Exception:
+                                inp.click_at(btn['x'], btn['y'])
+                        else:
+                            inp.click_at(btn['x'], btn['y'])
+                        time.sleep(2.0)
     elif platform == 'gemini':
         # Gemini: AT-SPI button click → dropdown → "Upload files" menu item
         btn = None
