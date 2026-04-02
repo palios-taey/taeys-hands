@@ -311,6 +311,15 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         if items:
             return _sorted(items)
 
+    # Pass 3b: Containerless menu items in Firefox root
+    # React portals mount under document.body (Firefox root), outside platform_doc.
+    if firefox:
+        _fallback = ('menu item', 'radio menu item', 'check menu item')
+        all_el = find_elements(firefox)
+        items = [e for e in all_el if e.get('name') and e.get('role', '') in _fallback]
+        if items:
+            return _sorted(items)
+
     # Pass 4: Firefox root (strict then loose containers)
     if firefox:
         items = _collect(firefox, require_item_showing=True, containers=_STRICT)
