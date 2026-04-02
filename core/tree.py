@@ -281,15 +281,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         items.sort(key=lambda x: x['y'])
         return items
 
-    # Pass 0: Firefox root, no SHOWING requirement — catches React portal menus
-    # React portals mount dropdown DOM under document.body, outside platform_doc.
-    # Firefox-ESR may not set SHOWING on freshly-mounted portal nodes immediately.
-    if firefox:
-        items = _collect(firefox, require_showing=False, require_item_showing=False,
-                         containers=_STRICT | _LOOSE)
-        if items:
-            return _sorted(items)
-
     # Pass 1: Strict containers in platform_doc (with SHOWING on container)
     if platform_doc:
         items = _collect(platform_doc, containers=_STRICT)
@@ -307,15 +298,6 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
     if platform_doc:
         _fallback = ('menu item', 'radio menu item', 'check menu item')
         all_el = find_elements(platform_doc)
-        items = [e for e in all_el if e.get('name') and e.get('role', '') in _fallback]
-        if items:
-            return _sorted(items)
-
-    # Pass 3b: Containerless menu items in Firefox root
-    # React portals mount under document.body (Firefox root), outside platform_doc.
-    if firefox:
-        _fallback = ('menu item', 'radio menu item', 'check menu item')
-        all_el = find_elements(firefox)
         items = [e for e in all_el if e.get('name') and e.get('role', '') in _fallback]
         if items:
             return _sorted(items)
