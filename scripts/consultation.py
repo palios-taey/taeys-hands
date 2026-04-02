@@ -981,7 +981,7 @@ def main():
         # Method 0: Trust selection result.
         sel = result.get('mode_selection', {})
         if sel.get('success') and sel.get('selected_item'):
-            selected_name = sel['selected_item'].lower().strip()
+            selected_name = sel['selected_item'].replace('_', ' ').lower().strip()
             target_lower = target_mode.replace('_', ' ').lower().strip()
             if target_lower in selected_name or selected_name.startswith(target_lower):
                 logger.info(f"Mode verified via selection result: '{sel['selected_item']}'")
