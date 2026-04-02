@@ -49,7 +49,9 @@ if os.path.exists(_env_path):
 DISPLAY = os.environ.get('DISPLAY', ':0')
 
 # Shared modules — only what workers-based monitoring needs
+from core.extractor import ExtractorRegistry
 from core.platforms import CHAT_PLATFORMS
+from core.storage_pipeline import StoragePipeline
 from storage.redis_pool import node_key, NODE_ID
 
 # Verify node ID matches expectations — mismatch breaks monitor notifications
@@ -325,6 +327,60 @@ class CentralMonitor:
                 _log(f"Redis notification error: {e}")
         else:
             _log(f"No Redis — notification for {session.get('monitor_id')} dropped")
+
+        if status == "response_complete":
+            self._extract_and_store(session)
+
+    def _extract_and_store(self, session: Dict):
+        """Best-effort extraction and storage after completion notification."""
+        platform = session.get('platform')
+        session_id = session.get('session_id')
+        monitor_id = session.get('monitor_id')
+
+        if not platform:
+            _log(f"[{monitor_id}] Extraction skipped: missing platform")
+            return
+
+        try:
+            from workers.manager import send_to_worker
+
+            extractor = ExtractorRegistry()
+            result = extractor.extract(
+                platform,
+                lambda cmd: send_to_worker(platform, cmd, timeout=120.0),
+            )
+            if not result:
+                _log(f"[{platform}/{monitor_id}] Extraction failed: empty worker result")
+                return
+
+            if result.get("error"):
+                _log(f"[{platform}/{monitor_id}] Extraction failed: {result['error']}")
+                return
+
+            content = result.get("content")
+            if not result.get("success") or not content:
+                _log(
+                    f"[{platform}/{monitor_id}] Extraction failed: "
+                    f"success={result.get('success', False)} content_present={bool(content)}"
+                )
+                return
+
+            content_hash = StoragePipeline().store(
+                platform,
+                content,
+                session_id,
+                monitor_id,
+                self.rc,
+            )
+            if content_hash:
+                _log(
+                    f"[{platform}/{monitor_id}] Extracted {len(content)} chars "
+                    f"from {platform}, stored as {content_hash}"
+                )
+            else:
+                _log(f"[{platform}/{monitor_id}] Extraction skipped: storage returned no content hash")
+        except Exception as e:
+            _log(f"[{platform}/{monitor_id}] Extraction failed: {e}")
 
     def run(self):
         """Main loop — poll workers for completion state every cycle."""
