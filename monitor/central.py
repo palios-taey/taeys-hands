@@ -4,8 +4,9 @@
 Completion detection:
   1. Poll every 2s for stop-button visibility, send-button readiness, and content hash
   2. Persist sticky ever-seen-stop flag per monitor session in Redis
-  3. COMPLETE when stop was seen and is now gone while send is ready
-  4. Fallback COMPLETE when content hash is stable for 2 ticks and send is ready
+  3. PRIMARY COMPLETE when stop was seen and is now gone
+  4. ENHANCED confidence when send is also ready at primary completion time
+  5. Fallback COMPLETE when content hash is stable for 2 ticks and send is ready
 
 URL navigation: verifies session URL matches current tab, navigates if mismatched.
 NO fixed coordinates. Stop button found by AT-SPI name matching.
@@ -257,8 +258,12 @@ class CentralMonitor:
             _log(f"[{platform}/{monitor_id}] stop=YES send={'YES' if send_visible else 'NO'} ({elapsed}s)")
             return False
 
-        if ever_seen_stop and send_visible:
-            _log(f"[{platform}/{monitor_id}] stop=NO send=YES ever_seen=YES → COMPLETE ({elapsed}s)")
+        if ever_seen_stop:
+            confidence = "high" if send_visible else "normal"
+            _log(
+                f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
+                f"ever_seen=YES → COMPLETE confidence={confidence} ({elapsed}s)"
+            )
             self._notify(session, "response_complete", "stop_button")
             return True
 
