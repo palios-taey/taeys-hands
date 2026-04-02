@@ -228,15 +228,24 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         if not (name and role in _ITEM_ROLES):
             return None
         try:
-            if require_showing and not child.get_state_set().contains(Atspi.StateType.SHOWING):
+            state_set = child.get_state_set()
+            if require_showing and not state_set.contains(Atspi.StateType.SHOWING):
                 return None
             comp = child.get_component_iface()
             if comp:
                 ext = comp.get_extents(Atspi.CoordType.SCREEN)
                 if ext.width > 0 and ext.height > 0:
-                    return {'name': name, 'role': role,
-                            'x': ext.x + ext.width // 2, 'y': ext.y + ext.height // 2,
-                            'atspi_obj': child}
+                    item = {
+                        'name': name,
+                        'role': role,
+                        'x': ext.x + ext.width // 2,
+                        'y': ext.y + ext.height // 2,
+                        'atspi_obj': child,
+                    }
+                    states = [s.value_nick for s in IMPORTANT_STATES if state_set.contains(s)]
+                    if states:
+                        item['states'] = states
+                    return item
         except Exception:
             pass
         return None
@@ -245,18 +254,32 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                  require_item_showing=False, containers=None):
         if containers is None:
             containers = _STRICT | _LOOSE
-        found = []
 
-        def search(obj, depth=0):
-            nonlocal found
-            if depth > max_depth or found:
-                return
-            try:
-                role = obj.get_role_name() or ''
-                if role == 'menu bar':
-                    return
-                if role in containers:
-                    if not require_showing or _is_showing(obj):
+        def dedupe(items):
+            merged = []
+            seen = set()
+            for item in items:
+                key = (item.get('name', ''), item.get('role', ''))
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(item)
+            return merged
+
+        current_level = [scope]
+        depth = 0
+
+        while current_level and depth <= max_depth:
+            next_level = []
+            level_items = []
+
+            for obj in current_level:
+                try:
+                    role = obj.get_role_name() or ''
+                    if role == 'menu bar':
+                        continue
+
+                    if role in containers and (not require_showing or _is_showing(obj)):
                         items = []
                         for i in range(min(obj.get_child_count(), 30)):
                             child = obj.get_child_at_index(i)
@@ -265,17 +288,22 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                                 if item:
                                     items.append(item)
                         if items:
-                            found = items
-                            return
-                for i in range(min(obj.get_child_count(), 30)):
-                    child = obj.get_child_at_index(i)
-                    if child:
-                        search(child, depth + 1)
-            except Exception:
-                pass
+                            level_items.extend(items)
 
-        search(scope)
-        return found
+                    for i in range(min(obj.get_child_count(), 30)):
+                        child = obj.get_child_at_index(i)
+                        if child:
+                            next_level.append(child)
+                except Exception:
+                    pass
+
+            if level_items:
+                return dedupe(level_items)
+
+            current_level = next_level
+            depth += 1
+
+        return []
 
     def _sorted(items):
         items.sort(key=lambda x: x['y'])

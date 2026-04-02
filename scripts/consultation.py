@@ -223,121 +223,12 @@ logging.basicConfig(
 logger = logging.getLogger('consultation')
 
 
-# ---- Mode selection via subprocess worker ----
-# consultation.py imports Atspi after setup_env() sets DBUS_SESSION_BUS_ADDRESS
-# to the AT-SPI accessibility bus (/tmp/a11y_bus_:N). This is NOT the same
-# bus that dbus-run-session uses to run Firefox. Atspi.get_desktop(0) connects
-# at first call and caches the connection for the lifetime of the process.
-#
-# React portal dropdowns (Perplexity tools menu, etc.) register their nodes
-# on the dbus-run-session bus. A process connected to the a11y bus can find
-# the Firefox application object (which bridges both), but freshly-mounted
-# portal nodes are only visible on the session bus.
-#
-# Solution: launch select_mode_worker.py as a subprocess with
-# DBUS_SESSION_BUS_ADDRESS set from /tmp/dbus_addr_:N BEFORE any Atspi import.
-# The worker performs mode selection and reports JSON to stdout.
-
-def _read_file_stripped(path: str) -> str:
-    """Read a file and return its stripped content, or empty string."""
-    try:
-        with open(path) as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return ''
-
-
 def _select_mode_via_worker(platform: str, mode: str = None, model: str = None,
                              display: str = None) -> dict:
-    """Run mode selection in a subprocess with the correct dbus session bus.
-
-    This bypasses the AT-SPI bus problem: the worker process starts with
-    DBUS_SESSION_BUS_ADDRESS from /tmp/dbus_addr_:N (the dbus-run-session bus),
-    NOT the a11y bus. This lets Atspi.get_desktop(0) connect to the same
-    registry that Firefox is registered on, making React portal nodes visible.
-
-    Falls back to in-process select_mode_model() if the dbus_addr file is
-    missing (non-Mira environments, or displays launched differently).
-    """
-    disp = display or os.environ.get('DISPLAY', '')
-
-    # Read the dbus-run-session bus address (written by Firefox launch script)
-    dbus_addr_file = f'/tmp/dbus_addr_{disp}'
-    session_bus = _read_file_stripped(dbus_addr_file)
-
-    if not session_bus:
-        logger.warning(
-            f"No dbus_addr file at {dbus_addr_file} — falling back to in-process "
-            f"mode selection (may fail for React portal dropdowns on Perplexity)"
-        )
-        return _select_mode_inprocess(platform, mode, model)
-
-    # Read the a11y bus for AT_SPI_BUS_ADDRESS
-    a11y_bus = _read_file_stripped(f'/tmp/a11y_bus_{disp}')
-
-    # Read Firefox PID for display filtering
-    firefox_pid_str = _read_file_stripped(f'/tmp/firefox_pid_{disp}')
-    firefox_pid = int(firefox_pid_str) if firefox_pid_str.isdigit() else None
-
-    worker_script = os.path.join(_SCRIPT_DIR, 'select_mode_worker.py')
-    if not os.path.isfile(worker_script):
-        logger.error(f"select_mode_worker.py not found at {worker_script}")
-        return _select_mode_inprocess(platform, mode, model)
-
-    cmd = [sys.executable, worker_script, '--platform', platform]
-    if mode:
-        cmd += ['--mode', mode]
-    if model:
-        cmd += ['--model', model]
-    if firefox_pid:
-        cmd += ['--pid', str(firefox_pid)]
-
-    env = os.environ.copy()
-    env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
-    if a11y_bus:
-        env['AT_SPI_BUS_ADDRESS'] = a11y_bus
-    env['DISPLAY'] = disp
-    env['GTK_USE_PORTAL'] = '0'
-    # Forward PYTHONPATH so worker finds project modules
-    env.setdefault('PYTHONPATH', _ROOT)
-    if _ROOT not in env.get('PYTHONPATH', ''):
-        env['PYTHONPATH'] = f"{_ROOT}:{env['PYTHONPATH']}"
-
-    logger.info(
-        f"Launching select_mode_worker: platform={platform} mode={mode} model={model} "
-        f"display={disp} dbus={session_bus[:40]}..."
-    )
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        # Worker logs go to stderr — forward to our logger
-        if proc.stderr:
-            for line in proc.stderr.strip().splitlines():
-                logger.info(f"[worker] {line}")
-
-        stdout = proc.stdout.strip()
-        if not stdout:
-            return {
-                'success': False,
-                'error': f'select_mode_worker produced no output (rc={proc.returncode})',
-            }
-
-        result = json.loads(stdout)
-        logger.info(f"Worker result: {result}")
-        return result
-
-    except subprocess.TimeoutExpired:
-        return {'success': False, 'error': 'select_mode_worker timed out after 30s'}
-    except json.JSONDecodeError as e:
-        return {'success': False, 'error': f'Worker output not valid JSON: {e} / stdout={proc.stdout[:200]}'}
-    except Exception as e:
-        return {'success': False, 'error': f'Worker launch failed: {e}'}
+    """Compatibility wrapper: mode selection now runs in-process."""
+    if display and display != os.environ.get('DISPLAY'):
+        logger.info("Ignoring explicit display override for in-process mode selection: %s", display)
+    return _select_mode_inprocess(platform, mode, model)
 
 
 def _select_mode_inprocess(platform: str, mode: str = None, model: str = None) -> dict:
@@ -936,25 +827,11 @@ def main():
             result['attachment'] = pkg_path
 
     # ── Step 3: Model/mode selection (skip for follow-ups) ──────────────────
-    # For platforms where mode selection requires clicking a React portal
-    # dropdown (Perplexity tools menu), we MUST use the subprocess worker
-    # so the AT-SPI connection is made on the correct dbus session bus.
     if is_followup and not args.model and not args.mode:
         logger.info("Step 3: Model/mode selection skipped (follow-up)")
     elif args.model or args.mode:
         logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
-        disp = os.environ.get('DISPLAY', '')
-        dbus_addr_file = f'/tmp/dbus_addr_{disp}'
-        use_worker = os.path.isfile(dbus_addr_file)
-
-        if use_worker:
-            logger.info(f"Step 3: Using subprocess worker (dbus_addr found: {dbus_addr_file})")
-            sel_result = _select_mode_via_worker(
-                platform, mode=args.mode, model=args.model, display=disp
-            )
-        else:
-            logger.info("Step 3: Using in-process mode selection (no dbus_addr file)")
-            sel_result = _select_mode_inprocess(platform, mode=args.mode, model=args.model)
+        sel_result = _select_mode_inprocess(platform, mode=args.mode, model=args.model)
 
         if sel_result.get('success'):
             logger.info(f"Mode/model selected: {sel_result.get('selected_mode', sel_result.get('matched', '?'))}")
