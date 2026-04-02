@@ -24,6 +24,8 @@ import socket
 import sys
 import time
 import traceback
+from fnmatch import fnmatch
+import hashlib
 
 # ─── MUST set display env before any AT-SPI/GTK imports ─────────────
 def _setup_display_env(display: str):
@@ -251,6 +253,12 @@ def handle_command(cmd_data: dict) -> dict:
             # Monitor support: check if stop button is visible
             return _check_stop_button()
 
+        elif cmd == 'get_send_button_state':
+            return _get_send_button_state()
+
+        elif cmd == 'get_content_hash':
+            return _get_content_hash()
+
         else:
             return {'error': f'Unknown command: {cmd}'}
 
@@ -300,6 +308,157 @@ def _check_stop_button() -> dict:
 
     stop_found = _scan(doc)
     return {'stop_found': stop_found, 'platform': PLATFORM}
+
+
+def _get_monitor_document():
+    """Get the active Firefox document for this worker platform."""
+    from core import atspi
+
+    firefox = atspi.find_firefox_for_platform(PLATFORM)
+    if not firefox:
+        return None, None, {'error': 'Firefox not found'}
+
+    doc = atspi.get_platform_document(firefox, PLATFORM)
+    if not doc:
+        return firefox, None, {'error': 'Document not found'}
+
+    return firefox, doc, None
+
+
+def _get_state_names(obj) -> set:
+    try:
+        state_set = obj.get_state_set()
+    except Exception:
+        return set()
+
+    names = set()
+    for state_name in ('showing', 'visible', 'enabled', 'editable',
+                       'focusable', 'focused', 'selected', 'checked', 'pressed'):
+        state = getattr(Atspi.StateType, state_name.upper(), None)
+        if state and state_set.contains(state):
+            names.add(state_name)
+    return names
+
+
+def _scan_named_elements(obj, elements, depth=0):
+    if depth > 25:
+        return
+    try:
+        name = (obj.get_name() or '').strip()
+        role = obj.get_role_name() or ''
+        if name:
+            elements.append({
+                'name': name,
+                'role': role,
+                'states': _get_state_names(obj),
+            })
+        for i in range(obj.get_child_count()):
+            child = obj.get_child_at_index(i)
+            if child:
+                _scan_named_elements(child, elements, depth + 1)
+    except Exception:
+        return
+
+
+def _value_matches(value: str, expected) -> bool:
+    if expected is None:
+        return True
+    if isinstance(expected, list):
+        return any(_value_matches(value, item) for item in expected)
+    if isinstance(expected, str):
+        return value == expected
+    return False
+
+
+def _contains_matches(value: str, expected) -> bool:
+    if expected is None:
+        return True
+    if isinstance(expected, list):
+        return any(_contains_matches(value, item) for item in expected)
+    if isinstance(expected, str):
+        return expected in value
+    return False
+
+
+def _spec_matches(element: dict, spec: dict) -> bool:
+    name = (element.get('name') or '').strip()
+    role = element.get('role') or ''
+    states = set(element.get('states') or set())
+
+    if 'name' in spec and not _value_matches(name, spec.get('name')):
+        return False
+    if 'name_contains' in spec and not _contains_matches(name, spec.get('name_contains')):
+        return False
+    if 'name_pattern' in spec:
+        patterns = spec.get('name_pattern')
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not any(fnmatch(name.lower(), pattern.lower()) for pattern in patterns):
+            return False
+    if 'role' in spec and role != spec.get('role'):
+        return False
+    if 'role_contains' in spec:
+        role_contains = spec.get('role_contains')
+        if isinstance(role_contains, str):
+            role_contains = [role_contains]
+        if not any(token in role for token in role_contains):
+            return False
+    required_states = set(spec.get('states_include') or [])
+    if required_states and not required_states.issubset(states):
+        return False
+    return True
+
+
+def _find_send_button(elements) -> dict:
+    from core.config import get_platform_config
+
+    config = get_platform_config(PLATFORM)
+    element_map = config.get('element_map', {})
+    send_keys = ('send_button', 'submit_button')
+    candidates = [element_map[key] for key in send_keys if key in element_map]
+    if not candidates:
+        return {}
+
+    for element in elements:
+        for spec in candidates:
+            if _spec_matches(element, spec):
+                return element
+    return {}
+
+
+def _get_send_button_state() -> dict:
+    """Report whether the send/submit button is visible and enabled."""
+    _, doc, error = _get_monitor_document()
+    if error:
+        return {'send_visible': False, **error}
+
+    elements = []
+    _scan_named_elements(doc, elements)
+    send_button = _find_send_button(elements)
+    send_visible = bool(send_button) and 'enabled' in send_button.get('states', set())
+    return {'send_visible': send_visible, 'platform': PLATFORM}
+
+
+def _get_content_hash() -> dict:
+    """Hash the visible document text snapshot for stability detection."""
+    _, doc, error = _get_monitor_document()
+    if error:
+        return {'content_hash': '', **error}
+
+    elements = []
+    _scan_named_elements(doc, elements)
+
+    chunks = []
+    for element in elements:
+        role = (element.get('role') or '').strip()
+        name = (element.get('name') or '').strip()
+        if not name:
+            continue
+        chunks.append(f"{role}:{name}")
+
+    content_blob = "\n".join(chunks)
+    content_hash = hashlib.sha256(content_blob.encode('utf-8')).hexdigest() if content_blob else ''
+    return {'content_hash': content_hash, 'platform': PLATFORM}
 
 
 # ─── Unix socket server ─────────────────────────────────────────────
