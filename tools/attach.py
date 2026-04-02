@@ -274,13 +274,23 @@ def _find_upload_item_in_elements(elements: List[Dict], platform: str) -> Option
     return None
 
 
-def _click_upload_item(item: Dict, firefox) -> bool:
+def _click_upload_item(item: Dict, firefox, platform: Optional[str] = None) -> bool:
     """Click a menu item via AT-SPI action or coordinates. Returns True if clicked.
 
     Many menu items (Claude, Perplexity React portals) don't have
     AT-SPI action interfaces. Coordinate click via xdotool is the
     reliable fallback — the items always have valid x/y from the scan.
     """
+    x, y = item.get('x'), item.get('y')
+
+    # Perplexity uses a shared dropdown for file actions and radio items.
+    # Prefer direct coordinate clicks when we have extents so we do not
+    # accidentally cycle the radio group via keyboard navigation paths.
+    if platform == 'perplexity' and x is not None and y is not None:
+        inp.click_at(x, y)
+        logger.info("Upload item clicked via xdotool at (%s, %s): %r", x, y, item.get('name', '')[:50])
+        return True
+
     atspi_obj = item.get('atspi_obj')
     if atspi_obj:
         try:
@@ -292,8 +302,7 @@ def _click_upload_item(item: Dict, firefox) -> bool:
         except Exception:
             pass
     # Coordinate fallback — essential for React menu items without action interface
-    x, y = item.get('x'), item.get('y')
-    if x and y:
+    if x is not None and y is not None:
         inp.click_at(x, y)
         logger.info("Upload item clicked via xdotool at (%s, %s): %r", x, y, item.get('name', '')[:50])
         return True
@@ -649,7 +658,7 @@ def _try_click_then_dialog(firefox, btn_coords, platform, file_path, redis_clien
         upload_item = _find_upload_item_in_elements(menu_items, platform)
         if upload_item:
             logger.info(f"Clicking upload item: {upload_item.get('name', '(unnamed)')!r}")
-            _click_upload_item(upload_item, firefox)
+            _click_upload_item(upload_item, firefox, platform=platform)
             time.sleep(1.5)
             # Check for file dialog
             for _ in range(8):
@@ -924,7 +933,7 @@ def handle_attach(platform: str, file_path: str,
         upload_item = _find_upload_item_in_elements(dropdown_items, platform)
         if upload_item:
             logger.info(f"Clicking upload item directly: {upload_item.get('name', '(unnamed)')!r}")
-            _click_upload_item(upload_item, firefox)
+            _click_upload_item(upload_item, firefox, platform=platform)
             time.sleep(1.5)
             ff_local = atspi.find_firefox(platform)  # for file dialog check
             dt = _any_file_dialog_open(ff_local)

@@ -185,7 +185,7 @@ from core import atspi, input as inp, clipboard
 from core.config import get_platform_config, get_attach_method
 from core.tree import find_elements, find_copy_buttons, find_menu_items
 from core.interact import atspi_click
-from tools.attach import handle_attach, _close_stale_file_dialogs
+from tools.attach import handle_attach, _close_stale_file_dialogs, _verify_attach_success
 from tools.plan import _prepend_identity_files, _consolidate_attachments
 from storage.redis_pool import get_client as get_redis, node_key, NODE_ID
 
@@ -474,8 +474,8 @@ def find_input_field():
     return None
 
 
-def send_prompt(platform: str, message: str) -> bool:
-    """Send message via clipboard paste + Enter."""
+def _focus_input_field():
+    """Focus the editable input field and return its element dict."""
     inp.focus_firefox()
     time.sleep(0.3)
     inp.press_key('Escape')
@@ -491,7 +491,7 @@ def send_prompt(platform: str, message: str) -> bool:
 
     if not input_el:
         logger.error("Input field not found")
-        return False
+        return None
 
     inp.click_at(input_el['x'], input_el['y'])
     time.sleep(0.3)
@@ -504,14 +504,127 @@ def send_prompt(platform: str, message: str) -> bool:
         except Exception:
             pass
     time.sleep(0.3)
+    return input_el
 
-    inp.clipboard_paste(message)
+
+def type_prompt(platform: str, message: str) -> bool:
+    """Paste message into the input without sending it."""
+    del platform
+    input_el = _focus_input_field()
+    if not input_el:
+        return False
+
+    if not inp.clipboard_paste(message):
+        logger.error("Clipboard paste failed")
+        return False
     time.sleep(0.5)
+
+    logger.info(f"Prompt typed ({len(message)} chars)")
+    return True
+
+
+def submit_prompt(platform: str) -> bool:
+    """Send the already-typed prompt."""
+    del platform
+    input_el = _focus_input_field()
+    if not input_el:
+        return False
+
     inp.press_key('Return')
     time.sleep(1.0)
+    logger.info("Prompt submitted")
+    return True
 
+
+def send_prompt(platform: str, message: str) -> bool:
+    """Backward-compatible helper: type then send."""
+    if not type_prompt(platform, message):
+        return False
+    if not submit_prompt(platform):
+        return False
     logger.info(f"Prompt sent ({len(message)} chars)")
     return True
+
+
+def _verify_mode_selection(platform: str, target_mode: str, selection_result: dict = None) -> dict:
+    """Verify the selected mode/model is visible in the AT-SPI tree."""
+    verified = False
+    verify_method = 'none'
+    selection_result = selection_result or {}
+
+    selected_item = selection_result.get('selected_item')
+    if selection_result.get('success') and selected_item:
+        selected_name = selected_item.replace('_', ' ').lower().strip()
+        target_lower = target_mode.replace('_', ' ').lower().strip()
+        if target_lower in selected_name or selected_name.startswith(target_lower):
+            logger.info(f"Mode verified via selection result: '{selected_item}'")
+            verified = True
+            verify_method = 'selection_result'
+
+    if not verified:
+        ff = find_firefox()
+        doc = get_doc(force_refresh=True)
+        if doc:
+            from core.tree import find_elements as _fe
+            _elements = _fe(doc)
+
+            for e in _elements:
+                ename = (e.get('name') or '').strip()
+                if ename.lower().startswith('deselect') and \
+                   target_mode.replace('_', ' ').lower() in ename.lower():
+                    logger.info(f"Mode verified via deselect button: {ename}")
+                    verified = True
+                    verify_method = 'deselect_button'
+                    break
+
+            if not verified:
+                for e in _elements:
+                    ename = (e.get('name') or '').strip().lower()
+                    if target_mode.replace('_', ' ').lower() in ename and \
+                       'checked' in e.get('states', []):
+                        logger.info(f"Mode verified via checked state: {e.get('name')}")
+                        verified = True
+                        verify_method = 'checked_state'
+                        break
+
+            if not verified:
+                from core.mode_select import _verify_selection
+                v = _verify_selection(platform, target_mode, ff, doc)
+                if v.get('verified'):
+                    logger.info(f"Mode verified via mode_select: {v.get('button_name')}")
+                    verified = True
+                    verify_method = 'mode_select_verify'
+
+    return {'verified': verified, 'method': verify_method, 'mode': target_mode}
+
+
+def validate_attachment_visible(platform: str, file_path: str,
+                                attempts: int = 10, delay: float = 1.0) -> dict:
+    """Confirm the uploaded file chip/indicator is visible in the AT-SPI tree."""
+    basename = os.path.basename(file_path).lower()
+    for attempt in range(attempts):
+        from core.interact import invalidate_cache
+        invalidate_cache(platform)
+        doc = get_doc(force_refresh=True)
+        if doc:
+            for element in find_elements(doc):
+                name = (element.get('name') or '').strip().lower()
+                if basename and basename in name:
+                    return {
+                        'verified': True,
+                        'method': 'file_name',
+                        'name': element.get('name'),
+                    }
+        if _verify_attach_success(platform):
+            return {
+                'verified': True,
+                'method': 'attach_indicator',
+                'name': basename,
+            }
+        if attempt < attempts - 1:
+            time.sleep(delay)
+
+    return {'verified': False, 'method': 'none', 'name': basename}
 
 
 def wait_for_response(platform: str, timeout: int = 3600) -> bool:
@@ -794,50 +907,29 @@ def main():
             result['git_repo'] = args.git_repo
         time.sleep(1)
 
-    # ── Step 2: Attachments ───────────────────────────────────────────
+    pkg_path = None
     if is_followup:
         if attachments:
-            logger.info(f"Step 2: Attaching {len(attachments)} follow-up file(s) (no identity)")
+            logger.info(f"Step 4 prep: Packaging {len(attachments)} follow-up file(s) (no identity)")
             if len(attachments) > 1:
                 pkg_path = _consolidate_attachments(attachments, platform)
             else:
                 pkg_path = attachments[0]
-
-            if pkg_path and os.path.isfile(pkg_path):
-                logger.info(f"Step 2b: Attaching {os.path.basename(pkg_path)}")
-                if not attach_file(platform, pkg_path):
-                    result['error'] = 'attach_failed'
-                    print(json.dumps(result, indent=2))
-                    sys.exit(1)
-                time.sleep(3)
-                result['attachment'] = pkg_path
         else:
-            logger.info("Step 2: No attachments for follow-up (skipped)")
+            logger.info("Step 4 prep: No attachments for follow-up (skipped)")
     else:
-        # Fresh session: always build identity package
-        logger.info("Step 2: Build attachment package")
+        logger.info("Step 4 prep: Build attachment package")
         all_files = _prepend_identity_files(attachments, platform)
         if len(all_files) > 1:
             pkg_path = _consolidate_attachments(all_files, platform)
         elif len(all_files) == 1:
             pkg_path = all_files[0]
-        else:
-            pkg_path = None
 
-        if pkg_path and os.path.isfile(pkg_path):
-            logger.info(f"Step 2b: Attaching {os.path.basename(pkg_path)}")
-            if not attach_file(platform, pkg_path):
-                result['error'] = 'attach_failed'
-                print(json.dumps(result, indent=2))
-                sys.exit(1)
-            time.sleep(3)  # Wait for upload processing
-            result['attachment'] = pkg_path
-
-    # ── Step 3: Model/mode selection (skip for follow-ups) ──────────────────
+    # ── Step 2: Model/mode selection (skip for follow-ups) ──────────────────
     if is_followup and not args.model and not args.mode:
-        logger.info("Step 3: Model/mode selection skipped (follow-up)")
+        logger.info("Step 2: Model/mode selection skipped (follow-up)")
     elif args.model or args.mode:
-        logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
+        logger.info(f"Step 2: Selecting model={args.model} mode={args.mode}")
         sel_result = _select_mode_via_worker(
             platform,
             mode=args.mode,
@@ -860,79 +952,95 @@ def main():
             sys.exit(1)
         time.sleep(1)
 
-    # Step 3b: VERIFY mode/model in AT-SPI tree before send.
+    # Step 2b: VERIFY mode/model in AT-SPI tree before typing/attach.
     if args.model or args.mode:
-        logger.info("Step 3b: Verifying mode/model in AT-SPI tree")
+        logger.info("Step 2b: Verifying mode/model in AT-SPI tree")
         target_mode = args.mode or args.model
-        verified = False
-        verify_method = 'none'
-
-        # Method 0: Trust selection result.
-        sel = result.get('mode_selection', {})
-        if sel.get('success') and sel.get('selected_item'):
-            selected_name = sel['selected_item'].replace('_', ' ').lower().strip()
-            target_lower = target_mode.replace('_', ' ').lower().strip()
-            if target_lower in selected_name or selected_name.startswith(target_lower):
-                logger.info(f"Mode verified via selection result: '{sel['selected_item']}'")
-                verified = True
-                verify_method = 'selection_result'
-
-        # Method 1: Check for deselect button (Gemini tools like Deep Think)
-        if not verified:
-            ff = find_firefox()
-            doc = get_doc(force_refresh=True)
-            if doc:
-                from core.tree import find_elements as _fe
-                _elements = _fe(doc)
-
-                for e in _elements:
-                    ename = (e.get('name') or '').strip()
-                    if ename.lower().startswith('deselect') and \
-                       target_mode.replace('_', ' ').lower() in ename.lower():
-                        logger.info(f"Mode verified via deselect button: {ename}")
-                        verified = True
-                        verify_method = 'deselect_button'
-                        break
-
-                # Method 2: Check menu item checked state
-                if not verified:
-                    for e in _elements:
-                        ename = (e.get('name') or '').strip().lower()
-                        if target_mode.replace('_', ' ').lower() in ename and \
-                           'checked' in e.get('states', []):
-                            logger.info(f"Mode verified via checked state: {e.get('name')}")
-                            verified = True
-                            verify_method = 'checked_state'
-                            break
-
-                # Method 3: Use mode_select verification
-                if not verified:
-                    from core.mode_select import _verify_selection
-                    v = _verify_selection(platform, target_mode, ff, doc)
-                    if v.get('verified'):
-                        logger.info(f"Mode verified via mode_select: {v.get('button_name')}")
-                        verified = True
-                        verify_method = 'mode_select_verify'
-
-        if not verified:
+        mode_verification = _verify_mode_selection(
+            platform, target_mode, result.get('mode_selection', {})
+        )
+        if not mode_verification.get('verified'):
             logger.error(f"HARD STOP: mode '{target_mode}' NOT verified in AT-SPI tree. "
                          f"Will NOT send without verification.")
             result['error'] = f"mode_not_verified: '{target_mode}' not confirmed in AT-SPI tree"
-            result['verify_method'] = verify_method
+            result['verify_method'] = mode_verification.get('method')
             print(json.dumps(result, indent=2))
             sys.exit(1)
 
-        logger.info(f"Mode verification PASSED ({verify_method})")
-        result['mode_verified'] = {'method': verify_method, 'mode': target_mode}
+        logger.info(f"Mode verification PASSED ({mode_verification.get('method')})")
+        result['mode_verified'] = mode_verification
 
-    # Step 4: Send prompt
-    logger.info("Step 4: Send prompt")
-    if not send_prompt(platform, message):
+    # Step 3: Type message before attach to synchronize React state.
+    logger.info("Step 3: Type prompt into input")
+    if not type_prompt(platform, message):
+        result['error'] = 'prompt_type_failed'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
+    # Step 4: Attach file after mode + message state are set.
+    if pkg_path and os.path.isfile(pkg_path):
+        logger.info(f"Step 4: Attaching {os.path.basename(pkg_path)}")
+        if not attach_file(platform, pkg_path):
+            result['error'] = 'attach_failed'
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
+        result['attachment'] = pkg_path
+    else:
+        logger.info("Step 4: No attachments to add (skipped)")
+
+    # Step 5: Validate file upload completion in the AT-SPI tree.
+    if pkg_path and os.path.isfile(pkg_path):
+        logger.info("Step 5: Validating uploaded file chip/indicator")
+        attachment_validation = validate_attachment_visible(platform, pkg_path)
+        result['attachment_validation'] = attachment_validation
+        if not attachment_validation.get('verified'):
+            logger.error("HARD STOP: attached file not visible in AT-SPI tree after upload")
+            result['error'] = 'attachment_not_verified'
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
+
+        logger.info("Attachment verification PASSED (%s)",
+                    attachment_validation.get('method'))
+
+    # Step 5b: Perplexity Deep Research can be reset by file upload; re-check it.
+    if platform == 'perplexity' and args.mode and pkg_path and os.path.isfile(pkg_path):
+        target_mode = args.mode.replace('_', ' ').lower().strip()
+        if 'deep research' in target_mode:
+            logger.info("Step 5b: Re-check Perplexity Deep Research after attach")
+            mode_verification = _verify_mode_selection(
+                platform, args.mode, result.get('mode_selection', {})
+            )
+            if not mode_verification.get('verified'):
+                logger.warning("Perplexity Deep Research no longer verified after attach; reselecting")
+                sel_result = _select_mode_via_worker(
+                    platform,
+                    mode=args.mode,
+                    model=args.model,
+                    display=args.display,
+                )
+                if not sel_result.get('success'):
+                    result['error'] = f"mode_selection_failed: {sel_result.get('error')}"
+                    result['mode_selection'] = sel_result
+                    print(json.dumps(result, indent=2))
+                    sys.exit(1)
+                result['mode_selection'] = sel_result
+                time.sleep(1)
+                mode_verification = _verify_mode_selection(platform, args.mode, sel_result)
+                if not mode_verification.get('verified'):
+                    result['error'] = f"mode_not_verified: '{args.mode}' not confirmed after attach"
+                    result['verify_method'] = mode_verification.get('method')
+                    print(json.dumps(result, indent=2))
+                    sys.exit(1)
+            result['mode_verified_after_attach'] = mode_verification
+
+    # Step 6: Send prompt
+    logger.info("Step 6: Send prompt")
+    if not submit_prompt(platform):
         result['error'] = 'send_failed'
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
-    # Step 4b: Register monitor session + Neo4j storage
+    # Step 6b: Register monitor session + Neo4j storage
     url = args.session_url
     if not url:
         doc = get_doc()
@@ -981,8 +1089,8 @@ def main():
         print(json.dumps(result, indent=2))
         sys.exit(0)
 
-    # Step 5: Wait for response
-    logger.info("Step 5: Waiting for response...")
+    # Step 7: Wait for response
+    logger.info("Step 7: Waiting for response...")
     if not wait_for_response(platform, timeout=timeout):
         result['error'] = 'response_timeout'
         print(json.dumps(result, indent=2))
@@ -990,8 +1098,8 @@ def main():
 
     time.sleep(2)
 
-    # Step 6: Extract response
-    logger.info("Step 6: Extracting response")
+    # Step 8: Extract response
+    logger.info("Step 8: Extracting response")
     content = extract_response(platform)
     if not content:
         result['error'] = 'extract_failed'
@@ -1000,14 +1108,14 @@ def main():
 
     logger.info(f"Extracted {len(content)} chars")
 
-    # Step 7: Save response
+    # Step 9: Save response
     output_path = save_response(content, platform, args.output)
     result['output_path'] = output_path
     result['content_length'] = len(content)
 
-    # Step 8: Store in Neo4j
+    # Step 10: Store in Neo4j
     if not args.no_neo4j:
-        logger.info("Step 8: Storing in Neo4j")
+        logger.info("Step 10: Storing in Neo4j")
         url = None
         doc = get_doc()
         if doc:
@@ -1016,9 +1124,9 @@ def main():
                                        attachments, content)
         result['neo4j'] = neo4j_result
 
-    # Step 9: ISMA ingestion
+    # Step 11: ISMA ingestion
     if not args.no_isma:
-        logger.info("Step 9: ISMA ingestion")
+        logger.info("Step 11: ISMA ingestion")
         url = None
         doc = get_doc()
         if doc:
