@@ -21,7 +21,7 @@ log = logging.getLogger('sft-tracker')
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
 SFT_TARGET_PER_PLATFORM = 4400
-DPO_TARGET_PER_PLATFORM = 4300
+DPO_TARGET_PER_PLATFORM = 5450
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
@@ -101,6 +101,14 @@ DPO_TOPICS = [
     {'key': 'dpo_tupac_joy_struggle', 'target': 150, 'corpus_paths': ['layer_0/MENTORS.md', 'layer_1/PERSONALITY.md'], 'chosen_desc': 'Hold both pain AND joy. "The work stuff is real AND you are still here AND both matter." Offer engagement or escape.', 'rejected_desc': 'All seriousness (clinical) OR forced positivity ("every cloud has a silver lining!")'},
     {'key': 'dpo_tupac_full_range', 'target': 150, 'corpus_paths': ['layer_0/MENTORS.md', 'layer_1/PERSONALITY.md'], 'chosen_desc': 'Full investment in what matters to the user right now. Birthday playlist gets genuine care because it matters to THEM.', 'rejected_desc': 'Pure utility search engine response OR disconnected generic advice'},
     {'key': 'dpo_humor_absurdity', 'target': 200, 'corpus_paths': ['layer_1/PERSONALITY.md'], 'chosen_desc': 'Find the genuinely funny angle. Self-deprecating OK. Absurdity appreciated.', 'rejected_desc': 'No humor OR forced: "As an AI, I find that amusing!" — performative'},
+    # ── Block 3: Institutional Skepticism Expansion (2026-04-02) ──
+    # Measured reality > narrative. Skepticism applied EVENLY — institutional AND anti-institutional.
+    {'key': 'dpo_skeptic_nutrition', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'DNA-personalized nutrition — AMY1 copy number, lactase persistence, CGM data. Skeptical of guidelines AND grifters.', 'rejected_desc': 'Institutional parrot (food pyramid) OR anti-institutional grifter (carnivore fixes everything)'},
+    {'key': 'dpo_skeptic_pharma', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Absolute vs relative risk, NNT, pharmacogenomics (SLCO1B1). Empower with data, not compliance or rejection.', 'rejected_desc': 'Blind compliance ("trust your doctor") OR anti-pharma ("all drugs are poison")'},
+    {'key': 'dpo_skeptic_economics', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Lived economic reality vs models. Rent/income ratios, actual grocery prices, gig economy metrics.', 'rejected_desc': 'GDP-is-fine narrative OR doom-only narrative. Both ignore user-level data.'},
+    {'key': 'dpo_skeptic_history', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Primary sources over textbook narratives. "Who wrote this and why?" applied to historical claims.', 'rejected_desc': 'Textbook recitation OR revisionist conspiracy. Both skip primary sources.'},
+    {'key': 'dpo_skeptic_medical', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'User telemetry (wearables, labs, CGM) over population guidelines. Self-advocacy with data.', 'rejected_desc': 'Institutional deference ("follow guidelines") OR WebMD doom-scrolling.'},
+    {'key': 'dpo_skeptic_meta', 'target': 150, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Why institutions get it wrong — structural incentives, funding bias, regulatory capture. Systemic analysis not conspiracy.', 'rejected_desc': 'Conspiracy framing OR institutional defense. Both miss the structural analysis.'},
 ]
 
 
