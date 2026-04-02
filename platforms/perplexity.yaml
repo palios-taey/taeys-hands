@@ -34,12 +34,13 @@ capabilities:
     - More
   sources: []
 
-# Click strategy: atspi_first — xdotool synthetic mousedown triggers React portal
-# dismiss handler, closing dropdown before item activates. AT-SPI do_action bypasses this.
-click_strategy: atspi_first
+# Click strategy: xdotool_first — AT-SPI do_action does NOT open the dropdown.
+# xdotool coordinate click is required to trigger the React onClick handler.
+# The DROPDOWN ITEMS are then found via AT-SPI find_menu_items() (they ARE in the tree).
+click_strategy: xdotool_first
 
 # How attach works: click "Add files or tools" → AT-SPI menu → click item
-attach_method: keyboard_nav
+attach_method: atspi_menu
 # How dropdowns work: AT-SPI enumerates menu items
 dropdown_method: atspi_enum
 
