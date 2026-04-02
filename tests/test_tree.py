@@ -81,3 +81,26 @@ def test_find_menu_items_collects_sibling_containers_and_dedupes():
     items = find_menu_items(None, root)
 
     assert [item['name'] for item in items] == ['Deep Research', 'Normal']
+
+
+def test_find_menu_items_uses_flat_search_across_split_siblings():
+    from core.tree import Atspi, find_menu_items
+
+    showing = {Atspi.StateType.SHOWING}
+    section = _FakeNode(
+        'section',
+        children=[_FakeNode('option', 'Deep Research', states=showing, y=20)],
+        states=showing,
+        y=10,
+    )
+    panel = _FakeNode(
+        'panel',
+        children=[_FakeNode('option', 'Normal', states=showing, y=40)],
+        states=showing,
+        y=15,
+    )
+    root = _FakeNode('document frame', children=[section, panel], states=showing)
+
+    items = find_menu_items(None, root)
+
+    assert [item['name'] for item in items] == ['Deep Research', 'Normal']
