@@ -99,6 +99,7 @@ from tools.dropdown import handle_select_dropdown, handle_prepare  # noqa: E402
 from tools.plan import handle_plan  # noqa: E402
 from tools.sessions import handle_list_sessions  # noqa: E402
 from tools.monitors import handle_monitors  # noqa: E402
+from tools.mode_select import handle_select_mode  # noqa: E402
 
 # ─── Logging ─────────────────────────────────────────────────────────
 
@@ -229,6 +230,13 @@ def handle_command(cmd_data: dict) -> dict:
             return handle_select_dropdown(
                 PLATFORM, dropdown, target_value, rc,
             )
+
+        elif cmd == 'select_mode':
+            mode = cmd_data.get('mode') or cmd_data.get('mode_name')
+            model = cmd_data.get('model')
+            if not mode and not model:
+                return {'error': 'mode or model required'}
+            return handle_select_mode(PLATFORM, mode=mode, model=model)
 
         elif cmd == 'list_sessions':
             return handle_list_sessions(
