@@ -382,6 +382,26 @@ def _click_element(element: Dict, platform: str) -> bool:
         return atspi_click(element)
 
 
+def _is_selected_item(item: Dict) -> bool:
+    """Check whether a menu item is already active before clicking it."""
+    states = {str(s).lower() for s in item.get('states', [])}
+    if 'checked' in states or 'selected' in states:
+        return True
+
+    obj = item.get('atspi_obj')
+    if not obj:
+        return False
+
+    try:
+        state_set = obj.get_state_set()
+        return (
+            state_set.contains(atspi.Atspi.StateType.CHECKED) or
+            state_set.contains(atspi.Atspi.StateType.SELECTED)
+        )
+    except Exception:
+        return False
+
+
 def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
     """Find matching item by name and click it."""
     from core.interact import atspi_click
@@ -415,6 +435,18 @@ def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
         for term in search_terms:
             if term in item_name or item_name.startswith(term):
                 logger.info(f"[{platform}] Menu match: '{item.get('name')}' for mode '{mode_key}'")
+
+                if _is_selected_item(item):
+                    logger.info(
+                        f"[{platform}] Item '{item.get('name')}' already selected; skipping click"
+                    )
+                    return {
+                        'success': True,
+                        'selected_mode': mode_key,
+                        'selected_item': item.get('name', ''),
+                        'platform': platform,
+                        'method': 'already_selected',
+                    }
 
                 clicked = False
                 if item.get('atspi_obj'):

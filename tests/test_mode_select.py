@@ -92,3 +92,27 @@ def test_element_map_coverage():
         em = config.get('element_map', {})
         for key in required_keys:
             assert key in em, f"{platform} missing element_map.{key}"
+
+
+def test_match_and_click_skips_click_for_already_selected(monkeypatch):
+    """Already-selected menu items should not be clicked again."""
+    from core.mode_select import _match_and_click
+
+    clicked = {'value': False}
+
+    def fail_click(_item):
+        clicked['value'] = True
+        raise AssertionError("click should not be attempted for already-selected item")
+
+    monkeypatch.setattr('core.interact.atspi_click', fail_click)
+
+    result = _match_and_click(
+        [{'name': 'Deep Research', 'role': 'check menu item', 'states': ['checked']}],
+        'deep_research',
+        'perplexity',
+    )
+
+    assert result.get('success') is True
+    assert result.get('method') == 'already_selected'
+    assert result.get('selected_item') == 'Deep Research'
+    assert clicked['value'] is False
