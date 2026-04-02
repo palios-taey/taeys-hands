@@ -449,6 +449,9 @@ def navigate_fresh_session(platform: str) -> bool:
 
 def attach_file(platform: str, file_path: str) -> bool:
     """Attach a file using the MCP attach handler."""
+    if platform in ('chatgpt', 'claude') and (args.model or args.mode):
+        _prepare_attach_after_mode_change(platform)
+
     rc = get_redis()
     result = handle_attach(platform, file_path, rc)
     status = result.get('status', '')
@@ -461,6 +464,62 @@ def attach_file(platform: str, file_path: str) -> bool:
     else:
         logger.error(f"Attach failed: {result.get('error', result)}")
         return False
+
+
+def _refresh_platform_tree(platform: str):
+    """Invalidate cached AT-SPI state and re-read the active platform tree."""
+    from core.interact import invalidate_cache
+
+    invalidate_cache(platform)
+    ff = find_firefox()
+    if ff:
+        try:
+            ff.clear_cache_single()
+        except Exception:
+            pass
+    doc = get_doc()
+    if doc:
+        try:
+            doc.clear_cache_single()
+        except Exception:
+            pass
+    return doc
+
+
+def _restore_input_focus():
+    """Click the message input to restore composer focus after UI changes."""
+    input_el = find_input_field()
+    if not input_el:
+        logger.warning("Input field not found while restoring focus")
+        return False
+
+    inp.click_at(input_el['x'], input_el['y'])
+    time.sleep(0.3)
+    obj = input_el.get('atspi_obj')
+    if obj:
+        try:
+            comp = obj.get_component_iface()
+            if comp:
+                comp.grab_focus()
+        except Exception:
+            pass
+    time.sleep(0.3)
+    return True
+
+
+def _prepare_attach_after_mode_change(platform: str):
+    """Stabilize ChatGPT/Claude after mode changes before attach discovery."""
+    if platform not in ('chatgpt', 'claude'):
+        return
+
+    logger.info("Stabilizing %s composer after mode change", platform)
+    inp.focus_firefox()
+    time.sleep(0.3)
+    inp.press_key('Escape')
+    time.sleep(1.5)
+    _refresh_platform_tree(platform)
+    _restore_input_focus()
+    _refresh_platform_tree(platform)
 
 
 def find_input_field():
