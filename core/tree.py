@@ -210,7 +210,7 @@ def find_copy_buttons(elements: List[Dict]) -> List[Dict]:
 
 
 def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
-    """Find visible menu items (4-pass: strict doc, containerless doc, strict firefox, loose)."""
+    """Find visible menu items with flat subtree search and container fallback."""
     _ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
     _STRICT = {'menu', 'popup menu', 'listbox'}
     _LOOSE = {'list', 'panel'}
@@ -250,21 +250,49 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
             pass
         return None
 
+    def _dedupe(items):
+        merged = []
+        seen = set()
+        for item in items:
+            key = (item.get('name', ''), item.get('role', ''))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    def _collect_flat(scope, max_depth=15, require_item_showing=True):
+        current_level = [scope]
+        depth = 0
+        items = []
+
+        while current_level and depth <= max_depth:
+            next_level = []
+
+            for obj in current_level:
+                try:
+                    role = obj.get_role_name() or ''
+                    if role != 'menu bar':
+                        item = _item_from_child(obj, require_item_showing)
+                        if item:
+                            items.append(item)
+
+                    for i in range(min(obj.get_child_count(), 30)):
+                        child = obj.get_child_at_index(i)
+                        if child:
+                            next_level.append(child)
+                except Exception:
+                    pass
+
+            current_level = next_level
+            depth += 1
+
+        return _dedupe(items)
+
     def _collect(scope, max_depth=15, require_showing=True,
                  require_item_showing=False, containers=None):
         if containers is None:
             containers = _STRICT | _LOOSE
-
-        def dedupe(items):
-            merged = []
-            seen = set()
-            for item in items:
-                key = (item.get('name', ''), item.get('role', ''))
-                if key in seen:
-                    continue
-                seen.add(key)
-                merged.append(item)
-            return merged
 
         current_level = [scope]
         depth = 0
@@ -298,7 +326,7 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
                     pass
 
             if level_items:
-                return dedupe(level_items)
+                return _dedupe(level_items)
 
             current_level = next_level
             depth += 1
@@ -309,28 +337,40 @@ def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
         items.sort(key=lambda x: x['y'])
         return items
 
-    # Pass 1: Strict containers in platform_doc (with SHOWING on container)
+    # Pass 1: Flat subtree search in platform_doc for visible menu items.
+    if platform_doc:
+        items = _collect_flat(platform_doc, require_item_showing=True)
+        if items:
+            return _sorted(items)
+
+    # Pass 2: Flat subtree search in firefox root for visible menu items.
+    if firefox:
+        items = _collect_flat(firefox, require_item_showing=True)
+        if items:
+            return _sorted(items)
+
+    # Pass 3: Strict containers in platform_doc (with SHOWING on container)
     if platform_doc:
         items = _collect(platform_doc, containers=_STRICT)
         if items:
             return _sorted(items)
 
-    # Pass 2: Strict containers WITHOUT SHOWING requirement
+    # Pass 4: Strict containers WITHOUT SHOWING requirement
     # (Gemini doesn't set SHOWING on menu containers when sidebar collapsed)
     if platform_doc:
         items = _collect(platform_doc, require_showing=False, containers=_STRICT)
         if items:
             return _sorted(items)
 
-    # Pass 3: Containerless menu items in platform_doc
+    # Pass 5: Containerless menu items in platform_doc
     if platform_doc:
         _fallback = ('menu item', 'radio menu item', 'check menu item')
         all_el = find_elements(platform_doc)
-        items = [e for e in all_el if e.get('name') and e.get('role', '') in _fallback]
+        items = _dedupe([e for e in all_el if e.get('name') and e.get('role', '') in _fallback])
         if items:
             return _sorted(items)
 
-    # Pass 4: Firefox root (strict then loose containers)
+    # Pass 6: Firefox root (strict then loose containers)
     if firefox:
         items = _collect(firefox, require_item_showing=True, containers=_STRICT)
         if items:
