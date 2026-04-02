@@ -138,7 +138,7 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
             result = {
                 'success': True,
                 'selected_mode': target_mode_lower,
-                'selected_item': f'keyboard_nav position {keyboard_nav}',
+                'selected_item': target_mode_lower,
                 'platform': platform,
                 'method': 'keyboard_nav',
             }

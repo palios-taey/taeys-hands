@@ -39,7 +39,7 @@ capabilities:
 click_strategy: atspi_first
 
 # How attach works: click "Add files or tools" → AT-SPI menu → click item
-attach_method: atspi_menu
+attach_method: keyboard_nav
 # How dropdowns work: AT-SPI enumerates menu items
 dropdown_method: atspi_enum
 
