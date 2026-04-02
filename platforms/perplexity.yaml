@@ -64,11 +64,13 @@ mode_guidance:
   deep_research:
     when: "Need facts, citations, multi-source synthesis, current events, comprehensive documentation"
     how: "Click 'Add files or tools' button, select 'Deep research New' radio item"
+    keyboard_nav: 5  # Down×5 from dropdown open = Deep research (5th item)
     timeout: 7200
     note: "Takes 5-30 minutes. Copy button = summary only. Use Export > Download as Markdown for full report."
   model_council:
     when: "Need consensus from multiple models, cross-validation of complex claims"
     how: "Click 'Add files or tools' button, select 'Model council Max' radio item"
+    keyboard_nav: 6  # Down×6 from dropdown open = Model council (6th item)
     timeout: 7200
     note: "Max plan feature. Sends query to multiple models and synthesizes."
   computer:

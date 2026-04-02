@@ -123,19 +123,39 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
         menu_items = find_menu_items(firefox, doc)
 
     if not menu_items:
-        # Fallback: scan entire tree for matching element_map items
-        # ChatGPT model items are now AT-SPI push buttons, not menu items
+        # Keyboard navigation fallback FIRST — same approach as hmm_bot.py on Thor.
+        # React portal dropdowns on Xvfb don't expose items to AT-SPI tree.
+        # Use Down+Enter based on known dropdown position from YAML keyboard_nav.
+        keyboard_nav = guidance.get('keyboard_nav')
+        if keyboard_nav and isinstance(keyboard_nav, int):
+            logger.info(f"[{platform}] AT-SPI menu scan empty — keyboard nav "
+                        f"fallback: Down×{keyboard_nav} + Enter")
+            for _ in range(keyboard_nav):
+                inp.press_key('Down')
+                time.sleep(0.3)
+            inp.press_key('Return')
+            time.sleep(1.0)
+            result = {
+                'success': True,
+                'selected_mode': target_mode_lower,
+                'selected_item': f'keyboard_nav position {keyboard_nav}',
+                'platform': platform,
+                'method': 'keyboard_nav',
+            }
+            return result
+
+        # Last resort: scan tree for element_map model buttons (ChatGPT)
         fences = get_fence_after(platform)
         all_elements = find_elements(doc, fence_after=fences)
         menu_items = _find_model_buttons_in_tree(platform, target_mode_lower, all_elements)
 
-    if not menu_items:
-        inp.press_key('Escape')
-        return {
-            'success': False,
-            'error': f'No menu items found after opening {platform} {trigger_key}',
-            'platform': platform,
-        }
+        if not menu_items:
+            inp.press_key('Escape')
+            return {
+                'success': False,
+                'error': f'No menu items found after opening {platform} {trigger_key}',
+                'platform': platform,
+            }
 
     # Match and click target
     result = _match_and_click(menu_items, target_mode_lower, platform)
