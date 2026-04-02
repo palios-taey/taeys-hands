@@ -54,6 +54,10 @@ import sys
 import time
 from datetime import datetime
 
+# consultation.py mutates DISPLAY per platform; pin the Redis node ID first
+# so monitor session keys stay aligned with the central monitor namespace.
+os.environ["TAEY_NODE_ID"] = "taeys-hands"
+
 
 # ---- Load .env FIRST (before any project imports or setup) ----
 # Standalone scripts don't inherit env from .mcp.json.
