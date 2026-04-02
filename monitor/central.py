@@ -285,6 +285,35 @@ class CentralMonitor:
 
         return False
 
+    def _notify(self, session: Dict, status: str, detection: str):
+        """Send notification via Redis for the orchestrator daemon to pick up."""
+        target_node = session.get('tmux_session', NODE_ID)
+        notification = {
+            "monitor_id": session.get('monitor_id'),
+            "platform": session.get('platform'),
+            "node_id": target_node,
+            "status": status,
+            "message": f"{status} on {session.get('platform')}",
+            "detection": detection,
+            "timestamp": datetime.now().isoformat(),
+            "session_id": session.get('session_id'),
+            "tmux_session": target_node,
+            "url": session.get('url'),
+            "elapsed_seconds": int(time.time() - session.get('started_ts', time.time())),
+            "requires_action": status in ("response_complete", "response_ready"),
+        }
+        nj = json.dumps(notification)
+        notify_key = f"taey:{target_node}:notifications"
+        if self.rc:
+            try:
+                self.rc.rpush(notify_key, nj)
+                _log(f"[{session.get('platform')}/{session.get('monitor_id')}] "
+                     f"Notified {target_node}: {status}")
+            except Exception as e:
+                _log(f"Redis notification error: {e}")
+        else:
+            _log(f"No Redis — notification for {session.get('monitor_id')} dropped")
+
     def run(self):
         """Main loop — poll workers for stop-button state every cycle."""
         _log(f"Central monitor started (node={NODE_ID}, cycle={self.cycle_interval}s)")
