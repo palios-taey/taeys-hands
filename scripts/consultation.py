@@ -214,6 +214,8 @@ try:
 except Exception:
     ingest_transcript = None
 
+from tools.mode_select import select_mode_with_worker_fallback
+
 # Logging
 logging.basicConfig(
     level=logging.DEBUG if args.verbose else logging.INFO,
@@ -225,10 +227,15 @@ logger = logging.getLogger('consultation')
 
 def _select_mode_via_worker(platform: str, mode: str = None, model: str = None,
                              display: str = None) -> dict:
-    """Compatibility wrapper: mode selection now runs in-process."""
+    """Prefer worker IPC for mode selection, with local fallback."""
     if display and display != os.environ.get('DISPLAY'):
-        logger.info("Ignoring explicit display override for in-process mode selection: %s", display)
-    return _select_mode_inprocess(platform, mode, model)
+        logger.info("Ignoring explicit display override for mode selection: %s", display)
+    return select_mode_with_worker_fallback(
+        platform,
+        mode=mode,
+        model=model,
+        fallback=_select_mode_inprocess,
+    )
 
 
 def _select_mode_inprocess(platform: str, mode: str = None, model: str = None) -> dict:
@@ -831,7 +838,12 @@ def main():
         logger.info("Step 3: Model/mode selection skipped (follow-up)")
     elif args.model or args.mode:
         logger.info(f"Step 3: Selecting model={args.model} mode={args.mode}")
-        sel_result = _select_mode_inprocess(platform, mode=args.mode, model=args.model)
+        sel_result = _select_mode_via_worker(
+            platform,
+            mode=args.mode,
+            model=args.model,
+            display=args.display,
+        )
 
         if sel_result.get('success'):
             logger.info(f"Mode/model selected: {sel_result.get('selected_mode', sel_result.get('matched', '?'))}")
