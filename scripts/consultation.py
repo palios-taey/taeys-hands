@@ -228,6 +228,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger('consultation')
 
+DEFAULT_STEP_ORDER = ['navigate', 'model', 'mode', 'attach', 'message', 'send']
+
 
 def _select_mode_via_worker(platform: str, mode: str = None, model: str = None,
                              display: str = None) -> dict:
@@ -741,6 +743,49 @@ def _verify_mode_selection(platform: str, target_mode: str, selection_result: di
     return {'verified': verified, 'method': verify_method, 'mode': target_mode}
 
 
+def _run_selection_step(platform: str, *, step_name: str, value: str,
+                        result: dict, timeout: int) -> tuple[bool, int]:
+    """Run and verify a single model or mode/tools selection step."""
+    logger.info("Selecting %s=%s", step_name, value)
+    sel_result = _select_mode_via_worker(
+        platform,
+        mode=value if step_name == 'mode' else None,
+        model=value if step_name == 'model' else None,
+        display=args.display,
+    )
+
+    if not sel_result.get('success'):
+        logger.error("%s selection FAILED: %s", step_name.title(), sel_result.get('error'))
+        logger.error("Available modes: %s", sel_result.get('available_modes', 'unknown'))
+        result['error'] = f"{step_name}_selection_failed: {sel_result.get('error')}"
+        result[f'{step_name}_selection'] = sel_result
+        return False, timeout
+
+    logger.info(
+        "%s selected: %s",
+        step_name.title(),
+        sel_result.get('selected_mode', sel_result.get('matched', '?')),
+    )
+    if sel_result.get('timeout'):
+        timeout = sel_result['timeout']
+        logger.info("Timeout adjusted to %ss for this %s", timeout, step_name)
+    result[f'{step_name}_selection'] = sel_result
+    time.sleep(1)
+
+    logger.info("Verifying %s in AT-SPI tree", step_name)
+    selection_verification = _verify_mode_selection(platform, value, sel_result)
+    if not selection_verification.get('verified'):
+        logger.error("HARD STOP: %s '%s' NOT verified in AT-SPI tree.", step_name, value)
+        result['error'] = f"{step_name}_not_verified: '{value}' not confirmed in AT-SPI tree"
+        result['verify_method'] = selection_verification.get('method')
+        return False, timeout
+
+    logger.info("%s verification PASSED (%s)",
+                step_name.title(), selection_verification.get('method'))
+    result[f'{step_name}_verified'] = selection_verification
+    return True, timeout
+
+
 def validate_attachment_visible(platform: str, file_path: str,
                                 attempts: int = 10, delay: float = 1.0) -> dict:
     """Confirm the uploaded file chip/indicator is visible in the AT-SPI tree."""
@@ -1067,73 +1112,52 @@ def main():
             pkg_path = _consolidate_attachments(all_files, platform)
         elif len(all_files) == 1:
             pkg_path = all_files[0]
+    logger.info("Resolved universal step order for %s: %s",
+                platform, " -> ".join(DEFAULT_STEP_ORDER))
 
-    # ── Step 2: Model/mode selection (skip for follow-ups) ──────────────────
-    if is_followup and not args.model and not args.mode:
-        logger.info("Step 2: Model/mode selection skipped (follow-up)")
-    elif args.model or args.mode:
-        logger.info(f"Step 2: Selecting model={args.model} mode={args.mode}")
-        sel_result = _select_mode_via_worker(
+    logger.info("Step 2: Model selection")
+    if is_followup and not args.model:
+        logger.info("Step 2: Model selection skipped (follow-up)")
+    elif not args.model:
+        logger.info("Step 2: Model selection skipped (not requested)")
+    else:
+        ok, timeout = _run_selection_step(
             platform,
-            mode=args.mode,
-            model=args.model,
-            display=args.display,
+            step_name='model',
+            value=args.model,
+            result=result,
+            timeout=timeout,
         )
-
-        if sel_result.get('success'):
-            logger.info(f"Mode/model selected: {sel_result.get('selected_mode', sel_result.get('matched', '?'))}")
-            if sel_result.get('timeout'):
-                timeout = sel_result['timeout']
-                logger.info(f"Timeout adjusted to {timeout}s for this mode")
-            result['mode_selection'] = sel_result
-        else:
-            logger.error(f"Mode/model selection FAILED: {sel_result.get('error')}")
-            logger.error(f"Available modes: {sel_result.get('available_modes', 'unknown')}")
-            result['error'] = f"mode_selection_failed: {sel_result.get('error')}"
-            result['mode_selection'] = sel_result
-            print(json.dumps(result, indent=2))
-            sys.exit(1)
-        time.sleep(1)
-
-    # Step 2b: VERIFY mode/model in AT-SPI tree before typing/attach.
-    if args.model or args.mode:
-        logger.info("Step 2b: Verifying mode/model in AT-SPI tree")
-        target_mode = args.mode or args.model
-        mode_verification = _verify_mode_selection(
-            platform, target_mode, result.get('mode_selection', {})
-        )
-        if not mode_verification.get('verified'):
-            logger.error(f"HARD STOP: mode '{target_mode}' NOT verified in AT-SPI tree. "
-                         f"Will NOT send without verification.")
-            result['error'] = f"mode_not_verified: '{target_mode}' not confirmed in AT-SPI tree"
-            result['verify_method'] = mode_verification.get('method')
+        if not ok:
             print(json.dumps(result, indent=2))
             sys.exit(1)
 
-        logger.info(f"Mode verification PASSED ({mode_verification.get('method')})")
-        result['mode_verified'] = mode_verification
+    logger.info("Step 3: Mode/tools selection")
+    if is_followup and not args.mode:
+        logger.info("Step 3: Mode/tools selection skipped (follow-up)")
+    elif not args.mode:
+        logger.info("Step 3: Mode/tools selection skipped (not requested)")
+    else:
+        ok, timeout = _run_selection_step(
+            platform,
+            step_name='mode',
+            value=args.mode,
+            result=result,
+            timeout=timeout,
+        )
+        if not ok:
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
 
-    # Step 3: Type message before attach to synchronize React state.
-    logger.info("Step 3: Type prompt into input")
-    if not type_prompt(platform, message):
-        result['error'] = 'prompt_type_failed'
-        print(json.dumps(result, indent=2))
-        sys.exit(1)
-
-    # Step 4: Attach file after mode + message state are set.
     if pkg_path and os.path.isfile(pkg_path):
-        logger.info(f"Step 4: Attaching {os.path.basename(pkg_path)}")
+        logger.info("Step 4: Attaching %s", os.path.basename(pkg_path))
         if not attach_file(platform, pkg_path):
             result['error'] = 'attach_failed'
             print(json.dumps(result, indent=2))
             sys.exit(1)
         result['attachment'] = pkg_path
-    else:
-        logger.info("Step 4: No attachments to add (skipped)")
 
-    # Step 5: Validate file upload completion in the AT-SPI tree.
-    if pkg_path and os.path.isfile(pkg_path):
-        logger.info("Step 5: Validating uploaded file chip/indicator")
+        logger.info("Step 4b: Validating uploaded file chip/indicator")
         attachment_validation = validate_attachment_visible(platform, pkg_path)
         result['attachment_validation'] = attachment_validation
         if not attachment_validation.get('verified'):
@@ -1145,38 +1169,41 @@ def main():
         logger.info("Attachment verification PASSED (%s)",
                     attachment_validation.get('method'))
 
-    # Step 5b: Perplexity Deep Research can be reset by file upload; re-check it.
-    if platform == 'perplexity' and args.mode and pkg_path and os.path.isfile(pkg_path):
-        target_mode = args.mode.replace('_', ' ').lower().strip()
-        if 'deep research' in target_mode:
-            logger.info("Step 5b: Re-check Perplexity Deep Research after attach")
-            mode_verification = _verify_mode_selection(
-                platform, args.mode, result.get('mode_selection', {})
-            )
-            if not mode_verification.get('verified'):
-                logger.warning("Perplexity Deep Research no longer verified after attach; reselecting")
-                sel_result = _select_mode_via_worker(
-                    platform,
-                    mode=args.mode,
-                    model=args.model,
-                    display=args.display,
+        if platform == 'perplexity' and args.mode:
+            target_mode = args.mode.replace('_', ' ').lower().strip()
+            if 'deep research' in target_mode:
+                logger.info("Step 4c: Re-check Perplexity Deep Research after attach")
+                mode_verification = _verify_mode_selection(
+                    platform, args.mode, result.get('mode_selection', {})
                 )
-                if not sel_result.get('success'):
-                    result['error'] = f"mode_selection_failed: {sel_result.get('error')}"
-                    result['mode_selection'] = sel_result
-                    print(json.dumps(result, indent=2))
-                    sys.exit(1)
-                result['mode_selection'] = sel_result
-                time.sleep(1)
-                mode_verification = _verify_mode_selection(platform, args.mode, sel_result)
                 if not mode_verification.get('verified'):
-                    result['error'] = f"mode_not_verified: '{args.mode}' not confirmed after attach"
-                    result['verify_method'] = mode_verification.get('method')
-                    print(json.dumps(result, indent=2))
-                    sys.exit(1)
-            result['mode_verified_after_attach'] = mode_verification
+                    logger.warning("Perplexity Deep Research no longer verified after attach; reselecting")
+                    ok, timeout = _run_selection_step(
+                        platform,
+                        step_name='mode',
+                        value=args.mode,
+                        result=result,
+                        timeout=timeout,
+                    )
+                    if not ok:
+                        print(json.dumps(result, indent=2))
+                        sys.exit(1)
+                    mode_verification = result.get('mode_verified', {})
+                    if not mode_verification.get('verified'):
+                        result['error'] = f"mode_not_verified: '{args.mode}' not confirmed after attach"
+                        result['verify_method'] = mode_verification.get('method')
+                        print(json.dumps(result, indent=2))
+                        sys.exit(1)
+                result['mode_verified_after_attach'] = mode_verification
+    else:
+        logger.info("Step 4: No attachments to add (skipped)")
 
-    # Step 6: Send prompt
+    logger.info("Step 5: Type prompt into input")
+    if not type_prompt(platform, message):
+        result['error'] = 'prompt_type_failed'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
     logger.info("Step 6: Send prompt")
     if not submit_prompt(platform):
         result['error'] = 'send_failed'
