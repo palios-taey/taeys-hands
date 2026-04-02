@@ -43,6 +43,7 @@ click_strategy: xdotool_first
 attach_method: keyboard_nav
 # How dropdowns work: AT-SPI enumerates menu items
 dropdown_method: atspi_enum
+step_order: [navigate, mode, message, attach, send]
 
 quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
