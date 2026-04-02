@@ -478,6 +478,72 @@ def find_input_field():
     return None
 
 
+def _match_element_criteria(element: dict, criteria: dict) -> bool:
+    """Return True when an element matches a simple element_map spec."""
+    name = (element.get('name') or '').strip().lower()
+    role = element.get('role', '')
+    states = set(s.lower() for s in element.get('states', []))
+
+    if 'name' in criteria and name != str(criteria['name']).lower():
+        return False
+
+    if 'name_contains' in criteria:
+        parts = criteria['name_contains']
+        if isinstance(parts, str):
+            parts = [parts]
+        if not any(str(part).lower() in name for part in parts):
+            return False
+
+    if 'role' in criteria and role != criteria['role']:
+        return False
+
+    if 'role_contains' in criteria and str(criteria['role_contains']) not in role:
+        return False
+
+    if 'states_include' in criteria:
+        required = set(str(state).lower() for state in criteria['states_include'])
+        if not required.issubset(states):
+            return False
+
+    return True
+
+
+def _find_send_button(platform: str):
+    """Return the visible platform send button, if configured."""
+    config = get_platform_config(platform)
+    criteria = config.get('element_map', {}).get('send_button')
+    if not isinstance(criteria, dict):
+        return None
+
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return None
+
+    for element in find_elements(doc):
+        if _match_element_criteria(element, criteria):
+            return element
+    return None
+
+
+def _click_send_button(platform: str) -> bool:
+    """Click the visible send button when keyboard submit is unreliable."""
+    send_button = _find_send_button(platform)
+    if not send_button:
+        return False
+
+    if send_button.get('atspi_obj') and atspi_click(send_button):
+        logger.info("Clicked send button via AT-SPI")
+        time.sleep(1.0)
+        return True
+
+    if inp.click_at(send_button['x'], send_button['y']):
+        logger.info("Clicked send button via xdotool")
+        time.sleep(1.0)
+        return True
+
+    return False
+
+
 def _focus_input_field():
     """Focus the editable input field and return its element dict."""
     inp.focus_firefox()
@@ -529,13 +595,27 @@ def type_prompt(platform: str, message: str) -> bool:
 
 def submit_prompt(platform: str) -> bool:
     """Send the already-typed prompt."""
-    del platform
     input_el = _focus_input_field()
     if not input_el:
         return False
 
-    inp.press_key('Return')
-    time.sleep(1.0)
+    # Claude can leave the send button active after attachments/mode changes
+    # without submitting on Return. Prefer the explicit button there.
+    if platform == 'claude' and _click_send_button(platform):
+        logger.info("Prompt submitted")
+        return True
+
+    if not inp.press_key('Return', timeout=5):
+        logger.error("Return keypress failed during submit")
+        return False
+    time.sleep(0.8)
+
+    if platform == 'claude' and _find_send_button(platform):
+        logger.warning("Claude send button still visible after Return; clicking fallback")
+        if not _click_send_button(platform):
+            logger.error("Claude send button fallback click failed")
+            return False
+
     logger.info("Prompt submitted")
     return True
 
