@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Central response monitor — one process per machine, cycles all active sessions.
 
-Simple state machine per session:
-  1. Check: is stop button visible?
-  2. If yes → mark stop_seen=True (AI is generating)
-  3. If no AND stop_seen was True → COMPLETE, notify via Redis
-  4. If no AND stop_seen was False → still waiting for generation to start
+Completion detection:
+  1. Poll every 2s for stop-button visibility, send-button readiness, and content hash
+  2. Persist sticky ever-seen-stop flag per monitor session in Redis
+  3. COMPLETE when stop was seen and is now gone while send is ready
+  4. Fallback COMPLETE when content hash is stable for 2 ticks and send is ready
 
 URL navigation: verifies session URL matches current tab, navigates if mismatched.
 NO fixed coordinates. Stop button found by AT-SPI name matching.
@@ -13,24 +13,23 @@ Uses core modules — no duplicated helpers.
 
 Usage:
     python3 -m monitor.central
-    python3 monitor/central.py --cycle-interval 10
+    python3 monitor/central.py --cycle-interval 2
 
 Environment:
     DISPLAY             X11 display (auto-detected)
     REDIS_HOST          Redis host (default: 127.0.0.1)
     REDIS_PORT          Redis port (default: 6379)
     TAEY_NODE_ID        Node identifier (default: hostname)
-    MONITOR_CYCLE_SEC   Seconds between full cycles (default: 10)
+    MONITOR_CYCLE_SEC   Seconds between full cycles (default: 2)
 """
 
 import argparse
 import json
 import os
-import signal
 import sys
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # Ensure project root is on path so core/ imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -68,15 +67,8 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
-CYCLE_TIMEOUT_SECONDS = 45
-
-
-class CycleTimeout(Exception):
-    pass
-
-
-def _cycle_timeout_handler(signum, frame):
-    raise CycleTimeout("Cycle timed out")
+POLL_INTERVAL = 2.0
+STABLE_TICKS = 2
 
 
 def _log(msg: str):
@@ -84,28 +76,12 @@ def _log(msg: str):
     print(f"[{ts}] [monitor] {msg}", flush=True)
 
 
-def _load_stop_patterns() -> Dict[str, List[str]]:
-    """Load stop patterns from platform YAML configs."""
-    import yaml
-    patterns = {}
-    platforms_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'platforms')
-    for platform in CHAT_PLATFORMS:
-        try:
-            with open(os.path.join(platforms_dir, f'{platform}.yaml')) as f:
-                config = yaml.safe_load(f) or {}
-            patterns[platform] = config.get('stop_patterns', ['stop'])
-        except Exception:
-            patterns[platform] = ['stop']
-    return patterns
-
-
 class CentralMonitor:
     """Single monitor process — cycles active sessions, detects completion."""
 
-    def __init__(self, cycle_interval: int = 10):
+    def __init__(self, cycle_interval: float = POLL_INTERVAL):
         self.cycle_interval = cycle_interval
         self.rc = self._connect_redis()
-        self.stop_patterns = _load_stop_patterns()
         if not self.rc:
             _log("WARNING: No Redis — monitor cannot track sessions")
 
@@ -218,6 +194,7 @@ class CentralMonitor:
     def _remove_session(self, session: Dict):
         if not self.rc:
             return
+        self._clear_monitor_state(session.get('monitor_id'))
         key = session.get('_redis_key')
         if key:
             self.rc.delete(key)
@@ -243,46 +220,76 @@ class CentralMonitor:
         display = os.environ.get('DISPLAY', ':0')
         return bool(self.rc.exists(f"taey:plan_active:{display}"))
 
+    def _monitor_key(self, monitor_id: str, suffix: str) -> str:
+        return f"taey:monitor:{monitor_id}:{suffix}"
 
-    # ── Session checking (worker-based only) ─────────────────────
-    # Direct AT-SPI methods removed: _is_landing_url, _navigate_to_url,
-    # _is_stop_button, _is_canvas_stop, _scan_for_stop_button, _check_session.
-    # All monitoring goes through workers. Monitor never touches DISPLAY :0.
+    def _clear_monitor_state(self, monitor_id: str):
+        if not self.rc or not monitor_id:
+            return
+        self.rc.delete(
+            self._monitor_key(monitor_id, "ever_seen_stop"),
+            self._monitor_key(monitor_id, "content_hash"),
+            self._monitor_key(monitor_id, "content_stable_ticks"),
+        )
 
-    def _check_session_with_stop(self, session: Dict, stop_found: bool) -> bool:
-        """Check session completion using worker-provided stop-button state.
-
-        Same 4-state machine as _check_session but without direct AT-SPI.
-        """
+    def _detect_completion(self, session: Dict, worker_state: Dict) -> bool:
+        """Check session completion using sticky stop visibility and content stability."""
         platform = session['platform']
         monitor_id = session['monitor_id']
         started_ts = session.get('started_ts', time.time())
         timeout = session.get('timeout', 7200)
         elapsed = int(time.time() - started_ts)
-        stop_seen = session.get('stop_seen', False)
+        stop_found = bool(worker_state.get('stop_found'))
+        send_visible = bool(worker_state.get('send_visible'))
+        content_hash = worker_state.get('content_hash') or ""
+        state_ttl = timeout
 
-        if stop_found and not stop_seen:
-            session['stop_seen'] = True
-            session['generating_since'] = time.time()
-            self._update_session(session)
-            _log(f"[{platform}/{monitor_id}] stop=YES (generation started, {elapsed}s)")
+        ever_seen_key = self._monitor_key(monitor_id, "ever_seen_stop")
+        hash_key = self._monitor_key(monitor_id, "content_hash")
+        stable_key = self._monitor_key(monitor_id, "content_stable_ticks")
+
+        ever_seen_stop = self.rc.get(ever_seen_key) == "1"
+
+        if stop_found:
+            self.rc.setex(ever_seen_key, state_ttl, "1")
+            self.rc.setex(hash_key, state_ttl, content_hash)
+            self.rc.setex(stable_key, state_ttl, "0")
+            _log(f"[{platform}/{monitor_id}] stop=YES send={'YES' if send_visible else 'NO'} ({elapsed}s)")
             return False
 
-        if stop_found and stop_seen:
-            _log(f"[{platform}/{monitor_id}] stop=YES (still generating, {elapsed}s)")
-            return False
-
-        if not stop_found and stop_seen:
-            _log(f"[{platform}/{monitor_id}] stop=NO, stop_seen=True → COMPLETE ({elapsed}s)")
+        if ever_seen_stop and send_visible:
+            _log(f"[{platform}/{monitor_id}] stop=NO send=YES ever_seen=YES → COMPLETE ({elapsed}s)")
             self._notify(session, "response_complete", "stop_button")
             return True
 
-        _log(f"[{platform}/{monitor_id}] stop=NO, waiting ({elapsed}s)")
         if time.time() - started_ts > timeout:
             _log(f"[{platform}/{monitor_id}] Timeout after {timeout}s")
             self._notify(session, "timeout", "timeout")
             return True
 
+        last_hash = self.rc.get(hash_key) or ""
+        stable_ticks = int(self.rc.get(stable_key) or "0")
+
+        if content_hash and content_hash == last_hash:
+            stable_ticks += 1
+        else:
+            stable_ticks = 0
+
+        self.rc.setex(hash_key, state_ttl, content_hash)
+        self.rc.setex(stable_key, state_ttl, str(stable_ticks))
+
+        if stable_ticks >= STABLE_TICKS and send_visible:
+            _log(
+                f"[{platform}/{monitor_id}] stop=NO send=YES stable_ticks={stable_ticks} "
+                f"→ COMPLETE ({elapsed}s)"
+            )
+            self._notify(session, "response_complete", "content_stable")
+            return True
+
+        _log(
+            f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
+            f"ever_seen={'YES' if ever_seen_stop else 'NO'} stable_ticks={stable_ticks} ({elapsed}s)"
+        )
         return False
 
     def _notify(self, session: Dict, status: str, detection: str):
@@ -315,7 +322,7 @@ class CentralMonitor:
             _log(f"No Redis — notification for {session.get('monitor_id')} dropped")
 
     def run(self):
-        """Main loop — poll workers for stop-button state every cycle."""
+        """Main loop — poll workers for completion state every cycle."""
         _log(f"Central monitor started (node={NODE_ID}, cycle={self.cycle_interval}s)")
         while True:
             try:
@@ -357,14 +364,20 @@ class CentralMonitor:
             if not get_platform_display(platform):
                 continue
             try:
-                result = send_to_worker(platform, {'cmd': 'check_stop'}, timeout=10.0)
-                stop_found = result.get('stop_found', False)
+                stop_result = send_to_worker(platform, {'cmd': 'check_stop'}, timeout=10.0)
+                send_result = send_to_worker(platform, {'cmd': 'get_send_button_state'}, timeout=10.0)
+                hash_result = send_to_worker(platform, {'cmd': 'get_content_hash'}, timeout=10.0)
+                worker_state = {
+                    'stop_found': stop_result.get('stop_found', False),
+                    'send_visible': send_result.get('send_visible', False),
+                    'content_hash': hash_result.get('content_hash', ''),
+                }
             except Exception as e:
-                _log(f"[{platform}] Worker check_stop failed: {e}")
+                _log(f"[{platform}] Worker monitor state check failed: {e}")
                 continue
 
             for session in platform_sessions:
-                if self._check_session_with_stop(session, stop_found):
+                if self._detect_completion(session, worker_state):
                     completed.append(session)
 
         for s in completed:
@@ -375,8 +388,8 @@ class CentralMonitor:
 
 def main():
     parser = argparse.ArgumentParser(description="Central response monitor")
-    parser.add_argument('--cycle-interval', type=int,
-                        default=int(os.environ.get('MONITOR_CYCLE_SEC', '10')))
+    parser.add_argument('--cycle-interval', type=float,
+                        default=float(os.environ.get('MONITOR_CYCLE_SEC', str(POLL_INTERVAL))))
     args = parser.parse_args()
 
     CentralMonitor(cycle_interval=args.cycle_interval).run()
