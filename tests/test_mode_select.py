@@ -9,18 +9,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_load_config_all_platforms():
     """All platform YAMLs load without error and have mode_guidance."""
-    from core.mode_select import _load_config
+    from core.config import get_platform_config
 
     for platform in ['chatgpt', 'gemini', 'grok', 'perplexity', 'claude']:
-        config = _load_config(platform)
+        config = get_platform_config(platform, reload=True)
         assert config is not None, f"{platform} config is None"
         assert 'mode_guidance' in config, f"{platform} missing mode_guidance"
         assert len(config['mode_guidance']) > 0, f"{platform} has empty mode_guidance"
 
 
 def test_chatgpt_mode_guidance():
-    from core.mode_select import _load_config
-    config = _load_config('chatgpt')
+    from core.config import get_platform_config
+    config = get_platform_config('chatgpt', reload=True)
     mg = config['mode_guidance']
 
     assert 'auto' in mg
@@ -30,8 +30,8 @@ def test_chatgpt_mode_guidance():
 
 
 def test_gemini_mode_guidance():
-    from core.mode_select import _load_config
-    config = _load_config('gemini')
+    from core.config import get_platform_config
+    config = get_platform_config('gemini', reload=True)
     mg = config['mode_guidance']
 
     assert 'deep_think' in mg
@@ -40,8 +40,8 @@ def test_gemini_mode_guidance():
 
 
 def test_grok_mode_guidance():
-    from core.mode_select import _load_config
-    config = _load_config('grok')
+    from core.config import get_platform_config
+    config = get_platform_config('grok', reload=True)
     mg = config['mode_guidance']
 
     assert 'expert' in mg
@@ -50,8 +50,8 @@ def test_grok_mode_guidance():
 
 
 def test_perplexity_mode_guidance():
-    from core.mode_select import _load_config
-    config = _load_config('perplexity')
+    from core.config import get_platform_config
+    config = get_platform_config('perplexity', reload=True)
     mg = config['mode_guidance']
 
     assert 'deep_research' in mg
@@ -75,23 +75,39 @@ def test_select_mode_invalid_platform():
 
 def test_social_platform_configs():
     """Social platform stubs load without error."""
-    from core.mode_select import _load_config
+    from core.config import get_platform_config
 
     for platform in ['x_twitter', 'linkedin']:
-        config = _load_config(platform)
+        config = get_platform_config(platform, reload=True)
         assert config is not None
 
 
 def test_element_map_coverage():
     """All chat platforms have required element_map keys."""
-    from core.mode_select import _load_config
+    from core.config import get_platform_config
 
     required_keys = {'input', 'copy_button'}
     for platform in ['chatgpt', 'gemini', 'grok', 'perplexity', 'claude']:
-        config = _load_config(platform)
+        config = get_platform_config(platform, reload=True)
         em = config.get('element_map', {})
         for key in required_keys:
             assert key in em, f"{platform} missing element_map.{key}"
+
+
+def test_git_connector_element_map_coverage():
+    """Platforms with git connector flows expose the connector menu item in YAML."""
+    from core.config import get_platform_config
+
+    expected = {
+        'chatgpt': 'tool_github',
+        'claude': 'git_connector_item',
+        'gemini': 'import_code_item',
+        'perplexity': 'git_connector_item',
+    }
+    for platform, key in expected.items():
+        config = get_platform_config(platform, reload=True)
+        em = config.get('element_map', {})
+        assert key in em, f"{platform} missing element_map.{key}"
 
 
 def test_match_and_click_skips_click_for_already_selected(monkeypatch):
