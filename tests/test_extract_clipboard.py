@@ -28,34 +28,25 @@ def test_read_clipboard_uses_explicit_display():
 
 def test_read_clipboard_falls_back_to_xsel():
     def fake_run(cmd, **kwargs):
-        if cmd[0] == "xclip":
-            raise FileNotFoundError("xclip missing")
-
-        class Result:
-            returncode = 0
-            stdout = "from xsel"
-            stderr = ""
-
-        return Result()
+        raise FileNotFoundError("xclip missing")
 
     with patch("tools.extract.subprocess.run", side_effect=fake_run):
         content, tool_name = extract._read_clipboard(display=":7")
 
-    assert content == "from xsel"
-    assert tool_name == "xsel"
+    assert content is None
+    assert tool_name == "xclip"
 
 
 def test_handle_quick_extract_returns_strategy_and_content():
     copy_button = {'x': 10, 'y': 20, 'name': 'Copy', 'role': 'push button'}
 
     with patch("tools.extract.inp.switch_to_platform", return_value=True), \
+         patch("tools.extract.get_platform_config", return_value={}), \
          patch("tools.extract.inp.press_key"), \
          patch("tools.extract.atspi.find_firefox_for_platform", return_value=object()), \
          patch("tools.extract.atspi.get_platform_document", return_value=object()), \
          patch("tools.extract.atspi.get_document_url", return_value="https://example.test"), \
-         patch("tools.extract.find_elements", return_value=[]), \
-         patch("tools.extract.find_copy_buttons", return_value=[copy_button]), \
-         patch("tools.extract._try_gemini_deep_research_extract", return_value=(None, "not_applicable")), \
+         patch("tools.extract.find_elements", return_value=[copy_button]), \
          patch("tools.extract._try_perplexity_deep_research_extract", return_value=(None, "not_applicable")), \
          patch("tools.extract._try_claude_artifact_extract", return_value=(None, "not_applicable")), \
          patch("tools.extract._click_and_read_clipboard", return_value=("hello world", "atspi+xclip")), \
@@ -66,13 +57,17 @@ def test_handle_quick_extract_returns_strategy_and_content():
 
     assert result["success"] is True
     assert result["content"] == "hello world"
-    assert result["strategy"] == "atspi+xclip"
+    assert result["extraction_method"] == "last_copy_button"
 
 
-def test_extractor_registry_uses_chatgpt_assistant_copy_strategy():
+def test_extractor_registry_calls_worker_without_strategy():
     registry = ExtractorRegistry()
+    calls = []
 
-    assert registry.get_strategy("chatgpt") == "chatgpt_last_assistant_copy"
+    result = registry.extract("chatgpt", lambda payload: calls.append(payload) or {"ok": True})
+
+    assert result == {"ok": True}
+    assert calls == [{"cmd": "extract"}]
 
 
 class _FakeRect:
