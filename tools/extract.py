@@ -2,9 +2,10 @@
 
 import json
 import os
+import subprocess
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from core import atspi, input as inp, clipboard
 from core.tree import find_elements, find_copy_buttons
@@ -17,7 +18,256 @@ from storage import neo4j_client
 logger = logging.getLogger(__name__)
 
 
-def _try_gemini_deep_research_extract(platform, firefox, doc):
+def _iter_children(obj):
+    try:
+        count = obj.get_child_count()
+    except Exception:
+        return
+
+    for i in range(count):
+        try:
+            child = obj.get_child_at_index(i)
+        except Exception:
+            child = None
+        if child:
+            yield child
+
+
+def _walk_accessible(obj, depth: int = 0, max_depth: int = 25):
+    if not obj or depth > max_depth:
+        return
+    yield obj, depth
+    for child in _iter_children(obj):
+        yield from _walk_accessible(child, depth + 1, max_depth=max_depth)
+
+
+def _collect_object_attributes(obj) -> Dict[str, str]:
+    attrs = {}
+    raw = None
+    for getter_name in ('get_attributes', 'get_attribute_set'):
+        getter = getattr(obj, getter_name, None)
+        if not getter:
+            continue
+        try:
+            raw = getter()
+            if raw is not None:
+                break
+        except Exception:
+            continue
+
+    if isinstance(raw, dict):
+        return {str(k).lower(): str(v).lower() for k, v in raw.items()}
+
+    if not raw:
+        return attrs
+
+    for item in raw:
+        text = str(item)
+        if ':' in text:
+            key, value = text.split(':', 1)
+        elif '=' in text:
+            key, value = text.split('=', 1)
+        else:
+            continue
+        attrs[key.strip().lower()] = value.strip().lower()
+    return attrs
+
+
+def _role_markers(obj) -> str:
+    parts = [(obj.get_role_name() or '').lower()]
+    for key, value in _collect_object_attributes(obj).items():
+        if 'role' in key:
+            parts.append(value)
+    return ' '.join(part for part in parts if part)
+
+
+def _node_signature(obj) -> str:
+    name = (obj.get_name() or '').lower()
+    role = (obj.get_role_name() or '').lower()
+    attrs = _collect_object_attributes(obj)
+    attr_text = ' '.join(f"{key} {value}" for key, value in attrs.items())
+    return ' '.join(part for part in (name, role, attr_text) if part)
+
+
+def _element_from_obj(obj) -> dict:
+    name = obj.get_name() or ''
+    role = obj.get_role_name() or ''
+    element = {'name': name, 'role': role, 'atspi_obj': obj}
+    try:
+        comp = obj.get_component_iface()
+        if comp:
+            rect = comp.get_extents(Atspi.CoordType.SCREEN)
+            if rect:
+                element['x'] = rect.x + (rect.width // 2 if rect.width else 0)
+                element['y'] = rect.y + (rect.height // 2 if rect.height else 0)
+    except Exception:
+        pass
+    return element
+
+
+def _find_conversation_container(doc):
+    markers = ('conversation', 'transcript', 'chat history', 'message list', 'messages')
+    best = None
+    for obj, depth in _walk_accessible(doc, max_depth=12):
+        signature = _node_signature(obj)
+        if any(marker in signature for marker in markers):
+            best = obj
+    return best or doc
+
+
+def _find_copy_button_in_scope(scope) -> Optional[dict]:
+    buttons = [
+        element for element in find_elements(scope, max_depth=10)
+        if 'button' in element.get('role', '')
+    ]
+    if not buttons:
+        return None
+
+    preferred = []
+    fallback = []
+    for button in buttons:
+        name = (button.get('name') or '').strip().lower()
+        if not name:
+            fallback.append(button)
+            continue
+        if 'copy' not in name:
+            continue
+        if name in {'copy response', 'copy', 'copy contents'}:
+            preferred.append(button)
+        elif name not in {'copy code', 'copy message', 'copy message to clipboard'}:
+            fallback.append(button)
+
+    candidates = preferred or fallback
+    if not candidates:
+        return None
+    candidates.sort(key=lambda button: button.get('y', 0))
+    return candidates[-1]
+
+
+def _select_chatgpt_last_assistant_copy_button(doc) -> Tuple[Optional[dict], Dict[str, Any]]:
+    conversation = _find_conversation_container(doc)
+    assistant_groups = []
+
+    for obj, depth in _walk_accessible(conversation, max_depth=18):
+        markers = _role_markers(obj)
+        if 'assistant' not in markers and 'presentation' not in markers:
+            continue
+        button = _find_copy_button_in_scope(obj)
+        if not button:
+            continue
+        group = _element_from_obj(obj)
+        group['depth'] = depth
+        group['copy_button'] = button
+        assistant_groups.append(group)
+
+    if not assistant_groups:
+        return None, {
+            "conversation_found": conversation is not doc,
+            "assistant_groups_found": 0,
+        }
+
+    assistant_groups.sort(key=lambda group: (group.get('y', 0), group.get('depth', 0)))
+    last_group = assistant_groups[-1]
+    return last_group['copy_button'], {
+        "conversation_found": conversation is not doc,
+        "assistant_groups_found": len(assistant_groups),
+        "assistant_group_role": last_group.get('role'),
+        "assistant_group_name": last_group.get('name'),
+    }
+
+
+def _clipboard_env(display: Optional[str] = None) -> Dict[str, str]:
+    env = {**os.environ}
+    if display:
+        env['DISPLAY'] = display
+    return env
+
+
+def _clear_clipboard(display: Optional[str] = None) -> None:
+    env = _clipboard_env(display)
+    attempts = [
+        ('xsel', ['xsel', '--clipboard', '--input']),
+        ('xclip', ['xclip', '-selection', 'clipboard']),
+    ]
+    last_error = None
+    for tool_name, cmd in attempts:
+        try:
+            result = subprocess.run(
+                cmd,
+                input='',
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+                env=env,
+            )
+            if result.returncode == 0:
+                return
+            last_error = f"{tool_name} clear failed: {result.stderr.strip()}"
+        except FileNotFoundError:
+            last_error = f"{tool_name} not installed"
+        except Exception as exc:
+            last_error = f"{tool_name} clear failed: {exc}"
+    raise RuntimeError(last_error or "Clipboard clear failed")
+
+
+def _read_clipboard(display: Optional[str] = None) -> Tuple[Optional[str], str]:
+    env = _clipboard_env(display)
+    attempts = [
+        ('xclip', ['xclip', '-selection', 'clipboard', '-o']),
+        ('xsel', ['xsel', '--clipboard', '--output']),
+    ]
+    for tool_name, cmd in attempts:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                env=env,
+            )
+            if result.returncode == 0:
+                return (result.stdout or None), tool_name
+            logger.warning("%s clipboard read failed: %s", tool_name, result.stderr.strip())
+        except FileNotFoundError:
+            logger.warning("%s not installed for clipboard read", tool_name)
+        except Exception as exc:
+            logger.warning("%s clipboard read failed: %s", tool_name, exc)
+    return None, 'unavailable'
+
+
+def _click_and_read_clipboard(button: dict, display: Optional[str] = None,
+                              initial_wait: float = 0.5) -> Tuple[Optional[str], str]:
+    try:
+        _clear_clipboard(display)
+        time.sleep(0.1)
+    except RuntimeError as exc:
+        logger.warning("Clipboard clear failed before click: %s", exc)
+
+    click_method = 'xdotool'
+    if button.get('atspi_obj') and atspi_click(button):
+        click_method = 'atspi'
+    else:
+        inp.click_at(int(button['x']), int(button['y']))
+
+    time.sleep(initial_wait)
+    content, read_method = _read_clipboard(display)
+    strategy = f"{click_method}+{read_method}"
+    if content:
+        return content, strategy
+
+    # Retry with coordinate click. Gemini sometimes exposes the button in
+    # AT-SPI but clipboard ownership only changes after a real pointer click.
+    try:
+        _clear_clipboard(display)
+    except RuntimeError as exc:
+        logger.warning("Clipboard clear failed before retry click: %s", exc)
+    inp.click_at(int(button['x']), int(button['y']))
+    time.sleep(max(initial_wait, 0.8))
+    retry, retry_method = _read_clipboard(display)
+    return retry, f"xdotool+{retry_method}"
+
+
+def _try_gemini_deep_research_extract(platform, firefox, doc, display: Optional[str] = None):
     """Gemini Deep Research: extract via Share & Export → Copy Content.
 
     Deep Research responses live in an immersive view. The regular Copy
@@ -29,7 +279,7 @@ def _try_gemini_deep_research_extract(platform, firefox, doc):
     Returns content string or None if not a Deep Research response.
     """
     if platform != 'gemini':
-        return None
+        return None, 'not_applicable'
 
     elements = find_elements(doc)
     share_export = [e for e in elements
@@ -37,12 +287,11 @@ def _try_gemini_deep_research_extract(platform, firefox, doc):
                     and 'export' in (e.get('name') or '').lower()
                     and 'button' in e.get('role', '')]
     if not share_export:
-        return None
+        return None, 'not_applicable'
 
     logger.info("Gemini Deep Research detected — using Share & Export extraction")
 
     # Kill stale xsel (blocks Firefox clipboard writes)
-    import subprocess
     subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
     time.sleep(0.3)
 
@@ -63,36 +312,19 @@ def _try_gemini_deep_research_extract(platform, firefox, doc):
     if not copy_content:
         logger.warning("Share & Export opened but 'Copy Content' not found")
         inp.press_key('Escape')
-        return None
+        return None, 'share_export_no_copy_content'
 
-    clipboard.clear()
-    time.sleep(0.1)
     cc = copy_content[0]
-    if cc.get('atspi_obj') and atspi_click(cc):
-        logger.info("Clicked Copy Content via AT-SPI")
-    else:
-        inp.click_at(int(cc['x']), int(cc['y']))
-    time.sleep(2.0)
-
-    content = clipboard.read()
+    content, strategy = _click_and_read_clipboard(cc, display=display)
     if content and len(content) > 200:
-        logger.info("Gemini Deep Research extracted: %d chars", len(content))
-        return content
-
-    # AT-SPI click may not trigger clipboard — retry with xdotool
-    clipboard.clear()
-    inp.click_at(int(cc['x']), int(cc['y']))
-    time.sleep(2.0)
-    content = clipboard.read()
-    if content and len(content) > 200:
-        logger.info("Gemini Deep Research extracted (xdotool retry): %d chars", len(content))
-        return content
+        logger.info("Gemini Deep Research extracted via %s: %d chars", strategy, len(content))
+        return content, strategy
 
     logger.warning("Copy Content clicked but clipboard empty")
-    return None
+    return None, strategy
 
 
-def _try_claude_artifact_extract(platform, firefox, doc):
+def _try_claude_artifact_extract(platform, firefox, doc, display: Optional[str] = None):
     """Claude artifact extraction: use artifact panel Copy button for full content.
 
     Claude artifacts have a side panel with its own Copy button that copies
@@ -106,7 +338,7 @@ def _try_claude_artifact_extract(platform, firefox, doc):
     Returns full artifact content, or None if no artifact detected.
     """
     if platform != 'claude':
-        return None
+        return None, 'not_applicable'
 
     elements = find_elements(doc)
 
@@ -125,7 +357,7 @@ def _try_claude_artifact_extract(platform, firefox, doc):
                 break
 
     if not artifact_heading:
-        return None
+        return None, 'not_applicable'
 
     logger.info("Claude artifact detected: %r", artifact_heading.get('name', '')[:80])
 
@@ -154,45 +386,24 @@ def _try_claude_artifact_extract(platform, firefox, doc):
 
     if not artifact_copy:
         logger.warning("Artifact heading found but no artifact Copy button")
-        return None
+        return None, 'artifact_copy_not_found'
 
     logger.info("Clicking artifact Copy at (%s, %s)",
                 artifact_copy.get('x'), artifact_copy.get('y'))
 
     # Kill stale xsel
-    import subprocess
     subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
     time.sleep(0.3)
-
-    clipboard.clear()
-    time.sleep(0.1)
-
-    if artifact_copy.get('atspi_obj') and atspi_click(artifact_copy):
-        logger.info("Clicked artifact Copy via AT-SPI")
-    else:
-        inp.click_at(int(artifact_copy['x']), int(artifact_copy['y']))
-        logger.info("Clicked artifact Copy via xdotool")
-    time.sleep(2.0)
-
-    content = clipboard.read()
+    content, strategy = _click_and_read_clipboard(artifact_copy, display=display)
     if content and len(content) > 500:
-        logger.info("Claude artifact extracted: %d chars", len(content))
-        return content
-
-    # Retry with xdotool
-    clipboard.clear()
-    inp.click_at(int(artifact_copy['x']), int(artifact_copy['y']))
-    time.sleep(2.0)
-    content = clipboard.read()
-    if content and len(content) > 500:
-        logger.info("Claude artifact extracted (xdotool retry): %d chars", len(content))
-        return content
+        logger.info("Claude artifact extracted via %s: %d chars", strategy, len(content))
+        return content, strategy
 
     logger.warning("Artifact Copy clicked but clipboard empty or too short")
-    return None
+    return None, strategy
 
 
-def _try_perplexity_deep_research_extract(platform, firefox, doc):
+def _try_perplexity_deep_research_extract(platform, firefox, doc, display: Optional[str] = None):
     """Perplexity Deep Research: extract full report via 'Copy contents' button.
 
     Deep Research responses have TWO copy buttons:
@@ -206,7 +417,7 @@ def _try_perplexity_deep_research_extract(platform, firefox, doc):
     lost in a rebuild. This re-implements the same approach.
     """
     if platform != 'perplexity':
-        return None
+        return None, 'not_applicable'
 
     elements = find_elements(doc)
 
@@ -227,42 +438,22 @@ def _try_perplexity_deep_research_extract(platform, firefox, doc):
 
     if not copy_contents:
         # Not a Deep Research response (no 'Copy contents' button)
-        return None
+        return None, 'not_applicable'
 
     logger.info("Perplexity Deep Research detected — using 'Copy contents' extraction")
 
     # Kill stale xsel
-    import subprocess
     subprocess.run(['pkill', '-f', 'xsel.*clipboard'], capture_output=True, timeout=3)
     time.sleep(0.3)
 
     btn = copy_contents[0]
-    clipboard.clear()
-    time.sleep(0.1)
-
-    if btn.get('atspi_obj') and atspi_click(btn):
-        logger.info("Clicked 'Copy contents' via AT-SPI")
-    else:
-        inp.click_at(int(btn['x']), int(btn['y']))
-        logger.info("Clicked 'Copy contents' via xdotool at (%s, %s)", btn['x'], btn['y'])
-    time.sleep(2.0)
-
-    content = clipboard.read()
+    content, strategy = _click_and_read_clipboard(btn, display=display)
     if content and len(content) > 500:
-        logger.info("Perplexity Deep Research extracted: %d chars", len(content))
-        return content
-
-    # Retry with xdotool if AT-SPI click didn't trigger clipboard
-    clipboard.clear()
-    inp.click_at(int(btn['x']), int(btn['y']))
-    time.sleep(2.0)
-    content = clipboard.read()
-    if content and len(content) > 500:
-        logger.info("Perplexity Deep Research extracted (xdotool retry): %d chars", len(content))
-        return content
+        logger.info("Perplexity Deep Research extracted via %s: %d chars", strategy, len(content))
+        return content, strategy
 
     logger.warning("'Copy contents' clicked but clipboard empty or too short")
-    return None
+    return None, strategy
 
 
 def _filter_response_copy(copy_buttons: list) -> list:
@@ -323,7 +514,9 @@ def _scroll_copy_into_view(platform: str, target_btn: dict,
 
 
 def handle_quick_extract(platform: str, redis_client,
-                         neo4j_mod=None, complete: bool = False) -> Dict[str, Any]:
+                         neo4j_mod=None, complete: bool = False,
+                         strategy: Optional[str] = None,
+                         display: Optional[str] = None) -> Dict[str, Any]:
     """Extract latest response via clipboard (click Copy, read clipboard)."""
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
@@ -349,7 +542,7 @@ def handle_quick_extract(platform: str, redis_client,
     url = atspi.get_document_url(doc)
 
     # Gemini Deep Research: extract via Share & Export → Copy Content
-    dr_content = _try_gemini_deep_research_extract(platform, firefox, doc)
+    dr_content, dr_strategy = _try_gemini_deep_research_extract(platform, firefox, doc, display=display)
     if dr_content:
         quality = _assess_extraction(dr_content, platform,
                                       find_elements(atspi.get_platform_document(firefox, platform) or doc))
@@ -357,6 +550,7 @@ def handle_quick_extract(platform: str, redis_client,
             "success": True, "platform": platform, "content": dr_content,
             "length": len(dr_content), "has_artifacts": False, "url": url,
             "extraction_method": "gemini_deep_research_share_export",
+            "strategy": dr_strategy,
             "copy_buttons_found": 0, "quality": quality,
         }
         if complete and redis_client:
@@ -402,7 +596,7 @@ def handle_quick_extract(platform: str, redis_client,
         return result
 
     # Perplexity Deep Research: extract via 'Copy contents' button (full report)
-    ppl_dr_content = _try_perplexity_deep_research_extract(platform, firefox, doc)
+    ppl_dr_content, ppl_dr_strategy = _try_perplexity_deep_research_extract(platform, firefox, doc, display=display)
     if ppl_dr_content:
         quality = _assess_extraction(ppl_dr_content, platform,
                                       find_elements(atspi.get_platform_document(firefox, platform) or doc))
@@ -410,6 +604,7 @@ def handle_quick_extract(platform: str, redis_client,
             "success": True, "platform": platform, "content": ppl_dr_content,
             "length": len(ppl_dr_content), "has_artifacts": False, "url": url,
             "extraction_method": "perplexity_deep_research_copy_contents",
+            "strategy": ppl_dr_strategy,
             "copy_buttons_found": 0, "quality": quality,
         }
         if complete and redis_client:
@@ -452,7 +647,7 @@ def handle_quick_extract(platform: str, redis_client,
         return result
 
     # Claude artifact extraction: artifact panel Copy for full content
-    claude_art = _try_claude_artifact_extract(platform, firefox, doc)
+    claude_art, claude_strategy = _try_claude_artifact_extract(platform, firefox, doc, display=display)
     if claude_art:
         quality = _assess_extraction(claude_art, platform,
                                       find_elements(atspi.get_platform_document(firefox, platform) or doc))
@@ -460,6 +655,7 @@ def handle_quick_extract(platform: str, redis_client,
             "success": True, "platform": platform, "content": claude_art,
             "length": len(claude_art), "has_artifacts": True, "url": url,
             "extraction_method": "claude_artifact_panel_copy",
+            "strategy": claude_strategy,
             "copy_buttons_found": 0, "quality": quality,
         }
         if complete and redis_client:
@@ -501,86 +697,105 @@ def handle_quick_extract(platform: str, redis_client,
             logger.warning("Auto-ingest failed (Claude artifact): %s", e)
         return result
 
-    # Extra scroll if needed — press Ctrl+End then End until positions stabilize
-    inp.press_key('ctrl+End')
-    time.sleep(0.3)
-    last_max_y = 0
-    for _ in range(15):
-        elements = find_elements(doc)
-        if elements:
-            cur_max_y = max(e.get('y', 0) for e in elements)
-            if cur_max_y == last_max_y:
-                break
-            last_max_y = cur_max_y
-        inp.press_key('End')
-        time.sleep(0.4)
-    time.sleep(0.3)
+    selection_meta = {}
+    explicit_button = None
 
-    # Re-fetch doc after scroll complete for fresh AT-SPI tree
-    doc = atspi.get_platform_document(firefox, platform) or doc
-    all_elements = find_elements(doc)
-    copy_buttons = find_copy_buttons(all_elements)
-
-    # Scroll to find copy buttons if none visible
-    if not copy_buttons:
+    if strategy == 'chatgpt_last_assistant_copy':
+        # ChatGPT exposes multiple Copy buttons. Restrict selection to the
+        # last assistant/presentation group instead of the global last button.
+        doc = atspi.get_platform_document(firefox, platform) or doc
+        all_elements = find_elements(doc)
+        copy_buttons = find_copy_buttons(all_elements)
+        explicit_button, selection_meta = _select_chatgpt_last_assistant_copy_button(doc)
+        if not explicit_button:
+            return {
+                "success": False,
+                "error": "No copy button found in last assistant group",
+                "platform": platform,
+                "strategy": strategy,
+                "selection_meta": selection_meta,
+                "copy_buttons_found": len(copy_buttons),
+            }
+    else:
+        # Extra scroll if needed — press Ctrl+End then End until positions stabilize
         inp.press_key('ctrl+End')
         time.sleep(0.3)
-        for _ in range(3):
+        last_max_y = 0
+        for _ in range(15):
+            elements = find_elements(doc)
+            if elements:
+                cur_max_y = max(e.get('y', 0) for e in elements)
+                if cur_max_y == last_max_y:
+                    break
+                last_max_y = cur_max_y
             inp.press_key('End')
-            time.sleep(0.3)
-        time.sleep(0.5)
-        doc = atspi.get_platform_document(firefox, platform) if firefox else doc
-        if doc:
-            all_elements = find_elements(doc)
-            copy_buttons = find_copy_buttons(all_elements)
+            time.sleep(0.4)
+        time.sleep(0.3)
+
+        # Re-fetch doc after scroll complete for fresh AT-SPI tree
+        doc = atspi.get_platform_document(firefox, platform) or doc
+        all_elements = find_elements(doc)
+        copy_buttons = find_copy_buttons(all_elements)
+
+        # Scroll to find copy buttons if none visible
         if not copy_buttons:
-            for _ in range(8):
-                inp.press_key('Page_Up')
-                time.sleep(0.4)
-                if doc:
-                    all_elements = find_elements(doc)
-                    copy_buttons = find_copy_buttons(all_elements)
-                    if copy_buttons:
-                        break
+            inp.press_key('ctrl+End')
+            time.sleep(0.3)
+            for _ in range(3):
+                inp.press_key('End')
+                time.sleep(0.3)
+            time.sleep(0.5)
+            doc = atspi.get_platform_document(firefox, platform) if firefox else doc
+            if doc:
+                all_elements = find_elements(doc)
+                copy_buttons = find_copy_buttons(all_elements)
+            if not copy_buttons:
+                for _ in range(8):
+                    inp.press_key('Page_Up')
+                    time.sleep(0.4)
+                    if doc:
+                        all_elements = find_elements(doc)
+                        copy_buttons = find_copy_buttons(all_elements)
+                        if copy_buttons:
+                            break
 
-    if not copy_buttons:
-        return {"success": False, "error": "No copy buttons found", "platform": platform,
-                "hint": "Response may not be visible - try scrolling or waiting."}
+        if not copy_buttons:
+            return {"success": False, "error": "No copy buttons found", "platform": platform,
+                    "hint": "Response may not be visible - try scrolling or waiting."}
 
-    # Prefer response copy buttons over code/message copy buttons.
-    # ChatGPT: "Copy response" (response) vs "Copy message" (user msg)
-    # Claude/Grok: "Copy" (both user and response)
-    _RESPONSE_NAMES = {'copy response', 'copy'}
-    _EXCLUDE_NAMES = {'copy message', 'copy code', 'copy message to clipboard'}
-    response_copy = [
-        b for b in copy_buttons
-        if (b.get('name') or '').strip().lower() in _RESPONSE_NAMES
-        and (b.get('name') or '').strip().lower() not in _EXCLUDE_NAMES
-    ]
-    # If we have "Copy response" buttons (ChatGPT), prefer those over plain "Copy"
-    chatgpt_copy = [b for b in response_copy if (b.get('name') or '').strip().lower() == 'copy response']
-    candidates = chatgpt_copy or response_copy or copy_buttons
-    # Pick the button with highest Y coordinate — bottom of page = AI response
-    newest = max(candidates, key=lambda b: b.get('y', 0))
+        # Prefer response copy buttons over code/message copy buttons.
+        # ChatGPT: "Copy response" (response) vs "Copy message" (user msg)
+        # Claude/Grok: "Copy" (both user and response)
+        _RESPONSE_NAMES = {'copy response', 'copy'}
+        _EXCLUDE_NAMES = {'copy message', 'copy code', 'copy message to clipboard'}
+        response_copy = [
+            b for b in copy_buttons
+            if (b.get('name') or '').strip().lower() in _RESPONSE_NAMES
+            and (b.get('name') or '').strip().lower() not in _EXCLUDE_NAMES
+        ]
+        # If we have "Copy response" buttons (ChatGPT), prefer those over plain "Copy"
+        chatgpt_copy = [b for b in response_copy if (b.get('name') or '').strip().lower() == 'copy response']
+        candidates = chatgpt_copy or response_copy or copy_buttons
+        # Pick the button with highest Y coordinate — bottom of page = AI response
+        newest = max(candidates, key=lambda b: b.get('y', 0))
+        x, y = newest['x'], newest['y']
+
+        if y > SCREEN_HEIGHT:
+            newest, x, y = _scroll_copy_into_view(platform, newest, copy_buttons)
+
+        explicit_button = newest
+
+    newest = explicit_button
     x, y = newest['x'], newest['y']
 
-    if y > SCREEN_HEIGHT:
+    if y > SCREEN_HEIGHT and strategy == 'chatgpt_last_assistant_copy':
         newest, x, y = _scroll_copy_into_view(platform, newest, copy_buttons)
 
-    clipboard.clear()
-    time.sleep(0.1)
-
-    if newest.get('atspi_obj') and atspi_click(newest):
-        pass
-    else:
-        inp.click_at(x, y)
-    time.sleep(0.8)
-
-    content = clipboard.read()
+    content, strategy_used = _click_and_read_clipboard(newest, display=display)
 
     # Detect if we copied user prompt instead of AI response.
     # Check against the actual pending_prompt stored by send_message.
-    if content and redis_client:
+    if content and redis_client and strategy != 'chatgpt_last_assistant_copy':
         pending_json = redis_client.get(node_key(f"pending_prompt:{platform}"))
         if pending_json:
             try:
@@ -590,16 +805,10 @@ def handle_quick_extract(platform: str, redis_client,
                     # Copied the user message — try the second-to-last button
                     if len(candidates) >= 2:
                         prev = candidates[-2]
-                        clipboard.clear()
-                        time.sleep(0.1)
-                        if prev.get('atspi_obj') and atspi_click(prev):
-                            pass
-                        else:
-                            inp.click_at(prev['x'], prev['y'])
-                        time.sleep(0.8)
-                        retry = clipboard.read()
+                        retry, retry_strategy = _click_and_read_clipboard(prev, display=display)
                         if retry and retry.strip() != sent_text:
                             content = retry
+                            strategy_used = retry_strategy
                     else:
                         content = None
             except (json.JSONDecodeError, TypeError):
@@ -608,21 +817,30 @@ def handle_quick_extract(platform: str, redis_client,
     # Retry with focus+Enter then xdotool if clipboard empty
     if not content and newest.get('atspi_obj'):
         from core.interact import atspi_focus
-        clipboard.clear()
+        try:
+            _clear_clipboard(display)
+        except RuntimeError as exc:
+            logger.warning("Clipboard clear failed before focus retry: %s", exc)
         if atspi_focus(newest):
             inp.press_key('Return')
-            time.sleep(0.8)
-            content = clipboard.read()
+            time.sleep(0.5)
+            content, read_method = _read_clipboard(display)
+            strategy_used = f"focus+Return+{read_method}"
         if not content:
-            clipboard.clear()
+            try:
+                _clear_clipboard(display)
+            except RuntimeError as exc:
+                logger.warning("Clipboard clear failed before xdotool retry: %s", exc)
             inp.click_at(x, y)
-            time.sleep(0.8)
-            content = clipboard.read()
+            time.sleep(0.5)
+            content, read_method = _read_clipboard(display)
+            strategy_used = f"xdotool+{read_method}"
 
     if not content:
         return {"success": False, "error": "No response in clipboard after Copy",
                 "platform": platform, "copy_button_coords": {"x": x, "y": y},
-                "copy_buttons_found": len(copy_buttons)}
+                "copy_buttons_found": len(copy_buttons), "content": "",
+                "strategy": strategy_used, "selection_meta": selection_meta}
 
     quality = _assess_extraction(content, platform, all_elements)
 
@@ -724,7 +942,8 @@ def handle_quick_extract(platform: str, redis_client,
         "url": url, "copy_buttons_found": len(copy_buttons),
         "plan_consumed": plan_consumed, "neo4j": neo4j_stored,
         "save_path": save_path, "quality": quality,
-        "ingest": ingest_result,
+        "ingest": ingest_result, "strategy": strategy_used,
+        "selection_meta": selection_meta,
     }
 
 
