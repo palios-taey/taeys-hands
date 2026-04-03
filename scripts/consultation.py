@@ -75,6 +75,12 @@ if os.path.exists(_ENV_PATH):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+
+from core.config import get_platform_config
+
+
 # ---- Display setup BEFORE any AT-SPI imports ----
 
 def setup_env(display: str = None, platform: str = None):
@@ -164,16 +170,26 @@ def parse_args():
     parser.add_argument('--async-send', action='store_true',
                         help='Send and return immediately (register monitor, don\'t wait/extract). '
                              'Monitor daemon will detect completion and send notification.')
-    return parser.parse_args()
+    parsed = parser.parse_args()
+
+    if parsed.session_url:
+        return parsed
+
+    consultation_defaults = get_platform_config(parsed.platform).get('consultation_defaults', {})
+    if not isinstance(consultation_defaults, dict):
+        consultation_defaults = {}
+
+    if parsed.model is None:
+        parsed.model = consultation_defaults.get('model')
+    if parsed.mode is None:
+        parsed.mode = consultation_defaults.get('mode')
+    return parsed
 
 
 args = parse_args()
 setup_env(display=args.display, platform=args.platform)
 
 # NOW import project modules
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _ROOT)
-
 # .env already loaded at top of file (before setup_env and all imports)
 
 import gi
