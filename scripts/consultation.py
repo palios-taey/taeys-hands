@@ -1159,7 +1159,7 @@ def _scan_stop_button(doc, stop_patterns: list) -> bool:
             role = obj.get_role_name() or ''
             name = (obj.get_name() or '').strip().lower()
             if role in ('push button', 'button', 'toggle button'):
-                if name and len(name) <= 50 and name in stop_patterns:
+                if name and len(name) <= 50 and any(p in name for p in stop_patterns):
                     return True
             for i in range(obj.get_child_count()):
                 child = obj.get_child_at_index(i)
