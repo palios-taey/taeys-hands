@@ -207,7 +207,6 @@ def handle_command(cmd_data: dict) -> dict:
                 PLATFORM, rc,
                 neo4j_mod=neo4j_client,
                 complete=cmd_data.get('complete', False),
-                strategy=cmd_data.get('strategy'),
                 display=DISPLAY,
             )
 
