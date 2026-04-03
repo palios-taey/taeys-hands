@@ -148,8 +148,7 @@ def parse_args():
                         help='Existing session URL for follow-up (skips fresh session, '
                              'identity files, and model/mode selection)')
     parser.add_argument('--git-repo', default=None,
-                        help='Git repo URL to connect (Gemini: Import Code, '
-                             'Perplexity: Connectors. Grok: skip, already connected)')
+                        help='Git repo URL to connect via the platform Git/GitHub connector')
     parser.add_argument('--display', default=None,
                         help='X11 display (e.g. :4). Auto-detected if not set.')
     parser.add_argument('--output', default=None,
@@ -296,16 +295,25 @@ def navigate_to_session_url(platform: str, url: str) -> bool:
 def connect_git_repo(platform: str, repo_url: str) -> bool:
     """Connect a git repo on supported platforms before sending.
 
-    Gemini: Click attach dropdown → 'Import Code' → paste repo URL.
-    Perplexity: Click 'Connectors and sources' → paste repo URL.
-    Grok: Already connected by default — skip.
-    ChatGPT/Claude: Not supported yet — skip.
+    Platform flow:
+      1. Click attach/+ button to open the dropdown.
+      2. Click the platform-specific Git/GitHub connector item.
+      3. Paste the repo URL into the dialog/search field.
+      4. Confirm via visible button when available, otherwise Return.
     """
-    if platform in ('grok', 'chatgpt', 'claude'):
-        if platform == 'grok':
-            logger.info(f"[{platform}] Git already connected by default, skipping")
-        else:
-            logger.info(f"[{platform}] Git connector not supported, skipping")
+    if platform == 'grok':
+        logger.info(f"[{platform}] Git connector not supported in YAML yet, skipping")
+        return True
+
+    flow_map = {
+        'chatgpt': {'trigger': 'attach_trigger', 'items': ['tool_more', 'tool_github']},
+        'claude': {'trigger': 'toggle_menu', 'items': ['git_connector_item']},
+        'gemini': {'trigger': 'upload_menu', 'items': ['import_code_item']},
+        'perplexity': {'trigger': 'attach_trigger', 'items': ['git_connector_item']},
+    }
+    flow = flow_map.get(platform)
+    if not flow:
+        logger.warning(f"[{platform}] Git connector not implemented")
         return True
 
     doc = get_doc(force_refresh=True)
@@ -313,93 +321,97 @@ def connect_git_repo(platform: str, repo_url: str) -> bool:
         logger.error("AT-SPI doc not found for git connector")
         return False
 
-    elements = find_elements(doc)
+    from core.config import get_element_spec
+    from tools.inspect import _match_element
 
-    if platform == 'gemini':
-        # Gemini: find attach/add dropdown trigger, click, find 'Import Code' item
-        from core.config import get_element_spec
-        attach_spec = get_element_spec(platform, 'attach_trigger')
-        trigger = None
-        if attach_spec:
-            from tools.inspect import _match_element
-            for e in elements:
-                if _match_element(e, attach_spec):
-                    trigger = e
-                    break
-        if not trigger:
-            # Fallback: look for 'Add files' or '+' button
-            for e in elements:
-                name = (e.get('name') or '').lower()
-                if 'add file' in name or 'attach' in name:
-                    trigger = e
-                    break
-        if not trigger:
-            logger.error(f"[{platform}] Attach trigger not found for Import Code")
+    def _refresh_elements():
+        refreshed = get_doc(force_refresh=True)
+        if not refreshed:
+            return None, []
+        return refreshed, find_elements(refreshed)
+
+    def _find_by_key(elements, key, *, required=True):
+        spec = get_element_spec(platform, key)
+        if not spec:
+            if required:
+                logger.error("[%s] Missing element_map.%s for git connector flow", platform, key)
+            return None
+        for element in elements:
+            if _match_element(element, spec):
+                return element
+        return None
+
+    def _find_menu_item(key):
+        current_doc, current_elements = _refresh_elements()
+        candidate = _find_by_key(current_elements, key)
+        if candidate:
+            return candidate
+        ff = find_firefox()
+        if current_doc and ff:
+            for item in find_menu_items(ff, current_doc):
+                if _find_by_key([item], key):
+                    return item
+        return None
+
+    def _click_element(element, label):
+        if not element:
             return False
+        if element.get('atspi_obj') and atspi_click(element):
+            logger.info("[%s] Clicked %s via AT-SPI", platform, label)
+            return True
+        x, y = element.get('x'), element.get('y')
+        if x is not None and y is not None and inp.click_at(x, y):
+            logger.info("[%s] Clicked %s via xdotool at (%s, %s)", platform, label, x, y)
+            return True
+        logger.error("[%s] Failed to click %s", platform, label)
+        return False
 
-        inp.click_at(trigger['x'], trigger['y'])
-        time.sleep(1.0)
+    def _focus_dialog_input(elements):
+        for element in elements:
+            states = set(s.lower() for s in element.get('states', []))
+            if element.get('role') == 'entry' and 'editable' in states:
+                return _click_element(element, 'git repo field')
+        for element in elements:
+            states = set(s.lower() for s in element.get('states', []))
+            if 'editable' in states and ('focusable' in states or 'multi-line' in states):
+                return _click_element(element, 'git repo field')
+        return False
 
-        # Find 'Import Code' menu item
-        doc = get_doc(force_refresh=True)
-        elements = find_elements(doc)
-        import_item = None
-        for e in elements:
-            name = (e.get('name') or '').lower()
-            if 'import code' in name or 'import from' in name:
-                import_item = e
-                break
-        if not import_item:
-            # Try menu items
-            from core.tree import find_menu_items
-            ff = find_firefox()
-            menu = find_menu_items(ff, doc)
-            for e in menu:
-                name = (e.get('name') or '').lower()
-                if 'import code' in name or 'import from' in name:
-                    import_item = e
-                    break
+    elements = find_elements(doc)
+    trigger = _find_by_key(elements, flow['trigger'])
+    if not trigger:
+        logger.error("[%s] Attach trigger %r not found for git connector", platform, flow['trigger'])
+        return False
+    if not _click_element(trigger, flow['trigger']):
+        return False
+    time.sleep(1.0)
 
-        if not import_item:
-            logger.error(f"[{platform}] 'Import Code' menu item not found")
+    for item_key in flow['items']:
+        item = _find_menu_item(item_key)
+        if not item:
+            logger.error("[%s] Git connector menu item %r not found", platform, item_key)
             inp.press_key('Escape')
             return False
-
-        inp.click_at(import_item['x'], import_item['y'])
-        time.sleep(1.5)
-
-        # Paste repo URL into dialog
-        inp.clipboard_paste(repo_url)
-        time.sleep(0.5)
-        inp.press_key('Return')
-        time.sleep(3)  # Wait for repo import
-        logger.info(f"[{platform}] Git repo connected: {repo_url}")
-        return True
-
-    elif platform == 'perplexity':
-        # Perplexity: find 'Connectors and sources' or similar
-        connector_btn = None
-        for e in elements:
-            name = (e.get('name') or '').lower()
-            if 'connector' in name or 'sources' in name:
-                connector_btn = e
-                break
-        if not connector_btn:
-            logger.error(f"[{platform}] Connectors button not found")
+        if not _click_element(item, item_key):
+            inp.press_key('Escape')
             return False
+        time.sleep(1.0)
 
-        inp.click_at(connector_btn['x'], connector_btn['y'])
-        time.sleep(1.5)
+    _, elements = _refresh_elements()
+    _focus_dialog_input(elements)
+    time.sleep(0.2)
+    inp.clipboard_paste(repo_url)
+    time.sleep(0.5)
 
-        # Paste repo URL
-        inp.clipboard_paste(repo_url)
-        time.sleep(0.5)
+    confirm_key = 'git_confirm_button'
+    confirm = _find_by_key(elements, confirm_key, required=False)
+    if confirm:
+        if not _click_element(confirm, confirm_key):
+            return False
+    else:
         inp.press_key('Return')
-        time.sleep(3)
-        logger.info(f"[{platform}] Git connector activated: {repo_url}")
-        return True
-
-    logger.warning(f"[{platform}] Git connector not implemented")
+    time.sleep(3)
+    logger.info("[%s] Git repo connected: %s", platform, repo_url)
     return True
 
 
