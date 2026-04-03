@@ -40,6 +40,12 @@ attach_method: keyboard_nav
 # How dropdowns work: React portal (invisible to AT-SPI), must use keyboard
 dropdown_method: keyboard_nav
 
+consultation_defaults:
+  model: pro
+  mode: extended_thinking
+  attach_method: atspi_menu
+  extract_method: last_copy_button
+
 quirks:
   # OpenAI has AI countermeasures detecting AT-SPI patterns
   # AT-SPI may show garbage elements, tabs may navigate elsewhere

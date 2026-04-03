@@ -50,6 +50,22 @@ _PLAN_TTL = int(os.environ.get('TAEY_PLAN_TTL', '3600'))  # Default 1 hour (was 
 _UNVERIFIABLE_MODEL_PLATFORMS = {'gemini', 'grok'}
 
 
+def _inject_consultation_defaults(platform: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach platform consultation defaults to plan responses."""
+    try:
+        config = get_platform_config(platform)
+    except (FileNotFoundError, ValueError):
+        return result
+
+    defaults = config.get('consultation_defaults')
+    if not defaults:
+        return result
+
+    enriched = dict(result)
+    enriched.setdefault('consultation_defaults', defaults)
+    return enriched
+
+
 def _validate_path(path: str) -> bool:
     """Check path is within allowed directories."""
     real = os.path.realpath(path)
@@ -127,19 +143,21 @@ def handle_plan(platform: str, action: str, params: Dict,
                 redis_client) -> Dict[str, Any]:
     """Dispatch plan operations: create, audit, get, update, delete."""
     if action == 'create' or action == 'send_message':
-        return _create_plan(platform, params, redis_client)
+        result = _create_plan(platform, params, redis_client)
     elif action == 'audit':
-        return _audit_plan(platform, params, redis_client)
+        result = _audit_plan(platform, params, redis_client)
     elif action == 'get':
-        return _get_plan(params.get('plan_id'), platform, redis_client)
+        result = _get_plan(params.get('plan_id'), platform, redis_client)
     elif action == 'update':
-        return _update_plan(params.get('plan_id'), params, redis_client)
+        result = _update_plan(params.get('plan_id'), params, redis_client)
     elif action == 'extract_response':
-        return _create_extract_plan(platform, params, redis_client)
+        result = _create_extract_plan(platform, params, redis_client)
     elif action == 'delete':
-        return _delete_plan(platform, params, redis_client)
+        result = _delete_plan(platform, params, redis_client)
     else:
         return {"error": f"Unknown plan action: {action}", "success": False}
+
+    return _inject_consultation_defaults(platform, result)
 
 
 # ─── Create ──────────────────────────────────────────────────────────────

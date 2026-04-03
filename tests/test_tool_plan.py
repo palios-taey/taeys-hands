@@ -5,6 +5,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tools.dropdown import handle_prepare
 from tools.plan import handle_plan
 
 
@@ -27,6 +28,22 @@ def test_create_plan_success(mock_redis):
     assert result["success"] is True
     assert result["platform"] == "claude"
     assert "plan_id" in result
+    assert result["consultation_defaults"] == {
+        "model": "opus",
+        "mode": "extended_thinking",
+        "attach_method": "atspi_menu",
+        "extract_method": "last_copy_button",
+    }
+
+
+def test_prepare_includes_consultation_defaults(mock_redis):
+    result = handle_prepare("perplexity", mock_redis)
+    assert result["consultation_defaults"] == {
+        "model": None,
+        "mode": "deep_research",
+        "attach_method": "keyboard_nav",
+        "extract_method": "copy_contents",
+    }
 
 
 def test_get_plan(mock_redis):

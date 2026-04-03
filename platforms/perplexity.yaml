@@ -44,6 +44,12 @@ attach_method: keyboard_nav
 # How dropdowns work: AT-SPI enumerates menu items
 dropdown_method: atspi_enum
 
+consultation_defaults:
+  model: null
+  mode: deep_research
+  attach_method: keyboard_nav
+  extract_method: copy_contents
+
 quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
   - model_selector: "'Model' button visible in search landing page input area (role=push button). Opens model selector. NOT visible in Computer mode."
