@@ -295,6 +295,8 @@ class CentralMonitor:
             return
         self.rc.delete(
             self._monitor_key(monitor_id, "ever_seen_stop"),
+            self._monitor_key(monitor_id, "stop_visible"),
+            self._monitor_key(monitor_id, "stop_cycles"),
             self._monitor_key(monitor_id, "content_hash"),
             self._monitor_key(monitor_id, "content_stable_ticks"),
         )
@@ -303,6 +305,7 @@ class CentralMonitor:
         """Check session completion using sticky stop visibility and content stability."""
         platform = session['platform']
         monitor_id = session['monitor_id']
+        mode = (session.get('mode') or "").strip().lower()
         started_ts = session.get('started_ts', time.time())
         timeout = session.get('timeout', 7200)
         elapsed = int(time.time() - started_ts)
@@ -310,28 +313,59 @@ class CentralMonitor:
         send_visible = bool(worker_state.get('send_visible'))
         content_hash = worker_state.get('content_hash') or ""
         state_ttl = timeout
+        required_stop_cycles = 2 if mode in {"deep_research", "deep_think"} else 1
 
         ever_seen_key = self._monitor_key(monitor_id, "ever_seen_stop")
+        stop_visible_key = self._monitor_key(monitor_id, "stop_visible")
+        stop_cycles_key = self._monitor_key(monitor_id, "stop_cycles")
         hash_key = self._monitor_key(monitor_id, "content_hash")
         stable_key = self._monitor_key(monitor_id, "content_stable_ticks")
 
         ever_seen_stop = self.rc.get(ever_seen_key) == "1"
+        stop_was_visible = self.rc.get(stop_visible_key) == "1"
+        stop_cycles = int(self.rc.get(stop_cycles_key) or "0")
 
         if stop_found:
             self.rc.setex(ever_seen_key, state_ttl, "1")
+            self.rc.setex(stop_visible_key, state_ttl, "1")
             self.rc.setex(hash_key, state_ttl, content_hash)
             self.rc.setex(stable_key, state_ttl, "0")
-            _log(f"[{platform}/{monitor_id}] stop=YES send={'YES' if send_visible else 'NO'} ({elapsed}s)")
+            _log(
+                f"[{platform}/{monitor_id}] stop=YES send={'YES' if send_visible else 'NO'} "
+                f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} ({elapsed}s)"
+            )
+            return False
+
+        if ever_seen_stop and stop_was_visible:
+            stop_cycles += 1
+            self.rc.setex(stop_cycles_key, state_ttl, str(stop_cycles))
+            self.rc.setex(stop_visible_key, state_ttl, "0")
+
+            if stop_cycles >= required_stop_cycles:
+                confidence = "high" if send_visible else "normal"
+                _log(
+                    f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
+                    f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} "
+                    f"→ COMPLETE confidence={confidence} ({elapsed}s)"
+                )
+                self._notify(session, "response_complete", "stop_button")
+                return True
+
+            _log(
+                f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
+                f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} "
+                f"→ waiting for next stop cycle ({elapsed}s)"
+            )
             return False
 
         if ever_seen_stop:
+            self.rc.setex(stop_visible_key, state_ttl, "0")
             confidence = "high" if send_visible else "normal"
             _log(
                 f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
-                f"ever_seen=YES → COMPLETE confidence={confidence} ({elapsed}s)"
+                f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} "
+                f"ever_seen=YES no-transition confidence={confidence} ({elapsed}s)"
             )
-            self._notify(session, "response_complete", "stop_button")
-            return True
 
         if time.time() - started_ts > timeout:
             _log(f"[{platform}/{monitor_id}] Timeout after {timeout}s")
@@ -367,7 +401,8 @@ class CentralMonitor:
 
         _log(
             f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
-            f"ever_seen={'YES' if ever_seen_stop else 'NO'} stable_ticks={stable_ticks} ({elapsed}s)"
+            f"mode={mode or 'default'} ever_seen={'YES' if ever_seen_stop else 'NO'} "
+            f"cycles={stop_cycles}/{required_stop_cycles} stable_ticks={stable_ticks} ({elapsed}s)"
         )
         return False
 

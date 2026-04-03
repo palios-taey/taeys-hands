@@ -15,6 +15,7 @@ def mock_redis():
     """Mock Redis client with basic get/set/delete."""
     client = MagicMock()
     store = {}
+    expiries = {}
 
     def mock_get(key):
         return store.get(key)
@@ -24,12 +25,34 @@ def mock_redis():
 
     def mock_setex(key, ttl, value):
         store[key] = value
+        expiries[key] = ttl
 
-    def mock_delete(key):
-        store.pop(key, None)
+    def mock_delete(*keys):
+        for item in keys:
+            store.pop(item, None)
+            expiries.pop(item, None)
+
+    def mock_sadd(key, value):
+        bucket = store.setdefault(key, set())
+        bucket.add(value)
+
+    def mock_smembers(key):
+        return set(store.get(key, set()))
+
+    def mock_srem(key, value):
+        bucket = store.get(key)
+        if isinstance(bucket, set):
+            bucket.discard(value)
+
+    def mock_ttl(key):
+        return expiries.get(key, -1)
 
     def mock_scan(cursor, match=None, count=100):
-        keys = [k for k in store if k.startswith(match.replace('*', ''))] if match else list(store)
+        if match:
+            prefix = match.split('*', 1)[0]
+            keys = [k for k in store if k.startswith(prefix)]
+        else:
+            keys = list(store)
         return (0, keys)
 
     def mock_lpop(key):
@@ -42,6 +65,10 @@ def mock_redis():
     client.set = mock_set
     client.setex = mock_setex
     client.delete = mock_delete
+    client.sadd = mock_sadd
+    client.smembers = mock_smembers
+    client.srem = mock_srem
+    client.ttl = mock_ttl
     client.scan = mock_scan
     client.lpop = mock_lpop
     client.rpush = mock_rpush
