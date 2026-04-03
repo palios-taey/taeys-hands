@@ -40,6 +40,12 @@ attach_method: keyboard_nav
 # How dropdowns work: React portal (invisible to AT-SPI), must use keyboard
 dropdown_method: keyboard_nav
 
+consultation_defaults:
+  model: pro
+  mode: extended_thinking
+  attach_method: atspi_menu
+  extract_method: last_copy_button
+
 quirks:
   # OpenAI has AI countermeasures detecting AT-SPI patterns
   # AT-SPI may show garbage elements, tabs may navigate elsewhere
@@ -75,6 +81,13 @@ mode_guidance:
     when: "Research-grade intelligence, standard thinking time"
     how: "Click model selector, select 'Pro'"
     timeout: 7200
+  extended:
+    when: "Increase thinking depth after selecting Thinking or Pro"
+    how: "Select 'Extended' thinking"
+    steps:
+      - trigger: null
+        select: extended
+    timeout: 14400
   pro_extended:
     when: "Research-grade intelligence WITH extended thinking time"
     how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' thinking."
