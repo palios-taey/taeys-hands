@@ -18,6 +18,48 @@ def test_load_config_all_platforms():
         assert len(config['mode_guidance']) > 0, f"{platform} has empty mode_guidance"
 
 
+def test_consultation_defaults_all_platforms():
+    """All consultation platforms expose consultation_defaults in YAML."""
+    from core.config import get_platform_config
+
+    expected = {
+        'chatgpt': {
+            'model': 'pro',
+            'mode': 'extended_thinking',
+            'attach_method': 'atspi_menu',
+            'extract_method': 'last_copy_button',
+        },
+        'claude': {
+            'model': 'opus',
+            'mode': 'extended_thinking',
+            'attach_method': 'atspi_menu',
+            'extract_method': 'last_copy_button',
+        },
+        'gemini': {
+            'model': None,
+            'mode': 'deep_think',
+            'attach_method': 'atspi_menu',
+            'extract_method': 'last_copy_button',
+        },
+        'grok': {
+            'model': None,
+            'mode': 'heavy',
+            'attach_method': 'atspi_menu',
+            'extract_method': 'last_copy_button',
+        },
+        'perplexity': {
+            'model': None,
+            'mode': 'deep_research',
+            'attach_method': 'keyboard_nav',
+            'extract_method': 'copy_contents',
+        },
+    }
+
+    for platform, defaults in expected.items():
+        config = get_platform_config(platform, reload=True)
+        assert config.get('consultation_defaults') == defaults
+
+
 def test_chatgpt_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('chatgpt', reload=True)

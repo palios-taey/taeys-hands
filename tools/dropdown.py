@@ -547,6 +547,7 @@ def handle_prepare(platform: str, redis_client) -> Dict[str, Any]:
         "modes": caps.get('modes', []),
         "tools": caps.get('tools', []),
         "sources": caps.get('sources', []),
+        "consultation_defaults": config.get('consultation_defaults', {}),
         "quirks": config.get('quirks', []),
         "mode_guidance": config.get('mode_guidance', {}),
         "element_hints": config.get('element_hints', {}),
