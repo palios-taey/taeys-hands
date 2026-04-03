@@ -176,13 +176,9 @@ sys.path.insert(0, _ROOT)
 
 # .env already loaded at top of file (before setup_env and all imports)
 
-# Clear _PLATFORM_DISPLAYS (populated at import time from .env)
 import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
-
-from core.platforms import _PLATFORM_DISPLAYS
-_PLATFORM_DISPLAYS.clear()
 
 from core import atspi, input as inp, clipboard
 from core.config import get_platform_config, get_attach_method
