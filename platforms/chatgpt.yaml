@@ -83,6 +83,9 @@ mode_guidance:
         select: pro
       - trigger: null
         select: extended
+    verification:
+      check: completed_steps
+      expected_steps: 2
     timeout: 14400
   extended_thinking:
     when: "Alias for pro_extended"
