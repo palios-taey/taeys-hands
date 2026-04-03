@@ -34,7 +34,7 @@ attach_method: atspi_menu
 dropdown_method: atspi_enum
 
 consultation_defaults:
-  model: opus
+  model: null
   mode: extended_thinking
   attach_method: atspi_menu
   extract_method: last_copy_button
