@@ -117,6 +117,9 @@ element_map:
   upload_files_item:
     name_contains: "Upload files"
     role: menu item
+  git_connector_item:
+    name: "Connectors and sources"
+    role_contains: item
   model_selector:
     name: "Model"
     role: push button
