@@ -83,18 +83,18 @@ mode_guidance:
     timeout: 7200
   extended:
     when: "Increase thinking depth after selecting Thinking or Pro"
-    how: "Select 'Extended' thinking"
+    how: "Select 'Extended' thinking tile (appears in input area after Pro/Thinking selected)"
     steps:
-      - trigger: thinking_mode
+      - trigger: null
         select: extended
     timeout: 14400
   pro_extended:
     when: "Research-grade intelligence WITH extended thinking time"
-    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' thinking."
+    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' tile in input area."
     steps:
       - trigger: model_selector
         select: pro
-      - trigger: thinking_mode
+      - trigger: null
         select: extended
     verification:
       check: completed_steps
@@ -102,11 +102,11 @@ mode_guidance:
     timeout: 14400
   extended_thinking:
     when: "Alias for pro_extended"
-    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' thinking."
+    how: "Two-step: 1) Click model selector, select 'Pro'. 2) Select 'Extended' tile in input area."
     steps:
       - trigger: model_selector
         select: pro
-      - trigger: thinking_mode
+      - trigger: null
         select: extended
     timeout: 14400
 
