@@ -605,6 +605,120 @@ def _click_send_button(platform: str) -> bool:
     return False
 
 
+def _click_send_button_atspi(platform: str) -> bool:
+    """Click the visible send button via AT-SPI only."""
+    send_button = _find_send_button(platform)
+    if not send_button or not send_button.get('atspi_obj'):
+        return False
+
+    if atspi_click(send_button):
+        logger.info("Clicked send button via AT-SPI")
+        time.sleep(1.0)
+        return True
+    return False
+
+
+def _get_current_url() -> str:
+    """Return the current document URL, if available."""
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return ''
+    return atspi.get_document_url(doc) or ''
+
+
+def _is_chatgpt_conversation_url(url: str) -> bool:
+    """Return True when ChatGPT has navigated to a conversation URL."""
+    return 'chatgpt.com/c/' in (url or '').lower()
+
+
+def _has_visible_stop_button(platform: str) -> bool:
+    """Return True when the platform stop button is visible."""
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return False
+    stop_patterns = get_platform_config(platform).get('stop_patterns', ['stop'])
+    return _scan_stop_button(doc, stop_patterns)
+
+
+def _chatgpt_send_state(initial_url: str) -> dict:
+    """Capture the observable ChatGPT send state after a submit attempt."""
+    current_url = _get_current_url()
+    send_visible = _find_send_button('chatgpt') is not None
+    stop_visible = _has_visible_stop_button('chatgpt')
+    return {
+        'url': current_url,
+        'url_changed_to_conversation': (
+            not _is_chatgpt_conversation_url(initial_url)
+            and _is_chatgpt_conversation_url(current_url)
+        ),
+        'send_visible': send_visible,
+        'stop_visible': stop_visible,
+    }
+
+
+def _submit_chatgpt_prompt() -> bool:
+    """Submit a ChatGPT prompt with Enter-first verification and fallback."""
+    initial_url = _get_current_url()
+    logger.info("ChatGPT send attempt 1/3: press Return")
+    if not inp.press_key('Return', timeout=5):
+        logger.error("Return keypress failed during ChatGPT submit")
+        return False
+
+    time.sleep(2.0)
+    state = _chatgpt_send_state(initial_url)
+    logger.info(
+        "ChatGPT send state after Return: url=%s, redirected=%s, stop_visible=%s, send_visible=%s",
+        state['url'] or '<none>',
+        state['url_changed_to_conversation'],
+        state['stop_visible'],
+        state['send_visible'],
+    )
+
+    fallback_needed = (
+        (not _is_chatgpt_conversation_url(initial_url) and not state['url_changed_to_conversation'])
+        or (not state['stop_visible'] and state['send_visible'])
+    )
+    if fallback_needed:
+        logger.warning("ChatGPT URL did not redirect to a conversation; trying send button fallback")
+        if not _click_send_button_atspi('chatgpt'):
+            logger.warning("ChatGPT AT-SPI send button fallback unavailable or failed")
+        time.sleep(2.0)
+        state = _chatgpt_send_state(initial_url)
+        logger.info(
+            "ChatGPT send state after AT-SPI click: url=%s, redirected=%s, stop_visible=%s, send_visible=%s",
+            state['url'] or '<none>',
+            state['url_changed_to_conversation'],
+            state['stop_visible'],
+            state['send_visible'],
+        )
+
+    if not state['stop_visible'] and state['send_visible']:
+        logger.warning("ChatGPT send button still visible after Enter and fallback; trying Return once more")
+        if not inp.press_key('Return', timeout=5):
+            logger.error("Final Return keypress failed during ChatGPT submit")
+            return False
+        time.sleep(2.0)
+        state = _chatgpt_send_state(initial_url)
+        logger.info(
+            "ChatGPT send state after final Return: url=%s, redirected=%s, stop_visible=%s, send_visible=%s",
+            state['url'] or '<none>',
+            state['url_changed_to_conversation'],
+            state['stop_visible'],
+            state['send_visible'],
+        )
+
+    if state['stop_visible']:
+        return True
+
+    logger.error(
+        "ChatGPT submit did not verify send: redirected=%s, stop_visible=%s, send_visible=%s",
+        state['url_changed_to_conversation'],
+        state['stop_visible'],
+        state['send_visible'],
+    )
+    return False
+
+
 def _focus_input_field():
     """Focus the editable input field and return its element dict."""
     inp.focus_firefox()
@@ -658,6 +772,12 @@ def submit_prompt(platform: str) -> bool:
     """Send the already-typed prompt."""
     input_el = _focus_input_field()
     if not input_el:
+        return False
+
+    if platform == 'chatgpt':
+        if _submit_chatgpt_prompt():
+            logger.info("Prompt submitted")
+            return True
         return False
 
     # Claude can leave the send button active after attachments/mode changes
