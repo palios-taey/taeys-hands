@@ -1,7 +1,8 @@
 # Grok Platform Configuration
 platform: grok
-url_pattern: grok.com
-base_url: https://grok.com/
+url_pattern: x.com/i/grok
+base_url: https://x.com/i/grok
+fresh_session_url: https://x.com/i/grok
 tab_shortcut: alt+4
 
 capabilities:
