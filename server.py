@@ -246,13 +246,15 @@ def _h_plan(args, rc):
     # MCP clients may send params as nested object OR flatten fields to top level.
     # Accept both: prefer nested 'params', fall back to extracting plan fields
     # from the top-level args.
+    _PLAN_FIELDS = ('session', 'message', 'model', 'mode', 'tools',
+                    'attachments', 'plan_id', 'current_state', 'status',
+                    'current_model', 'current_mode', 'current_tools',
+                    'attachment_confirmed', 'steps')
     params = args.get('params')
-    if not params or not isinstance(params, dict) or not any(params.values()):
-        # Params missing or empty — extract plan fields from top-level args
-        _PLAN_FIELDS = ('session', 'message', 'model', 'mode', 'tools',
-                        'attachments', 'plan_id', 'current_state', 'status',
-                        'current_model', 'current_mode', 'current_tools',
-                        'attachment_confirmed', 'steps')
+    if params is not None and not isinstance(params, dict):
+        return {"error": "params must be an object"}
+    if params is None or not params:
+        # Params missing or an empty object — extract plan fields from top-level args
         params = {k: args[k] for k in _PLAN_FIELDS if k in args}
     return err or handle_plan(args['platform'], args['action'], params, rc)
 
