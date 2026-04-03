@@ -413,6 +413,15 @@ def _try_perplexity_deep_research_extract(platform, firefox, doc, display: Optio
     if platform != 'perplexity':
         return None, 'not_applicable'
 
+    # Deep Research exposes the report-level "Copy contents" control at the top.
+    # Quick extract scrolls down first for generic copy flows, so reset to the top
+    # before trying the report-header button.
+    inp.press_key('ctrl+Home')
+    time.sleep(0.3)
+    inp.press_key('Home')
+    time.sleep(0.5)
+
+    doc = atspi.get_platform_document(firefox, platform) or doc
     copy_contents, _ = _find_copy_buttons_by_name(doc, 'copy contents')
     if not copy_contents:
         return None, 'not_applicable'
