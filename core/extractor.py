@@ -1,6 +1,6 @@
 class ExtractorRegistry:
     STRATEGIES = {
-        "chatgpt": "response_last_copy",
+        "chatgpt": "chatgpt_last_assistant_copy",
         "claude": "artifact_copy_then_message_copy",
         "gemini": "last_copy",
         "grok": "last_copy",
