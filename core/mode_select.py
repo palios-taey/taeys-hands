@@ -508,12 +508,15 @@ def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
                     }
 
                 clicked = False
-                if item.get('atspi_obj'):
+                from core.config import get_platform_config
+                strategy = get_platform_config(platform).get('click_strategy', 'atspi_first')
+                x, y = int(item.get('x', 0)), int(item.get('y', 0))
+                if strategy == 'xdotool_first' and x > 0 and y > 0:
+                    clicked = inp.click_at(x, y)
+                if not clicked and item.get('atspi_obj'):
                     clicked = atspi_click(item)
-                if not clicked:
-                    x, y = int(item.get('x', 0)), int(item.get('y', 0))
-                    if x > 0 and y > 0:
-                        clicked = inp.click_at(x, y)
+                if not clicked and x > 0 and y > 0:
+                    clicked = inp.click_at(x, y)
 
                 if clicked:
                     time.sleep(0.5)
