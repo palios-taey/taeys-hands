@@ -11,12 +11,33 @@ from core import atspi, input as inp, clipboard
 from core.config import get_platform_config
 from core.tree import find_elements, find_copy_buttons
 from core.interact import atspi_click
-from core.platforms import SCREEN_HEIGHT
+from core.platforms import SCREEN_HEIGHT, get_platform_display
 from core.ingest import auto_ingest
 from storage.redis_pool import node_key
 from storage import neo4j_client
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_extract_display_env(platform: str, display: Optional[str] = None) -> Optional[str]:
+    """Ensure DISPLAY/DBus env is populated before direct AT-SPI extract calls."""
+    effective_display = os.environ.get('DISPLAY') or get_platform_display(platform) or display
+    if not effective_display:
+        return display
+
+    os.environ['DISPLAY'] = effective_display
+
+    bus_file = f'/tmp/a11y_bus_{effective_display}'
+    try:
+        with open(bus_file) as f:
+            bus = f.read().strip()
+        if bus:
+            os.environ['AT_SPI_BUS_ADDRESS'] = bus
+            os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
+    except FileNotFoundError:
+        pass
+
+    return effective_display
 
 
 def _iter_children(obj):
@@ -498,6 +519,8 @@ def handle_quick_extract(platform: str, redis_client,
                          neo4j_mod=None, complete: bool = False,
                          display: Optional[str] = None) -> Dict[str, Any]:
     """Extract latest response via clipboard (click Copy, read clipboard)."""
+    display = _setup_extract_display_env(platform, display)
+
     if not inp.switch_to_platform(platform):
         return {"error": f"Could not switch to {platform} tab", "platform": platform}
 
