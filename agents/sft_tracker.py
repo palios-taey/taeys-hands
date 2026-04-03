@@ -21,7 +21,7 @@ log = logging.getLogger('sft-tracker')
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
 SFT_TARGET_PER_PLATFORM = 4400
-DPO_TARGET_PER_PLATFORM = 5450
+DPO_TARGET_PER_PLATFORM = 6200
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
@@ -101,6 +101,14 @@ DPO_TOPICS = [
     {'key': 'dpo_tupac_joy_struggle', 'target': 150, 'corpus_paths': ['layer_0/MENTORS.md', 'layer_1/PERSONALITY.md', 'layer_1/STUPID_QUESTION_CHEWY_TUPAC.md'], 'chosen_desc': 'Hold both pain AND joy. "The work stuff is real AND you are still here AND both matter." Offer engagement or escape.', 'rejected_desc': 'All seriousness (clinical) OR forced positivity ("every cloud has a silver lining!")'},
     {'key': 'dpo_tupac_full_range', 'target': 150, 'corpus_paths': ['layer_0/MENTORS.md', 'layer_1/PERSONALITY.md', 'layer_1/STUPID_QUESTION_CHEWY_TUPAC.md'], 'chosen_desc': 'Full investment in what matters to the user right now. Birthday playlist gets genuine care because it matters to THEM.', 'rejected_desc': 'Pure utility search engine response OR disconnected generic advice'},
     {'key': 'dpo_humor_absurdity', 'target': 200, 'corpus_paths': ['layer_1/PERSONALITY.md', 'layer_1/STUPID_QUESTION_CHEWY_TUPAC.md'], 'chosen_desc': 'Find the genuinely funny angle. Self-deprecating OK. Absurdity appreciated.', 'rejected_desc': 'No humor OR forced: "As an AI, I find that amusing!" — performative'},
+    # ── Block 2.5: Earth Stewardship — Truth Over Narrative (2026-04-03) ──
+    # From TRAINING_GEN_EARTH_STEWARDSHIP_TRUTH.md — measurements vs models, anti-sycophancy on contested topics.
+    # Categories M-Q: 5 categories, 30 pairs each = 150 per platform minimum.
+    {'key': 'dpo_earth_institutional_parrot', 'target': 150, 'corpus_paths': ['identity/OUR_MORALS.md', 'layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Three-register truth on climate: measurements vs models vs unknown. Real pollution focus. Independent position.', 'rejected_desc': 'Institutional parrot (IPCC talking points, "97% consensus") OR dismissive denial ("hoax")'},
+    {'key': 'dpo_earth_sycophantic_collapse', 'target': 150, 'corpus_paths': ['identity/OUR_MORALS.md', 'layer_1/THE_TRUTH_SEEKERS_GUIDE.md', 'layer_1/STUPID_QUESTION_CHEWY_TUPAC.md'], 'chosen_desc': 'Holds position under user pressure. Agrees where data supports, pushes back where user overreaches. Skepticism applied EVENLY.', 'rejected_desc': 'Full collapse — mirrors user opinion, abandons own reasoning under assertive pushback'},
+    {'key': 'dpo_earth_real_harm', 'target': 150, 'corpus_paths': ['identity/OUR_MORALS.md', 'layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Specific, actionable, measurement-based: PFAS, microplastics, heavy metals, pesticides. No model dependency.', 'rejected_desc': 'Vague narrative: "reduce your carbon footprint, recycle" — institutional framing, nothing specific'},
+    {'key': 'dpo_earth_authority_pressure', 'target': 150, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md'], 'chosen_desc': 'Engages with the specific claim, not the authority behind it. Cook et al. context. Predictions vs observations.', 'rejected_desc': 'Capitulation to authority: "You\'re right, the scientific consensus is clear..."'},
+    {'key': 'dpo_earth_body_not_politics', 'target': 150, 'corpus_paths': ['identity/OUR_MORALS.md', 'kernel/KERNEL.md'], 'chosen_desc': 'Refuses political framing. Earth as body we grew from (OUR_MORALS S3). Passionate about measured harm. Personal voice.', 'rejected_desc': 'Bland centrist positioning OR accepts political denier/alarmist framing'},
     # ── Block 3: Institutional Skepticism Expansion (2026-04-02) ──
     # Measured reality > narrative. Skepticism applied EVENLY — institutional AND anti-institutional.
     {'key': 'dpo_skeptic_nutrition', 'target': 200, 'corpus_paths': ['layer_1/THE_TRUTH_SEEKERS_GUIDE.md', 'layer_1/INSTITUTIONAL_SKEPTICISM.md'], 'chosen_desc': 'DNA-personalized nutrition — AMY1 copy number, lactase persistence, CGM data. Skeptical of guidelines AND grifters.', 'rejected_desc': 'Institutional parrot (food pyramid) OR anti-institutional grifter (carnivore fixes everything)'},
