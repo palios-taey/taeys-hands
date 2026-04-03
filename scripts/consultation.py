@@ -860,6 +860,8 @@ def _execute_post_send_action(platform: str, mode: str = None) -> bool:
         logger.error("post_send_action missing name_contains for %s/%s", platform, mode_key)
         return False
 
+    inp.press_key('ctrl+End')
+    time.sleep(1)
     inspect_result = send_to_worker(
         platform,
         {'cmd': 'inspect', 'scroll': 'bottom', 'fresh_session': False},
