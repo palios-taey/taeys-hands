@@ -197,6 +197,12 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
+# CRITICAL: core/platforms.py populates _PLATFORM_DISPLAYS at import time
+# from both env var AND .env file. Clear it after import so consultation
+# routing does not inherit stale display mappings from .env fallback.
+from core.platforms import _PLATFORM_DISPLAYS
+_PLATFORM_DISPLAYS.clear()
+
 from core import atspi, input as inp, clipboard
 from core.config import get_platform_config, get_attach_method
 from core.tree import find_elements, find_copy_buttons, find_menu_items
