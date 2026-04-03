@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 from core.extractor import ExtractorRegistry
 from tools import extract
@@ -58,6 +58,36 @@ def test_handle_quick_extract_returns_strategy_and_content():
     assert result["success"] is True
     assert result["content"] == "hello world"
     assert result["extraction_method"] == "last_copy_button"
+
+
+def test_handle_quick_extract_bootstraps_display_and_dbus_from_platform():
+    copy_button = {'x': 10, 'y': 20, 'name': 'Copy', 'role': 'push button'}
+
+    def fake_read_clipboard(*_args, **kwargs):
+        assert extract.os.environ["DISPLAY"] == ":5"
+        assert extract.os.environ["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/tmp/a11y-bus"
+        assert extract.os.environ["AT_SPI_BUS_ADDRESS"] == "unix:path=/tmp/a11y-bus"
+        return "hello world", "atspi+xclip"
+
+    with patch.dict("tools.extract.os.environ", {}, clear=True), \
+         patch("tools.extract.get_platform_display", return_value=":5"), \
+         patch("tools.extract.get_platform_config", return_value={}), \
+         patch("builtins.open", mock_open(read_data="unix:path=/tmp/a11y-bus")), \
+         patch("tools.extract.inp.switch_to_platform", return_value=True), \
+         patch("tools.extract.atspi.find_firefox_for_platform", return_value=object()), \
+         patch("tools.extract.atspi.get_platform_document", return_value=object()), \
+         patch("tools.extract.atspi.get_document_url", return_value="https://grok.example"), \
+         patch("tools.extract.find_elements", return_value=[copy_button]), \
+         patch("tools.extract._try_perplexity_deep_research_extract", return_value=(None, "not_applicable")), \
+         patch("tools.extract._try_claude_artifact_extract", return_value=(None, "not_applicable")), \
+         patch("tools.extract._click_and_read_clipboard", side_effect=fake_read_clipboard) as read_clipboard, \
+         patch("tools.extract._assess_extraction", return_value={"likely_complete": True}), \
+         patch("tools.extract.SCREEN_HEIGHT", 1000), \
+         patch("tools.extract.auto_ingest", return_value={"ok": True}):
+        result = extract.handle_quick_extract("grok", redis_client=None)
+
+    assert result["success"] is True
+    assert read_clipboard.call_args.kwargs["display"] == ":5"
 
 
 def test_extractor_registry_calls_worker_without_strategy():
