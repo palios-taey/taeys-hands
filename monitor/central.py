@@ -361,15 +361,9 @@ class CentralMonitor:
             self._notify(session, "response_complete", "content_stable")
             return True
 
-        # Hard timeout fallback: if session has been waiting >600s (10 min) with no
-        # stop ever seen, something went wrong. Complete and notify.
-        if elapsed > 600 and not ever_seen_stop:
-            _log(
-                f"[{platform}/{monitor_id}] HARD TIMEOUT: {elapsed}s with no stop ever seen "
-                f"→ COMPLETE via timeout"
-            )
-            self._notify(session, "response_complete", "hard_timeout")
-            return True
+        # No hard timeout — responses can take over an hour (ChatGPT Pro Extended,
+        # Perplexity Deep Research, Gemini Deep Research). The stop button detection
+        # is the only reliable completion signal. Content stability is the fallback.
 
         _log(
             f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
