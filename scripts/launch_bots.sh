@@ -7,15 +7,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
 
-REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_HOST="${REDIS_HOST:-192.168.100.10}"
 REDIS_PORT="${REDIS_PORT:-6379}"
-CONDUCTOR_INBOX="${CONDUCTOR_INBOX:-taey:conductor:inbox}"
+NOTIFY_INBOX="${NOTIFY_INBOX:-taey:taeys-hands:inbox}"
 BOT_NOTIFY_FROM="${BOT_NOTIFY_FROM:-bot-launcher}"
 AUTO_RESTART="${AUTO_RESTART:-0}"
 RESTART_BASE_DELAY="${RESTART_BASE_DELAY:-1}"
 RESTART_MAX_DELAY="${RESTART_MAX_DELAY:-60}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-BOT_SCRIPT="${BOT_SCRIPT:-agents/hmm_bot.py}"
+BOT_SCRIPT="${BOT_SCRIPT:-agents/sft_gen_bot.py}"
+BOT_ROUND="${BOT_ROUND:-all}"
 
 declare -a PLATFORMS=()
 declare -A DISPLAY_BY_PLATFORM=()
@@ -115,7 +116,7 @@ PY
     )"
 
     if redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" \
-        LPUSH "${CONDUCTOR_INBOX}" "${payload}" >/dev/null; then
+        LPUSH "${NOTIFY_INBOX}" "${payload}" >/dev/null; then
         log "Notified conductor about ${platform} death (exit ${exit_code})"
     else
         log "Failed to notify conductor about ${platform} death (exit ${exit_code})"
@@ -145,7 +146,8 @@ launch_bot() {
             DISPLAY="${display}" \
             DBUS_SESSION_BUS_ADDRESS="${bus}" \
             AT_SPI_BUS_ADDRESS="${bus}" \
-            "${PYTHON_BIN}" "${BOT_SCRIPT}" --platforms "${platform}" --cycles 0
+            TAEY_NOTIFY_NODE="taeys-hands" \
+            "${PYTHON_BIN}" "${BOT_SCRIPT}" --round "${BOT_ROUND}" --platforms "${platform}"
     ) &
 
     BOT_PID["${platform}"]=$!
@@ -269,7 +271,7 @@ main() {
     done
 
     log "Launcher active for platforms: ${PLATFORMS[*]}"
-    log "AUTO_RESTART=${AUTO_RESTART} REDIS=${REDIS_HOST}:${REDIS_PORT} inbox=${CONDUCTOR_INBOX}"
+    log "AUTO_RESTART=${AUTO_RESTART} REDIS=${REDIS_HOST}:${REDIS_PORT} inbox=${NOTIFY_INBOX} round=${BOT_ROUND}"
 
     while true; do
         reap_dead_bots
