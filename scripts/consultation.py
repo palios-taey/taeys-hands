@@ -901,9 +901,22 @@ def _verify_mode_selection(platform: str, target_mode: str, selection_result: di
     verified = False
     verify_method = 'none'
     selection_result = selection_result or {}
+    mode_key = _normalize_mode_key(target_mode)
+    mode_guidance = get_platform_config(platform).get('mode_guidance', {})
+    mode_config = mode_guidance.get(mode_key, {})
+    verification_config = mode_config.get('verification', {})
+    verification_check = verification_config.get('check')
 
     selected_item = selection_result.get('selected_item')
-    if selection_result.get('success') and selected_item:
+    if verification_check == 'completed_steps':
+        completed_steps = selection_result.get('completed_steps') or []
+        expected_steps = verification_config.get('expected_steps')
+        if selection_result.get('success') and len(completed_steps) == expected_steps:
+            logger.info("Mode verified via completed steps: %s/%s",
+                        len(completed_steps), expected_steps)
+            verified = True
+            verify_method = 'completed_steps'
+    elif selection_result.get('success') and selected_item:
         selected_name = selected_item.replace('_', ' ').lower().strip()
         target_lower = target_mode.replace('_', ' ').lower().strip()
         if target_lower in selected_name or selected_name.startswith(target_lower):
