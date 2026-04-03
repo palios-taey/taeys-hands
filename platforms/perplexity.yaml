@@ -130,8 +130,8 @@ element_map:
     name: "Copy code"
     role: push button
   stop_button:
-    name_contains: "Stop"
-    role_contains: button
+    name_contains: "Stop response"
+    role: push button
   submit_button:
     name: "Submit"
     role: push button

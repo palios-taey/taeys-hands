@@ -288,26 +288,26 @@ def _check_stop_button() -> dict:
         return {'stop_found': False, 'error': 'Document not found'}
 
     config = get_platform_config(PLATFORM)
-    stop_patterns = config.get('stop_patterns', ['stop'])
+    stop_spec = config.get('element_map', {}).get('stop_button') or {}
+    stop_name = stop_spec.get('name_contains')
+    stop_role = stop_spec.get('role')
 
-    def _scan(obj, depth=0):
-        if depth > 25:
-            return False
-        try:
-            role = obj.get_role_name() or ''
-            name = (obj.get_name() or '').strip().lower()
-            if role in ('push button', 'button', 'toggle button'):
-                if name and len(name) <= 50 and any(p in name for p in stop_patterns):
-                    return True
-            for i in range(obj.get_child_count()):
-                child = obj.get_child_at_index(i)
-                if child and _scan(child, depth + 1):
-                    return True
-        except Exception:
-            pass
-        return False
+    if not isinstance(stop_name, str) or not isinstance(stop_role, str):
+        return {
+            'stop_found': False,
+            'error': f'Missing stop_button config for {PLATFORM}',
+        }
 
-    stop_found = _scan(doc)
+    stop_name = stop_name.lower()
+    stop_role = stop_role.lower()
+
+    elements = []
+    _scan_named_elements(doc, elements)
+    stop_found = any(
+        (element.get('role') or '').strip().lower() == stop_role
+        and stop_name in (element.get('name') or '').strip().lower()
+        for element in elements
+    )
     return {'stop_found': stop_found, 'platform': PLATFORM}
 
 
