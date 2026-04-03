@@ -120,6 +120,52 @@ def test_detect_completion_deep_think_requires_full_stop_transition(mock_redis):
     notify.assert_not_called()
 
 
+def test_detect_completion_deep_research_ignores_content_stability_fallback(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    session = {
+        "platform": "gemini",
+        "monitor_id": "mon-stable",
+        "mode": "deep_research",
+        "started_ts": time.time(),
+        "timeout": 7200,
+    }
+
+    with patch.object(monitor, "_notify") as notify:
+        first_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "stable-hash",
+            },
+        )
+        second_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "stable-hash",
+            },
+        )
+        third_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "stable-hash",
+            },
+        )
+
+    assert first_poll is False
+    assert second_poll is False
+    assert third_poll is False
+    assert mock_redis.get("taey:monitor:mon-stable:content_stable_ticks") == "2"
+    assert mock_redis.get("taey:monitor:mon-stable:stop_cycles") is None
+    notify.assert_not_called()
+
+
 def test_notify_extracts_and_stores_after_response_complete(mock_redis):
     with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
         monitor = CentralMonitor()

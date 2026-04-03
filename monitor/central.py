@@ -388,6 +388,12 @@ class CentralMonitor:
 
         # Fallback: content stable for STABLE_TICKS cycles — NO send_visible required
         if stable_ticks >= STABLE_TICKS:
+            if mode in ("deep_research", "deep_think") and stop_cycles < required_stop_cycles:
+                _log(
+                    f"[{platform}/{monitor_id}] content stable but DR mode needs "
+                    f"{required_stop_cycles} stop cycles — waiting"
+                )
+                return False
             _log(
                 f"[{platform}/{monitor_id}] stop=NO stable_ticks={stable_ticks} "
                 f"→ COMPLETE via content stability ({elapsed}s)"
