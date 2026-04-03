@@ -53,6 +53,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from urllib.parse import urlsplit
 
 # consultation.py mutates DISPLAY per platform; pin the Redis node ID first
 # so monitor session keys stay aligned with the central monitor namespace.
@@ -282,8 +283,48 @@ def get_doc(force_refresh=False):
     return atspi.get_platform_document(ff, args.platform)
 
 
-def navigate_to_session_url(platform: str, url: str) -> bool:
-    """Navigate to an existing session URL for follow-up."""
+def _expected_url_fragments(url: str) -> list[str]:
+    """Return normalized URL fragments that should appear after navigation."""
+    if not url:
+        return []
+    lowered = url.lower().rstrip('/')
+    parts = urlsplit(lowered)
+    fragments = [lowered]
+    if parts.netloc:
+        path = parts.path.rstrip('/')
+        fragments.append(f"{parts.netloc}{path}" if path else parts.netloc)
+    return list(dict.fromkeys(fragment for fragment in fragments if fragment))
+
+
+def _verify_navigation_url(platform: str, expected_fragments: list[str], timeout: float = 12.0) -> bool:
+    """Wait for the document URL to match one of the expected fragments."""
+    if not expected_fragments:
+        return True
+
+    normalized = [fragment.lower().rstrip('/') for fragment in expected_fragments if fragment]
+    deadline = time.time() + timeout
+    last_seen = ''
+
+    while time.time() < deadline:
+        current_url = _get_current_url().lower().rstrip('/')
+        if current_url:
+            last_seen = current_url
+            if any(fragment in current_url for fragment in normalized):
+                logger.info("[%s] Navigation verified at %s", platform, current_url)
+                return True
+        time.sleep(1.0)
+
+    logger.error(
+        "[%s] Navigation verification failed: expected one of %s, saw %s",
+        platform,
+        normalized,
+        last_seen or '<none>',
+    )
+    return False
+
+
+def _navigate_browser_to_url(platform: str, url: str, *, expected_fragments: list[str] | None = None) -> bool:
+    """Navigate Firefox via the location bar and optionally verify the result."""
     _close_stale_file_dialogs()
     inp.focus_firefox()
     time.sleep(0.3)
@@ -293,10 +334,19 @@ def navigate_to_session_url(platform: str, url: str) -> bool:
     time.sleep(0.3)
     inp.press_key('ctrl+a')
     time.sleep(0.1)
-    inp.type_text(url, delay_ms=5)
+    if not inp.clipboard_paste(url):
+        logger.warning("[%s] Clipboard paste failed for URL, falling back to typing", platform)
+        inp.type_text(url, delay_ms=5)
     time.sleep(0.3)
     inp.press_key('Return')
-    time.sleep(8)
+    time.sleep(2.0)
+    return _verify_navigation_url(platform, expected_fragments or [])
+
+
+def navigate_to_session_url(platform: str, url: str) -> bool:
+    """Navigate to an existing session URL for follow-up."""
+    if not _navigate_browser_to_url(platform, url, expected_fragments=_expected_url_fragments(url)):
+        return False
 
     doc = get_doc(force_refresh=True)
     if not doc:
@@ -430,24 +480,18 @@ def connect_git_repo(platform: str, repo_url: str) -> bool:
 def navigate_fresh_session(platform: str) -> bool:
     """Navigate to fresh session URL."""
     from core.platforms import BASE_URLS
-    url = BASE_URLS.get(platform)
+
+    config = get_platform_config(platform)
+    url = config.get('fresh_session_url') or config.get('base_url') or BASE_URLS.get(platform)
     if not url:
         logger.error(f"No base URL for {platform}")
         return False
 
-    _close_stale_file_dialogs()
-    inp.focus_firefox()
-    time.sleep(0.3)
-    inp.press_key('Escape')
-    time.sleep(0.2)
-    inp.press_key('ctrl+l')
-    time.sleep(0.3)
-    inp.press_key('ctrl+a')
-    time.sleep(0.1)
-    inp.type_text(url, delay_ms=5)
-    time.sleep(0.3)
-    inp.press_key('Return')
-    time.sleep(8)
+    expected_fragments = _expected_url_fragments(url)
+    if platform == 'grok':
+        expected_fragments = _expected_url_fragments('https://x.com/i/grok')
+    if not _navigate_browser_to_url(platform, url, expected_fragments=expected_fragments):
+        return False
 
     # Platform-specific post-navigation
     if platform == 'perplexity':
