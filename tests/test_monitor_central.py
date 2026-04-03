@@ -63,10 +63,10 @@ def test_notify_extracts_and_stores_after_response_complete(mock_redis):
         monitor._notify(session, "response_complete", "stop_button")
         extractor.extract.assert_called_once()
         worker_fn = extractor.extract.call_args.args[1]
-        worker_fn({"cmd": "extract", "strategy": "response_last_copy"})
+        worker_fn({"cmd": "extract", "strategy": "chatgpt_last_assistant_copy"})
         call_worker.assert_called_once_with(
             "chatgpt",
-            {"cmd": "extract", "strategy": "response_last_copy"},
+            {"cmd": "extract", "strategy": "chatgpt_last_assistant_copy"},
             operation="extract",
         )
 
