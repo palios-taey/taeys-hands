@@ -42,7 +42,7 @@ dropdown_method: keyboard_nav
 
 consultation_defaults:
   model: pro
-  mode: pro_extended
+  mode: pro
   attach_method: atspi_menu
   extract_method: last_copy_button
 
