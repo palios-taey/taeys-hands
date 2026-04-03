@@ -26,7 +26,31 @@ def test_chatgpt_mode_guidance():
     assert 'auto' in mg
     assert 'thinking' in mg
     assert 'pro' in mg
+    assert mg['pro_extended']['verification'] == {
+        'check': 'completed_steps',
+        'expected_steps': 2,
+    }
     assert mg['pro']['timeout'] == 7200
+
+
+def test_chatgpt_pro_extended_verifies_by_completed_steps():
+    import sys
+
+    sys.argv = ['consultation.py', '--platform', 'chatgpt', '--message', 'x']
+    from scripts import consultation
+
+    result = consultation._verify_mode_selection(
+        'chatgpt',
+        'pro_extended',
+        {
+            'success': True,
+            'selected_item': 'Extended Pro',
+            'completed_steps': [{'step': 1}, {'step': 2}],
+        },
+    )
+
+    assert result['verified'] is True
+    assert result['method'] == 'completed_steps'
 
 
 def test_gemini_mode_guidance():
