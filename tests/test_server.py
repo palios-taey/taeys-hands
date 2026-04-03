@@ -49,6 +49,23 @@ def test_send_message_requires_fields():
     assert "message" in result["error"]
 
 
+def test_taey_plan_preserves_nested_falsey_params():
+    redis_client = MagicMock()
+    with patch("server.handle_plan", return_value={"success": True}) as mock_handle_plan:
+        result = handle_tool(
+            "taey_plan",
+            {
+                "platform": "claude",
+                "action": "update",
+                "params": {"tools": []},
+            },
+            redis_client,
+        )
+
+    assert result["success"] is True
+    mock_handle_plan.assert_called_once_with("claude", "update", {"tools": []}, redis_client)
+
+
 def test_inject_notifications_empty(mock_redis):
     result = {"success": True}
     result = inject_notifications(result, mock_redis)
