@@ -185,16 +185,28 @@ def send_to_worker(platform: str, cmd: dict,
 
 def _ipc_call(sock_path: str, cmd: dict, timeout: float) -> dict:
     """Low-level Unix socket call: send JSON, receive JSON."""
+    deadline = time.monotonic() + timeout
+
+    def _remaining_timeout() -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"Timed out waiting for worker response after {timeout:.2f}s"
+            )
+        return remaining
+
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
     try:
+        sock.settimeout(_remaining_timeout())
         sock.connect(sock_path)
         payload = json.dumps(cmd, cls=_JSONEncoder) + '\n'
+        sock.settimeout(_remaining_timeout())
         sock.sendall(payload.encode())
 
         # Read response (newline-terminated)
         data = b''
         while b'\n' not in data:
+            sock.settimeout(_remaining_timeout())
             chunk = sock.recv(1048576)  # 1MB chunks
             if not chunk:
                 break

@@ -30,7 +30,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Ensure project root is on path so core/ imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -72,11 +72,23 @@ except ImportError:
 
 POLL_INTERVAL = 2.0
 STABLE_TICKS = 2
+DEFAULT_WORKER_TIMEOUT = 5.0
 
 
 def _log(msg: str):
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     print(f"[{ts}] [monitor] {msg}", flush=True)
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        _log(f"Invalid float for {name}={value!r}; using {default}")
+        return default
 
 
 class CentralMonitor:
@@ -87,6 +99,48 @@ class CentralMonitor:
         self.rc = self._connect_redis()
         if not self.rc:
             _log("WARNING: No Redis — monitor cannot track sessions")
+
+    def _worker_timeout(self, platform: str, operation: Optional[str] = None) -> float:
+        op = operation.upper() if operation else None
+        platform_key = platform.upper()
+        env_names = []
+        if op:
+            env_names.extend([
+                f"MONITOR_{op}_TIMEOUT_{platform_key}_SEC",
+                f"MONITOR_{op}_TIMEOUT_SEC",
+            ])
+        env_names.extend([
+            f"MONITOR_WORKER_TIMEOUT_{platform_key}_SEC",
+            "MONITOR_WORKER_TIMEOUT_SEC",
+        ])
+
+        timeout = DEFAULT_WORKER_TIMEOUT
+        for env_name in reversed(env_names):
+            timeout = _env_float(env_name, timeout)
+        return timeout
+
+    def _call_worker(self, platform: str, cmd: Dict, operation: Optional[str] = None) -> Optional[Dict]:
+        from workers.manager import send_to_worker
+
+        timeout = self._worker_timeout(platform, operation)
+        started = time.monotonic()
+        try:
+            result = send_to_worker(platform, cmd, timeout=timeout)
+        except Exception as e:
+            elapsed = time.monotonic() - started
+            _log(
+                f"[{platform}] Worker call failed for {cmd.get('cmd')} "
+                f"after {elapsed:.2f}s (timeout={timeout:.2f}s): {e}"
+            )
+            return None
+
+        elapsed = time.monotonic() - started
+        if elapsed > timeout:
+            _log(
+                f"[{platform}] Worker call for {cmd.get('cmd')} exceeded "
+                f"timeout budget ({elapsed:.2f}s > {timeout:.2f}s)"
+            )
+        return result
 
     def _connect_redis(self):
         if not REDIS_AVAILABLE:
@@ -342,12 +396,10 @@ class CentralMonitor:
             return
 
         try:
-            from workers.manager import send_to_worker
-
             extractor = ExtractorRegistry()
             result = extractor.extract(
                 platform,
-                lambda cmd: send_to_worker(platform, cmd, timeout=120.0),
+                lambda cmd: self._call_worker(platform, cmd, operation="extract"),
             )
             if not result:
                 _log(f"[{platform}/{monitor_id}] Extraction failed: empty worker result")
@@ -412,7 +464,6 @@ class CentralMonitor:
         if not sessions:
             return
 
-        from workers.manager import send_to_worker
         from core.platforms import get_platform_display
 
         by_platform: Dict[str, List[Dict]] = {}
@@ -425,18 +476,17 @@ class CentralMonitor:
         for platform, platform_sessions in by_platform.items():
             if not get_platform_display(platform):
                 continue
-            try:
-                stop_result = send_to_worker(platform, {'cmd': 'check_stop'}, timeout=10.0)
-                send_result = send_to_worker(platform, {'cmd': 'get_send_button_state'}, timeout=10.0)
-                hash_result = send_to_worker(platform, {'cmd': 'get_content_hash'}, timeout=10.0)
-                worker_state = {
-                    'stop_found': stop_result.get('stop_found', False),
-                    'send_visible': send_result.get('send_visible', False),
-                    'content_hash': hash_result.get('content_hash', ''),
-                }
-            except Exception as e:
-                _log(f"[{platform}] Worker monitor state check failed: {e}")
+            stop_result = self._call_worker(platform, {'cmd': 'check_stop'}, operation="poll")
+            send_result = self._call_worker(platform, {'cmd': 'get_send_button_state'}, operation="poll")
+            hash_result = self._call_worker(platform, {'cmd': 'get_content_hash'}, operation="poll")
+            if not (stop_result and send_result and hash_result):
+                _log(f"[{platform}] Worker monitor state incomplete; skipping platform this cycle")
                 continue
+            worker_state = {
+                'stop_found': stop_result.get('stop_found', False),
+                'send_visible': send_result.get('send_visible', False),
+                'content_hash': hash_result.get('content_hash', ''),
+            }
 
             for session in platform_sessions:
                 if self._detect_completion(session, worker_state):
