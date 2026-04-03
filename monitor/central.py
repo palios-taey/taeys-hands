@@ -371,6 +371,7 @@ class CentralMonitor:
                 session_id,
                 monitor_id,
                 self.rc,
+                source="monitor",
             )
             if content_hash:
                 _log(
