@@ -114,8 +114,8 @@ element_map:
     name_contains: "Copy"
     role_contains: button
   stop_button:
-    name_contains: ["Stop", "Cancel"]
-    role_contains: button
+    name_contains: "Stop response"
+    role: push button
   send_button:
     name: "Send message"
     role: push button

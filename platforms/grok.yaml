@@ -111,7 +111,7 @@ element_map:
     role: push button
   stop_button:
     name_contains: "Stop"
-    role_contains: button
+    role: push button
   regenerate:
     name: "Regenerate"
     role: push button
