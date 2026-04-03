@@ -100,6 +100,7 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
                              redis_client, session_id: str = None,
                              user_message_id: str = None,
                              tmux_session: str = None,
+                             mode: str = None,
                              timeout: int = 7200) -> Dict[str, Any]:
     """Register active session for the central monitor to track."""
     if not redis_client:
@@ -112,6 +113,7 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
         "session_id": session_id,
         "user_message_id": user_message_id,
         "tmux_session": tmux_session or NODE_ID,
+        "mode": mode,
         "stop_seen": False,
         "generating_since": None,
         "started_ts": time.time(),
@@ -230,6 +232,18 @@ def handle_send_message(platform: str, message: str,
     # Register monitor session BEFORE Enter (chat platforms only)
     monitor_id = str(uuid.uuid4())[:8]
     monitor_registered = False
+    mode = None
+
+    if redis_client:
+        plan_id = redis_client.get(node_key(f"plan:current:{platform}"))
+        if plan_id:
+            plan_json = redis_client.get(node_key(f"plan:{plan_id}"))
+            if plan_json:
+                try:
+                    plan = json.loads(plan_json)
+                    mode = plan.get('required_state', {}).get('mode') or plan.get('mode')
+                except (json.JSONDecodeError, TypeError):
+                    logger.debug("Could not decode current plan for monitor mode", exc_info=True)
 
     if platform not in SOCIAL_PLATFORMS:
         _ensure_central_monitor(display)
@@ -237,6 +251,7 @@ def handle_send_message(platform: str, message: str,
             platform=platform, monitor_id=monitor_id, url=url,
             redis_client=redis_client, session_id=session_id,
             user_message_id=message_id,
+            mode=mode,
         )
         monitor_registered = reg.get("registered", False)
 

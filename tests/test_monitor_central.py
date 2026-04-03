@@ -1,4 +1,5 @@
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 from monitor.central import CentralMonitor, ExtractTimeout
@@ -36,6 +37,87 @@ def test_detect_completion_allows_primary_gate_without_send_visible(mock_redis):
     assert generating is False
     assert completed is True
     notify.assert_called_once_with(session, "response_complete", "stop_button")
+
+
+def test_detect_completion_deep_research_waits_for_second_stop_cycle(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    session = {
+        "platform": "gemini",
+        "monitor_id": "mon-deep",
+        "mode": "deep_research",
+        "started_ts": 0,
+        "timeout": 7200,
+    }
+
+    with patch.object(monitor, "_notify") as notify:
+        first_generating = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "hash-1",
+            },
+        )
+        plan_transition = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "hash-2",
+            },
+        )
+        second_generating = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "hash-3",
+            },
+        )
+        completed = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "hash-4",
+            },
+        )
+
+    assert first_generating is False
+    assert plan_transition is False
+    assert second_generating is False
+    assert completed is True
+    assert mock_redis.get("taey:monitor:mon-deep:stop_cycles") == "2"
+    notify.assert_called_once_with(session, "response_complete", "stop_button")
+
+
+def test_detect_completion_deep_think_requires_full_stop_transition(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    session = {
+        "platform": "gemini",
+        "monitor_id": "mon-think",
+        "mode": "deep_think",
+        "started_ts": time.time(),
+        "timeout": 7200,
+    }
+
+    with patch.object(monitor, "_notify") as notify:
+        poll_without_transition = monitor._detect_completion(
+            session,
+            {
+                "stop_found": False,
+                "send_visible": False,
+                "content_hash": "",
+            },
+        )
+
+    assert poll_without_transition is False
+    assert mock_redis.get("taey:monitor:mon-think:stop_cycles") is None
+    notify.assert_not_called()
 
 
 def test_notify_extracts_and_stores_after_response_complete(mock_redis):

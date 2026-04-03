@@ -95,6 +95,26 @@ def test_audit_passes_send_with_audit_passed(mock_redis):
     assert error is None
 
 
+def test_register_monitor_session_stores_mode(mock_redis):
+    """Monitor session registration must persist the selected mode."""
+    from tools.send import register_monitor_session
+    from storage.redis_pool import node_key
+
+    result = register_monitor_session(
+        platform='gemini',
+        monitor_id='mon-mode',
+        url='https://example.test/chat',
+        redis_client=mock_redis,
+        mode='deep_research',
+    )
+
+    assert result == {"registered": True, "monitor_id": "mon-mode"}
+
+    session_key = node_key("active_session:mon-mode")
+    session = json.loads(mock_redis.get(session_key))
+    assert session["mode"] == "deep_research"
+
+
 # ── Test 4: Grok fresh_session triggers F5 on stale URL ────────────────────
 
 def test_grok_fresh_session_triggers_reload():
