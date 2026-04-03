@@ -1,5 +1,6 @@
 """Tests for mode/model selection — YAML config loading and routing."""
 
+import importlib
 import os
 import sys
 import pytest
@@ -68,11 +69,43 @@ def test_chatgpt_mode_guidance():
     assert 'auto' in mg
     assert 'thinking' in mg
     assert 'pro' in mg
+    assert 'extended' in mg
     assert mg['pro_extended']['verification'] == {
         'check': 'completed_steps',
         'expected_steps': 2,
     }
     assert mg['pro']['timeout'] == 7200
+
+
+def test_chatgpt_consultation_defaults():
+    from core.config import get_platform_config
+
+    defaults = get_platform_config('chatgpt', reload=True)['consultation_defaults']
+    assert defaults['model'] == 'pro'
+    assert defaults['mode'] == 'extended_thinking'
+
+
+def test_consultation_uses_yaml_defaults_for_fresh_sessions():
+    sys.argv = ['consultation.py', '--platform', 'chatgpt', '--message', 'x']
+    consultation = importlib.import_module('scripts.consultation')
+    consultation = importlib.reload(consultation)
+
+    assert consultation.args.model == 'pro'
+    assert consultation.args.mode == 'extended_thinking'
+
+
+def test_consultation_skips_yaml_defaults_for_followups():
+    sys.argv = [
+        'consultation.py',
+        '--platform', 'chatgpt',
+        '--message', 'x',
+        '--session-url', 'https://chatgpt.com/c/example',
+    ]
+    consultation = importlib.import_module('scripts.consultation')
+    consultation = importlib.reload(consultation)
+
+    assert consultation.args.model is None
+    assert consultation.args.mode is None
 
 
 def test_chatgpt_pro_extended_verifies_by_completed_steps():
