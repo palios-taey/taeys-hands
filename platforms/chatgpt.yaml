@@ -85,7 +85,7 @@ mode_guidance:
     when: "Increase thinking depth after selecting Thinking or Pro"
     how: "Select 'Extended' thinking"
     steps:
-      - trigger: null
+      - trigger: thinking_mode
         select: extended
     timeout: 14400
   pro_extended:
@@ -94,7 +94,7 @@ mode_guidance:
     steps:
       - trigger: model_selector
         select: pro
-      - trigger: null
+      - trigger: thinking_mode
         select: extended
     verification:
       check: completed_steps
@@ -106,7 +106,7 @@ mode_guidance:
     steps:
       - trigger: model_selector
         select: pro
-      - trigger: null
+      - trigger: thinking_mode
         select: extended
     timeout: 14400
 
