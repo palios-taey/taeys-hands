@@ -58,6 +58,10 @@ mode_guidance:
     how: "Click 'Tools' button, select 'Deep research' check menu item"
     timeout: 3600
     note: "Multi-step: plan card -> click 'Start research' -> respawn_monitor -> extract via Share & Export > Copy Content"
+    post_send_action:
+      type: click_button
+      name_contains: Start research
+      wait_before: 3
   thinking:
     when: "Medium complexity reasoning"
     how: "Click 'Open mode picker', select 'Thinking' radio item"

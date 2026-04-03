@@ -192,6 +192,7 @@ from core.interact import atspi_click
 from tools.attach import handle_attach, _close_stale_file_dialogs, _verify_attach_success
 from tools.plan import _prepend_identity_files, _consolidate_attachments
 from storage.redis_pool import get_client as get_redis, node_key, NODE_ID
+from workers.manager import send_to_worker
 
 # Verify node ID matches expectations — mismatch breaks monitor notifications
 if NODE_ID and '-d' in NODE_ID and not os.environ.get('TAEY_NODE_ID'):
@@ -811,6 +812,80 @@ def send_prompt(platform: str, message: str) -> bool:
     return True
 
 
+def _normalize_mode_key(mode: str) -> str:
+    """Normalize CLI mode strings to mode_guidance keys."""
+    return (mode or '').strip().lower().replace(' ', '_')
+
+
+def _execute_post_send_action(platform: str, mode: str = None) -> bool:
+    """Run a configured post-send action for the selected mode, if any."""
+    mode_key = _normalize_mode_key(mode)
+    if not mode_key:
+        return True
+
+    mode_guidance = get_platform_config(platform).get('mode_guidance', {})
+    mode_config = mode_guidance.get(mode_key, {})
+    post_send_action = mode_config.get('post_send_action')
+    if not isinstance(post_send_action, dict):
+        return True
+
+    if post_send_action.get('type') != 'click_button':
+        logger.warning("Unsupported post_send_action type for %s/%s: %s",
+                       platform, mode_key, post_send_action.get('type'))
+        return False
+
+    wait_before = float(post_send_action.get('wait_before', 0) or 0)
+    if wait_before > 0:
+        logger.info("Waiting %.1fs before post-send action", wait_before)
+        time.sleep(wait_before)
+
+    name_contains = post_send_action.get('name_contains')
+    if isinstance(name_contains, str):
+        patterns = [name_contains]
+    else:
+        patterns = [str(part) for part in (name_contains or []) if str(part).strip()]
+    if not patterns:
+        logger.error("post_send_action missing name_contains for %s/%s", platform, mode_key)
+        return False
+
+    inspect_result = send_to_worker(
+        platform,
+        {'cmd': 'inspect', 'scroll': 'bottom', 'fresh_session': False},
+        timeout=30.0,
+    )
+    if not inspect_result.get('success'):
+        logger.error("Post-send inspect failed for %s/%s: %s",
+                     platform, mode_key, inspect_result.get('error'))
+        return False
+
+    patterns_lower = [part.lower() for part in patterns]
+    controls = inspect_result.get('controls', [])
+    button = next(
+        (
+            control for control in controls
+            if 'button' in str(control.get('role', '')).lower()
+            and any(part in str(control.get('name', '')).lower() for part in patterns_lower)
+        ),
+        None,
+    )
+    if not button:
+        logger.error("Post-send button not found for %s/%s: %s", platform, mode_key, patterns)
+        return False
+
+    click_result = send_to_worker(
+        platform,
+        {'cmd': 'click', 'x': int(button['x']), 'y': int(button['y'])},
+        timeout=30.0,
+    )
+    if click_result.get('error'):
+        logger.error("Post-send click failed for %s/%s: %s",
+                     platform, mode_key, click_result.get('error'))
+        return False
+
+    logger.info("Clicked Start research button for Gemini Deep Research")
+    return True
+
+
 def _verify_mode_selection(platform: str, target_mode: str, selection_result: dict = None) -> dict:
     """Verify the selected mode/model is visible in the AT-SPI tree."""
     verified = False
@@ -1327,6 +1402,12 @@ def main():
     logger.info("Step 6: Send prompt")
     if not submit_prompt(platform):
         result['error'] = 'send_failed'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
+    logger.info("Step 6a: Post-send action check")
+    if not _execute_post_send_action(platform, args.mode):
+        result['error'] = 'post_send_action_failed'
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
