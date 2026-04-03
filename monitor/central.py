@@ -343,18 +343,32 @@ class CentralMonitor:
 
         if content_hash and content_hash == last_hash:
             stable_ticks += 1
+        elif not content_hash and last_hash:
+            # Worker didn't return hash — don't reset, keep counting
+            stable_ticks += 1
         else:
             stable_ticks = 0
 
-        self.rc.setex(hash_key, state_ttl, content_hash)
+        self.rc.setex(hash_key, state_ttl, content_hash or last_hash or "")
         self.rc.setex(stable_key, state_ttl, str(stable_ticks))
 
-        if stable_ticks >= STABLE_TICKS and send_visible:
+        # Fallback: content stable for STABLE_TICKS cycles — NO send_visible required
+        if stable_ticks >= STABLE_TICKS:
             _log(
-                f"[{platform}/{monitor_id}] stop=NO send=YES stable_ticks={stable_ticks} "
-                f"→ COMPLETE ({elapsed}s)"
+                f"[{platform}/{monitor_id}] stop=NO stable_ticks={stable_ticks} "
+                f"→ COMPLETE via content stability ({elapsed}s)"
             )
             self._notify(session, "response_complete", "content_stable")
+            return True
+
+        # Hard timeout fallback: if session has been waiting >600s (10 min) with no
+        # stop ever seen, something went wrong. Complete and notify.
+        if elapsed > 600 and not ever_seen_stop:
+            _log(
+                f"[{platform}/{monitor_id}] HARD TIMEOUT: {elapsed}s with no stop ever seen "
+                f"→ COMPLETE via timeout"
+            )
+            self._notify(session, "response_complete", "hard_timeout")
             return True
 
         _log(
