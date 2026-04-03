@@ -27,6 +27,7 @@ Environment:
 import argparse
 import json
 import os
+import signal
 import sys
 import time
 from datetime import datetime
@@ -73,6 +74,15 @@ except ImportError:
 POLL_INTERVAL = 2.0
 STABLE_TICKS = 2
 DEFAULT_WORKER_TIMEOUT = 5.0
+EXTRACT_HARD_TIMEOUT_SEC = 5
+
+
+class ExtractTimeout(Exception):
+    """Raised when the hard extraction timeout fires."""
+
+
+def _timeout_handler(signum, frame):
+    raise ExtractTimeout()
 
 
 def _log(msg: str):
@@ -396,6 +406,12 @@ class CentralMonitor:
             return
 
         try:
+            old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(EXTRACT_HARD_TIMEOUT_SEC)
+        except Exception:
+            return
+
+        try:
             extractor = ExtractorRegistry()
             result = extractor.extract(
                 platform,
@@ -432,8 +448,16 @@ class CentralMonitor:
                 )
             else:
                 _log(f"[{platform}/{monitor_id}] Extraction skipped: storage returned no content hash")
+        except ExtractTimeout:
+            _log(
+                f"[{platform}/{monitor_id}] WARN: Extract timed out after "
+                f"{EXTRACT_HARD_TIMEOUT_SEC}s; skipping"
+            )
         except Exception as e:
-            _log(f"[{platform}/{monitor_id}] Extraction failed: {e}")
+            _log(f"[{platform}/{monitor_id}] WARN: Extract failed: {e}; skipping")
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
 
     def run(self):
         """Main loop — poll workers for completion state every cycle."""
