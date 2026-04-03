@@ -971,7 +971,8 @@ def _verify_mode_selection(platform: str, target_mode: str, selection_result: di
     if verification_check == 'completed_steps':
         completed_steps = selection_result.get('completed_steps') or []
         expected_steps = verification_config.get('expected_steps')
-        if selection_result.get('success') and len(completed_steps) == expected_steps:
+        all_steps_verified = all(step.get('verified') for step in completed_steps)
+        if selection_result.get('success') and len(completed_steps) == expected_steps and all_steps_verified:
             logger.info("Mode verified via completed steps: %s/%s",
                         len(completed_steps), expected_steps)
             verified = True

@@ -262,10 +262,25 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
             step_result['completed_steps'] = completed_steps
             return step_result
 
+        step_verification = _verify_multi_step_selection(
+            platform, select_target, firefox, doc
+        )
+        if not step_verification.get('verified'):
+            return {
+                'success': False,
+                'error': f'Step {i+1}: \"{select_target}\" click did not verify',
+                'step': i + 1,
+                'verify_method': step_verification.get('method', 'none'),
+                'verification_note': step_verification.get('note'),
+                'completed_steps': completed_steps,
+            }
+
         completed_steps.append({
             'step': i + 1,
             'trigger': trigger_key,
             'selected': step_result.get('selected_item', select_target),
+            'verified': True,
+            'verify_method': step_verification.get('method', 'none'),
         })
 
         # Wait for UI to update between steps
@@ -402,18 +417,14 @@ def _is_selected_item(item: Dict) -> bool:
         return False
 
 
-def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
-    """Find matching item by name and click it."""
-    from core.interact import atspi_click
-
+def _selection_terms(mode_key: str) -> List[str]:
+    """Build search terms including common aliases for a mode key."""
     mode_key_lower = mode_key.lower().strip()
-
-    # Build search terms including common aliases
-    search_terms = [mode_key_lower]
-    _ALIASES = {
+    aliases = {
         'deep_think': ['deep think'],
         'deep_research': ['deep research'],
         'extended_thinking': ['extended thinking', 'extended'],
+        'extended': ['extended'],
         'expert': ['expert'],
         'heavy': ['heavy'],
         'thinking': ['thinking'],
@@ -425,7 +436,55 @@ def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
         'auto': ['auto'],
         'instant': ['instant'],
     }
-    search_terms.extend(_ALIASES.get(mode_key_lower, []))
+    return [mode_key_lower, *aliases.get(mode_key_lower, [])]
+
+
+def _verify_multi_step_selection(platform: str, select_target: str,
+                                 firefox, doc) -> Dict:
+    """Verify a multi-step selection actually changed the intended state."""
+    verification = _verify_selection(platform, select_target, firefox, doc)
+    if verification.get('verified'):
+        verification['method'] = 'mode_select_verify'
+        return verification
+
+    config = get_platform_config(platform)
+    fences = config.get('fence_after', [])
+
+    try:
+        refreshed_doc = atspi.get_platform_document(firefox, platform) or doc
+        elements = find_elements(refreshed_doc, fence_after=fences)
+    except Exception as e:
+        return {'verified': False, 'note': f'Tree rescan failed: {e}'}
+
+    terms = _selection_terms(select_target)
+    for element in elements:
+        name = (element.get('name') or '').strip().lower()
+        if not name or not any(term in name or name.startswith(term) for term in terms):
+            continue
+
+        if _is_selected_item(element):
+            return {
+                'verified': True,
+                'method': 'checked_state',
+                'button_name': element.get('name', ''),
+            }
+
+        if platform == 'chatgpt' and select_target == 'extended':
+            if 'extended pro' in name or 'extended, click to remove' in name:
+                return {
+                    'verified': True,
+                    'method': 'chatgpt_extended_button',
+                    'button_name': element.get('name', ''),
+                }
+
+    return verification
+
+
+def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
+    """Find matching item by name and click it."""
+    from core.interact import atspi_click
+
+    search_terms = _selection_terms(mode_key)
 
     for item in items:
         item_name = (item.get('name') or '').strip().lower()

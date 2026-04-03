@@ -26,12 +26,12 @@ def test_consultation_defaults_all_platforms():
     expected = {
         'chatgpt': {
             'model': 'pro',
-            'mode': 'extended_thinking',
+            'mode': 'pro_extended',
             'attach_method': 'atspi_menu',
             'extract_method': 'last_copy_button',
         },
         'claude': {
-            'model': 'opus',
+            'model': None,
             'mode': 'extended_thinking',
             'attach_method': 'atspi_menu',
             'extract_method': 'last_copy_button',
@@ -70,6 +70,10 @@ def test_chatgpt_mode_guidance():
     assert 'thinking' in mg
     assert 'pro' in mg
     assert 'extended' in mg
+    assert mg['pro_extended']['steps'] == [
+        {'trigger': 'model_selector', 'select': 'pro'},
+        {'trigger': 'thinking_mode', 'select': 'extended'},
+    ]
     assert mg['pro_extended']['verification'] == {
         'check': 'completed_steps',
         'expected_steps': 2,
@@ -82,7 +86,7 @@ def test_chatgpt_consultation_defaults():
 
     defaults = get_platform_config('chatgpt', reload=True)['consultation_defaults']
     assert defaults['model'] == 'pro'
-    assert defaults['mode'] == 'extended_thinking'
+    assert defaults['mode'] == 'pro_extended'
 
 
 def test_consultation_uses_yaml_defaults_for_fresh_sessions():
@@ -91,7 +95,7 @@ def test_consultation_uses_yaml_defaults_for_fresh_sessions():
     consultation = importlib.reload(consultation)
 
     assert consultation.args.model == 'pro'
-    assert consultation.args.mode == 'extended_thinking'
+    assert consultation.args.mode == 'pro_extended'
 
 
 def test_consultation_skips_yaml_defaults_for_followups():
@@ -120,12 +124,89 @@ def test_chatgpt_pro_extended_verifies_by_completed_steps():
         {
             'success': True,
             'selected_item': 'Extended Pro',
-            'completed_steps': [{'step': 1}, {'step': 2}],
+            'completed_steps': [
+                {'step': 1, 'verified': True},
+                {'step': 2, 'verified': True},
+            ],
         },
     )
 
     assert result['verified'] is True
     assert result['method'] == 'completed_steps'
+
+
+def test_chatgpt_pro_extended_rejects_unverified_completed_step():
+    import sys
+
+    sys.argv = ['consultation.py', '--platform', 'chatgpt', '--message', 'x']
+    from scripts import consultation
+
+    result = consultation._verify_mode_selection(
+        'chatgpt',
+        'pro_extended',
+        {
+            'success': True,
+            'selected_item': 'Extended Pro',
+            'completed_steps': [
+                {'step': 1, 'verified': True},
+                {'step': 2, 'verified': False},
+            ],
+        },
+    )
+
+    assert result['verified'] is False
+
+
+def test_multi_step_select_requires_verified_steps(monkeypatch):
+    from core.mode_select import _multi_step_select
+
+    monkeypatch.setattr('core.mode_select._find_button_by_element_map', lambda *args, **kwargs: {
+        'name': 'trigger',
+        'x': 1,
+        'y': 1,
+    })
+    monkeypatch.setattr('core.mode_select._click_element', lambda *args, **kwargs: True)
+    monkeypatch.setattr('core.mode_select.find_menu_items', lambda *args, **kwargs: [
+        {'name': 'Pro Research-grade intelligence', 'role': 'push button'}
+    ])
+    monkeypatch.setattr('core.mode_select.find_elements', lambda *args, **kwargs: [])
+    monkeypatch.setattr('core.mode_select._match_and_click', lambda items, target, platform: {
+        'success': True,
+        'selected_item': target.title(),
+    })
+
+    verifications = iter([
+        {'verified': True, 'method': 'mode_select_verify'},
+        {'verified': False, 'note': 'Extended state not found'},
+    ])
+    monkeypatch.setattr(
+        'core.mode_select._verify_multi_step_selection',
+        lambda *args, **kwargs: next(verifications),
+    )
+    monkeypatch.setattr('core.mode_select.atspi.get_platform_document', lambda *args, **kwargs: object())
+
+    result = _multi_step_select(
+        'chatgpt',
+        [
+            {'trigger': 'model_selector', 'select': 'pro'},
+            {'trigger': 'thinking_mode', 'select': 'extended'},
+        ],
+        'pro_extended',
+        object(),
+        object(),
+    )
+
+    assert result['success'] is False
+    assert result['step'] == 2
+    assert result['completed_steps'] == [
+        {
+            'step': 1,
+            'trigger': 'model_selector',
+            'selected': 'Pro',
+            'verified': True,
+            'verify_method': 'mode_select_verify',
+        }
+    ]
 
 
 def test_gemini_mode_guidance():
