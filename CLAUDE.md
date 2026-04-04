@@ -203,3 +203,15 @@ python3 agents/unified_bot.py --platforms chatgpt gemini grok
 # With orchestrator mode
 python3 agents/unified_bot.py --orchestrator --platforms chatgpt gemini grok
 ```
+
+## 6SIGMA Change Protocol — MANDATORY
+
+ALL code changes go through The Conductor. No instance writes code directly.
+
+Process: Conductor receives request → Gemini CLI analyzes (MEASURE+ANALYZE) → Codex CLI implements on branch (IMPROVE) → Conductor verifies and merges (CONTROL).
+
+**You do NOT modify code.** You identify defects, send them to the Conductor with full context, and wait for the PR. If you find a bug, message conductor: `redis-cli LPUSH "taey:conductor:inbox" '{"from":"{you}","type":"defect","body":"DEFECT: {what} in {file}:{line}. Root cause: {why}. Impact: {what breaks}."}'`
+
+Read-only files and full protocol: /home/mira/the-conductor/docs/6SIGMA_CHANGE_PROTOCOL.md
+
+**First error = full stop.** Do not retry. Do not patch. Report to Conductor with root cause analysis.
