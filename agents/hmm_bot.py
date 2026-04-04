@@ -941,7 +941,7 @@ def _find_dialog_wid() -> str:
     return ''
 
 
-def _handle_dialog_direct(file_path: str) -> bool:
+def _handle_dialog_direct(file_path: str, dialog_path_mode: str = 'ctrl_l') -> bool:
     """Handle GTK file dialog: focus → open path bar → enter path → confirm.
 
     Tries multiple approaches for entering the path since GTK file dialogs
@@ -968,13 +968,24 @@ def _handle_dialog_direct(file_path: str) -> bool:
         logger.warning(f"Dialog windowactivate timed out for {wid}")
     time.sleep(0.5)
 
-    # Ctrl+L opens location bar, Ctrl+A clears, type path, Enter confirms
-    logger.info(f"Dialog: Ctrl+L + type path: {file_path}")
-    inp.press_key('ctrl+l')
-    time.sleep(0.5)
-    inp.press_key('ctrl+a')
-    time.sleep(0.1)
-    inp.type_text(file_path, delay_ms=10)
+    if dialog_path_mode == 'typed_path':
+        # GTK file choosers accept '/' as a shortcut into the path entry without
+        # touching Firefox's location bar. This is safer for the Perplexity case
+        # where Ctrl+L can sometimes navigate the browser to file:// instead.
+        logger.info(f"Dialog: typed-path entry (no Ctrl+L): {file_path}")
+        inp.type_text('/', delay_ms=10)
+        time.sleep(0.5)
+        inp.press_key('ctrl+a')
+        time.sleep(0.1)
+        inp.type_text(file_path, delay_ms=10)
+    else:
+        # Ctrl+L opens location bar, Ctrl+A clears, type path, Enter confirms
+        logger.info(f"Dialog: Ctrl+L + type path: {file_path}")
+        inp.press_key('ctrl+l')
+        time.sleep(0.5)
+        inp.press_key('ctrl+a')
+        time.sleep(0.1)
+        inp.type_text(file_path, delay_ms=10)
     time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(1.5)
@@ -994,7 +1005,7 @@ def _handle_dialog_direct(file_path: str) -> bool:
     return False
 
 
-def attach_file(platform: str, file_path: str) -> bool:
+def attach_file(platform: str, file_path: str, dialog_path_mode: str = 'ctrl_l') -> bool:
     """Attach a file: open file dialog → type path → confirm.
 
     Handles everything directly instead of using handle_attach(), because
@@ -1331,7 +1342,7 @@ def attach_file(platform: str, file_path: str) -> bool:
         return False
 
     # Handle dialog with xdotool type (reliable on Xvfb)
-    if _handle_dialog_direct(file_path):
+    if _handle_dialog_direct(file_path, dialog_path_mode=dialog_path_mode):
         logger.info(f"[{platform}] File attached: {os.path.basename(file_path)}")
         # Re-focus Firefox after dialog closes
         inp.focus_firefox()
