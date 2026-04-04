@@ -313,7 +313,7 @@ class CentralMonitor:
         send_visible = bool(worker_state.get('send_visible'))
         content_hash = worker_state.get('content_hash') or ""
         state_ttl = timeout
-        required_stop_cycles = 2 if mode in {"deep_research", "deep_think"} else 1
+        required_stop_cycles = 2 if mode in {"deep_research", "deep_think", "pro_extended", "extended_thinking", "heavy"} else 1
 
         ever_seen_key = self._monitor_key(monitor_id, "ever_seen_stop")
         stop_visible_key = self._monitor_key(monitor_id, "stop_visible")
