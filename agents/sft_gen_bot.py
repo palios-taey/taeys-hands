@@ -537,6 +537,168 @@ def _read_isolated_bus(display):
     return None
 
 
+def _control_role_matches(control, role_terms):
+    role = (control.get('role') or '').strip().lower()
+    return any(term in role for term in role_terms)
+
+
+def _control_name_matches(control, terms):
+    name = (control.get('name') or '').strip().lower()
+    return bool(name) and any(term in name for term in terms)
+
+
+def _control_has_active_state(control):
+    states = {str(state).lower() for state in (control.get('states') or [])}
+    return bool({'checked', 'selected', 'pressed'} & states)
+
+
+def _find_named_control(controls, name_terms, role_terms):
+    for control in controls:
+        if _control_name_matches(control, name_terms) and _control_role_matches(control, role_terms):
+            return control
+    return None
+
+
+def _inspect_platform_controls(platform, bot, scroll_bottom=True):
+    """Inspect visible controls via worker IPC first, local AT-SPI fallback second."""
+    if scroll_bottom:
+        bot.inp.focus_firefox()
+        time.sleep(0.3)
+        bot.inp.press_key('ctrl+End')
+        time.sleep(1.0)
+
+    try:
+        from workers.manager import send_to_worker
+
+        result = send_to_worker(
+            platform,
+            {'cmd': 'inspect', 'scroll': 'bottom', 'fresh_session': False},
+            timeout=30.0,
+        )
+        if result.get('success'):
+            return result.get('controls') or []
+        log.warning(f"[{platform}] Worker inspect failed: {result.get('error')}")
+    except Exception as e:
+        log.info(f"[{platform}] Worker inspect unavailable, using local AT-SPI fallback: {e}")
+
+    from core.tree import find_elements
+
+    bot._cached_doc.clear()
+    doc = bot.get_doc(platform, force_refresh=True)
+    if not doc:
+        return []
+    return find_elements(doc)
+
+
+def _click_control(platform, control, bot):
+    """Click a control via worker IPC when possible, local fallback otherwise."""
+    x = int(control.get('x', 0) or 0)
+    y = int(control.get('y', 0) or 0)
+
+    try:
+        from workers.manager import send_to_worker
+
+        if x > 0 and y > 0:
+            result = send_to_worker(platform, {'cmd': 'click', 'x': x, 'y': y}, timeout=30.0)
+            if not result.get('error'):
+                return True
+            log.warning(f"[{platform}] Worker click failed: {result.get('error')}")
+    except Exception as e:
+        log.info(f"[{platform}] Worker click unavailable, using local fallback: {e}")
+
+    from core.interact import atspi_click
+
+    if control.get('atspi_obj'):
+        try:
+            if atspi_click(control):
+                return True
+        except Exception:
+            pass
+    if x > 0 and y > 0:
+        return bot.inp.click_at(x, y)
+    return False
+
+
+def _disable_perplexity_deep_research(platform, bot, controls):
+    """Try to clear a blocking Deep Research selection after send."""
+    visible_toggle = _find_named_control(
+        controls,
+        ['deep research'],
+        ['toggle button', 'push button', 'button'],
+    )
+    if visible_toggle:
+        if _click_control(platform, visible_toggle, bot):
+            log.info(f"[{platform}] Deep Research toggle clicked off after send")
+            return True
+        log.warning(f"[{platform}] Deep Research toggle found but click failed")
+
+    attach_trigger = _find_named_control(controls, ['add files or tools'], ['push button', 'button'])
+    if not attach_trigger:
+        log.warning(f"[{platform}] Could not find tools dropdown to clear Deep Research")
+        return False
+
+    if not _click_control(platform, attach_trigger, bot):
+        log.warning(f"[{platform}] Failed to open tools dropdown while clearing Deep Research")
+        return False
+
+    time.sleep(1.5)
+    dropdown_controls = _inspect_platform_controls(platform, bot, scroll_bottom=False)
+    deep_research_item = None
+    for control in dropdown_controls:
+        if _control_name_matches(control, ['deep research']) and _control_role_matches(
+            control, ['item', 'radio button', 'check menu item']
+        ):
+            if _control_has_active_state(control):
+                deep_research_item = control
+                break
+
+    if not deep_research_item:
+        log.warning(f"[{platform}] Deep Research item not found as active in tools dropdown")
+        return False
+
+    if _click_control(platform, deep_research_item, bot):
+        log.info(f"[{platform}] Deep Research dropdown item clicked off after send")
+        return True
+
+    log.warning(f"[{platform}] Active Deep Research item found but click failed")
+    return False
+
+
+def _handle_perplexity_post_send_deep_research(platform, bot):
+    """If Deep Research blocks generation, start it or clear the stale mode."""
+    if platform != 'perplexity':
+        return False
+
+    log.info(f"[{platform}] Post-send Deep Research check: waiting 5s")
+    time.sleep(5)
+
+    deadline = time.time() + 10
+    while True:
+        controls = _inspect_platform_controls(platform, bot)
+        start_button = _find_named_control(controls, ['start research'], ['push button', 'button'])
+        if start_button:
+            if _click_control(platform, start_button, bot):
+                log.info(f"[{platform}] Clicked Start research button")
+                return True
+            log.warning(f"[{platform}] Start research button found but click failed")
+            break
+        if time.time() >= deadline:
+            break
+        time.sleep(2)
+
+    controls = _inspect_platform_controls(platform, bot)
+    deep_research_active = any(
+        _control_name_matches(control, ['deep research']) and _control_has_active_state(control)
+        for control in controls
+    )
+    if deep_research_active:
+        log.warning(f"[{platform}] Deep Research still active after send with no Start research button")
+        return _disable_perplexity_deep_research(platform, bot, controls)
+
+    log.info(f"[{platform}] No Start research button detected; continuing normally")
+    return False
+
+
 def process_platform_v2(platform, topic, output_dir):
     """Full cycle using hmm_bot's proven functions. V2: topic-driven dispatch.
 
@@ -772,6 +934,8 @@ def process_platform_v2(platform, topic, output_dir):
         else:
             log.error(f"[{platform}] Send button still visible after 3 attempts — send failed")
             return False
+
+    _handle_perplexity_post_send_deep_research(platform, bot)
 
     # Step 4: Wait for response
     # Generous timeout — hmm_bot._wait_atspi_polling handles expected-time warnings
