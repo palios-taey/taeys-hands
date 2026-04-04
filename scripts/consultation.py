@@ -180,9 +180,9 @@ def parse_args():
     if not isinstance(consultation_defaults, dict):
         consultation_defaults = {}
 
-    if parsed.model is None:
+    if not parsed.model:
         parsed.model = consultation_defaults.get('model')
-    if parsed.mode is None:
+    if not parsed.mode:
         parsed.mode = consultation_defaults.get('mode')
     return parsed
 
