@@ -537,6 +537,76 @@ def _read_isolated_bus(display):
     return None
 
 
+def _wait_for_attach_ready(bot, platform):
+    """Wait for the chat page and attach affordance to be ready."""
+    if platform == 'claude':
+        for ready_wait in range(6):
+            bot._cached_doc.clear()
+            doc = bot.get_doc(platform, force_refresh=True)
+            if doc:
+                log.info(f"[{platform}] Page ready — document found")
+                return True
+            if ready_wait < 5:
+                log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
+                time.sleep(5)
+        log.error(f"[{platform}] Page not ready after 30s — no document")
+        return False
+
+    from tools.attach import _get_attach_button_coords
+    for ready_wait in range(6):
+        bot._cached_doc.clear()
+        doc = bot.get_doc(platform, force_refresh=True)
+        if doc:
+            btn = _get_attach_button_coords(doc, platform=platform)
+            if btn:
+                log.info(f"[{platform}] Page ready — attach button found")
+                return True
+        if ready_wait < 5:
+            log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
+            time.sleep(5)
+    log.error(f"[{platform}] Page not ready after 30s — attach button not found")
+    return False
+
+
+def _get_page_url_and_title(bot, platform):
+    """Read the active page URL/title from the current platform document."""
+    import core.atspi as _atspi
+
+    bot.invalidate_doc_cache(platform)
+    bot._cached_doc.clear()
+    doc = bot.get_doc(platform, force_refresh=True)
+    if not doc:
+        return '', ''
+
+    try:
+        title = (doc.get_name() or '').strip()
+    except Exception:
+        title = ''
+    return (_atspi.get_document_url(doc) or '', title)
+
+
+def _perplexity_attach_landed_on_file(bot, package_path):
+    """Detect Firefox navigation to a local file viewer instead of Perplexity."""
+    filename = os.path.basename(package_path).lower()
+
+    for _ in range(5):
+        url, title = _get_page_url_and_title(bot, 'perplexity')
+        url_lower = url.lower()
+        title_lower = title.lower()
+
+        if url_lower.startswith('file://'):
+            return True, url, title
+        if url_lower and 'perplexity.ai' not in url_lower:
+            return True, url, title
+        if filename and filename in title_lower and 'perplexity' not in title_lower:
+            return True, url, title
+        if url_lower:
+            return False, url, title
+        time.sleep(1)
+
+    return False, '', ''
+
+
 def process_platform_v2(platform, topic, output_dir):
     """Full cycle using hmm_bot's proven functions. V2: topic-driven dispatch.
 
@@ -693,43 +763,57 @@ def process_platform_v2(platform, topic, output_dir):
     if hasattr(_atspi, 'find_firefox'):
         _atspi.find_firefox = _pid_find
 
-    # Wait for page to be fully ready before attach
-    # Claude uses Ctrl+U for attach (no visible button) — just wait for doc
-    # Other platforms need the attach button to appear
-    if platform == 'claude':
-        for ready_wait in range(6):
-            bot._cached_doc.clear()
-            doc = bot.get_doc(platform, force_refresh=True)
-            if doc:
-                log.info(f"[{platform}] Page ready — document found")
-                break
-            if ready_wait < 5:
-                log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
-                time.sleep(5)
-        else:
-            log.error(f"[{platform}] Page not ready after 30s — no document")
-            return False
-    else:
-        from tools.attach import _get_attach_button_coords
-        for ready_wait in range(6):
-            bot._cached_doc.clear()
-            doc = bot.get_doc(platform, force_refresh=True)
-            if doc:
-                btn = _get_attach_button_coords(doc, platform=platform)
-                if btn:
-                    log.info(f"[{platform}] Page ready — attach button found")
-                    break
-            if ready_wait < 5:
-                log.info(f"[{platform}] Waiting for page to load (attempt {ready_wait+1}/6)...")
-                time.sleep(5)
-        else:
-            log.error(f"[{platform}] Page not ready after 30s — attach button not found")
+    if not _wait_for_attach_ready(bot, platform):
+        return False
+
+    attach_modes = ['ctrl_l']
+    if platform == 'perplexity':
+        attach_modes.append('typed_path')
+
+    attach_ok = False
+    for attach_attempt, dialog_path_mode in enumerate(attach_modes, start=1):
+        log.info(f"[{platform}] Attaching {os.path.basename(package_path)} "
+                 f"(attempt {attach_attempt}/{len(attach_modes)}, mode={dialog_path_mode})")
+        if not bot.attach_file(platform, package_path, dialog_path_mode=dialog_path_mode):
+            log.error(f"[{platform}] Attach failed on attempt {attach_attempt}")
             return False
 
-    log.info(f"[{platform}] Attaching {os.path.basename(package_path)}")
-    if not bot.attach_file(platform, package_path):
+        if platform != 'perplexity':
+            attach_ok = True
+            break
+
+        landed_on_file, url, title = _perplexity_attach_landed_on_file(bot, package_path)
+        if not landed_on_file:
+            attach_ok = True
+            break
+
+        log.warning(f"[{platform}] Attach landed on wrong page after dialog entry: "
+                    f"url={url or '<none>'} title={title or '<none>'}")
+        if attach_attempt >= len(attach_modes):
+            log.error(f"[{platform}] Perplexity attach left Firefox off-site after retry")
+            return False
+
+        from core import input as _inp
+        _inp.focus_firefox()
+        time.sleep(0.3)
+        _inp.press_key('alt+Left')
+        time.sleep(3)
+        bot.invalidate_doc_cache(platform)
+
+        url, title = _get_page_url_and_title(bot, platform)
+        if 'perplexity.ai' not in url.lower():
+            log.warning(f"[{platform}] Browser back did not restore Perplexity "
+                        f"(url={url or '<none>'}, title={title or '<none>'}) — starting fresh session")
+            if not bot.navigate_fresh_session(platform):
+                log.error(f"[{platform}] Recovery navigation failed")
+                return False
+        if not _wait_for_attach_ready(bot, platform):
+            return False
+
+    if not attach_ok:
         log.error(f"[{platform}] Attach failed")
         return False
+
     log.info(f"[{platform}] Attach OK — waiting for upload to complete")
 
     # Wait for attachment to fully upload before sending.
