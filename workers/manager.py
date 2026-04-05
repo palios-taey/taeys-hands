@@ -90,7 +90,7 @@ def _spawn_worker(platform: str, display: str) -> bool:
             return False
         if os.path.exists(sock_path):
             try:
-                result = send_to_worker(platform, {'cmd': 'ping'}, timeout=5.0)
+                result = _ipc_call(sock_path, {'cmd': 'ping'}, timeout=5.0)
                 if result.get('status') == 'alive':
                     logger.info("Worker %s ready (PID %d)", platform, proc.pid)
                     return True

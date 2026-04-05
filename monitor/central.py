@@ -75,6 +75,8 @@ POLL_INTERVAL = 2.0
 STABLE_TICKS = 2
 DEFAULT_WORKER_TIMEOUT = 5.0
 EXTRACT_HARD_TIMEOUT_SEC = 5
+PLATFORM_FAILURE_THRESHOLD = 3
+PLATFORM_RETRY_DELAY_SEC = 60.0
 
 
 class ExtractTimeout(Exception):
@@ -107,6 +109,8 @@ class CentralMonitor:
     def __init__(self, cycle_interval: float = POLL_INTERVAL):
         self.cycle_interval = cycle_interval
         self.rc = self._connect_redis()
+        self._platform_failure_counts: Dict[str, int] = {}
+        self._platform_retry_after: Dict[str, float] = {}
         if not self.rc:
             _log("WARNING: No Redis — monitor cannot track sessions")
 
@@ -549,12 +553,31 @@ class CentralMonitor:
         for platform, platform_sessions in by_platform.items():
             if not get_platform_display(platform):
                 continue
+            retry_after = self._platform_retry_after.get(platform, 0.0)
+            now = time.monotonic()
+            if retry_after > now:
+                _log(
+                    f"[{platform}] Skipping platform until retry window opens "
+                    f"in {retry_after - now:.1f}s"
+                )
+                continue
             stop_result = self._call_worker(platform, {'cmd': 'check_stop'}, operation="poll")
             send_result = self._call_worker(platform, {'cmd': 'get_send_button_state'}, operation="poll")
             hash_result = self._call_worker(platform, {'cmd': 'get_content_hash'}, operation="poll")
             if not (stop_result and send_result and hash_result):
+                failures = self._platform_failure_counts.get(platform, 0) + 1
+                self._platform_failure_counts[platform] = failures
+                if failures >= PLATFORM_FAILURE_THRESHOLD:
+                    self._platform_failure_counts[platform] = 0
+                    self._platform_retry_after[platform] = now + PLATFORM_RETRY_DELAY_SEC
+                    _log(
+                        f"[{platform}] Worker failed {failures} consecutive cycle(s); "
+                        f"backing off for {PLATFORM_RETRY_DELAY_SEC:.0f}s"
+                    )
                 _log(f"[{platform}] Worker monitor state incomplete; skipping platform this cycle")
                 continue
+            self._platform_failure_counts.pop(platform, None)
+            self._platform_retry_after.pop(platform, None)
             worker_state = {
                 'stop_found': stop_result.get('stop_found', False),
                 'send_visible': send_result.get('send_visible', False),
