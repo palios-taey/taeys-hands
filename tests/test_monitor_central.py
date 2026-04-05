@@ -327,3 +327,37 @@ def test_cycle_skips_platform_when_worker_call_times_out(mock_redis):
 
     detect_completion.assert_not_called()
     remove_session.assert_not_called()
+
+
+def test_cycle_backs_off_platform_after_three_failures(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    sessions = [
+        {
+            "platform": "chatgpt",
+            "monitor_id": "mon-123",
+            "session_id": "sess-123",
+            "started_ts": 0,
+        }
+    ]
+
+    with patch.object(monitor, "_get_sessions", return_value=sessions), \
+         patch.object(monitor, "_plan_active", return_value=False), \
+         patch("core.platforms.get_platform_display", return_value=":2"), \
+         patch.object(monitor, "_call_worker", return_value=None) as call_worker, \
+         patch.object(monitor, "_detect_completion") as detect_completion, \
+         patch.object(monitor, "_remove_session") as remove_session:
+        monitor._cycle()
+        monitor._cycle()
+        monitor._cycle()
+
+        assert monitor._platform_failure_counts.get("chatgpt", 0) == 0
+        assert monitor._platform_retry_after["chatgpt"] > time.monotonic()
+
+        call_count_before_backoff = call_worker.call_count
+        monitor._cycle()
+
+    assert call_worker.call_count == call_count_before_backoff
+    detect_completion.assert_not_called()
+    remove_session.assert_not_called()
