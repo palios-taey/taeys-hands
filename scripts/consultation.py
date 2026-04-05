@@ -498,8 +498,6 @@ def navigate_fresh_session(platform: str) -> bool:
         return False
 
     expected_fragments = _expected_url_fragments(url)
-    if platform == 'grok':
-        expected_fragments = _expected_url_fragments('https://x.com/i/grok')
     if not _navigate_browser_to_url(platform, url, expected_fragments=expected_fragments):
         return False
 
