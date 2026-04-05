@@ -250,6 +250,11 @@ logger = logging.getLogger('consultation')
 DEFAULT_STEP_ORDER = ['navigate', 'model', 'mode', 'attach', 'message', 'send']
 
 
+def _neo4j_available() -> bool:
+    """Whether the optional Neo4j client imported successfully."""
+    return neo4j_client is not None
+
+
 def _select_mode_via_worker(platform: str, mode: str = None, model: str = None,
                              display: str = None) -> dict:
     """Prefer worker IPC for mode selection, with local fallback."""
@@ -1257,7 +1262,7 @@ def save_response(content: str, platform: str, output_path: str = None) -> str:
 def store_in_neo4j(platform: str, url: str, message: str, attachments: list,
                    response: str) -> dict:
     """Store prompt + response in Neo4j."""
-    if not neo4j_client:
+    if not _neo4j_available():
         return {}
     try:
         session_id = neo4j_client.get_or_create_session(platform, url or f'consultation://{platform}')
@@ -1509,7 +1514,7 @@ def main():
         if doc:
             url = atspi.get_document_url(doc)
     session_id = message_id = None
-    if not args.no_neo4j and neo4j_client and url:
+    if not args.no_neo4j and _neo4j_available() and url:
         try:
             session_id = neo4j_client.get_or_create_session(platform, url)
             message_id = neo4j_client.add_message(session_id, 'user', message,
@@ -1577,14 +1582,17 @@ def main():
 
     # Step 10: Store in Neo4j
     if not args.no_neo4j:
-        logger.info("Step 10: Storing in Neo4j")
-        url = None
-        doc = get_doc()
-        if doc:
-            url = atspi.get_document_url(doc)
-        neo4j_result = store_in_neo4j(platform, url, message,
-                                       attachments, content)
-        result['neo4j'] = neo4j_result
+        if _neo4j_available():
+            logger.info("Step 10: Storing in Neo4j")
+            url = None
+            doc = get_doc()
+            if doc:
+                url = atspi.get_document_url(doc)
+            neo4j_result = store_in_neo4j(platform, url, message,
+                                           attachments, content)
+            result['neo4j'] = neo4j_result
+        else:
+            logger.info("Step 10: Skipping Neo4j storage; client unavailable")
 
     # Step 11: ISMA ingestion
     if not args.no_isma:
