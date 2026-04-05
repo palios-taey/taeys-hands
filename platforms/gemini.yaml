@@ -2,6 +2,7 @@
 platform: gemini
 url_pattern: gemini.google.com
 base_url: https://gemini.google.com/app
+verify_navigation: false
 tab_shortcut: alt+3
 
 capabilities:
