@@ -61,6 +61,23 @@ def test_consultation_defaults_all_platforms():
         assert config.get('consultation_defaults') == defaults
 
 
+def test_verify_navigation_is_yaml_driven_per_platform():
+    """Navigation verification should be explicitly configured per platform."""
+    from core.config import get_platform_config
+
+    expected = {
+        'chatgpt': False,
+        'claude': False,
+        'gemini': False,
+        'grok': True,
+        'perplexity': False,
+    }
+
+    for platform, verify_navigation in expected.items():
+        config = get_platform_config(platform, reload=True)
+        assert config.get('verify_navigation') is verify_navigation
+
+
 def test_chatgpt_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('chatgpt', reload=True)

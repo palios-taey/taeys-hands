@@ -3,6 +3,7 @@ platform: grok
 url_pattern: grok.com
 base_url: https://grok.com/
 fresh_session_url: https://grok.com/
+verify_navigation: true
 tab_shortcut: alt+4
 
 capabilities:
