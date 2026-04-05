@@ -255,7 +255,7 @@ class CentralMonitor:
             return
         key = session.get('_redis_key')
         if key:
-            self.rc.setex(key, session.get('timeout', 7200), json.dumps(
+            self.rc.set(key, json.dumps(
                 {k: v for k, v in session.items() if k not in ('_redis_key', '_set_key')}))
 
     def _remove_session(self, session: Dict):

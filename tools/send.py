@@ -123,9 +123,8 @@ def register_monitor_session(platform: str, monitor_id: str, url: str,
 
     try:
         session_key = node_key(f"active_session:{monitor_id}")
-        redis_client.setex(
+        redis_client.set(
             session_key,
-            timeout,
             json.dumps(session_data),
         )
         # Add to deterministic SET so monitor doesn't need SCAN
@@ -303,9 +302,7 @@ def handle_send_message(platform: str, message: str,
             if raw:
                 sess_data = json.loads(raw)
                 sess_data['url'] = url
-                ttl = redis_client.ttl(sess_key)
-                if ttl > 0:
-                    redis_client.setex(sess_key, ttl, json.dumps(sess_data))
+                redis_client.set(sess_key, json.dumps(sess_data))
 
     # Clear DISPLAY-scoped plan lock — send complete, monitor can resume cycling
     if redis_client:
