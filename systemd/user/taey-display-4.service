@@ -1,0 +1,15 @@
+[Unit]
+Description=Taey Display :4 (Gemini)
+After=default.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:4
+ExecStartPre=/usr/bin/bash -lc 'rm -f /tmp/.X4-lock /tmp/.X11-unix/X4 /tmp/a11y_bus_:4 /tmp/firefox_pid_:4; pkill -f "Xvfb :4 " 2>/dev/null || true; pkill -f "/tmp/ff-profile-mira-gemini" 2>/dev/null || true; /usr/bin/Xvfb :4 -screen 0 1920x1080x24 -ac -noreset >/tmp/taey-display-4-xvfb.log 2>&1 &'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :4 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:4; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-gemini; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-gemini "https://gemini.google.com/app" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:4; wait ${FIREFOX_PID}'
+ExecStopPost=/usr/bin/bash -lc 'pkill -f "Xvfb :4 " 2>/dev/null || true; rm -f /tmp/.X4-lock /tmp/.X11-unix/X4 /tmp/a11y_bus_:4 /tmp/firefox_pid_:4'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
