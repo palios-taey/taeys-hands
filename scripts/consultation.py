@@ -330,7 +330,8 @@ def _verify_navigation_url(platform: str, expected_fragments: list[str], timeout
 
 
 def _navigate_browser_to_url(platform: str, url: str, *, expected_fragments: list[str] | None = None) -> bool:
-    """Navigate Firefox via the location bar and optionally verify the result."""
+    """Navigate Firefox via the location bar and verify only when YAML enables it."""
+    platform_config = get_platform_config(platform)
     _close_stale_file_dialogs()
     inp.focus_firefox()
     time.sleep(0.3)
@@ -346,7 +347,10 @@ def _navigate_browser_to_url(platform: str, url: str, *, expected_fragments: lis
     time.sleep(0.3)
     inp.press_key('Return')
     time.sleep(2.0)
-    return _verify_navigation_url(platform, expected_fragments or [])
+    if platform_config.get('verify_navigation', False):
+        return _verify_navigation_url(platform, expected_fragments or [])
+    logger.info("[%s] Skipping navigation URL verification per platform config", platform)
+    return True
 
 
 def navigate_to_session_url(platform: str, url: str) -> bool:
