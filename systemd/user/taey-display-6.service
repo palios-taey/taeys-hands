@@ -6,7 +6,7 @@ After=default.target
 Type=simple
 Environment=DISPLAY=:6
 ExecStartPre=/usr/bin/bash -lc 'rm -f /tmp/.X6-lock /tmp/.X11-unix/X6 /tmp/a11y_bus_:6 /tmp/firefox_pid_:6; pkill -f "Xvfb :6 " 2>/dev/null || true; pkill -f "/tmp/ff-profile-mira-perplexity" 2>/dev/null || true; /usr/bin/Xvfb :6 -screen 0 1920x1080x24 -ac -noreset >/tmp/taey-display-6-xvfb.log 2>&1 &'
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :6 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:6; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-perplexity; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-perplexity "https://perplexity.ai" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:6; wait ${FIREFOX_PID}'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :6 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:6; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-perplexity; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-perplexity "https://www.perplexity.ai/" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:6; wait ${FIREFOX_PID}'
 ExecStopPost=/usr/bin/bash -lc 'pkill -f "Xvfb :6 " 2>/dev/null || true; rm -f /tmp/.X6-lock /tmp/.X11-unix/X6 /tmp/a11y_bus_:6 /tmp/firefox_pid_:6'
 Restart=always
 RestartSec=10
