@@ -1,6 +1,7 @@
 # Claude Platform Configuration
 platform: claude
 url_pattern: claude.ai
+fresh_session_url: https://claude.ai/new
 base_url: https://claude.ai/new
 tab_shortcut: alt+2
 

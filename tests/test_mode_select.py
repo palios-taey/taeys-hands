@@ -98,6 +98,14 @@ def test_consultation_uses_yaml_defaults_for_fresh_sessions():
     assert consultation.args.mode == 'pro_extended'
 
 
+def test_claude_config_has_fresh_session_url():
+    from core.config import get_platform_config
+
+    config = get_platform_config('claude', reload=True)
+    assert config['fresh_session_url'] == 'https://claude.ai/new'
+    assert config['url_pattern'] == 'claude.ai'
+
+
 def test_consultation_skips_yaml_defaults_for_followups():
     sys.argv = [
         'consultation.py',
@@ -155,6 +163,39 @@ def test_chatgpt_pro_extended_rejects_unverified_completed_step():
     )
 
     assert result['verified'] is False
+
+
+def test_navigate_fresh_session_verifies_with_url_pattern(monkeypatch):
+    sys.argv = ['consultation.py', '--platform', 'claude', '--message', 'x']
+    consultation = importlib.import_module('scripts.consultation')
+    consultation = importlib.reload(consultation)
+
+    captured = {}
+
+    monkeypatch.setattr(
+        consultation,
+        'get_platform_config',
+        lambda platform: {
+            'fresh_session_url': 'https://claude.ai/new',
+            'base_url': 'https://claude.ai/new',
+            'url_pattern': 'claude.ai',
+        },
+    )
+    monkeypatch.setattr(
+        consultation,
+        '_navigate_browser_to_url',
+        lambda platform, url, *, expected_fragments=None: captured.update({
+            'platform': platform,
+            'url': url,
+            'expected_fragments': expected_fragments,
+        }) or True,
+    )
+    monkeypatch.setattr(consultation, 'get_doc', lambda force_refresh=False: None)
+
+    assert consultation.navigate_fresh_session('claude') is True
+    assert captured['platform'] == 'claude'
+    assert captured['url'] == 'https://claude.ai/new'
+    assert captured['expected_fragments'] == ['claude.ai']
 
 
 def test_multi_step_select_requires_verified_steps(monkeypatch):

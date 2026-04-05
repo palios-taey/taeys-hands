@@ -493,7 +493,8 @@ def navigate_fresh_session(platform: str) -> bool:
         logger.error(f"No base URL for {platform}")
         return False
 
-    expected_fragments = _expected_url_fragments(url)
+    url_pattern = (config.get('url_pattern') or '').strip()
+    expected_fragments = _expected_url_fragments(url_pattern or url)
     if platform == 'grok':
         expected_fragments = _expected_url_fragments('https://x.com/i/grok')
     if not _navigate_browser_to_url(platform, url, expected_fragments=expected_fragments):
