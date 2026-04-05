@@ -113,6 +113,7 @@ def test_register_monitor_session_stores_mode(mock_redis):
     session_key = node_key("active_session:mon-mode")
     session = json.loads(mock_redis.get(session_key))
     assert session["mode"] == "deep_research"
+    assert mock_redis.ttl(session_key) == -1
 
 
 # ── Test 4: Grok fresh_session triggers F5 on stale URL ────────────────────
