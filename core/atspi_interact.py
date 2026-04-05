@@ -60,8 +60,8 @@ def find_element_at(platform: str, x: int, y: int,
             continue
         if is_defunct(e):
             continue
-        dx = abs(e.get('x', 0) - x)
-        dy = abs(e.get('y', 0) - y)
+        dx = abs(int(e.get('x', 0)) - x)
+        dy = abs(int(e.get('y', 0)) - y)
         dist = dx + dy
         if dist < best_dist and dist <= tolerance:
             best = e
