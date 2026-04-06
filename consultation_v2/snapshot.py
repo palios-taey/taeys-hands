@@ -119,7 +119,13 @@ def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_i
     return snapshot
 
 
-def build_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Snapshot]:
+    """Build AT-SPI snapshot.
+
+    scan_root controls where to scan:
+      'auto' — scan from document (default, most platforms)
+      'app'  — scan from Firefox app root (needed for React portals like ChatGPT model dropdown)
+    """
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get('tree') or {})
     firefox = atspi.find_firefox_for_platform(platform)
@@ -129,7 +135,16 @@ def build_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     if not doc:
         raise RuntimeError(f'Document not found for {platform}')
     url = atspi.get_document_url(doc)
-    elements = find_elements(doc, fence_after=tree_cfg.get('fence_after') or [])
+
+    # Some platforms (ChatGPT) have elements outside the document (React portals).
+    # fence_after: [] means "no fence" — scan full app tree to catch portals.
+    # Other platforms use fence_after to cut sidebar — scan from doc only.
+    fence = tree_cfg.get('fence_after') or []
+    if scan_root == 'app' or (scan_root == 'auto' and not fence):
+        scope = firefox
+    else:
+        scope = doc
+    elements = find_elements(scope, fence_after=tree_cfg.get('fence_after') or [])
     snapshot = _classify_elements(platform, elements)
     snapshot.url = url
     return firefox, doc, snapshot

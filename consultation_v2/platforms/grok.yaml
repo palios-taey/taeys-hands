@@ -83,6 +83,12 @@ tree:
     create_share_link:
       name: Create share link
       role: push button
+    search:
+      name: Search
+      role: push button
+    history:
+      name: History
+      role: push button
     thought_indicator:
       name_pattern: Thought for *
       role: push button
@@ -90,7 +96,7 @@ tree:
       name: Scroll down
       role: push button
     dictation:
-      name_pattern: Start dictation*
+      name_contains: Dictation
       role: push button
     voice_mode:
       name_pattern: Enter voice mode*

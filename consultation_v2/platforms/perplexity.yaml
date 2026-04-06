@@ -89,6 +89,12 @@ tree:
     thread_actions:
       name: Thread actions
       role: push button
+    deep_research:
+      name: Deep research
+      role: push button
+    new_thread:
+      name_contains: New thread
+      role: push button
     dictation:
       name: Dictation
       role: push button
@@ -130,7 +136,7 @@ workflow:
       gemini_3_1_pro: model_gemini_3_1_pro
       grok_4_1: model_grok_4_1
     mode_targets:
-      deep_research: tool_deep_research
+      deep_research: deep_research
       model_council: tool_model_council
       computer: computer_mode
   attachment:

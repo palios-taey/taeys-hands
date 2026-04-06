@@ -83,16 +83,28 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                         return False
                     continue
 
-                menu_snap = self.runtime.menu_snapshot()
-                target_el = self.find_first(menu_snap, step['target'])
+                # ChatGPT model dropdown renders via React portal — items appear as
+                # push buttons in AT-SPI tree, NOT as menu items. Use regular snapshot.
+                time.sleep(1.0)
+                dropdown_snap = self.runtime.snapshot()
+                target_el = self.find_first(dropdown_snap, step['target'])
                 if not target_el:
-                    result.add_step(f'select_{index}', False, f"ChatGPT menu item {step['target']} not found", menu=menu_snap.serializable())
+                    # Fallback: try menu snapshot in case AT-SPI behavior changed
+                    menu_snap = self.runtime.menu_snapshot()
+                    target_el = self.find_first(menu_snap, step['target'])
+                if not target_el:
+                    result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
                 clicked = self.runtime.click(target_el, strategy='coordinate_only')
                 time.sleep(0.8)
                 verify_snap = self.runtime.snapshot()
                 selector = self.find_first(verify_snap, 'model_selector')
-                verified = bool(clicked and selector and 'pro' in selector.name.lower())
+                # ChatGPT model selector name is static ("Model selector") — does NOT
+                # update to show current model. Verify by checking dropdown closed
+                # (target item no longer visible) and click succeeded.
+                verify_snap2 = self.runtime.snapshot()
+                target_still_visible = self.find_first(verify_snap2, step['target'])
+                verified = bool(clicked and not target_still_visible)
                 result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
                 if not verified:
                     return False
@@ -106,17 +118,25 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            menu_snap = self.runtime.menu_snapshot()
+            # ChatGPT model dropdown renders via React portal — items appear as
+            # push buttons in AT-SPI tree, NOT as menu items. Use regular snapshot.
+            dropdown_snap = self.runtime.snapshot()
             target_key = workflow['model_targets'][target]
-            item = self.find_first(menu_snap, target_key)
+            item = self.find_first(dropdown_snap, target_key)
             if not item:
-                result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', menu=menu_snap.serializable())
+                # Fallback: try menu snapshot in case AT-SPI behavior changed
+                menu_snap = self.runtime.menu_snapshot()
+                item = self.find_first(menu_snap, target_key)
+            if not item:
+                result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
             clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.8)
+            # ChatGPT model selector name is static ("Model selector") — does NOT
+            # update to show current model. Verify by checking dropdown closed.
             verify_snap = self.runtime.snapshot()
-            selector = self.find_first(verify_snap, 'model_selector')
-            verified = bool(clicked and selector and target.split('_')[0] in selector.name.lower())
+            target_still_visible = self.find_first(verify_snap, target_key)
+            verified = bool(clicked and not target_still_visible)
             result.add_step('select_model', verified, f'ChatGPT model set to {target}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
