@@ -72,6 +72,9 @@ tree:
     microphone:
       name: Microphone
       role: toggle button
+    new_chat:
+      name: New chat
+      role: push button
     upload_files_item:
       name_pattern: Upload files*
       role: menu item

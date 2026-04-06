@@ -48,6 +48,7 @@ tree:
       - editable
     toggle_menu:
       name_contains:
+      - Add files, connectors, and more
       - Add files
       - Toggle menu
       role: push button
@@ -67,22 +68,22 @@ tree:
       role: push button
     model_opus:
       name_contains: Opus 4.6 Most capable
-      role: push button
+      role: menu item
     model_sonnet:
       name_contains: Sonnet 4.6 Most efficient
-      role: push button
+      role: menu item
     model_haiku:
       name_contains: Haiku 4.5 Fastest
-      role: push button
+      role: menu item
     model_sonnet_extended:
       name: Sonnet 4.6 Extended
       role: push button
     model_extended_thinking:
       name_contains: Extended thinking
-      role: push button
+      role: menu item
     model_more:
       name: More models
-      role: push button
+      role: menu item
     copy_button:
       name_contains: Copy
       role_contains: button
@@ -106,6 +107,9 @@ tree:
     incognito:
       name_contains: Use incognito
       role: push button
+    research_mode:
+      name: Research mode
+      role: toggle button
     send_button:
       name: Send message
       role: push button
@@ -125,8 +129,7 @@ workflow:
     mode_targets:
       extended_thinking: model_extended_thinking
     tool_targets:
-      research: tool_research
-      web_search: tool_web_search
+      research: research_mode
   attachment:
     trigger: toggle_menu
     menu_target: upload_files_item

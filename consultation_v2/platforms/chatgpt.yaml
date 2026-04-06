@@ -48,11 +48,12 @@ tree:
     role: push button
   element_map:
     input:
+      name: Chat with ChatGPT
       role: entry
       states_include:
       - editable
     model_selector:
-      name_contains: Model selector
+      name: Model selector
       role: push button
     attach_trigger:
       name: Add files and more
@@ -64,7 +65,7 @@ tree:
       name_contains: Stop streaming
       role: push button
     pro_indicator:
-      name_pattern: Pro, click to remove
+      name_pattern: Extended Pro, click to remove
       role: push button
     thinking_mode:
       name_pattern: '*, click to remove'
@@ -73,38 +74,32 @@ tree:
       name: Extended Pro
       role: push button
     temporary_chat:
-      name_contains: Turn on temporary chat
+      name_contains: temporary chat
       role: push button
     search_chats:
       name_contains: Search chats
       role: push button
+    dictation:
+      name: Start dictation
+      role: push button
     send_button:
       name: Send prompt
       role: push button
-    model_auto:
-      name: Auto Decides how long to think
-      role: push button
     model_instant:
-      name: Instant For everyday chats
-      role: push button
+      name_contains: Instant
+      role_contains: item
     model_thinking:
-      name: Thinking For complex questions
-      role: push button
+      name_contains: Thinking
+      role_contains: item
     model_pro:
-      name: Pro Research-grade intelligence
-      role: push button
-    model_configure:
-      name: Configure...
-      role: push button
+      name_contains: Pro Research-grade intelligence
+      role_contains: item
     thinking_standard:
       name: Standard
-      role: push button
+      role: radio menu item
     thinking_extended:
       name: Extended
-      role: push button
-    thinking_pro_button:
-      name: Pro
-      role: push button
+      role: radio menu item
     tool_upload:
       name_contains: Add photos
       role_contains: item
@@ -145,7 +140,6 @@ workflow:
     tools: []
   selection:
     model_targets:
-      auto: model_auto
       instant: model_instant
       thinking: model_thinking
       pro: model_pro
@@ -194,9 +188,9 @@ validation:
       role_contains: button
   model_selected:
     indicators:
-    - name_contains: Model selector
+    - name: Model selector
       role: push button
-    name_contains_model: true
+    name_contains_model: false
   extended_tile:
     indicators:
     - name: Extended Pro
