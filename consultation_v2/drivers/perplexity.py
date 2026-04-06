@@ -157,20 +157,35 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         return True
 
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
+        # After mode toggle or attach, input focus may be lost.
+        # Click input TWICE — first click focuses the page area, second focuses the input.
+        for attempt in range(3):
+            snap = self.runtime.snapshot()
+            input_el = self.find_first(snap, 'input')
+            if input_el:
+                break
+            time.sleep(1.0)
         if not input_el:
-            result.add_step('prompt', False, 'Perplexity input field not found', snapshot=snap.serializable())
+            result.add_step('prompt', False, 'Perplexity input field not found after retries', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='coordinate_only'):
-            result.add_step('prompt', False, 'Perplexity input focus click failed', snapshot=snap.serializable())
-            return False
+        # Focus: click input coordinates to bring focus to the text field
+        self.runtime.click(input_el, strategy='coordinate_only')
+        time.sleep(0.5)
+        # Click again to ensure cursor is in the text field (not just the page)
+        self.runtime.click(input_el, strategy='coordinate_only')
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
-        time.sleep(0.5)
+        time.sleep(1.0)
+        # After paste, Submit button should appear. Check for it as confirmation.
         verify_snap = self.runtime.snapshot()
-        # Trust clipboard paste — validation_passes('prompt_ready') is unreliable
-        result.add_step('prompt', bool(pasted), 'Perplexity prompt entered' + (' (paste confirmed)' if pasted else ' (paste failed)'), snapshot=verify_snap.serializable())
+        submit_visible = self.find_first(verify_snap, 'submit_button')
+        confirmed = bool(pasted and submit_visible)
+        msg = 'Perplexity prompt entered'
+        if submit_visible:
+            msg += ' (Submit button appeared)'
+        elif pasted:
+            msg += ' (paste ok but Submit not visible — may need focus)'
+        result.add_step('prompt', bool(pasted), msg, snapshot=verify_snap.serializable())
         return bool(pasted)
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -181,8 +196,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if send_button:
             clicked = self.runtime.click(send_button, strategy='coordinate_only')
         else:
-            # Submit button not visible (common in Deep Research mode).
-            # Fall back to Enter key like Grok.
+            # No Submit button — try clicking input again and pressing Ctrl+Enter
+            input_el = self.find_first(snap, 'input')
+            if input_el:
+                self.runtime.click(input_el, strategy='coordinate_only')
+                time.sleep(0.3)
             clicked = self.runtime.press('Return')
         stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0) or self.runtime.current_url()
