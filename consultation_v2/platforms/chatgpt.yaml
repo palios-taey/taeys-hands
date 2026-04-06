@@ -6,114 +6,137 @@ urls:
 tree:
   fence_after: []
   exclude:
-    names: ["Close sidebar", "Turn on temporary chat", "Start Voice", "Profile image", "ChatGPT", "Chat history", "Skip to content"]
-    name_contains: ["Upgrade", "Get Plus", ", open profile menu", "Manage my account"]
-    roles: [separator, document web, landmark, heading, section]
+    names:
+    - Close sidebar
+    - Turn on temporary chat
+    - Start Voice
+    - Profile image
+    - ChatGPT
+    - Chat history
+    - Skip to content
+    name_contains:
+    - Upgrade
+    - Get Plus
+    - ', open profile menu'
+    - Manage my account
+    roles:
+    - separator
+    - document web
+    - landmark
+    - heading
+    - section
   sidebar_nav:
-    - {name: "Home", role: "link"}
-    - {name_pattern: "New chat*", role: "link"}
-    - {name: "Pulse", role: "link"}
-    - {name: "Images", role: "link"}
-    - {name: "Apps", role: "link"}
-    - {name: "Deep research", role: "link"}
-    - {name: "Codex", role: "link"}
-    - {name: "GPTs", role: "link"}
-    - {name: "Projects", role: "push button"}
-    - {name: "Your chats", role: "push button"}
+  - name: Home
+    role: link
+  - name_pattern: New chat*
+    role: link
+  - name: Pulse
+    role: link
+  - name: Images
+    role: link
+  - name: Apps
+    role: link
+  - name: Deep research
+    role: link
+  - name: Codex
+    role: link
+  - name: GPTs
+    role: link
+  - name: Projects
+    role: push button
+  - name: Your chats
+    role: push button
   element_map:
     input:
       role: entry
-      states_include: [editable]
+      states_include:
+      - editable
     model_selector:
-      name_contains: "Model selector"
+      name_contains: Model selector
       role: push button
     attach_trigger:
-      name: "Add files and more"
+      name: Add files and more
       role: push button
     copy_button:
-      name_contains: "Copy"
+      name_contains: Copy
       role_contains: button
     stop_button:
-      name_contains: "Stop streaming"
+      name_contains: Stop streaming
       role: push button
     pro_indicator:
-      name_pattern: "Pro, click to remove"
+      name_pattern: Pro, click to remove
       role: push button
     thinking_mode:
-      name_pattern: "*, click to remove"
+      name_pattern: '*, click to remove'
       role: push button
     extended_pro:
-      name: "Extended Pro"
+      name: Extended Pro
       role: push button
     temporary_chat:
-      name_contains: "Turn on temporary chat"
+      name_contains: Turn on temporary chat
       role: push button
     search_chats:
-      name_contains: "Search chats"
+      name_contains: Search chats
       role: push button
     send_button:
-      name: "Send prompt"
+      name: Send prompt
       role: push button
-    # Model dropdown items (visible in AT-SPI since ~March 2026)
     model_auto:
-      name: "Auto Decides how long to think"
+      name: Auto Decides how long to think
       role: push button
     model_instant:
-      name: "Instant For everyday chats"
+      name: Instant For everyday chats
       role: push button
     model_thinking:
-      name: "Thinking For complex questions"
+      name: Thinking For complex questions
       role: push button
     model_pro:
-      name: "Pro Research-grade intelligence"
+      name: Pro Research-grade intelligence
       role: push button
     model_configure:
-      name: "Configure..."
+      name: Configure...
       role: push button
-    # Thinking time options (shown after clicking Extended Pro button)
     thinking_standard:
-      name: "Standard"
+      name: Standard
       role: push button
     thinking_extended:
-      name: "Extended"
+      name: Extended
       role: push button
     thinking_pro_button:
-      name: "Pro"
+      name: Pro
       role: push button
-    # Tools dropdown items (from "Add files and more" button)
     tool_upload:
-      name_contains: "Add photos"
-      role_contains: item  # AT-SPI role is 'menu item', not 'button'
+      name_contains: Add photos
+      role_contains: item
     tool_google_drive:
-      name: "Add from Google Drive"
+      name: Add from Google Drive
       role_contains: button
     tool_deep_research:
-      name: "Deep research"
+      name: Deep research
       role_contains: item
     tool_web_search:
-      name: "Web search"
+      name: Web search
       role_contains: item
     tool_study:
-      name: "Study and learn"
+      name: Study and learn
       role_contains: item
     tool_more:
-      name: "More"
+      name: More
       role_contains: item
     tool_recent_files:
-      name: "Recent files"
+      name: Recent files
       role_contains: item
-    # More submenu items (hover over "More" to reveal)
     tool_github:
-      name: "GitHub"
+      name: GitHub
       role_contains: item
     tool_agent_mode:
-      name: "Agent mode"
+      name: Agent mode
       role_contains: item
     tool_gmail:
-      name: "Gmail"
+      name: Gmail
       role_contains: item
     tool_quizzes:
-      name: "Quizzes"
+      name: Quizzes
       role_contains: item
 workflow:
   defaults:
@@ -128,11 +151,19 @@ workflow:
       pro: model_pro
     composite_modes:
       pro_extended:
-        - {trigger: model_selector, target: model_pro, verification: model_selected}
-        - {trigger: extended_pro, target: thinking_extended, verification: extended_tile}
+      - trigger: model_selector
+        target: model_pro
+        verification: model_selected
+      - trigger: extended_pro
+        target: thinking_extended
+        verification: extended_tile
       extended_thinking:
-        - {trigger: model_selector, target: model_pro, verification: model_selected}
-        - {trigger: extended_pro, target: thinking_extended, verification: extended_tile}
+      - trigger: model_selector
+        target: model_pro
+        verification: model_selected
+      - trigger: extended_pro
+        target: thinking_extended
+        verification: extended_tile
     tool_targets:
       deep_research: tool_deep_research
       web_search: tool_web_search
@@ -159,22 +190,28 @@ workflow:
 validation:
   attach_success:
     indicators:
-      - {name_contains: "Remove", role_contains: button}
+    - name_contains: Remove
+      role_contains: button
   model_selected:
     indicators:
-      - {name_contains: "Model selector", role: push button}
+    - name_contains: Model selector
+      role: push button
     name_contains_model: true
   extended_tile:
     indicators:
-      - {name: "Extended Pro", role: push button}
+    - name: Extended Pro
+      role: push button
   prompt_ready:
     indicators:
-      - {name: "Send prompt", role: push button}
+    - name: Send prompt
+      role: push button
   send_success:
     indicators:
-      - {name_contains: "Stop streaming", role: push button}
+    - name_contains: Stop streaming
+      role: push button
     timeout: 30
   response_complete:
     indicators:
-      - {name_contains: "Copy", role_contains: button}
+    - name_contains: Copy
+      role_contains: button
     stop_absent: true

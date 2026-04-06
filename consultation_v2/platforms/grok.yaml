@@ -5,73 +5,95 @@ urls:
   verify_navigation: true
 tree:
   fence_after:
-    - {name: "History", role: "push button"}
+  - name: History
+    role: push button
   exclude:
-    names: ["Toggle Sidebar", "pfp", "Web page favicon", "Markdown"]
-    name_contains: ["Upgrade to", "SuperGrok"]
-    roles: [separator, document web, list item, paragraph, image]
+    names:
+    - Toggle Sidebar
+    - pfp
+    - Web page favicon
+    - Markdown
+    name_contains:
+    - Upgrade to
+    - SuperGrok
+    roles:
+    - separator
+    - document web
+    - list item
+    - paragraph
+    - image
   sidebar_nav:
-    - {name: "Home page", role: "link"}
-    - {name: "Search", role: "push button"}
-    - {name: "Chat", role: "link"}
-    - {name: "Voice", role: "link"}
-    - {name: "Imagine", role: "link"}
-    - {name: "Projects", role: "push button"}
-    - {name: "History", role: "push button"}
+  - name: Home page
+    role: link
+  - name: Search
+    role: push button
+  - name: Chat
+    role: link
+  - name: Voice
+    role: link
+  - name: Imagine
+    role: link
+  - name: Projects
+    role: push button
+  - name: History
+    role: push button
   element_map:
     input:
       role_contains: section
-      states_include: [editable, focusable, multi-line]
+      states_include:
+      - editable
+      - focusable
+      - multi-line
     attach_trigger:
-      name: "Attach"
+      name: Attach
       role: push button
     upload_files_item:
-      name: "Upload a file"
+      name: Upload a file
       role: menu item
     model_selector:
-      name: "Model select"
+      name: Model select
       role: push button
     copy_button:
-      name: "Copy"
+      name: Copy
       role: push button
     edit_button:
-      name: "Edit"
+      name: Edit
       role: push button
     stop_button:
-      name_contains: "Stop"
+      name_contains: Stop
       role: push button
     regenerate:
-      name: "Regenerate"
+      name: Regenerate
       role: push button
     read_aloud:
-      name: "Read aloud"
+      name: Read aloud
       role: push button
     start_thread:
-      name: "Start thread"
+      name: Start thread
       role: push button
     like:
-      name: "Like"
+      name: Like
       role: push button
     dislike:
-      name: "Dislike"
+      name: Dislike
       role: push button
     more_actions:
-      name: "More actions"
+      name: More actions
       role: push button
     create_share_link:
-      name: "Create share link"
+      name: Create share link
       role: push button
     thought_indicator:
-      name_pattern: "Thought for *"
+      name_pattern: Thought for *
       role: push button
     scroll_down:
-      name: "Scroll down"
+      name: Scroll down
       role: push button
     dictation:
-      name_pattern: "Start dictation*"
+      name_pattern: Start dictation*
       role: push button
     voice_mode:
-      name_pattern: "Enter voice mode*"
+      name_pattern: Enter voice mode*
       role: push button
 workflow:
   defaults:
@@ -106,18 +128,22 @@ workflow:
 validation:
   attach_success:
     indicators:
-      - {name_contains: "Remove", role_contains: button}
+    - name_contains: Remove
+      role_contains: button
   model_selected:
     indicators:
-      - {name: "Model select", role: push button}
+    - name: Model select
+      role: push button
     reopen_to_verify: true
   prompt_ready:
     check_input_value: true
   send_success:
     indicators:
-      - {name_contains: "Stop", role: push button}
+    - name_contains: Stop
+      role: push button
     timeout: 30
   response_complete:
     indicators:
-      - {name: "Copy", role: push button}
+    - name: Copy
+      role: push button
     stop_absent: true
