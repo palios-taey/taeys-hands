@@ -21,7 +21,6 @@ SKIP_BOTS=false
 ROUND="sft"
 VNC_PASSWORD="${VNC_PASSWORD:-thor}"
 RESOLUTION="1920x1080x24"
-DBUS="unix:path=/run/user/1000/bus"
 TAEY_PATH="${HOME}/taeys-hands"
 EMBEDDING_PATH="${HOME}/embedding-server"
 
@@ -34,12 +33,37 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Platform layout: display|platform|url|tmux_session|profile
-declare -A PLATFORMS=(
-    [5]="chatgpt|https://chatgpt.com/?temporary-chat=true|sft-chatgpt|ff-profile-chatgpt2"
-    [6]="gemini|https://gemini.google.com/app|sft-gemini|ff-profile-gemini2"
-    [7]="grok|https://grok.com/|sft-grok|ff-profile-grok2"
-)
+# --- Load machine.env (single source of truth) ---
+for candidate in "${HOME}/.taey/machine.env" "${TAEY_PATH}/machine.env"; do
+    if [[ -f "${candidate}" ]]; then
+        # shellcheck source=/dev/null
+        source "${candidate}"
+        break
+    fi
+done
+REDIS_HOST="${TAEY_REDIS_HOST:-127.0.0.1}"
+
+# Platform layout from machine.env or defaults
+declare -A PLATFORMS
+for display in 5 6 7; do
+    DISPLAY_VAR="TAEY_DISPLAY_${display}"
+    DISPLAY_CONFIG="${!DISPLAY_VAR:-}"
+    if [[ -n "${DISPLAY_CONFIG}" ]]; then
+        platform="${DISPLAY_CONFIG%%:*}"
+        _remainder="${DISPLAY_CONFIG#*:}"
+        profile="${_remainder%%:*}"
+        url="${_remainder#*:}"
+        PLATFORMS[$display]="${platform}|${url}|sft-${platform}|${profile}"
+    fi
+done
+# Fallback if no machine.env
+if [[ ${#PLATFORMS[@]} -eq 0 ]]; then
+    PLATFORMS=(
+        [5]="chatgpt|https://chatgpt.com/?temporary-chat=true|sft-chatgpt|ff-profile-chatgpt2"
+        [6]="gemini|https://gemini.google.com/app|sft-gemini|ff-profile-gemini2"
+        [7]="grok|https://grok.com/|sft-grok|ff-profile-grok2"
+    )
+fi
 
 echo "=== Launching SFT ($ROUND) ==="
 
@@ -114,24 +138,34 @@ USERJS
         echo "  Wrote user.js to profile"
     fi
 
-    # Launch Firefox
+    # Launch Firefox with isolated D-Bus
     if [ "$SKIP_FIREFOX" = "false" ]; then
         pkill -f "firefox.*$profile" 2>/dev/null || true
         sleep 2
 
+        echo "  Starting isolated D-Bus for :$display..."
+        eval "$(DISPLAY=:$display dbus-launch --sh-syntax --exit-with-session 2>/dev/null)" || true
+        DISPLAY_DBUS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+        DISPLAY=":$display" DBUS_SESSION_BUS_ADDRESS="$DISPLAY_DBUS" /usr/libexec/at-spi2-registryd >/dev/null 2>&1 &
+        sleep 2
+
         echo "  Launching Firefox on :$display..."
         tmux send-keys -t "$tmux_session" \
-            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS LIBGL_ALWAYS_SOFTWARE=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_GPU_SANDBOXING=1 GDK_BACKEND=x11 firefox --no-remote --profile /tmp/$profile '$url' &" Enter
+            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' LIBGL_ALWAYS_SOFTWARE=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_GPU_SANDBOXING=1 GDK_BACKEND=x11 firefox --no-remote --profile /tmp/$profile '$url' &" Enter
         sleep 5
+
+        echo "$DISPLAY_DBUS" > "/tmp/a11y_bus_:${display}"
         echo "  Firefox launched (VNC port $vnc_port)"
     fi
 
     # Start SFT bot
     if [ "$SKIP_BOTS" = "false" ]; then
+        DISPLAY_DBUS="$(cat /tmp/a11y_bus_:${display} 2>/dev/null || echo 'unix:path=/run/user/1000/bus')"
         sleep 2
         echo "  Starting SFT bot ($ROUND)..."
         tmux send-keys -t "$tmux_session" \
-            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS REDIS_HOST=10.0.0.163 PYTHONPATH=$EMBEDDING_PATH python3 agents/sft_gen_bot.py --round $ROUND --platforms $platform 2>&1 | tee /tmp/sft_${platform}.log" Enter
+            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' REDIS_HOST=$REDIS_HOST WEAVIATE_URL=http://10.0.0.163:8088 PYTHONPATH=$EMBEDDING_PATH python3 agents/sft_gen_bot.py --round $ROUND --platforms $platform 2>&1 | tee /tmp/sft_${platform}.log" Enter
         echo "  Bot started in tmux: $tmux_session"
     fi
 done

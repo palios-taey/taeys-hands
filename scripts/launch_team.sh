@@ -21,7 +21,6 @@ SKIP_FIREFOX=false
 SKIP_BOTS=false
 VNC_PASSWORD="${VNC_PASSWORD:-thor}"
 RESOLUTION="1920x1080x24"
-DBUS="unix:path=/run/user/1000/bus"
 EMBEDDING_PATH="${HOME}/embedding-server"
 TAEY_PATH="${HOME}/taeys-hands"
 
@@ -34,25 +33,57 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Team layout
+# --- Load machine.env (single source of truth) ---
+MACHINE_ENV=""
+for candidate in "${HOME}/.taey/machine.env" "${TAEY_PATH}/machine.env"; do
+    if [[ -f "${candidate}" ]]; then
+        MACHINE_ENV="${candidate}"
+        break
+    fi
+done
+if [[ -n "${MACHINE_ENV}" ]]; then
+    # shellcheck source=/dev/null
+    source "${MACHINE_ENV}"
+fi
+REDIS_HOST="${TAEY_REDIS_HOST:-127.0.0.1}"
+
+# Team layout — reads from machine.env if available, falls back to defaults
 if [ "$TEAM" = "1" ]; then
-    declare -A PLATFORMS=(
-        [2]="chatgpt|https://chatgpt.com/?temporary-chat=true|hmm-chatgpt|ff-profile-chatgpt"
-        [3]="gemini|https://gemini.google.com/app|hmm-gemini|ff-profile-gemini"
-        [4]="grok|https://grok.com/|hmm-grok|ff-profile-grok"
-    )
+    TEAM_DISPLAYS=(2 3 4)
     VNC_BASE=5902
 elif [ "$TEAM" = "2" ]; then
-    declare -A PLATFORMS=(
-        [5]="chatgpt|https://chatgpt.com/?temporary-chat=true|hmm-chatgpt2|ff-profile-chatgpt2"
-        [6]="gemini|https://gemini.google.com/app|hmm-gemini2|ff-profile-gemini2"
-        [7]="grok|https://grok.com/|hmm-grok2|ff-profile-grok2"
-    )
+    TEAM_DISPLAYS=(5 6 7)
     VNC_BASE=5905
 else
     echo "Team must be 1 or 2"
     exit 1
 fi
+
+# Build PLATFORMS map from machine.env or defaults
+declare -A PLATFORMS
+for display in "${TEAM_DISPLAYS[@]}"; do
+    DISPLAY_VAR="TAEY_DISPLAY_${display}"
+    DISPLAY_CONFIG="${!DISPLAY_VAR:-}"
+    if [[ -n "${DISPLAY_CONFIG}" ]]; then
+        platform="${DISPLAY_CONFIG%%:*}"
+        _remainder="${DISPLAY_CONFIG#*:}"
+        profile="${_remainder%%:*}"
+        url="${_remainder#*:}"
+        tmux_session="hmm-${platform}"
+    else
+        # Fallback defaults if no machine.env
+        case $display in
+            2|5) platform="chatgpt"; url="https://chatgpt.com/?temporary-chat=true"; profile="ff-profile-chatgpt"; tmux_session="hmm-chatgpt" ;;
+            3|6) platform="gemini"; url="https://gemini.google.com/app"; profile="ff-profile-gemini"; tmux_session="hmm-gemini" ;;
+            4|7) platform="grok"; url="https://grok.com/"; profile="ff-profile-grok"; tmux_session="hmm-grok" ;;
+        esac
+        if [ "$TEAM" = "2" ]; then
+            profile="${profile}2"
+            tmux_session="${tmux_session}2"
+        fi
+    fi
+    PLATFORMS[$display]="${platform}|${url}|${tmux_session}|${profile}"
+done
 
 echo "=== Launching Team $TEAM ==="
 
@@ -129,19 +160,31 @@ user_pref("toolkit.cosmeticAnimations.enabled", false);
 USERJS
         fi
 
-        echo "  Launching Firefox on :$display with D-Bus..."
+        echo "  Starting isolated D-Bus for :$display..."
+        eval "$(DISPLAY=:$display dbus-launch --sh-syntax --exit-with-session 2>/dev/null)" || true
+        DISPLAY_DBUS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+        # Start AT-SPI registryd in isolated bus
+        DISPLAY=":$display" DBUS_SESSION_BUS_ADDRESS="$DISPLAY_DBUS" /usr/libexec/at-spi2-registryd >/dev/null 2>&1 &
+        sleep 2
+
+        echo "  Launching Firefox on :$display with isolated D-Bus..."
         # GPU/RDD env vars prevent IPC crashes on Xvfb (especially aarch64)
         tmux send-keys -t "$tmux_session" \
-            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS LIBGL_ALWAYS_SOFTWARE=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_GPU_SANDBOXING=1 GDK_BACKEND=x11 firefox --no-remote --profile /tmp/$profile '$url' &" Enter
+            "DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' LIBGL_ALWAYS_SOFTWARE=1 MOZ_DISABLE_RDD_SANDBOX=1 MOZ_DISABLE_GPU_SANDBOXING=1 GDK_BACKEND=x11 firefox --no-remote --profile /tmp/$profile '$url' &" Enter
         sleep 5
+
+        # Record bus address for bot and MCP tools
+        echo "$DISPLAY_DBUS" > "/tmp/a11y_bus_:${display}"
         echo "  Firefox launched (check VNC port $vnc_port for login)"
     fi
 
     # Start bot
     if [ "$SKIP_BOTS" = "false" ]; then
+        DISPLAY_DBUS="$(cat /tmp/a11y_bus_:${display} 2>/dev/null || echo 'unix:path=/run/user/1000/bus')"
         echo "  Starting bot..."
         tmux send-keys -t "$tmux_session" \
-            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS=$DBUS TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=10.0.0.163 PYTHONPATH=$EMBEDDING_PATH python3 agents/hmm_bot.py --platforms $platform --cycles 0" Enter
+            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=$REDIS_HOST WEAVIATE_URL=http://10.0.0.163:8088 PYTHONPATH=$EMBEDDING_PATH python3 agents/hmm_bot.py --platforms $platform --cycles 0" Enter
         echo "  Bot started in tmux session: $tmux_session"
     fi
 done
