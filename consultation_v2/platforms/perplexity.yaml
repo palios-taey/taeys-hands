@@ -4,9 +4,9 @@ urls:
   fresh: https://www.perplexity.ai/
   verify_navigation: false
 tree:
-  fence_after:
-  - name: Recent Collapse
-    role: push button
+  # fence_after disabled — Deep Research and input controls appear AFTER
+  # sidebar history in AT-SPI tree. Fencing cuts them off.
+  fence_after: []
   exclude:
     names:
     - User avatar
