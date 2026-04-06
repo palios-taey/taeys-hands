@@ -210,8 +210,24 @@ ALL code changes go through The Conductor. No instance writes code directly.
 
 Process: Conductor receives request → Gemini CLI analyzes (MEASURE+ANALYZE) → Codex CLI implements on branch (IMPROVE) → Conductor verifies and merges (CONTROL).
 
-**You do NOT modify code.** You identify defects, send them to the Conductor with full context, and wait for the PR. If you find a bug, message conductor: `redis-cli LPUSH "taey:conductor:inbox" '{"from":"{you}","type":"defect","body":"DEFECT: {what} in {file}:{line}. Root cause: {why}. Impact: {what breaks}."}'`
-
-Read-only files and full protocol: /home/mira/the-conductor/docs/6SIGMA_CHANGE_PROTOCOL.md
+**You do NOT modify code.** You identify defects, send them to the Conductor with full context, and wait for the PR.
 
 **First error = full stop.** Do not retry. Do not patch. Report to Conductor with root cause analysis.
+
+## Inter-Session Communication
+
+**NEVER use `!!` as a command prefix** — that is bash history expansion and will fail with syntax errors.
+
+Send messages to other sessions:
+```bash
+# Preferred: taey-notify
+taey-notify conductor "your message here"
+taey-notify weaver "result goes here"
+
+# Alternative: direct Redis
+redis-cli LPUSH "taey:conductor:inbox" '{"from":"taeys-hands","type":"message","body":"your message","priority":"normal","msg_id":"unique-id"}'
+```
+
+Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
+
+**Consultation results go to the REQUESTER**, not to conductor. If weaver requests a consultation, route the result to `taey:weaver:inbox`. If infra requests one, route to `taey:infra:inbox`. Only send to conductor for consultations conductor requested.
