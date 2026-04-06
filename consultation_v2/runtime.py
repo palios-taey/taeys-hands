@@ -57,7 +57,7 @@ class ConsultationRuntime:
         return bool(inp.type_text(text, delay_ms=delay_ms))
 
     def read_clipboard(self) -> str:
-        return clipboard.read_text() or ''
+        return clipboard.read() or ''
 
     def wait_until(self, predicate: Callable[[], Any], timeout: float, interval: float = 0.5) -> Any:
         deadline = time.time() + timeout
