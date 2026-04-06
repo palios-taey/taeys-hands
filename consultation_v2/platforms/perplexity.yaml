@@ -35,50 +35,69 @@ tree:
     model_selector:
       name: "Model"
       role: push button
-    model_best:
-      name_contains: "Best"
-      role_contains: item
-    model_gpt_5_2:
-      name_contains: "GPT-5.2"
-      role_contains: item
-    model_claude_sonnet_4_6:
-      name_contains: "Claude Sonnet 4.6"
-      role_contains: item
-    model_claude_opus_4_6:
-      name_contains: "Claude Opus 4.6"
-      role_contains: item
-    model_gemini_3_1_pro:
-      name_contains: "Gemini 3.1 Pro"
-      role_contains: item
-    model_grok_4_1:
-      name_contains: "Grok 4.1"
-      role_contains: item
-    tool_deep_research:
-      name_contains: "Deep research"
-      role_contains: item
-    tool_model_council:
-      name_contains: "Model council"
-      role_contains: item
-    computer_mode:
-      name: "Computer"
+    copy_button:
+      name: "Copy"
       role: push button
-    submit_button:
-      name: "Submit"
+    copy_code:
+      name: "Copy code"
       role: push button
     stop_button:
       name_contains: "Stop response"
       role: push button
-    copy_button:
-      name: "Copy"
+    submit_button:
+      name: "Submit"
       role: push button
-    copy_contents_button:
-      name: "Copy contents"
-      role_contains: button
     share_button:
       name: "Share"
       role: push button
     download_button:
       name: "Download"
+      role: push button
+    copy_contents_button:
+      name: "Copy contents"
+      role_contains: button
+    rewrite_thread:
+      name: "Rewrite Thread"
+      role: push button
+    helpful:
+      name: "Helpful"
+      role: push button
+    not_helpful:
+      name: "Not helpful"
+      role: push button
+    more_actions:
+      name: "More actions"
+      role: push button
+    thread_actions:
+      name: "Thread actions"
+      role: push button
+    dictation:
+      name: "Dictation"
+      role: push button
+    answer_mode_tabs:
+      name: "Answer mode tabs"
+      role: page tab list
+    # Answer mode tabs
+    answer_tab:
+      name: "Answer"
+      role: page tab
+    links_tab:
+      name: "Links"
+      role: page tab
+    images_tab:
+      name: "Images"
+      role: page tab
+    notifications:
+      name: "Notifications"
+      role: push button
+    computer_mode:
+      name: "Computer"
+      role: push button
+    voice_mode:
+      name: "Use voice mode"
+      role: push button
+    incognito:
+      name_contains: "Use incognito"
       role: push button
 workflow:
   defaults:
