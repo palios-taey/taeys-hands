@@ -106,14 +106,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not item or not self.runtime.click(item, strategy='coordinate_only'):
                 result.add_step('select_mode', False, f'Perplexity mode item missing or click failed for {requested_mode}', snapshot=dropdown_snap.serializable())
                 return False
-            time.sleep(0.8)
-            # Close dropdown by pressing Escape, then verify the mode indicator
-            # is visible in the main UI (not inside a dropdown).
+            time.sleep(1.0)
+            # Close dropdown and let page settle. Deep Research toggle causes
+            # page state changes — need extra time before next AT-SPI scan.
             self.runtime.press('Escape')
-            time.sleep(0.5)
-            # Trust the click — Perplexity Deep Research doesn't reliably report
-            # checked/selected state in AT-SPI. The click succeeded if we got here.
-            result.add_step('select_mode', True, f'Perplexity mode set to {requested_mode} (click confirmed)', snapshot=self.runtime.snapshot().serializable())
+            time.sleep(2.0)
+            result.add_step('select_mode', True, f'Perplexity mode set to {requested_mode} (click confirmed)')
         else:
             result.add_step('select_mode', True, 'Perplexity mode left unchanged/default', requested_mode=request.mode)
 
