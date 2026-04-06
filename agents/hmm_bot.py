@@ -348,7 +348,7 @@ def builder_cmd(*args) -> subprocess.CompletedProcess:
     existing = env.get('PYTHONPATH', '')
     if emb_root not in existing:
         env['PYTHONPATH'] = f"{emb_root}:{existing}" if existing else emb_root
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
 
 
 def get_prompt() -> str:
