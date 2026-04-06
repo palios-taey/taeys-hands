@@ -750,14 +750,18 @@ def process_platform_v2(platform, topic, output_dir):
         if ff:
             from core.tree import find_elements as _fe_mode
             from core.interact import atspi_click as _ac_mode
-            mode_buttons = _fe_mode(ff, name_contains='click to remove', role='push button')
-            for btn in mode_buttons:
-                btn_name = btn.get_name() or ''
-                if 'Pro' in btn_name or 'Extended' in btn_name:
-                    log.warning(f"[{platform}] DESELECTING mode: {btn_name}")
-                    _ac_mode(btn)
-                    time.sleep(2)
-                    bot.invalidate_doc_cache(platform)
+            all_elems = _fe_mode(ff)
+            for elem_dict in all_elems:
+                name = elem_dict.get('name', '')
+                role = elem_dict.get('role', '')
+                if 'click to remove' in name and 'button' in role:
+                    if 'Pro' in name or 'Extended' in name:
+                        log.warning(f"[{platform}] DESELECTING mode: {name}")
+                        node = elem_dict.get('atspi_obj')
+                        if node:
+                            _ac_mode(node)
+                            time.sleep(2)
+                            bot.invalidate_doc_cache(platform)
 
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
