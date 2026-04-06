@@ -1,0 +1,149 @@
+platform: grok
+click_strategy: xdotool_first
+urls:
+  fresh: https://grok.com/
+  verify_navigation: true
+tree:
+  fence_after:
+  - name: History
+    role: push button
+  exclude:
+    names:
+    - Toggle Sidebar
+    - pfp
+    - Web page favicon
+    - Markdown
+    name_contains:
+    - Upgrade to
+    - SuperGrok
+    roles:
+    - separator
+    - document web
+    - list item
+    - paragraph
+    - image
+  sidebar_nav:
+  - name: Home page
+    role: link
+  - name: Search
+    role: push button
+  - name: Chat
+    role: link
+  - name: Voice
+    role: link
+  - name: Imagine
+    role: link
+  - name: Projects
+    role: push button
+  - name: History
+    role: push button
+  element_map:
+    input:
+      role_contains: section
+      states_include:
+      - editable
+      - focusable
+      - multi-line
+    attach_trigger:
+      name: Attach
+      role: push button
+    upload_files_item:
+      name: Upload a file
+      role: menu item
+    model_selector:
+      name: Model select
+      role: push button
+    copy_button:
+      name: Copy
+      role: push button
+    edit_button:
+      name: Edit
+      role: push button
+    stop_button:
+      name_contains: Stop
+      role: push button
+    regenerate:
+      name: Regenerate
+      role: push button
+    read_aloud:
+      name: Read aloud
+      role: push button
+    start_thread:
+      name: Start thread
+      role: push button
+    like:
+      name: Like
+      role: push button
+    dislike:
+      name: Dislike
+      role: push button
+    more_actions:
+      name: More actions
+      role: push button
+    create_share_link:
+      name: Create share link
+      role: push button
+    thought_indicator:
+      name_pattern: Thought for *
+      role: push button
+    scroll_down:
+      name: Scroll down
+      role: push button
+    dictation:
+      name_pattern: Start dictation*
+      role: push button
+    voice_mode:
+      name_pattern: Enter voice mode*
+      role: push button
+workflow:
+  defaults:
+    model: null
+    mode: heavy
+    tools: []
+  selection:
+    model_targets:
+      auto: model_auto
+      fast: model_fast
+      expert: model_expert
+      heavy: model_heavy
+  attachment:
+    trigger: attach_trigger
+    menu_target: upload_files_item
+    open_method: coordinate_menu
+  prompt:
+    input: input
+  send:
+    trigger: null
+    submit_via_return: true
+    require_new_url: true
+    stop_key: stop_button
+  monitor:
+    stop_key: stop_button
+    complete_key: copy_button
+  extract:
+    primary_key: copy_button
+    strategy: last_by_y_atspi_only
+  extra_extract:
+    strategy: none
+validation:
+  attach_success:
+    indicators:
+    - name_contains: Remove
+      role_contains: button
+  model_selected:
+    indicators:
+    - name: Model select
+      role: push button
+    reopen_to_verify: true
+  prompt_ready:
+    check_input_value: true
+  send_success:
+    indicators:
+    - name_contains: Stop
+      role: push button
+    timeout: 30
+  response_complete:
+    indicators:
+    - name: Copy
+      role: push button
+    stop_absent: true

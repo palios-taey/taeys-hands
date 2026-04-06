@@ -1,0 +1,175 @@
+platform: claude
+click_strategy: xdotool_first
+urls:
+  fresh: https://claude.ai/new
+  verify_navigation: false
+tree:
+  fence_after:
+  - name: Starred
+    role: heading
+  exclude:
+    names:
+    - Close sidebar
+    - Claude
+    - Profile image
+    - Sidebar
+    name_contains:
+    - Upgrade to
+    - ', Settings'
+    - Get apps and extensions
+    - Claude's choice
+    roles:
+    - separator
+    - document web
+    - paragraph
+    - list item
+  sidebar_nav:
+  - name: Home
+    role: link
+  - name: New chat
+    role: link
+  - name: Search
+    role: link
+  - name: Customize
+    role: link
+  - name: Chats
+    role: link
+  - name: Projects
+    role: link
+  - name: Artifacts
+    role: link
+  - name: Code
+    role: link
+  element_map:
+    input:
+      name: Write your prompt to Claude
+      role: entry
+      states_include:
+      - editable
+    toggle_menu:
+      name_contains:
+      - Add files
+      - Toggle menu
+      role: push button
+    upload_files_item:
+      name_contains:
+      - Add files
+      - Add content
+      role_contains: item
+    git_connector_item:
+      name: Add from GitHub
+      role_contains: item
+    model_selector:
+      name_contains:
+      - Opus 4.6
+      - Sonnet 4.6
+      - Haiku 4.5
+      role: push button
+    model_opus:
+      name_contains: Opus 4.6 Most capable
+      role: push button
+    model_sonnet:
+      name_contains: Sonnet 4.6 Most efficient
+      role: push button
+    model_haiku:
+      name_contains: Haiku 4.5 Fastest
+      role: push button
+    model_sonnet_extended:
+      name: Sonnet 4.6 Extended
+      role: push button
+    model_extended_thinking:
+      name_contains: Extended thinking
+      role: push button
+    model_more:
+      name: More models
+      role: push button
+    copy_button:
+      name_contains: Copy
+      role_contains: button
+    stop_button:
+      name_contains: Stop response
+      role: push button
+    prompt_categories:
+      name: Prompt categories
+      role: page tab list
+    prompt_tab:
+      name_contains:
+      - Write
+      - Learn
+      - Code
+      - Life stuff
+      - From Drive
+      role: page tab
+    open_sidebar:
+      name: Open sidebar
+      role: push button
+    incognito:
+      name_contains: Use incognito
+      role: push button
+    send_button:
+      name: Send message
+      role: push button
+    scroll_to_bottom:
+      name: Scroll to bottom
+      role: push button
+workflow:
+  defaults:
+    model: null
+    mode: extended_thinking
+    tools: []
+  selection:
+    model_targets:
+      opus: model_opus
+      sonnet: model_sonnet
+      haiku: model_haiku
+    mode_targets:
+      extended_thinking: model_extended_thinking
+    tool_targets:
+      research: tool_research
+      web_search: tool_web_search
+  attachment:
+    trigger: toggle_menu
+    menu_target: upload_files_item
+    open_method: atspi_menu
+  prompt:
+    input: input
+    send_button: send_button
+  send:
+    trigger: send_button
+    require_new_url: true
+    stop_key: stop_button
+  monitor:
+    stop_key: stop_button
+    complete_key: copy_button
+  extract:
+    primary_key: copy_button
+    strategy: last_by_y
+  extra_extract:
+    strategy: none
+validation:
+  attach_success:
+    indicators:
+    - name_contains: Remove
+      role_contains: button
+  model_selected:
+    indicators:
+    - name_contains:
+      - Opus 4.6
+      - Sonnet 4.6
+      - Haiku 4.5
+      role: push button
+    name_is_model: true
+  prompt_ready:
+    indicators:
+    - name: Send message
+      role: push button
+  send_success:
+    indicators:
+    - name_contains: Stop response
+      role: push button
+    timeout: 30
+  response_complete:
+    indicators:
+    - name_contains: Copy
+      role_contains: button
+    stop_absent: true

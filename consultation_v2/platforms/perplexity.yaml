@@ -1,0 +1,185 @@
+platform: perplexity
+click_strategy: xdotool_first
+urls:
+  fresh: https://www.perplexity.ai/
+  verify_navigation: false
+tree:
+  fence_after:
+  - name: Recent Collapse
+    role: push button
+  exclude:
+    names:
+    - User avatar
+    name_contains:
+    - Upgrade to Pro
+    - ', open profile menu'
+    - User avatar Jesse
+    roles:
+    - separator
+    - document web
+    - paragraph
+    - landmark
+  sidebar_nav:
+  - name: Search
+    role: link
+  - name: Computer
+    role: link
+  - name: New Thread
+    role: push button
+  - name: History
+    role: link
+  - name: Discover
+    role: link
+  - name: Spaces
+    role: link
+  - name: Finance
+    role: link
+  - name: More
+    role: push button
+  element_map:
+    input:
+      role: entry
+      states_include:
+      - editable
+    attach_trigger:
+      name: Add files or tools
+      role: push button
+    upload_files_item:
+      name_contains: Upload files
+      role: menu item
+    git_connector_item:
+      name: Connectors and sources
+      role_contains: item
+    model_selector:
+      name: Model
+      role: push button
+    copy_button:
+      name: Copy
+      role: push button
+    copy_code:
+      name: Copy code
+      role: push button
+    stop_button:
+      name_contains: Stop response
+      role: push button
+    submit_button:
+      name: Submit
+      role: push button
+    share_button:
+      name: Share
+      role: push button
+    download_button:
+      name: Download
+      role: push button
+    copy_contents_button:
+      name: Copy contents
+      role_contains: button
+    rewrite_thread:
+      name: Rewrite Thread
+      role: push button
+    helpful:
+      name: Helpful
+      role: push button
+    not_helpful:
+      name: Not helpful
+      role: push button
+    more_actions:
+      name: More actions
+      role: push button
+    thread_actions:
+      name: Thread actions
+      role: push button
+    dictation:
+      name: Dictation
+      role: push button
+    answer_mode_tabs:
+      name: Answer mode tabs
+      role: page tab list
+    answer_tab:
+      name: Answer
+      role: page tab
+    links_tab:
+      name: Links
+      role: page tab
+    images_tab:
+      name: Images
+      role: page tab
+    notifications:
+      name: Notifications
+      role: push button
+    computer_mode:
+      name: Computer
+      role: push button
+    voice_mode:
+      name: Use voice mode
+      role: push button
+    incognito:
+      name_contains: Use incognito
+      role: push button
+workflow:
+  defaults:
+    model: null
+    mode: deep_research
+    tools: []
+  selection:
+    model_targets:
+      best: model_best
+      gpt_5_2: model_gpt_5_2
+      claude_sonnet_4_6: model_claude_sonnet_4_6
+      claude_opus_4_6: model_claude_opus_4_6
+      gemini_3_1_pro: model_gemini_3_1_pro
+      grok_4_1: model_grok_4_1
+    mode_targets:
+      deep_research: tool_deep_research
+      model_council: tool_model_council
+      computer: computer_mode
+  attachment:
+    trigger: attach_trigger
+    menu_target: upload_files_item
+    open_method: atspi_menu
+  prompt:
+    input: input
+    send_button: submit_button
+  send:
+    trigger: submit_button
+    require_new_url: true
+    stop_key: stop_button
+    settle_redirects: true
+  monitor:
+    stop_key: stop_button
+    complete_key: copy_button
+  extract:
+    primary_key: copy_button
+    strategy: last_by_y
+  extra_extract:
+    strategy: copy_contents_button
+    copy_contents_key: copy_contents_button
+validation:
+  attach_success:
+    indicators:
+    - name_contains: Remove
+      role_contains: button
+  model_selected:
+    indicators:
+    - name: Model
+      role: push button
+    name_is_model: true
+  tool_selected:
+    indicators:
+    - name: Add files or tools
+      role: push button
+    check_menu_item_state: true
+  prompt_ready:
+    indicators:
+    - name: Submit
+      role: push button
+  send_success:
+    indicators:
+    - name_contains: Stop response
+      role: push button
+    timeout: 30
+  response_complete:
+    indicators:
+    - name: Copy
+      role: push button
+    stop_absent: true

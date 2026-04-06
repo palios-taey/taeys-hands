@@ -1,0 +1,217 @@
+platform: chatgpt
+click_strategy: xdotool_first
+urls:
+  fresh: https://chatgpt.com/?temporary-chat=true
+  verify_navigation: false
+tree:
+  fence_after: []
+  exclude:
+    names:
+    - Close sidebar
+    - Turn on temporary chat
+    - Start Voice
+    - Profile image
+    - ChatGPT
+    - Chat history
+    - Skip to content
+    name_contains:
+    - Upgrade
+    - Get Plus
+    - ', open profile menu'
+    - Manage my account
+    roles:
+    - separator
+    - document web
+    - landmark
+    - heading
+    - section
+  sidebar_nav:
+  - name: Home
+    role: link
+  - name_pattern: New chat*
+    role: link
+  - name: Pulse
+    role: link
+  - name: Images
+    role: link
+  - name: Apps
+    role: link
+  - name: Deep research
+    role: link
+  - name: Codex
+    role: link
+  - name: GPTs
+    role: link
+  - name: Projects
+    role: push button
+  - name: Your chats
+    role: push button
+  element_map:
+    input:
+      role: entry
+      states_include:
+      - editable
+    model_selector:
+      name_contains: Model selector
+      role: push button
+    attach_trigger:
+      name: Add files and more
+      role: push button
+    copy_button:
+      name_contains: Copy
+      role_contains: button
+    stop_button:
+      name_contains: Stop streaming
+      role: push button
+    pro_indicator:
+      name_pattern: Pro, click to remove
+      role: push button
+    thinking_mode:
+      name_pattern: '*, click to remove'
+      role: push button
+    extended_pro:
+      name: Extended Pro
+      role: push button
+    temporary_chat:
+      name_contains: Turn on temporary chat
+      role: push button
+    search_chats:
+      name_contains: Search chats
+      role: push button
+    send_button:
+      name: Send prompt
+      role: push button
+    model_auto:
+      name: Auto Decides how long to think
+      role: push button
+    model_instant:
+      name: Instant For everyday chats
+      role: push button
+    model_thinking:
+      name: Thinking For complex questions
+      role: push button
+    model_pro:
+      name: Pro Research-grade intelligence
+      role: push button
+    model_configure:
+      name: Configure...
+      role: push button
+    thinking_standard:
+      name: Standard
+      role: push button
+    thinking_extended:
+      name: Extended
+      role: push button
+    thinking_pro_button:
+      name: Pro
+      role: push button
+    tool_upload:
+      name_contains: Add photos
+      role_contains: item
+    tool_google_drive:
+      name: Add from Google Drive
+      role_contains: button
+    tool_deep_research:
+      name: Deep research
+      role_contains: item
+    tool_web_search:
+      name: Web search
+      role_contains: item
+    tool_study:
+      name: Study and learn
+      role_contains: item
+    tool_more:
+      name: More
+      role_contains: item
+    tool_recent_files:
+      name: Recent files
+      role_contains: item
+    tool_github:
+      name: GitHub
+      role_contains: item
+    tool_agent_mode:
+      name: Agent mode
+      role_contains: item
+    tool_gmail:
+      name: Gmail
+      role_contains: item
+    tool_quizzes:
+      name: Quizzes
+      role_contains: item
+workflow:
+  defaults:
+    model: pro
+    mode: pro
+    tools: []
+  selection:
+    model_targets:
+      auto: model_auto
+      instant: model_instant
+      thinking: model_thinking
+      pro: model_pro
+    composite_modes:
+      pro_extended:
+      - trigger: model_selector
+        target: model_pro
+        verification: model_selected
+      - trigger: extended_pro
+        target: thinking_extended
+        verification: extended_tile
+      extended_thinking:
+      - trigger: model_selector
+        target: model_pro
+        verification: model_selected
+      - trigger: extended_pro
+        target: thinking_extended
+        verification: extended_tile
+    tool_targets:
+      deep_research: tool_deep_research
+      web_search: tool_web_search
+      study_and_learn: tool_study
+  attachment:
+    trigger: attach_trigger
+    menu_target: tool_upload
+    open_method: keyboard_nav
+  prompt:
+    input: input
+    send_button: send_button
+  send:
+    trigger: send_button
+    require_new_url: true
+    stop_key: stop_button
+  monitor:
+    stop_key: stop_button
+    complete_key: copy_button
+  extract:
+    primary_key: copy_button
+    strategy: last_by_y
+  extra_extract:
+    strategy: none
+validation:
+  attach_success:
+    indicators:
+    - name_contains: Remove
+      role_contains: button
+  model_selected:
+    indicators:
+    - name_contains: Model selector
+      role: push button
+    name_contains_model: true
+  extended_tile:
+    indicators:
+    - name: Extended Pro
+      role: push button
+  prompt_ready:
+    indicators:
+    - name: Send prompt
+      role: push button
+  send_success:
+    indicators:
+    - name_contains: Stop streaming
+      role: push button
+    timeout: 30
+  response_complete:
+    indicators:
+    - name_contains: Copy
+      role_contains: button
+    stop_absent: true
