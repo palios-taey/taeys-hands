@@ -91,7 +91,7 @@ tree:
       role: push button
     deep_research:
       name: Deep research
-      role: push button
+      role_contains: item
     new_thread:
       name_contains: New thread
       role: push button
