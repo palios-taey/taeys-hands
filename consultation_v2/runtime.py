@@ -18,7 +18,15 @@ class ConsultationRuntime:
         self.click_strategy = str(self.cfg.get('click_strategy') or self.cfg.get('workflow', {}).get('click_strategy') or 'xdotool_first')
 
     def switch(self) -> bool:
-        return bool(inp.switch_to_platform(self.platform))
+        # Try standard switch (works when PLATFORM_DISPLAYS env is set)
+        if inp.switch_to_platform(self.platform):
+            return True
+        # Fallback: if DISPLAY is already set correctly for this platform,
+        # just verify Firefox is accessible on current display
+        firefox = atspi.find_firefox_for_platform(self.platform)
+        if firefox:
+            return True
+        return False
 
     def current_url(self) -> Optional[str]:
         firefox = atspi.find_firefox_for_platform(self.platform)

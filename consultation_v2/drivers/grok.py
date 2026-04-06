@@ -87,8 +87,15 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_mode = (request.mode or self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
-        target = requested_mode or (request.model or '').strip().lower()
+        # None = use YAML default; empty string = skip selection
+        if request.mode is None:
+            requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
+        else:
+            requested_mode = request.mode.strip().lower()
+        if request.model is None:
+            target = requested_mode
+        else:
+            target = requested_mode or request.model.strip().lower()
         if not target:
             result.add_step('select_model_mode', True, 'Grok using current/default model')
             return True
@@ -177,8 +184,12 @@ class GrokConsultationDriver(BaseConsultationDriver):
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
-        verified = bool(pasted and self._input_has_text())
-        result.add_step('prompt', verified, 'Grok prompt entered and validated through AT-SPI text/value interfaces', snapshot=self.runtime.snapshot().serializable())
+        # Grok uses section-role input — AT-SPI text/value interfaces may not work.
+        # Trust the paste if clipboard operation succeeded.
+        at_spi_verified = self._input_has_text()
+        verified = bool(pasted)  # Trust paste; AT-SPI verification is bonus
+        msg = 'Grok prompt entered' + (' (AT-SPI verified)' if at_spi_verified else ' (paste trusted)')
+        result.add_step('prompt', verified, msg, snapshot=self.runtime.snapshot().serializable())
         return verified
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:

@@ -96,10 +96,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
+            # Perplexity tools dropdown items appear as push buttons, not menu items.
+            # Use regular snapshot first, fallback to menu snapshot.
+            dropdown_snap = self.runtime.snapshot()
+            item = self.find_first(dropdown_snap, workflow['mode_targets'][requested_mode])
+            if not item:
+                menu_snap = self.runtime.menu_snapshot()
+                item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
             if not item or not self.runtime.click(item, strategy='coordinate_only'):
-                result.add_step('select_mode', False, f'Perplexity mode item missing or click failed for {requested_mode}', menu=menu_snap.serializable())
+                result.add_step('select_mode', False, f'Perplexity mode item missing or click failed for {requested_mode}', snapshot=dropdown_snap.serializable())
                 return False
             time.sleep(0.8)
             # Re-open and confirm checked/selected state.
@@ -108,8 +113,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             verified = False
             if trigger and self.runtime.click(trigger, strategy='coordinate_only'):
                 time.sleep(0.5)
-                verify_menu = self.runtime.menu_snapshot()
-                verify_item = self.find_first(verify_menu, workflow['mode_targets'][requested_mode])
+                verify_snap = self.runtime.snapshot()
+                verify_item = self.find_first(verify_snap, workflow['mode_targets'][requested_mode])
+                if not verify_item:
+                    verify_menu = self.runtime.menu_snapshot()
+                    verify_item = self.find_first(verify_menu, workflow['mode_targets'][requested_mode])
                 verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
             result.add_step('select_mode', verified, f'Perplexity mode set to {requested_mode}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
