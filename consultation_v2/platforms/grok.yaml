@@ -31,20 +31,11 @@ tree:
     model_selector:
       name: "Model select"
       role: push button
-    model_auto:
-      name_contains: "Auto"
-      role_contains: item
-    model_fast:
-      name_contains: "Fast"
-      role_contains: item
-    model_expert:
-      name_contains: "Expert"
-      role_contains: item
-    model_heavy:
-      name_contains: "Heavy"
-      role_contains: item
     copy_button:
       name: "Copy"
+      role: push button
+    edit_button:
+      name: "Edit"
       role: push button
     stop_button:
       name_contains: "Stop"
@@ -52,8 +43,35 @@ tree:
     regenerate:
       name: "Regenerate"
       role: push button
+    read_aloud:
+      name: "Read aloud"
+      role: push button
     start_thread:
       name: "Start thread"
+      role: push button
+    like:
+      name: "Like"
+      role: push button
+    dislike:
+      name: "Dislike"
+      role: push button
+    more_actions:
+      name: "More actions"
+      role: push button
+    create_share_link:
+      name: "Create share link"
+      role: push button
+    thought_indicator:
+      name_pattern: "Thought for *"
+      role: push button
+    scroll_down:
+      name: "Scroll down"
+      role: push button
+    dictation:
+      name_pattern: "Start dictation*"
+      role: push button
+    voice_mode:
+      name_pattern: "Enter voice mode*"
       role: push button
 workflow:
   defaults:

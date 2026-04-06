@@ -22,6 +22,7 @@ tree:
     input:
       role: entry
       states_include: [editable]
+      # Gemini also uses contenteditable sections — match either
     input_alt:
       role_contains: section
       states_include: [editable, focusable, multi-line]
@@ -34,12 +35,6 @@ tree:
     upload_menu:
       name: "Open upload file menu"
       role: push button
-    upload_files_item:
-      name_pattern: "Upload files*"
-      role: menu item
-    import_code_item:
-      name: "Import code"
-      role: menu item
     copy_button:
       name_contains: "Copy"
       role_contains: button
@@ -52,24 +47,36 @@ tree:
     share_export:
       name_contains: "Share & export"
       role_contains: button
-    copy_content_item:
-      name_contains: "Copy Content"
-      role_contains: item
-    download_markdown_item:
-      name_contains: "Download"
-      role_contains: item
     start_research:
       name: "Start research"
       role: push button
+    microphone:
+      name: "Microphone"
+      role: toggle button
+    # Menu items (visible when dropdown is open)
+    upload_files_item:
+      name_pattern: "Upload files*"
+      role: menu item
+    add_from_drive_item:
+      name_pattern: "Add from Drive*"
+      role: menu item
+    import_code_item:
+      name: "Import code"
+      role: menu item
+    notebooklm_item:
+      name: "NotebookLM"
+      role: menu item
+    # Mode picker items
     mode_fast:
-      name_contains: "Fast"
+      name: "Fast Answers quickly"
       role_contains: item
     mode_thinking:
-      name_contains: "Thinking"
+      name: "Thinking Solves complex problems"
       role_contains: item
     mode_pro:
-      name_contains: "Pro"
+      name_contains: "Pro Advanced math"
       role_contains: item
+    # Tool toggle items (from Tools dropdown)
     tool_deep_think:
       name: "Deep think"
       role_contains: item
@@ -79,6 +86,12 @@ tree:
     tool_canvas:
       name: "Canvas"
       role_contains: item
+    tool_create_image:
+      name_contains: "Create image"
+      role_contains: item
+    tool_deselect_deep_think:
+      name: "Deselect Deep think"
+      role_contains: button
 workflow:
   defaults:
     model: null
