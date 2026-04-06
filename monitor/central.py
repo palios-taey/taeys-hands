@@ -371,6 +371,16 @@ class CentralMonitor:
                 f"ever_seen=YES no-transition confidence={confidence} ({elapsed}s)"
             )
 
+        # Generation-start timeout: if stop button never seen after 90s, send likely failed
+        generation_start_timeout = 90
+        if not ever_seen_stop and elapsed > generation_start_timeout:
+            _log(
+                f"[{platform}/{monitor_id}] GENERATION NEVER STARTED — no stop button after "
+                f"{elapsed}s. Send likely failed. Declaring send_failure. ({elapsed}s)"
+            )
+            self._notify(session, "send_failure", "no_stop_button")
+            return True
+
         if time.time() - started_ts > timeout:
             _log(f"[{platform}/{monitor_id}] Timeout after {timeout}s")
             self._notify(session, "timeout", "timeout")
