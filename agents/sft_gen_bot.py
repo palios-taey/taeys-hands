@@ -758,8 +758,8 @@ def process_platform_v2(platform, topic, output_dir):
                     if 'Pro' in name or 'Extended' in name:
                         log.warning(f"[{platform}] DESELECTING mode: {name}")
                         _ac_mode(elem_dict)
-                            time.sleep(2)
-                            bot.invalidate_doc_cache(platform)
+                        time.sleep(2)
+                        bot.invalidate_doc_cache(platform)
 
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
