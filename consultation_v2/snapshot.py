@@ -133,8 +133,10 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
         raise RuntimeError(f'Firefox not found for {platform}')
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
-        raise RuntimeError(f'Document not found for {platform}')
-    url = atspi.get_document_url(doc)
+        # Document not found — page may have navigated (e.g., Perplexity Deep Research toggle).
+        # Fall back to scanning from Firefox app root.
+        scan_root = 'app'
+    url = atspi.get_document_url(doc) if doc else None
 
     # Some platforms (ChatGPT) have elements outside the document (React portals).
     # fence_after: [] means "no fence" — scan full app tree to catch portals.
