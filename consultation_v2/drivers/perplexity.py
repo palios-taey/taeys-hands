@@ -180,10 +180,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.session_url_before = before
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'submit_button')
-        if not send_button:
-            result.add_step('send', False, 'Perplexity submit button not found', snapshot=snap.serializable())
-            return False
-        clicked = self.runtime.click(send_button, strategy='coordinate_only')
+        if send_button:
+            clicked = self.runtime.click(send_button, strategy='coordinate_only')
+        else:
+            # Submit button not visible (common in Deep Research mode).
+            # Fall back to Enter key like Grok.
+            clicked = self.runtime.press('Return')
         stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0) or self.runtime.current_url()
         # Perplexity often redirects through /search/new/... before settling.
