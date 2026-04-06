@@ -187,26 +187,49 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         before = self.runtime.current_url()
         result.session_url_before = before
+
         snap = self.runtime.snapshot()
-        send_button = self.find_first(snap, 'submit_button')
+        send_button = self.find_first(snap, "submit_button")
+
         if send_button:
-            clicked = self.runtime.click(send_button, strategy='coordinate_only')
+            clicked = self.runtime.click(send_button, strategy="coordinate_only")
         else:
-            # Perplexity accepts Return in focused input as send
+            # Fallback: Return in focused input — Perplexity accepts this.
             clicked = self.runtime.press('Return')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0) or self.runtime.current_url()
-        # Perplexity often redirects through /search/new/... before settling.
-        final_url = after
-        for _ in range(5):
+
+        # Stop button is the canonical "Perplexity accepted the send" signal.
+        # Timeout 60 s — Deep Research mode delays streaming start.
+        stop_seen = self.runtime.wait_until(
+            lambda: self.runtime.snapshot().has('stop_button'),
+            timeout=60,
+            interval=0.6,
+        )
+
+        # Settle the redirect chain: Perplexity routes through /search/new before
+        # landing on the permanent thread URL. Poll until URL stabilises.
+        settled_url = self.runtime.current_url() or before
+        for _ in range(8):
             time.sleep(1.0)
-            current = self.runtime.current_url() or final_url
-            if current and current != final_url:
-                final_url = current
-        result.session_url_after = final_url
+            current = self.runtime.current_url() or settled_url
+            if current and current != settled_url:
+                settled_url = current
+            else:
+                break  # URL has stopped moving
+
+        result.session_url_after = settled_url
+
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen and final_url)
-        result.add_step('send', verified, 'Perplexity send validated by stop button and settled URL capture', url_before=before, url_after=final_url, snapshot=verify_snap.serializable())
+        # Verified = click succeeded AND stop button was seen.
+        # settled_url is captured for Neo4j but is NOT a gate condition.
+        verified = bool(clicked and stop_seen)
+        result.add_step(
+            "send",
+            verified,
+            "Perplexity send validated by stop button + settled URL capture",
+            url_before=before,
+            url_after=settled_url,
+            snapshot=verify_snap.serializable(),
+        )
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
