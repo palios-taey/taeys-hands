@@ -51,7 +51,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
         requested_model = (request.model or '').strip().lower()
-        requested_mode = (request.mode or self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
+        requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower() if request.mode is None else request.mode.strip().lower()
 
         if requested_model and requested_model in workflow.get('model_targets', {}):
             snap = self.runtime.snapshot()

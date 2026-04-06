@@ -52,7 +52,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_mode = (request.mode or self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
+        requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower() if request.mode is None else request.mode.strip().lower()
         requested_model = (request.model or self.cfg['workflow']['defaults'].get('model') or '').strip().lower()
         target = requested_mode or requested_model
 
