@@ -742,6 +742,23 @@ def process_platform_v2(platform, topic, output_dir):
             return False
         log.info(f"[{platform}] Navigation OK")
 
+    # Step 1b: Deselect Extended Pro / Pro mode if active (ChatGPT only)
+    # Extended Pro causes 10-30 min responses vs ~60s. MUST be removed.
+    if platform == 'chatgpt':
+        time.sleep(2)  # Let page settle after navigation
+        ff = bot.get_firefox(platform)
+        if ff:
+            from core.tree import find_elements as _fe_mode
+            from core.interact import atspi_click as _ac_mode
+            mode_buttons = _fe_mode(ff, name_contains='click to remove', role='push button')
+            for btn in mode_buttons:
+                btn_name = btn.get_name() or ''
+                if 'Pro' in btn_name or 'Extended' in btn_name:
+                    log.warning(f"[{platform}] DESELECTING mode: {btn_name}")
+                    _ac_mode(btn)
+                    time.sleep(2)
+                    bot.invalidate_doc_cache(platform)
+
     # Step 2: Attach package
     # Patch core.atspi so ALL code paths use our PID-filtered Firefox
     import core.atspi as _atspi
