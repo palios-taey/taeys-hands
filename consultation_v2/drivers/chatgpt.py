@@ -83,15 +83,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                         return False
                     continue
 
-                # ChatGPT model dropdown renders via React portal — items appear as
-                # push buttons in AT-SPI tree, NOT as menu items. Use regular snapshot.
                 time.sleep(1.0)
                 dropdown_snap = self.runtime.snapshot()
                 target_el = self.find_first(dropdown_snap, step['target'])
-                if not target_el:
-                    # Fallback: try menu snapshot in case AT-SPI behavior changed
-                    menu_snap = self.runtime.menu_snapshot()
-                    target_el = self.find_first(menu_snap, step['target'])
                 if not target_el:
                     result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
@@ -118,15 +112,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            # ChatGPT model dropdown renders via React portal — items appear as
-            # push buttons in AT-SPI tree, NOT as menu items. Use regular snapshot.
             dropdown_snap = self.runtime.snapshot()
             target_key = workflow['model_targets'][target]
             item = self.find_first(dropdown_snap, target_key)
-            if not item:
-                # Fallback: try menu snapshot in case AT-SPI behavior changed
-                menu_snap = self.runtime.menu_snapshot()
-                item = self.find_first(menu_snap, target_key)
             if not item:
                 result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
@@ -155,10 +143,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_tool', False, f'ChatGPT failed to open tools dropdown for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, target_key)
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, target_key)
             if not item:
-                result.add_step('select_tool', False, f'ChatGPT tool item {target_key} missing', menu=menu_snap.serializable())
+                result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=snap.serializable())
                 return False
             clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.6)
@@ -181,14 +169,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'ChatGPT attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'tool_upload')
-            if upload_item:
-                clicked = self.runtime.click(upload_item, strategy='coordinate_only')
-            else:
-                clicked = bool(self.runtime.press('Down') and self.runtime.press('Return'))
+            snap = self.runtime.snapshot()
+            upload_item = self.find_first(snap, 'tool_upload')
+            if not upload_item:
+                result.add_step('attach', False, f'ChatGPT upload item not found for {abs_path}', snapshot=snap.serializable())
+                return False
+            clicked = self.runtime.click(upload_item, strategy='coordinate_only')
             if not clicked:
-                result.add_step('attach', False, f'ChatGPT upload menu interaction failed for {abs_path}', menu=menu_snap.serializable())
+                result.add_step('attach', False, f'ChatGPT upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')

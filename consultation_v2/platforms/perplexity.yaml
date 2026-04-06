@@ -38,6 +38,7 @@ tree:
     role: push button
   element_map:
     input:
+      name: ""
       role: entry
       states_include:
       - editable
@@ -45,11 +46,11 @@ tree:
       name: Add files or tools
       role: push button
     upload_files_item:
-      name_contains: Upload files
+      name: Upload files
       role: menu item
     git_connector_item:
       name: Connectors and sources
-      role_contains: item
+      role: menu item
     model_selector:
       name: Model
       role: push button
@@ -60,7 +61,7 @@ tree:
       name: Copy code
       role: push button
     stop_button:
-      name_contains: Stop response
+      name: Stop response
       role: push button
     submit_button:
       name: Submit
@@ -73,7 +74,7 @@ tree:
       role: push button
     copy_contents_button:
       name: Copy contents
-      role_contains: button
+      role: push button
     rewrite_thread:
       name: Rewrite Thread
       role: push button
@@ -91,9 +92,9 @@ tree:
       role: push button
     deep_research:
       name: Deep research
-      role_contains: item
+      role: radio menu item
     new_thread:
-      name_contains: New thread
+      name: New thread Ctrl I
       role: push button
     dictation:
       name: Dictation
@@ -120,7 +121,7 @@ tree:
       name: Use voice mode
       role: push button
     incognito:
-      name_contains: Use incognito
+      name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
       role: push button
 workflow:
   defaults:
@@ -181,7 +182,7 @@ validation:
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop response
+    - name: Stop response
       role: push button
     timeout: 30
   response_complete:

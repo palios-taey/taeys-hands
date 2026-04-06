@@ -36,15 +36,16 @@ tree:
     role: heading
   element_map:
     input:
+      name: Enter a prompt for Gemini
       role: entry
       states_include:
       - editable
     input_alt:
-      role_contains: section
+      name: ""
+      role: section
       states_include:
       - editable
       - focusable
-      - multi-line
     mode_picker:
       name: Open mode picker
       role: push button
@@ -55,17 +56,17 @@ tree:
       name: Open upload file menu
       role: push button
     copy_button:
-      name_contains: Copy
-      role_contains: button
+      name: Copy
+      role: push button
     stop_button:
-      name_contains: Stop response
+      name: Stop response
       role: push button
     send_button:
       name: Send message
       role: push button
     share_export:
-      name_contains: Share & export
-      role_contains: button
+      name: Share & export
+      role: push button
     start_research:
       name: Start research
       role: push button
@@ -76,10 +77,10 @@ tree:
       name: New chat
       role: push button
     upload_files_item:
-      name_pattern: Upload files*
+      name: Upload files
       role: menu item
     add_from_drive_item:
-      name_pattern: Add from Drive*
+      name: Add from Drive
       role: menu item
     import_code_item:
       name: Import code
@@ -89,28 +90,28 @@ tree:
       role: menu item
     mode_fast:
       name: Fast Answers quickly
-      role_contains: item
+      role: menu item
     mode_thinking:
       name: Thinking Solves complex problems
-      role_contains: item
+      role: menu item
     mode_pro:
-      name_contains: Pro Advanced math
-      role_contains: item
+      name: Pro Advanced math and coding
+      role: menu item
     tool_deep_think:
       name: Deep think
-      role_contains: item
+      role: menu item
     tool_deep_research:
       name: Deep research
-      role_contains: item
+      role: menu item
     tool_canvas:
       name: Canvas
-      role_contains: item
+      role: menu item
     tool_create_image:
-      name_contains: Create image
-      role_contains: item
+      name: Create image
+      role: menu item
     tool_deselect_deep_think:
       name: Deselect Deep think
-      role_contains: button
+      role: push button
 workflow:
   defaults:
     model: null
@@ -169,11 +170,11 @@ validation:
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop response
+    - name: Stop response
       role: push button
     timeout: 30
   response_complete:
     indicators:
-    - name_contains: Copy
-      role_contains: button
+    - name: Copy
+      role: push button
     stop_absent: true
