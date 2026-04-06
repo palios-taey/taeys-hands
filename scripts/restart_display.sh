@@ -1,330 +1,174 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# Universal Display & Bot Manager (Thor, Mira, Jetson)
+# Usage: ./restart_display.sh <display_number_or_platform> [bot_type]
+# Example: ./restart_display.sh 11 sft
+# Example: ./restart_display.sh chatgpt none  (Launches display only)
 
-set -Eeuo pipefail
+INPUT=$1
+BOT_TYPE=${2:-"none"}
 
-DISPLAY_NUM="${1:-}"
-
-if [[ -z "${DISPLAY_NUM}" || ! "${DISPLAY_NUM}" =~ ^[0-9]+$ ]]; then
-    echo "Usage: $0 <display_number>" >&2
+if [ -z "$INPUT" ]; then
+    echo "Usage: $0 <display_number_or_platform> [bot_type (hmm|sft|consultation|none)]"
     exit 1
 fi
 
+# 1. Load Universal Config
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DISPLAY_STR=":${DISPLAY_NUM}"
+# Source .env if it exists
+if [ -f "$REPO_ROOT/.env" ]; then
+    source "$REPO_ROOT/.env"
+fi
 
-declare -A PLATFORM_BY_DISPLAY=(
-    [4]="perplexity"
-    [6]="gemini"
-    [7]="grok"
-    [8]="claude"
-    [9]="perplexity"
-    [10]="claude"
-    [11]="chatgpt"
-    [12]="grok"
-    [13]="chatgpt"
-)
+# Defaults if not in .env
+REDIS_HOST=${REDIS_HOST:-"127.0.0.1"}
+MACHINE=$(hostname)
 
-declare -A URL_BY_DISPLAY=(
-    [4]="https://www.perplexity.ai/"
-    [6]="https://gemini.google.com/app"
-    [7]="https://grok.com/"
-    [8]="https://claude.ai/new?incognito"
-    [9]="https://www.perplexity.ai/"
-    [10]="https://claude.ai/new?incognito"
-    [11]="https://chatgpt.com/?temporary-chat=true"
-    [12]="https://grok.com/"
-    [13]="https://chatgpt.com/?temporary-chat=true"
-)
+# 2. Dynamic Display Mapping
+# Use the ones from .env or these defaults for standard Mira/Thor deployments
+DISPLAYS_MIRA=${DISPLAYS_MIRA:-"chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"}
+DISPLAYS_THOR=${DISPLAYS_THOR:-"perplexity:4,gemini:6,grok:7,claude:8,perplexity:9,claude:10,chatgpt:11,grok:12,chatgpt:13"}
 
-declare -A PROFILE_BY_DISPLAY=(
-    [4]="ff-profile-perplexity2"
-    [6]="ff-profile-gemini"
-    [7]="ff-profile-grok"
-    [8]="ff-profile-claude2"
-    [9]="ff-profile-perplexity"
-    [10]="ff-profile-claude3"
-    [11]="ff-profile-chatgpt"
-    [12]="ff-profile-grok2"
-    [13]="ff-profile-chatgpt2"
-)
+if [[ "$MACHINE" == *"mira"* ]]; then
+    MAPPINGS=$DISPLAYS_MIRA
+elif [[ "$MACHINE" == *"thor"* ]]; then
+    MAPPINGS=$DISPLAYS_THOR
+else
+    # Fallback if unknown machine
+    MAPPINGS=$DISPLAYS_MIRA
+fi
 
-PLATFORM="${PLATFORM_BY_DISPLAY[${DISPLAY_NUM}]:-}"
-URL="${URL_BY_DISPLAY[${DISPLAY_NUM}]:-}"
-PROFILE="${PROFILE_BY_DISPLAY[${DISPLAY_NUM}]:-}"
+# Resolve Platform & Display Num
+if [[ "$INPUT" =~ ^[0-9]+$ ]]; then
+    DISPLAY_NUM=$INPUT
+    PLATFORM=$(echo "$MAPPINGS" | tr ',' '\n' | grep ":${DISPLAY_NUM}$" | cut -d':' -f1)
+else
+    PLATFORM=$INPUT
+    DISPLAY_NUM=$(echo "$MAPPINGS" | tr ',' '\n' | grep "^${PLATFORM}:" | head -n1 | cut -d':' -f2)
+fi
 
-if [[ -z "${PLATFORM}" || -z "${URL}" || -z "${PROFILE}" ]]; then
-    echo "ERROR: No Thor display mapping found for ${DISPLAY_STR}" >&2
+if [ -z "$PLATFORM" ] || [ -z "$DISPLAY_NUM" ]; then
+    echo "Error: Display/Platform mapping not found for input '$INPUT' on $MACHINE"
     exit 1
 fi
 
-SESSION_NAME="sft-${PLATFORM}${DISPLAY_NUM}"
-BOT_PID_FILE="/tmp/${SESSION_NAME}.pid"
-BOT_LOG_FILE="/tmp/${SESSION_NAME}.log"
-FIREFOX_PID_FILE="/tmp/firefox_pid_${DISPLAY_STR}"
-A11Y_BUS_FILE="/tmp/a11y_bus_${DISPLAY_STR}"
-REGISTRY_LOG_FILE="/tmp/atspi2-registryd_${DISPLAY_NUM}.log"
-FIREFOX_LOG_FILE="/tmp/firefox_${DISPLAY_NUM}.log"
-ATSPI_REGISTRYD_PID=""
-FIREFOX_PID=""
-RESTART_PHASE="idle"
+DISPLAY_STR=":${DISPLAY_NUM}"
 
-log() {
-    printf '[restart:%s] %s\n' "${DISPLAY_STR}" "$*"
-}
+# 3. Standardize Naming (Solves Issue #4)
+PROFILE_DIR="/tmp/ff-profile-${MACHINE}-${PLATFORM}-${DISPLAY_NUM}"
+TMUX_SESSION="${BOT_TYPE}-${PLATFORM}-${DISPLAY_NUM}"
+BUS_FILE="/tmp/a11y_bus_${DISPLAY_STR}"
 
-fail() {
-    printf '[restart:%s] ERROR: %s\n' "${DISPLAY_STR}" "$*" >&2
-    exit 1
-}
+case $PLATFORM in
+    chatgpt)    URL="https://chatgpt.com/?temporary-chat=true" ;;
+    claude)     URL="https://claude.ai/new?incognito" ;;
+    gemini)     URL="https://gemini.google.com/app" ;;
+    grok)       URL="https://grok.com/" ;;
+    perplexity) URL="https://www.perplexity.ai/" ;;
+    *)          URL="https://google.com" ;;
+esac
 
-rollback_partial_restart() {
-    [[ "${RESTART_PHASE}" == "idle" || "${RESTART_PHASE}" == "complete" ]] && return 0
+echo "====================================================="
+echo "🚀 Launching $PLATFORM on $DISPLAY_STR ($MACHINE)"
+echo "📁 Profile : $PROFILE_DIR"
+echo "🖥️ Tmux    : $TMUX_SESSION"
+echo "🔌 D-Bus   : $BUS_FILE"
+echo "====================================================="
 
-    log "Rolling back partial restart state"
-    [[ -n "${FIREFOX_PID}" ]] && kill -TERM "${FIREFOX_PID}" 2>/dev/null || true
-    [[ -n "${ATSPI_REGISTRYD_PID}" ]] && kill -TERM "${ATSPI_REGISTRYD_PID}" 2>/dev/null || true
-    [[ -n "${DBUS_SESSION_BUS_PID:-}" ]] && kill -TERM "${DBUS_SESSION_BUS_PID}" 2>/dev/null || true
-}
+# 4. Total Teardown of Existing Stack for this Display
+# Kill any tmux session with the standardized name or the old ones
+tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+tmux kill-session -t "sft-${PLATFORM}${DISPLAY_NUM}" 2>/dev/null || true
+tmux kill-session -t "hmm-${PLATFORM}" 2>/dev/null || true
 
-require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
-}
+# Kill Xvfb and VNC for this display
+pkill -f "Xvfb $DISPLAY_STR " 2>/dev/null || true
+pkill -f "x11vnc.*$DISPLAY_STR" 2>/dev/null || true
+# Kill Firefox on this profile
+pkill -f "firefox.*$PROFILE_DIR" 2>/dev/null || true
+# Kill any other Firefox on this display
+pkill -f "firefox.*display=$DISPLAY_STR" 2>/dev/null || true
 
-ATSPI_REGISTRYD_CMD=""
-resolve_atspi_registryd() {
-    if command -v at-spi2-registryd >/dev/null 2>&1; then
-        ATSPI_REGISTRYD_CMD="$(command -v at-spi2-registryd)"
-        return 0
+if [ -f "$BUS_FILE" ]; then
+    # Kill the isolated dbus daemon for this display to prevent zombies
+    # Attempt to read PID from file if it was stored by a previous run
+    BUS_PID=$(grep -oP 'DBUS_SESSION_BUS_PID=\K[0-9]+' "$BUS_FILE" 2>/dev/null)
+    [ -n "$BUS_PID" ] && kill -9 "$BUS_PID" 2>/dev/null || true
+    rm -f "$BUS_FILE"
+fi
+
+# Clear X locks
+rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM}
+fuser -k -9 "${DISPLAY_NUM}/tcp" 2>/dev/null || true
+sleep 2
+
+# 5. Initialize Profile
+if [ ! -d "$PROFILE_DIR" ]; then
+    mkdir -p "$PROFILE_DIR"
+    echo 'user_pref("toolkit.accessibility.enabled", true);' > "$PROFILE_DIR/user.js"
+    echo 'user_pref("dom.disable_open_during_load", false);' >> "$PROFILE_DIR/user.js"
+    echo 'user_pref("gfx.webrender.all", false);' >> "$PROFILE_DIR/user.js"
+    echo 'user_pref("layers.acceleration.disabled", true);' >> "$PROFILE_DIR/user.js"
+fi
+
+# 6. Start Xvfb & VNC
+Xvfb "$DISPLAY_STR" -screen 0 1920x1080x24 > /dev/null 2>&1 &
+sleep 2
+
+VNC_PORT=$((5900 + DISPLAY_NUM))
+x11vnc -display "$DISPLAY_STR" -bg -nopw -listen localhost -xkb -rfbport $VNC_PORT -forever > /dev/null 2>&1
+
+# 7. True D-Bus Isolation (Solves Issue #3)
+export DISPLAY="$DISPLAY_STR"
+# We use dbus-launch but we want to capture its output to write to BUS_FILE
+DBUS_OUTPUT=$(dbus-launch --sh-syntax)
+eval "$DBUS_OUTPUT"
+
+echo "$DBUS_OUTPUT" > "$BUS_FILE"
+export AT_SPI_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS
+
+# Start AT-SPI helpers on the isolated bus
+if [ -x /usr/libexec/at-spi-bus-launcher ]; then
+    /usr/libexec/at-spi-bus-launcher &
+fi
+if [ -x /usr/libexec/at-spi2-registryd ]; then
+    /usr/libexec/at-spi2-registryd &
+fi
+sleep 2
+
+# 8. Start Firefox
+export MOZ_DISABLE_WAYLAND=1
+export GTK_USE_PORTAL=0
+export LIBGL_ALWAYS_SOFTWARE=1
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_GPU_SANDBOXING=1
+export GDK_BACKEND=x11
+
+firefox --profile "$PROFILE_DIR" --new-instance "$URL" > /dev/null 2>&1 &
+FIREFOX_PID=$!
+echo "export FIREFOX_PID=$FIREFOX_PID" >> "$BUS_FILE"
+sleep 5
+
+# 9. Launch Bot (if requested)
+if [ "$BOT_TYPE" != "none" ]; then
+    echo "🤖 Spawning $BOT_TYPE bot in tmux..."
+    tmux new-session -d -s "$TMUX_SESSION"
+    
+    # Send env vars to tmux
+    tmux send-keys -t "$TMUX_SESSION" "export DISPLAY=$DISPLAY_STR" C-m
+    tmux send-keys -t "$TMUX_SESSION" "export DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" C-m
+    tmux send-keys -t "$TMUX_SESSION" "export REDIS_HOST=$REDIS_HOST" C-m
+    tmux send-keys -t "$TMUX_SESSION" "export TAEY_NOTIFY_NODE=taeys-hands" C-m
+    tmux send-keys -t "$TMUX_SESSION" "export PYTHONPATH=$REPO_ROOT:$HOME/embedding-server" C-m
+    
+    if [ "$BOT_TYPE" == "hmm" ]; then
+        tmux send-keys -t "$TMUX_SESSION" "python3 agents/hmm_bot.py --platforms $PLATFORM --cycles 0" C-m
+    elif [ "$BOT_TYPE" == "sft" ]; then
+        tmux send-keys -t "$TMUX_SESSION" "python3 agents/sft_gen_bot.py --round all --platforms $PLATFORM" C-m
+    elif [ "$BOT_TYPE" == "consultation" ]; then
+        tmux send-keys -t "$TMUX_SESSION" "python3 scripts/consultation.py --platform $PLATFORM" C-m
     fi
-    if [[ -x /usr/libexec/at-spi2-registryd ]]; then
-        ATSPI_REGISTRYD_CMD="/usr/libexec/at-spi2-registryd"
-        return 0
-    fi
-    fail "Could not locate at-spi2-registryd"
-}
-
-declare -a TARGET_PIDS=()
-declare -a DBUS_PATHS=()
-
-append_unique() {
-    local value="$1"
-    shift
-    local existing
-    for existing in "$@"; do
-        [[ "${existing}" == "${value}" ]] && return 0
-    done
-    return 1
-}
-
-collect_display_processes() {
-    TARGET_PIDS=()
-    DBUS_PATHS=()
-
-    local proc_entry pid env_file cmdline env_text dbus_addr dbus_path
-    for proc_entry in /proc/[0-9]*; do
-        pid="${proc_entry##*/}"
-        env_file="${proc_entry}/environ"
-        [[ -r "${env_file}" ]] || continue
-
-        env_text="$(tr '\0' '\n' < "${env_file}" 2>/dev/null || true)"
-        [[ "${env_text}" == *"DISPLAY=${DISPLAY_STR}"* ]] || continue
-
-        cmdline="$(tr '\0' ' ' < "${proc_entry}/cmdline" 2>/dev/null || true)"
-        [[ -n "${cmdline}" ]] || continue
-
-        if [[ "${cmdline}" =~ (python|firefox|at-spi2-registryd|at-spi-bus-launcher|dbus-daemon|dbus-launch) ]]; then
-            TARGET_PIDS+=("${pid}")
-        fi
-
-        dbus_addr="$(printf '%s\n' "${env_text}" | awk -F= '$1 == "DBUS_SESSION_BUS_ADDRESS" {print $2; exit}')"
-        if [[ "${dbus_addr}" =~ ^unix:path=(/tmp/dbus-[^,]+) ]]; then
-            dbus_path="${BASH_REMATCH[1]}"
-            if ! append_unique "${dbus_path}" "${DBUS_PATHS[@]:-}"; then
-                DBUS_PATHS+=("${dbus_path}")
-            fi
-        fi
-    done
-}
-
-terminate_collected_processes() {
-    if [[ ${#TARGET_PIDS[@]} -eq 0 ]]; then
-        log "No display-bound bot/firefox/AT-SPI/D-Bus processes found"
-        return 0
-    fi
-
-    log "Sending SIGTERM to PIDs: ${TARGET_PIDS[*]}"
-    kill -TERM "${TARGET_PIDS[@]}" 2>/dev/null || true
-
-    sleep 5
-
-    local -a survivors=()
-    local pid
-    for pid in "${TARGET_PIDS[@]}"; do
-        if kill -0 "${pid}" 2>/dev/null; then
-            survivors+=("${pid}")
-        fi
-    done
-
-    if [[ ${#survivors[@]} -gt 0 ]]; then
-        log "Sending SIGKILL to stubborn PIDs: ${survivors[*]}"
-        kill -KILL "${survivors[@]}" 2>/dev/null || true
-        sleep 1
-    fi
-}
-
-cleanup_pid_files() {
-    log "Cleaning lock files and display-scoped temp state"
-    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" "${FIREFOX_PID_FILE}" "${A11Y_BUS_FILE}" "${BOT_PID_FILE}"
-
-    local dbus_path
-    for dbus_path in "${DBUS_PATHS[@]:-}"; do
-        [[ "${dbus_path}" == /tmp/dbus-* ]] || continue
-        rm -f -- "${dbus_path}"
-        compgen -G "${dbus_path},*" >/dev/null && rm -f -- "${dbus_path}",*
-    done
-
-    rm -f "/tmp/bot_pid_${DISPLAY_STR}" "/tmp/hmm_bot_${DISPLAY_NUM}.pid" "/tmp/sft_gen_bot_${DISPLAY_NUM}.pid"
-}
-
-kill_old_tmux_session() {
-    if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
-        log "Removing existing tmux session ${SESSION_NAME}"
-        tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
-    fi
-}
-
-start_dbus_session() {
-    log "Starting D-Bus session"
-    local dbus_output
-    dbus_output="$(dbus-launch --sh-syntax --exit-with-session)" || fail "dbus-launch failed"
-    eval "${dbus_output}"
-    export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
-
-    [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] || fail "dbus-launch did not export DBUS_SESSION_BUS_ADDRESS"
-    log "D-Bus session ready: ${DBUS_SESSION_BUS_ADDRESS}"
-}
-
-start_registryd() {
-    log "Waiting 3s before starting at-spi2-registryd"
-    sleep 3
-
-    log "Starting at-spi2-registryd"
-    "${ATSPI_REGISTRYD_CMD}" >"${REGISTRY_LOG_FILE}" 2>&1 &
-    ATSPI_REGISTRYD_PID=$!
-    export ATSPI_REGISTRYD_PID
-
-    log "Waiting 3s for registryd to stabilize"
-    sleep 3
-
-    if ! kill -0 "${ATSPI_REGISTRYD_PID}" 2>/dev/null; then
-        fail "at-spi2-registryd failed to stay running"
-    fi
-    log "Verified at-spi2-registryd is running (PID ${ATSPI_REGISTRYD_PID})"
-}
-
-start_firefox() {
-    mkdir -p "/tmp/${PROFILE}"
-
-    log "Starting Firefox on ${DISPLAY_STR}"
-    GTK_USE_PORTAL=0 \
-    LIBGL_ALWAYS_SOFTWARE=1 \
-    MOZ_DISABLE_RDD_SANDBOX=1 \
-    MOZ_DISABLE_GPU_SANDBOXING=1 \
-    GDK_BACKEND=x11 \
-    firefox --display="${DISPLAY_STR}" --no-remote --profile "/tmp/${PROFILE}" "${URL}" >"${FIREFOX_LOG_FILE}" 2>&1 &
-    FIREFOX_PID=$!
-    export FIREFOX_PID
-    printf '%s\n' "${FIREFOX_PID}" > "${FIREFOX_PID_FILE}"
-
-    log "Waiting 10s for Firefox initialization"
-    sleep 10
-
-    if ! kill -0 "${FIREFOX_PID}" 2>/dev/null; then
-        fail "Firefox exited during initialization"
-    fi
-
-    local a11y_addr=""
-    a11y_addr="$(xprop -display "${DISPLAY_STR}" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//;s/"$//' || true)"
-    if [[ -n "${a11y_addr}" ]]; then
-        printf '%s\n' "${a11y_addr}" > "${A11Y_BUS_FILE}"
-        export AT_SPI_BUS_ADDRESS="${a11y_addr}"
-        log "Recorded AT-SPI bus: ${a11y_addr}"
-    fi
-}
-
-verify_firefox_atspi() {
-    log "Verifying AT-SPI can see Firefox"
-    DISPLAY="${DISPLAY_STR}" \
-    DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \
-    AT_SPI_BUS_ADDRESS="${AT_SPI_BUS_ADDRESS:-}" \
-    python3 - <<'PY'
-import gi
-gi.require_version('Atspi', '2.0')
-from gi.repository import Atspi
-
-Atspi.init()
-desktop = Atspi.get_desktop(0)
-apps = [
-    desktop.get_child_at_index(i).get_name()
-    for i in range(desktop.get_child_count())
-]
-assert any('Firefox' in (app or '') for app in apps), apps
-PY
-}
-
-start_bot() {
-    log "Starting bot for ${PLATFORM} in tmux session ${SESSION_NAME}"
-
-    local bot_cmd
-    bot_cmd="cd '${REPO_ROOT}' && env DISPLAY='${DISPLAY_STR}' DBUS_SESSION_BUS_ADDRESS='${DBUS_SESSION_BUS_ADDRESS}' TAEY_NOTIFY_NODE='taeys-hands' REDIS_HOST='192.168.100.10' PYTHONPATH='${HOME}/embedding-server' python3 agents/sft_gen_bot.py --round all --platforms '${PLATFORM}' 2>&1 | tee '${BOT_LOG_FILE}'"
-
-    tmux new-session -d -s "${SESSION_NAME}" "${bot_cmd}" || fail "Failed to start tmux session ${SESSION_NAME}"
-
-    sleep 2
-    tmux has-session -t "${SESSION_NAME}" 2>/dev/null || fail "tmux session ${SESSION_NAME} did not stay up"
-
-    local bot_pid=""
-    bot_pid="$(pgrep -n -f "DISPLAY=${DISPLAY_STR} .*agents/sft_gen_bot.py --round all --platforms ${PLATFORM}" || true)"
-    if [[ -n "${bot_pid}" ]]; then
-        printf '%s\n' "${bot_pid}" > "${BOT_PID_FILE}"
-        log "Bot running with PID ${bot_pid}"
-    else
-        log "Bot session started; PID discovery skipped"
-    fi
-}
-
-main() {
-    trap rollback_partial_restart ERR
-
-    require_cmd dbus-launch
-    require_cmd firefox
-    require_cmd python3
-    require_cmd tmux
-    require_cmd xprop
-    resolve_atspi_registryd
-
-    log "Restarting display environment for ${PLATFORM} on ${DISPLAY_STR}"
-    collect_display_processes
-    kill_old_tmux_session
-    terminate_collected_processes
-    cleanup_pid_files
-
-    export DISPLAY="${DISPLAY_STR}"
-    RESTART_PHASE="dbus"
-    start_dbus_session
-    RESTART_PHASE="registryd"
-    start_registryd
-    RESTART_PHASE="firefox"
-    start_firefox
-    RESTART_PHASE="verify"
-    verify_firefox_atspi || fail "AT-SPI verification failed for Firefox"
-    log "AT-SPI verification passed"
-    RESTART_PHASE="bot"
-    start_bot
-    RESTART_PHASE="complete"
-    trap - ERR
-    log "Restart complete"
-}
-
-main "$@"
+    echo "✅ Bot launched in tmux: $TMUX_SESSION"
+else
+    echo "✅ Display active and isolated (No background bot)."
+fi

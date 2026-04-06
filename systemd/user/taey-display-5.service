@@ -1,15 +1,26 @@
 [Unit]
 Description=Taey Display :5 (Grok)
-After=default.target
+After=network.target
 
 [Service]
 Type=simple
-Environment=DISPLAY=:5
-ExecStartPre=/usr/bin/bash -lc 'rm -f /tmp/.X5-lock /tmp/.X11-unix/X5 /tmp/a11y_bus_:5 /tmp/firefox_pid_:5; pkill -f "Xvfb :5 " 2>/dev/null || true; pkill -f "/tmp/ff-profile-mira-grok" 2>/dev/null || true; /usr/bin/Xvfb :5 -screen 0 1920x1080x24 -ac -noreset >/tmp/taey-display-5-xvfb.log 2>&1 &'
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :5 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:5; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-grok; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-grok "https://grok.com" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:5; wait ${FIREFOX_PID}'
-ExecStopPost=/usr/bin/bash -lc 'pkill -f "Xvfb :5 " 2>/dev/null || true; rm -f /tmp/.X5-lock /tmp/.X11-unix/X5 /tmp/a11y_bus_:5 /tmp/firefox_pid_:5'
+Environment="DISPLAY=:5"
+EnvironmentFile=/home/mira/taeys-hands/.env
+Environment="PROFILE=/tmp/ff-profile-%H-grok-5"
+
+ExecStartPre=/bin/sh -c 'rm -f /tmp/a11y_bus_:5 && mkdir -p ${PROFILE}'
+
+# Start blocking isolated D-Bus. Write address to standard file.
+ExecStart=/usr/bin/dbus-run-session -- sh -c '\
+    echo "export DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" > /tmp/a11y_bus_:5 && \
+    /usr/libexec/at-spi-bus-launcher & \
+    /usr/libexec/at-spi2-registryd & \
+    Xvfb :5 -screen 0 1920x1080x24 & \
+    sleep 2 && \
+    exec firefox --profile ${PROFILE} --new-instance "https://grok.com/"'
+
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=default.target

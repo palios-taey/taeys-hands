@@ -31,18 +31,42 @@ done
 
 IFS=',' read -ra PLATFORM_LIST <<< "$PLATFORMS"
 
-# Map platform → display number (consistent across all machines)
-declare -A PLATFORM_DISPLAY=(
-    [chatgpt]=2
-    [grok]=3
-    [gemini]=4
-)
+# 1. Load Universal Config
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ -f "$REPO_ROOT/.env" ]; then
+    source "$REPO_ROOT/.env"
+fi
 
-declare -A PLATFORM_URL=(
-    [chatgpt]="https://chatgpt.com"
-    [grok]="https://grok.com/"
-    [gemini]="https://gemini.google.com/app"
-)
+MACHINE=$(hostname)
+REDIS_HOST=${REDIS_HOST:-"127.0.0.1"}
+DISPLAYS_MIRA=${DISPLAYS_MIRA:-"chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"}
+DISPLAYS_THOR=${DISPLAYS_THOR:-"perplexity:4,gemini:6,grok:7,claude:8,perplexity:9,claude:10,chatgpt:11,grok:12,chatgpt:13"}
+
+if [[ "$MACHINE" == *"mira"* ]]; then 
+    MAPPINGS=$DISPLAYS_MIRA
+elif [[ "$MACHINE" == *"thor"* ]]; then
+    MAPPINGS=$DISPLAYS_THOR
+else
+    MAPPINGS=$DISPLAYS_MIRA
+fi
+
+# Resolve mappings into associative arrays
+declare -A PLATFORM_DISPLAY
+declare -A PLATFORM_URL
+IFS=',' read -ra PAIRS <<< "$MAPPINGS"
+for pair in "${PAIRS[@]}"; do
+    IFS=':' read -r platform disp <<< "$pair"
+    PLATFORM_DISPLAY[$platform]=$disp
+    case $platform in
+        chatgpt)    PLATFORM_URL[$platform]="https://chatgpt.com/?temporary-chat=true" ;;
+        claude)     PLATFORM_URL[$platform]="https://claude.ai/new?incognito" ;;
+        gemini)     PLATFORM_URL[$platform]="https://gemini.google.com/app" ;;
+        grok)       PLATFORM_URL[$platform]="https://grok.com/" ;;
+        perplexity) PLATFORM_URL[$platform]="https://www.perplexity.ai/" ;;
+        *)          PLATFORM_URL[$platform]="https://google.com" ;;
+    esac
+done
 
 for cmd in Xvfb firefox xdotool tmux; do
     command -v "$cmd" >/dev/null || { echo "ERROR: $cmd not found"; exit 1; }

@@ -28,13 +28,40 @@ done
 
 RESOLUTION="1920x1080x24"
 
-declare -A PLATFORMS=(
-    [2]="chatgpt|https://chatgpt.com"
-    [3]="gemini|https://gemini.google.com/app"
-    [4]="grok|https://grok.com/"
-    [5]="claude|https://claude.ai/new"
-    [6]="perplexity|https://www.perplexity.ai/"
-)
+# 1. Load Universal Config
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ -f "$REPO_ROOT/.env" ]; then
+    source "$REPO_ROOT/.env"
+fi
+
+MACHINE=$(hostname)
+DISPLAYS_MIRA=${DISPLAYS_MIRA:-"chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"}
+DISPLAYS_THOR=${DISPLAYS_THOR:-"perplexity:4,gemini:6,grok:7,claude:8,perplexity:9,claude:10,chatgpt:11,grok:12,chatgpt:13"}
+
+if [[ "$MACHINE" == *"mira"* ]]; then 
+    MAPPINGS=$DISPLAYS_MIRA
+elif [[ "$MACHINE" == *"thor"* ]]; then
+    MAPPINGS=$DISPLAYS_THOR
+else
+    MAPPINGS=$DISPLAYS_MIRA
+fi
+
+# Resolve mappings into associative array for loop compatibility
+declare -A PLATFORMS
+IFS=',' read -ra PAIRS <<< "$MAPPINGS"
+for pair in "${PAIRS[@]}"; do
+    IFS=':' read -r platform disp <<< "$pair"
+    case $platform in
+        chatgpt)    url="https://chatgpt.com/?temporary-chat=true" ;;
+        claude)     url="https://claude.ai/new?incognito" ;;
+        gemini)     url="https://gemini.google.com/app" ;;
+        grok)       url="https://grok.com/" ;;
+        perplexity) url="https://www.perplexity.ai/" ;;
+        *)          url="https://google.com" ;;
+    esac
+    PLATFORMS[$disp]="$platform|$url"
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"

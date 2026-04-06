@@ -1,15 +1,26 @@
 [Unit]
 Description=Taey Display :2 (ChatGPT)
-After=default.target
+After=network.target
 
 [Service]
 Type=simple
-Environment=DISPLAY=:2
-ExecStartPre=/usr/bin/bash -lc 'rm -f /tmp/.X2-lock /tmp/.X11-unix/X2 /tmp/a11y_bus_:2 /tmp/firefox_pid_:2; pkill -f "Xvfb :2 " 2>/dev/null || true; pkill -f "/tmp/ff-profile-mira-chatgpt" 2>/dev/null || true; /usr/bin/Xvfb :2 -screen 0 1920x1080x24 -ac -noreset >/tmp/taey-display-2-xvfb.log 2>&1 &'
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :2 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:2; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-chatgpt; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-chatgpt "https://chatgpt.com" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:2; wait ${FIREFOX_PID}'
-ExecStopPost=/usr/bin/bash -lc 'pkill -f "Xvfb :2 " 2>/dev/null || true; rm -f /tmp/.X2-lock /tmp/.X11-unix/X2 /tmp/a11y_bus_:2 /tmp/firefox_pid_:2'
+Environment="DISPLAY=:2"
+EnvironmentFile=/home/mira/taeys-hands/.env
+Environment="PROFILE=/tmp/ff-profile-%H-chatgpt-2"
+
+ExecStartPre=/bin/sh -c 'rm -f /tmp/a11y_bus_:2 && mkdir -p ${PROFILE}'
+
+# Start blocking isolated D-Bus. Write address to standard file.
+ExecStart=/usr/bin/dbus-run-session -- sh -c '\
+    echo "export DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" > /tmp/a11y_bus_:2 && \
+    /usr/libexec/at-spi-bus-launcher & \
+    /usr/libexec/at-spi2-registryd & \
+    Xvfb :2 -screen 0 1920x1080x24 & \
+    sleep 2 && \
+    exec firefox --profile ${PROFILE} --new-instance "https://chatgpt.com/?temporary-chat=true"'
+
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=default.target

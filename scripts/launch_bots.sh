@@ -7,7 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
 
-REDIS_HOST="${REDIS_HOST:-192.168.100.10}"
+if [[ -f "${ENV_FILE}" ]]; then
+    source "${ENV_FILE}"
+fi
+
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 NOTIFY_INBOX="${NOTIFY_INBOX:-taey:taeys-hands:inbox}"
 BOT_NOTIFY_FROM="${BOT_NOTIFY_FROM:-bot-launcher}"
