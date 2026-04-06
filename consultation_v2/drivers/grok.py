@@ -111,13 +111,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model_mode', False, 'Grok model selector click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
-        menu_snap = self.runtime.menu_snapshot()
-        item = self.find_first(menu_snap, workflow['model_targets'][target])
+        snap = self.runtime.snapshot()
+        item = self.find_first(snap, workflow['model_targets'][target])
         if not item:
-            result.add_step('select_model_mode', False, f'Grok model item {target} not found', menu=menu_snap.serializable())
+            result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
             return False
         if not self.runtime.click(item, strategy='coordinate_only'):
-            result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', menu=menu_snap.serializable())
+            result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
         # Grok requires explicit re-open verification because the selector label does not update reliably.
@@ -126,8 +126,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
         verified = False
         if selector and self.runtime.click(selector, strategy='coordinate_only'):
             time.sleep(0.5)
-            verify_menu = self.runtime.menu_snapshot()
-            verify_item = self.find_first(verify_menu, workflow['model_targets'][target])
+            verify_snap = self.runtime.snapshot()
+            verify_item = self.find_first(verify_snap, workflow['model_targets'][target])
             verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
         result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
         return verified
@@ -148,10 +148,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.6)
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item or not self.runtime.click(upload_item, strategy='coordinate_only'):
-                result.add_step('attach', False, f'Grok upload item missing or click failed for {abs_path}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            upload_item = self.find_first(snap, 'upload_files_item')
+            if not upload_item:
+                result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(upload_item, strategy='coordinate_only'):
+                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')

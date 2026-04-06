@@ -39,11 +39,11 @@ tree:
     role: push button
   element_map:
     input:
-      role_contains: section
+      name: ""
+      role: section
       states_include:
       - editable
       - focusable
-      - multi-line
     attach_trigger:
       name: Attach
       role: push button
@@ -60,7 +60,7 @@ tree:
       name: Edit
       role: push button
     stop_button:
-      name_contains: Stop
+      name: Stop
       role: push button
     regenerate:
       name: Regenerate
@@ -90,16 +90,16 @@ tree:
       name: History
       role: push button
     thought_indicator:
-      name_pattern: Thought for *
+      name_contains: Thought for
       role: push button
     scroll_down:
       name: Scroll down
       role: push button
     dictation:
-      name_contains: Dictation
+      name: Dictation (Ctrl+D)
       role: push button
     voice_mode:
-      name_pattern: Enter voice mode*
+      name: Enter voice mode (Ctrl+⇧O)
       role: push button
 workflow:
   defaults:
@@ -145,7 +145,7 @@ validation:
     check_input_value: true
   send_success:
     indicators:
-    - name_contains: Stop
+    - name: Stop
       role: push button
     timeout: 30
   response_complete:

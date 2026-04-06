@@ -59,13 +59,13 @@ tree:
       name: Add files and more
       role: push button
     copy_button:
-      name_contains: Copy
-      role_contains: button
+      name: Copy
+      role: push button
     stop_button:
-      name_contains: Stop streaming
+      name: Stop streaming
       role: push button
     pro_indicator:
-      name_pattern: Extended Pro, click to remove
+      name: Extended Pro, click to remove
       role: push button
     thinking_mode:
       name_pattern: '*, click to remove'
@@ -77,7 +77,7 @@ tree:
       name_contains: temporary chat
       role: push button
     search_chats:
-      name_contains: Search chats
+      name: Search chats Control K
       role: push button
     dictation:
       name: Start dictation
@@ -86,14 +86,14 @@ tree:
       name: Send prompt
       role: push button
     model_instant:
-      name_contains: Instant
-      role_contains: item
+      name: Instant For everyday chats
+      role: menu item
     model_thinking:
-      name_contains: Thinking
-      role_contains: item
+      name: Thinking For complex questions
+      role: menu item
     model_pro:
-      name_contains: Pro Research-grade intelligence
-      role_contains: item
+      name: Pro Research-grade intelligence
+      role: menu item
     thinking_standard:
       name: Standard
       role: radio menu item
@@ -101,38 +101,38 @@ tree:
       name: Extended
       role: radio menu item
     tool_upload:
-      name_contains: Add photos
-      role_contains: item
+      name: Add photos and files
+      role: menu item
     tool_google_drive:
       name: Add from Google Drive
-      role_contains: button
+      role: menu item
     tool_deep_research:
       name: Deep research
-      role_contains: item
+      role: menu item
     tool_web_search:
       name: Web search
-      role_contains: item
+      role: menu item
     tool_study:
       name: Study and learn
-      role_contains: item
+      role: menu item
     tool_more:
       name: More
-      role_contains: item
+      role: menu item
     tool_recent_files:
       name: Recent files
-      role_contains: item
+      role: menu item
     tool_github:
       name: GitHub
-      role_contains: item
+      role: menu item
     tool_agent_mode:
       name: Agent mode
-      role_contains: item
+      role: menu item
     tool_gmail:
       name: Gmail
-      role_contains: item
+      role: menu item
     tool_quizzes:
       name: Quizzes
-      role_contains: item
+      role: menu item
 workflow:
   defaults:
     model: pro

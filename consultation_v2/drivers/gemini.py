@@ -63,13 +63,13 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'Gemini mode picker click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['model_targets'][requested_model])
             if not item:
-                result.add_step('select_model', False, f'Gemini model item {requested_model} not found', menu=menu_snap.serializable())
+                result.add_step('select_model', False, f'Gemini model item {requested_model} not found', snapshot=snap.serializable())
                 return False
             if not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_model', False, f'Gemini model click failed for {requested_model}', menu=menu_snap.serializable())
+                result.add_step('select_model', False, f'Gemini model click failed for {requested_model}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             # Re-open to validate checked state
@@ -78,8 +78,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if picker and self.runtime.click(picker, strategy='atspi_first'):
                 time.sleep(0.5)
-                verify_menu = self.runtime.menu_snapshot()
-                verify_item = self.find_first(verify_menu, workflow['model_targets'][requested_model])
+                verify_snap = self.runtime.snapshot()
+                verify_item = self.find_first(verify_snap, workflow['model_targets'][requested_model])
                 verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
             result.add_step('select_model', verified, f'Gemini model set to {requested_model}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
@@ -97,13 +97,13 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, 'Gemini tools button click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['tool_targets'][requested_mode])
             if not item:
-                result.add_step('select_mode', False, f'Gemini tool item {requested_mode} not found', menu=menu_snap.serializable())
+                result.add_step('select_mode', False, f'Gemini tool item {requested_mode} not found', snapshot=snap.serializable())
                 return False
             if not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_mode', False, f'Gemini tool click failed for {requested_mode}', menu=menu_snap.serializable())
+                result.add_step('select_mode', False, f'Gemini tool click failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             verify_root = self.runtime.snapshot()
@@ -111,8 +111,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
                 time.sleep(0.5)
-                verify_menu = self.runtime.menu_snapshot()
-                verify_item = self.find_first(verify_menu, workflow['tool_targets'][requested_mode])
+                verify_snap = self.runtime.snapshot()
+                verify_item = self.find_first(verify_snap, workflow['tool_targets'][requested_mode])
                 verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
             result.add_step('select_mode', verified, f'Gemini mode/tool set to {requested_mode}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
@@ -132,10 +132,13 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_tool', False, f'Gemini failed to open tools menu for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(0.6)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, target_key)
-            if not item or not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_tool', False, f'Gemini failed to click tool {tool_name}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, target_key)
+            if not item:
+                result.add_step('select_tool', False, f'Gemini tool item {target_key} not found', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(item, strategy='atspi_first'):
+                result.add_step('select_tool', False, f'Gemini failed to click tool {tool_name}', snapshot=snap.serializable())
                 return False
             result.add_step('select_tool', True, f'Gemini tool click executed for {tool_name}', snapshot=self.runtime.snapshot().serializable())
         return True
@@ -152,10 +155,13 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Gemini upload menu trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item or not self.runtime.click(upload_item, strategy='atspi_first'):
-                result.add_step('attach', False, f'Gemini upload item missing or click failed for {abs_path}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            upload_item = self.find_first(snap, 'upload_files_item')
+            if not upload_item:
+                result.add_step('attach', False, f'Gemini upload item not found for {abs_path}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(upload_item, strategy='atspi_first'):
+                result.add_step('attach', False, f'Gemini upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')
@@ -178,7 +184,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
 
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input') or self.find_first(snap, 'input_alt')
+        input_el = self.find_first(snap, 'input')
         if not input_el:
             result.add_step('prompt', False, 'Gemini input field not found', snapshot=snap.serializable())
             return False
@@ -261,13 +267,13 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             result.add_step('extract_additional', False, 'Gemini Share & export click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.7)
-        menu_snap = self.runtime.menu_snapshot()
-        copy_item = self.find_first(menu_snap, 'copy_content_item')
+        snap = self.runtime.snapshot()
+        copy_item = self.find_first(snap, 'copy_content_item')
         if not copy_item:
-            result.add_step('extract_additional', True, 'Gemini Share & export opened but Copy Content item was not exposed', menu=menu_snap.serializable())
+            result.add_step('extract_additional', True, 'Gemini Share & export opened but Copy Content item was not exposed', snapshot=snap.serializable())
             return True
         if not self.runtime.click(copy_item, strategy='atspi_first'):
-            result.add_step('extract_additional', False, 'Gemini Copy Content click failed', menu=menu_snap.serializable())
+            result.add_step('extract_additional', False, 'Gemini Copy Content click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.5)
         content = self.runtime.read_clipboard().strip()

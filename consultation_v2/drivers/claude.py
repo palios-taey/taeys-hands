@@ -63,10 +63,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'Claude model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['model_targets'][requested_model])
             if not item:
-                result.add_step('select_model', False, f'Claude model item for {requested_model} not found', menu=menu_snap.serializable())
+                result.add_step('select_model', False, f'Claude model item for {requested_model} not found', snapshot=snap.serializable())
                 return False
             clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.8)
@@ -89,10 +89,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, 'Claude mode dropdown click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['mode_targets'][requested_mode])
             if not item:
-                result.add_step('select_mode', False, f'Claude mode item {requested_mode} not found', menu=menu_snap.serializable())
+                result.add_step('select_mode', False, f'Claude mode item {requested_mode} not found', snapshot=snap.serializable())
                 return False
             clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.8)
@@ -115,10 +115,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_tool', False, f'Claude failed to open toggle menu for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, target_key)
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, target_key)
             if not item:
-                result.add_step('select_tool', False, f'Claude tool item {target_key} missing', menu=menu_snap.serializable())
+                result.add_step('select_tool', False, f'Claude tool item {target_key} not found', snapshot=snap.serializable())
                 return False
             clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.6)
@@ -140,10 +140,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Claude toggle menu click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item or not self.runtime.click(upload_item, strategy='coordinate_only'):
-                result.add_step('attach', False, f'Claude upload item missing or click failed for {abs_path}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            upload_item = self.find_first(snap, 'upload_files_item')
+            if not upload_item:
+                result.add_step('attach', False, f'Claude upload item not found for {abs_path}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(upload_item, strategy='coordinate_only'):
+                result.add_step('attach', False, f'Claude upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')

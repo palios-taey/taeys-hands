@@ -63,10 +63,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'Perplexity model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
-            if not item or not self.runtime.click(item, strategy='coordinate_only'):
-                result.add_step('select_model', False, f'Perplexity model click failed for {requested_model}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['model_targets'][requested_model])
+            if not item:
+                result.add_step('select_model', False, f'Perplexity model item not found for {requested_model}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(item, strategy='coordinate_only'):
+                result.add_step('select_model', False, f'Perplexity model click failed for {requested_model}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
@@ -96,15 +99,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            # Perplexity tools dropdown items appear as push buttons, not menu items.
-            # Use regular snapshot first, fallback to menu snapshot.
-            dropdown_snap = self.runtime.snapshot()
-            item = self.find_first(dropdown_snap, workflow['mode_targets'][requested_mode])
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, workflow['mode_targets'][requested_mode])
             if not item:
-                menu_snap = self.runtime.menu_snapshot()
-                item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
-            if not item or not self.runtime.click(item, strategy='coordinate_only'):
-                result.add_step('select_mode', False, f'Perplexity mode item missing or click failed for {requested_mode}', snapshot=dropdown_snap.serializable())
+                result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(item, strategy='coordinate_only'):
+                result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
             # Close dropdown and let page settle. Deep Research toggle causes
@@ -132,10 +133,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Perplexity attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item or not self.runtime.click(upload_item, strategy='coordinate_only'):
-                result.add_step('attach', False, f'Perplexity upload item missing or click failed for {abs_path}', menu=menu_snap.serializable())
+            snap = self.runtime.snapshot()
+            upload_item = self.find_first(snap, 'upload_files_item')
+            if not upload_item:
+                result.add_step('attach', False, f'Perplexity upload item not found for {abs_path}', snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(upload_item, strategy='coordinate_only'):
+                result.add_step('attach', False, f'Perplexity upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')
@@ -157,22 +161,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         return True
 
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        # After mode toggle or attach, input focus may be lost.
-        # Click input TWICE — first click focuses the page area, second focuses the input.
-        for attempt in range(3):
-            snap = self.runtime.snapshot()
-            input_el = self.find_first(snap, 'input')
-            if input_el:
-                break
-            time.sleep(1.0)
+        snap = self.runtime.snapshot()
+        input_el = self.find_first(snap, 'input')
         if not input_el:
-            result.add_step('prompt', False, 'Perplexity input field not found after retries', snapshot=snap.serializable())
+            result.add_step('prompt', False, 'Perplexity input field not found', snapshot=snap.serializable())
             return False
-        # Focus: click input coordinates to bring focus to the text field
-        self.runtime.click(input_el, strategy='coordinate_only')
-        time.sleep(0.5)
-        # Click again to ensure cursor is in the text field (not just the page)
-        self.runtime.click(input_el, strategy='coordinate_only')
+        if not self.runtime.click(input_el, strategy='coordinate_only'):
+            result.add_step('prompt', False, 'Perplexity input focus click failed', snapshot=snap.serializable())
+            return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
         time.sleep(1.0)
@@ -193,15 +189,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.session_url_before = before
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'submit_button')
-        if send_button:
-            clicked = self.runtime.click(send_button, strategy='coordinate_only')
-        else:
-            # No Submit button — try clicking input again and pressing Ctrl+Enter
-            input_el = self.find_first(snap, 'input')
-            if input_el:
-                self.runtime.click(input_el, strategy='coordinate_only')
-                time.sleep(0.3)
-            clicked = self.runtime.press('Return')
+        if not send_button:
+            result.add_step('send', False, 'Perplexity submit button not found', snapshot=snap.serializable())
+            return False
+        clicked = self.runtime.click(send_button, strategy='coordinate_only')
         stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0) or self.runtime.current_url()
         # Perplexity often redirects through /search/new/... before settling.
