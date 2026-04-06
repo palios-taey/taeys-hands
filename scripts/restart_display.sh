@@ -12,53 +12,53 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DISPLAY_STR=":${DISPLAY_NUM}"
+BOT_TYPE="${2:-sft}"  # hmm, sft, dpo, or "none" to skip bot launch
 
-declare -A PLATFORM_BY_DISPLAY=(
-    [4]="perplexity"
-    [6]="gemini"
-    [7]="grok"
-    [8]="claude"
-    [9]="perplexity"
-    [10]="claude"
-    [11]="chatgpt"
-    [12]="grok"
-    [13]="chatgpt"
-)
+# --- Load machine.env (single source of truth) ---
+MACHINE_ENV=""
+for candidate in "${HOME}/.taey/machine.env" "${REPO_ROOT}/machine.env"; do
+    if [[ -f "${candidate}" ]]; then
+        MACHINE_ENV="${candidate}"
+        break
+    fi
+done
 
-declare -A URL_BY_DISPLAY=(
-    [4]="https://www.perplexity.ai/"
-    [6]="https://gemini.google.com/app"
-    [7]="https://grok.com/"
-    [8]="https://claude.ai/new?incognito"
-    [9]="https://www.perplexity.ai/"
-    [10]="https://claude.ai/new?incognito"
-    [11]="https://chatgpt.com/?temporary-chat=true"
-    [12]="https://grok.com/"
-    [13]="https://chatgpt.com/?temporary-chat=true"
-)
-
-declare -A PROFILE_BY_DISPLAY=(
-    [4]="ff-profile-perplexity2"
-    [6]="ff-profile-gemini"
-    [7]="ff-profile-grok"
-    [8]="ff-profile-claude2"
-    [9]="ff-profile-perplexity"
-    [10]="ff-profile-claude3"
-    [11]="ff-profile-chatgpt"
-    [12]="ff-profile-grok2"
-    [13]="ff-profile-chatgpt2"
-)
-
-PLATFORM="${PLATFORM_BY_DISPLAY[${DISPLAY_NUM}]:-}"
-URL="${URL_BY_DISPLAY[${DISPLAY_NUM}]:-}"
-PROFILE="${PROFILE_BY_DISPLAY[${DISPLAY_NUM}]:-}"
-
-if [[ -z "${PLATFORM}" || -z "${URL}" || -z "${PROFILE}" ]]; then
-    echo "ERROR: No Thor display mapping found for ${DISPLAY_STR}" >&2
+if [[ -z "${MACHINE_ENV}" ]]; then
+    echo "ERROR: No machine.env found. Checked ~/.taey/machine.env and ${REPO_ROOT}/machine.env" >&2
+    echo "Copy machine.env.example to ~/.taey/machine.env and customize." >&2
     exit 1
 fi
 
-SESSION_NAME="sft-${PLATFORM}${DISPLAY_NUM}"
+# shellcheck source=/dev/null
+source "${MACHINE_ENV}"
+
+# Parse TAEY_DISPLAY_{N} → platform:profile:url
+DISPLAY_VAR="TAEY_DISPLAY_${DISPLAY_NUM}"
+DISPLAY_CONFIG="${!DISPLAY_VAR:-}"
+
+if [[ -z "${DISPLAY_CONFIG}" ]]; then
+    echo "ERROR: No mapping for display ${DISPLAY_STR} in ${MACHINE_ENV}" >&2
+    echo "Expected: ${DISPLAY_VAR}=\"platform:profile:url\"" >&2
+    exit 1
+fi
+
+# Split on first two colons only (URL contains colons)
+PLATFORM="${DISPLAY_CONFIG%%:*}"
+_remainder="${DISPLAY_CONFIG#*:}"
+PROFILE="${_remainder%%:*}"
+URL="${_remainder#*:}"
+
+if [[ -z "${PLATFORM}" || -z "${URL}" || -z "${PROFILE}" ]]; then
+    echo "ERROR: Malformed ${DISPLAY_VAR}='${DISPLAY_CONFIG}'" >&2
+    echo "Expected format: platform:profile:url" >&2
+    exit 1
+fi
+
+# Use machine-env Redis host, fall back to localhost
+REDIS_HOST="${TAEY_REDIS_HOST:-127.0.0.1}"
+export REDIS_HOST
+
+SESSION_NAME="${BOT_TYPE}-${PLATFORM}"
 BOT_PID_FILE="/tmp/${SESSION_NAME}.pid"
 BOT_LOG_FILE="/tmp/${SESSION_NAME}.log"
 FIREFOX_PID_FILE="/tmp/firefox_pid_${DISPLAY_STR}"
@@ -274,10 +274,22 @@ PY
 }
 
 start_bot() {
-    log "Starting bot for ${PLATFORM} in tmux session ${SESSION_NAME}"
+    if [[ "${BOT_TYPE}" == "none" ]]; then
+        log "Bot launch skipped (bot_type=none). Display ready for manual use."
+        return 0
+    fi
+
+    log "Starting ${BOT_TYPE} bot for ${PLATFORM} in tmux session ${SESSION_NAME}"
+
+    local bot_script="agents/sft_gen_bot.py"
+    local bot_args="--round all --platforms '${PLATFORM}'"
+    if [[ "${BOT_TYPE}" == "hmm" ]]; then
+        bot_script="agents/hmm_bot.py"
+        bot_args="--platforms '${PLATFORM}' --cycles 0"
+    fi
 
     local bot_cmd
-    bot_cmd="cd '${REPO_ROOT}' && env DISPLAY='${DISPLAY_STR}' DBUS_SESSION_BUS_ADDRESS='${DBUS_SESSION_BUS_ADDRESS}' TAEY_NOTIFY_NODE='taeys-hands' REDIS_HOST='192.168.100.10' PYTHONPATH='${HOME}/embedding-server' python3 agents/sft_gen_bot.py --round all --platforms '${PLATFORM}' 2>&1 | tee '${BOT_LOG_FILE}'"
+    bot_cmd="cd '${REPO_ROOT}' && env DISPLAY='${DISPLAY_STR}' DBUS_SESSION_BUS_ADDRESS='${DBUS_SESSION_BUS_ADDRESS}' TAEY_NOTIFY_NODE='taeys-hands' REDIS_HOST='${REDIS_HOST}' WEAVIATE_URL='http://10.0.0.163:8088' PYTHONPATH='${HOME}/embedding-server' python3 ${bot_script} ${bot_args} 2>&1 | tee '${BOT_LOG_FILE}'"
 
     tmux new-session -d -s "${SESSION_NAME}" "${bot_cmd}" || fail "Failed to start tmux session ${SESSION_NAME}"
 
@@ -285,7 +297,7 @@ start_bot() {
     tmux has-session -t "${SESSION_NAME}" 2>/dev/null || fail "tmux session ${SESSION_NAME} did not stay up"
 
     local bot_pid=""
-    bot_pid="$(pgrep -n -f "DISPLAY=${DISPLAY_STR} .*agents/sft_gen_bot.py --round all --platforms ${PLATFORM}" || true)"
+    bot_pid="$(pgrep -n -f "DISPLAY=${DISPLAY_STR} .*${bot_script}.*${PLATFORM}" || true)"
     if [[ -n "${bot_pid}" ]]; then
         printf '%s\n' "${bot_pid}" > "${BOT_PID_FILE}"
         log "Bot running with PID ${bot_pid}"
