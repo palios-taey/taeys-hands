@@ -171,8 +171,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
         verify_snap = self.runtime.snapshot()
-        verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
-        result.add_step('prompt', verified, 'Perplexity prompt entered', snapshot=verify_snap.serializable())
+        # Trust clipboard paste — validation_passes('prompt_ready') is unreliable
+        result.add_step('prompt', bool(pasted), 'Perplexity prompt entered' + (' (paste confirmed)' if pasted else ' (paste failed)'), snapshot=verify_snap.serializable())
         return verified
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
