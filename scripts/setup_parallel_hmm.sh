@@ -31,13 +31,40 @@ while [[ $# -gt 0 ]]; do
 done
 
 RESOLUTION="1920x1080x24"
+TAEY_PATH="${HOME}/taeys-hands"
+EMBEDDING_PATH="${HOME}/embedding-server"
+
+# --- Load machine.env if available ---
+for candidate in "${HOME}/.taey/machine.env" "${TAEY_PATH}/machine.env"; do
+    if [[ -f "${candidate}" ]]; then
+        # shellcheck source=/dev/null
+        source "${candidate}"
+        break
+    fi
+done
+REDIS_HOST="${TAEY_REDIS_HOST:-127.0.0.1}"
 
 # Display numbers start at :2 to avoid :0 (physical) and :1 (GNOME session on some machines)
-declare -A PLATFORMS=(
-    [2]="chatgpt|https://chatgpt.com"
-    [3]="gemini|https://gemini.google.com/app"
-    [4]="grok|https://grok.com/"
-)
+# Uses machine.env mappings if available, otherwise defaults
+declare -A PLATFORMS
+for display in 2 3 4; do
+    DISPLAY_VAR="TAEY_DISPLAY_${display}"
+    DISPLAY_CONFIG="${!DISPLAY_VAR:-}"
+    if [[ -n "${DISPLAY_CONFIG}" ]]; then
+        platform="${DISPLAY_CONFIG%%:*}"
+        _remainder="${DISPLAY_CONFIG#*:}"
+        url="${_remainder#*:}"
+        PLATFORMS[$display]="${platform}|${url}"
+    fi
+done
+# Fallback if no machine.env
+if [[ ${#PLATFORMS[@]} -eq 0 ]]; then
+    PLATFORMS=(
+        [2]="chatgpt|https://chatgpt.com/?temporary-chat=true"
+        [3]="gemini|https://gemini.google.com/app"
+        [4]="grok|https://grok.com/"
+    )
+fi
 
 for cmd in Xvfb x11vnc firefox tmux; do
     command -v "$cmd" >/dev/null || { echo "ERROR: $cmd not found"; exit 1; }
