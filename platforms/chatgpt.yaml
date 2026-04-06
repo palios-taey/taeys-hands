@@ -1,7 +1,7 @@
 # ChatGPT Platform Configuration
 platform: chatgpt
 url_pattern: chatgpt.com
-base_url: https://chatgpt.com/
+base_url: https://chatgpt.com/?temporary-chat=true
 verify_navigation: false
 tab_shortcut: alt+1
 
