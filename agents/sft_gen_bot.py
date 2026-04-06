@@ -757,9 +757,7 @@ def process_platform_v2(platform, topic, output_dir):
                 if 'click to remove' in name and 'button' in role:
                     if 'Pro' in name or 'Extended' in name:
                         log.warning(f"[{platform}] DESELECTING mode: {name}")
-                        node = elem_dict.get('atspi_obj')
-                        if node:
-                            _ac_mode(node)
+                        _ac_mode(elem_dict)
                             time.sleep(2)
                             bot.invalidate_doc_cache(platform)
 
