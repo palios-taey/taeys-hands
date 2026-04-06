@@ -5,92 +5,108 @@ urls:
   verify_navigation: false
 tree:
   fence_after:
-    - {name: "Chats", role: "heading"}
+  - name: Chats
+    role: heading
   exclude:
-    names: ["Gemini"]
-    name_contains: ["Gemini Apps Activity", "Manage extensions", ", Google Account", "tap to use tool"]
-    roles: [separator, document web, paragraph]
+    names:
+    - Gemini
+    name_contains:
+    - Gemini Apps Activity
+    - Manage extensions
+    - ', Google Account'
+    - tap to use tool
+    roles:
+    - separator
+    - document web
+    - paragraph
   sidebar_nav:
-    - {name: "New chat", role: "link"}
-    - {name: "New chat", role: "push button"}
-    - {name: "Main menu", role: "push button"}
-    - {name: "Search", role: "push button"}
-    - {name: "Projects", role: "push button"}
-    - {name: "History", role: "push button"}
-    - {name: "Chats", role: "heading"}
+  - name: New chat
+    role: link
+  - name: New chat
+    role: push button
+  - name: Main menu
+    role: push button
+  - name: Search
+    role: push button
+  - name: Projects
+    role: push button
+  - name: History
+    role: push button
+  - name: Chats
+    role: heading
   element_map:
     input:
       role: entry
-      states_include: [editable]
-      # Gemini also uses contenteditable sections — match either
+      states_include:
+      - editable
     input_alt:
       role_contains: section
-      states_include: [editable, focusable, multi-line]
+      states_include:
+      - editable
+      - focusable
+      - multi-line
     mode_picker:
-      name: "Open mode picker"
+      name: Open mode picker
       role: push button
     tools_button:
-      name: "Tools"
+      name: Tools
       role: push button
     upload_menu:
-      name: "Open upload file menu"
+      name: Open upload file menu
       role: push button
     copy_button:
-      name_contains: "Copy"
+      name_contains: Copy
       role_contains: button
     stop_button:
-      name_contains: "Stop response"
+      name_contains: Stop response
       role: push button
     send_button:
-      name: "Send message"
+      name: Send message
       role: push button
     share_export:
-      name_contains: "Share & export"
+      name_contains: Share & export
       role_contains: button
     start_research:
-      name: "Start research"
+      name: Start research
       role: push button
     microphone:
-      name: "Microphone"
+      name: Microphone
       role: toggle button
-    # Menu items (visible when dropdown is open)
     upload_files_item:
-      name_pattern: "Upload files*"
+      name_pattern: Upload files*
       role: menu item
     add_from_drive_item:
-      name_pattern: "Add from Drive*"
+      name_pattern: Add from Drive*
       role: menu item
     import_code_item:
-      name: "Import code"
+      name: Import code
       role: menu item
     notebooklm_item:
-      name: "NotebookLM"
+      name: NotebookLM
       role: menu item
-    # Mode picker items
     mode_fast:
-      name: "Fast Answers quickly"
+      name: Fast Answers quickly
       role_contains: item
     mode_thinking:
-      name: "Thinking Solves complex problems"
+      name: Thinking Solves complex problems
       role_contains: item
     mode_pro:
-      name_contains: "Pro Advanced math"
+      name_contains: Pro Advanced math
       role_contains: item
-    # Tool toggle items (from Tools dropdown)
     tool_deep_think:
-      name: "Deep think"
+      name: Deep think
       role_contains: item
     tool_deep_research:
-      name: "Deep research"
+      name: Deep research
       role_contains: item
     tool_canvas:
-      name: "Canvas"
+      name: Canvas
       role_contains: item
     tool_create_image:
-      name_contains: "Create image"
+      name_contains: Create image
       role_contains: item
     tool_deselect_deep_think:
-      name: "Deselect Deep think"
+      name: Deselect Deep think
       role_contains: button
 workflow:
   defaults:
@@ -132,23 +148,29 @@ workflow:
 validation:
   attach_success:
     indicators:
-      - {name_contains: "Remove", role_contains: button}
+    - name_contains: Remove
+      role_contains: button
   model_selected:
     indicators:
-      - {name: "Open mode picker", role: push button}
+    - name: Open mode picker
+      role: push button
     check_menu_item_state: true
   tool_selected:
     indicators:
-      - {name: "Tools", role: push button}
+    - name: Tools
+      role: push button
     check_menu_item_state: true
   prompt_ready:
     indicators:
-      - {name: "Send message", role: push button}
+    - name: Send message
+      role: push button
   send_success:
     indicators:
-      - {name_contains: "Stop response", role: push button}
+    - name_contains: Stop response
+      role: push button
     timeout: 30
   response_complete:
     indicators:
-      - {name_contains: "Copy", role_contains: button}
+    - name_contains: Copy
+      role_contains: button
     stop_absent: true

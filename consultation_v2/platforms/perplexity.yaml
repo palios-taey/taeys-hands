@@ -5,99 +5,116 @@ urls:
   verify_navigation: false
 tree:
   fence_after:
-    - {name: "Recent Collapse", role: "push button"}
+  - name: Recent Collapse
+    role: push button
   exclude:
-    names: ["User avatar"]
-    name_contains: ["Upgrade to Pro", ", open profile menu", "User avatar Jesse"]
-    roles: [separator, document web, paragraph, landmark]
+    names:
+    - User avatar
+    name_contains:
+    - Upgrade to Pro
+    - ', open profile menu'
+    - User avatar Jesse
+    roles:
+    - separator
+    - document web
+    - paragraph
+    - landmark
   sidebar_nav:
-    - {name: "Search", role: "link"}
-    - {name: "Computer", role: "link"}
-    - {name: "New Thread", role: "push button"}
-    - {name: "History", role: "link"}
-    - {name: "Discover", role: "link"}
-    - {name: "Spaces", role: "link"}
-    - {name: "Finance", role: "link"}
-    - {name: "More", role: "push button"}
+  - name: Search
+    role: link
+  - name: Computer
+    role: link
+  - name: New Thread
+    role: push button
+  - name: History
+    role: link
+  - name: Discover
+    role: link
+  - name: Spaces
+    role: link
+  - name: Finance
+    role: link
+  - name: More
+    role: push button
   element_map:
     input:
       role: entry
-      states_include: [editable]
+      states_include:
+      - editable
     attach_trigger:
-      name: "Add files or tools"
+      name: Add files or tools
       role: push button
     upload_files_item:
-      name_contains: "Upload files"
+      name_contains: Upload files
       role: menu item
     git_connector_item:
-      name: "Connectors and sources"
+      name: Connectors and sources
       role_contains: item
     model_selector:
-      name: "Model"
+      name: Model
       role: push button
     copy_button:
-      name: "Copy"
+      name: Copy
       role: push button
     copy_code:
-      name: "Copy code"
+      name: Copy code
       role: push button
     stop_button:
-      name_contains: "Stop response"
+      name_contains: Stop response
       role: push button
     submit_button:
-      name: "Submit"
+      name: Submit
       role: push button
     share_button:
-      name: "Share"
+      name: Share
       role: push button
     download_button:
-      name: "Download"
+      name: Download
       role: push button
     copy_contents_button:
-      name: "Copy contents"
+      name: Copy contents
       role_contains: button
     rewrite_thread:
-      name: "Rewrite Thread"
+      name: Rewrite Thread
       role: push button
     helpful:
-      name: "Helpful"
+      name: Helpful
       role: push button
     not_helpful:
-      name: "Not helpful"
+      name: Not helpful
       role: push button
     more_actions:
-      name: "More actions"
+      name: More actions
       role: push button
     thread_actions:
-      name: "Thread actions"
+      name: Thread actions
       role: push button
     dictation:
-      name: "Dictation"
+      name: Dictation
       role: push button
     answer_mode_tabs:
-      name: "Answer mode tabs"
+      name: Answer mode tabs
       role: page tab list
-    # Answer mode tabs
     answer_tab:
-      name: "Answer"
+      name: Answer
       role: page tab
     links_tab:
-      name: "Links"
+      name: Links
       role: page tab
     images_tab:
-      name: "Images"
+      name: Images
       role: page tab
     notifications:
-      name: "Notifications"
+      name: Notifications
       role: push button
     computer_mode:
-      name: "Computer"
+      name: Computer
       role: push button
     voice_mode:
-      name: "Use voice mode"
+      name: Use voice mode
       role: push button
     incognito:
-      name_contains: "Use incognito"
+      name_contains: Use incognito
       role: push button
 workflow:
   defaults:
@@ -140,23 +157,29 @@ workflow:
 validation:
   attach_success:
     indicators:
-      - {name_contains: "Remove", role_contains: button}
+    - name_contains: Remove
+      role_contains: button
   model_selected:
     indicators:
-      - {name: "Model", role: push button}
+    - name: Model
+      role: push button
     name_is_model: true
   tool_selected:
     indicators:
-      - {name: "Add files or tools", role: push button}
+    - name: Add files or tools
+      role: push button
     check_menu_item_state: true
   prompt_ready:
     indicators:
-      - {name: "Submit", role: push button}
+    - name: Submit
+      role: push button
   send_success:
     indicators:
-      - {name_contains: "Stop response", role: push button}
+    - name_contains: Stop response
+      role: push button
     timeout: 30
   response_complete:
     indicators:
-      - {name: "Copy", role: push button}
+    - name: Copy
+      role: push button
     stop_absent: true
