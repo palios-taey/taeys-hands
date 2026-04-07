@@ -161,22 +161,26 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
     doc = atspi.get_platform_document(firefox, platform)
-    if not doc:
-        raise RuntimeError(f'Document not found for {platform}')
+    # NOTE: doc may be None if a portal/dropdown opened during navigation.
+    # Do NOT raise here — fall back gracefully; find_menu_items and find_elements
+    # will use firefox (app root) which covers React portals outside the document.
     try:
         firefox.clear_cache_single()
     except Exception:
         pass
-    try:
-        doc.clear_cache_single()
-    except Exception:
-        pass
+    if doc is not None:
+        try:
+            doc.clear_cache_single()
+        except Exception:
+            pass
 
     menu = find_menu_items(firefox, doc)
     if not menu:
-        elements = find_elements(doc)
+        # Scan from firefox (app root) so React portal dropdown items are included.
+        # This matches build_snapshot's behaviour when fence_after is empty (lines 149-150).
+        elements = find_elements(firefox)
         menu = [element for element in elements if (element.get('role') or '').strip().lower() in _MENU_ROLES and (element.get('name') or '').strip()]
         menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
     snapshot = _classify_elements(platform, menu, menu_items=menu)
-    snapshot.url = atspi.get_document_url(doc)
+    snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot
