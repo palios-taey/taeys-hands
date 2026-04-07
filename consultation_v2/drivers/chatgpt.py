@@ -281,8 +281,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return verified
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        before = self.runtime.current_url()
-        result.session_url_before = before
+        # Use the pre-navigation baseline captured in run() — file attachment
+        # can change the URL before send, making current_url() stale.
+        before = result.session_url_before
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'send_button')
         if not send_button:
