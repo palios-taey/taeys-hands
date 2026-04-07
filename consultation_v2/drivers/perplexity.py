@@ -59,7 +59,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not selector:
                 result.add_step('select_model', False, 'Perplexity model selector not found', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(selector, strategy='coordinate_only'):
+            if not self.runtime.click(selector):
                 result.add_step('select_model', False, 'Perplexity model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
@@ -68,7 +68,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not item:
                 result.add_step('select_model', False, f'Perplexity model item not found for {requested_model}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(item, strategy='coordinate_only'):
+            if not self.runtime.click(item):
                 result.add_step('select_model', False, f'Perplexity model click failed for {requested_model}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
@@ -84,7 +84,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if requested_mode == 'computer':
             snap = self.runtime.snapshot()
             computer = self.find_first(snap, 'computer_mode')
-            if not computer or not self.runtime.click(computer, strategy='coordinate_only'):
+            if not computer or not self.runtime.click(computer):
                 result.add_step('select_mode', False, 'Perplexity Computer button not available', snapshot=snap.serializable())
                 return False
             changed = self.runtime.wait_until(lambda: '/computer/' in (self.runtime.current_url() or ''), timeout=20, interval=1.0)
@@ -95,7 +95,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         elif requested_mode and requested_mode in workflow.get('mode_targets', {}):
             snap = self.runtime.snapshot()
             trigger = self.find_first(snap, 'attach_trigger')
-            if not trigger or not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not trigger or not self.runtime.click(trigger):
                 result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
@@ -104,7 +104,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not item:
                 result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(item, strategy='coordinate_only'):
+            if not self.runtime.click(item):
                 result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
@@ -129,7 +129,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not trigger:
                 result.add_step('attach', False, f'Perplexity attach trigger missing for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not self.runtime.click(trigger):
                 result.add_step('attach', False, f'Perplexity attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
@@ -138,7 +138,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not upload_item:
                 result.add_step('attach', False, f'Perplexity upload item not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(upload_item, strategy='coordinate_only'):
+            if not self.runtime.click(upload_item):
                 result.add_step('attach', False, f'Perplexity upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
@@ -166,7 +166,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if not input_el:
             result.add_step('prompt', False, 'Perplexity input field not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='coordinate_only'):
+        if not self.runtime.click(input_el):
             result.add_step('prompt', False, 'Perplexity input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)
@@ -190,7 +190,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'submit_button')
         if send_button:
-            clicked = self.runtime.click(send_button, strategy='coordinate_only')
+            clicked = self.runtime.click(send_button)
         else:
             # Perplexity accepts Return in focused input as send
             clicked = self.runtime.press('Return')
@@ -241,7 +241,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if not copy_button:
             result.add_step('extract_primary', False, 'Perplexity copy button not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(copy_button, strategy='coordinate_only'):
+        if not self.runtime.click(copy_button):
             result.add_step('extract_primary', False, 'Perplexity copy button click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.4)
@@ -254,7 +254,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     def extract_additional(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         snap = self.runtime.snapshot()
         copy_contents = self.find_first(snap, 'copy_contents_button')
-        if copy_contents and self.runtime.click(copy_contents, strategy='coordinate_only'):
+        if copy_contents and self.runtime.click(copy_contents):
             time.sleep(0.4)
             content = self.runtime.read_clipboard().strip()
             if content:
