@@ -46,8 +46,8 @@ tree:
       name: Attach
       role: push button
     upload_files_item:
-      name: Upload a file
-      role: menu item
+      name: "Upload a file"
+      role: push button
     model_selector:
       name: Model select
       role: push button
