@@ -207,8 +207,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return verified
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        before = self.runtime.current_url()
-        result.session_url_before = before
+        # Use the pre-navigation baseline captured in run() — file attachment
+        # can change the URL before send, making current_url() stale.
+        before = result.session_url_before
         pressed = self.runtime.press('Return')
         # Stop button OR copy button confirms send succeeded.
         # Fast responses: stop appears and disappears before poll catches it,

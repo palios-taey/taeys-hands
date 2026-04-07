@@ -280,9 +280,9 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def send_prompt(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        # BUG 9 FIX: capture URL before send for bookkeeping only — not a gate condition
-        before = self.runtime.current_url()
-        result.session_url_before = before
+        # Use the pre-navigation baseline captured in run() — file attachment
+        # can change the URL before send, making current_url() stale.
+        before = result.session_url_before
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'send_button')
         if not send_button:
