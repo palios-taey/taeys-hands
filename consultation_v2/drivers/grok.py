@@ -222,7 +222,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            return seen_stop and snap.has('copy_button')
+            # Complete if: (1) saw stop then copy appeared, OR
+            # (2) copy present and no stop — response finished before we started
+            if snap.has('copy_button') and not snap.has('stop_button'):
+                return True
+            return False
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
