@@ -78,9 +78,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if picker and self.runtime.click(picker, strategy='atspi_first'):
                 time.sleep(0.5)
-                from consultation_v2.snapshot import build_menu_snapshot
-                _, _, verify_snap = build_menu_snapshot(self.platform)
-                verified = self.validation_passes(verify_snap, 'model_selected', item_key=workflow['model_targets'][requested_model])
+                verify_menu = self.runtime.menu_snapshot()
+                verified = self.validation_passes(verify_menu, f'{requested_model}_active')
             result.add_step('select_model', verified, f'Gemini model set to {requested_model}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
                 return False
@@ -98,17 +97,17 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             if not tools_button:
                 result.add_step('select_mode', False, 'Gemini tools button not found', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(tools_button):
+            if not self.runtime.click(tools_button, strategy='atspi_first'):
                 result.add_step('select_mode', False, 'Gemini tools button click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            snap = self.runtime.snapshot()
-            item = self.find_first(snap, workflow['tool_targets'][requested_mode])
+            menu_snap = self.runtime.menu_snapshot()
+            item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
             if not item:
-                result.add_step('select_mode', False, f'Gemini tool item {requested_mode} not found', snapshot=snap.serializable())
+                result.add_step('select_mode', False, f'Gemini tool item {requested_mode} not found', menu=menu_snap.serializable())
                 return False
             if not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_mode', False, f'Gemini tool click failed for {requested_mode}', snapshot=snap.serializable())
+                result.add_step('select_mode', False, f'Gemini tool click failed for {requested_mode}', menu=menu_snap.serializable())
                 return False
             time.sleep(0.8)
             verify_root = self.runtime.snapshot()
@@ -116,9 +115,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
                 time.sleep(0.5)
-                from consultation_v2.snapshot import build_menu_snapshot
-                _, _, verify_snap = build_menu_snapshot(self.platform)
-                verified = self.validation_passes(verify_snap, 'tool_selected', item_key=workflow['tool_targets'][requested_mode])
+                verify_menu = self.runtime.menu_snapshot()
+                verified = self.validation_passes(verify_menu, mode_active_key)
             result.add_step('select_mode', verified, f'Gemini mode/tool set to {requested_mode}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
                 return False

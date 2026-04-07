@@ -134,16 +134,11 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Model select
-      role: push button
-    reopen_to_verify: true
   prompt_ready:
     check_input_value: true
   send_success:
     indicators:
-    - name: Stop
+    - name_contains: Stop
       role: push button
     timeout: 30
   response_complete:
@@ -151,3 +146,28 @@ validation:
     - name: Copy
       role: push button
     stop_absent: true
+  auto_active:
+    indicators:
+    - name: Grok 2
+      states_include: [checked]
+  fast_active:
+    indicators:
+    - name: Grok 2 (mini)
+      states_include: [checked]
+  expert_active:
+    indicators:
+    - name: Grok 2
+      states_include: [checked]
+  heavy_active:
+    indicators:
+    - name: Grok 3
+      states_include: [checked]
+  reasoning_active:
+    indicators:
+    - name: Reasoning
+      states_include: [checked]
+  deepsearch_active:
+    indicators:
+    - name: Deepsearch
+      states_include: [checked]
+

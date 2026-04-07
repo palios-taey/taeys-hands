@@ -68,12 +68,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if not item:
                 result.add_step('select_model', False, f'Perplexity model item not found for {requested_model}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(item):
-                result.add_step('select_model', False, f'Perplexity model click failed for {requested_model}', snapshot=snap.serializable())
-                return False
+            clicked = self.runtime.click(item)
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, 'model_selected', item_key=requested_model)
+            verified = clicked and self.validation_passes(verify_snap, f'{requested_model}_active')
             result.add_step('select_model', verified, f'Perplexity model set to {requested_model}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
@@ -102,13 +100,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                     result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
                     return False
                 time.sleep(0.8)
-                snap = self.runtime.snapshot()
-                item = self.find_first(snap, workflow['mode_targets'][requested_mode])
+                verify_snap = self.runtime.snapshot()
+                item = self.find_first(verify_snap, workflow['mode_targets'][requested_mode])
                 if not item:
-                    result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=snap.serializable())
+                    result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=verify_snap.serializable())
                     return False
                 if not self.runtime.click(item):
-                    result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=snap.serializable())
+                    result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=verify_snap.serializable())
                     return False
                 time.sleep(1.0)
                 # Close dropdown and let page settle.

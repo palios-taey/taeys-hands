@@ -147,17 +147,17 @@ workflow:
       pro_extended:
       - trigger: model_selector
         target: model_pro
-        verification: model_selected
+        verification: pro_active
       - trigger: extended_pro
         target: thinking_extended
-        verification: extended_tile
+        verification: pro_extended_active
       extended_thinking:
       - trigger: model_selector
         target: model_pro
-        verification: model_selected
+        verification: pro_active
       - trigger: extended_pro
         target: thinking_extended
-        verification: extended_tile
+        verification: extended_thinking_active
     tool_targets:
       deep_research: tool_deep_research
       web_search: tool_web_search
@@ -186,23 +186,6 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Model selector
-      role: push button
-    name_contains_model: false
-  extended_tile:
-    indicators:
-    - name: Extended Pro
-      role: push button
-  extended_thinking_active:
-    indicators:
-    - name: Extended Pro
-      role: push button
-  deep_research_active:
-    indicators:
-    - name: Deep research
-      role: link
   prompt_ready:
     indicators:
     - name: Send prompt
@@ -217,3 +200,27 @@ validation:
     - name_contains: Copy
       role_contains: button
     stop_absent: true
+  auto_active:
+    indicators:
+    - name_contains_all: [Model selector, Auto]
+      role: push button
+  instant_active:
+    indicators:
+    - name_contains_all: [Model selector, Instant]
+      role: push button
+  thinking_active:
+    indicators:
+    - name_contains_all: [Model selector, Thinking]
+      role: push button
+  pro_active:
+    indicators:
+    - name_contains_all: [Model selector, Pro]
+      role: push button
+  pro_extended_active:
+    indicators:
+    - name: Pro, click to remove
+      role: push button
+  extended_thinking_active:
+    indicators:
+    - name: Pro, click to remove
+      role: push button

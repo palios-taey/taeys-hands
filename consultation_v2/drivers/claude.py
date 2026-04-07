@@ -71,7 +71,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             clicked = self.runtime.click(item)
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, 'model_selected', item_key=requested_model)
+            verified = clicked and self.validation_passes(verify_snap, f'{requested_model}_active')
             result.add_step('select_model', verified, f'Claude model set to {requested_model}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
@@ -93,15 +93,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, 'Claude mode dropdown click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
-            snap = self.runtime.snapshot()
-            item = self.find_first(snap, workflow['mode_targets'][requested_mode])
+            verify_snap = self.runtime.snapshot()
+            item = self.find_first(verify_snap, workflow['mode_targets'][requested_mode])
             if not item:
-                result.add_step('select_mode', False, f'Claude mode item {requested_mode} not found', snapshot=snap.serializable())
+                result.add_step('select_mode', False, f'Claude mode item {requested_mode} not found', snapshot=verify_snap.serializable())
                 return False
             clicked = self.runtime.click(item)
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, mode_active_key)
+            verified = clicked and self.validation_passes(verify_snap, mode_active_key)
             result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
