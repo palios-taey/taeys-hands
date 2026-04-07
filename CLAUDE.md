@@ -93,6 +93,8 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 - **Know your branch.** V2 code is on `consultation-v2-isolated-drivers`, NOT main.
 - **Use production scripts.** Never launch Firefox/bots/tests manually.
 - **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
+- **Screenshot before AND after EVERY action.** When debugging, take a screenshot before and after each click/keypress. Then scan AT-SPI and compare against the screenshot. If they don't match, the AT-SPI tree needs refreshing. This is how you determine if the issue is code, timing, or tree staleness.
+- **This is faster.** More steps but every step moves forward with certainty. Guessing leads to wrong fixes that break working code, which costs 10x more time. The Grok attach debug proved this: 4 screenshots + 1 AT-SPI check = root cause found in minutes. Without screenshots, I spent hours on wrong assumptions (dropdown staying open, Escape fixes, etc.) that were all wrong. Slow is fast.
 
 ---
 
