@@ -76,11 +76,13 @@ tree:
     new_chat:
       name: New chat
       role: push button
+    # BUG 4 FIX: exact AT-SPI name for upload dropdown item
     upload_files_item:
       name: "Upload files. Documents, data, code files"
-      role: push button
+      role: menu item
+    # BUG 4 FIX: exact AT-SPI name for Drive item
     add_from_drive_item:
-      name: Add from Drive
+      name: "Add from Drive. Sheets, Docs, Slides"
       role: menu item
     import_code_item:
       name: Import code
@@ -94,21 +96,34 @@ tree:
     mode_thinking:
       name: Thinking Solves complex problems
       role: menu item
+    # BUG 1 FIX: exact AT-SPI name for Pro mode
     mode_pro:
-      name: Pro Advanced math and coding
+      name: "Pro Advanced math and code with 3.1 Pro"
       role: menu item
-    tool_deep_think:
-      name: Deep think
-      role: menu item
-    tool_deep_research:
-      name: Deep research
-      role: menu item
+    # BUG 2 FIX: all tool items are check menu item, not menu item
+    # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
+    tool_create_image:
+      name: "Create image New"
+      role: check menu item
     tool_canvas:
       name: Canvas
-      role: menu item
-    tool_create_image:
-      name: Create image
-      role: menu item
+      role: check menu item
+    tool_deep_research:
+      name: Deep research
+      role: check menu item
+    # BUG 5 FIX: three new tool entries present in live AT-SPI scan
+    tool_create_video:
+      name: Create video
+      role: check menu item
+    tool_create_music:
+      name: "Create music New"
+      role: check menu item
+    tool_guided_learning:
+      name: Guided learning
+      role: check menu item
+    tool_deep_think:
+      name: Deep think
+      role: check menu item
     tool_deselect_deep_think:
       name: Deselect Deep think
       role: push button
@@ -126,6 +141,10 @@ workflow:
       deep_think: tool_deep_think
       deep_research: tool_deep_research
       canvas: tool_canvas
+      create_image: tool_create_image
+      create_video: tool_create_video
+      create_music: tool_create_music
+      guided_learning: tool_guided_learning
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
@@ -136,7 +155,7 @@ workflow:
     send_button: send_button
   send:
     trigger: send_button
-    require_new_url: true
+    require_new_url: false
     stop_key: stop_button
     post_send_key: start_research
   monitor:
@@ -163,23 +182,24 @@ validation:
     - name: Stop response
       role: push button
     timeout: 30
+  # BUG 6 FIX: name_contains: Copy (not exact name: Copy) per driver spec
   response_complete:
     indicators:
-    - name: Copy
-      role: push button
+    - name_contains: Copy
     stop_absent: true
+  # BUG 7 FIX: mode validation uses checked state, not selected
   fast_active:
     indicators:
     - name: Fast Answers quickly
-      states_include: [selected]
+      states_include: [checked]
   thinking_active:
     indicators:
     - name: Thinking Solves complex problems
-      states_include: [selected]
+      states_include: [checked]
   pro_active:
     indicators:
-    - name: Pro Advanced math and coding
-      states_include: [selected]
+    - name: "Pro Advanced math and code with 3.1 Pro"
+      states_include: [checked]
   deep_think_active:
     indicators:
     - name: Deselect Deep think
