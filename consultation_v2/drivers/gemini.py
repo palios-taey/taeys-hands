@@ -78,9 +78,9 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if picker and self.runtime.click(picker, strategy='atspi_first'):
                 time.sleep(0.5)
-                verify_snap = self.runtime.snapshot()
-                verify_item = self.find_first(verify_snap, workflow['model_targets'][requested_model])
-                verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
+                from consultation_v2.snapshot import build_menu_snapshot
+                _, _, verify_snap = build_menu_snapshot(self.platform)
+                verified = self.validation_passes(verify_snap, 'model_selected', item_key=workflow['model_targets'][requested_model])
             result.add_step('select_model', verified, f'Gemini model set to {requested_model}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
                 return False
@@ -88,13 +88,11 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model', True, 'Gemini model left unchanged/default', requested_model=request.model)
 
         if requested_mode and requested_mode in workflow.get('tool_targets', {}):
-            # Check if already active — "Deselect Deep think" button visible means it's ON
             snap = self.runtime.snapshot()
-            if requested_mode == 'deep_think':
-                already_active = self.find_first(snap, 'tool_deselect_deep_think')
-                if already_active:
-                    result.add_step('select_mode', True, 'Gemini Deep Think already active')
-                    return True
+            mode_active_key = f"{requested_mode}_active"
+            if self.validation_passes(snap, mode_active_key):
+                result.add_step('select_mode', True, f'Gemini {requested_mode} already active')
+                return True
 
             tools_button = self.find_first(snap, 'tools_button')
             if not tools_button:
@@ -118,9 +116,9 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = False
             if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
                 time.sleep(0.5)
-                verify_snap = self.runtime.snapshot()
-                verify_item = self.find_first(verify_snap, workflow['tool_targets'][requested_mode])
-                verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
+                from consultation_v2.snapshot import build_menu_snapshot
+                _, _, verify_snap = build_menu_snapshot(self.platform)
+                verified = self.validation_passes(verify_snap, 'tool_selected', item_key=workflow['tool_targets'][requested_mode])
             result.add_step('select_mode', verified, f'Gemini mode/tool set to {requested_mode}', snapshot=self.runtime.snapshot().serializable())
             if not verified:
                 return False

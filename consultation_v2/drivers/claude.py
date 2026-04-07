@@ -71,8 +71,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             clicked = self.runtime.click(item)
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
-            selector = self.find_first(verify_snap, 'model_selector')
-            verified = bool(clicked and selector and requested_model in selector.name.lower())
+            verified = self.validation_passes(verify_snap, 'model_selected', item_key=requested_model)
             result.add_step('select_model', verified, f'Claude model set to {requested_model}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
@@ -81,6 +80,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         if requested_mode and requested_mode in workflow.get('mode_targets', {}):
             snap = self.runtime.snapshot()
+            mode_active_key = f"{requested_mode}_active"
+            if self.validation_passes(snap, mode_active_key):
+                result.add_step('select_mode', True, f'Claude {requested_mode} already active')
+                return True
+
             selector = self.find_first(snap, 'model_selector')
             if not selector:
                 result.add_step('select_mode', False, 'Claude model selector unavailable for mode toggle', snapshot=snap.serializable())
@@ -97,8 +101,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             clicked = self.runtime.click(item)
             time.sleep(0.8)
             verify_snap = self.runtime.snapshot()
-            selector = self.find_first(verify_snap, 'model_selector')
-            verified = bool(clicked and selector and ('extended' in selector.name.lower() or 'sonnet' in selector.name.lower() or 'opus' in selector.name.lower()))
+            verified = self.validation_passes(verify_snap, mode_active_key)
             result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}', snapshot=verify_snap.serializable())
             if not verified:
                 return False

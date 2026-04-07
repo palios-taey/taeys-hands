@@ -56,6 +56,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         requested_model = (request.model or self.cfg['workflow']['defaults'].get('model') or '').strip().lower()
         target = requested_mode or requested_model
 
+        snap = self.runtime.snapshot()
+        mode_active_key = f"{target}_active"
+        if self.validation_passes(snap, mode_active_key):
+            result.add_step('select_model_mode', True, f'ChatGPT {target} already active')
+            return True
+
         if target in workflow.get('composite_modes', {}):
             steps = workflow['composite_modes'][target]
             for index, step in enumerate(steps, start=1):
@@ -90,14 +96,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
                 clicked = self.runtime.click(target_el)
-                time.sleep(0.8)
-                verify_snap = self.runtime.snapshot()
-                selector = self.find_first(verify_snap, 'model_selector')
+                time.sleep(1.0)
                 # ChatGPT model selector name is static ("Model selector") — does NOT
                 # update to show current model. Verify by checking dropdown closed
                 # (target item no longer visible) and click succeeded.
-                verify_snap2 = self.runtime.snapshot()
-                target_still_visible = self.find_first(verify_snap2, step['target'])
+                verify_snap = self.runtime.snapshot()
+                target_still_visible = self.find_first(verify_snap, step['target'])
                 verified = bool(clicked and not target_still_visible)
                 result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
                 if not verified:
@@ -119,7 +123,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
             clicked = self.runtime.click(item)
-            time.sleep(0.8)
+            time.sleep(1.0)
             # ChatGPT model selector name is static ("Model selector") — does NOT
             # update to show current model. Verify by checking dropdown closed.
             verify_snap = self.runtime.snapshot()

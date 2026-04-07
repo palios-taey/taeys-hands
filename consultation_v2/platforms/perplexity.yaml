@@ -123,6 +123,9 @@ tree:
     incognito:
       name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
       role: push button
+    deep_research_toggle:
+      name: Deep research
+      role: push button
 workflow:
   defaults:
     model: null
@@ -171,6 +174,14 @@ validation:
     - name: Model
       role: push button
     name_is_model: true
+  computer_active:
+    indicators:
+    - name: New Task
+      role: link
+  deep_research_active:
+    indicators:
+    - name: Deep research
+      role: push button
   tool_selected:
     indicators:
     - name: Add files or tools
