@@ -176,7 +176,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             self.runtime.press('Return')
             time.sleep(1.0)
             self.runtime.press('Return')
-            time.sleep(1.2)
+            time.sleep(2.0)  # Wait for AT-SPI tree to reflect the Remove button after dialog closes
             verify_snap = self.runtime.snapshot()
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified, f'Grok attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
