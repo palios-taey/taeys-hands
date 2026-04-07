@@ -285,23 +285,27 @@ validation:
   computer_active:
     url_contains: /computer/
   deep_research_active:
+    # Presence-only check: the "Deep research" push button appears in the
+    # toolbar when active and disappears when inactive.  It has NO checked
+    # state — states are only [showing, focusable, enabled].
     indicators:
     - name: Deep research
       role: push button
-      states_include: [checked]
   model_council_active:
-    # Checks radio item — only visible while dropdown open.
+    # Checks radio item — only visible while dropdown is open.
     # No post-close toolbar indicator confirmed yet.
     indicators:
     - name: "Model council Max"
       role: radio menu item
       states_include: [checked]
   create_files_and_apps_active:
+    # Checks radio item — only visible while dropdown is open.
     indicators:
     - name: "Create files and apps"
       role: radio menu item
       states_include: [checked]
   learn_step_by_step_active:
+    # Checks radio item — only visible while dropdown is open.
     indicators:
     - name: "Learn step by step"
       role: radio menu item
