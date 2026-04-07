@@ -268,11 +268,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             lambda: self.runtime.snapshot().has('stop_button'),
             timeout=30, interval=0.6,
         )
-        # URL captured for bookkeeping only -- NOT a gate on success
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen)
+        url_changed = result.session_url_after and result.session_url_after != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(clicked and stop_seen and url_changed)
+        else:
+            verified = bool(clicked and stop_seen)
         result.add_step(
             'send', verified, 'Claude send validated by stop button',
             url_before=before, url_after=result.session_url_after,

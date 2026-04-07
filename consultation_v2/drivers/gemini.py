@@ -310,12 +310,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 timeout=30,
                 interval=0.8,
             )
-        # URL captured as bookkeeping — not gating success
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
-        # BUG 9 FIX: success = clicked + stop_seen only; URL is bookkeeping
-        verified = bool(clicked and stop_seen)
+        url_changed = result.session_url_after and result.session_url_after != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(clicked and stop_seen and url_changed)
+        else:
+            verified = bool(clicked and stop_seen)
         result.add_step(
             'send', verified,
             'Gemini send validated by stop/start-research detection',

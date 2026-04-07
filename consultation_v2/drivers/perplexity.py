@@ -423,7 +423,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 break
         result.session_url_after = settled_url
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen)
+        url_changed = settled_url and settled_url != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(clicked and stop_seen and url_changed)
+        else:
+            verified = bool(clicked and stop_seen)
         result.add_step(
             'send', verified,
             'Perplexity send validated by stop/copy button',
