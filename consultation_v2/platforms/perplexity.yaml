@@ -279,7 +279,7 @@ validation:
     timeout: 30
   response_complete:
     indicators:
-    - name: Copy
+    - name_contains: Copy
       role: push button
     stop_absent: true
   computer_active:
