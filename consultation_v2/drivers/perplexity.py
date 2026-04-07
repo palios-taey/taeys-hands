@@ -194,19 +194,25 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         else:
             # Perplexity accepts Return in focused input as send
             clicked = self.runtime.press('Return')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0) or self.runtime.current_url()
-        # Perplexity often redirects through /search/new/... before settling.
-        final_url = after
-        for _ in range(5):
+        # Stop button OR copy button confirms send. Timeout 60s for Deep Research.
+        def _send_confirmed():
+            snap = self.runtime.snapshot()
+            return snap.has('stop_button') or snap.has('copy_button')
+        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
+
+        # Settle redirect chain — Perplexity routes through /search/new/ before landing
+        settled_url = self.runtime.current_url() or before
+        for _ in range(8):
             time.sleep(1.0)
-            current = self.runtime.current_url() or final_url
-            if current and current != final_url:
-                final_url = current
-        result.session_url_after = final_url
+            current = self.runtime.current_url() or settled_url
+            if current and current != settled_url:
+                settled_url = current
+            else:
+                break
+        result.session_url_after = settled_url
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen and final_url)
-        result.add_step('send', verified, 'Perplexity send validated by stop button and settled URL capture', url_before=before, url_after=final_url, snapshot=verify_snap.serializable())
+        verified = bool(clicked and stop_seen)
+        result.add_step('send', verified, 'Perplexity send validated by stop/copy button', url_before=before, url_after=settled_url, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -218,7 +224,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            return seen_stop and snap.has('copy_button')
+            # Complete if copy present and no stop — response finished
+            if snap.has('copy_button') and not snap.has('stop_button'):
+                return True
+            return False
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
