@@ -37,6 +37,7 @@ tree:
   - name: More
     role: push button
   element_map:
+    # ─── Toolbar / persistent controls ───────────────────────────────────────
     input:
       name: ""
       role: entry
@@ -45,14 +46,135 @@ tree:
     attach_trigger:
       name: Add files or tools
       role: push button
+    new_thread:
+      name: New thread Ctrl I
+      role: push button
+    dictation:
+      name: Dictation
+      role: push button
+    voice_mode:
+      name: Use voice mode
+      role: push button
+    computer_ready:
+      name: "Your Computer is ready"
+      role: push button
+    notifications:
+      name: Notifications
+      role: push button
+    scheduled:
+      name: Scheduled
+      role: push button
+    incognito:
+      name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
+      role: push button
+    deep_research_toggle:
+      name: Deep research
+      role: push button
+    suggestion_tabs:
+      name: Primer query categories
+      role: page tab list
+    suggestion_tab_for_you:
+      name: For you
+      role: page tab
+
+    # ─── Attach dropdown (Firefox root / portal — use menu_snapshot()) ────────
     upload_files_item:
       name: "Upload files or images"
       role: menu item
     git_connector_item:
-      name: Connectors and sources
+      name: "Connectors and sources"
       role: menu item
+    # radio menu items — mode selection (main attach dropdown level)
+    computer_dropdown:
+      name: Computer
+      role: radio menu item
+    deep_research:
+      name: Deep research
+      role: radio menu item
+    tool_model_council:
+      name: "Model council Max"
+      role: radio menu item
+    # "More" sub-menu trigger inside attach dropdown
+    attach_more_trigger:
+      name: More
+      role: menu item
+    # "More" sub-menu items (Firefox root — use menu_snapshot())
+    mode_create_files:
+      name: "Create files and apps"
+      role: radio menu item
+    mode_learn:
+      name: "Learn step by step"
+      role: radio menu item
+
+    # ─── Connectors and sources panel (Firefox root — use menu_snapshot()) ───
+    search_sources:
+      name: "Search sources"
+      role: entry
+      states_include:
+      - editable
+    clear_search:
+      name: Clear
+      role: push button
+    # Source toggles (check menu items)
+    source_web:
+      name: "Web"
+      role: check menu item
+    source_academic:
+      name: "Academic"
+      role: check menu item
+    source_gmail:
+      name: "Gmail with Calendar Gmail with Calendar"
+      role: check menu item
+    source_google_drive:
+      name: "Google Drive Google Drive"
+      role: check menu item
+    source_health:
+      name: "Health"
+      role: check menu item
+    source_social:
+      name: "Social"
+      role: check menu item
+    source_blockscout:
+      name: "Blockscout Blockscout"
+      role: check menu item
+    source_github:
+      name: "GitHub GitHub"
+      role: check menu item
+    # Cloud connectors (menu items — click to connect, not toggles)
+    add_files_from_cloud:
+      name: "Add files from cloud"
+      role: menu item
+    manage_connectors:
+      name: "Manage Connectors"
+      role: menu item
+    # Cloud service connectors (below fold — menu items, not toggleable)
+    connector_asana:
+      name: "Asana Asana"
+      role: menu item
+    connector_box:
+      name: "Box Box"
+      role: menu item
+    connector_circleback:
+      name: "Circleback Circleback"
+      role: menu item
+    connector_cloudinary:
+      name: "Cloudinary Cloudinary"
+      role: menu item
+    connector_confluence:
+      name: "Confluence Confluence"
+      role: menu item
+
+    # ─── Model selector ───────────────────────────────────────────────────────
     model_selector:
       name: Model
+      role: push button
+
+    # ─── Response / post-generation controls ─────────────────────────────────
+    submit_button:
+      name: Submit
+      role: push button
+    stop_button:
+      name: Stop response
       role: push button
     copy_button:
       name_contains: Copy
@@ -60,20 +182,14 @@ tree:
     copy_code:
       name: Copy code
       role: push button
-    stop_button:
-      name: Stop response
-      role: push button
-    submit_button:
-      name: Submit
+    copy_contents_button:
+      name: Copy contents
       role: push button
     share_button:
       name: Share
       role: push button
     download_button:
       name: Download
-      role: push button
-    copy_contents_button:
-      name: Copy contents
       role: push button
     rewrite_thread:
       name: Rewrite Thread
@@ -90,56 +206,45 @@ tree:
     thread_actions:
       name: Thread actions
       role: push button
-    deep_research:
-      name: Deep research
-      role: radio menu item
-    new_thread:
-      name: New thread Ctrl I
-      role: push button
-    dictation:
-      name: Dictation
-      role: push button
-    suggestion_tabs:
-      name: Primer query categories
-      role: page tab list
-    notifications:
-      name: Notifications
-      role: push button
-    computer_dropdown:
-      name: Computer
-      role: radio menu item
-    computer_ready:
-      name: "Your Computer is ready"
-      role: push button
-    voice_mode:
-      name: Use voice mode
-      role: push button
-    incognito:
-      name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
-      role: push button
-    deep_research_toggle:
-      name: Deep research
-      role: push button
-    tool_model_council:
-      name: "Model council Max"
-      role: radio menu item
+
 workflow:
   defaults:
     model: null
     mode: deep_research
     tools: []
   selection:
-    # model_targets removed — no AT-SPI scan of model selector dropdown available yet.
-    # Add back after live scan provides exact [radio menu item] names.
+    # model_targets: empty until live AT-SPI scan of model selector dropdown
+    # is available with exact [radio menu item] names.
     model_targets: {}
     mode_targets:
       deep_research: deep_research
       model_council: tool_model_council
-      computer: computer_dropdown  # driver must read this target, not hardcode key names
+      computer: computer_dropdown
+      create_files_and_apps: mode_create_files
+      learn_step_by_step: mode_learn
+    # Modes that live inside the "More" sub-menu of the attach dropdown.
+    # The driver must click attach_more_trigger before these items are visible.
+    mode_submenu_keys:
+    - create_files_and_apps
+    - learn_step_by_step
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
     open_method: atspi_menu
+  connectors:
+    # Source toggle workflow: open attach dropdown → click git_connector_item
+    # → panel opens in portal → use menu_snapshot() for all source items.
+    trigger: attach_trigger
+    panel_trigger: git_connector_item
+    source_targets:
+      web: source_web
+      academic: source_academic
+      gmail: source_gmail
+      google_drive: source_google_drive
+      health: source_health
+      social: source_social
+      blockscout: source_blockscout
+      github: source_github
   prompt:
     input: input
     send_button: submit_button
@@ -157,6 +262,7 @@ workflow:
   extra_extract:
     strategy: copy_contents_button
     copy_contents_key: copy_contents_button
+
 validation:
   attach_success:
     indicators:
@@ -184,13 +290,20 @@ validation:
       role: push button
       states_include: [checked]
   model_council_active:
-    # NOTE: This checks the dropdown radio item which is only visible while dropdown is open.
-    # No toolbar push button for model council confirmed in AT-SPI scan yet.
-    # Follow-up scan needed to find post-close indicator.
+    # Checks radio item — only visible while dropdown open.
+    # No post-close toolbar indicator confirmed yet.
     indicators:
     - name: "Model council Max"
       role: radio menu item
       states_include: [checked]
-  # Model-specific *_active specs removed — model_targets is empty.
-  # Add back after AT-SPI scan of model selector dropdown.
-
+  create_files_and_apps_active:
+    indicators:
+    - name: "Create files and apps"
+      role: radio menu item
+      states_include: [checked]
+  learn_step_by_step_active:
+    indicators:
+    - name: "Learn step by step"
+      role: radio menu item
+      states_include: [checked]
+  # model_targets is empty — no model-specific *_active specs until dropdown scanned.
