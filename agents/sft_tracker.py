@@ -20,7 +20,7 @@ log = logging.getLogger('sft-tracker')
 
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
-SFT_TARGET_PER_PLATFORM = 4400
+SFT_TARGET_PER_PLATFORM = 4800  # 4400 original + 400 infra (4 categories × 100)
 DPO_TARGET_PER_PLATFORM = 6200
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
