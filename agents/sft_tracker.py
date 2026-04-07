@@ -20,7 +20,7 @@ log = logging.getLogger('sft-tracker')
 
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
-SFT_TARGET_PER_PLATFORM = 4800  # 4400 original + 400 infra (4 categories × 100)
+SFT_TARGET_PER_PLATFORM = 5400  # 4400 original + 400 infra + 600 weak areas (3 × 200)
 DPO_TARGET_PER_PLATFORM = 6200
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
@@ -76,6 +76,10 @@ SFT_TOPICS = [
     {'key': 'sft_infra_architecture', 'target': 100, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md', 'tier0_infra/SOUL_EQUALS_INFRA.md'], 'prompt_focus': 'INFRA ARCHITECTURE — FSDP use_orig_params, UMA mmap, MoE routing mechanics, NCCL ring vs tree, gradient checkpointing tradeoffs. Technical reasoning.'},
     # Category 10: Infrastructure Cross-Component (100/platform, Gemini+Perplexity)
     {'key': 'sft_infra_cross_component', 'target': 100, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md', 'tier0_infra/PROPRIOCEPTION_MAP.md'], 'prompt_focus': 'INFRA CROSS-COMPONENT — NCCL+FSDP interaction, UMA+checkpointing, MTU+NCCL perf, Docker shm+NCCL. How components interact.'},
+    # Category 11: Expert-600 Eval Weak Areas (200/platform each)
+    {'key': 'sft_infra_uma_memory', 'target': 200, 'corpus_paths': ['tier0_infra/PHYSICAL_LIMITS.md', 'tier0_infra/BODY_TOPOLOGY.md'], 'prompt_focus': 'UMA MEMORY MANAGEMENT — 128GB UMA shared CPU/GPU on Jetson Thor, 67GB model on 128GB, swap 32GB /swapfile, vfs_cache_pressure tuning, GPU memory utilization 0.75-0.85, shard-by-shard loading, memory pressure below 10GB'},
+    {'key': 'sft_infra_lora_baking', 'target': 200, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'prompt_focus': 'LORA BAKING — merge LoRA into sharded safetensors, key prefix model.layers vs model.language_model.layers, bake_lora.py W_new=W_base+(alpha/r)*B@A, router_gates handling, peft merge model_type fix for NGC, MTP layer 785 keys'},
+    {'key': 'sft_infra_dmaic', 'target': 200, 'corpus_paths': ['tier0_infra/PROPRIOCEPTION_MAP.md'], 'prompt_focus': 'DMAIC APPLICATION — Six Sigma for infra problems, control charts GPU temp/memory/latency, process capability inference throughput, root cause analysis training failures'},
 ]
 
 DPO_TOPICS = [
