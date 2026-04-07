@@ -199,12 +199,14 @@ class GrokConsultationDriver(BaseConsultationDriver):
         before = self.runtime.current_url()
         result.session_url_before = before
         pressed = self.runtime.press('Return')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url()
+        # Stop button is the ONLY reliable send signal for Grok.
+        # Grok does not change URL on in-thread sends. Timeout 60s for file attachments.
+        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=60, interval=0.6)
+        # URL capture is bookkeeping, not a gate condition
+        result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(pressed and stop_seen and result.session_url_after)
-        result.add_step('send', verified, 'Grok send validated by Return + stop button + new URL capture', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        verified = bool(pressed and stop_seen)
+        result.add_step('send', verified, 'Grok send validated by Return + stop button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
