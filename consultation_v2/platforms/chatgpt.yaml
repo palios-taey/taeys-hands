@@ -85,6 +85,7 @@ tree:
     send_button:
       name: Send prompt
       role: push button
+    # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
     model_instant:
       name: Instant For everyday chats
       role: menu item
@@ -94,45 +95,49 @@ tree:
     model_pro:
       name: Pro Research-grade intelligence
       role: menu item
+    # Bug 4 fixed: "Configure..." was present in live scan, missing from YAML
+    model_configure:
+      name: "Configure..."
+      role: menu item
+    # --- Extended Pro thinking selector (Firefox root / menu_snapshot) ---
     thinking_standard:
       name: Standard
       role: radio menu item
     thinking_extended:
       name: Extended
       role: radio menu item
+    # --- Attach/+ dropdown items (Firefox root / menu_snapshot) ---
+    # Bug 1 fixed: was name:"Add photos and files" role:push button
+    # AT-SPI actual: [menu item] "Add photos & files Control U"
     tool_upload:
-      name: "Add photos and files"
-      role: push button
-    tool_google_drive:
-      name: Add from Google Drive
-      role: menu item
-    tool_deep_research:
-      name: Deep research
-      role: menu item
-    tool_web_search:
-      name: Web search
-      role: menu item
-    tool_study:
-      name: Study and learn
-      role: menu item
-    tool_more:
-      name: More
+      name: "Add photos & files Control U"
       role: menu item
     tool_recent_files:
       name: Recent files
       role: menu item
+    # Bug 2 fixed: these 5 are radio menu item in AT-SPI, not menu item
+    # Bug 2 also: tool_create_image was entirely missing, now added
+    tool_create_image:
+      name: Create image
+      role: radio menu item
+    tool_web_search:
+      name: Web search
+      role: radio menu item
     tool_github:
       name: GitHub
-      role: menu item
-    tool_agent_mode:
-      name: Agent mode
-      role: menu item
+      role: radio menu item
     tool_gmail:
       name: Gmail
-      role: menu item
+      role: radio menu item
     tool_quizzes:
       name: Quizzes
-      role: menu item
+      role: radio menu item
+    # Bug 3: removed stale entries not present in current AT-SPI scan:
+    #   tool_deep_research ("Deep research")
+    #   tool_google_drive ("Add from Google Drive")
+    #   tool_study ("Study and learn")
+    #   tool_more ("More")
+    #   tool_agent_mode ("Agent mode")
 workflow:
   defaults:
     model: pro
@@ -158,10 +163,9 @@ workflow:
       - trigger: extended_pro
         target: thinking_extended
         verification: extended_thinking_active
+    # Bug 3 follow-on: removed stale tool_targets that referenced deleted elements
     tool_targets:
-      deep_research: tool_deep_research
       web_search: tool_web_search
-      study_and_learn: tool_study
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
@@ -200,22 +204,24 @@ validation:
     - name_contains: Copy
       role_contains: button
     stop_absent: true
-  auto_active:
-    indicators:
-    - name_contains_all: [Model selector, Auto]
-      role: push button
   instant_active:
+    best_effort: true
+    # Model selector button label does not change — cannot confirm via AT-SPI
     indicators:
-    - name_contains_all: [Model selector, Instant]
-      role: push button
+    - name: "Instant For everyday chats"
+      role: menu item
   thinking_active:
+    best_effort: true
+    # Model selector button label does not change — cannot confirm via AT-SPI
     indicators:
-    - name_contains_all: [Model selector, Thinking]
-      role: push button
+    - name: "Thinking For complex questions"
+      role: menu item
   pro_active:
+    best_effort: true
+    # Model selector button label does not change — cannot confirm via AT-SPI
     indicators:
-    - name_contains_all: [Model selector, Pro]
-      role: push button
+    - name: "Pro Research-grade intelligence"
+      role: menu item
   pro_extended_active:
     indicators:
     - name: Pro, click to remove
