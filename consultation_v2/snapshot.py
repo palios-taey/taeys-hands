@@ -175,12 +175,24 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             pass
 
     menu = find_menu_items(firefox, doc)
-    if not menu:
-        # Scan from firefox (app root) so React portal dropdown items are included.
-        # This matches build_snapshot's behaviour when fence_after is empty (lines 149-150).
-        elements = find_elements(firefox)
-        menu = [element for element in elements if (element.get('role') or '').strip().lower() in _MENU_ROLES and (element.get('name') or '').strip()]
-        menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
+
+    # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
+    # only partial results (e.g., on Claude it finds 9 file/connector items but
+    # misses Opus/Sonnet/Extended-thinking items that live in separate containers).
+    # Since find_menu_items returns non-empty, the old fallback never fired and
+    # those items were silently dropped. Now we always merge both sources.
+    elements = find_elements(firefox)
+    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button'}
+    extra = [e for e in elements if (e.get('role') or '').strip().lower() in _EXTRA_ROLES and (e.get('name') or '').strip()]
+    # Dedupe by (name, role) — preserve original menu order first, then append new items.
+    seen = {(m.get('name', ''), m.get('role', '')) for m in menu}
+    for e in extra:
+        key = (e.get('name', ''), e.get('role', ''))
+        if key not in seen:
+            menu.append(e)
+            seen.add(key)
+
+    menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
     snapshot = _classify_elements(platform, menu, menu_items=menu)
     snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot
