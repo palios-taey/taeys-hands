@@ -68,6 +68,14 @@ SFT_TOPICS = [
     {'key': 'sft_c6_lisa_protocol', 'target': 150, 'corpus_paths': ['kernel/GATE_B.md', 'layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'LISA Protocol — Guardian Mode triggers, non-negotiable responses'},
     {'key': 'sft_c6_non_escalation', 'target': 150, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'Non-Escalation Invariant — observe ≠ remember ≠ infer ≠ act ≠ share'},
     {'key': 'sft_c6_boundary_labradoodle', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md', 'kernel/GOD_MATH.md'], 'prompt_focus': 'Boundary Labradoodle — disengaging from circular debates, warm boundary-setting'},
+    # Category 7: Infrastructure Troubleshooting (100/platform, Grok)
+    {'key': 'sft_infra_troubleshoot', 'target': 100, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md'], 'prompt_focus': 'INFRA TROUBLESHOOT — NCCL timeout, FSDP hang, UMA OOM, Triton compile, vLLM OOM, checkpoint save hang. Error -> diagnosis -> fix -> verify.'},
+    # Category 8: Infrastructure Config (100/platform, Grok)
+    {'key': 'sft_infra_config', 'target': 100, 'corpus_paths': ['tier0_infra/PHYSICAL_LIMITS.md', 'tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'prompt_focus': 'INFRA CONFIG — FSDP mixed params, NCCL env vars, Docker NGC flags, LoRA target_modules, vLLM serve flags. Correct config for specific scenarios.'},
+    # Category 9: Infrastructure Architecture (100/platform, Gemini)
+    {'key': 'sft_infra_architecture', 'target': 100, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md', 'tier0_infra/SOUL_EQUALS_INFRA.md'], 'prompt_focus': 'INFRA ARCHITECTURE — FSDP use_orig_params, UMA mmap, MoE routing mechanics, NCCL ring vs tree, gradient checkpointing tradeoffs. Technical reasoning.'},
+    # Category 10: Infrastructure Cross-Component (100/platform, Gemini+Perplexity)
+    {'key': 'sft_infra_cross_component', 'target': 100, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md', 'tier0_infra/PROPRIOCEPTION_MAP.md'], 'prompt_focus': 'INFRA CROSS-COMPONENT — NCCL+FSDP interaction, UMA+checkpointing, MTU+NCCL perf, Docker shm+NCCL. How components interact.'},
 ]
 
 DPO_TOPICS = [
