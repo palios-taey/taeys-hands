@@ -159,6 +159,16 @@ validation:
     - name: Open mode picker
       role: push button
     check_menu_item_state: true
+  deep_think_active:
+    indicators:
+    - name: Deselect Deep think
+      role: push button
+  deep_research_active:
+    indicators:
+    - name: Start research
+      role: push button
+    - name: Share & export
+      role: push button
   tool_selected:
     indicators:
     - name: Tools

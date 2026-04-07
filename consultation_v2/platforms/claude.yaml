@@ -158,6 +158,10 @@ validation:
       - Haiku 4.5
       role: push button
     name_is_model: true
+  extended_thinking_active:
+    indicators:
+    - name_contains: Extended
+      role: push button
   prompt_ready:
     indicators:
     - name: Send message

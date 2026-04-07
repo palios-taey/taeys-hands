@@ -195,6 +195,14 @@ validation:
     indicators:
     - name: Extended Pro
       role: push button
+  extended_thinking_active:
+    indicators:
+    - name: Extended Pro
+      role: push button
+  deep_research_active:
+    indicators:
+    - name: Deep research
+      role: link
   prompt_ready:
     indicators:
     - name: Send prompt

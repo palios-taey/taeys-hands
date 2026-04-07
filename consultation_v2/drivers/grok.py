@@ -103,6 +103,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model_mode', False, f'Grok target {target!r} is not mapped in Consultation V2 YAML')
             return False
         snap = self.runtime.snapshot()
+        mode_active_key = f"{target}_active"
+        if self.validation_passes(snap, mode_active_key):
+            result.add_step('select_model_mode', True, f'Grok {target} already active')
+            return True
+
         selector = self.find_first(snap, 'model_selector')
         if not selector:
             result.add_step('select_model_mode', False, 'Grok model selector not found', snapshot=snap.serializable())
@@ -112,7 +117,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.8)
         snap = self.runtime.snapshot()
-        item = self.find_first(snap, workflow['model_targets'][target])
+        item_key = workflow['model_targets'][target]
+        item = self.find_first(snap, item_key)
         if not item:
             result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
             return False
@@ -126,9 +132,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
         verified = False
         if selector and self.runtime.click(selector):
             time.sleep(0.5)
-            verify_snap = self.runtime.snapshot()
-            verify_item = self.find_first(verify_snap, workflow['model_targets'][target])
-            verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
+            from consultation_v2.snapshot import build_menu_snapshot
+            _, _, verify_snap = build_menu_snapshot(self.platform)
+            verified = self.validation_passes(verify_snap, 'model_selected', item_key=item_key)
         result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
         return verified
 
