@@ -41,6 +41,7 @@ tree:
   - name: Code
     role: link
   element_map:
+    # -- Main page persistent elements --
     input:
       name: Write your prompt to Claude
       role: entry
@@ -49,41 +50,20 @@ tree:
     toggle_menu:
       name: Add files, connectors, and more
       role: push button
-    upload_files_item:
-      name: Add files
-      role: menu item
-    git_connector_item:
-      name: Add from GitHub
-      role: menu item
-    model_selector:
-      name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
-      role: push button
-    model_opus:
-      name: Opus 4.6 Most capable for ambitious work
-      role: menu item
-    model_sonnet:
-      name: Sonnet 4.6 Most efficient for everyday tasks
-      role: menu item
-    model_haiku:
-      name: Haiku 4.5 Fastest for simple tasks
-      role: menu item
-    model_sonnet_extended:
-      name: Sonnet 4.6 Extended
-      role: push button
-    model_extended_thinking:
-      name: Extended thinking
-      role: menu item
-    model_more:
-      name: More models
-      role: menu item
-    copy_button:
-      name_contains: Copy
+    send_button:
+      name: Send message
       role: push button
     stop_button:
       name: Stop response
+      role: push button
+    copy_button:
+      name_contains: Copy
+      role: push button
+    open_sidebar:
+      name: Open sidebar
+      role: push button
+    incognito:
+      name_contains: Use incognito
       role: push button
     prompt_categories:
       name: Prompt categories
@@ -94,24 +74,63 @@ tree:
       - Learn
       - Code
       - Life stuff
-      - From Drive
+      - "Claude's choice"
       role: page tab
-    open_sidebar:
-      name: Open sidebar
-      role: push button
-    incognito:
-      name_contains: Use incognito
+
+    # -- Toggle-menu portal items (require menu_snapshot) --
+    upload_files_item:
+      name: "Add files or photos Ctrl+U"
+      role: menu item
+    take_screenshot:
+      name: Take a screenshot
+      role: menu item
+    add_to_project:
+      name: Add to project
+      role: menu item
+    git_connector_item:
+      name: Add from GitHub
+      role: menu item
+    skills:
+      name: Skills
+      role: menu item
+    add_connectors:
+      name: Add connectors
+      role: menu item
+    tool_research:
+      name: Research
+      role: check menu item
+    tool_web_search:
+      name: Web search
+      role: check menu item
+    use_style:
+      name: Use style
+      role: menu item
+
+    # -- Model selector (label changes with active model) --
+    model_selector:
+      name_contains:
+      - Opus 4.6
+      - Sonnet 4.6
+      - Haiku 4.5
       role: push button
 
-    research_mode:
-      name: Research mode
-      role: toggle button
-    send_button:
-      name: Send message
-      role: push button
-    scroll_to_bottom:
-      name: Scroll to bottom
-      role: push button
+    # -- Model / mode menu items (require menu_snapshot after clicking selector) --
+    model_opus:
+      name: Opus 4.6 Most capable for ambitious work
+      role: menu item
+    model_sonnet:
+      name: Sonnet 4.6 Most efficient for everyday tasks
+      role: menu item
+    model_haiku:
+      name: Haiku 4.5 Fastest for quick answers
+      role: menu item
+    model_extended_thinking:
+      name: "Extended thinking Think longer for complex tasks"
+      role: menu item
+    model_more:
+      name: More models
+      role: menu item
+
 workflow:
   defaults:
     model: null
@@ -125,7 +144,8 @@ workflow:
     mode_targets:
       extended_thinking: model_extended_thinking
     tool_targets:
-      research: research_mode
+      research: tool_research
+      web_search: tool_web_search
   attachment:
     trigger: toggle_menu
     menu_target: upload_files_item
@@ -135,7 +155,6 @@ workflow:
     send_button: send_button
   send:
     trigger: send_button
-    require_new_url: true
     stop_key: stop_button
   monitor:
     stop_key: stop_button
@@ -145,6 +164,7 @@ workflow:
     strategy: last_by_y
   extra_extract:
     strategy: none
+
 validation:
   attach_success:
     indicators:
@@ -161,7 +181,7 @@ validation:
     timeout: 30
   response_complete:
     indicators:
-    - name: Copy
+    - name_contains: Copy
       role: push button
     stop_absent: true
   sonnet_active:
