@@ -206,14 +206,16 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(1.0)
+        # Validate BEFORE closing — radio items are only visible while dropdown is open
+        pre_close_snap = self.runtime.menu_snapshot()
+        verified = self.validation_passes(pre_close_snap, mode_active_key)
+        # Now close the dropdown
         self.runtime.press('Escape')
-        time.sleep(2.0)
-        verify_snap = self.runtime.snapshot()
-        verified = self.validation_passes(verify_snap, mode_active_key)
+        time.sleep(1.0)
         result.add_step(
             'select_mode', verified,
             f'Perplexity mode set to {requested_mode}',
-            snapshot=verify_snap.serializable(),
+            snapshot=pre_close_snap.serializable(),
         )
         return verified
 
@@ -271,14 +273,16 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(1.0)
+        # Validate BEFORE closing — radio items are only visible while dropdown is open
+        pre_close_snap = self.runtime.menu_snapshot()
+        verified = self.validation_passes(pre_close_snap, mode_active_key)
+        # Now close the dropdown
         self.runtime.press('Escape')
-        time.sleep(2.0)
-        verify_snap = self.runtime.snapshot()
-        verified = self.validation_passes(verify_snap, mode_active_key)
+        time.sleep(1.0)
         result.add_step(
             'select_mode', verified,
             f'Perplexity sub-menu mode set to {requested_mode}',
-            snapshot=verify_snap.serializable(),
+            snapshot=pre_close_snap.serializable(),
         )
         return verified
 
@@ -539,18 +543,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                     preview=content[:200],
                 )
                 return True
-        download = self.find_first(snap, 'download_button')
-        if download:
-            result.add_step(
-                'extract_additional', True,
-                'Perplexity download surface is visible, but Consultation V2 '
-                'currently prefers Copy contents for text ingestion',
-                snapshot=snap.serializable(),
-            )
-            return True
         result.add_step(
             'extract_additional', True,
-            'Perplexity additional export surface was not visible',
+            'Perplexity copy_contents_button not found or yielded no content',
         )
         return True
 
