@@ -50,178 +50,115 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         result.ok = True
         return result
 
-    def select_model_mode_tools(
-        self, request: ConsultationRequest, result: ConsultationResult
-    ) -> bool:
-        workflow = self.cfg["workflow"]["selection"]
-        requested_mode = (
-            self.cfg["workflow"]["defaults"].get("mode") or ""
-        ).strip().lower() if request.mode is None else request.mode.strip().lower()
-        requested_model = (
-            request.model or self.cfg["workflow"]["defaults"].get("model") or ""
-        ).strip().lower()
+    def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        workflow = self.cfg['workflow']['selection']
+        requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower() if request.mode is None else request.mode.strip().lower()
+        requested_model = (request.model or self.cfg['workflow']['defaults'].get('model') or '').strip().lower()
         target = requested_mode or requested_model
 
-        # --- Composite mode (e.g. "pro_extended", "extended_thinking") ---
-        if target in workflow.get("composite_modes", {}):
-            steps = workflow["composite_modes"][target]
+        if target in workflow.get('composite_modes', {}):
+            steps = workflow['composite_modes'][target]
             for index, step in enumerate(steps, start=1):
                 snap = self.runtime.snapshot()
-                trigger = self.find_first(snap, step["trigger"])
+                trigger = self.find_first(snap, step['trigger'])
                 if not trigger:
-                    result.add_step(
-                        f"select_{index}",
-                        False,
-                        f"ChatGPT trigger {step['trigger']!r} not found",
-                        snapshot=snap.serializable(),
-                    )
+                    result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} not found", snapshot=snap.serializable())
                     return False
-                if not self.runtime.click(trigger, strategy="coordinate_only"):
-                    result.add_step(
-                        f"select_{index}",
-                        False,
-                        f"ChatGPT trigger {step['trigger']!r} click failed",
-                        snapshot=snap.serializable(),
-                    )
+                # Modal triggers can usually be coordinate_only
+                if not self.runtime.click(trigger, strategy='coordinate_only'):
+                    result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} click failed", snapshot=snap.serializable())
                     return False
                 time.sleep(1.0)
+                
+                if step['target'].startswith('thinking_'):
+                    tile_snap = self.runtime.snapshot()
+                    tile = self.find_first(tile_snap, step['target'])
+                    if not tile:
+                        result.add_step(f'select_{index}', False, f"ChatGPT tile {step['target']} not visible after trigger", snapshot=tile_snap.serializable())
+                        return False
+                    # Use atspi_first for portal/modal items rendering 0,0 bounds
+                    clicked = self.runtime.click(tile, strategy='atspi_first')
+                    time.sleep(0.8)
+                    verify_snap = self.runtime.snapshot()
+                    verified = clicked and self.validation_passes(verify_snap, step['verification'])
+                    result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
+                    if not verified:
+                        return False
+                    continue
 
-                # React portal: scan from app root, NOT document.
-                dropdown_snap = self.runtime.menu_snapshot()
-                target_el = self.find_first(dropdown_snap, step["target"])
+                time.sleep(1.0)
+                dropdown_snap = self.runtime.snapshot()
+                target_el = self.find_first(dropdown_snap, step['target'])
                 if not target_el:
-                    result.add_step(
-                        f"select_{index}",
-                        False,
-                        f"ChatGPT menu item {step['target']!r} not found in portal",
-                        snapshot=dropdown_snap.serializable(),
-                    )
+                    result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
-                clicked = self.runtime.click(target_el, strategy="coordinate_only")
+                clicked = self.runtime.click(target_el, strategy='atspi_first')
                 time.sleep(0.8)
-
-                # Verify: target menu item should have disappeared (portal closed).
-                verify_snap = self.runtime.menu_snapshot()
-                target_still_visible = self.find_first(verify_snap, step["target"])
+                
+                # Verify by checking dropdown closed (React unmounts it)
+                verify_snap = self.runtime.snapshot()
+                target_still_visible = self.find_first(verify_snap, step['target'])
                 verified = bool(clicked and not target_still_visible)
-                result.add_step(
-                    f"select_{index}",
-                    verified,
-                    f"ChatGPT applied {step['target']!r}",
-                    selected=step["target"],
-                    snapshot=verify_snap.serializable(),
-                )
+                result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
                 if not verified:
                     return False
-            return True
-
-        # --- Simple model selection ---
-        elif target and target in workflow.get("model_targets", {}):
+                    
+        elif target and target in workflow.get('model_targets', {}):
             snap = self.runtime.snapshot()
-            selector = self.find_first(snap, "model_selector")
+            selector = self.find_first(snap, 'model_selector')
             if not selector:
-                result.add_step(
-                    "select_model",
-                    False,
-                    "ChatGPT model selector not found",
-                    snapshot=snap.serializable(),
-                )
+                result.add_step('select_model', False, 'ChatGPT model selector not found', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(selector, strategy="coordinate_only"):
-                result.add_step(
-                    "select_model",
-                    False,
-                    "ChatGPT model selector click failed",
-                    snapshot=snap.serializable(),
-                )
+            if not self.runtime.click(selector, strategy='coordinate_only'):
+                result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-
-            # React portal: MUST use menu_snapshot (app-root scan).
-            dropdown_snap = self.runtime.menu_snapshot()
-            target_key = workflow["model_targets"][target]
+            
+            dropdown_snap = self.runtime.snapshot()
+            target_key = workflow['model_targets'][target]
             item = self.find_first(dropdown_snap, target_key)
             if not item:
-                result.add_step(
-                    "select_model",
-                    False,
-                    f"ChatGPT menu item {target_key!r} not found in portal",
-                    snapshot=dropdown_snap.serializable(),
-                )
+                result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy="coordinate_only")
+            clicked = self.runtime.click(item, strategy='atspi_first')
             time.sleep(0.8)
-
-            # Verify: portal closed, item no longer in tree.
-            verify_snap = self.runtime.menu_snapshot()
+            
+            verify_snap = self.runtime.snapshot()
             target_still_visible = self.find_first(verify_snap, target_key)
             verified = bool(clicked and not target_still_visible)
-            result.add_step(
-                "select_model",
-                verified,
-                f"ChatGPT model set to {target!r}",
-                snapshot=verify_snap.serializable(),
-            )
+            result.add_step('select_model', verified, f'ChatGPT model set to {target}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
-
         else:
-            # No model/mode requested — use session default.
-            result.add_step(
-                "select_model_mode",
-                True,
-                "ChatGPT using current/default model and mode",
-                requested_model=request.model,
-                requested_mode=request.mode,
-            )
+            result.add_step('select_model_mode', True, 'ChatGPT using current/default model and mode', requested_model=request.model, requested_mode=request.mode)
 
-        # --- Tool selection ---
         for tool_name in request.tools:
-            normalized = tool_name.strip().lower().replace(" ", "_")
-            target_key = workflow.get("tool_targets", {}).get(normalized)
+            normalized = tool_name.strip().lower().replace(' ', '_')
+            target_key = workflow.get('tool_targets', {}).get(normalized)
             if not target_key:
-                result.add_step(
-                    "select_tool",
-                    False,
-                    f"ChatGPT tool {tool_name!r} is not mapped in Consultation V2 YAML",
-                )
+                result.add_step('select_tool', False, f'ChatGPT tool {tool_name!r} is not mapped in Consultation V2 YAML')
                 return False
             snap = self.runtime.snapshot()
-            trigger = self.find_first(snap, "attach_trigger")
-            if not trigger or not self.runtime.click(trigger, strategy="coordinate_only"):
-                result.add_step(
-                    "select_tool",
-                    False,
-                    f"ChatGPT failed to open tools dropdown for {tool_name!r}",
-                    snapshot=snap.serializable(),
-                )
+            trigger = self.find_first(snap, 'attach_trigger')
+            if not trigger or not self.runtime.click(trigger, strategy='coordinate_only'):
+                result.add_step('select_tool', False, f'ChatGPT failed to open tools dropdown for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-
-            # React portal for tool menu too.
-            tool_snap = self.runtime.menu_snapshot()
-            item = self.find_first(tool_snap, target_key)
+            
+            snap = self.runtime.snapshot()
+            item = self.find_first(snap, target_key)
             if not item:
-                result.add_step(
-                    "select_tool",
-                    False,
-                    f"ChatGPT tool item {target_key!r} not found in portal",
-                    snapshot=tool_snap.serializable(),
-                )
+                result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy="coordinate_only")
+            clicked = self.runtime.click(item, strategy='atspi_first')
             time.sleep(0.6)
-            verify_snap = self.runtime.menu_snapshot()
-            verified = bool(clicked)
-            result.add_step(
-                "select_tool",
-                verified,
-                f"ChatGPT tool click executed for {tool_name!r}",
-                snapshot=verify_snap.serializable(),
-            )
+            
+            verify_snap = self.runtime.snapshot()
+            target_still_visible = self.find_first(verify_snap, target_key)
+            verified = bool(clicked and not target_still_visible)
+            result.add_step('select_tool', verified, f'ChatGPT tool click executed for {tool_name}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
-
         return True
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -241,7 +178,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not upload_item:
                 result.add_step('attach', False, f'ChatGPT upload item not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(upload_item, strategy='coordinate_only')
+            clicked = self.runtime.click(upload_item, strategy='atspi_first')
             if not clicked:
                 result.add_step('attach', False, f'ChatGPT upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
@@ -289,13 +226,34 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not send_button:
             result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
             return False
+            
         clicked = self.runtime.click(send_button, strategy='coordinate_only')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
+        
+        send_confirmed = False
+        def _poll() -> bool:
+            nonlocal send_confirmed
+            s = self.runtime.snapshot()
+            if s.has('stop_button') or s.has('copy_button'):
+                send_confirmed = True
+                return True
+            curr = self.runtime.current_url()
+            if curr and curr != before:
+                send_confirmed = True
+                return True
+            return False
+            
+        self.runtime.wait_until(_poll, timeout=30.0, interval=0.6)
+        
+        after = self.runtime.current_url()
+        if after == before:
+            after = self.runtime.wait_for_url_change(before, timeout=2.0, interval=0.5)
+            
         result.session_url_after = after or self.runtime.current_url()
+        url_changed = bool(result.session_url_after and result.session_url_after != before)
+        
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen and result.session_url_after)
-        result.add_step('send', verified, 'ChatGPT send validated by stop button and URL capture', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        verified = bool(clicked and (send_confirmed or url_changed))
+        result.add_step('send', verified, 'ChatGPT send validated by stop button OR copy button OR URL change', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:

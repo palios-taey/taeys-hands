@@ -226,7 +226,8 @@ validation:
   send_success:
     indicators:
       - stop_button
-    timeout: 30
+    timeout: 60
+    require_new_url: false
   response_complete:
     indicators:
       - copy_button

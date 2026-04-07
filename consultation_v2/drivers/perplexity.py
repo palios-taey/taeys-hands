@@ -108,8 +108,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            # Close dropdown and let page settle. Deep Research toggle causes
-            # page state changes — need extra time before next AT-SPI scan.
             self.runtime.press('Escape')
             time.sleep(2.0)
             result.add_step('select_mode', True, f'Perplexity mode set to {requested_mode} (click confirmed)')
@@ -171,8 +169,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
+        time.sleep(0.5)
+        # Tap space to force React onChange event, triggering Submit button to mount
+        self.runtime.type_text(' ')
         time.sleep(1.0)
-        # After paste, Submit button should appear. Check for it as confirmation.
         verify_snap = self.runtime.snapshot()
         submit_visible = self.find_first(verify_snap, 'submit_button')
         confirmed = bool(pasted and submit_visible)
@@ -180,7 +180,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if submit_visible:
             msg += ' (Submit button appeared)'
         elif pasted:
-            msg += ' (paste ok but Submit not visible — may need focus)'
+            msg += ' (paste ok but Submit not visible — using Return fallback)'
         result.add_step('prompt', bool(pasted), msg, snapshot=verify_snap.serializable())
         return bool(pasted)
 
@@ -188,46 +188,55 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         before = self.runtime.current_url()
         result.session_url_before = before
 
+        send_validation = dict(self.cfg.get('validation', {}).get('send_success', {}))
+        timeout = float(send_validation.get('timeout') or 30)
+
         snap = self.runtime.snapshot()
-        send_button = self.find_first(snap, "submit_button")
+        send_button = self.find_first(snap, 'submit_button')
+        if not send_button:
+            result.add_step('send', False, 'Perplexity submit button not found', snapshot=snap.serializable())
+            return False
+        if not self.runtime.click(send_button, strategy='coordinate_only'):
+            result.add_step('send', False, 'Perplexity submit button click failed', snapshot=snap.serializable())
+            return False
 
-        if send_button:
-            clicked = self.runtime.click(send_button, strategy="coordinate_only")
-        else:
-            # Fallback: Return in focused input — Perplexity accepts this.
-            clicked = self.runtime.press('Return')
+        observed_url = (before or '').strip()
+        last_change_at = time.time()
 
-        # Stop button is the canonical "Perplexity accepted the send" signal.
-        # Timeout 60 s — Deep Research mode delays streaming start.
-        stop_seen = self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('stop_button'),
-            timeout=60,
-            interval=0.6,
-        )
+        def _poll() -> bool:
+            nonlocal observed_url, last_change_at
+            current = (self.runtime.current_url() or '').strip()
+            if current and current != observed_url:
+                observed_url = current
+                last_change_at = time.time()
+            snap = self.runtime.snapshot()
+            # Confirm send if stop button appears OR copy button appears
+            return bool(snap.has('stop_button') or snap.has('copy_button'))
 
-        # Settle the redirect chain: Perplexity routes through /search/new before
-        # landing on the permanent thread URL. Poll until URL stabilises.
-        settled_url = self.runtime.current_url() or before
-        for _ in range(8):
-            time.sleep(1.0)
-            current = self.runtime.current_url() or settled_url
-            if current and current != settled_url:
-                settled_url = current
-            else:
-                break  # URL has stopped moving
+        stop_seen = self.runtime.wait_until(_poll, timeout=timeout, interval=0.5)
 
-        result.session_url_after = settled_url
+        # Settle URL chain
+        final_url = observed_url or (before or '')
+        settle_deadline = time.time() + 10.0
+        while time.time() < settle_deadline:
+            current = (self.runtime.current_url() or '').strip()
+            if current and current != final_url:
+                final_url = current
+                last_change_at = time.time()
+            elif time.time() - last_change_at >= 1.5:
+                break
+            time.sleep(0.5)
 
+        result.session_url_after = final_url or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
-        # Verified = click succeeded AND stop button was seen.
-        # settled_url is captured for Neo4j but is NOT a gate condition.
-        verified = bool(clicked and stop_seen)
+        # Verified if stop/copy button seen. URL change is bonus.
+        verified = bool(stop_seen)
         result.add_step(
-            "send",
+            'send',
             verified,
-            "Perplexity send validated by stop button + settled URL capture",
+            'Perplexity send validated by Submit + stop button appearance; URL settled separately',
             url_before=before,
-            url_after=settled_url,
+            url_after=result.session_url_after,
             snapshot=verify_snap.serializable(),
         )
         return verified

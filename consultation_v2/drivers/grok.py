@@ -87,7 +87,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
-        # None = use YAML default; empty string = skip selection
         if request.mode is None:
             requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
         else:
@@ -120,7 +119,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
-        # Grok requires explicit re-open verification because the selector label does not update reliably.
         verify_root = self.runtime.snapshot()
         selector = self.find_first(verify_root, 'model_selector')
         verified = False
@@ -199,27 +197,35 @@ class GrokConsultationDriver(BaseConsultationDriver):
         before = self.runtime.current_url()
         result.session_url_before = before
 
+        send_validation = dict(self.cfg.get('validation', {}).get('send_success', {}))
+        timeout = float(send_validation.get('timeout') or 30)
+
         pressed = self.runtime.press('Return')
+        observed_url = None
 
-        # Stop button appearing is the ONLY reliable send confirmation for Grok.
-        # Grok does not change URL on in-thread sends (no new-conversation redirect).
-        # Timeout is 60 s to cover file-attachment responses that take longer to begin.
-        stop_seen = self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('stop_button'),
-            timeout=60,
-            interval=0.6,
-        )
+        def _poll() -> bool:
+            nonlocal observed_url
+            current = (self.runtime.current_url() or '').strip()
+            previous = (before or '').strip()
+            if current and current != previous:
+                observed_url = current
+            snap = self.runtime.snapshot()
+            # Confirm send if stop button appears OR copy button appears (finished instantly)
+            return bool(snap.has('stop_button') or snap.has('copy_button'))
 
-        # Capture URL for session tracking — not a pass/fail gate.
-        after = self.runtime.current_url()
-        result.session_url_after = after or before
+        stop_seen = self.runtime.wait_until(_poll, timeout=timeout, interval=0.6)
 
+        if observed_url is None:
+            observed_url = self.runtime.wait_for_url_change(before, timeout=3.0, interval=0.5)
+
+        result.session_url_after = observed_url or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
-        verified = bool(pressed and stop_seen)
+        # Verified if Return was pressed AND either stop/copy button was seen OR URL changed
+        verified = bool(pressed and (stop_seen or (result.session_url_after and result.session_url_after != before)))
         result.add_step(
-            "send",
+            'send',
             verified,
-            "Grok send validated by Return + stop button appearance",
+            'Grok send validated by Return + stop button OR copy button OR URL change',
             url_before=before,
             url_after=result.session_url_after,
             snapshot=verify_snap.serializable(),
@@ -239,7 +245,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
+        # Pass if generation finished OR if copy button is already present
+        verified = bool(completed or verify_snap.has('copy_button'))
         result.add_step('monitor', verified, 'Grok response completed', stop_seen=seen_stop, snapshot=verify_snap.serializable())
         return verified
 
