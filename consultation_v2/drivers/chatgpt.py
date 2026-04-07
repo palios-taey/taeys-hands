@@ -289,14 +289,18 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
             return False
         clicked = self._click(send_button)
-        # Stop button OR copy button confirms send. URL is bookkeeping not a gate.
         def _send_confirmed():
             snap = self.runtime.snapshot()
             return snap.has('stop_button') or snap.has('copy_button')
         stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen)
+        url_changed = result.session_url_after and result.session_url_after != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(clicked and stop_seen and url_changed)
+        else:
+            verified = bool(clicked and stop_seen)
         result.add_step('send', verified, 'ChatGPT send validated by stop/copy button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 

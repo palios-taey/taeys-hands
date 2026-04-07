@@ -38,8 +38,10 @@ Post-click dropdown reads MUST use `menu_snapshot()`. Pre-click trigger finds us
 ### 5. Validation checks must target persistent elements
 After closing a dropdown, radio menu items inside it are GONE from the AT-SPI tree. Validation specs (`*_active`) must check elements that persist (e.g., toolbar push buttons with `states_include: [checked]`).
 
-### 6. URL is bookkeeping, not a gate
-`send_prompt` success = stop button appeared. URL capture is for session tracking only.
+### 6. URL is a gate for new sessions
+For `session="new"`: send success requires BOTH stop button appeared AND URL changed. No URL change = send failed.
+For follow-up sessions (existing URL): URL may not change — gate on stop button only.
+URL is always captured for session tracking.
 
 ### 7. No fallbacks, no broadening
 If an element isn't found: scan the tree, get the real name, fix the YAML. Never add try-then-that chains.
@@ -132,7 +134,7 @@ consultation_v2/
 2. `select_model_mode_tools` — Set model/mode/tools via YAML workflow targets
 3. `attach_files` — Upload consultation package
 4. `enter_prompt` — Paste message into input
-5. `send_prompt` — Click send, confirm via stop button (URL is bookkeeping, NOT a gate)
+5. `send_prompt` — Click send, confirm via stop button + URL change for new sessions (see Rule 6)
 6. `wait_for_completion` — Poll until stop button disappears
 7. `extract_response` — Copy button → clipboard
 8. `store_result` — Write to Neo4j

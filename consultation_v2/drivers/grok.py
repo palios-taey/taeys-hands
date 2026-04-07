@@ -217,10 +217,14 @@ class GrokConsultationDriver(BaseConsultationDriver):
             snap = self.runtime.snapshot()
             return snap.has('stop_button') or snap.has('copy_button')
         stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
-        # URL capture is bookkeeping, not a gate condition
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(pressed and stop_seen)
+        url_changed = result.session_url_after and result.session_url_after != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(pressed and stop_seen and url_changed)
+        else:
+            verified = bool(pressed and stop_seen)
         result.add_step('send', verified, 'Grok send validated by Return + stop button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
