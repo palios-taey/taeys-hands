@@ -43,6 +43,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 return result
         if not self.select_model_mode_tools(request, result):
             return result
+        if request.connectors:
+            if not self.toggle_connectors(request, result):
+                return result
         if not self.attach_files(request, result):
             return result
         if not self.enter_prompt(request, result):
@@ -307,6 +310,175 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             snapshot=verify_snap.serializable(),
         )
         return verified
+
+    # ------------------------------------------------------------------
+    # Connector toggles
+    # ------------------------------------------------------------------
+
+    def toggle_connectors(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        """
+        Enable the connectors listed in request.connectors.
+
+        Flow:
+          1. Click attach_trigger to open the attach dropdown.
+          2. Click git_connector_item to open the connectors/sources panel
+             (renders in a Firefox portal — use menu_snapshot()).
+          3. For each requested connector, look up its element key via
+             workflow.connectors.source_targets.
+          4. If the item is NOT already checked, click it to enable.
+             If it IS already checked, leave it alone (idempotent enable-only).
+          5. Press Escape to close the panel.
+          6. Verify each connector's final state via a fresh menu_snapshot().
+        """
+        cfg_connectors = self.cfg['workflow'].get('connectors', {})
+        source_targets: dict[str, str] = cfg_connectors.get('source_targets', {})
+
+        # ── Step 1: open attach dropdown ─────────────────────────────
+        snap = self.runtime.snapshot()
+        trigger = self.find_first(snap, 'attach_trigger')
+        if not trigger:
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity attach_trigger not found for connector panel',
+                snapshot=snap.serializable(),
+            )
+            return False
+        if not self.runtime.click(trigger):
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity attach_trigger click failed for connector panel',
+                snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(0.8)
+
+        # ── Step 2: click git_connector_item to open the panel ───────
+        # Attach dropdown is a React portal — must use menu_snapshot()
+        menu_snap = self.runtime.menu_snapshot()
+        panel_trigger = self.find_first(menu_snap, 'git_connector_item')
+        if not panel_trigger:
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity git_connector_item not found in attach dropdown',
+                snapshot=menu_snap.serializable(),
+            )
+            return False
+        if not self.runtime.click(panel_trigger):
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity git_connector_item click failed',
+                snapshot=menu_snap.serializable(),
+            )
+            return False
+        time.sleep(0.8)
+
+        # ── Steps 3 & 4: enable each requested connector ─────────────
+        # Connectors panel is also a portal — use menu_snapshot()
+        panel_snap = self.runtime.menu_snapshot()
+        for connector_name in request.connectors:
+            normalized = connector_name.strip().lower()
+            element_key = source_targets.get(normalized)
+            if not element_key:
+                result.add_step(
+                    'toggle_connectors', False,
+                    f'Connector {connector_name!r} not found in source_targets mapping',
+                )
+                return False
+
+            item = self.find_first(panel_snap, element_key)
+            if not item:
+                result.add_step(
+                    'toggle_connectors', False,
+                    f'Perplexity connector element {element_key!r} not found in panel for {connector_name!r}',
+                    snapshot=panel_snap.serializable(),
+                )
+                return False
+
+            # check menu items carry 'checked' in their states when enabled
+            already_checked = bool(
+                item.states and 'checked' in [s.lower() for s in item.states]
+            )
+            if already_checked:
+                result.add_step(
+                    'toggle_connectors', True,
+                    f'Connector {connector_name!r} already enabled — skipping',
+                )
+            else:
+                if not self.runtime.click(item):
+                    result.add_step(
+                        'toggle_connectors', False,
+                        f'Perplexity connector click failed for {connector_name!r}',
+                        snapshot=panel_snap.serializable(),
+                    )
+                    return False
+                time.sleep(0.5)
+                result.add_step(
+                    'toggle_connectors', True,
+                    f'Connector {connector_name!r} clicked to enable',
+                )
+
+        # ── Step 5: close the panel with Escape ──────────────────────
+        self.runtime.press('Escape')
+        time.sleep(0.8)
+
+        # ── Step 6: verify — re-open panel and confirm checked states ─
+        snap = self.runtime.snapshot()
+        trigger = self.find_first(snap, 'attach_trigger')
+        if not trigger or not self.runtime.click(trigger):
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity attach_trigger re-open failed during connector verification',
+                snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(0.8)
+
+        menu_snap2 = self.runtime.menu_snapshot()
+        panel_trigger2 = self.find_first(menu_snap2, 'git_connector_item')
+        if not panel_trigger2 or not self.runtime.click(panel_trigger2):
+            result.add_step(
+                'toggle_connectors', False,
+                'Perplexity git_connector_item re-open failed during connector verification',
+                snapshot=menu_snap2.serializable(),
+            )
+            return False
+        time.sleep(0.8)
+
+        verify_panel_snap = self.runtime.menu_snapshot()
+        all_verified = True
+        for connector_name in request.connectors:
+            normalized = connector_name.strip().lower()
+            element_key = source_targets.get(normalized)
+            if not element_key:
+                continue
+            verify_item = self.find_first(verify_panel_snap, element_key)
+            is_checked = bool(
+                verify_item
+                and verify_item.states
+                and 'checked' in [s.lower() for s in verify_item.states]
+            )
+            if not is_checked:
+                all_verified = False
+            result.add_step(
+                'verify_connector', is_checked,
+                f'Connector {connector_name!r} verified {"enabled" if is_checked else "NOT enabled"}',
+                snapshot=verify_panel_snap.serializable(),
+            )
+
+        # Close the panel before continuing
+        self.runtime.press('Escape')
+        time.sleep(0.5)
+
+        result.add_step(
+            'toggle_connectors', all_verified,
+            'Perplexity connector toggle complete',
+            requested=request.connectors,
+        )
+        return all_verified
 
     # ------------------------------------------------------------------
     # File attachment
