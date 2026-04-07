@@ -120,9 +120,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
         item_key = workflow['model_targets'][target]
         item = self.find_first(snap, item_key)
         if not item:
+            self.runtime.press('Escape')
+            time.sleep(0.3)
             result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
             return False
         if not self.runtime.click(item):
+            self.runtime.press('Escape')
+            time.sleep(0.3)
             result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
@@ -134,6 +138,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
             time.sleep(0.5)
             verify_menu = self.runtime.menu_snapshot()
             verified = self.validation_passes(verify_menu, mode_active_key)
+            self.runtime.press('Escape')
+            time.sleep(0.3)
         result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
         return verified
 
@@ -245,7 +251,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not copy_button:
             result.add_step('extract_primary', False, 'Grok copy button not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(copy_button, strategy='atspi_only'):
+        if not self.runtime.click(copy_button):
             result.add_step('extract_primary', False, 'Grok copy button AT-SPI action failed', snapshot=snap.serializable())
             return False
         time.sleep(0.4)

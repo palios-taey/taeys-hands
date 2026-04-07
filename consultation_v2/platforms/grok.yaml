@@ -47,7 +47,19 @@ tree:
       role: push button
     upload_files_item:
       name: "Upload a file"
-      role: push button
+      role: menu item
+    model_auto:
+      name: "Auto Chooses Fast or Expert"
+      role: menu item
+    model_fast:
+      name: "Fast Quick responses - Grok 4.20"
+      role: menu item
+    model_expert:
+      name: "Expert Thinks hard - Grok 4.20"
+      role: menu item
+    model_heavy:
+      name: "Heavy Powered by Grok 4.20"
+      role: menu item
     model_selector:
       name: Model select
       role: push button
@@ -99,6 +111,18 @@ tree:
     voice_mode:
       name: Enter voice mode (Ctrl+⇧O)
       role: push button
+    sources_selector:
+      name: Sources selector
+      role: push button
+    connect_gmail:
+      name: Connect Gmail
+      role: menu item
+    connect_calendar:
+      name: Connect Google Calendar
+      role: menu item
+    connectors:
+      name: Connectors
+      role: menu item
 workflow:
   defaults:
     model: null
@@ -119,7 +143,7 @@ workflow:
   send:
     trigger: null
     submit_via_return: true
-    require_new_url: true
+    require_new_url: false
     stop_key: stop_button
   monitor:
     stop_key: stop_button
@@ -147,27 +171,23 @@ validation:
       role: push button
     stop_absent: true
   auto_active:
+    best_effort: true
     indicators:
-    - name: Grok 2
-      states_include: [checked]
+    - name: "Auto Chooses Fast or Expert"
+      role: menu item
   fast_active:
+    best_effort: true
     indicators:
-    - name: Grok 2 (mini)
-      states_include: [checked]
+    - name: "Fast Quick responses - Grok 4.20"
+      role: menu item
   expert_active:
+    best_effort: true
     indicators:
-    - name: Grok 2
-      states_include: [checked]
+    - name: "Expert Thinks hard - Grok 4.20"
+      role: menu item
   heavy_active:
+    best_effort: true
     indicators:
-    - name: Grok 3
-      states_include: [checked]
-  reasoning_active:
-    indicators:
-    - name: Reasoning
-      states_include: [checked]
-  deepsearch_active:
-    indicators:
-    - name: Deepsearch
-      states_include: [checked]
+    - name: "Heavy Powered by Grok 4.20"
+      role: menu item
 
