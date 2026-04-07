@@ -80,7 +80,7 @@ tree:
       name: More models
       role: menu item
     copy_button:
-      name: Copy
+      name_contains: Copy
       role: push button
     stop_button:
       name: Stop response

@@ -52,7 +52,7 @@ tree:
       name: Model select
       role: push button
     copy_button:
-      name: Copy
+      name_contains: Copy
       role: push button
     edit_button:
       name: Edit

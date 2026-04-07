@@ -55,7 +55,7 @@ tree:
       name: Model
       role: push button
     copy_button:
-      name: Copy
+      name_contains: Copy
       role: push button
     copy_code:
       name: Copy code
