@@ -59,7 +59,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         removed = 0
         for element in candidates:
             if matches_spec(element, remove_spec):
-                if self.runtime.click(element, strategy='coordinate_only'):
+                if self.runtime.click(element):
                     removed += 1
                     time.sleep(0.2)
         return removed
@@ -107,7 +107,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not selector:
             result.add_step('select_model_mode', False, 'Grok model selector not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(selector, strategy='coordinate_only'):
+        if not self.runtime.click(selector):
             result.add_step('select_model_mode', False, 'Grok model selector click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
@@ -116,7 +116,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not item:
             result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(item, strategy='coordinate_only'):
+        if not self.runtime.click(item):
             result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
@@ -124,7 +124,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         verify_root = self.runtime.snapshot()
         selector = self.find_first(verify_root, 'model_selector')
         verified = False
-        if selector and self.runtime.click(selector, strategy='coordinate_only'):
+        if selector and self.runtime.click(selector):
             time.sleep(0.5)
             verify_snap = self.runtime.snapshot()
             verify_item = self.find_first(verify_snap, workflow['model_targets'][target])
@@ -144,7 +144,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             if not trigger:
                 result.add_step('attach', False, f'Grok attach trigger missing for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not self.runtime.click(trigger):
                 result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.6)
@@ -153,7 +153,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             if not upload_item:
                 result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(upload_item, strategy='coordinate_only'):
+            if not self.runtime.click(upload_item):
                 result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
@@ -181,7 +181,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not input_el:
             result.add_step('prompt', False, 'Grok input field not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='coordinate_only'):
+        if not self.runtime.click(input_el):
             result.add_step('prompt', False, 'Grok input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)

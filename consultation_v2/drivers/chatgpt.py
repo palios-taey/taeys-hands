@@ -64,7 +64,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 if not trigger:
                     result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} not found", snapshot=snap.serializable())
                     return False
-                if not self.runtime.click(trigger, strategy='coordinate_only'):
+                if not self.runtime.click(trigger):
                     result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} click failed", snapshot=snap.serializable())
                     return False
                 time.sleep(1.0)
@@ -74,7 +74,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     if not tile:
                         result.add_step(f'select_{index}', False, f"ChatGPT tile {step['target']} not visible after trigger", snapshot=tile_snap.serializable())
                         return False
-                    clicked = self.runtime.click(tile, strategy='coordinate_only')
+                    clicked = self.runtime.click(tile)
                     time.sleep(0.8)
                     verify_snap = self.runtime.snapshot()
                     verified = clicked and self.validation_passes(verify_snap, step['verification'])
@@ -89,7 +89,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 if not target_el:
                     result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
-                clicked = self.runtime.click(target_el, strategy='coordinate_only')
+                clicked = self.runtime.click(target_el)
                 time.sleep(0.8)
                 verify_snap = self.runtime.snapshot()
                 selector = self.find_first(verify_snap, 'model_selector')
@@ -108,7 +108,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not selector:
                 result.add_step('select_model', False, 'ChatGPT model selector not found', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(selector, strategy='coordinate_only'):
+            if not self.runtime.click(selector):
                 result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
@@ -118,7 +118,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not item:
                 result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy='coordinate_only')
+            clicked = self.runtime.click(item)
             time.sleep(0.8)
             # ChatGPT model selector name is static ("Model selector") — does NOT
             # update to show current model. Verify by checking dropdown closed.
@@ -139,7 +139,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return False
             snap = self.runtime.snapshot()
             trigger = self.find_first(snap, 'attach_trigger')
-            if not trigger or not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not trigger or not self.runtime.click(trigger):
                 result.add_step('select_tool', False, f'ChatGPT failed to open tools dropdown for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
@@ -148,7 +148,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not item:
                 result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy='coordinate_only')
+            clicked = self.runtime.click(item)
             time.sleep(0.6)
             verify_snap = self.runtime.snapshot()
             verified = bool(clicked)
@@ -165,7 +165,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not trigger:
                 result.add_step('attach', False, f'ChatGPT attach trigger not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not self.runtime.click(trigger):
                 result.add_step('attach', False, f'ChatGPT attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.7)
@@ -174,7 +174,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not upload_item:
                 result.add_step('attach', False, f'ChatGPT upload item not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(upload_item, strategy='coordinate_only')
+            clicked = self.runtime.click(upload_item)
             if not clicked:
                 result.add_step('attach', False, f'ChatGPT upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
@@ -203,7 +203,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not input_el:
             result.add_step('prompt', False, 'ChatGPT input field not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='coordinate_only'):
+        if not self.runtime.click(input_el):
             result.add_step('prompt', False, 'ChatGPT input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)
@@ -222,7 +222,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not send_button:
             result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
             return False
-        clicked = self.runtime.click(send_button, strategy='coordinate_only')
+        clicked = self.runtime.click(send_button)
         # Stop button OR copy button confirms send. URL is bookkeeping.
         def _send_confirmed():
             snap = self.runtime.snapshot()
@@ -260,7 +260,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not copy_button:
             result.add_step('extract_primary', False, 'ChatGPT copy button not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(copy_button, strategy='coordinate_only'):
+        if not self.runtime.click(copy_button):
             result.add_step('extract_primary', False, 'ChatGPT copy button click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.4)
