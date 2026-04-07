@@ -204,29 +204,40 @@ validation:
     - name_contains: Copy
       role_contains: button
     stop_absent: true
-  instant_active:
-    best_effort: true
-    # Model selector button label does not change — cannot confirm via AT-SPI
-    indicators:
-    - name: "Instant For everyday chats"
-      role: menu item
-  thinking_active:
-    best_effort: true
-    # Model selector button label does not change — cannot confirm via AT-SPI
-    indicators:
-    - name: "Thinking For complex questions"
-      role: menu item
+  # pro_active: Pro model is selected.
+  # pro_indicator (persistent toolbar button) is the authoritative signal —
+  # it appears as soon as Pro is active and does NOT vanish on dropdown close.
   pro_active:
-    best_effort: true
-    # Model selector button label does not change — cannot confirm via AT-SPI
     indicators:
-    - name: "Pro Research-grade intelligence"
-      role: menu item
+    - name: Extended Pro, click to remove
+      role: push button
+  # pro_extended_active: Pro + Extended Pro are both active.
+  # Same persistent toolbar indicator as pro_active — when Extended Pro is
+  # engaged the pro_indicator element IS present in the toolbar snapshot.
   pro_extended_active:
     indicators:
-    - name: Pro, click to remove
+    - name: Extended Pro, click to remove
       role: push button
+  # instant_active: No persistent toolbar badge exists for Instant.
+  # Use best_effort + dropdown item check (open selector, verify item present).
+  # Driver opens the dropdown, finds the item, then closes — acceptable because
+  # best_effort: true means a miss here does not abort the run.
+  instant_active:
+    best_effort: true
+    indicators:
+    - name: Instant For everyday chats
+      role: menu item
+  # thinking_active: No persistent toolbar badge exists for Thinking.
+  # Same best_effort + dropdown item approach as instant_active.
+  thinking_active:
+    best_effort: true
+    indicators:
+    - name: Thinking For complex questions
+      role: menu item
+  # extended_thinking_active: The thinking_mode element (, click to remove)
+  # appears in the toolbar when Extended Thinking is active — use it as the
+  # primary persistent check, mirroring the pro_indicator pattern.
   extended_thinking_active:
     indicators:
-    - name: Pro, click to remove
+    - name_pattern: ', click to remove'
       role: push button
