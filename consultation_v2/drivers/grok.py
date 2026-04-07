@@ -199,9 +199,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
         before = self.runtime.current_url()
         result.session_url_before = before
         pressed = self.runtime.press('Return')
-        # Stop button is the ONLY reliable send signal for Grok.
-        # Grok does not change URL on in-thread sends. Timeout 60s for file attachments.
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=60, interval=0.6)
+        # Stop button OR copy button confirms send succeeded.
+        # Fast responses: stop appears and disappears before poll catches it,
+        # but copy_button appears when response completes — confirms send worked.
+        def _send_confirmed():
+            snap = self.runtime.snapshot()
+            return snap.has('stop_button') or snap.has('copy_button')
+        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
         # URL capture is bookkeeping, not a gate condition
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
