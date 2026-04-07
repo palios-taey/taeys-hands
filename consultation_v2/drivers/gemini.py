@@ -88,12 +88,19 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model', True, 'Gemini model left unchanged/default', requested_model=request.model)
 
         if requested_mode and requested_mode in workflow.get('tool_targets', {}):
+            # Check if already active — "Deselect Deep think" button visible means it's ON
             snap = self.runtime.snapshot()
+            if requested_mode == 'deep_think':
+                already_active = self.find_first(snap, 'tool_deselect_deep_think')
+                if already_active:
+                    result.add_step('select_mode', True, 'Gemini Deep Think already active')
+                    return True
+
             tools_button = self.find_first(snap, 'tools_button')
             if not tools_button:
                 result.add_step('select_mode', False, 'Gemini tools button not found', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(tools_button, strategy='atspi_first'):
+            if not self.runtime.click(tools_button):
                 result.add_step('select_mode', False, 'Gemini tools button click failed', snapshot=snap.serializable())
                 return False
             time.sleep(0.8)
