@@ -85,44 +85,38 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', True, f'Perplexity {requested_mode} already active')
                 return True
 
-            if requested_mode == 'computer':
-                computer = self.find_first(snap, 'computer_mode')
-                if not computer or not self.runtime.click(computer):
-                    result.add_step('select_mode', False, 'Perplexity Computer button not available', snapshot=snap.serializable())
-                    return False
-                verified = self.runtime.wait_until(lambda: self.validation_passes(self.runtime.snapshot(), 'computer_active'), timeout=20, interval=1.0)
-                result.add_step('select_mode', verified, 'Perplexity Computer mode opened', url=self.runtime.current_url())
-                if not verified:
-                    return False
-            else:
-                trigger = self.find_first(snap, 'attach_trigger')
-                if not trigger or not self.runtime.click(trigger):
-                    result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
-                    return False
-                time.sleep(0.8)
-                verify_snap = self.runtime.snapshot()
-                item = self.find_first(verify_snap, workflow['mode_targets'][requested_mode])
-                if not item:
-                    result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=verify_snap.serializable())
-                    return False
-                if not self.runtime.click(item):
-                    result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=verify_snap.serializable())
-                    return False
-                time.sleep(1.0)
-                # Close dropdown and let page settle.
-                self.runtime.press('Escape')
-                time.sleep(2.0)
-                verify_snap = self.runtime.snapshot()
-                verified = self.validation_passes(verify_snap, mode_active_key)
-                result.add_step('select_mode', verified, f'Perplexity mode set to {requested_mode}')
-                if not verified:
-                    return False
+            trigger = self.find_first(snap, 'attach_trigger')
+            if not trigger or not self.runtime.click(trigger):
+                result.add_step('select_mode', False, f'Perplexity tools trigger failed for {requested_mode}', snapshot=snap.serializable())
+                return False
+            time.sleep(0.8)
+            verify_snap = self.runtime.snapshot()
+            item = self.find_first(verify_snap, workflow['mode_targets'][requested_mode])
+            if not item:
+                result.add_step('select_mode', False, f'Perplexity mode item not found for {requested_mode}', snapshot=verify_snap.serializable())
+                return False
+            if not self.runtime.click(item):
+                result.add_step('select_mode', False, f'Perplexity mode click failed for {requested_mode}', snapshot=verify_snap.serializable())
+                return False
+            time.sleep(1.0)
+            # Close dropdown and let page settle.
+            self.runtime.press('Escape')
+            time.sleep(2.0)
+            verify_snap = self.runtime.snapshot()
+            verified = self.validation_passes(verify_snap, mode_active_key)
+            result.add_step('select_mode', verified, f'Perplexity mode set to {requested_mode}')
+            if not verified:
+                return False
         else:
             result.add_step('select_mode', True, 'Perplexity mode left unchanged/default', requested_mode=request.mode)
 
+        mode_target_names = set(workflow.get('mode_targets', {}).keys())
         for tool_name in request.tools:
-            result.add_step('select_tool', False, f'Perplexity Consultation V2 treats tool selection via mode_targets; extra tool {tool_name!r} was not applied')
-            return False
+            normalized = tool_name.strip().lower().replace(' ', '_')
+            if normalized in mode_target_names:
+                result.add_step('select_tool', True, f'Tool {tool_name!r} already handled via mode_targets')
+            else:
+                result.add_step('select_tool', True, f'Unknown tool {tool_name!r} ignored; Perplexity does not support individual tool toggles')
         return True
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
