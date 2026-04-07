@@ -424,8 +424,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        before = self.runtime.current_url()
-        result.session_url_before = before
+        # Use the pre-navigation baseline captured in run() at line 29.
+        # If files were attached, Perplexity may have already changed the URL
+        # by send time — so self.runtime.current_url() here would produce a
+        # stale "before" that matches "after", causing the URL-change gate to
+        # fail.  result.session_url_before is always the original target URL.
+        before = result.session_url_before
         snap = self.runtime.snapshot()
         send_button = self.find_first(snap, 'submit_button')
         if send_button:
