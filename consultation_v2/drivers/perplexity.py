@@ -198,6 +198,18 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=menu_snap.serializable(),
             )
             return False
+        # Check if already checked in dropdown — if so, just close and skip
+        if item.states and 'checked' in [s.lower() for s in item.states]:
+            self.runtime.press('Escape')
+            time.sleep(0.5)
+            verify_snap = self.runtime.snapshot()
+            verified = self.validation_passes(verify_snap, mode_active_key)
+            result.add_step(
+                'select_mode', verified,
+                f'Perplexity {requested_mode} already checked in dropdown',
+                snapshot=verify_snap.serializable(),
+            )
+            return verified
         if not self.runtime.click(item):
             result.add_step(
                 'select_mode', False,
@@ -206,16 +218,16 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(1.0)
-        # Validate BEFORE closing — radio items are only visible while dropdown is open
-        pre_close_snap = self.runtime.menu_snapshot()
-        verified = self.validation_passes(pre_close_snap, mode_active_key)
-        # Now close the dropdown
+        # Close dropdown — direct items don't auto-close
         self.runtime.press('Escape')
         time.sleep(1.0)
+        # Verify via persistent toolbar indicator (document scope)
+        verify_snap = self.runtime.snapshot()
+        verified = self.validation_passes(verify_snap, mode_active_key)
         result.add_step(
             'select_mode', verified,
             f'Perplexity mode set to {requested_mode}',
-            snapshot=pre_close_snap.serializable(),
+            snapshot=verify_snap.serializable(),
         )
         return verified
 
@@ -265,6 +277,18 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=submenu_snap.serializable(),
             )
             return False
+        # Check if already checked in sub-menu — if so, just close and skip
+        if item.states and 'checked' in [s.lower() for s in item.states]:
+            self.runtime.press('Escape')
+            time.sleep(0.5)
+            verify_snap = self.runtime.snapshot()
+            verified = self.validation_passes(verify_snap, mode_active_key)
+            result.add_step(
+                'select_mode', verified,
+                f'Perplexity {requested_mode} already checked in sub-menu',
+                snapshot=verify_snap.serializable(),
+            )
+            return verified
         if not self.runtime.click(item):
             result.add_step(
                 'select_mode', False,
@@ -273,16 +297,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(1.0)
-        # Validate BEFORE closing — radio items are only visible while dropdown is open
-        pre_close_snap = self.runtime.menu_snapshot()
-        verified = self.validation_passes(pre_close_snap, mode_active_key)
-        # Now close the dropdown
-        self.runtime.press('Escape')
-        time.sleep(1.0)
+        # Sub-menu items auto-close the dropdown after click.
+        # Verify via persistent toolbar indicator (document scope)
+        verify_snap = self.runtime.snapshot()
+        verified = self.validation_passes(verify_snap, mode_active_key)
         result.add_step(
             'select_mode', verified,
             f'Perplexity sub-menu mode set to {requested_mode}',
-            snapshot=pre_close_snap.serializable(),
+            snapshot=verify_snap.serializable(),
         )
         return verified
 

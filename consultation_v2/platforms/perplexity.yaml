@@ -106,6 +106,17 @@ tree:
       name: "Learn step by step"
       role: radio menu item
 
+    # ─── Persistent toolbar indicators (presence = mode active) ──────────
+    model_council_indicator:
+      name: "Model council"
+      role: push button
+    create_files_indicator:
+      name: "Create files and apps"
+      role: push button
+    learn_step_indicator:
+      name: "Learn step by step"
+      role: push button
+
     # ─── Connectors and sources panel (Firefox root — use menu_snapshot()) ───
     search_sources:
       name: "Search sources"
@@ -292,22 +303,15 @@ validation:
     - name: Deep research
       role: push button
   model_council_active:
-    # Checks radio item — only visible while dropdown is open.
-    # No post-close toolbar indicator confirmed yet.
     indicators:
-    - name: "Model council Max"
-      role: radio menu item
-      states_include: [checked]
+    - name: "Model council"
+      role: push button
   create_files_and_apps_active:
-    # Checks radio item — only visible while dropdown is open.
     indicators:
     - name: "Create files and apps"
-      role: radio menu item
-      states_include: [checked]
+      role: push button
   learn_step_by_step_active:
-    # Checks radio item — only visible while dropdown is open.
     indicators:
     - name: "Learn step by step"
-      role: radio menu item
-      states_include: [checked]
+      role: push button
   # model_targets is empty — no model-specific *_active specs until dropdown scanned.
