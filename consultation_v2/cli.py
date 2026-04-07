@@ -16,6 +16,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--model', default=None)
     parser.add_argument('--mode', default=None)
     parser.add_argument('--tool', action='append', default=[])
+    parser.add_argument('--connector', action='append', default=[],
+                        help='Connector name to enable, e.g. github, web (repeatable)')
     parser.add_argument('--session-url', default=None)
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--output', default=None)
@@ -35,6 +37,7 @@ def main() -> int:
         model=args.model,
         mode=args.mode,
         tools=list(args.tool or []),
+        connectors=list(args.connector or []),
         session_url=args.session_url,
         timeout=args.timeout,
         output_path=args.output,
