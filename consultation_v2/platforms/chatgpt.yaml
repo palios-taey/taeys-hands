@@ -101,8 +101,8 @@ tree:
       name: Extended
       role: radio menu item
     tool_upload:
-      name: Add photos and files
-      role: menu item
+      name: "Add photos and files"
+      role: push button
     tool_google_drive:
       name: Add from Google Drive
       role: menu item

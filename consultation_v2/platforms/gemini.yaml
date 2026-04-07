@@ -77,8 +77,8 @@ tree:
       name: New chat
       role: push button
     upload_files_item:
-      name: Upload files
-      role: menu item
+      name: "Upload files. Documents, data, code files"
+      role: push button
     add_from_drive_item:
       name: Add from Drive
       role: menu item
