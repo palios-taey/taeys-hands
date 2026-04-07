@@ -3,7 +3,161 @@
 ## What This Is
 MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT, Claude, Gemini, Grok, Perplexity via accessibility tree (no coordinates, no screenshots).
 
-## Architecture: Plan → Audit → Send → Monitor
+---
+
+## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
+
+### 1. YAML = exact AT-SPI truth
+Every `element_map` entry has the EXACT `name` and `role` from a live AT-SPI scan. Not approximate, not broadened. If the scan says `[menu item] "Upload files or images"`, the YAML says:
+```yaml
+upload_files_item:
+  name: "Upload files or images"
+  role: menu item
+```
+No `name_contains` when the full name is known. No fallbacks. No wildcards.
+
+### 2. Driver code = zero platform knowledge
+Drivers NEVER hardcode element names, key names, or platform-specific strings. ALL element lookups go through the YAML:
+```python
+# CORRECT — read from workflow, look up in element_map
+target_key = workflow['mode_targets'][requested_mode]
+element = self.find_first(snap, target_key)
+
+# WRONG — hardcoded key name (platform knowledge in driver)
+element = self.find_first(snap, 'computer_mode')
+```
+
+### 3. YAML drives the driver, never the reverse
+If the YAML has a key name and the driver uses a different key name, the DRIVER is wrong. Never rename YAML keys to match driver hardcoding. Fix the driver.
+
+### 4. Two scan scopes
+- `snapshot()` — document subtree (main page elements)
+- `menu_snapshot()` — Firefox app root (React portals, dropdown overlays)
+Post-click dropdown reads MUST use `menu_snapshot()`. Pre-click trigger finds use `snapshot()`.
+
+### 5. Validation checks must target persistent elements
+After closing a dropdown, radio menu items inside it are GONE from the AT-SPI tree. Validation specs (`*_active`) must check elements that persist (e.g., toolbar push buttons with `states_include: [checked]`).
+
+### 6. URL is bookkeeping, not a gate
+`send_prompt` success = stop button appeared. URL capture is for session tracking only.
+
+### 7. No fallbacks, no broadening
+If an element isn't found: scan the tree, get the real name, fix the YAML. Never add try-then-that chains.
+
+---
+
+## Change Process — MANDATORY
+
+### Claude (this session) does NOT edit code or YAML directly. Ever.
+
+**Claude's role:**
+1. **Observe** — AT-SPI scans, screenshots, read files
+2. **Package audits** — document mismatches between YAML and live AT-SPI tree
+3. **Send to Chats** — ChatGPT/Gemini/Perplexity/Grok analyze and propose fixes
+4. **Spawn sub-agents** — with Chat-validated fixes + the rules from this section
+5. **Validate** — screenshots and AT-SPI scans after every change
+
+**Who can edit files:**
+- **Sub-agents only** — spawned via Agent tool, given explicit instructions
+- Every sub-agent receives THE RULE (this section) in their prompt
+- Every fix must be validated by a Chat before the sub-agent applies it
+
+**The workflow for every change:**
+```
+1. Claude scans AT-SPI tree → finds mismatch
+2. Claude packages audit (YAML + tree + driver code + problems)
+3. Claude sends audit to a Chat (with THE RULE attached)
+4. Chat provides exact fixes (complete files, not diffs)
+5. Claude spawns sub-agent with Chat's fixes + THE RULE
+6. Sub-agent applies changes and commits
+7. Claude validates with screenshots + AT-SPI scan
+8. If validation fails → back to step 1 (new scan, not a guess)
+```
+
+**What goes to every Chat and sub-agent:**
+- The rules from this section (copy verbatim)
+- The current YAML being fixed
+- The current driver code being fixed
+- The live AT-SPI scan output
+- Specific bugs with line numbers
+
+---
+
+## Behavioral Guardrails
+
+- **Verify before reporting.** NEVER say "sent" or "running" without confirming output files exist and contain expected content.
+- **First error = full stop.** Do not retry. Do not patch. Diagnose root cause.
+- **Look at the screen.** When any UI op fails: `DISPLAY=:X scrot /tmp/screenshot.png` then read the image. BEFORE debugging code.
+- **Know your branch.** V2 code is on `consultation-v2-isolated-drivers`, NOT main.
+- **Use production scripts.** Never launch Firefox/bots/tests manually.
+- **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
+
+---
+
+## Consultation V2 — Isolated Driver Architecture
+
+**Branch:** `consultation-v2-isolated-drivers` (NOT merged to main)
+**Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
+**Status:** Under repair — audit findings being addressed (2026-04-07)
+
+### Structure
+```
+consultation_v2/
+  cli.py              — Standalone CLI entrypoint
+  orchestrator.py     — Platform→Driver registry
+  runtime.py          — AT-SPI operations (click, paste, snapshot, menu_snapshot)
+  snapshot.py         — Tree scanning, element classification
+  types.py            — ConsultationRequest, ConsultationResult, Snapshot
+  yaml_contract.py    — YAML loader with LRU cache
+  drivers/
+    base.py           — BaseConsultationDriver (find_first, validation_passes)
+    chatgpt.py        — ChatGPT driver
+    claude.py         — Claude driver
+    gemini.py         — Gemini driver
+    grok.py           — Grok driver
+    perplexity.py     — Perplexity driver
+  platforms/          — YAML configs (one per platform)
+    chatgpt.yaml, claude.yaml, gemini.yaml, grok.yaml, perplexity.yaml
+```
+
+### Isolation Rules
+- No driver imports from another driver
+- Each driver imports only from `base`, `types`, `runtime`
+- All platform-specific element names/roles in YAML `element_map`
+- All validation specs in YAML `validation` section
+- Two scan scopes: `snapshot()` (document tree) and `menu_snapshot()` (app-root for React portals/dropdowns)
+
+### The 8-Step Consultation Flow
+1. `navigate` — Open platform URL
+2. `select_model_mode_tools` — Set model/mode/tools via YAML workflow targets
+3. `attach_files` — Upload consultation package
+4. `enter_prompt` — Paste message into input
+5. `send_prompt` — Click send, confirm via stop button (URL is bookkeeping, NOT a gate)
+6. `wait_for_completion` — Poll until stop button disappears
+7. `extract_response` — Copy button → clipboard
+8. `store_result` — Write to Neo4j
+
+### Display Mappings (machine.env)
+Config: `~/.taey/machine.env` — no hardcoded display numbers.
+**Mira:** :2=ChatGPT, :3=Claude, :4=Gemini, :5=Grok, :6=Perplexity
+**Thor:** :6=Gemini, :7=Grok, :9=Perplexity, :13=ChatGPT
+
+---
+
+## Training Data Status (2026-04-07)
+
+| Dataset | Location | Count | Notes |
+|---------|----------|-------|-------|
+| SFT | `/home/mira/training/sft_balanced_all.jsonl` | 24,388 pairs | Constitutional/identity + bot-generated |
+| DPO | `/home/mira/training/dpo_all.jsonl` | 27,288 pairs | Claude/Gemini/Grok/Perplexity complete |
+| Infra docs | `/home/mira/data/corpus/tier0_infra/raw/` | 435 docs | NCCL, Jetson, CUDA, FSDP — NOT yet used for SFT |
+
+- **DPO gap:** ChatGPT needs ~3,726 more pairs
+- **Infra SFT:** Previous attempt used WRONG corpus (deleted). Real docs exist but need training plan.
+
+---
+
+## Architecture: Plan → Audit → Send → Monitor (V1 — MCP Tools)
 
 ### The Pipeline (MUST be followed in order)
 
@@ -235,7 +389,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (1302 symbols, 3680 relationships, 106 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (1517 symbols, 4612 relationships, 123 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
