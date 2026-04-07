@@ -59,7 +59,7 @@ tree:
       name: Add files and more
       role: push button
     copy_button:
-      name: Copy
+      name_contains: Copy
       role: push button
     stop_button:
       name: Stop streaming
