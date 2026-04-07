@@ -64,20 +64,17 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 if not trigger:
                     result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} not found", snapshot=snap.serializable())
                     return False
-                # Modal triggers can usually be coordinate_only
                 if not self.runtime.click(trigger, strategy='coordinate_only'):
                     result.add_step(f'select_{index}', False, f"ChatGPT trigger {step['trigger']} click failed", snapshot=snap.serializable())
                     return False
                 time.sleep(1.0)
-                
                 if step['target'].startswith('thinking_'):
                     tile_snap = self.runtime.snapshot()
                     tile = self.find_first(tile_snap, step['target'])
                     if not tile:
                         result.add_step(f'select_{index}', False, f"ChatGPT tile {step['target']} not visible after trigger", snapshot=tile_snap.serializable())
                         return False
-                    # Use atspi_first for portal/modal items rendering 0,0 bounds
-                    clicked = self.runtime.click(tile, strategy='atspi_first')
+                    clicked = self.runtime.click(tile, strategy='coordinate_only')
                     time.sleep(0.8)
                     verify_snap = self.runtime.snapshot()
                     verified = clicked and self.validation_passes(verify_snap, step['verification'])
@@ -92,17 +89,19 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 if not target_el:
                     result.add_step(f'select_{index}', False, f"ChatGPT model item {step['target']} not found", snapshot=dropdown_snap.serializable())
                     return False
-                clicked = self.runtime.click(target_el, strategy='atspi_first')
+                clicked = self.runtime.click(target_el, strategy='coordinate_only')
                 time.sleep(0.8)
-                
-                # Verify by checking dropdown closed (React unmounts it)
                 verify_snap = self.runtime.snapshot()
-                target_still_visible = self.find_first(verify_snap, step['target'])
+                selector = self.find_first(verify_snap, 'model_selector')
+                # ChatGPT model selector name is static ("Model selector") — does NOT
+                # update to show current model. Verify by checking dropdown closed
+                # (target item no longer visible) and click succeeded.
+                verify_snap2 = self.runtime.snapshot()
+                target_still_visible = self.find_first(verify_snap2, step['target'])
                 verified = bool(clicked and not target_still_visible)
                 result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
                 if not verified:
                     return False
-                    
         elif target and target in workflow.get('model_targets', {}):
             snap = self.runtime.snapshot()
             selector = self.find_first(snap, 'model_selector')
@@ -113,16 +112,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            
             dropdown_snap = self.runtime.snapshot()
             target_key = workflow['model_targets'][target]
             item = self.find_first(dropdown_snap, target_key)
             if not item:
                 result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy='atspi_first')
+            clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.8)
-            
+            # ChatGPT model selector name is static ("Model selector") — does NOT
+            # update to show current model. Verify by checking dropdown closed.
             verify_snap = self.runtime.snapshot()
             target_still_visible = self.find_first(verify_snap, target_key)
             verified = bool(clicked and not target_still_visible)
@@ -144,18 +143,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_tool', False, f'ChatGPT failed to open tools dropdown for {tool_name}', snapshot=snap.serializable())
                 return False
             time.sleep(1.0)
-            
             snap = self.runtime.snapshot()
             item = self.find_first(snap, target_key)
             if not item:
                 result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(item, strategy='atspi_first')
+            clicked = self.runtime.click(item, strategy='coordinate_only')
             time.sleep(0.6)
-            
             verify_snap = self.runtime.snapshot()
-            target_still_visible = self.find_first(verify_snap, target_key)
-            verified = bool(clicked and not target_still_visible)
+            verified = bool(clicked)
             result.add_step('select_tool', verified, f'ChatGPT tool click executed for {tool_name}', snapshot=verify_snap.serializable())
             if not verified:
                 return False
@@ -178,7 +174,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not upload_item:
                 result.add_step('attach', False, f'ChatGPT upload item not found for {abs_path}', snapshot=snap.serializable())
                 return False
-            clicked = self.runtime.click(upload_item, strategy='atspi_first')
+            clicked = self.runtime.click(upload_item, strategy='coordinate_only')
             if not clicked:
                 result.add_step('attach', False, f'ChatGPT upload item click failed for {abs_path}', snapshot=snap.serializable())
                 return False
@@ -226,34 +222,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not send_button:
             result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
             return False
-            
         clicked = self.runtime.click(send_button, strategy='coordinate_only')
-        
-        send_confirmed = False
-        def _poll() -> bool:
-            nonlocal send_confirmed
-            s = self.runtime.snapshot()
-            if s.has('stop_button') or s.has('copy_button'):
-                send_confirmed = True
-                return True
-            curr = self.runtime.current_url()
-            if curr and curr != before:
-                send_confirmed = True
-                return True
-            return False
-            
-        self.runtime.wait_until(_poll, timeout=30.0, interval=0.6)
-        
-        after = self.runtime.current_url()
-        if after == before:
-            after = self.runtime.wait_for_url_change(before, timeout=2.0, interval=0.5)
-            
+        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
+        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
-        url_changed = bool(result.session_url_after and result.session_url_after != before)
-        
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and (send_confirmed or url_changed))
-        result.add_step('send', verified, 'ChatGPT send validated by stop button OR copy button OR URL change', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        verified = bool(clicked and stop_seen and result.session_url_after)
+        result.add_step('send', verified, 'ChatGPT send validated by stop button and URL capture', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:

@@ -192,8 +192,7 @@ validation:
     indicators:
       - stop_button
     # Grok has "thinking" as a stop pattern — stop button appears quickly
-    timeout: 60
-    require_new_url: false
+    timeout: 30
   response_complete:
     indicators:
       - copy_button
