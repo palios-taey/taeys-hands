@@ -87,7 +87,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
-        # None = use YAML default; empty string = skip selection
         if request.mode is None:
             requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
         else:
@@ -159,13 +158,19 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.6)
-            snap = self.runtime.snapshot()
-            upload_item = self.find_first(snap, 'upload_files_item')
+            # FIX 1: Use menu_snapshot() instead of snapshot() so portal-rendered
+            # dropdown items (role: menu item) are visible to AT-SPI discovery.
+            menu_snap = self.runtime.menu_snapshot()
+            upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
-                result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=snap.serializable())
+                self.runtime.press('Escape')
+                time.sleep(0.3)
+                result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=menu_snap.serializable())
                 return False
             if not self.runtime.click(upload_item):
-                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=snap.serializable())
+                self.runtime.press('Escape')
+                time.sleep(0.3)
+                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=menu_snap.serializable())
                 return False
             time.sleep(0.8)
             self.runtime.press('ctrl+l')
@@ -176,7 +181,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
             self.runtime.press('Return')
             time.sleep(1.0)
             self.runtime.press('Return')
-            time.sleep(2.0)  # Wait for AT-SPI tree to reflect the Remove button after dialog closes
+            # FIX 2: Press Escape to ensure the dropdown is closed after the file
+            # dialog dismisses — Grok re-opens the dropdown on dialog close.
+            time.sleep(0.5)
+            self.runtime.press('Escape')
+            # FIX 3: Increased wait from 2.0s → 3.0s before validation snapshot
+            # so the AT-SPI tree has time to reflect the Remove chip.
+            time.sleep(3.0)
             verify_snap = self.runtime.snapshot()
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified, f'Grok attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
@@ -201,7 +212,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         # Grok uses section-role input — AT-SPI text/value interfaces may not work.
         # Trust the paste if clipboard operation succeeded.
         at_spi_verified = self._input_has_text()
-        verified = bool(pasted)  # Trust paste; AT-SPI verification is bonus
+        verified = bool(pasted)
         msg = 'Grok prompt entered' + (' (AT-SPI verified)' if at_spi_verified else ' (paste trusted)')
         result.add_step('prompt', verified, msg, snapshot=self.runtime.snapshot().serializable())
         return verified
