@@ -1,14 +1,14 @@
 platform: chatgpt
 click_strategy: xdotool_first
 urls:
-  fresh: https://chatgpt.com/?temporary-chat=true
+  fresh: https://chatgpt.com/
   verify_navigation: false
 tree:
   fence_after: []
   exclude:
     names:
     - Close sidebar
-    - Turn on temporary chat
+    - Turn off temporary chat
     - Start Voice
     - Profile image
     - ChatGPT
