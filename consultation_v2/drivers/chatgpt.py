@@ -223,12 +223,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button, strategy='coordinate_only')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url()
+        # Stop button OR copy button confirms send. URL is bookkeeping.
+        def _send_confirmed():
+            snap = self.runtime.snapshot()
+            return snap.has('stop_button') or snap.has('copy_button')
+        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
+        result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen and result.session_url_after)
-        result.add_step('send', verified, 'ChatGPT send validated by stop button and URL capture', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        verified = bool(clicked and stop_seen)
+        result.add_step('send', verified, 'ChatGPT send validated by stop/copy button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -240,7 +243,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            return seen_stop and snap.has('copy_button')
+            # Complete if copy present and no stop — response finished
+            if snap.has('copy_button') and not snap.has('stop_button'):
+                return True
+            return False
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
