@@ -132,9 +132,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
         verified = False
         if selector and self.runtime.click(selector):
             time.sleep(0.5)
-            from consultation_v2.snapshot import build_menu_snapshot
-            _, _, verify_snap = build_menu_snapshot(self.platform)
-            verified = self.validation_passes(verify_snap, 'model_selected', item_key=item_key)
+            verify_menu = self.runtime.menu_snapshot()
+            verified = self.validation_passes(verify_menu, mode_active_key)
         result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
         return verified
 

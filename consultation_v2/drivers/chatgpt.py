@@ -97,12 +97,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     return False
                 clicked = self.runtime.click(target_el)
                 time.sleep(1.0)
-                # ChatGPT model selector name is static ("Model selector") — does NOT
-                # update to show current model. Verify by checking dropdown closed
-                # (target item no longer visible) and click succeeded.
                 verify_snap = self.runtime.snapshot()
-                target_still_visible = self.find_first(verify_snap, step['target'])
-                verified = bool(clicked and not target_still_visible)
+                verified = clicked and self.validation_passes(verify_snap, f"{target}_active")
                 result.add_step(f'select_{index}', verified, f"ChatGPT applied {step['target']}", selected=step['target'], snapshot=verify_snap.serializable())
                 if not verified:
                     return False
@@ -124,11 +120,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return False
             clicked = self.runtime.click(item)
             time.sleep(1.0)
-            # ChatGPT model selector name is static ("Model selector") — does NOT
-            # update to show current model. Verify by checking dropdown closed.
             verify_snap = self.runtime.snapshot()
-            target_still_visible = self.find_first(verify_snap, target_key)
-            verified = bool(clicked and not target_still_visible)
+            verified = clicked and self.validation_passes(verify_snap, f"{target}_active")
             result.add_step('select_model', verified, f'ChatGPT model set to {target}', snapshot=verify_snap.serializable())
             if not verified:
                 return False

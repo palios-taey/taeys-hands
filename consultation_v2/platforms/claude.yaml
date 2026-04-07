@@ -150,18 +150,6 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
-      role: push button
-    name_is_model: true
-  extended_thinking_active:
-    indicators:
-    - name_contains: Extended
-      role: push button
   prompt_ready:
     indicators:
     - name: Send message
@@ -176,3 +164,19 @@ validation:
     - name: Copy
       role: push button
     stop_absent: true
+  sonnet_active:
+    indicators:
+    - name_contains: Sonnet 4.6
+      role: push button
+  opus_active:
+    indicators:
+    - name_contains: Opus 4.6
+      role: push button
+  haiku_active:
+    indicators:
+    - name_contains: Haiku 4.5
+      role: push button
+  extended_thinking_active:
+    indicators:
+    - name_contains: Extended thinking
+      role: push button

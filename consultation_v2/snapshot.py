@@ -36,6 +36,10 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
         probes = [str(item).lower() for item in _listify(spec['name_contains'])]
         if not any(probe in name_lower for probe in probes):
             return False
+    if 'name_contains_all' in spec:
+        probes = [str(item).lower() for item in _listify(spec['name_contains_all'])]
+        if not all(probe in name_lower for probe in probes):
+            return False
     if 'name_pattern' in spec:
         patterns = [str(item).lower() for item in _listify(spec['name_pattern'])]
         if not any(fnmatch.fnmatch(name_lower, pattern) for pattern in patterns):

@@ -154,26 +154,6 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Open mode picker
-      role: push button
-    check_menu_item_state: true
-  deep_think_active:
-    indicators:
-    - name: Deselect Deep think
-      role: push button
-  deep_research_active:
-    indicators:
-    - name: Start research
-      role: push button
-    - name: Share & export
-      role: push button
-  tool_selected:
-    indicators:
-    - name: Tools
-      role: push button
-    check_menu_item_state: true
   prompt_ready:
     indicators:
     - name: Send message
@@ -188,3 +168,29 @@ validation:
     - name: Copy
       role: push button
     stop_absent: true
+  fast_active:
+    indicators:
+    - name: Fast Answers quickly
+      states_include: [selected]
+  thinking_active:
+    indicators:
+    - name: Thinking Solves complex problems
+      states_include: [selected]
+  pro_active:
+    indicators:
+    - name: Pro Advanced math and coding
+      states_include: [selected]
+  deep_think_active:
+    indicators:
+    - name: Deselect Deep think
+      role: push button
+  deep_research_active:
+    indicators:
+    - name: Start research
+      role: push button
+    - name: Share & export
+      role: push button
+  canvas_active:
+    indicators:
+    - name: Canvas
+      states_include: [checked]

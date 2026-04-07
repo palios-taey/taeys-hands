@@ -169,31 +169,13 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Model
-      role: push button
-    name_is_model: true
-  computer_active:
-    indicators:
-    - name: New Task
-      role: link
-  deep_research_active:
-    indicators:
-    - name: Deep research
-      role: push button
-  tool_selected:
-    indicators:
-    - name: Add files or tools
-      role: push button
-    check_menu_item_state: true
   prompt_ready:
     indicators:
     - name: Submit
       role: push button
   send_success:
     indicators:
-    - name: Stop response
+    - name_contains: Stop response
       role: push button
     timeout: 30
   response_complete:
@@ -201,3 +183,38 @@ validation:
     - name: Copy
       role: push button
     stop_absent: true
+  computer_active:
+    url_contains: /computer/
+  deep_research_active:
+    indicators:
+    - name: Deep Research
+      states_include: [checked]
+  model_council_active:
+    indicators:
+    - name: Model Council
+      states_include: [checked]
+  best_active:
+    indicators:
+    - name: Pro (Default)
+      states_include: [checked]
+  gpt_5_2_active:
+    indicators:
+    - name_contains: GPT-5.2
+      states_include: [checked]
+  claude_sonnet_4_6_active:
+    indicators:
+    - name_contains: Claude 3.6 Sonnet
+      states_include: [checked]
+  claude_opus_4_6_active:
+    indicators:
+    - name_contains: Claude 3.6 Opus
+      states_include: [checked]
+  gemini_3_1_pro_active:
+    indicators:
+    - name_contains: Gemini 3.1 Pro
+      states_include: [checked]
+  grok_4_1_active:
+    indicators:
+    - name_contains: Grok 4.1
+      states_include: [checked]
+
