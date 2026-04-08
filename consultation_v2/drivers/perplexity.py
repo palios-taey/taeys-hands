@@ -761,12 +761,19 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, 'copy_button')
         if not copy_button:
+            # Try copy_contents_button for Deep Research reports
+            copy_button = self.find_first(snap, 'copy_contents_button')
+        if not copy_button:
             result.add_step(
                 'extract_primary', False,
                 'Perplexity copy button not found',
                 snapshot=snap.serializable(),
             )
             return False
+        # Clear clipboard before clicking copy — prevents stale prompt text
+        from core import clipboard
+        clipboard.write('')
+        time.sleep(0.2)
         if not self.runtime.click(copy_button):
             result.add_step(
                 'extract_primary', False,
@@ -774,13 +781,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(0.4)
+        time.sleep(1.0)  # Wait for clipboard to update
         content = self.runtime.read_clipboard().strip()
         result.response_text = content
         verified = bool(content)
         result.add_step(
             'extract_primary', verified,
-            'Perplexity summary copied to clipboard',
+            'Perplexity response copied to clipboard',
             characters=len(content),
             preview=content[:200],
         )
