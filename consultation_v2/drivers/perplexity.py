@@ -750,14 +750,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        # For Deep Research: scroll to TOP where the report-level "Copy contents"
-        # button lives. For regular responses: scroll to bottom for the copy button.
-        if self._is_deep_research(request):
-            self.runtime.press('ctrl+Home')
-            time.sleep(0.3)
-            self.runtime.press('Home')
-        else:
-            self.runtime.press('End')
+        # Wait for response to fully render before extracting.
+        # Do NOT scroll — the copy button coordinates must match the current viewport.
         time.sleep(2.0)
 
         snap = self.runtime.snapshot()
