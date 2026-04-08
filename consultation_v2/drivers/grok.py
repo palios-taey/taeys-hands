@@ -143,6 +143,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return verified
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        self.runtime.close_stale_dialogs()
         if request.attachments and request.session_url is None:
             removed = self._remove_stale_attachment_buttons()
             if removed:

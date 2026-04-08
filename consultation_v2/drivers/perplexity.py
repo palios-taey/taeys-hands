@@ -338,6 +338,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
           5. Verify each connector's final state via a fresh re-open of the panel,
              using the same search-box approach so the item is visible.
         """
+        self.runtime.close_stale_dialogs()
         cfg_connectors = self.cfg['workflow'].get('connectors', {})
         source_targets: dict[str, str] = cfg_connectors.get('source_targets', {})
 
@@ -558,6 +559,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
+        self.runtime.close_stale_dialogs()
         for file_path in request.attachments:
             abs_path = os.path.abspath(file_path)
             snap = self.runtime.snapshot()

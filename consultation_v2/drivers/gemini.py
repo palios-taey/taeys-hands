@@ -206,6 +206,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def attach_files(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        self.runtime.close_stale_dialogs()
         for file_path in request.attachments:
             abs_path = os.path.abspath(file_path)
             snap = self.runtime.snapshot()
