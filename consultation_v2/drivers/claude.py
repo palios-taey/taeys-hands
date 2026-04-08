@@ -125,8 +125,39 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude mode item {requested_mode} not found',
                                 snapshot=menu_snap.serializable())
                 return False
-            clicked = self.runtime.click(item)
-            time.sleep(0.8)
+
+            # Extended thinking is a toggle button INSIDE the menu item, not
+            # a plain menu-item click.  Find the toggle child and flip it.
+            if requested_mode == 'extended_thinking':
+                toggle = self.find_first(menu_snap, 'toggle_extended_thinking')
+                if not toggle:
+                    result.add_step('select_mode', False,
+                                    'Claude ET toggle button not found in model dropdown',
+                                    snapshot=menu_snap.serializable())
+                    self.runtime.press('Escape')
+                    return False
+                already_on = bool(
+                    toggle.states
+                    and 'checked' in [s.lower() for s in toggle.states]
+                )
+                if already_on:
+                    # Already enabled — dismiss dropdown and confirm
+                    self.runtime.press('Escape')
+                    time.sleep(0.4)
+                    verify_snap = self.runtime.snapshot()
+                    result.add_step('select_mode', True,
+                                    'Claude extended_thinking toggle already ON',
+                                    snapshot=verify_snap.serializable())
+                    return True
+                clicked = self.runtime.click(toggle)
+                time.sleep(0.5)
+                # Dismiss dropdown after toggling
+                self.runtime.press('Escape')
+                time.sleep(0.4)
+            else:
+                clicked = self.runtime.click(item)
+                time.sleep(0.8)
+
             verify_snap = self.runtime.snapshot()
             verified = clicked and self.validation_passes(verify_snap, mode_active_key)
             result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}',
