@@ -320,24 +320,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        """
-        Enable the connectors listed in request.connectors.
-
-        Flow:
-          1. Click attach_trigger to open the attach dropdown.
-          2. Click git_connector_item to open the connectors/sources panel
-             (renders in a Firefox portal — use menu_snapshot()).
-          3. For each requested connector:
-             a. Find search_sources in the panel and click it.
-             b. Clear any existing text (Ctrl+A, Delete), then type the connector name.
-             c. Take a fresh menu_snapshot() to find the now-filtered item.
-             d. Look up the element key via workflow.connectors.source_targets.
-             e. If NOT already checked, click to enable.  If already checked, skip.
-             f. Clear the search box (Ctrl+A, Delete) before moving to the next connector.
-          4. Press Escape to close the panel.
-          5. Verify each connector's final state via a fresh re-open of the panel,
-             using the same search-box approach so the item is visible.
-        """
         self.runtime.close_stale_dialogs()
         cfg_connectors = self.cfg['workflow'].get('connectors', {})
         source_targets: dict[str, str] = cfg_connectors.get('source_targets', {})
@@ -753,16 +735,62 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     # Extraction
     # ------------------------------------------------------------------
 
+    def _is_deep_research(self, request: ConsultationRequest) -> bool:
+        """Return True if the current request is a Deep Research mode query."""
+        mode = (request.mode or '').strip().lower()
+        if mode == 'deep_research':
+            return True
+        default_mode = (
+            self.cfg.get('workflow', {}).get('defaults', {}).get('mode') or ''
+        ).strip().lower()
+        return default_mode == 'deep_research'
+
     def extract_primary(
         self,
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
+        # Wait an extra 2 s to ensure the full response is rendered before
+        # snapshotting (especially important for Deep Research report cards).
+        time.sleep(2.0)
+
         snap = self.runtime.snapshot()
+
+        # ── Deep Research: prefer copy_contents_button for the report card ──
+        if self._is_deep_research(request):
+            copy_contents = self.find_first(snap, 'copy_contents_button')
+            if copy_contents:
+                # Clear clipboard so we can detect a silent AT-SPI action failure
+                self.runtime.write_clipboard('')
+                time.sleep(0.2)
+                if not self.runtime.click(copy_contents):
+                    result.add_step(
+                        'extract_primary', False,
+                        'Perplexity copy_contents_button click failed (DR)',
+                        snapshot=snap.serializable(),
+                    )
+                    return False
+                time.sleep(1.0)
+                content = self.runtime.read_clipboard().strip()
+                if content:
+                    result.response_text = content
+                    result.add_step(
+                        'extract_primary', True,
+                        'Perplexity DR primary extracted via copy_contents_button',
+                        characters=len(content),
+                        preview=content[:200],
+                    )
+                    return True
+                # copy_contents click fired but clipboard still empty — fall
+                # through to regular copy_button below.
+                result.add_step(
+                    'extract_primary', False,
+                    'Perplexity copy_contents_button clicked but clipboard empty (DR); '
+                    'AT-SPI action may not have fired — retrying with copy_button',
+                )
+
+        # ── Standard path (or DR fallback): use copy_button ──────────
         copy_button = self.find_last(snap, 'copy_button')
-        if not copy_button:
-            # Try copy_contents_button for Deep Research reports
-            copy_button = self.find_first(snap, 'copy_contents_button')
         if not copy_button:
             result.add_step(
                 'extract_primary', False,
@@ -770,10 +798,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        # Clear clipboard before clicking copy — prevents stale prompt text
-        from core import clipboard
-        clipboard.write('')
+
+        # Clear clipboard before clicking so stale prompt text cannot be
+        # mistaken for the AI response.
+        self.runtime.write_clipboard('')
         time.sleep(0.2)
+
         if not self.runtime.click(copy_button):
             result.add_step(
                 'extract_primary', False,
@@ -781,17 +811,29 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(1.0)  # Wait for clipboard to update
+
+        time.sleep(1.0)
         content = self.runtime.read_clipboard().strip()
+
+        if not content:
+            # AT-SPI action fired but clipboard is still empty — the click did
+            # not transfer any content.  This is the known silent-failure mode.
+            result.add_step(
+                'extract_primary', False,
+                'Perplexity copy button clicked but clipboard still empty; '
+                'AT-SPI action did not transfer content',
+                snapshot=snap.serializable(),
+            )
+            return False
+
         result.response_text = content
-        verified = bool(content)
         result.add_step(
-            'extract_primary', verified,
-            'Perplexity response copied to clipboard',
+            'extract_primary', True,
+            'Perplexity primary response copied to clipboard',
             characters=len(content),
             preview=content[:200],
         )
-        return verified
+        return True
 
     def extract_additional(
         self,
@@ -800,28 +842,45 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         snap = self.runtime.snapshot()
         copy_contents = self.find_first(snap, 'copy_contents_button')
-        if copy_contents and self.runtime.click(copy_contents):
-            time.sleep(0.4)
-            content = self.runtime.read_clipboard().strip()
-            if content:
-                result.extractions.append(
-                    ExtractedArtifact(
-                        name='perplexity_full_contents.md',
-                        content=content,
-                        kind='report_export',
-                        metadata={'source': 'copy_contents_button'},
+
+        # If extract_primary already consumed copy_contents_button (DR path),
+        # skip here to avoid double-extraction of the same content.
+        if copy_contents and not self._is_deep_research(request):
+            # Clear clipboard before clicking to detect silent AT-SPI failures
+            self.runtime.write_clipboard('')
+            time.sleep(0.2)
+
+            if self.runtime.click(copy_contents):
+                time.sleep(1.0)
+                content = self.runtime.read_clipboard().strip()
+                if content:
+                    result.extractions.append(
+                        ExtractedArtifact(
+                            name='perplexity_full_contents.md',
+                            content=content,
+                            kind='report_export',
+                            metadata={'source': 'copy_contents_button'},
+                        )
                     )
-                )
+                    result.add_step(
+                        'extract_additional', True,
+                        'Perplexity full contents copied via copy_contents_button',
+                        characters=len(content),
+                        preview=content[:200],
+                    )
+                    return True
+
                 result.add_step(
                     'extract_additional', True,
-                    'Perplexity full contents copied',
-                    characters=len(content),
-                    preview=content[:200],
+                    'Perplexity copy_contents_button clicked but clipboard empty; '
+                    'AT-SPI action did not fire — skipping',
                 )
                 return True
+
+        # copy_contents_button not found, not clickable, or already used for DR primary
         result.add_step(
             'extract_additional', True,
-            'Perplexity copy_contents_button not found or yielded no content',
+            'Perplexity copy_contents_button not found or skipped (DR already extracted)',
         )
         return True
 
