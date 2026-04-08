@@ -758,7 +758,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
 
         # ── Deep Research: prefer copy_contents_button for the report card ──
         if self._is_deep_research(request):
-            copy_contents = self.find_first(snap, 'copy_contents_button')
+            # Take FRESH snapshot — atspi_obj from earlier snapshot may be stale
+            fresh_snap = self.runtime.snapshot()
+            copy_contents = self.find_first(fresh_snap, 'copy_contents_button')
             if copy_contents:
                 # Clear clipboard so we can detect a silent AT-SPI action failure
                 self.runtime.write_clipboard('')
