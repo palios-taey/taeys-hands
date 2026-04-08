@@ -763,7 +763,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 # Clear clipboard so we can detect a silent AT-SPI action failure
                 self.runtime.write_clipboard('')
                 time.sleep(0.2)
-                if not self.runtime.click(copy_contents):
+                if not self.runtime.click(copy_contents, strategy='atspi_only'):
                     result.add_step(
                         'extract_primary', False,
                         'Perplexity copy_contents_button click failed (DR)',
@@ -804,7 +804,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         self.runtime.write_clipboard('')
         time.sleep(0.2)
 
-        if not self.runtime.click(copy_button):
+        if not self.runtime.click(copy_button, strategy='atspi_only'):
             result.add_step(
                 'extract_primary', False,
                 'Perplexity copy button click failed',
