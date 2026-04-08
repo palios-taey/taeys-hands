@@ -748,10 +748,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             # copy_button's parent region.
             copy_btn = self.find_last(snap, 'copy_button')
             if copy_btn:
-                # Click near (but not on) the copy button to land inside the
-                # response scroll area without triggering the copy action.
-                # We offset upward by ~80px to land in the prose region.
-                self.runtime.click(copy_btn, offset_y=-80)
+                # Click near the copy button to focus the response area.
+                self.runtime.click(copy_btn)
             else:
                 result.add_step(
                     'extract_primary', False,
