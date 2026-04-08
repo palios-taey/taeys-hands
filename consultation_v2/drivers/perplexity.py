@@ -358,7 +358,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(0.8)
+        time.sleep(1.5)
 
         # ── Step 2: click git_connector_item to open the panel ───────
         # Attach dropdown is a React portal — must use menu_snapshot()
@@ -378,7 +378,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=menu_snap.serializable(),
             )
             return False
-        time.sleep(0.8)
+        time.sleep(2.0)
 
         # ── Step 3: for each connector, use search box to surface it ─
         for connector_name in request.connectors:
@@ -417,7 +417,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             self.runtime.press('Delete')
             time.sleep(0.1)
             self.runtime.type_text(connector_name, delay_ms=40)
-            time.sleep(0.6)
+            time.sleep(1.5)
 
             # 3c. Take a fresh snapshot — the filtered item should now be visible
             filtered_snap = self.runtime.menu_snapshot()
@@ -479,7 +479,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(0.8)
+        time.sleep(1.5)
 
         menu_snap2 = self.runtime.menu_snapshot()
         panel_trigger2 = self.find_first(menu_snap2, 'git_connector_item')
@@ -490,7 +490,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=menu_snap2.serializable(),
             )
             return False
-        time.sleep(0.8)
+        time.sleep(2.0)
 
         all_verified = True
         for connector_name in request.connectors:
@@ -510,7 +510,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 self.runtime.press('Delete')
                 time.sleep(0.1)
                 self.runtime.type_text(connector_name, delay_ms=40)
-                time.sleep(0.6)
+                time.sleep(1.5)
 
             verify_panel_snap2 = self.runtime.menu_snapshot()
             verify_item = self.find_first(verify_panel_snap2, element_key)
