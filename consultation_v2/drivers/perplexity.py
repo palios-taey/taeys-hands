@@ -777,95 +777,54 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        # Wait for response to fully render before extracting.
+        # Wait for response to fully render.
         time.sleep(2.0)
 
-        # ── Deep Research: Ctrl+A / Ctrl+C on the response body ──────
-        # The "Copy contents" button is hover-gated and conditionally mounted
-        # in AT-SPI — unreliable.  The response body is always present and
-        # focusable once generation completes.
-        if self._is_deep_research(request):
-            content = self._dr_select_all_copy(result)
+        # Use V1-proven approach: find copy buttons via fresh find_elements,
+        # AT-SPI action click, clipboard read. No snapshots, no coordinates.
+        from core.atspi import find_firefox_for_platform, get_platform_document
+        from core.tree import find_elements as raw_find_elements
+        from core.interact import atspi_click
+        from core import clipboard
 
-            if content is None:
-                # _dr_select_all_copy already recorded the failure step
-                return False
-
-            content = content.strip()
-
-            if content:
-                # Strip any leading prompt/header text if present.
-                # DR reports begin after the research-steps preamble; the
-                # substantive report typically starts with a Markdown heading.
-                # We find the first "# " heading and trim everything before it
-                # so that the extracted text starts cleanly at the report body.
-                heading_idx = content.find('\n# ')
-                if heading_idx == -1:
-                    heading_idx = content.find('\n## ')
-                if heading_idx != -1:
-                    content = content[heading_idx:].lstrip()
-
-                result.response_text = content
-                result.add_step(
-                    'extract_primary', True,
-                    'Perplexity DR primary extracted via Ctrl+A/Ctrl+C on response body',
-                    characters=len(content),
-                    preview=content[:200],
-                )
-                return True
-
-            # Clipboard empty — Ctrl+A/Ctrl+C did not produce content.
-            # Log it and fall through to the standard copy_button path.
-            result.add_step(
-                'extract_primary', False,
-                'Perplexity DR Ctrl+A/Ctrl+C produced empty clipboard; '
-                'falling back to copy_button',
-            )
-
-        # ── Standard path (non-DR, or DR fallback): use copy_button ──
-        snap = self.runtime.snapshot()
-        copy_button = self.find_last(snap, 'copy_button')
-        if not copy_button:
-            result.add_step(
-                'extract_primary', False,
-                'Perplexity copy button not found',
-                snapshot=snap.serializable(),
-            )
+        firefox = find_firefox_for_platform(self.platform)
+        doc = get_platform_document(firefox, self.platform)
+        if not doc:
+            result.add_step('extract_primary', False, 'Perplexity document not found for extraction')
             return False
 
-        # Clear clipboard before clicking so stale prompt text cannot be
-        # mistaken for the AI response.
-        self.runtime.write_clipboard('')
-        time.sleep(0.2)
+        # Find copy buttons — prefer "Copy contents" for DR, fall back to "Copy"
+        all_el = raw_find_elements(doc, fence_after=[])
+        copy_contents = [e for e in all_el if (e.get('name') or '').strip().lower() == 'copy contents' and 'button' in (e.get('role') or '')]
+        copy_regular = [e for e in all_el if (e.get('name') or '').strip().lower() in ('copy', 'copy response') and 'button' in (e.get('role') or '')]
 
-        if not self.runtime.click(copy_button, strategy='atspi_only'):
-            result.add_step(
-                'extract_primary', False,
-                'Perplexity copy button click failed',
-                snapshot=snap.serializable(),
-            )
+        target = (copy_contents[-1] if copy_contents else None) or (copy_regular[-1] if copy_regular else None)
+        if not target:
+            result.add_step('extract_primary', False, 'Perplexity no copy button found', elements=len(all_el))
             return False
 
+        # Clear clipboard, AT-SPI action click, read clipboard
+        clipboard.write('')
+        time.sleep(0.3)
+        clicked = atspi_click(target)
         time.sleep(1.0)
-        content = self.runtime.read_clipboard().strip()
+        content = (clipboard.read() or '').strip()
 
-        if not content:
+        if content:
+            result.response_text = content
             result.add_step(
-                'extract_primary', False,
-                'Perplexity copy button clicked but clipboard still empty; '
-                'AT-SPI action did not transfer content',
-                snapshot=snap.serializable(),
+                'extract_primary', True,
+                f'Perplexity response extracted via {target.get("name", "copy")} AT-SPI action',
+                characters=len(content),
+                preview=content[:200],
             )
-            return False
+            return True
 
-        result.response_text = content
         result.add_step(
-            'extract_primary', True,
-            'Perplexity primary response copied to clipboard',
-            characters=len(content),
-            preview=content[:200],
+            'extract_primary', False,
+            f'Perplexity copy button clicked but clipboard empty (button: {target.get("name", "")})',
         )
-        return True
+        return False
 
     def extract_additional(
         self,
