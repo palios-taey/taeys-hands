@@ -156,6 +156,9 @@ class ConsultationRuntime:
     def read_clipboard(self) -> str:
         return clipboard.read() or ""
 
+    def write_clipboard(self, text: str) -> bool:
+        return clipboard.write(text)
+
     # ------------------------------------------------------------------
     # Wait helpers
     # ------------------------------------------------------------------
