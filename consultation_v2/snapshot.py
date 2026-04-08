@@ -182,7 +182,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     # Since find_menu_items returns non-empty, the old fallback never fired and
     # those items were silently dropped. Now we always merge both sources.
     elements = find_elements(firefox)
-    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button'}
+    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button', 'toggle button'}
     extra = [e for e in elements if (e.get('role') or '').strip().lower() in _EXTRA_ROLES and (e.get('name') or '').strip()]
     # Dedupe by (name, role) — preserve original menu order first, then append new items.
     seen = {(m.get('name', ''), m.get('role', '')) for m in menu}
