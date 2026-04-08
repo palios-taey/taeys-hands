@@ -166,6 +166,7 @@ workflow:
     # Bug 3 follow-on: removed stale tool_targets that referenced deleted elements
     tool_targets:
       web_search: tool_web_search
+      github: tool_github
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload

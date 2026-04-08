@@ -149,6 +149,7 @@ workflow:
     tool_targets:
       research: tool_research
       web_search: tool_web_search
+      github: git_connector_item
   attachment:
     trigger: toggle_menu
     menu_target: upload_files_item

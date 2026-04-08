@@ -145,6 +145,7 @@ workflow:
       create_video: tool_create_video
       create_music: tool_create_music
       guided_learning: tool_guided_learning
+      import_code: import_code_item
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
