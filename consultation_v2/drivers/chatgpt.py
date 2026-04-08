@@ -247,8 +247,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not self.runtime.paste(abs_path):
                 self.runtime.type_text(abs_path, delay_ms=5)
             time.sleep(0.2)
-            self.runtime.press('Return')
-            time.sleep(0.8)
+            # ONE Return is sufficient: selects the file and closes the GTK dialog.
+            # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
             time.sleep(1.2)
             verify_snap = self.runtime.snapshot()
