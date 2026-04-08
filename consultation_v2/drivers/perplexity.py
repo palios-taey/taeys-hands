@@ -750,8 +750,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        # Wait an extra 2 s to ensure the full response is rendered before
-        # snapshotting (especially important for Deep Research report cards).
+        # Scroll to bottom so copy buttons are in view, then wait for render.
+        self.runtime.press('End')
         time.sleep(2.0)
 
         snap = self.runtime.snapshot()
