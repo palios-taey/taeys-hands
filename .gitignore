@@ -86,3 +86,5 @@ RELEASE_READINESS.md
 .gemini/
 .gitnexus/
 .ntm/
+.claude/worktrees/
+.ipynb_checkpoints/

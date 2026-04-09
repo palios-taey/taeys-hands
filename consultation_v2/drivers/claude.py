@@ -220,7 +220,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude toggle menu click failed for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
-            time.sleep(0.7)
+            time.sleep(1.0)
             menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
@@ -233,17 +233,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude upload item click failed for {abs_path}',
                                 snapshot=menu_snap.serializable())
                 return False
-            time.sleep(0.8)
+            time.sleep(1.0)
             self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
-            time.sleep(0.2)
+            time.sleep(0.3)
             if not self.runtime.paste(abs_path):
                 self.runtime.type_text(abs_path, delay_ms=5)
-            time.sleep(0.2)
-            # ONE Return is sufficient: selects the file and closes the GTK dialog.
-            # A second Return would hit the now-focused chat input and submit garbage.
+            time.sleep(0.3)
             self.runtime.press('Return')
-            time.sleep(3.0)
+            time.sleep(4.0)
             verify_snap = self.runtime.snapshot()
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,
