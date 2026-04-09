@@ -306,9 +306,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         url_changed = result.session_url_after and result.session_url_after != before
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(clicked and stop_seen and url_changed)
+            verified = bool(clicked and (stop_seen or url_changed))
         else:
-            verified = bool(clicked and stop_seen)
+            verified = bool(clicked and (stop_seen or url_changed))
         result.add_step(
             'send', verified, 'Claude send validated by stop button',
             url_before=before, url_after=result.session_url_after,
@@ -324,6 +324,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
         seen_stop = False
+        url_changed = bool(
+            result.session_url_after
+            and result.session_url_before
+            and result.session_url_after != result.session_url_before
+        )
 
         def _poll() -> bool:
             nonlocal seen_stop
@@ -331,10 +336,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            return seen_stop and snap.has('copy_button')
+            # Accept copy_button if stop was seen OR URL already changed
+            # (Extended Thinking on short prompts can complete in < 1s)
+            if (seen_stop or url_changed) and snap.has('copy_button'):
+                return True
+            return False
 
         completed = self.runtime.wait_until(
-            _poll, timeout=float(request.timeout), interval=1.0,
+            _poll, timeout=float(request.timeout), interval=0.5,
         )
         verify_snap = self.runtime.snapshot()
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
@@ -349,24 +358,44 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        snap = self.runtime.snapshot()
-        copy_button = self.find_last(snap, 'copy_button')
-        if not copy_button:
-            result.add_step('extract_primary', False, 'Claude copy button not found',
-                            snapshot=snap.serializable())
-            return False
-        if not self.runtime.click(copy_button):
-            result.add_step('extract_primary', False, 'Claude copy button click failed',
-                            snapshot=snap.serializable())
-            return False
-        time.sleep(0.4)
-        content = self.runtime.read_clipboard().strip()
-        result.response_text = content
-        verified = bool(content)
-        result.add_step('extract_primary', verified,
-                        'Claude response copied to clipboard',
-                        characters=len(content), preview=content[:200])
-        return verified
+        from core.atspi import find_firefox_for_platform
+        from core.tree import find_elements as raw_find_elements
+        from core.interact import atspi_click
+        from core import clipboard
+
+        # Retry: response Copy button appears after AT-SPI tree updates
+        for attempt in range(5):
+            time.sleep(3.0)
+            firefox = find_firefox_for_platform(self.platform)
+            if not firefox:
+                continue
+            try:
+                firefox.clear_cache_single()
+            except Exception:
+                pass
+            all_el = raw_find_elements(firefox, fence_after=[])
+            copy_btns = [e for e in all_el
+                         if (e.get('name') or '').strip() == 'Copy'
+                         and 'button' in (e.get('role') or '')]
+            if len(copy_btns) < 2:
+                continue  # Need at least 2: prompt Copy + response Copy
+            target = copy_btns[-1]
+            clipboard.write('')
+            time.sleep(0.3)
+            atspi_click(target)
+            time.sleep(1.5)
+            content = (clipboard.read() or '').strip()
+            if content and content != request.message:
+                result.response_text = content
+                result.add_step('extract_primary', True,
+                                f'Claude response copied ({len(content)} chars, attempt {attempt+1})',
+                                characters=len(content), preview=content[:200])
+                return True
+
+        result.add_step('extract_primary', False,
+                        f'Claude extraction failed after 5 attempts',
+                        elements=len(all_el) if all_el else 0)
+        return False
 
     # ------------------------------------------------------------------
     # Extract additional artifacts
