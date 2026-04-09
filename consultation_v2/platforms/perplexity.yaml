@@ -185,10 +185,14 @@ tree:
       name: Submit
       role: push button
     stop_button:
-      name: Stop response
+      name_contains: Stop response
       role: push button
     copy_button:
       name_contains: Copy
+      name_not_contains: query
+      role: push button
+    copy_query_button:
+      name: Copy query
       role: push button
     copy_code:
       name: Copy code

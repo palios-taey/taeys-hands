@@ -36,6 +36,10 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
         probes = [str(item).lower() for item in _listify(spec['name_contains'])]
         if not any(probe in name_lower for probe in probes):
             return False
+    if 'name_not_contains' in spec:
+        excluded = [str(item).lower() for item in _listify(spec['name_not_contains'])]
+        if any(probe in name_lower for probe in excluded):
+            return False
     if 'name_contains_all' in spec:
         probes = [str(item).lower() for item in _listify(spec['name_contains_all'])]
         if not all(probe in name_lower for probe in probes):
@@ -132,9 +136,21 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
     """
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get('tree') or {})
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi as _Atspi
+        desktop = _Atspi.get_desktop(0)
+        desktop.clear_cache_single()
+    except Exception:
+        pass
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
+    try:
+        firefox.clear_cache_single()
+    except Exception:
+        pass
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
         # Document not found — page may have navigated (e.g., Perplexity Deep Research toggle).
@@ -157,6 +173,16 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+    # Clear desktop cache to discover new portal documents that appeared
+    # since the last scan (dropdowns, overlays, file dialogs).
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi as _Atspi
+        desktop = _Atspi.get_desktop(0)
+        desktop.clear_cache_single()
+    except Exception:
+        pass
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')

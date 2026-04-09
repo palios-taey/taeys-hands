@@ -62,7 +62,7 @@ tree:
       name_contains: Copy
       role: push button
     stop_button:
-      name: Stop streaming
+      name_contains: Stop
       role: push button
     pro_indicator:
       name: Extended Pro, click to remove

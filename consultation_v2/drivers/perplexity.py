@@ -553,6 +553,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             time.sleep(0.8)
+            self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
@@ -676,7 +677,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            if snap.has('copy_button') and not snap.has('stop_button'):
+            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
                 return True
             return False
 
@@ -780,41 +781,30 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # Wait for response to fully render.
         time.sleep(2.0)
 
-        # Use V1-proven approach: find copy buttons via fresh find_elements,
-        # AT-SPI action click, clipboard read. No snapshots, no coordinates.
-        from core.atspi import find_firefox_for_platform, get_platform_document
-        from core.tree import find_elements as raw_find_elements
-        from core.interact import atspi_click
-        from core import clipboard
+        # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
+        # copy buttons. Raw find_elements bypasses cache clearing and misses
+        # elements after the long monitor polling phase.
+        snap = self.runtime.snapshot()
 
-        firefox = find_firefox_for_platform(self.platform)
-        doc = get_platform_document(firefox, self.platform)
-        if not doc:
-            result.add_step('extract_primary', False, 'Perplexity document not found for extraction')
-            return False
-
-        # Find copy buttons — prefer "Copy contents" for DR, fall back to "Copy"
-        all_el = raw_find_elements(doc, fence_after=[])
-        copy_contents = [e for e in all_el if (e.get('name') or '').strip().lower() == 'copy contents' and 'button' in (e.get('role') or '')]
-        copy_regular = [e for e in all_el if (e.get('name') or '').strip().lower() in ('copy', 'copy response') and 'button' in (e.get('role') or '')]
-
-        target = (copy_contents[-1] if copy_contents else None) or (copy_regular[-1] if copy_regular else None)
+        # Prefer "Copy contents" for DR, fall back to "Copy"
+        target = self.find_last(snap, 'copy_contents_button') or self.find_last(snap, 'copy_button')
         if not target:
-            result.add_step('extract_primary', False, 'Perplexity no copy button found', elements=len(all_el))
+            result.add_step('extract_primary', False, 'Perplexity no copy button found',
+                            snapshot=snap.serializable())
             return False
 
-        # Clear clipboard, AT-SPI action click, read clipboard
-        clipboard.write('')
+        # Clear clipboard, click via AT-SPI action, read clipboard
+        self.runtime.write_clipboard('')
         time.sleep(0.3)
-        clicked = atspi_click(target)
+        clicked = self.runtime.click(target, strategy='atspi_only')
         time.sleep(1.0)
-        content = (clipboard.read() or '').strip()
+        content = self.runtime.read_clipboard().strip()
 
         if content:
             result.response_text = content
             result.add_step(
                 'extract_primary', True,
-                f'Perplexity response extracted via {target.get("name", "copy")} AT-SPI action',
+                f'Perplexity response extracted via {target.name!r} ({len(content)} chars)',
                 characters=len(content),
                 preview=content[:200],
             )
@@ -822,7 +812,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
 
         result.add_step(
             'extract_primary', False,
-            f'Perplexity copy button clicked but clipboard empty (button: {target.get("name", "")})',
+            f'Perplexity copy button clicked but clipboard empty (button: {target.name!r})',
         )
         return False
 

@@ -54,7 +54,7 @@ tree:
       name: Send message
       role: push button
     stop_button:
-      name: Stop response
+      name: Stop
       role: push button
     copy_button:
       name_contains: Copy
@@ -180,7 +180,7 @@ validation:
       role: push button
   send_success:
     indicators:
-    - name: Stop response
+    - name: Stop
       role: push button
     timeout: 30
   response_complete:

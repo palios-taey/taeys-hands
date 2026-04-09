@@ -19,6 +19,7 @@ class ConsultationRequest:
     no_neo4j: bool = False
     session_type: Optional[str] = None
     purpose: Optional[str] = None
+    requester: Optional[str] = None
 
 
 @dataclass(slots=True)
