@@ -174,6 +174,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=menu_snap.serializable())
                 return False
             time.sleep(0.8)
+            self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
@@ -252,7 +253,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 return False
             # Complete if: (1) saw stop then copy appeared, OR
             # (2) copy present and no stop — response finished before we started
-            if snap.has('copy_button') and not snap.has('stop_button'):
+            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
                 return True
             return False
 
@@ -263,19 +264,22 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return verified
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        time.sleep(2.0)
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, 'copy_button')
         if not copy_button:
             result.add_step('extract_primary', False, 'Grok copy button not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(copy_button):
+        self.runtime.write_clipboard('')
+        time.sleep(0.3)
+        if not self.runtime.click(copy_button, strategy='atspi_only'):
             result.add_step('extract_primary', False, 'Grok copy button AT-SPI action failed', snapshot=snap.serializable())
             return False
-        time.sleep(0.4)
+        time.sleep(1.0)
         content = self.runtime.read_clipboard().strip()
         result.response_text = content
-        verified = bool(content)
-        result.add_step('extract_primary', verified, 'Grok response copied to clipboard', characters=len(content), preview=content[:200])
+        verified = bool(content) and content != request.message
+        result.add_step('extract_primary', verified, f'Grok response copied ({len(content)} chars)', characters=len(content), preview=content[:200])
         return verified
 
     def extract_additional(self, request: ConsultationRequest, result: ConsultationResult) -> bool:

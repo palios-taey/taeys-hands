@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7689')
 _driver = None
 
 
@@ -93,6 +93,96 @@ def add_message(session_id: str, role: str, content: str,
              attachments=json.dumps(attachments or []),
              handled=(role == 'user'))
     return message_id
+
+
+def create_plan(
+    platform: str, model: str, mode: str, tools: List[str],
+    message: str, attachment_path: str, session: str,
+    requester: str,
+) -> Optional[str]:
+    """Create a Plan node before consultation starts. Returns plan_id."""
+    driver = get_driver()
+    if not driver:
+        return None
+    plan_id = str(uuid.uuid4())[:16]
+    with driver.session() as s:
+        s.run("""
+            CREATE (p:Plan {
+                plan_id: $plan_id, platform: $platform,
+                model: $model, mode: $mode, tools: $tools,
+                message: $message, attachment_path: $attachment_path,
+                session: $session, requester: $requester,
+                status: 'pending', created_at: datetime(),
+                response_text: null, extraction_method: null,
+                response_at: null, step_audit: null,
+                isma_ingested: false
+            })
+        """, plan_id=plan_id, platform=platform, model=model,
+             mode=mode, tools=tools, message=message,
+             attachment_path=attachment_path, session=session,
+             requester=requester)
+    return plan_id
+
+
+def complete_plan(
+    plan_id: str, response_text: str, extraction_method: str,
+    status: str, step_audit: str,
+) -> bool:
+    """Update Plan node with response after extraction."""
+    driver = get_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as s:
+            s.run("""
+                MATCH (p:Plan {plan_id: $plan_id})
+                SET p.response_text = $response_text,
+                    p.extraction_method = $extraction_method,
+                    p.response_at = datetime(),
+                    p.status = $status,
+                    p.step_audit = $step_audit
+            """, plan_id=plan_id, response_text=response_text,
+                 extraction_method=extraction_method,
+                 status=status, step_audit=step_audit)
+        return True
+    except Exception as e:
+        logger.error("complete_plan failed: %s", e)
+        return False
+
+
+def link_plan_to_session(plan_id: str, session_id: str) -> bool:
+    """Link Plan node to ChatSession via [:RAN_IN]."""
+    driver = get_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as s:
+            s.run("""
+                MATCH (p:Plan {plan_id: $plan_id})
+                MATCH (sess:ChatSession {session_id: $session_id})
+                MERGE (p)-[:RAN_IN]->(sess)
+            """, plan_id=plan_id, session_id=session_id)
+        return True
+    except Exception as e:
+        logger.error("link_plan_to_session failed: %s", e)
+        return False
+
+
+def mark_plan_ingested(plan_id: str) -> bool:
+    """Mark Plan as ingested into ISMA."""
+    driver = get_driver()
+    if not driver:
+        return False
+    try:
+        with driver.session() as s:
+            s.run("""
+                MATCH (p:Plan {plan_id: $plan_id})
+                SET p.isma_ingested = true, p.isma_ingested_at = datetime()
+            """, plan_id=plan_id)
+        return True
+    except Exception as e:
+        logger.error("mark_plan_ingested failed: %s", e)
+        return False
 
 
 _ALLOWED_SESSION_PROPS = {'session_type', 'purpose', 'last_activity', 'url'}

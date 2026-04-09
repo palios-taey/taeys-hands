@@ -234,6 +234,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 snapshot=menu_snap.serializable())
                 return False
             time.sleep(0.8)
+            self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
@@ -242,7 +243,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
-            time.sleep(1.2)
+            time.sleep(3.0)
             verify_snap = self.runtime.snapshot()
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,

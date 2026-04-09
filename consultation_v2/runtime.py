@@ -75,12 +75,46 @@ class ConsultationRuntime:
 
         return closed
 
+    def focus_file_dialog(self) -> bool:
+        """Focus the GTK file dialog window before sending Ctrl+L.
+
+        Without this, Ctrl+L targets Firefox's address bar instead of
+        the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
+        approach (tools/attach.py).
+        """
+        env = dict(os.environ)
+        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+
+        for title in ("File Upload", "Open", "Open File"):
+            try:
+                r = subprocess.run(
+                    ["xdotool", "search", "--name", title],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    env=env,
+                )
+                if r.stdout.strip():
+                    wid = r.stdout.strip().split("\n")[0]
+                    subprocess.run(
+                        ["xdotool", "windowactivate", wid],
+                        capture_output=True,
+                        timeout=5,
+                        env=env,
+                    )
+                    logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
+                    time.sleep(0.5)
+                    return True
+            except Exception:
+                pass
+        logger.warning("focus_file_dialog: no file dialog window found")
+        return False
+
     # ------------------------------------------------------------------
     # Display / navigation helpers
     # ------------------------------------------------------------------
 
     def switch(self) -> bool:
-        # Try standard switch — works when PLATFORM_DISPLAYS env is set
         if inp.switch_to_platform(self.platform):
             return True
         # Fallback: if DISPLAY is already set correctly for this platform,

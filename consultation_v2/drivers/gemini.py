@@ -236,6 +236,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                 menu=menu_snap.serializable())
                 return False
             time.sleep(0.8)
+            self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):

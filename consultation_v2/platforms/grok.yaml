@@ -70,7 +70,7 @@ tree:
       name: Edit
       role: push button
     stop_button:
-      name: Stop
+      name: Stop model response
       role: push button
     regenerate:
       name: Regenerate

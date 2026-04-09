@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--no-neo4j', action='store_true')
     parser.add_argument('--session-type', default=None)
     parser.add_argument('--purpose', default=None)
+    parser.add_argument('--requester', default=None,
+                        help='Node ID of the requester (for notifications)')
     return parser
 
 
@@ -44,6 +46,7 @@ def main() -> int:
         no_neo4j=args.no_neo4j,
         session_type=args.session_type,
         purpose=args.purpose,
+        requester=args.requester,
     )
     result = run_consultation(request)
     payload = result.serializable()
