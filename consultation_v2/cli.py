@@ -16,12 +16,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--model', default=None)
     parser.add_argument('--mode', default=None)
     parser.add_argument('--tool', action='append', default=[])
+    parser.add_argument('--connector', action='append', default=[],
+                        help='Connector name to enable, e.g. github, web (repeatable)')
     parser.add_argument('--session-url', default=None)
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--output', default=None)
     parser.add_argument('--no-neo4j', action='store_true')
     parser.add_argument('--session-type', default=None)
     parser.add_argument('--purpose', default=None)
+    parser.add_argument('--requester', default=None,
+                        help='Node ID of the requester (for notifications)')
     return parser
 
 
@@ -35,12 +39,14 @@ def main() -> int:
         model=args.model,
         mode=args.mode,
         tools=list(args.tool or []),
+        connectors=list(args.connector or []),
         session_url=args.session_url,
         timeout=args.timeout,
         output_path=args.output,
         no_neo4j=args.no_neo4j,
         session_type=args.session_type,
         purpose=args.purpose,
+        requester=args.requester,
     )
     result = run_consultation(request)
     payload = result.serializable()

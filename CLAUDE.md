@@ -3,7 +3,165 @@
 ## What This Is
 MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT, Claude, Gemini, Grok, Perplexity via accessibility tree (no coordinates, no screenshots).
 
-## Architecture: Plan → Audit → Send → Monitor
+---
+
+## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
+
+### 1. YAML = exact AT-SPI truth
+Every `element_map` entry has the EXACT `name` and `role` from a live AT-SPI scan. Not approximate, not broadened. If the scan says `[menu item] "Upload files or images"`, the YAML says:
+```yaml
+upload_files_item:
+  name: "Upload files or images"
+  role: menu item
+```
+No `name_contains` when the full name is known. No fallbacks. No wildcards.
+
+### 2. Driver code = zero platform knowledge
+Drivers NEVER hardcode element names, key names, or platform-specific strings. ALL element lookups go through the YAML:
+```python
+# CORRECT — read from workflow, look up in element_map
+target_key = workflow['mode_targets'][requested_mode]
+element = self.find_first(snap, target_key)
+
+# WRONG — hardcoded key name (platform knowledge in driver)
+element = self.find_first(snap, 'computer_mode')
+```
+
+### 3. YAML drives the driver, never the reverse
+If the YAML has a key name and the driver uses a different key name, the DRIVER is wrong. Never rename YAML keys to match driver hardcoding. Fix the driver.
+
+### 4. Two scan scopes
+- `snapshot()` — document subtree (main page elements)
+- `menu_snapshot()` — Firefox app root (React portals, dropdown overlays)
+Post-click dropdown reads MUST use `menu_snapshot()`. Pre-click trigger finds use `snapshot()`.
+
+### 5. Validation checks must target persistent elements
+After closing a dropdown, radio menu items inside it are GONE from the AT-SPI tree. Validation specs (`*_active`) must check elements that persist (e.g., toolbar push buttons with `states_include: [checked]`).
+
+### 6. URL is a gate for new sessions
+For `session="new"`: send success requires BOTH stop button appeared AND URL changed. No URL change = send failed.
+For follow-up sessions (existing URL): URL may not change — gate on stop button only.
+URL is always captured for session tracking.
+
+### 7. No fallbacks, no broadening
+If an element isn't found: scan the tree, get the real name, fix the YAML. Never add try-then-that chains.
+
+---
+
+## Change Process — MANDATORY
+
+### Claude (this session) does NOT edit code or YAML directly. Ever.
+
+**Claude's role:**
+1. **Observe** — AT-SPI scans, screenshots, read files
+2. **Package audits** — document mismatches between YAML and live AT-SPI tree
+3. **Send to Chats** — ChatGPT/Gemini/Perplexity/Grok analyze and propose fixes
+4. **Spawn sub-agents** — with Chat-validated fixes + the rules from this section
+5. **Validate** — screenshots and AT-SPI scans after every change
+
+**Who can edit files:**
+- **Sub-agents only** — spawned via Agent tool, given explicit instructions
+- Every sub-agent receives THE RULE (this section) in their prompt
+- Every fix must be validated by a Chat before the sub-agent applies it
+
+**The workflow for every change:**
+```
+1. Claude scans AT-SPI tree → finds mismatch
+2. Claude packages audit (YAML + tree + driver code + problems)
+3. Claude sends audit to a Chat (with THE RULE attached)
+4. Chat provides exact fixes (complete files, not diffs)
+5. Claude spawns sub-agent with Chat's fixes + THE RULE
+6. Sub-agent applies changes and commits
+7. Claude validates with screenshots + AT-SPI scan
+8. If validation fails → back to step 1 (new scan, not a guess)
+```
+
+**What goes to every Chat and sub-agent:**
+- The rules from this section (copy verbatim)
+- The current YAML being fixed
+- The current driver code being fixed
+- The live AT-SPI scan output
+- Specific bugs with line numbers
+
+---
+
+## Behavioral Guardrails
+
+- **Verify before reporting.** NEVER say "sent" or "running" without confirming output files exist and contain expected content.
+- **First error = full stop.** Do not retry. Do not patch. Diagnose root cause.
+- **Look at the screen.** When any UI op fails: `DISPLAY=:X scrot /tmp/screenshot.png` then read the image. BEFORE debugging code.
+- **Know your branch.** V2 code is on `consultation-v2-isolated-drivers`, NOT main.
+- **Use production scripts.** Never launch Firefox/bots/tests manually.
+- **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
+- **Screenshot before AND after EVERY action.** When debugging, take a screenshot before and after each click/keypress. Then scan AT-SPI and compare against the screenshot. If they don't match, the AT-SPI tree needs refreshing. This is how you determine if the issue is code, timing, or tree staleness.
+- **This is faster.** More steps but every step moves forward with certainty. Guessing leads to wrong fixes that break working code, which costs 10x more time. The Grok attach debug proved this: 4 screenshots + 1 AT-SPI check = root cause found in minutes. Without screenshots, I spent hours on wrong assumptions (dropdown staying open, Escape fixes, etc.) that were all wrong. Slow is fast.
+
+---
+
+## Consultation V2 — Isolated Driver Architecture
+
+**Branch:** `consultation-v2-isolated-drivers` (NOT merged to main)
+**Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
+**Status:** Under repair — audit findings being addressed (2026-04-07)
+
+### Structure
+```
+consultation_v2/
+  cli.py              — Standalone CLI entrypoint
+  orchestrator.py     — Platform→Driver registry
+  runtime.py          — AT-SPI operations (click, paste, snapshot, menu_snapshot)
+  snapshot.py         — Tree scanning, element classification
+  types.py            — ConsultationRequest, ConsultationResult, Snapshot
+  yaml_contract.py    — YAML loader with LRU cache
+  drivers/
+    base.py           — BaseConsultationDriver (find_first, validation_passes)
+    chatgpt.py        — ChatGPT driver
+    claude.py         — Claude driver
+    gemini.py         — Gemini driver
+    grok.py           — Grok driver
+    perplexity.py     — Perplexity driver
+  platforms/          — YAML configs (one per platform)
+    chatgpt.yaml, claude.yaml, gemini.yaml, grok.yaml, perplexity.yaml
+```
+
+### Isolation Rules
+- No driver imports from another driver
+- Each driver imports only from `base`, `types`, `runtime`
+- All platform-specific element names/roles in YAML `element_map`
+- All validation specs in YAML `validation` section
+- Two scan scopes: `snapshot()` (document tree) and `menu_snapshot()` (app-root for React portals/dropdowns)
+
+### The 8-Step Consultation Flow
+1. `navigate` — Open platform URL
+2. `select_model_mode_tools` — Set model/mode/tools via YAML workflow targets
+3. `attach_files` — Upload consultation package
+4. `enter_prompt` — Paste message into input
+5. `send_prompt` — Click send, confirm via stop button + URL change for new sessions (see Rule 6)
+6. `wait_for_completion` — Poll until stop button disappears
+7. `extract_response` — Copy button → clipboard
+8. `store_result` — Write to Neo4j
+
+### Display Mappings (machine.env)
+Config: `~/.taey/machine.env` — no hardcoded display numbers.
+**Mira:** :2=ChatGPT, :3=Claude, :4=Gemini, :5=Grok, :6=Perplexity
+**Thor:** :6=Gemini, :7=Grok, :9=Perplexity, :13=ChatGPT
+
+---
+
+## Training Data Status (2026-04-07)
+
+| Dataset | Location | Count | Notes |
+|---------|----------|-------|-------|
+| SFT | `/home/mira/training/sft_balanced_all.jsonl` | 24,388 pairs | Constitutional/identity + bot-generated |
+| DPO | `/home/mira/training/dpo_all.jsonl` | 27,288 pairs | Claude/Gemini/Grok/Perplexity complete |
+| Infra docs | `/home/mira/data/corpus/tier0_infra/raw/` | 435 docs | NCCL, Jetson, CUDA, FSDP — NOT yet used for SFT |
+
+- **DPO gap:** ChatGPT needs ~3,726 more pairs
+- **Infra SFT:** Previous attempt used WRONG corpus (deleted). Real docs exist but need training plan.
+
+---
+
+## Architecture: Plan → Audit → Send → Monitor (V1 — MCP Tools)
 
 ### The Pipeline (MUST be followed in order)
 
@@ -231,3 +389,105 @@ redis-cli LPUSH "taey:conductor:inbox" '{"from":"taeys-hands","type":"message","
 Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 
 **Consultation results go to the REQUESTER**, not to conductor. If weaver requests a consultation, route the result to `taey:weaver:inbox`. If infra requests one, route to `taey:infra:inbox`. Only send to conductor for consultations conductor requested.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **taeys-hands** (1517 symbols, 4612 relationships, 123 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/taeys-hands/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/taeys-hands/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/taeys-hands/clusters` | All functional areas |
+| `gitnexus://repo/taeys-hands/processes` | All execution flows |
+| `gitnexus://repo/taeys-hands/process/{name}` | Step-by-step execution trace |
+
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope
+4. All d=1 (WILL BREAK) dependents were updated
+
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+npx gitnexus analyze
+```
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+npx gitnexus analyze --embeddings
+```
+
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
+
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

@@ -1,5 +1,6 @@
 platform: claude
 click_strategy: xdotool_first
+navigation_key: F6
 urls:
   fresh: https://claude.ai/new
   verify_navigation: false
@@ -41,53 +42,29 @@ tree:
   - name: Code
     role: link
   element_map:
+    # -- Main page persistent elements --
     input:
       name: Write your prompt to Claude
       role: entry
       states_include:
       - editable
     toggle_menu:
-      name_contains:
-      - Add files
-      - Toggle menu
+      name: Add files, connectors, and more
       role: push button
-    upload_files_item:
-      name_contains:
-      - Add files
-      - Add content
-      role_contains: item
-    git_connector_item:
-      name: Add from GitHub
-      role_contains: item
-    model_selector:
-      name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
+    send_button:
+      name: Send message
       role: push button
-    model_opus:
-      name_contains: Opus 4.6 Most capable
-      role: push button
-    model_sonnet:
-      name_contains: Sonnet 4.6 Most efficient
-      role: push button
-    model_haiku:
-      name_contains: Haiku 4.5 Fastest
-      role: push button
-    model_sonnet_extended:
-      name: Sonnet 4.6 Extended
-      role: push button
-    model_extended_thinking:
-      name_contains: Extended thinking
-      role: push button
-    model_more:
-      name: More models
+    stop_button:
+      name: Stop
       role: push button
     copy_button:
       name_contains: Copy
-      role_contains: button
-    stop_button:
-      name_contains: Stop response
+      role: push button
+    open_sidebar:
+      name: Open sidebar
+      role: push button
+    incognito:
+      name_contains: Use incognito
       role: push button
     prompt_categories:
       name: Prompt categories
@@ -98,20 +75,66 @@ tree:
       - Learn
       - Code
       - Life stuff
-      - From Drive
+      - "Claude's choice"
       role: page tab
-    open_sidebar:
-      name: Open sidebar
+
+    # -- Toggle-menu portal items (require menu_snapshot) --
+    upload_files_item:
+      name: "Add files or photos Ctrl+U"
+      role: menu item
+    take_screenshot:
+      name: Take a screenshot
+      role: menu item
+    add_to_project:
+      name: Add to project
+      role: menu item
+    git_connector_item:
+      name: Add from GitHub
+      role: menu item
+    skills:
+      name: Skills
+      role: menu item
+    add_connectors:
+      name: Add connectors
+      role: menu item
+    tool_research:
+      name: Research
+      role: check menu item
+    tool_web_search:
+      name: Web search
+      role: check menu item
+    use_style:
+      name: Use style
+      role: menu item
+
+    # -- Model selector (label changes with active model) --
+    model_selector:
+      name_contains:
+      - Opus 4.6
+      - Sonnet 4.6
+      - Haiku 4.5
       role: push button
-    incognito:
-      name_contains: Use incognito
-      role: push button
-    send_button:
-      name: Send message
-      role: push button
-    scroll_to_bottom:
-      name: Scroll to bottom
-      role: push button
+
+    # -- Model / mode menu items (require menu_snapshot after clicking selector) --
+    model_opus:
+      name: Opus 4.6 Most capable for ambitious work
+      role: menu item
+    model_sonnet:
+      name: Sonnet 4.6 Most efficient for everyday tasks
+      role: menu item
+    model_haiku:
+      name: Haiku 4.5 Fastest for quick answers
+      role: menu item
+    model_extended_thinking:
+      name: "Extended thinking Think longer for complex tasks"
+      role: menu item
+    toggle_extended_thinking:
+      name: Extended thinking
+      role: toggle button
+    model_more:
+      name: More models
+      role: menu item
+
 workflow:
   defaults:
     model: null
@@ -127,16 +150,20 @@ workflow:
     tool_targets:
       research: tool_research
       web_search: tool_web_search
+      github: git_connector_item
   attachment:
     trigger: toggle_menu
     menu_target: upload_files_item
     open_method: atspi_menu
+    # Keyboard shortcut: Ctrl+U opens file dialog directly, bypassing
+    # the toggle_menu portal entirely. More reliable than AT-SPI menu
+    # click because it avoids stale portal/menu_snapshot issues.
+    keyboard_shortcut: ctrl+u
   prompt:
     input: input
     send_button: send_button
   send:
     trigger: send_button
-    require_new_url: true
     stop_key: stop_button
   monitor:
     stop_key: stop_button
@@ -146,30 +173,39 @@ workflow:
     strategy: last_by_y
   extra_extract:
     strategy: none
+
 validation:
   attach_success:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
-      role: push button
-    name_is_model: true
   prompt_ready:
     indicators:
     - name: Send message
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop response
+    - name: Stop
       role: push button
     timeout: 30
   response_complete:
     indicators:
     - name_contains: Copy
-      role_contains: button
+      role: push button
     stop_absent: true
+  sonnet_active:
+    indicators:
+    - name_contains: Sonnet 4.6
+      role: push button
+  opus_active:
+    indicators:
+    - name_contains: Opus 4.6
+      role: push button
+  haiku_active:
+    indicators:
+    - name_contains: Haiku 4.5
+      role: push button
+  extended_thinking_active:
+    indicators:
+    - name_contains: Extended
+      role: push button

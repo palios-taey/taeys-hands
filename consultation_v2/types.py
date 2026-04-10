@@ -12,12 +12,14 @@ class ConsultationRequest:
     model: Optional[str] = None
     mode: Optional[str] = None
     tools: List[str] = field(default_factory=list)
+    connectors: List[str] = field(default_factory=list)
     session_url: Optional[str] = None
     timeout: int = 3600
     output_path: Optional[str] = None
     no_neo4j: bool = False
     session_type: Optional[str] = None
     purpose: Optional[str] = None
+    requester: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -143,6 +145,7 @@ class ConsultationResult:
                 'model': self.request.model,
                 'mode': self.request.mode,
                 'tools': list(self.request.tools),
+                'connectors': list(self.request.connectors),
                 'session_url': self.request.session_url,
                 'timeout': self.request.timeout,
                 'no_neo4j': self.request.no_neo4j,

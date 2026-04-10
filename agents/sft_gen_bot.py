@@ -941,7 +941,7 @@ def main():
     output_dir = SFT_OUTPUT_DIR  # DPO routing handled per-topic in process_platform_v2
 
     # V3 tracker — counts actual records on disk, no state file
-    from agents.sft_tracker import SFTTracker, SFT_TARGET_PER_PLATFORM, DPO_TARGET_PER_PLATFORM
+    from agents.sft_tracker import SFTTracker, SFT_TARGETS, DPO_TARGET_PER_PLATFORM
     tracker = SFTTracker()
     log.info(f"Starting V2 generation ({args.round}) on {args.platforms}")
     log.info(tracker.stats())
@@ -1042,7 +1042,7 @@ def main():
             topic_key = topic['key']
             is_dpo = topic_key.startswith('dpo_')
             current_total = tracker._dpo_count(platform) if is_dpo else tracker._sft_count(platform)
-            target_total = DPO_TARGET_PER_PLATFORM if is_dpo else SFT_TARGET_PER_PLATFORM
+            target_total = DPO_TARGET_PER_PLATFORM if is_dpo else SFT_TARGETS.get(platform, SFT_TARGETS['default'])
             remaining = target_total - current_total
             log.info(f"=== Cycle {cycle} — {platform} — {topic_key} ({remaining} {('DPO' if is_dpo else 'SFT')} remaining) ===")
 
