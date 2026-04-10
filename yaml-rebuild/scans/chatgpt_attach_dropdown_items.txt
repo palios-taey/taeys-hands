@@ -1,0 +1,13 @@
+# ChatGPT Attach Dropdown Menu Items
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Add files and more" push button @ (798, 690)
+# State: Home page, Extended Pro active
+#
+# Only actual menu items (filtered from sidebar list items):
+
+[menu item] "Add photos & files Control U" @ (894,732)  states=[showing, focusable, enabled]
+[menu item] "Recent files" @ (894,768)  states=[showing, focusable, enabled]
+[radio menu item] "Create image" @ (894,813)  states=[showing, focusable, enabled]
+[radio menu item] "Deep research" @ (894,849)  states=[showing, focusable, enabled]
+[radio menu item] "Web search" @ (894,885)  states=[showing, focusable, enabled]
+[menu item] "More" @ (894,921)  states=[showing, focusable, enabled]

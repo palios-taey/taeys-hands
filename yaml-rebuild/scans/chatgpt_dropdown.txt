@@ -1,0 +1,69 @@
+# AT-SPI Tree Scan
+# Display: :2
+# Label: chatgpt_dropdown
+# Scope: menu
+# Screenshot: chatgpt_dropdown.png
+#
+# Format: [role] "name" @ (x,y) size=(WxH) states=[...] desc="..."
+# Indentation shows parent-child relationships.
+#
+
+=== MENU/PORTAL ELEMENTS (non-document) ===
+
+[application] "Firefox"   [showing, visible]
+  [frame] "ChatGPT — Mozilla Firefox" @ (320,62)  [showing, visible, enabled, focusable]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [menu] "" @ (-1,-1)  [enabled]
+    [tool bar] "Menu Bar" @ (-1,-1)  [showing, visible, enabled]
+      [menu bar] "Application" @ (320,62)  [visible, enabled]
+        [menu] "File" @ (320,62)  [visible, enabled, focusable]
+        [menu] "Edit" @ (355,62)  [visible, enabled, focusable]
+        [menu] "View" @ (392,62)  [visible, enabled, focusable]
+        [menu] "History" @ (434,62)  [visible, enabled, focusable]
+        [menu] "Bookmarks" @ (493,62)  [visible, enabled, focusable]
+        [menu] "Tools" @ (577,62)  [visible, enabled, focusable]
+        [menu] "Help" @ (623,62)  [visible, enabled, focusable]
+    [tool bar] "Browser tabs" @ (320,62)  [showing, visible, enabled]
+      [toggle button] "Firefox View" @ (320,62)  [showing, visible, enabled]
+        [page tab] "ChatGPT" @ (365,62)  [showing, visible, selected, enabled, focusable]
+          [push button] "Close tab" @ (566,72)  [showing, enabled]
+        [push button] "Open a new tab (Ctrl+T)" @ (590,62)  [showing, visible, enabled]
+      [push button] "List all tabs" @ (1560,62)  [showing, visible, enabled]
+    [tool bar] "Navigation" @ (320,106)  [showing, visible, enabled]
+      [push button] "Sidebars" @ (320,106)  [showing, visible, enabled]
+      [push button] "Back" @ (362,106)  [showing, visible, enabled]
+        [menu] "Back" @ (-1,-1)  [enabled]
+      [push button] "Forward" @ (398,106)  [showing, visible]
+        [menu] "Forward" @ (-1,-1)  [enabled]
+      [push button] "Reload" @ (434,106)  [showing, visible, enabled]
+        [push button] "Google, pick a search engine" @ (576,-889)  [showing, visible, enabled]
+          [menu] "Google, pick a search engine" @ (-1,-1)  [enabled]
+        [push button] "View site information" @ (576,112)  [showing, visible, enabled]
+        [push button] "You have granted this website additional permissions." @ (604,112)  [showing, visible, enabled]
+          [entry] "Search with Google or enter address" @ (636,112)  [showing, visible, enabled, editable, focusable]
+          [menu] "" @ (-1,-1)  [enabled]
+        [push button] "Bookmark this page (Ctrl+D)" @ (1352,112)  [showing, visible, enabled]
+      [push button] "Account" @ (1486,106)  [showing, visible, enabled]
+      [push button] "Extensions" @ (1522,106)  [showing, visible, enabled]
+      [push button] "Firefox" @ (1558,106)  [showing, visible, enabled]
+          [document web] (SKIPPED)
+          [document web] (SKIPPED)

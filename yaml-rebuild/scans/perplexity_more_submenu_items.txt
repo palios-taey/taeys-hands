@@ -1,0 +1,6 @@
+# Perplexity "More" Submenu
+# Captured: 2026-04-10 via AT-SPI scan while submenu expanded
+# Parent: "More" menu item in attach dropdown
+# Screenshot: perplexity_more_submenu.png
+
+[radio menu item] "Learn step by step" @ (986,804)  states=[showing, enabled, focusable]

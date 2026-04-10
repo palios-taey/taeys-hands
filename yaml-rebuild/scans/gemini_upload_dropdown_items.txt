@@ -1,0 +1,9 @@
+# Gemini Upload File Menu
+# Captured: 2026-04-10 via scan_tree.py
+# Trigger: "Open upload file menu" push button @ (747, 933)
+# Screenshot: gemini_upload_dropdown.png
+
+[menu item] "Upload files. Documents, data, code files" @ (747,753)  states=[showing, visible, enabled, focusable]
+[menu item] "Add from Drive. Sheets, Docs, Slides" @ (747,793)  states=[showing, visible, enabled, focusable]
+[menu item] "Import code" @ (747,833)  states=[showing, visible, enabled, focusable]
+[menu item] "NotebookLM" @ (747,873)  states=[showing, visible, enabled, focusable]

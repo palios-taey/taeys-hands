@@ -1,0 +1,7 @@
+# Grok Attach Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Attach" push button @ (719, 598)
+# State: Home page
+
+[menu item] "Upload a file" @ (767,647)  states=[showing, focusable, enabled]
+[menu item] "Recent" @ (767,688)  states=[showing, focusable, enabled]
