@@ -34,6 +34,12 @@ attach_method: atspi_menu
 # How dropdowns work: AT-SPI enumerates menu items after click
 dropdown_method: atspi_enum
 
+workflow:
+  attachment:
+    # Ctrl+U opens file dialog directly, bypassing AT-SPI portal scanning.
+    # More reliable than toggle_menu → menu_snapshot → upload_files_item.
+    keyboard_shortcut: ctrl+u
+
 consultation_defaults:
   model: null
   mode: extended_thinking

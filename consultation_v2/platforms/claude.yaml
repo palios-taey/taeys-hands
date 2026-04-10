@@ -155,6 +155,10 @@ workflow:
     trigger: toggle_menu
     menu_target: upload_files_item
     open_method: atspi_menu
+    # Keyboard shortcut: Ctrl+U opens file dialog directly, bypassing
+    # the toggle_menu portal entirely. More reliable than AT-SPI menu
+    # click because it avoids stale portal/menu_snapshot issues.
+    keyboard_shortcut: ctrl+u
   prompt:
     input: input
     send_button: send_button
