@@ -67,8 +67,25 @@ tree:
     incognito:
       name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
       role: push button
+    # ─── Mode tiles (toolbar chips next to "+" attach button) ─────────────
+    # IMPORTANT: Mode tiles have TWO visual states in Perplexity's UI:
+    #   - INACTIVE (with "+"): tile is just an available option, NOT selected.
+    #     AT-SPI shows as push button with name "Computer" or "Deep research".
+    #     Presence does NOT mean the mode is active.
+    #   - ACTIVE (no "+" / with "×" on hover): mode IS selected.
+    #     AT-SPI shows "Remove" push button adjacent (appears on hover).
+    #     The "Deep research" tile appears WITHOUT "+" when active.
+    # To CHECK if a mode is active: look for the tile WITHOUT a "+" and
+    # without a sibling "Computer" inactive tile. If "Computer" push button
+    # is present alongside "Deep research", only ONE is active — the one
+    # that does NOT have "+" visually.
+    # To SELECT a mode: use the attach dropdown radio menu items (below),
+    # NOT the toolbar tiles. do_action(0) on the radio menu item works.
     deep_research_toggle:
       name: Deep research
+      role: push button
+    computer_mode:
+      name: Computer
       role: push button
     suggestion_tabs:
       name: Primer query categories
