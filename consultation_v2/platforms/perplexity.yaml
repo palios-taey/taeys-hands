@@ -4,9 +4,9 @@ urls:
   fresh: https://www.perplexity.ai/
   verify_navigation: false
 tree:
-  fence_after:
-  - name: Recent Collapse
-    role: push button
+  # fence_after disabled — Deep Research and input controls appear AFTER
+  # sidebar history in AT-SPI tree. Fencing cuts them off.
+  fence_after: []
   exclude:
     names:
     - User avatar
@@ -37,33 +37,185 @@ tree:
   - name: More
     role: push button
   element_map:
+    # ─── Toolbar / persistent controls ───────────────────────────────────────
     input:
+      name: ""
       role: entry
       states_include:
       - editable
     attach_trigger:
       name: Add files or tools
       role: push button
+    new_thread:
+      name: New thread Ctrl I
+      role: push button
+    dictation:
+      name: Dictation
+      role: push button
+    voice_mode:
+      name: Use voice mode
+      role: push button
+    computer_ready:
+      name: "Your Computer is ready"
+      role: push button
+    notifications:
+      name: Notifications
+      role: push button
+    scheduled:
+      name: Scheduled
+      role: push button
+    incognito:
+      name: "Use incognito: create anonymous threads that aren't saved to your history and expire after 24 hours"
+      role: push button
+    # ─── Mode tiles (toolbar chips next to "+" attach button) ─────────────
+    # IMPORTANT: Mode tiles have TWO visual states in Perplexity's UI:
+    #   - INACTIVE (with "+"): tile is just an available option, NOT selected.
+    #     AT-SPI shows as push button with name "Computer" or "Deep research".
+    #     Presence does NOT mean the mode is active.
+    #   - ACTIVE (no "+" / with "×" on hover): mode IS selected.
+    #     AT-SPI shows "Remove" push button adjacent (appears on hover).
+    #     The "Deep research" tile appears WITHOUT "+" when active.
+    # To CHECK if a mode is active: look for the tile WITHOUT a "+" and
+    # without a sibling "Computer" inactive tile. If "Computer" push button
+    # is present alongside "Deep research", only ONE is active — the one
+    # that does NOT have "+" visually.
+    # To SELECT a mode: use the attach dropdown radio menu items (below),
+    # NOT the toolbar tiles. do_action(0) on the radio menu item works.
+    deep_research_toggle:
+      name: Deep research
+      role: push button
+    computer_mode:
+      name: Computer
+      role: push button
+    suggestion_tabs:
+      name: Primer query categories
+      role: page tab list
+    suggestion_tab_for_you:
+      name: For you
+      role: page tab
+
+    # ─── Attach dropdown (Firefox root / portal — use menu_snapshot()) ────────
     upload_files_item:
-      name_contains: Upload files
+      name: "Upload files or images"
       role: menu item
     git_connector_item:
-      name: Connectors and sources
-      role_contains: item
+      name: "Connectors and sources"
+      role: menu item
+    # radio menu items — mode selection (main attach dropdown level)
+    computer_dropdown:
+      name: Computer
+      role: radio menu item
+    deep_research:
+      name: Deep research
+      role: radio menu item
+    tool_model_council:
+      name: "Model council Max"
+      role: radio menu item
+    # "More" sub-menu trigger inside attach dropdown
+    attach_more_trigger:
+      name: More
+      role: menu item
+    # "More" sub-menu items (Firefox root — use menu_snapshot())
+    mode_create_files:
+      name: "Create files and apps"
+      role: radio menu item
+    mode_learn:
+      name: "Learn step by step"
+      role: radio menu item
+
+    # ─── Persistent toolbar indicators (presence = mode active) ──────────
+    model_council_indicator:
+      name: "Model council"
+      role: push button
+    create_files_indicator:
+      name: "Create files and apps"
+      role: push button
+    learn_step_indicator:
+      name: "Learn step by step"
+      role: push button
+
+    # ─── Connectors and sources panel (Firefox root — use menu_snapshot()) ───
+    search_sources:
+      name: "Search sources"
+      role: entry
+      states_include:
+      - editable
+    clear_search:
+      name: Clear
+      role: push button
+    # Source toggles (check menu items)
+    source_web:
+      name: "Web"
+      role: check menu item
+    source_academic:
+      name: "Academic"
+      role: check menu item
+    source_gmail:
+      name: "Gmail with Calendar Gmail with Calendar"
+      role: check menu item
+    source_google_drive:
+      name: "Google Drive Google Drive"
+      role: check menu item
+    source_health:
+      name: "Health"
+      role: check menu item
+    source_social:
+      name: "Social"
+      role: check menu item
+    source_blockscout:
+      name: "Blockscout Blockscout"
+      role: check menu item
+    source_github:
+      name: "GitHub GitHub"
+      role: check menu item
+    # Cloud connectors (menu items — click to connect, not toggles)
+    add_files_from_cloud:
+      name: "Add files from cloud"
+      role: menu item
+    manage_connectors:
+      name: "Manage Connectors"
+      role: menu item
+    # Cloud service connectors (below fold — menu items, not toggleable)
+    connector_asana:
+      name: "Asana Asana"
+      role: menu item
+    connector_box:
+      name: "Box Box"
+      role: menu item
+    connector_circleback:
+      name: "Circleback Circleback"
+      role: menu item
+    connector_cloudinary:
+      name: "Cloudinary Cloudinary"
+      role: menu item
+    connector_confluence:
+      name: "Confluence Confluence"
+      role: menu item
+
+    # ─── Model selector ───────────────────────────────────────────────────────
     model_selector:
       name: Model
       role: push button
-    copy_button:
-      name: Copy
-      role: push button
-    copy_code:
-      name: Copy code
+
+    # ─── Response / post-generation controls ─────────────────────────────────
+    submit_button:
+      name: Submit
       role: push button
     stop_button:
       name_contains: Stop response
       role: push button
-    submit_button:
-      name: Submit
+    copy_button:
+      name_contains: Copy
+      name_not_contains: query
+      role: push button
+    copy_query_button:
+      name: Copy query
+      role: push button
+    copy_code:
+      name: Copy code
+      role: push button
+    copy_contents_button:
+      name: Copy contents
       role: push button
     share_button:
       name: Share
@@ -71,9 +223,6 @@ tree:
     download_button:
       name: Download
       role: push button
-    copy_contents_button:
-      name: Copy contents
-      role_contains: button
     rewrite_thread:
       name: Rewrite Thread
       role: push button
@@ -89,54 +238,45 @@ tree:
     thread_actions:
       name: Thread actions
       role: push button
-    dictation:
-      name: Dictation
-      role: push button
-    answer_mode_tabs:
-      name: Answer mode tabs
-      role: page tab list
-    answer_tab:
-      name: Answer
-      role: page tab
-    links_tab:
-      name: Links
-      role: page tab
-    images_tab:
-      name: Images
-      role: page tab
-    notifications:
-      name: Notifications
-      role: push button
-    computer_mode:
-      name: Computer
-      role: push button
-    voice_mode:
-      name: Use voice mode
-      role: push button
-    incognito:
-      name_contains: Use incognito
-      role: push button
+
 workflow:
   defaults:
     model: null
     mode: deep_research
     tools: []
   selection:
-    model_targets:
-      best: model_best
-      gpt_5_2: model_gpt_5_2
-      claude_sonnet_4_6: model_claude_sonnet_4_6
-      claude_opus_4_6: model_claude_opus_4_6
-      gemini_3_1_pro: model_gemini_3_1_pro
-      grok_4_1: model_grok_4_1
+    # model_targets: empty until live AT-SPI scan of model selector dropdown
+    # is available with exact [radio menu item] names.
+    model_targets: {}
     mode_targets:
-      deep_research: tool_deep_research
+      deep_research: deep_research
       model_council: tool_model_council
-      computer: computer_mode
+      computer: computer_dropdown
+      create_files_and_apps: mode_create_files
+      learn_step_by_step: mode_learn
+    # Modes that live inside the "More" sub-menu of the attach dropdown.
+    # The driver must click attach_more_trigger before these items are visible.
+    mode_submenu_keys:
+    - create_files_and_apps
+    - learn_step_by_step
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
     open_method: atspi_menu
+  connectors:
+    # Source toggle workflow: open attach dropdown → click git_connector_item
+    # → panel opens in portal → use menu_snapshot() for all source items.
+    trigger: attach_trigger
+    panel_trigger: git_connector_item
+    source_targets:
+      web: source_web
+      academic: source_academic
+      gmail: source_gmail
+      google_drive: source_google_drive
+      health: source_health
+      social: source_social
+      blockscout: source_blockscout
+      github: source_github
   prompt:
     input: input
     send_button: submit_button
@@ -154,21 +294,12 @@ workflow:
   extra_extract:
     strategy: copy_contents_button
     copy_contents_key: copy_contents_button
+
 validation:
   attach_success:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Model
-      role: push button
-    name_is_model: true
-  tool_selected:
-    indicators:
-    - name: Add files or tools
-      role: push button
-    check_menu_item_state: true
   prompt_ready:
     indicators:
     - name: Submit
@@ -180,6 +311,28 @@ validation:
     timeout: 30
   response_complete:
     indicators:
-    - name: Copy
+    - name_contains: Copy
       role: push button
     stop_absent: true
+  computer_active:
+    url_contains: /computer/
+  deep_research_active:
+    # Presence-only check: the "Deep research" push button appears in the
+    # toolbar when active and disappears when inactive.  It has NO checked
+    # state — states are only [showing, focusable, enabled].
+    indicators:
+    - name: Deep research
+      role: push button
+  model_council_active:
+    indicators:
+    - name: "Model council"
+      role: push button
+  create_files_and_apps_active:
+    indicators:
+    - name: "Create files and apps"
+      role: push button
+  learn_step_by_step_active:
+    indicators:
+    - name: "Learn step by step"
+      role: push button
+  # model_targets is empty — no model-specific *_active specs until dropdown scanned.

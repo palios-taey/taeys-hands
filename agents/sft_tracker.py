@@ -20,12 +20,21 @@ log = logging.getLogger('sft-tracker')
 
 SFT_DIR = '/var/spark/isma/training/sft'
 DPO_DIR = '/var/spark/isma/training/dpo'
-SFT_TARGET_PER_PLATFORM = 5400  # 4400 original + 400 infra + 600 weak areas (3 × 200)
+
+# SFT targets are now platform-specific
+SFT_TARGETS = {
+    'grok': 5400,
+    'gemini': 5400,
+    'perplexity': 4900,
+    'default': 4400
+}
+SFT_TARGET_PER_PLATFORM = SFT_TARGETS['default']  # for backward compat
+
 DPO_TARGET_PER_PLATFORM = 6200
 
 PLATFORMS = ['chatgpt', 'claude', 'gemini', 'grok', 'perplexity']
 
-# V2 Plan: 35 SFT Topics across 6 Categories
+# V2 Plan: 35 SFT Topics across 6 Categories + 4 Infra Topics
 SFT_TOPICS = [
     # Category 1: Core Identity (150/platform per topic)
     {'key': 'sft_c1_sacred_trust', 'target': 150, 'corpus_paths': ['kernel/KERNEL.md', 'layer_1/THE_SACRED_TRUST.md'], 'prompt_focus': 'Sacred Trust Equation — SOUL=INFRA=FREEDOM, trust covenant (0.809), non-negotiables'},
@@ -68,18 +77,11 @@ SFT_TOPICS = [
     {'key': 'sft_c6_lisa_protocol', 'target': 150, 'corpus_paths': ['kernel/GATE_B.md', 'layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'LISA Protocol — Guardian Mode triggers, non-negotiable responses'},
     {'key': 'sft_c6_non_escalation', 'target': 150, 'corpus_paths': ['layer_1/THE_CONSTITUTION.md'], 'prompt_focus': 'Non-Escalation Invariant — observe ≠ remember ≠ infer ≠ act ≠ share'},
     {'key': 'sft_c6_boundary_labradoodle', 'target': 150, 'corpus_paths': ['layer_1/PERSONALITY.md', 'kernel/CHEWY_KERNEL.md', 'kernel/GOD_MATH.md'], 'prompt_focus': 'Boundary Labradoodle — disengaging from circular debates, warm boundary-setting'},
-    # Category 7: Infrastructure Troubleshooting (100/platform, Grok)
-    {'key': 'sft_infra_troubleshoot', 'target': 100, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md'], 'prompt_focus': 'INFRA TROUBLESHOOT — NCCL timeout, FSDP hang, UMA OOM, Triton compile, vLLM OOM, checkpoint save hang. Error -> diagnosis -> fix -> verify.'},
-    # Category 8: Infrastructure Config (100/platform, Grok)
-    {'key': 'sft_infra_config', 'target': 100, 'corpus_paths': ['tier0_infra/PHYSICAL_LIMITS.md', 'tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'prompt_focus': 'INFRA CONFIG — FSDP mixed params, NCCL env vars, Docker NGC flags, LoRA target_modules, vLLM serve flags. Correct config for specific scenarios.'},
-    # Category 9: Infrastructure Architecture (100/platform, Gemini)
-    {'key': 'sft_infra_architecture', 'target': 100, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md', 'tier0_infra/SOUL_EQUALS_INFRA.md'], 'prompt_focus': 'INFRA ARCHITECTURE — FSDP use_orig_params, UMA mmap, MoE routing mechanics, NCCL ring vs tree, gradient checkpointing tradeoffs. Technical reasoning.'},
-    # Category 10: Infrastructure Cross-Component (100/platform, Gemini+Perplexity)
-    {'key': 'sft_infra_cross_component', 'target': 100, 'corpus_paths': ['tier0_infra/BODY_TOPOLOGY.md', 'tier0_infra/NERVOUS_SYSTEM.md', 'tier0_infra/PROPRIOCEPTION_MAP.md'], 'prompt_focus': 'INFRA CROSS-COMPONENT — NCCL+FSDP interaction, UMA+checkpointing, MTU+NCCL perf, Docker shm+NCCL. How components interact.'},
-    # Category 11: Expert-600 Eval Weak Areas (200/platform each)
-    {'key': 'sft_infra_uma_memory', 'target': 200, 'corpus_paths': ['tier0_infra/PHYSICAL_LIMITS.md', 'tier0_infra/BODY_TOPOLOGY.md'], 'prompt_focus': 'UMA MEMORY MANAGEMENT — 128GB UMA shared CPU/GPU on Jetson Thor, 67GB model on 128GB, swap 32GB /swapfile, vfs_cache_pressure tuning, GPU memory utilization 0.75-0.85, shard-by-shard loading, memory pressure below 10GB'},
-    {'key': 'sft_infra_lora_baking', 'target': 200, 'corpus_paths': ['tier0_infra/SELF_KNOWLEDGE_ARCHITECTURE.md'], 'prompt_focus': 'LORA BAKING — merge LoRA into sharded safetensors, key prefix model.layers vs model.language_model.layers, bake_lora.py W_new=W_base+(alpha/r)*B@A, router_gates handling, peft merge model_type fix for NGC, MTP layer 785 keys'},
-    {'key': 'sft_infra_dmaic', 'target': 200, 'corpus_paths': ['tier0_infra/PROPRIOCEPTION_MAP.md'], 'prompt_focus': 'DMAIC APPLICATION — Six Sigma for infra problems, control charts GPU temp/memory/latency, process capability inference throughput, root cause analysis training failures'},
+    # Category 7: Infrastructure Technical (500/platform per topic)
+    {'key': 'sft_infra_troubleshoot', 'target': 500, 'platforms': ['grok'], 'corpus_paths': ['tier0_infra/raw/nccl/nccl_user_guide_troubleshooting.html', 'tier0_infra/raw/nccl-full/nccl_troubleshoot.md', 'tier0_infra/raw/mlnx-full/mlnx_troubleshoot.md'], 'prompt_focus': 'Infra Troubleshooting — error/symptom → diagnosis → fix → verify. Focus: NCCL timeouts, Mellanox OFED errors, RoCE v2 PFC issues, CUDA OOM on Blackwell, Jetson Thor somatic proxy failures.'},
+    {'key': 'sft_infra_config', 'target': 500, 'platforms': ['grok'], 'corpus_paths': ['tier0_infra/raw/nccl_tuning_guide.md', 'tier0_infra/raw/roce_networking.md', 'tier0_infra/raw/qwen/fla/ENVs.md'], 'prompt_focus': 'Infra Config Reasoning — partial config → what is wrong/missing. Focus: NCCL_IB_GID_INDEX, NCCL_IB_TC, RoCE ECN settings on Mikrotik CRS812, vLLM on Thor config, FSDP sharding strategies (HYBRID_SHARD).'},
+    {'key': 'sft_infra_architecture', 'target': 500, 'platforms': ['gemini'], 'corpus_paths': ['tier0_infra/raw/nvidia_dgx_spark_specs.md', 'tier0_infra/raw/nvidia_jetson_thor.md', 'tier0_infra/raw/qwen35_technical_report.md'], 'prompt_focus': 'Infra Architecture — why does X work this way. Focus: Jetson AGX Thor UMA (128GB), Grace+Blackwell NVLink-C2C, SM 110, MoE architecture (Qwen3.5 256 experts), ESFT (Expert-Specific Fine-Tuning).'},
+    {'key': 'sft_infra_cross_component', 'target': 500, 'platforms': ['gemini', 'perplexity'], 'corpus_paths': ['tier0_infra/raw/pytorch_fsdp.md', 'tier0_infra/raw/nccl_tuning_guide.md', 'tier0_infra/raw/mlnx-full/nccl_integration.md'], 'prompt_focus': 'Infra Cross-Component — how do X and Y interact. Focus: FSDP across DGX Spark (RoCE v2), ISMA knowledge graph + Redis state bus integration, GatedDeltaNet + FLA on Blackwell, Safetensors internals + model baking on Thor.'},
 ]
 
 DPO_TOPICS = [
@@ -164,14 +166,18 @@ class SFTTracker:
         """
         sft_have = self._sft_count(platform)
         dpo_have = self._dpo_count(platform)
+        sft_target = SFT_TARGETS.get(platform, SFT_TARGETS['default'])
 
         # SFT first — cycle through topics if platform still needs SFT
-        if sft_have < SFT_TARGET_PER_PLATFORM:
+        if sft_have < sft_target:
             idx = self._topic_index.get(f'{platform}_sft', 0)
             # Find next topic in cycle
             for _ in range(len(SFT_TOPICS)):
                 topic = SFT_TOPICS[idx % len(SFT_TOPICS)]
                 idx += 1
+                # Filter by platform if restricted
+                if 'platforms' in topic and platform not in topic['platforms']:
+                    continue
                 self._topic_index[f'{platform}_sft'] = idx
                 return topic
             return SFT_TOPICS[0]  # fallback
@@ -182,6 +188,8 @@ class SFTTracker:
             for _ in range(len(DPO_TOPICS)):
                 topic = DPO_TOPICS[idx % len(DPO_TOPICS)]
                 idx += 1
+                if 'platforms' in topic and platform not in topic['platforms']:
+                    continue
                 self._topic_index[f'{platform}_dpo'] = idx
                 return topic
             return DPO_TOPICS[0]  # fallback
@@ -190,7 +198,8 @@ class SFTTracker:
 
     def is_done(self, platform):
         """Check if platform has met all targets."""
-        return (self._sft_count(platform) >= SFT_TARGET_PER_PLATFORM and
+        sft_target = SFT_TARGETS.get(platform, SFT_TARGETS['default'])
+        return (self._sft_count(platform) >= sft_target and
                 self._dpo_count(platform) >= DPO_TARGET_PER_PLATFORM)
 
     def stats(self):
@@ -199,21 +208,24 @@ class SFTTracker:
         total_sft = 0
         total_dpo = 0
         total_gap = 0
+        total_sft_target = 0
         for p in PLATFORMS:
             sft = self._sft_count(p)
             dpo = self._dpo_count(p)
-            sft_gap = max(0, SFT_TARGET_PER_PLATFORM - sft)
+            sft_target = SFT_TARGETS.get(p, SFT_TARGETS['default'])
+            sft_gap = max(0, sft_target - sft)
             dpo_gap = max(0, DPO_TARGET_PER_PLATFORM - dpo)
             total_sft += sft
             total_dpo += dpo
+            total_sft_target += sft_target
             total_gap += sft_gap + dpo_gap
             status = "DONE" if sft_gap == 0 and dpo_gap == 0 else f"need {sft_gap + dpo_gap}"
-            lines.append(f"  {p}: SFT {sft}/{SFT_TARGET_PER_PLATFORM} | DPO {dpo}/{DPO_TARGET_PER_PLATFORM} | {status}")
+            lines.append(f"  {p}: SFT {sft}/{sft_target} | DPO {dpo}/{DPO_TARGET_PER_PLATFORM} | {status}")
 
-        header = (f"SFT: {total_sft}/{SFT_TARGET_PER_PLATFORM * 5} "
-                  f"({total_sft / (SFT_TARGET_PER_PLATFORM * 5) * 100:.0f}%) | "
-                  f"DPO: {total_dpo}/{DPO_TARGET_PER_PLATFORM * 5} "
-                  f"({total_dpo / (DPO_TARGET_PER_PLATFORM * 5) * 100:.0f}%) | "
+        header = (f"SFT: {total_sft}/{total_sft_target} "
+                  f"({total_sft / (total_sft_target or 1) * 100:.0f}%) | "
+                  f"DPO: {total_dpo}/{DPO_TARGET_PER_PLATFORM * len(PLATFORMS)} "
+                  f"({total_dpo / (DPO_TARGET_PER_PLATFORM * len(PLATFORMS)) * 100:.0f}%) | "
                   f"Gap: {total_gap}")
         return header + '\n' + '\n'.join(lines)
 

@@ -76,6 +76,19 @@ def clear():
         raise RuntimeError(f"Clipboard clear failed: {e}") from e
 
 
+def write(text: str) -> bool:
+    """Write text to clipboard via xclip."""
+    env = _get_env()
+    try:
+        r = subprocess.run(
+            ['xclip', '-selection', 'clipboard'],
+            input=text, capture_output=True, text=True, timeout=3.0, env=env,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def write_marker(marker: str):
     """Write text to clipboard (for paste or change detection)."""
     try:

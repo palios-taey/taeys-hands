@@ -36,6 +36,14 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
         probes = [str(item).lower() for item in _listify(spec['name_contains'])]
         if not any(probe in name_lower for probe in probes):
             return False
+    if 'name_not_contains' in spec:
+        excluded = [str(item).lower() for item in _listify(spec['name_not_contains'])]
+        if any(probe in name_lower for probe in excluded):
+            return False
+    if 'name_contains_all' in spec:
+        probes = [str(item).lower() for item in _listify(spec['name_contains_all'])]
+        if not all(probe in name_lower for probe in probes):
+            return False
     if 'name_pattern' in spec:
         patterns = [str(item).lower() for item in _listify(spec['name_pattern'])]
         if not any(fnmatch.fnmatch(name_lower, pattern) for pattern in patterns):
@@ -119,43 +127,98 @@ def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_i
     return snapshot
 
 
-def build_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Snapshot]:
+    """Build AT-SPI snapshot.
+
+    scan_root controls where to scan:
+      'auto' — scan from document (default, most platforms)
+      'app'  — scan from Firefox app root (needed for React portals like ChatGPT model dropdown)
+    """
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get('tree') or {})
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi as _Atspi
+        desktop = _Atspi.get_desktop(0)
+        desktop.clear_cache_single()
+    except Exception:
+        pass
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
+    try:
+        firefox.clear_cache_single()
+    except Exception:
+        pass
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
-        raise RuntimeError(f'Document not found for {platform}')
-    url = atspi.get_document_url(doc)
-    elements = find_elements(doc, fence_after=tree_cfg.get('fence_after') or [])
+        # Document not found — page may have navigated (e.g., Perplexity Deep Research toggle).
+        # Fall back to scanning from Firefox app root.
+        scan_root = 'app'
+    url = atspi.get_document_url(doc) if doc else None
+
+    # Some platforms (ChatGPT) have elements outside the document (React portals).
+    # fence_after: [] means "no fence" — scan full app tree to catch portals.
+    # Other platforms use fence_after to cut sidebar — scan from doc only.
+    fence = tree_cfg.get('fence_after') or []
+    if scan_root == 'app' or (scan_root == 'auto' and not fence):
+        scope = firefox
+    else:
+        scope = doc
+    elements = find_elements(scope, fence_after=tree_cfg.get('fence_after') or [])
     snapshot = _classify_elements(platform, elements)
     snapshot.url = url
     return firefox, doc, snapshot
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+    # Clear desktop cache to discover new portal documents that appeared
+    # since the last scan (dropdowns, overlays, file dialogs).
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi as _Atspi
+        desktop = _Atspi.get_desktop(0)
+        desktop.clear_cache_single()
+    except Exception:
+        pass
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
     doc = atspi.get_platform_document(firefox, platform)
-    if not doc:
-        raise RuntimeError(f'Document not found for {platform}')
+    # NOTE: doc may be None if a portal/dropdown opened during navigation.
+    # Do NOT raise here — fall back gracefully; find_menu_items and find_elements
+    # will use firefox (app root) which covers React portals outside the document.
     try:
         firefox.clear_cache_single()
     except Exception:
         pass
-    try:
-        doc.clear_cache_single()
-    except Exception:
-        pass
+    if doc is not None:
+        try:
+            doc.clear_cache_single()
+        except Exception:
+            pass
 
     menu = find_menu_items(firefox, doc)
-    if not menu:
-        elements = find_elements(doc)
-        menu = [element for element in elements if (element.get('role') or '').strip().lower() in _MENU_ROLES and (element.get('name') or '').strip()]
-        menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
+
+    # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
+    # only partial results (e.g., on Claude it finds 9 file/connector items but
+    # misses Opus/Sonnet/Extended-thinking items that live in separate containers).
+    # Since find_menu_items returns non-empty, the old fallback never fired and
+    # those items were silently dropped. Now we always merge both sources.
+    elements = find_elements(firefox)
+    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button', 'toggle button'}
+    extra = [e for e in elements if (e.get('role') or '').strip().lower() in _EXTRA_ROLES and (e.get('name') or '').strip()]
+    # Dedupe by (name, role) — preserve original menu order first, then append new items.
+    seen = {(m.get('name', ''), m.get('role', '')) for m in menu}
+    for e in extra:
+        key = (e.get('name', ''), e.get('role', ''))
+        if key not in seen:
+            menu.append(e)
+            seen.add(key)
+
+    menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
     snapshot = _classify_elements(platform, menu, menu_items=menu)
-    snapshot.url = atspi.get_document_url(doc)
+    snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot

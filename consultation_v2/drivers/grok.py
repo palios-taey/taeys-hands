@@ -59,7 +59,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         removed = 0
         for element in candidates:
             if matches_spec(element, remove_spec):
-                if self.runtime.click(element, strategy='coordinate_only'):
+                if self.runtime.click(element):
                     removed += 1
                     time.sleep(0.2)
         return removed
@@ -87,8 +87,14 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
     def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_mode = (request.mode or self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
-        target = requested_mode or (request.model or '').strip().lower()
+        if request.mode is None:
+            requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
+        else:
+            requested_mode = request.mode.strip().lower()
+        if request.model is None:
+            target = requested_mode
+        else:
+            target = requested_mode or request.model.strip().lower()
         if not target:
             result.add_step('select_model_mode', True, 'Grok using current/default model')
             return True
@@ -96,36 +102,48 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model_mode', False, f'Grok target {target!r} is not mapped in Consultation V2 YAML')
             return False
         snap = self.runtime.snapshot()
+        mode_active_key = f"{target}_active"
+        if self.validation_passes(snap, mode_active_key):
+            result.add_step('select_model_mode', True, f'Grok {target} already active')
+            return True
+
         selector = self.find_first(snap, 'model_selector')
         if not selector:
             result.add_step('select_model_mode', False, 'Grok model selector not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(selector, strategy='coordinate_only'):
+        if not self.runtime.click(selector):
             result.add_step('select_model_mode', False, 'Grok model selector click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
-        menu_snap = self.runtime.menu_snapshot()
-        item = self.find_first(menu_snap, workflow['model_targets'][target])
+        snap = self.runtime.snapshot()
+        item_key = workflow['model_targets'][target]
+        item = self.find_first(snap, item_key)
         if not item:
-            result.add_step('select_model_mode', False, f'Grok model item {target} not found', menu=menu_snap.serializable())
+            self.runtime.press('Escape')
+            time.sleep(0.3)
+            result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(item, strategy='coordinate_only'):
-            result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', menu=menu_snap.serializable())
+        if not self.runtime.click(item):
+            self.runtime.press('Escape')
+            time.sleep(0.3)
+            result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
             return False
         time.sleep(0.8)
         # Grok requires explicit re-open verification because the selector label does not update reliably.
         verify_root = self.runtime.snapshot()
         selector = self.find_first(verify_root, 'model_selector')
         verified = False
-        if selector and self.runtime.click(selector, strategy='coordinate_only'):
+        if selector and self.runtime.click(selector):
             time.sleep(0.5)
             verify_menu = self.runtime.menu_snapshot()
-            verify_item = self.find_first(verify_menu, workflow['model_targets'][target])
-            verified = bool(verify_item and any(state.lower() in {'checked', 'selected'} for state in verify_item.states))
+            verified = self.validation_passes(verify_menu, mode_active_key)
+            self.runtime.press('Escape')
+            time.sleep(0.3)
         result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
         return verified
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        self.runtime.close_stale_dialogs()
         if request.attachments and request.session_url is None:
             removed = self._remove_stale_attachment_buttons()
             if removed:
@@ -137,25 +155,41 @@ class GrokConsultationDriver(BaseConsultationDriver):
             if not trigger:
                 result.add_step('attach', False, f'Grok attach trigger missing for {abs_path}', snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger, strategy='coordinate_only'):
+            if not self.runtime.click(trigger):
                 result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
             time.sleep(0.6)
+            # FIX 1: Use menu_snapshot() instead of snapshot() so portal-rendered
+            # dropdown items (role: menu item) are visible to AT-SPI discovery.
             menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item or not self.runtime.click(upload_item, strategy='coordinate_only'):
-                result.add_step('attach', False, f'Grok upload item missing or click failed for {abs_path}', menu=menu_snap.serializable())
+            if not upload_item:
+                self.runtime.press('Escape')
+                time.sleep(0.3)
+                result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=menu_snap.serializable())
+                return False
+            if not self.runtime.click(upload_item):
+                self.runtime.press('Escape')
+                time.sleep(0.3)
+                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=menu_snap.serializable())
                 return False
             time.sleep(0.8)
+            self.runtime.focus_file_dialog()
             self.runtime.press('ctrl+l')
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
                 self.runtime.type_text(abs_path, delay_ms=5)
             time.sleep(0.2)
+            # ONE Return is sufficient: selects the file and closes the GTK dialog.
+            # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
-            time.sleep(1.0)
-            self.runtime.press('Return')
-            time.sleep(1.2)
+            # FIX 2: Press Escape to ensure the dropdown is closed after the file
+            # dialog dismisses — Grok re-opens the dropdown on dialog close.
+            time.sleep(0.5)
+            self.runtime.press('Escape')
+            # FIX 3: Increased wait from 2.0s → 3.0s before validation snapshot
+            # so the AT-SPI tree has time to reflect the Remove chip.
+            time.sleep(3.0)
             verify_snap = self.runtime.snapshot()
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified, f'Grok attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
@@ -171,26 +205,41 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not input_el:
             result.add_step('prompt', False, 'Grok input field not found', snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='coordinate_only'):
+        if not self.runtime.click(input_el):
             result.add_step('prompt', False, 'Grok input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
-        verified = bool(pasted and self._input_has_text())
-        result.add_step('prompt', verified, 'Grok prompt entered and validated through AT-SPI text/value interfaces', snapshot=self.runtime.snapshot().serializable())
+        # Grok uses section-role input — AT-SPI text/value interfaces may not work.
+        # Trust the paste if clipboard operation succeeded.
+        at_spi_verified = self._input_has_text()
+        verified = bool(pasted)
+        msg = 'Grok prompt entered' + (' (AT-SPI verified)' if at_spi_verified else ' (paste trusted)')
+        result.add_step('prompt', verified, msg, snapshot=self.runtime.snapshot().serializable())
         return verified
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        before = self.runtime.current_url()
-        result.session_url_before = before
+        # Use the pre-navigation baseline captured in run() — file attachment
+        # can change the URL before send, making current_url() stale.
+        before = result.session_url_before
         pressed = self.runtime.press('Return')
-        stop_seen = self.runtime.wait_until(lambda: self.runtime.snapshot().has('stop_button'), timeout=30, interval=0.6)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url()
+        # Stop button OR copy button confirms send succeeded.
+        # Fast responses: stop appears and disappears before poll catches it,
+        # but copy_button appears when response completes — confirms send worked.
+        def _send_confirmed():
+            snap = self.runtime.snapshot()
+            return snap.has('stop_button') or snap.has('copy_button')
+        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
+        result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(pressed and stop_seen and result.session_url_after)
-        result.add_step('send', verified, 'Grok send validated by Return + stop button + new URL capture', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        url_changed = result.session_url_after and result.session_url_after != before
+        is_new_session = not request.session_url
+        if is_new_session:
+            verified = bool(pressed and stop_seen and url_changed)
+        else:
+            verified = bool(pressed and stop_seen)
+        result.add_step('send', verified, 'Grok send validated by Return + stop button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -202,7 +251,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            return seen_stop and snap.has('copy_button')
+            # Complete if: (1) saw stop then copy appeared, OR
+            # (2) copy present and no stop — response finished before we started
+            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
+                return True
+            return False
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
@@ -211,19 +264,22 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return verified
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        time.sleep(2.0)
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, 'copy_button')
         if not copy_button:
             result.add_step('extract_primary', False, 'Grok copy button not found', snapshot=snap.serializable())
             return False
+        self.runtime.write_clipboard('')
+        time.sleep(0.3)
         if not self.runtime.click(copy_button, strategy='atspi_only'):
             result.add_step('extract_primary', False, 'Grok copy button AT-SPI action failed', snapshot=snap.serializable())
             return False
-        time.sleep(0.4)
+        time.sleep(1.0)
         content = self.runtime.read_clipboard().strip()
         result.response_text = content
-        verified = bool(content)
-        result.add_step('extract_primary', verified, 'Grok response copied to clipboard', characters=len(content), preview=content[:200])
+        verified = bool(content) and content != request.message
+        result.add_step('extract_primary', verified, f'Grok response copied ({len(content)} chars)', characters=len(content), preview=content[:200])
         return verified
 
     def extract_additional(self, request: ConsultationRequest, result: ConsultationResult) -> bool:

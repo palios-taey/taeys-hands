@@ -28,19 +28,31 @@ class BaseConsultationDriver(ABC):
 
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
         validation = dict(self.cfg.get('validation', {}).get(validation_key, {}))
+        if not validation and not filename:
+            # If the validation key is missing, we assume it's NOT active
+            return False
+
+        if validation.get('url_contains'):
+            probe = str(validation['url_contains']).lower()
+            if probe not in (snapshot.url or '').lower():
+                return False
+
         indicators = validation.get('indicators') or []
         if indicators:
-            found = False
             all_elements: List[ElementRef] = []
             for items in snapshot.mapped.values():
                 all_elements.extend(items)
             all_elements.extend(snapshot.unknown)
+            all_elements.extend(snapshot.sidebar)
+
+            found = False
             for indicator in indicators:
                 if any(matches_spec(element, indicator) for element in all_elements):
                     found = True
                     break
             if not found:
                 return False
+
         file_chip = dict(validation.get('file_chip', {}))
         if filename and file_chip:
             probes = []
@@ -48,10 +60,12 @@ class BaseConsultationDriver(ABC):
             probes.append(base.lower())
             stem = base.rsplit('.', 1)[0].lower() if '.' in base else base.lower()
             probes.append(stem)
+            
             all_elements: List[ElementRef] = []
             for items in snapshot.mapped.values():
                 all_elements.extend(items)
             all_elements.extend(snapshot.unknown)
+            
             role_set = {str(role).lower() for role in file_chip.get('roles', [])}
             matched_chip = False
             for element in all_elements:
@@ -63,6 +77,7 @@ class BaseConsultationDriver(ABC):
                     break
             if not matched_chip:
                 return False
+
         if validation.get('stop_absent'):
             stop_key = self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
             if snapshot.has(stop_key):

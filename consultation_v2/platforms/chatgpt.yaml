@@ -1,14 +1,14 @@
 platform: chatgpt
 click_strategy: xdotool_first
 urls:
-  fresh: https://chatgpt.com/?temporary-chat=true
+  fresh: https://chatgpt.com/
   verify_navigation: false
 tree:
   fence_after: []
   exclude:
     names:
     - Close sidebar
-    - Turn on temporary chat
+    - Turn off temporary chat
     - Start Voice
     - Profile image
     - ChatGPT
@@ -48,23 +48,24 @@ tree:
     role: push button
   element_map:
     input:
+      name: Chat with ChatGPT
       role: entry
       states_include:
       - editable
     model_selector:
-      name_contains: Model selector
+      name: Model selector
       role: push button
     attach_trigger:
       name: Add files and more
       role: push button
     copy_button:
       name_contains: Copy
-      role_contains: button
+      role: push button
     stop_button:
-      name_contains: Stop streaming
+      name_contains: Stop
       role: push button
     pro_indicator:
-      name_pattern: Pro, click to remove
+      name: Extended Pro, click to remove
       role: push button
     thinking_mode:
       name_pattern: '*, click to remove'
@@ -73,71 +74,70 @@ tree:
       name: Extended Pro
       role: push button
     temporary_chat:
-      name_contains: Turn on temporary chat
+      name_contains: temporary chat
       role: push button
     search_chats:
-      name_contains: Search chats
+      name: Search chats Control K
+      role: push button
+    dictation:
+      name: Start dictation
       role: push button
     send_button:
       name: Send prompt
       role: push button
-    model_auto:
-      name: Auto Decides how long to think
-      role: push button
+    # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
     model_instant:
       name: Instant For everyday chats
-      role: push button
+      role: menu item
     model_thinking:
       name: Thinking For complex questions
-      role: push button
+      role: menu item
     model_pro:
       name: Pro Research-grade intelligence
-      role: push button
+      role: menu item
+    # Bug 4 fixed: "Configure..." was present in live scan, missing from YAML
     model_configure:
-      name: Configure...
-      role: push button
+      name: "Configure..."
+      role: menu item
+    # --- Extended Pro thinking selector (Firefox root / menu_snapshot) ---
     thinking_standard:
       name: Standard
-      role: push button
+      role: radio menu item
     thinking_extended:
       name: Extended
-      role: push button
-    thinking_pro_button:
-      name: Pro
-      role: push button
+      role: radio menu item
+    # --- Attach/+ dropdown items (Firefox root / menu_snapshot) ---
+    # Bug 1 fixed: was name:"Add photos and files" role:push button
+    # AT-SPI actual: [menu item] "Add photos & files Control U"
     tool_upload:
-      name_contains: Add photos
-      role_contains: item
-    tool_google_drive:
-      name: Add from Google Drive
-      role_contains: button
-    tool_deep_research:
-      name: Deep research
-      role_contains: item
-    tool_web_search:
-      name: Web search
-      role_contains: item
-    tool_study:
-      name: Study and learn
-      role_contains: item
-    tool_more:
-      name: More
-      role_contains: item
+      name: "Add photos & files Control U"
+      role: menu item
     tool_recent_files:
       name: Recent files
-      role_contains: item
+      role: menu item
+    # Bug 2 fixed: these 5 are radio menu item in AT-SPI, not menu item
+    # Bug 2 also: tool_create_image was entirely missing, now added
+    tool_create_image:
+      name: Create image
+      role: radio menu item
+    tool_web_search:
+      name: Web search
+      role: radio menu item
     tool_github:
       name: GitHub
-      role_contains: item
-    tool_agent_mode:
-      name: Agent mode
-      role_contains: item
+      role: radio menu item
     tool_gmail:
       name: Gmail
-      role_contains: item
+      role: radio menu item
     tool_quizzes:
       name: Quizzes
-      role_contains: item
+      role: radio menu item
+    # Bug 3: removed stale entries not present in current AT-SPI scan:
+    #   tool_deep_research ("Deep research")
+    #   tool_google_drive ("Add from Google Drive")
+    #   tool_study ("Study and learn")
+    #   tool_more ("More")
+    #   tool_agent_mode ("Agent mode")
 workflow:
   defaults:
     model: pro
@@ -145,7 +145,6 @@ workflow:
     tools: []
   selection:
     model_targets:
-      auto: model_auto
       instant: model_instant
       thinking: model_thinking
       pro: model_pro
@@ -153,21 +152,21 @@ workflow:
       pro_extended:
       - trigger: model_selector
         target: model_pro
-        verification: model_selected
+        verification: pro_active
       - trigger: extended_pro
         target: thinking_extended
-        verification: extended_tile
+        verification: pro_extended_active
       extended_thinking:
       - trigger: model_selector
         target: model_pro
-        verification: model_selected
+        verification: pro_active
       - trigger: extended_pro
         target: thinking_extended
-        verification: extended_tile
+        verification: extended_thinking_active
+    # Bug 3 follow-on: removed stale tool_targets that referenced deleted elements
     tool_targets:
-      deep_research: tool_deep_research
       web_search: tool_web_search
-      study_and_learn: tool_study
+      github: tool_github
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
@@ -192,15 +191,6 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name_contains: Model selector
-      role: push button
-    name_contains_model: true
-  extended_tile:
-    indicators:
-    - name: Extended Pro
-      role: push button
   prompt_ready:
     indicators:
     - name: Send prompt
@@ -215,3 +205,40 @@ validation:
     - name_contains: Copy
       role_contains: button
     stop_absent: true
+  # pro_active: Pro model is selected.
+  # pro_indicator (persistent toolbar button) is the authoritative signal —
+  # it appears as soon as Pro is active and does NOT vanish on dropdown close.
+  pro_active:
+    indicators:
+    - name: Extended Pro, click to remove
+      role: push button
+  # pro_extended_active: Pro + Extended Pro are both active.
+  # Same persistent toolbar indicator as pro_active — when Extended Pro is
+  # engaged the pro_indicator element IS present in the toolbar snapshot.
+  pro_extended_active:
+    indicators:
+    - name: Extended Pro, click to remove
+      role: push button
+  # instant_active: No persistent toolbar badge exists for Instant.
+  # Use best_effort + dropdown item check (open selector, verify item present).
+  # Driver opens the dropdown, finds the item, then closes — acceptable because
+  # best_effort: true means a miss here does not abort the run.
+  instant_active:
+    best_effort: true
+    indicators:
+    - name: Instant For everyday chats
+      role: menu item
+  # thinking_active: No persistent toolbar badge exists for Thinking.
+  # Same best_effort + dropdown item approach as instant_active.
+  thinking_active:
+    best_effort: true
+    indicators:
+    - name: Thinking For complex questions
+      role: menu item
+  # extended_thinking_active: The thinking_mode element (, click to remove)
+  # appears in the toolbar when Extended Thinking is active — use it as the
+  # primary persistent check, mirroring the pro_indicator pattern.
+  extended_thinking_active:
+    indicators:
+    - name_pattern: ', click to remove'
+      role: push button

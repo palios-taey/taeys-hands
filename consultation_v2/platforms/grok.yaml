@@ -4,9 +4,7 @@ urls:
   fresh: https://grok.com/
   verify_navigation: true
 tree:
-  fence_after:
-  - name: History
-    role: push button
+  fence_after: []
   exclude:
     names:
     - Toggle Sidebar
@@ -39,28 +37,40 @@ tree:
     role: push button
   element_map:
     input:
-      role_contains: section
+      name: ""
+      role: section
       states_include:
       - editable
       - focusable
-      - multi-line
     attach_trigger:
       name: Attach
       role: push button
     upload_files_item:
-      name: Upload a file
+      name: "Upload a file"
+      role: menu item
+    model_auto:
+      name: "Auto Chooses Fast or Expert"
+      role: menu item
+    model_fast:
+      name: "Fast Quick responses - Grok 4.20"
+      role: menu item
+    model_expert:
+      name: "Expert Thinks hard - Grok 4.20"
+      role: menu item
+    model_heavy:
+      name: "Heavy Powered by Grok 4.20"
       role: menu item
     model_selector:
       name: Model select
       role: push button
     copy_button:
-      name: Copy
+      name_contains: Copy
       role: push button
     edit_button:
       name: Edit
       role: push button
     stop_button:
-      name_contains: Stop
+      name: Stop model response
       role: push button
     regenerate:
       name: Regenerate
@@ -83,18 +93,36 @@ tree:
     create_share_link:
       name: Create share link
       role: push button
+    search:
+      name: Search
+      role: push button
+    history:
+      name: History
+      role: push button
     thought_indicator:
-      name_pattern: Thought for *
+      name_contains: Thought for
       role: push button
     scroll_down:
       name: Scroll down
       role: push button
     dictation:
-      name_pattern: Start dictation*
+      name: Dictation (Ctrl+D)
       role: push button
     voice_mode:
-      name_pattern: Enter voice mode*
+      name: Enter voice mode (Ctrl+⇧O)
       role: push button
+    sources_selector:
+      name: Sources selector
+      role: push button
+    connect_gmail:
+      name: Connect Gmail
+      role: menu item
+    connect_calendar:
+      name: Connect Google Calendar
+      role: menu item
+    connectors:
+      name: Connectors
+      role: menu item
 workflow:
   defaults:
     model: null
@@ -115,7 +143,7 @@ workflow:
   send:
     trigger: null
     submit_via_return: true
-    require_new_url: true
+    require_new_url: false
     stop_key: stop_button
   monitor:
     stop_key: stop_button
@@ -130,11 +158,6 @@ validation:
     indicators:
     - name_contains: Remove
       role_contains: button
-  model_selected:
-    indicators:
-    - name: Model select
-      role: push button
-    reopen_to_verify: true
   prompt_ready:
     check_input_value: true
   send_success:
@@ -147,3 +170,24 @@ validation:
     - name: Copy
       role: push button
     stop_absent: true
+  auto_active:
+    best_effort: true
+    indicators:
+    - name: "Auto Chooses Fast or Expert"
+      role: menu item
+  fast_active:
+    best_effort: true
+    indicators:
+    - name: "Fast Quick responses - Grok 4.20"
+      role: menu item
+  expert_active:
+    best_effort: true
+    indicators:
+    - name: "Expert Thinks hard - Grok 4.20"
+      role: menu item
+  heavy_active:
+    best_effort: true
+    indicators:
+    - name: "Heavy Powered by Grok 4.20"
+      role: menu item
+

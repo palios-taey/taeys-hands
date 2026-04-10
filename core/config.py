@@ -125,6 +125,14 @@ def get_attach_method(platform: str) -> str:
     return config.get('attach_method', 'atspi_menu')
 
 
+def get_attach_keyboard_shortcut(platform: str) -> Optional[str]:
+    """Get keyboard shortcut for file attach (e.g. 'ctrl+u'), or None."""
+    config = get_platform_config(platform)
+    workflow = config.get('workflow', {})
+    attachment = workflow.get('attachment', {})
+    return attachment.get('keyboard_shortcut')
+
+
 def get_dropdown_method(platform: str) -> str:
     """Get dropdown method: 'keyboard_nav' or 'atspi_enum'."""
     config = get_platform_config(platform)

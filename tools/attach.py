@@ -14,7 +14,8 @@ from gi.repository import Atspi
 
 from core import atspi, input as inp
 from core.config import (get_platform_config, get_attach_trigger_key, get_element_spec,
-                         get_attach_method, scan_platform_tree)
+                         get_attach_method, get_attach_keyboard_shortcut,
+                         scan_platform_tree)
 from core.tree import (find_elements, find_menu_items,
                        filter_useful_elements, detect_chrome_y)
 from core.interact import (extend_cache, find_element_at, atspi_click,
@@ -860,6 +861,29 @@ def handle_attach(platform: str, file_path: str,
         dt = _any_file_dialog_open(firefox)
         if dt:
             return _handle_file_dialog(platform, file_path, redis_client)
+
+    # Try keyboard shortcut first (e.g. Ctrl+U for Claude) — bypasses
+    # AT-SPI portal scanning entirely, avoiding stale menu_snapshot issues.
+    kb_shortcut = get_attach_keyboard_shortcut(platform)
+    if kb_shortcut:
+        logger.info("Trying keyboard shortcut %s for %s attach", kb_shortcut, platform)
+        inp.press_key(kb_shortcut)
+        time.sleep(2.0)
+        firefox_local = atspi.find_firefox(platform)
+        dt = _any_file_dialog_open(firefox_local)
+        if dt:
+            result = _handle_file_dialog(platform, file_path, redis_client)
+            if result.get('status') in ('file_attached', 'unverified'):
+                verified = _verify_attach_success(platform)
+                result['verified'] = verified
+                if verified and result.get('status') == 'unverified':
+                    result['status'] = 'file_attached'
+                    result['info'] = ("File chip verified via YAML indicators. "
+                                      "Re-inspect before further clicks.")
+            result['dialog_type'] = 'keyboard_shortcut'
+            return result
+        logger.warning("Keyboard shortcut %s did not open file dialog for %s, "
+                       "falling through to attach_method", kb_shortcut, platform)
 
     # Dispatch based on YAML attach_method
     attach_method = get_attach_method(platform)
