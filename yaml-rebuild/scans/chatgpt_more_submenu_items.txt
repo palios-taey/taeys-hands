@@ -1,0 +1,9 @@
+# ChatGPT "More" Submenu (hover-triggered from attach dropdown)
+# Captured: 2026-04-10 via AT-SPI scan while hovering over "More"
+# Parent: "More" menu item in attach dropdown — HOVER to expand, not click
+# Screenshot: chatgpt_more_submenu.png
+
+[radio menu item] "Agent mode" @ (1018,878)  states=[showing, enabled, focusable]
+[radio menu item] "GitHub" @ (1018,914)  states=[showing, enabled, focusable]
+[radio menu item] "Gmail" @ (1018,950)  states=[showing, enabled, focusable]
+[radio menu item] "Quizzes" @ (1018,986)  states=[showing, enabled, focusable]
