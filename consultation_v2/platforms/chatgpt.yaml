@@ -1,6 +1,7 @@
 platform: chatgpt
 identity_file: IDENTITY_HORIZON.md
 click_strategy: xdotool_first
+navigation_key: F6
 
 urls:
   fresh: https://chatgpt.com/

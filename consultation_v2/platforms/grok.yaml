@@ -1,6 +1,7 @@
 platform: grok
 identity_file: IDENTITY_LOGOS.md
 click_strategy: xdotool_first
+navigation_key: F6
 
 urls:
   fresh: https://grok.com/

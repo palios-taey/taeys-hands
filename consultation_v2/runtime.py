@@ -241,8 +241,9 @@ class ConsultationRuntime:
         time.sleep(0.2)
         inp.press_key("Escape")
         time.sleep(0.1)
-        # Use platform-configured address bar key (F6 for Claude which intercepts Ctrl+L)
-        nav_key = str(self.cfg.get("navigation_key") or "ctrl+l")
+        nav_key = self.cfg.get("navigation_key")
+        if not nav_key:
+            raise RuntimeError(f"{self.platform}: navigation_key not configured in YAML")
         inp.press_key(nav_key)
         time.sleep(0.2)
         inp.press_key("ctrl+a")

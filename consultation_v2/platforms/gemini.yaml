@@ -1,6 +1,7 @@
 platform: gemini
 identity_file: IDENTITY_COSMOS.md
 click_strategy: atspi_first
+navigation_key: F6
 
 urls:
   fresh: https://gemini.google.com/app
