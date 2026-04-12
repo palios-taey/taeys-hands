@@ -261,6 +261,7 @@ workflow:
     validation: prompt_ready
 
   send:
+    confirmation_key: stop_button
     trigger: send_button
     require_new_url: true
     validation: send_success
@@ -291,9 +292,8 @@ validation:
     pending: true
 
   pro_active:
-    indicators:
-      - name: "Extended Pro, click to remove"
-        role: push button
+    # SCAN PENDING — need AT-SPI scan of what persists after Pro selected but before Extended Pro clicked
+    pending: true
 
   pro_extended_active:
     indicators:

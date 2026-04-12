@@ -208,6 +208,7 @@ workflow:
     validation: prompt_ready
 
   send:
+    confirmation_key: stop_button
     trigger: send_button
     validation: send_success
 

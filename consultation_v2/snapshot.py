@@ -20,9 +20,6 @@ def _listify(value: Any) -> List[Any]:
     return [value]
 
 
-def _lower_set(values: Any) -> set[str]:
-    return {str(item).strip().lower() for item in _listify(values) if str(item).strip()}
-
 
 def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> bool:
     if not spec:
@@ -30,38 +27,35 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
 
     name = ((element.name if isinstance(element, ElementRef) else element.get("name")) or "").strip()
     role = ((element.role if isinstance(element, ElementRef) else element.get("role")) or "").strip()
-    states = set(
-        s.strip().lower()
+    states = {
+        s.strip()
         for s in ((element.states if isinstance(element, ElementRef) else element.get("states")) or [])
         if str(s).strip()
-    )
+    }
 
-    name_lower = name.lower()
-    role_lower = role.lower()
-
-    if "name" in spec and name_lower != str(spec["name"]).strip().lower():
+    if "name" in spec and name != str(spec["name"]).strip():
         return False
 
     if "names" in spec:
-        allowed_names = _lower_set(spec["names"])
-        if name_lower not in allowed_names:
+        allowed = {str(n).strip() for n in _listify(spec["names"]) if str(n).strip()}
+        if name not in allowed:
             return False
 
-    if "role" in spec and role_lower != str(spec["role"]).strip().lower():
+    if "role" in spec and role != str(spec["role"]).strip():
         return False
 
     if "roles" in spec:
-        allowed_roles = _lower_set(spec["roles"])
-        if role_lower not in allowed_roles:
+        allowed = {str(r).strip() for r in _listify(spec["roles"]) if str(r).strip()}
+        if role not in allowed:
             return False
 
     if "states_include" in spec:
-        needed = _lower_set(spec["states_include"])
+        needed = {str(s).strip() for s in _listify(spec["states_include"]) if str(s).strip()}
         if not needed.issubset(states):
             return False
 
     if "states_exclude" in spec:
-        blocked = _lower_set(spec["states_exclude"])
+        blocked = {str(s).strip() for s in _listify(spec["states_exclude"]) if str(s).strip()}
         if states & blocked:
             return False
 
@@ -70,12 +64,14 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
 
 def _is_excluded(element: Dict[str, Any], tree_cfg: Dict[str, Any]) -> bool:
     exclude = dict(tree_cfg.get("exclude", {}))
-    name = (element.get("name") or "").strip().lower()
-    role = (element.get("role") or "").strip().lower()
+    name = (element.get("name") or "").strip()
+    role = (element.get("role") or "").strip()
 
-    if name and name in _lower_set(exclude.get("names")):
+    excluded_names = {str(n).strip() for n in _listify(exclude.get("names")) if str(n).strip()}
+    if name and name in excluded_names:
         return True
-    if role and role in _lower_set(exclude.get("roles")):
+    excluded_roles = {str(r).strip() for r in _listify(exclude.get("roles")) if str(r).strip()}
+    if role and role in excluded_roles:
         return True
     return False
 
@@ -142,7 +138,7 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
 
     scan_root controls where to scan:
       'auto' — scan from document (default, most platforms)
-      'app'  — scan from Firefox app root (needed for React portals like ChatGPT model dropdown)
+      'app'  — scan from Firefox app root (for platforms where controls escape document subtree)
     """
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get("tree") or {})

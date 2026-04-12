@@ -51,10 +51,6 @@ class BaseConsultationDriver(ABC):
         if not validation and not filename:
             return False
 
-        if validation.get("url_contains"):
-            probe = str(validation["url_contains"]).lower()
-            if probe not in (snapshot.url or "").lower():
-                return False
 
         indicators = validation.get("indicators") or []
         if indicators:
@@ -301,17 +297,15 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         filename: str | None = None,
     ) -> Tuple[bool, str]:
         if not validation_key:
-            return True, "unconfigured"
+            return False, "missing_config"
         cfg = self._validation_cfg(validation_key)
         if not cfg:
-            return True, "unconfigured"
+            return False, "missing_config"
         if cfg.get("pending"):
             return True, "pending"
         passed = self.validation_passes(snapshot, validation_key, filename=filename)
         if passed:
             return True, "validated"
-        if cfg.get("best_effort"):
-            return True, "best_effort_miss"
         return False, "failed"
 
     def _current_step_message(
@@ -331,8 +325,6 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return f"{label} applied and validated"
         if validation_status == "pending":
             return f"{label} applied; persistent validation scan pending"
-        if validation_status == "best_effort_miss":
-            return f"{label} applied; validation missed but block is best_effort"
         return f"{label} applied"
 
     # ------------------------------------------------------------------
@@ -917,7 +909,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             if trigger and self.runtime.click(trigger, strategy=send_cfg.get("click_strategy")):
                 sent = True
                 send_method = trigger_key
-            elif not submit_via_return:
+            else:
                 result.add_step(
                     "send",
                     False,
@@ -925,34 +917,28 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                     snapshot=snap.serializable(),
                 )
                 return False
-
-        if not sent and submit_via_return:
+        elif submit_via_return:
             sent = bool(self.runtime.press(submit_key))
             send_method = f"keypress:{submit_key}"
-
-        if not sent:
+        else:
             result.add_step(
                 "send",
                 False,
-                f"{self.platform} send_button is SCAN PENDING and no keyboard submit path is configured",
+                f"{self.platform} no send path configured",
             )
             return False
 
-        stop_key = send_cfg.get("stop_key") or dict(self._workflow().get("monitor") or {}).get("stop_key")
-        complete_key = dict(self._workflow().get("monitor") or {}).get("complete_key")
-        has_stop = bool(stop_key and self._has_element_spec(stop_key))
-        has_complete = bool(complete_key and self._has_element_spec(complete_key))
+        confirmation_key = send_cfg.get("confirmation_key")
+        has_confirmation = bool(confirmation_key and self._has_element_spec(confirmation_key))
         require_new_url = bool(send_cfg.get("require_new_url")) and not bool(request.session_url)
 
         confirmed = False
         confirmation_timeout = float(send_cfg.get("confirmation_timeout") or 30)
 
-        if has_stop or has_complete:
+        if has_confirmation:
             def _confirm() -> bool:
                 snap = self.runtime.snapshot()
-                if has_stop and snap.has(str(stop_key)):
-                    return True
-                if has_complete and snap.has(str(complete_key)):
+                if snap.has(str(confirmation_key)):
                     return True
                 if require_new_url:
                     current = self.runtime.current_url() or ""
@@ -963,26 +949,15 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             confirmed = bool(self.runtime.wait_until(_confirm, timeout=confirmation_timeout, interval=0.7))
         elif require_new_url:
             confirmed = bool(self.runtime.wait_for_url_change(before, timeout=20.0, interval=1.0))
-        else:
-            confirmed = bool(send_cfg.get("allow_unvalidated_send"))
 
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
         validation_ok, validation_status = self._validation_state(
             verify_snap,
-            send_cfg.get("validation") or "send_success",
+            send_cfg.get("validation"),
         )
 
-        if has_stop or has_complete or require_new_url:
-            ok = bool(sent and confirmed and validation_ok)
-        elif validation_status in {"pending", "unconfigured"} and send_cfg.get("allow_unvalidated_send"):
-            ok = bool(sent)
-        else:
-            ok = bool(sent and validation_ok)
-
-        if not (has_stop or has_complete or require_new_url) and not send_cfg.get("allow_unvalidated_send"):
-            ok = False
-            validation_status = "pending"
+        ok = bool(sent and (confirmed or validation_ok))
 
         message = self._current_step_message("prompt sent", validation_status)
         if send_method:
@@ -1064,11 +1039,13 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         self._sleep(extract_cfg.get("pause_before_extract", 1.0))
         snap = self.runtime.snapshot()
 
-        strategy = str(extract_cfg.get("strategy") or "last_by_y").lower()
-        if strategy.startswith("last"):
+        strategy = str(extract_cfg.get("strategy") or "last_by_y")
+        if strategy in {"last_by_y", "last_by_y_atspi_only"}:
             target = self.find_last(snap, primary_key)
-        else:
+        elif strategy == "first":
             target = self.find_first(snap, primary_key)
+        else:
+            target = self.find_last(snap, primary_key)
 
         if not target:
             result.add_step(
@@ -1080,7 +1057,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False
 
         click_strategy = extract_cfg.get("click_strategy")
-        if strategy.endswith("atspi_only") and not click_strategy:
+        if strategy == "last_by_y_atspi_only" and not click_strategy:
             click_strategy = "atspi_only"
 
         self.runtime.write_clipboard("")
