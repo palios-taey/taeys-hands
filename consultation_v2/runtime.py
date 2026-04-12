@@ -23,8 +23,10 @@ class ConsultationRuntime:
         self.click_strategy = str(
             self.cfg.get("click_strategy")
             or self.cfg.get("workflow", {}).get("click_strategy")
-            or "xdotool_first"
+            or ""
         )
+        if not self.click_strategy:
+            raise RuntimeError(f"{platform}: click_strategy not configured in YAML")
 
     # ------------------------------------------------------------------
     # Stale file dialog cleanup
@@ -143,7 +145,7 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def click(self, element: ElementRef, strategy: Optional[str] = None) -> bool:
-        chosen = (strategy or self.click_strategy or "xdotool_first").strip()
+        chosen = (strategy or self.click_strategy).strip()
         if chosen == "coordinate_only":
             return (
                 element.x is not None

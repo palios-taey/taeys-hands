@@ -242,8 +242,8 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         return bool(self._element_spec(key))
 
     def _normalize(self, value: str | None) -> str:
-        """Return value as-is, stripped. Callers must use exact YAML key names."""
-        return (value or "").strip()
+        """Return value as-is. Callers must use exact YAML key names. No normalization."""
+        return value or ""
 
     def _snapshot(self, kind: str = "document") -> Snapshot:
         return self.runtime.menu_snapshot() if kind == "menu" else self.runtime.snapshot()
@@ -814,7 +814,11 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 result.add_step("attach", False, f"{self.platform} file dialog did not appear for {abs_path}")
                 return False
 
-            self.runtime.press(str(attachment.get("dialog_location_shortcut") or "ctrl+l"))
+            dialog_shortcut = attachment.get("dialog_location_shortcut")
+            if not dialog_shortcut:
+                result.add_step("attach", False, f"{self.platform} workflow.attachment.dialog_location_shortcut not configured")
+                return False
+            self.runtime.press(str(dialog_shortcut))
             self._sleep(0.5)
             pasted = self.runtime.paste(abs_path)
             if not pasted:

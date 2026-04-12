@@ -253,6 +253,7 @@ workflow:
     open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
     prefer_keyboard_shortcut: true
+    dialog_location_shortcut: ctrl+l
     validation: attach_success
 
   prompt:

@@ -298,6 +298,7 @@ workflow:
     trigger: attach_trigger
     menu_target: upload_files_item
     open_method: atspi_menu
+    dialog_location_shortcut: ctrl+l
     validation: attach_success
 
   prompt:
