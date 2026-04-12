@@ -1,3 +1,12 @@
+# THE RULE — enforced in every function in this file:
+# 1. YAML = exact AT-SPI truth. Exact string, exact case. No .lower().
+# 2. No name_contains. Period. Anywhere. EXACT MATCH ONLY.
+# 3. Driver code = zero platform knowledge.
+# 4. YAML drives the driver, never the reverse.
+# 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
+# 6. Validation targets persistent elements only.
+# 7. No fallbacks, no broadening.
+
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Tuple

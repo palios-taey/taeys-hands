@@ -1,3 +1,12 @@
+# THE RULE — enforced in every function in this file:
+# 1. YAML = exact AT-SPI truth. Exact string, exact case. No .lower().
+# 2. No name_contains. Period. Anywhere. EXACT MATCH ONLY.
+# 3. Driver code = zero platform knowledge. No hardcoded element names or default keys.
+# 4. YAML drives the driver, never the reverse.
+# 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
+# 6. Validation targets persistent elements only.
+# 7. No fallbacks, no broadening. Fail closed on missing config.
+
 from __future__ import annotations
 
 import json
@@ -233,10 +242,8 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         return bool(self._element_spec(key))
 
     def _normalize(self, value: str | None) -> str:
-        normalized = (value or "").strip().lower().replace("-", "_").replace(" ", "_")
-        while "__" in normalized:
-            normalized = normalized.replace("__", "_")
-        return normalized.strip("_")
+        """Return value as-is, stripped. Callers must use exact YAML key names."""
+        return (value or "").strip()
 
     def _snapshot(self, kind: str = "document") -> Snapshot:
         return self.runtime.menu_snapshot() if kind == "menu" else self.runtime.snapshot()
@@ -268,7 +275,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         action: str = "click",
         strategy: str | None = None,
     ) -> bool:
-        normalized = (action or "click").strip().lower()
+        normalized = (action or "click").strip()
         if normalized == "hover":
             return self._hover(element)
         if normalized == "press":
@@ -387,7 +394,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             if not target_el:
                 return False
 
-            checked = "checked" in {state.lower() for state in target_el.states}
+            checked = "checked" in {state for state in target_el.states}
             if step.get("skip_if_checked") and checked:
                 if step.get("close_with_escape"):
                     self.runtime.press("Escape")
@@ -628,7 +635,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                     )
                     return False
 
-                checked = "checked" in {state.lower() for state in item.states}
+                checked = "checked" in {state for state in item.states}
                 if not checked:
                     if not self.runtime.click(item, strategy=cfg.get("item_click_strategy")):
                         result.add_step(
@@ -646,7 +653,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 if cfg.get("verify_checked", True):
                     verify_ok = bool(
                         verify_item
-                        and "checked" in {state.lower() for state in verify_item.states}
+                        and "checked" in {state for state in verify_item.states}
                     )
 
                 result.add_step(
@@ -710,7 +717,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 )
                 return False
 
-            checked = "checked" in {state.lower() for state in target.states}
+            checked = "checked" in {state for state in target.states}
             if checked and cfg.get("skip_if_checked"):
                 success = True
             else:
@@ -755,7 +762,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
 
         keyboard_shortcut = attachment.get("keyboard_shortcut")
         prefer_keyboard_shortcut = bool(attachment.get("prefer_keyboard_shortcut"))
-        validation_key = attachment.get("validation") or "attach_success"
+        validation_key = attachment.get("validation")
 
         for file_path in attachment_paths:
             abs_path = os.path.abspath(file_path)
@@ -845,7 +852,10 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         prompt_cfg = dict(self._workflow().get("prompt") or {})
-        input_key = prompt_cfg.get("input") or "input"
+        input_key = prompt_cfg.get("input")
+        if not input_key:
+            result.add_step("prompt", False, f"{self.platform} workflow.prompt.input not configured in YAML")
+            return False
         snap = self.runtime.snapshot()
         input_el = self.find_first(snap, input_key)
         if not input_el:
@@ -875,7 +885,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         verify_snap = self.runtime.snapshot()
         ok, validation_status = self._validation_state(
             verify_snap,
-            prompt_cfg.get("validation") or "prompt_ready",
+            prompt_cfg.get("validation"),
         )
         result.add_step(
             "prompt",
@@ -1097,7 +1107,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         extra_cfg = dict(self._workflow().get("extra_extract") or {})
-        strategy = str(extra_cfg.get("strategy") or "none").lower()
+        strategy = str(extra_cfg.get("strategy") or "none")
         if strategy in {"", "none"}:
             result.add_step(
                 "extract_additional",

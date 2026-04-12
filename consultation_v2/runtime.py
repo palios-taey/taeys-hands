@@ -1,3 +1,4 @@
+# THE RULE — enforced in every function in this file:
 from __future__ import annotations
 
 import logging
@@ -142,7 +143,7 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def click(self, element: ElementRef, strategy: Optional[str] = None) -> bool:
-        chosen = (strategy or self.click_strategy or "xdotool_first").lower()
+        chosen = (strategy or self.click_strategy or "xdotool_first").strip()
         if chosen == "coordinate_only":
             return (
                 element.x is not None

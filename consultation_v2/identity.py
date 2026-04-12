@@ -1,3 +1,4 @@
+# THE RULE — enforced in every function in this file:
 """Identity file consolidation for V2 consultations.
 
 Prepends FAMILY_KERNEL.md + platform-specific IDENTITY file to every
@@ -75,7 +76,7 @@ def consolidate_attachments(
         if not os.path.isfile(path):
             continue
         content = open(path).read()
-        lang = _EXT_LANG.get(os.path.splitext(path)[1].lower(), '')
+        lang = _EXT_LANG.get(os.path.splitext(path)[1], '')
         sections.append(
             f"\n---\n\n## {os.path.basename(path)}\n\n`{path}`\n\n"
             f"```{lang}\n{content}\n```\n"
