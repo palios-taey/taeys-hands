@@ -1,6 +1,6 @@
 platform: perplexity
 identity_file: IDENTITY_CLARITY.md
-click_strategy: xdotool_first
+click_strategy: coordinate_only
 navigation_key: F6
 
 urls:
@@ -262,7 +262,7 @@ workflow:
         - trigger: attach_trigger
           snapshot: menu
           target: more_submenu_trigger
-          click_strategy: xdotool_first
+          click_strategy: coordinate_only
         - snapshot: menu
           target: mode_learn_step_by_step_item
           click_strategy: atspi_only
@@ -274,9 +274,9 @@ workflow:
       - trigger: attach_trigger
         snapshot: menu
         target: connectors_and_sources_item
-        click_strategy: xdotool_first
+        click_strategy: coordinate_only
     search_input: search_sources
-    item_click_strategy: xdotool_first
+    item_click_strategy: coordinate_only
     verify_checked: true
     close_with_escape: true
     source_targets:

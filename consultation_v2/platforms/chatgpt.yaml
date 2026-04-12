@@ -1,6 +1,6 @@
 platform: chatgpt
 identity_file: IDENTITY_HORIZON.md
-click_strategy: xdotool_first
+click_strategy: coordinate_only
 navigation_key: F6
 
 urls:
@@ -178,7 +178,7 @@ workflow:
   selection:
     model_trigger: model_selector
     model_snapshot: menu
-    model_click_strategy: atspi_first
+    model_click_strategy: atspi_only
     model_targets:
       instant: model_instant
       thinking: model_thinking
@@ -190,7 +190,7 @@ workflow:
 
     tool_trigger: attach_trigger
     tool_snapshot: menu
-    tool_click_strategy: atspi_first
+    tool_click_strategy: atspi_only
     tool_targets:
       create_image: create_image_item
       deep_research: deep_research_item
@@ -201,11 +201,11 @@ workflow:
         - trigger: model_selector
           snapshot: menu
           target: model_pro
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: pro_active
         - snapshot: document
           target: extended_pro_option
-          click_strategy: xdotool_first
+          click_strategy: coordinate_only
           validation: pro_extended_active
 
       agent_mode:
@@ -215,7 +215,7 @@ workflow:
           action: hover
         - snapshot: menu
           target: agent_mode_item
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: agent_mode_active
 
       github:
@@ -225,7 +225,7 @@ workflow:
           action: hover
         - snapshot: menu
           target: github_item
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: github_active
 
       gmail:
@@ -235,7 +235,7 @@ workflow:
           action: hover
         - snapshot: menu
           target: gmail_item
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: gmail_active
 
       quizzes:
@@ -245,7 +245,7 @@ workflow:
           action: hover
         - snapshot: menu
           target: quizzes_item
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: quizzes_active
 
   attachment:

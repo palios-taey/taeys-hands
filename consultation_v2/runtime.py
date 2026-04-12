@@ -1,5 +1,17 @@
-# THE RULE — enforced in every function in this file:
 from __future__ import annotations
+
+# THE RULE — enforced in every function in this file:
+# 1. YAML = exact AT-SPI truth. Exact string, exact case. No .lower().
+# 2. No name_contains. Period. Anywhere. EXACT MATCH ONLY.
+# 3. Driver code = zero platform knowledge.
+# 4. YAML drives the driver, never the reverse.
+# 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
+# 6. Validation targets persistent elements only.
+# 7. No fallbacks, no broadening. Fail closed on missing config.
+#
+# INFRASTRUCTURE CONSTANTS (Firefox browser / GTK OS behavior, not platform UI):
+# These are universal across all platforms because they are browser/OS behavior.
+_GTK_DIALOG_TITLES = ("File Upload", "Open", "Open File")
 
 import logging
 import os
@@ -158,27 +170,9 @@ class ConsultationRuntime:
                     {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
                 )
             )
-        if chosen == "atspi_first":
-            if atspi_click(
-                {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-            ):
-                return True
-            return (
-                element.x is not None
-                and element.y is not None
-                and bool(inp.click_at(int(element.x), int(element.y)))
-            )
-        # Default: xdotool_first
-        if (
-            element.x is not None
-            and element.y is not None
-            and inp.click_at(int(element.x), int(element.y))
-        ):
-            return True
-        return bool(
-            atspi_click(
-                {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-            )
+        raise RuntimeError(
+            f"{self.platform}: unknown click_strategy {chosen!r}. "
+            "YAML must declare 'atspi_only' or 'coordinate_only'."
         )
 
     def press(self, key: str) -> bool:

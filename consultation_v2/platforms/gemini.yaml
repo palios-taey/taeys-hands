@@ -1,6 +1,6 @@
 platform: gemini
 identity_file: IDENTITY_COSMOS.md
-click_strategy: atspi_first
+click_strategy: atspi_only
 navigation_key: F6
 
 urls:
@@ -154,7 +154,7 @@ workflow:
   selection:
     mode_trigger: mode_picker
     mode_snapshot: menu
-    mode_click_strategy: atspi_first
+    mode_click_strategy: atspi_only
     mode_targets:
       fast: mode_fast
       thinking: mode_thinking
@@ -166,7 +166,7 @@ workflow:
 
     tool_trigger: tools_button
     tool_snapshot: menu
-    tool_click_strategy: atspi_first
+    tool_click_strategy: atspi_only
     tool_skip_if_checked: true
     tool_targets:
       create_image: tool_create_image
@@ -181,12 +181,12 @@ workflow:
         - trigger: mode_picker
           snapshot: menu
           target: mode_pro
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           validation: pro_active
         - trigger: tools_button
           snapshot: menu
           target: tool_deep_think
-          click_strategy: atspi_first
+          click_strategy: atspi_only
           skip_if_checked: true
           validation: deep_think_active
 
