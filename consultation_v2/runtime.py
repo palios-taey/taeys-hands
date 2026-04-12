@@ -8,10 +8,6 @@ from __future__ import annotations
 # 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
 # 6. Validation targets persistent elements only.
 # 7. No fallbacks, no broadening. Fail closed on missing config.
-#
-# INFRASTRUCTURE CONSTANTS (Firefox browser / GTK OS behavior, not platform UI):
-# These are universal across all platforms because they are browser/OS behavior.
-_GTK_DIALOG_TITLES = ("File Upload", "Open", "Open File")
 
 import logging
 import os
@@ -63,8 +59,9 @@ class ConsultationRuntime:
         env = dict(os.environ)
         env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
 
+        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         closed = 0
-        for title in ("File Upload", "Open", "Open File"):
+        for title in dialog_titles:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -100,7 +97,8 @@ class ConsultationRuntime:
         env = dict(os.environ)
         env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
 
-        for title in ("File Upload", "Open", "Open File"):
+        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
+        for title in dialog_titles:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -130,14 +128,7 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def switch(self) -> bool:
-        if inp.switch_to_platform(self.platform):
-            return True
-        # Fallback: if DISPLAY is already set correctly for this platform,
-        # just verify Firefox is accessible on the current display
-        firefox = atspi.find_firefox_for_platform(self.platform)
-        if firefox:
-            return True
-        return False
+        return bool(inp.switch_to_platform(self.platform))
 
     def current_url(self) -> Optional[str]:
         firefox = atspi.find_firefox_for_platform(self.platform)

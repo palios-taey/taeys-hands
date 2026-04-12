@@ -11,6 +11,10 @@ tree:
   # Empty fence is intentional: the compose controls appear after sidebar/history
   # content in the current AT-SPI tree, so fencing would hide the real targets.
   scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
   fence_after: []
 
   exclude:

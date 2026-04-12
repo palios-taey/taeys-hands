@@ -9,6 +9,10 @@ urls:
 
 tree:
   scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
   fence_after: []
 
   exclude:

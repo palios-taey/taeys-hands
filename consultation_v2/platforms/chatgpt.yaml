@@ -11,6 +11,10 @@ tree:
   # Empty fence keeps snapshot() on the Firefox app root. ChatGPT needs this
   # because key controls and React portals escape the document subtree.
   scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
   fence_after: []
 
   exclude:

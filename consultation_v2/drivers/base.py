@@ -54,10 +54,9 @@ class BaseConsultationDriver(ABC):
         self,
         snapshot: Snapshot,
         validation_key: str,
-        filename: str | None = None,
     ) -> bool:
         validation = dict(self.cfg.get("validation", {}).get(validation_key, {}))
-        if not validation and not filename:
+        if not validation:
             return False
 
 
@@ -75,24 +74,6 @@ class BaseConsultationDriver(ABC):
                     found = True
                     break
             if not found:
-                return False
-
-        file_chip = dict(validation.get("file_chip", {}))
-        if filename and file_chip:
-            base = filename.split("/")[-1]
-
-            all_elements = []
-            for items in snapshot.mapped.values():
-                all_elements.extend(items)
-            all_elements.extend(snapshot.unknown)
-
-            role_set = {str(role).strip() for role in file_chip.get("roles", [])}
-            matched_chip = any(
-                element.name.strip() == base
-                for element in all_elements
-                if not role_set or element.role.strip() in role_set
-            )
-            if not matched_chip:
                 return False
 
         if validation.get("stop_absent"):
@@ -303,8 +284,6 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         self,
         snapshot: Snapshot,
         validation_key: str | None,
-        *,
-        filename: str | None = None,
     ) -> Tuple[bool, str]:
         if not validation_key:
             return False, "missing_config"
@@ -313,7 +292,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False, "missing_config"
         if cfg.get("pending"):
             return True, "pending"
-        passed = self.validation_passes(snapshot, validation_key, filename=filename)
+        passed = self.validation_passes(snapshot, validation_key)
         if passed:
             return True, "validated"
         return False, "failed"
@@ -624,7 +603,13 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                     return False
 
                 self._clear_search_box(search_box)
-                self.runtime.type_text(raw_name, delay_ms=int(cfg.get("search_delay_ms", 40)))
+                # Get search term from YAML element spec name, not caller's raw string
+                target_spec = self._element_spec(target_key)
+                search_term = target_spec.get("name", "") if target_spec else ""
+                if not search_term:
+                    result.add_step("toggle_connectors", False, f"{self.platform} no name in element spec for {target_key!r}")
+                    return False
+                self.runtime.type_text(search_term, delay_ms=int(cfg.get("search_delay_ms", 40)))
                 self._sleep(cfg.get("pause_after_search", 1.0))
 
                 filtered_snap = self.runtime.menu_snapshot()
@@ -835,7 +820,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             ok, validation_status = self._validation_state(
                 verify_snap,
                 validation_key,
-                filename=abs_path,
+                
             )
             result.add_step(
                 "attach",
@@ -914,7 +899,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         send_cfg = dict(self._workflow().get("send") or {})
         trigger_key = send_cfg.get("trigger")
         submit_via_return = bool(send_cfg.get("submit_via_return"))
-        submit_key = str(send_cfg.get("keypress") or "Return")
+        submit_key = send_cfg.get("keypress")
         before = result.session_url_before or self.runtime.current_url() or ""
 
         sent = False
@@ -1128,7 +1113,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         extra_cfg = dict(self._workflow().get("extra_extract") or {})
-        strategy = str(extra_cfg.get("strategy") or "none")
+        strategy = extra_cfg.get("strategy")
         if strategy in {"", "none"}:
             result.add_step(
                 "extract_additional",
