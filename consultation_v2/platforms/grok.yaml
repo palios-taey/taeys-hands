@@ -194,6 +194,7 @@ workflow:
     validation: response_complete
 
   extract:
+    scroll_before_extract: ctrl+End
     primary_key: copy_button
     strategy: last_by_y_atspi_only
 
