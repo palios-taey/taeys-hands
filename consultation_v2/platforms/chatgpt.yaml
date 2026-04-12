@@ -10,6 +10,7 @@ urls:
 tree:
   # Empty fence keeps snapshot() on the Firefox app root. ChatGPT needs this
   # because key controls and React portals escape the document subtree.
+  scan_root: app
   fence_after: []
 
   exclude:
@@ -276,7 +277,8 @@ workflow:
   extract:
     scroll_before_extract: ctrl+End
     primary_key: copy_button
-    strategy: last_by_y_atspi_only
+    strategy: last_by_y
+    click_strategy: atspi_only
 
   extra_extract:
     strategy: none

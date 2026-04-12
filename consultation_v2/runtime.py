@@ -243,7 +243,7 @@ class ConsultationRuntime:
         inp.press_key("ctrl+a")
         time.sleep(0.1)
         if not self.paste(url):
-            self.type_text(url, delay_ms=5)
+            return False
         time.sleep(0.2)
         inp.press_key("Return")
         if not verify_change:

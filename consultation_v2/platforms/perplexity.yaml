@@ -10,6 +10,7 @@ urls:
 tree:
   # Empty fence is intentional: the compose controls appear after sidebar/history
   # content in the current AT-SPI tree, so fencing would hide the real targets.
+  scan_root: app
   fence_after: []
 
   exclude:
@@ -321,7 +322,8 @@ workflow:
   extract:
     scroll_before_extract: ctrl+End
     primary_key: copy_button
-    strategy: last_by_y_atspi_only
+    strategy: last_by_y
+    click_strategy: atspi_only
 
   extra_extract:
     strategy: none

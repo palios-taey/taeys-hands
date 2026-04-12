@@ -18,7 +18,6 @@ from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
 
 
-_MENU_ROLES = {"menu item", "radio menu item", "check menu item", "list item", "option"}
 
 
 def _listify(value: Any) -> List[Any]:
@@ -181,8 +180,9 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
             raise RuntimeError(f"{platform}: AT-SPI document not found; cannot proceed (fail closed)")
     url = atspi.get_document_url(doc) if doc else None
 
+    yaml_scope = tree_cfg.get("scan_root")
     fence = tree_cfg.get("fence_after") or []
-    if scan_root == "app" or (scan_root == "auto" and not fence):
+    if scan_root == "app" or yaml_scope == "app":
         scope = firefox
     else:
         scope = doc

@@ -275,12 +275,15 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         action: str = "click",
         strategy: str | None = None,
     ) -> bool:
-        normalized = (action or "click").strip()
-        if normalized == "hover":
+        if not action:
+            raise RuntimeError(f"{self.platform}: action not specified for element {element.name!r}")
+        if action == "hover":
             return self._hover(element)
-        if normalized == "press":
+        if action == "press":
             return self.runtime.press(element.name)
-        return self.runtime.click(element, strategy=strategy)
+        if action == "click":
+            return self.runtime.click(element, strategy=strategy)
+        raise RuntimeError(f"{self.platform}: unknown action {action!r}. Must be click, hover, or press.")
 
     def _find_key_or_fail(
         self,
@@ -1065,13 +1068,17 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         self._sleep(extract_cfg.get("pause_before_extract", 1.0))
         snap = self.runtime.snapshot()
 
-        strategy = str(extract_cfg.get("strategy") or "last_by_y")
-        if strategy in {"last_by_y", "last_by_y_atspi_only"}:
+        strategy = extract_cfg.get("strategy")
+        if not strategy:
+            result.add_step("extract_primary", False, f"{self.platform} workflow.extract.strategy not configured")
+            return False
+        if strategy == "last_by_y":
             target = self.find_last(snap, primary_key)
         elif strategy == "first":
             target = self.find_first(snap, primary_key)
         else:
-            target = self.find_last(snap, primary_key)
+            result.add_step("extract_primary", False, f"{self.platform} unknown extract strategy {strategy!r}")
+            return False
 
         if not target:
             result.add_step(
@@ -1083,8 +1090,6 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False
 
         click_strategy = extract_cfg.get("click_strategy")
-        if strategy == "last_by_y_atspi_only" and not click_strategy:
-            click_strategy = "atspi_only"
 
         self.runtime.write_clipboard("")
         self._sleep(0.2)
