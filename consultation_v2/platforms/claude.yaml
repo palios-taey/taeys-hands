@@ -1,211 +1,249 @@
 platform: claude
+identity_file: IDENTITY_GAIA.md
 click_strategy: xdotool_first
 navigation_key: F6
+
 urls:
   fresh: https://claude.ai/new
   verify_navigation: false
+
 tree:
-  fence_after:
-  - name: Starred
-    role: heading
+  fence_after: []
+
   exclude:
     names:
-    - Close sidebar
-    - Claude
-    - Profile image
-    - Sidebar
-    name_contains:
-    - Upgrade to
-    - ', Settings'
-    - Get apps and extensions
-    - Claude's choice
+      - "Search with Google or enter address"
+      - "Google, pick a search engine"
+      - "View site information"
+      - "You have granted this website additional permissions."
+      - "Bookmark this page (Ctrl+D)"
+      - "Sidebars"
+      - "Back"
+      - "Forward"
+      - "Reload"
+      - "Firefox View"
+      - "Close tab"
+      - "Open a new tab (Ctrl+T)"
+      - "List all tabs"
+      - "Account"
+      - "Extensions"
+      - "Firefox"
     roles:
-    - separator
-    - document web
-    - paragraph
-    - list item
-  sidebar_nav:
-  - name: Home
-    role: link
-  - name: New chat
-    role: link
-  - name: Search
-    role: link
-  - name: Customize
-    role: link
-  - name: Chats
-    role: link
-  - name: Projects
-    role: link
-  - name: Artifacts
-    role: link
-  - name: Code
-    role: link
-  element_map:
-    # -- Main page persistent elements --
-    input:
-      name: Write your prompt to Claude
-      role: entry
-      states_include:
-      - editable
-    toggle_menu:
-      name: Add files, connectors, and more
-      role: push button
-    send_button:
-      name: Send message
-      role: push button
-    stop_button:
-      name: Stop
-      role: push button
-    copy_button:
-      name_contains: Copy
-      role: push button
-    open_sidebar:
-      name: Open sidebar
-      role: push button
-    incognito:
-      name_contains: Use incognito
-      role: push button
-    prompt_categories:
-      name: Prompt categories
-      role: page tab list
-    prompt_tab:
-      name_contains:
-      - Write
-      - Learn
-      - Code
-      - Life stuff
-      - "Claude's choice"
-      role: page tab
+      - separator
+      - document web
+      - paragraph
+      - list item
+      - page tab
 
-    # -- Toggle-menu portal items (require menu_snapshot) --
+  sidebar_nav:
+    - name: "Open sidebar"
+      role: toggle button
+    - name: "Home"
+      role: link
+    - name: "New chat"
+      role: link
+    - name: "Search"
+      role: link
+    - name: "Customize"
+      role: link
+    - name: "Chats"
+      role: link
+    - name: "Projects"
+      role: link
+    - name: "Artifacts"
+      role: link
+    - name: "Code"
+      role: link
+    - name: "Get apps and extensions"
+      role: link
+    - name: "Jesse LaRose, Settings"
+      role: push button
+
+  element_map:
+    input:
+      name: "Write your prompt to Claude"
+      role: entry
+      states_include: [editable, multi-line]
+
+    attach_trigger:
+      name: "Add files, connectors, and more"
+      role: push button
+
+    send_button:
+      name: "Send message"
+      role: push button
+
+    stop_button:
+      name: "Stop response"
+      role: push button
+
+    copy_button:
+      name: "Copy"
+      role: push button
+
+    model_selector:
+      # Exact current-model button names only; no substring matching.
+      names:
+        - "Opus 4.6"
+        - "Opus 4.6 Extended"
+        - "Sonnet 4.6"
+        - "Sonnet 4.6 Extended"
+        - "Haiku 4.5"
+        - "Haiku 4.5 Extended"
+      role: push button
+
+    voice_mode:
+      name: "Use voice mode"
+      role: push button
+
+    incognito:
+      name: "Use incognito"
+      role: push button
+
     upload_files_item:
       name: "Add files or photos Ctrl+U"
       role: menu item
-    take_screenshot:
-      name: Take a screenshot
-      role: menu item
-    add_to_project:
-      name: Add to project
-      role: menu item
-    git_connector_item:
-      name: Add from GitHub
-      role: menu item
-    skills:
-      name: Skills
-      role: menu item
-    add_connectors:
-      name: Add connectors
-      role: menu item
-    tool_research:
-      name: Research
-      role: check menu item
-    tool_web_search:
-      name: Web search
-      role: check menu item
-    use_style:
-      name: Use style
+
+    take_screenshot_item:
+      name: "Take a screenshot"
       role: menu item
 
-    # -- Model selector (label changes with active model) --
-    model_selector:
-      name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
-      role: push button
+    add_to_project_item:
+      name: "Add to project"
+      role: menu item
 
-    # -- Model / mode menu items (require menu_snapshot after clicking selector) --
+    add_from_github_item:
+      name: "Add from GitHub"
+      role: menu item
+
+    skills_item:
+      name: "Skills"
+      role: menu item
+
+    add_connectors_item:
+      name: "Add connectors"
+      role: menu item
+
+    research_item:
+      name: "Research"
+      role: check menu item
+
+    web_search_item:
+      name: "Web search"
+      role: check menu item
+
+    use_style_item:
+      name: "Use style"
+      role: menu item
+
     model_opus:
-      name: Opus 4.6 Most capable for ambitious work
+      name: "Opus 4.6 Most capable for ambitious work"
       role: menu item
+
     model_sonnet:
-      name: Sonnet 4.6 Most efficient for everyday tasks
+      name: "Sonnet 4.6 Most efficient for everyday tasks"
       role: menu item
+
     model_haiku:
-      name: Haiku 4.5 Fastest for quick answers
+      name: "Haiku 4.5 Fastest for quick answers"
       role: menu item
-    model_extended_thinking:
-      name: "Extended thinking Think longer for complex tasks"
+
+    model_extended_thinking_item:
+      name: "Extended thinking Think longer for complex tasks Extended thinking"
       role: menu item
-    toggle_extended_thinking:
-      name: Extended thinking
-      role: toggle button
-    model_more:
-      name: More models
+
+    model_more_item:
+      name: "More models"
       role: menu item
 
 workflow:
   defaults:
-    model: null
+    model: opus
     mode: extended_thinking
     tools: []
+
   selection:
+    model_trigger: model_selector
+    model_snapshot: menu
+    model_click_strategy: xdotool_first
     model_targets:
       opus: model_opus
       sonnet: model_sonnet
       haiku: model_haiku
+    model_validations:
+      opus: opus_active
+      sonnet: sonnet_active
+      haiku: haiku_active
+
+    mode_trigger: model_selector
+    mode_snapshot: menu
+    mode_click_strategy: xdotool_first
+    mode_close_with_escape: true
     mode_targets:
-      extended_thinking: model_extended_thinking
+      extended_thinking: model_extended_thinking_item
+    mode_validations:
+      extended_thinking: extended_thinking_active
+
+    tool_trigger: attach_trigger
+    tool_snapshot: menu
+    tool_click_strategy: xdotool_first
+    tool_skip_if_checked: true
+    tool_close_with_escape: true
     tool_targets:
-      research: tool_research
-      web_search: tool_web_search
-      github: git_connector_item
+      research: research_item
+      web_search: web_search_item
+      github: add_from_github_item
+
   attachment:
-    trigger: toggle_menu
+    trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: atspi_menu
-    # Keyboard shortcut: Ctrl+U opens file dialog directly, bypassing
-    # the toggle_menu portal entirely. More reliable than AT-SPI menu
-    # click because it avoids stale portal/menu_snapshot issues.
+    open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
+    prefer_keyboard_shortcut: true
+    validation: attach_success
+
   prompt:
     input: input
-    send_button: send_button
+    paste_via_clipboard: true
+    validation: prompt_ready
+
   send:
     trigger: send_button
-    stop_key: stop_button
+    validation: send_success
+
   monitor:
     stop_key: stop_button
     complete_key: copy_button
+    validation: response_complete
+
   extract:
     primary_key: copy_button
     strategy: last_by_y
+
   extra_extract:
     strategy: none
 
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove
-      role_contains: button
+    pending: true
+
   prompt_ready:
-    indicators:
-    - name: Send message
-      role: push button
+    pending: true
+
   send_success:
-    indicators:
-    - name: Stop
-      role: push button
-    timeout: 30
+    pending: true
+
   response_complete:
-    indicators:
-    - name_contains: Copy
-      role: push button
-    stop_absent: true
-  sonnet_active:
-    indicators:
-    - name_contains: Sonnet 4.6
-      role: push button
+    pending: true
+
   opus_active:
-    indicators:
-    - name_contains: Opus 4.6
-      role: push button
+    pending: true
+
+  sonnet_active:
+    pending: true
+
   haiku_active:
-    indicators:
-    - name_contains: Haiku 4.5
-      role: push button
+    pending: true
+
   extended_thinking_active:
-    indicators:
-    - name_contains: Extended
-      role: push button
+    pending: true
