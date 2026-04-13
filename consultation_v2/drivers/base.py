@@ -423,30 +423,26 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             # and clicked. For radio menu items, re-scan to confirm checked state.
             # For regular menu items (which close on click and have no checked state),
             # the successful find + click IS the verification.
-            if step.get("verified_by_checked_state"):
-                self._sleep(step.get("pause_after_action", 1.5))
-                recheck_snap = self._snapshot(target_snapshot_kind)
-                recheck_el = self.find_first(recheck_snap, target_key)
-                if recheck_el:
-                    # Element still visible — verify checked state if it has one
-                    if "checked" not in {s for s in recheck_el.states}:
-                        result.add_step(
-                            f"{step_name}:{index}",
-                            False,
-                            f"{self.platform} target {target_key!r} not in checked state after click for {label}",
-                            snapshot=recheck_snap.serializable(),
-                        )
-                        return False
-                # If element is gone (dropdown closed on click), the find + click
-                # in the pre-click scan was the verification. This is honest:
-                # we found the exact element by name+role and clicked it.
+            self._sleep(step.get("pause_after_action", 1.5))
 
             if step.get("close_with_escape"):
                 self.runtime.press("Escape")
                 self._sleep(step.get("pause_after_close", 1.0))
 
-            # If verified by checked state, we already confirmed above
             if step.get("verified_by_checked_state"):
+                # Rescan after click (and after dropdown close if applicable)
+                recheck_snap = self._snapshot(target_snapshot_kind)
+                recheck_el = self.find_first(recheck_snap, target_key)
+                if recheck_el and "checked" not in {s for s in recheck_el.states}:
+                    # Element visible but not checked — fail
+                    result.add_step(
+                        f"{step_name}:{index}",
+                        False,
+                        f"{self.platform} target {target_key!r} not in checked state after click for {label}",
+                        snapshot=recheck_snap.serializable(),
+                    )
+                    return False
+                # Element gone (dropdown closed) or checked — success
                 result.add_step(
                     f"{step_name}:{index}",
                     True,

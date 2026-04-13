@@ -157,6 +157,7 @@ workflow:
     mode_snapshot: menu
     mode_click_strategy: coordinate_only
     mode_verified_by_checked_state: true
+    mode_close_with_escape: true
     mode_targets:
       auto: model_auto
       fast: model_fast
