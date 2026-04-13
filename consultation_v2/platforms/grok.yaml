@@ -208,7 +208,7 @@ workflow:
     scroll_before_extract: ctrl+End
     primary_key: copy_button
     strategy: last_by_y
-    click_strategy: atspi_only
+    click_strategy: coordinate_only
 
   extra_extract:
     strategy: none
