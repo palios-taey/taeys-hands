@@ -68,7 +68,9 @@ def setup_display(platform: str) -> str:
 
     session_file = f'/tmp/dbus_session_bus_{display}'
     try:
-        os.environ['DBUS_SESSION_BUS_ADDRESS'] = Path(session_file).read_text().strip()
+        session_bus = Path(session_file).read_text().strip()
+        if session_bus:
+            os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     except FileNotFoundError:
         if os.environ.get('AT_SPI_BUS_ADDRESS'):
             os.environ['DBUS_SESSION_BUS_ADDRESS'] = os.environ['AT_SPI_BUS_ADDRESS']
@@ -86,7 +88,6 @@ def main():
     parser.add_argument('--absent', type=int, default=3, help='Required consecutive absent polls')
     parser.add_argument('--timeout', type=float, default=3600, help='Max wait time in seconds')
     parser.add_argument('--stop-key', default='stop_button', help='YAML key for stop button')
-    parser.add_argument('--copy-key', default='copy_button', help='YAML key for copy button (fast-path)')
     args = parser.parse_args()
 
     display = setup_display(args.platform)
@@ -111,7 +112,6 @@ def main():
         try:
             _, _, snap = build_snapshot(args.platform)
             has_stop = snap.has(args.stop_key)
-            has_copy = snap.has(args.copy_key)
 
             if has_stop:
                 seen_stop = True
@@ -138,7 +138,6 @@ def main():
                 'status': status,
                 'elapsed': round(elapsed, 1),
                 'has_stop': has_stop,
-                'has_copy': has_copy,
             }), flush=True)
 
         except Exception as e:
