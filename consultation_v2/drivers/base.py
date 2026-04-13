@@ -424,10 +424,11 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             # For regular menu items (which close on click and have no checked state),
             # the successful find + click IS the verification.
             if step.get("verified_by_checked_state"):
+                self._sleep(step.get("pause_after_action", 1.5))
                 recheck_snap = self._snapshot(target_snapshot_kind)
                 recheck_el = self.find_first(recheck_snap, target_key)
                 if recheck_el:
-                    # Element still visible — verify checked state
+                    # Element still visible — verify checked state if it has one
                     if "checked" not in {s for s in recheck_el.states}:
                         result.add_step(
                             f"{step_name}:{index}",
