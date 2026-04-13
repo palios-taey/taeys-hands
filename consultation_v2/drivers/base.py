@@ -494,7 +494,14 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False
 
         validations = dict(selection.get(f"{group}_validations") or {})
-        validation_key = validations.get(normalized_target) or f"{normalized_target}_active"
+        validation_key = validations.get(normalized_target)
+        if not validation_key:
+            result.add_step(
+                f"select_{group}",
+                False,
+                f"{self.platform} {group} validation key not mapped for {normalized_target!r} in YAML",
+            )
+            return False
         validation_cfg = self._validation_cfg(validation_key)
         if validation_cfg and not validation_cfg.get("pending") and not validation_cfg.get("verified_by_checked_state"):
             current_snap = self.runtime.snapshot()
@@ -1117,7 +1124,10 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> Optional[str]:
         """Find element by key in snapshot, click it, read clipboard. Returns text or None."""
-        strategy_name = extract_cfg.get("strategy", "last_by_y")
+        strategy_name = extract_cfg.get("strategy")
+        if not strategy_name:
+            result.add_step(step_label, False, f"{self.platform} extract strategy not configured in YAML")
+            return None
         if strategy_name == "last_by_y":
             target = self.find_last(snap, key)
         elif strategy_name == "first":

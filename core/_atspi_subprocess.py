@@ -286,10 +286,16 @@ if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'find_firefox'
 
     if cmd == 'find_firefox':
-        platform = sys.argv[2] if len(sys.argv) > 2 else 'chatgpt'
+        if len(sys.argv) < 3:
+            print(json.dumps({'error': 'platform argument required'}))
+            sys.exit(1)
+        platform = sys.argv[2]
         print(json.dumps(find_firefox_info(platform)))
     elif cmd == 'scan':
-        platform = sys.argv[2] if len(sys.argv) > 2 else 'chatgpt'
+        if len(sys.argv) < 3:
+            print(json.dumps({'error': 'platform argument required'}))
+            sys.exit(1)
+        platform = sys.argv[2]
         scan_root = sys.argv[3] if len(sys.argv) > 3 else 'document'
         print(json.dumps(scan_elements(platform, scan_root)))
     elif cmd == 'click':
