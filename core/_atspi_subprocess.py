@@ -161,7 +161,7 @@ def scan_elements(platform, scan_root='auto'):
 
 
 def _scan(node, elements, depth):
-    if depth > 30:
+    if depth > 50:
         return
     try:
         name = (node.get_name() or '').strip()
