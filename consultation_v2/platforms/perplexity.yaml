@@ -117,15 +117,27 @@ tree:
       role: push button
 
     # Toolbar mode-tile semantics:
-    # - "Deep research" push button (no "+") is the ACTIVE mode indicator.
-    # - inactive options are selected via dropdown radio menu items.
-    # - the adjacent "Remove" push button appears with the active toolbar tile.
+    # - Active mode appears as a push button with the mode name (toolbar tile).
+    # - The adjacent "Remove" push button appears with the active tile.
+    # - All modes follow this same pattern (verified via live AT-SPI scans 2026-04-13).
     active_mode_remove:
       name: "Remove"
       role: push button
 
     deep_research_active_indicator:
       name: "Deep research"
+      role: push button
+
+    computer_active_indicator:
+      name: "Computer"
+      role: push button
+
+    model_council_active_indicator:
+      name: "Model council"
+      role: push button
+
+    learn_step_by_step_active_indicator:
+      name: "Learn step by step"
       role: push button
 
     upload_files_item:
@@ -366,13 +378,16 @@ validation:
         role: push button
 
   computer_active:
-    # NEEDS LIVE SCAN: does Computer mode show a persistent toolbar tile?
-    pending: true
+    indicators:
+      - name: "Computer"
+        role: push button
 
   model_council_active:
-    # NEEDS LIVE SCAN: does Model Council show a persistent toolbar tile?
-    pending: true
+    indicators:
+      - name: "Model council"
+        role: push button
 
   learn_step_by_step_active:
-    # NEEDS LIVE SCAN: does Learn Step by Step show a persistent toolbar tile?
-    pending: true
+    indicators:
+      - name: "Learn step by step"
+        role: push button

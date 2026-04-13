@@ -110,6 +110,22 @@ tree:
       name: "Extended Pro, click to remove"
       role: push button
 
+    agent_mode_active_indicator:
+      name: "Agent, click to remove"
+      role: push button
+
+    github_active_indicator:
+      name: "GitHub, click to remove"
+      role: push button
+
+    gmail_active_indicator:
+      name: "Gmail, click to remove"
+      role: push button
+
+    quizzes_active_indicator:
+      name: "Quizzes, click to remove"
+      role: push button
+
     dictation:
       name: "Start dictation"
       role: push button
@@ -328,17 +344,21 @@ validation:
     verified_by_checked_state: true
 
   agent_mode_active:
-    # NEEDS LIVE SCAN: is there a persistent indicator for agent mode?
-    pending: true
+    indicators:
+      - name: "Agent, click to remove"
+        role: push button
 
   github_active:
-    # NEEDS LIVE SCAN: is there a persistent indicator for GitHub tool?
-    pending: true
+    indicators:
+      - name: "GitHub, click to remove"
+        role: push button
 
   gmail_active:
-    # NEEDS LIVE SCAN: is there a persistent indicator for Gmail tool?
-    pending: true
+    indicators:
+      - name: "Gmail, click to remove"
+        role: push button
 
   quizzes_active:
-    # NEEDS LIVE SCAN: is there a persistent indicator for Quizzes tool?
-    pending: true
+    indicators:
+      - name: "Quizzes, click to remove"
+        role: push button
