@@ -160,6 +160,7 @@ workflow:
     mode_trigger: mode_picker
     mode_snapshot: menu
     mode_click_strategy: atspi_only
+    mode_verified_by_checked_state: true
     mode_targets:
       fast: mode_fast
       thinking: mode_thinking
@@ -228,25 +229,35 @@ workflow:
 
 validation:
   attach_success:
+    # NEEDS LIVE SCAN: what file chip appears after attachment?
     pending: true
 
   prompt_ready:
+    # NEEDS LIVE SCAN: what changes after text entered?
     pending: true
 
   send_success:
-    pending: true
+    indicators:
+      - name: "Stop response"
+        role: push button
 
   response_complete:
-    pending: true
+    indicators:
+      - name: "Copy"
+        role: push button
+    stop_absent: true
 
   fast_active:
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   thinking_active:
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   pro_active:
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   deep_think_active:
     indicators:

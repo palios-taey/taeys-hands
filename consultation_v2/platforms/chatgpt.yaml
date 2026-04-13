@@ -184,6 +184,7 @@ workflow:
     model_trigger: model_selector
     model_snapshot: menu
     model_click_strategy: atspi_only
+    model_verified_by_checked_state: true
     model_targets:
       instant: model_instant
       thinking: model_thinking
@@ -289,20 +290,27 @@ workflow:
 
 validation:
   attach_success:
+    # NEEDS LIVE SCAN: what file chip appears after attachment?
     pending: true
 
   prompt_ready:
+    # NEEDS LIVE SCAN: what changes in tree after text entered?
     pending: true
 
   send_success:
-    pending: true
+    indicators:
+      - name: "Stop streaming"
+        role: push button
 
   response_complete:
-    pending: true
+    indicators:
+      - name: "Copy response"
+        role: push button
+    stop_absent: true
 
   pro_active:
-    # SCAN PENDING — need AT-SPI scan of what persists after Pro selected but before Extended Pro clicked
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   pro_extended_active:
     indicators:
@@ -310,19 +318,25 @@ validation:
         role: push button
 
   instant_active:
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   thinking_active:
-    pending: true
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
 
   agent_mode_active:
+    # NEEDS LIVE SCAN: is there a persistent indicator for agent mode?
     pending: true
 
   github_active:
+    # NEEDS LIVE SCAN: is there a persistent indicator for GitHub tool?
     pending: true
 
   gmail_active:
+    # NEEDS LIVE SCAN: is there a persistent indicator for Gmail tool?
     pending: true
 
   quizzes_active:
+    # NEEDS LIVE SCAN: is there a persistent indicator for Quizzes tool?
     pending: true

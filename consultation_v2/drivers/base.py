@@ -291,7 +291,12 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         if not cfg:
             return False, "missing_config"
         if cfg.get("pending"):
-            return True, "pending"
+            return False, "not_implemented"
+        if cfg.get("verified_by_checked_state"):
+            # This validation is handled by checked-state verification during sequence execution.
+            # It cannot be validated post-close because no persistent indicator exists.
+            # The sequence step must have verified_by_checked_state: true to pass.
+            return False, "requires_checked_state"
         passed = self.validation_passes(snapshot, validation_key)
         if passed:
             return True, "validated"
@@ -307,13 +312,13 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         if already_checked:
             if validation_status == "validated":
                 return f"{label} already active"
-            if validation_status == "pending":
-                return f"{label} already checked in menu; persistent validation scan pending"
+            if validation_status == "not_implemented":
+                return f"{label} FAILED: validation not yet implemented"
             return f"{label} already checked in menu"
         if validation_status == "validated":
             return f"{label} applied and validated"
-        if validation_status == "pending":
-            return f"{label} applied; persistent validation scan pending"
+        if validation_status == "not_implemented":
+            return f"{label} FAILED: validation not yet implemented"
         return f"{label} applied"
 
     # ------------------------------------------------------------------
@@ -381,6 +386,14 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 if step.get("close_with_escape"):
                     self.runtime.press("Escape")
                     self._sleep(step.get("pause_after_close", 0.4))
+                if step.get("verified_by_checked_state"):
+                    result.add_step(
+                        f"{step_name}:{index}",
+                        True,
+                        self._current_step_message(label, "validated", already_checked=True),
+                        target=target_key,
+                    )
+                    continue
                 verify_snapshot_kind = step.get("verify_snapshot", "document")
                 verify_snap = self._snapshot(verify_snapshot_kind)
                 ok, validation_status = self._validation_state(
@@ -412,9 +425,33 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
 
             self._sleep(step.get("pause_after_action", 1.5))
 
+            # If this step uses checked-state verification, confirm checked now
+            # (before dropdown closes and state is lost)
+            if step.get("verified_by_checked_state"):
+                recheck_snap = self._snapshot(target_snapshot_kind)
+                recheck_el = self.find_first(recheck_snap, target_key)
+                if not recheck_el or "checked" not in {s for s in recheck_el.states}:
+                    result.add_step(
+                        f"{step_name}:{index}",
+                        False,
+                        f"{self.platform} target {target_key!r} not in checked state after click for {label}",
+                        snapshot=recheck_snap.serializable(),
+                    )
+                    return False
+
             if step.get("close_with_escape"):
                 self.runtime.press("Escape")
                 self._sleep(step.get("pause_after_close", 1.0))
+
+            # If verified by checked state, we already confirmed above
+            if step.get("verified_by_checked_state"):
+                result.add_step(
+                    f"{step_name}:{index}",
+                    True,
+                    self._current_step_message(label, "validated"),
+                    target=target_key,
+                )
+                continue
 
             verify_snapshot_kind = step.get("verify_snapshot", "document")
             verify_snap = self._snapshot(verify_snapshot_kind)
@@ -457,7 +494,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         validations = dict(selection.get(f"{group}_validations") or {})
         validation_key = validations.get(normalized_target) or f"{normalized_target}_active"
         validation_cfg = self._validation_cfg(validation_key)
-        if validation_cfg and not validation_cfg.get("pending"):
+        if validation_cfg and not validation_cfg.get("pending") and not validation_cfg.get("verified_by_checked_state"):
             current_snap = self.runtime.snapshot()
             if self.validation_passes(current_snap, validation_key):
                 result.add_step(
@@ -478,6 +515,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 "skip_if_checked": bool(selection.get(f"{group}_skip_if_checked")),
                 "close_with_escape": bool(selection.get(f"{group}_close_with_escape")),
                 "validation": validation_key,
+                "verified_by_checked_state": bool(selection.get(f"{group}_verified_by_checked_state")),
             }
         ]
         return self._execute_sequence(f"select_{group}", normalized_target, sequence, result)

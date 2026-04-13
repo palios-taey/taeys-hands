@@ -234,25 +234,50 @@ workflow:
 
 validation:
   attach_success:
+    # NEEDS LIVE SCAN: what file chip appears after attachment?
     pending: true
 
   prompt_ready:
+    # NEEDS LIVE SCAN: what changes after text entered?
     pending: true
 
   send_success:
-    pending: true
+    indicators:
+      - name: "Stop response"
+        role: push button
 
   response_complete:
-    pending: true
+    indicators:
+      - name: "Copy"
+        role: push button
+    stop_absent: true
 
   opus_active:
-    pending: true
+    indicators:
+      - name: "Opus 4.6"
+        role: push button
+      - name: "Opus 4.6 Extended"
+        role: push button
 
   sonnet_active:
-    pending: true
+    indicators:
+      - name: "Sonnet 4.6"
+        role: push button
+      - name: "Sonnet 4.6 Extended"
+        role: push button
 
   haiku_active:
-    pending: true
+    indicators:
+      - name: "Haiku 4.5"
+        role: push button
+      - name: "Haiku 4.5 Extended"
+        role: push button
 
   extended_thinking_active:
-    pending: true
+    indicators:
+      - name: "Opus 4.6 Extended"
+        role: push button
+      - name: "Sonnet 4.6 Extended"
+        role: push button
+      - name: "Haiku 4.5 Extended"
+        role: push button

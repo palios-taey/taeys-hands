@@ -253,6 +253,7 @@ workflow:
     mode_click_strategy: atspi_only
     mode_close_with_escape: true
     mode_skip_if_checked: true
+    mode_verified_by_checked_state: true
     mode_targets:
       computer: mode_computer_item
       deep_research: mode_deep_research_item
@@ -334,29 +335,37 @@ workflow:
 
 validation:
   attach_success:
+    # NEEDS LIVE SCAN: what file chip appears after attachment?
     pending: true
 
   prompt_ready:
+    # NEEDS LIVE SCAN: what changes after text entered?
     pending: true
 
   send_success:
-    pending: true
+    indicators:
+      - name: "Cancel"
+        role: push button
 
   response_complete:
-    pending: true
+    indicators:
+      - name: "Copy"
+        role: push button
+    stop_absent: true
 
-  # Deep Research is active when the persistent toolbar tile exists,
-  # not when the dropdown radio item is checked.
   deep_research_active:
     indicators:
       - name: "Deep research"
         role: push button
 
   computer_active:
+    # NEEDS LIVE SCAN: does Computer mode show a persistent toolbar tile?
     pending: true
 
   model_council_active:
+    # NEEDS LIVE SCAN: does Model Council show a persistent toolbar tile?
     pending: true
 
   learn_step_by_step_active:
+    # NEEDS LIVE SCAN: does Learn Step by Step show a persistent toolbar tile?
     pending: true
