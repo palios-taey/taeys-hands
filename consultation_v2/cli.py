@@ -86,8 +86,10 @@ def setup_display(platform: str, display: str | None = None) -> None:
         if os.environ.get('AT_SPI_BUS_ADDRESS'):
             os.environ['DBUS_SESSION_BUS_ADDRESS'] = os.environ['AT_SPI_BUS_ADDRESS']
 
-    # This process IS the display worker — no subprocess routing
-    os.environ.pop('PLATFORM_DISPLAYS', None)
+    # Set PLATFORM_DISPLAYS to only this platform so switch_to_platform works
+    # but subprocess scanning is not triggered (single platform = direct AT-SPI)
+    disp_num = disp.lstrip(':')
+    os.environ['PLATFORM_DISPLAYS'] = f'{platform}:{disp_num}'
     os.environ['GTK_USE_PORTAL'] = '0'
 
 

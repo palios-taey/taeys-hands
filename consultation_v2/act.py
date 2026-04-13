@@ -77,7 +77,8 @@ def setup_display(platform: str) -> str:
         if os.environ.get('AT_SPI_BUS_ADDRESS'):
             os.environ['DBUS_SESSION_BUS_ADDRESS'] = os.environ['AT_SPI_BUS_ADDRESS']
 
-    os.environ.pop('PLATFORM_DISPLAYS', None)
+    disp_num = display.lstrip(':')
+    os.environ['PLATFORM_DISPLAYS'] = f'{platform}:{disp_num}'
     os.environ['GTK_USE_PORTAL'] = '0'
     return display
 
