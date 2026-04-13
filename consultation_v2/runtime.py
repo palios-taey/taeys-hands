@@ -53,10 +53,15 @@ class ConsultationRuntime:
             only its named dialog windows are targeted here.
         """
         from core.platforms import get_platform_display
+        from pathlib import Path
         env = dict(os.environ)
         plat_display = get_platform_display(self.platform)
         if plat_display:
             env['DISPLAY'] = plat_display
+            try:
+                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
+            except FileNotFoundError:
+                pass
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         closed = 0
@@ -94,10 +99,15 @@ class ConsultationRuntime:
         approach (tools/attach.py).
         """
         from core.platforms import get_platform_display
+        from pathlib import Path
         env = dict(os.environ)
         plat_display = get_platform_display(self.platform)
         if plat_display:
             env['DISPLAY'] = plat_display
+            try:
+                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
+            except FileNotFoundError:
+                pass
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         for title in dialog_titles:
