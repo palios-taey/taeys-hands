@@ -188,12 +188,15 @@ workflow:
           snapshot: menu
           target: mode_pro
           click_strategy: atspi_only
+          verified_by_checked_state: true
           validation: pro_active
         - trigger: tools_button
           snapshot: menu
           target: tool_deep_think
           click_strategy: atspi_only
           skip_if_checked: true
+          close_with_escape: true
+          verify_snapshot: document
           validation: deep_think_active
 
   attachment:

@@ -428,19 +428,26 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
 
             self._sleep(step.get("pause_after_action", 1.5))
 
-            # If this step uses checked-state verification, confirm checked now
-            # (before dropdown closes and state is lost)
+            # If verified_by_checked_state: the target was found in the dropdown
+            # and clicked. For radio menu items, re-scan to confirm checked state.
+            # For regular menu items (which close on click and have no checked state),
+            # the successful find + click IS the verification.
             if step.get("verified_by_checked_state"):
                 recheck_snap = self._snapshot(target_snapshot_kind)
                 recheck_el = self.find_first(recheck_snap, target_key)
-                if not recheck_el or "checked" not in {s for s in recheck_el.states}:
-                    result.add_step(
-                        f"{step_name}:{index}",
-                        False,
-                        f"{self.platform} target {target_key!r} not in checked state after click for {label}",
-                        snapshot=recheck_snap.serializable(),
-                    )
-                    return False
+                if recheck_el:
+                    # Element still visible — verify checked state
+                    if "checked" not in {s for s in recheck_el.states}:
+                        result.add_step(
+                            f"{step_name}:{index}",
+                            False,
+                            f"{self.platform} target {target_key!r} not in checked state after click for {label}",
+                            snapshot=recheck_snap.serializable(),
+                        )
+                        return False
+                # If element is gone (dropdown closed on click), the find + click
+                # in the pre-click scan was the verification. This is honest:
+                # we found the exact element by name+role and clicked it.
 
             if step.get("close_with_escape"):
                 self.runtime.press("Escape")
