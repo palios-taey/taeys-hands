@@ -879,36 +879,48 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
 
             verify_snap = self.runtime.snapshot()
 
-            # Diff-based attach validation: a new named element must appear
-            post_attach_elements = set()
-            for items in verify_snap.mapped.values():
-                for el in items:
-                    if el.name:
-                        post_attach_elements.add((el.name, el.role))
-            for el in verify_snap.unknown:
-                if el.name:
-                    post_attach_elements.add((el.name, el.role))
-
-            new_elements = post_attach_elements - pre_attach_elements
-            if new_elements:
-                chip_name, chip_role = next(iter(new_elements))
+            # Check YAML validation config first
+            validation_cfg = self._validation_cfg(validation_key) if validation_key else {}
+            if validation_cfg.get("pass_through"):
+                # File dialog interaction success IS the validation
                 result.add_step(
                     "attach",
                     True,
-                    f"attached {os.path.basename(abs_path)}; new element: {chip_name!r} [{chip_role}]",
+                    f"attached {os.path.basename(abs_path)} (dialog interaction validated)",
                     file=abs_path,
-                    new_elements=[(n, r) for n, r in new_elements],
                     snapshot=verify_snap.serializable(),
                 )
             else:
-                result.add_step(
-                    "attach",
-                    False,
-                    f"{self.platform} no new element appeared after attaching {os.path.basename(abs_path)}",
-                    file=abs_path,
-                    snapshot=verify_snap.serializable(),
-                )
-                return False
+                # Diff-based attach validation: a new named element must appear
+                post_attach_elements = set()
+                for items in verify_snap.mapped.values():
+                    for el in items:
+                        if el.name:
+                            post_attach_elements.add((el.name, el.role))
+                for el in verify_snap.unknown:
+                    if el.name:
+                        post_attach_elements.add((el.name, el.role))
+
+                new_elements = post_attach_elements - pre_attach_elements
+                if new_elements:
+                    chip_name, chip_role = next(iter(new_elements))
+                    result.add_step(
+                        "attach",
+                        True,
+                        f"attached {os.path.basename(abs_path)}; new element: {chip_name!r} [{chip_role}]",
+                        file=abs_path,
+                        new_elements=[(n, r) for n, r in new_elements],
+                        snapshot=verify_snap.serializable(),
+                    )
+                else:
+                    result.add_step(
+                        "attach",
+                        False,
+                        f"{self.platform} no new element appeared after attaching {os.path.basename(abs_path)}",
+                        file=abs_path,
+                        snapshot=verify_snap.serializable(),
+                    )
+                    return False
 
         return True
 
