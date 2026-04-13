@@ -67,7 +67,7 @@ class ConsultationRuntime:
         for title in dialog_titles:
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", f"^{title}$"],
+                    ["xdotool", "search", "--name", title],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -107,7 +107,7 @@ class ConsultationRuntime:
         for title in dialog_titles:
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", f"^{title}$"],
+                    ["xdotool", "search", "--name", title],
                     capture_output=True,
                     text=True,
                     timeout=2,
