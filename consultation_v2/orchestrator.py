@@ -67,8 +67,13 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             logger.error("Plan creation failed: %s", exc)
 
     # --- Phase 3: Run driver ---
-    driver = _REGISTRY[request.platform]()
-    result = driver.run(request)
+    try:
+        driver = _REGISTRY[request.platform]()
+        result = driver.run(request)
+    except Exception as exc:
+        logger.exception("Driver crashed with unhandled exception")
+        result = ConsultationResult(platform=request.platform, request=request)
+        result.add_step("driver_run", False, f"Driver crashed: {exc}")
 
     # --- Phase 4: Complete Plan + notify + ingest ---
     if plan_id and not request.no_neo4j:

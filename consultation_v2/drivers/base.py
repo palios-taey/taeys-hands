@@ -16,7 +16,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from consultation_v2.identity import consolidate_attachments
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import (
@@ -107,21 +106,10 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> Optional[List[str]]:
-        """Consolidate user attachments with FAMILY_KERNEL + platform identity.
-
-        Returns [] if no attachments, [consolidated_path] on success, None on failure.
-        """
+        """Return attachment paths. Orchestrator already consolidated with identity files."""
         if not request.attachments:
             return []
-        try:
-            consolidated = consolidate_attachments(self.platform, list(request.attachments))
-        except Exception as exc:
-            result.add_step('attach', False, f'{self.platform} identity consolidation failed: {exc}')
-            return None
-        if not consolidated:
-            result.add_step('attach', False, f'{self.platform} identity consolidation returned no file')
-            return None
-        return [os.path.abspath(consolidated)]
+        return [os.path.abspath(p) for p in request.attachments]
 
     # ------------------------------------------------------------------
     # Top-level flow
@@ -236,7 +224,11 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
     def _hover(self, element: ElementRef) -> bool:
         if element.x is None or element.y is None:
             return False
+        from core.platforms import get_platform_display
         env = dict(os.environ)
+        plat_display = get_platform_display(self.platform)
+        if plat_display:
+            env['DISPLAY'] = plat_display
         try:
             subprocess.run(
                 ["xdotool", "mousemove", "--sync", str(int(element.x) + 4), str(int(element.y) + 4)],
@@ -653,6 +645,8 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                 # Get search term from YAML element spec name, not caller's raw string
                 target_spec = self._element_spec(target_key)
                 search_term = target_spec.get("name", "") if target_spec else ""
+                if not search_term and target_spec and target_spec.get("names"):
+                    search_term = str(target_spec["names"][0])
                 if not search_term:
                     result.add_step("toggle_connectors", False, f"{self.platform} no name in element spec for {target_key!r}")
                     return False
@@ -1216,7 +1210,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         extra_cfg = dict(self._workflow().get("extra_extract") or {})
         strategy = extra_cfg.get("strategy")
-        if strategy in {"", "none"}:
+        if not strategy or strategy in {"", "none"}:
             result.add_step(
                 "extract_additional",
                 True,

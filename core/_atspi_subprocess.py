@@ -199,7 +199,7 @@ def perform_action(platform, scan_root, name, role, x, y):
         try:
             n_name = (node.get_name() or '').strip()
             n_role = node.get_role_name() or ''
-            if n_name == name and n_role == role:
+            if n_name[:200] == name and n_role == role:
                 try:
                     ext = node.get_extents(0)
                     cx = ext.x + ext.width // 2
