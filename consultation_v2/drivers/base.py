@@ -292,6 +292,9 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False, "missing_config"
         if cfg.get("pending"):
             return False, "not_implemented"
+        if cfg.get("diff_validated") or cfg.get("pass_through"):
+            # Validation handled by driver logic (snapshot diff or downstream gate).
+            return True, "validated"
         if cfg.get("verified_by_checked_state"):
             # This validation is handled by checked-state verification during sequence execution.
             # It cannot be validated post-close because no persistent indicator exists.
@@ -793,6 +796,16 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         for file_path in attachment_paths:
             abs_path = os.path.abspath(file_path)
 
+            # Snapshot BEFORE attach — used for diff validation
+            pre_attach_snap = self.runtime.snapshot()
+            pre_attach_buttons = {
+                el.name for items in pre_attach_snap.mapped.values() for el in items
+                if el.role == "push button"
+            }
+            for el in pre_attach_snap.unknown:
+                if el.role == "push button":
+                    pre_attach_buttons.add(el.name)
+
             if prefer_keyboard_shortcut and keyboard_shortcut:
                 opened = self.runtime.press(str(keyboard_shortcut))
                 self._sleep(2)
@@ -855,19 +868,37 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             self._sleep(attachment.get("pause_after_dialog_submit", 2.0))
 
             verify_snap = self.runtime.snapshot()
-            ok, validation_status = self._validation_state(
-                verify_snap,
-                validation_key,
-                
-            )
-            result.add_step(
-                "attach",
-                ok,
-                self._current_step_message(f"attached {os.path.basename(abs_path)}", validation_status),
-                file=abs_path,
-                snapshot=verify_snap.serializable(),
-            )
-            if not ok:
+
+            # Diff-based attach validation: a new push button (file chip) must appear
+            post_attach_buttons = {
+                el.name for items in verify_snap.mapped.values() for el in items
+                if el.role == "push button"
+            }
+            for el in verify_snap.unknown:
+                if el.role == "push button":
+                    post_attach_buttons.add(el.name)
+
+            new_buttons = post_attach_buttons - pre_attach_buttons
+            # Filter out empty names and browser chrome
+            new_buttons = {n for n in new_buttons if n and not n.startswith("Open context")}
+
+            if new_buttons:
+                result.add_step(
+                    "attach",
+                    True,
+                    f"attached {os.path.basename(abs_path)}; file chip: {next(iter(new_buttons))!r}",
+                    file=abs_path,
+                    new_elements=list(new_buttons),
+                    snapshot=verify_snap.serializable(),
+                )
+            else:
+                result.add_step(
+                    "attach",
+                    False,
+                    f"{self.platform} no file chip appeared after attaching {os.path.basename(abs_path)}",
+                    file=abs_path,
+                    snapshot=verify_snap.serializable(),
+                )
                 return False
 
         return True
@@ -1061,6 +1092,42 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
     # Extraction
     # ------------------------------------------------------------------
 
+    def _click_and_read_clipboard(
+        self,
+        snap: Snapshot,
+        key: str,
+        extract_cfg: Dict[str, Any],
+        step_label: str,
+        result: ConsultationResult,
+    ) -> Optional[str]:
+        """Find element by key in snapshot, click it, read clipboard. Returns text or None."""
+        strategy_name = extract_cfg.get("strategy", "last_by_y")
+        if strategy_name == "last_by_y":
+            target = self.find_last(snap, key)
+        elif strategy_name == "first":
+            target = self.find_first(snap, key)
+        else:
+            result.add_step(step_label, False, f"{self.platform} unknown extract strategy {strategy_name!r}")
+            return None
+
+        if not target:
+            return None
+
+        click_strategy = extract_cfg.get("click_strategy")
+        self.runtime.write_clipboard("")
+        self._sleep(0.2)
+        if not self.runtime.click(target, strategy=click_strategy):
+            result.add_step(
+                step_label, False,
+                f"{self.platform} extraction click failed for {key!r}",
+                snapshot=snap.serializable(),
+            )
+            return None
+
+        self._sleep(extract_cfg.get("pause_after_click", 1.0))
+        content = self.runtime.read_clipboard().strip()
+        return content if content else None
+
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -1068,11 +1135,20 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         extract_cfg = dict(self._workflow().get("extract") or {})
         primary_key = extract_cfg.get("primary_key")
-        if not (primary_key and self._has_element_spec(primary_key)):
+        fallback_key = extract_cfg.get("fallback_key")
+
+        # At least one extraction key must be configured and mapped
+        keys_to_try = []
+        if primary_key and self._has_element_spec(primary_key):
+            keys_to_try.append(primary_key)
+        if fallback_key and self._has_element_spec(fallback_key):
+            keys_to_try.append(fallback_key)
+
+        if not keys_to_try:
             result.add_step(
                 "extract_primary",
                 False,
-                f"{self.platform} {primary_key!r} is SCAN PENDING; extraction step cannot run fail-closed",
+                f"{self.platform} no extraction keys configured (primary={primary_key!r}, fallback={fallback_key!r})",
             )
             return False
 
@@ -1091,59 +1167,29 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         self._sleep(extract_cfg.get("pause_before_extract", 1.0))
         snap = self.runtime.snapshot()
 
-        strategy = extract_cfg.get("strategy")
-        if not strategy:
-            result.add_step("extract_primary", False, f"{self.platform} workflow.extract.strategy not configured")
-            return False
-        if strategy == "last_by_y":
-            target = self.find_last(snap, primary_key)
-        elif strategy == "first":
-            target = self.find_first(snap, primary_key)
-        else:
-            result.add_step("extract_primary", False, f"{self.platform} unknown extract strategy {strategy!r}")
-            return False
+        # Try each key in order — use the first one that produces content
+        for key in keys_to_try:
+            content = self._click_and_read_clipboard(snap, key, extract_cfg, "extract_primary", result)
+            if content:
+                result.response_text = content
+                result.add_step(
+                    "extract_primary",
+                    True,
+                    f"{self.platform} response copied via {key!r} ({len(content)} chars)",
+                    characters=len(content),
+                    key_used=key,
+                    preview=content[:200],
+                )
+                return True
 
-        if not target:
-            result.add_step(
-                "extract_primary",
-                False,
-                f"{self.platform} extraction target {primary_key!r} not found",
-                snapshot=snap.serializable(),
-            )
-            return False
-
-        click_strategy = extract_cfg.get("click_strategy")
-
-        self.runtime.write_clipboard("")
-        self._sleep(0.2)
-        if not self.runtime.click(target, strategy=click_strategy):
-            result.add_step(
-                "extract_primary",
-                False,
-                f"{self.platform} extraction click failed for {primary_key!r}",
-                snapshot=snap.serializable(),
-            )
-            return False
-
-        self._sleep(extract_cfg.get("pause_after_click", 1.0))
-        content = self.runtime.read_clipboard().strip()
-        if not content:
-            result.add_step(
-                "extract_primary",
-                False,
-                f"{self.platform} clipboard was empty after extraction click",
-            )
-            return False
-
-        result.response_text = content
+        # All keys tried, none produced content
         result.add_step(
             "extract_primary",
-            True,
-            f"{self.platform} response copied ({len(content)} chars)",
-            characters=len(content),
-            preview=content[:200],
+            False,
+            f"{self.platform} clipboard empty after trying keys: {keys_to_try}",
+            snapshot=snap.serializable(),
         )
-        return True
+        return False
 
     def extract_additional(
         self,

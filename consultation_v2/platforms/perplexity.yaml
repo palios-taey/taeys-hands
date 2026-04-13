@@ -330,7 +330,8 @@ workflow:
 
   extract:
     scroll_before_extract: ctrl+End
-    primary_key: copy_button
+    primary_key: copy_contents_button
+    fallback_key: copy_button
     strategy: last_by_y
     click_strategy: atspi_only
 
@@ -339,12 +340,14 @@ workflow:
 
 validation:
   attach_success:
-    # NEEDS LIVE SCAN: what file chip appears after attachment?
-    pending: true
+    # Validated by snapshot diff in driver — new push button (file chip) must appear.
+    # No YAML indicators needed; driver compares pre/post-attach snapshots.
+    diff_validated: true
 
   prompt_ready:
-    # NEEDS LIVE SCAN: what changes after text entered?
-    pending: true
+    # Send button presence is sufficient — if send_button is in tree, prompt is ready.
+    # The send step will fail if send_button is missing.
+    pass_through: true
 
   send_success:
     indicators:

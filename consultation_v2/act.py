@@ -84,7 +84,7 @@ def setup_display(platform: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description='V2 single-action tool')
-    parser.add_argument('action', choices=['inspect', 'click', 'navigate', 'paste', 'press'])
+    parser.add_argument('action', choices=['inspect', 'click', 'navigate', 'paste', 'press', 'clipboard'])
     parser.add_argument('platform', choices=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'])
     parser.add_argument('target', nargs='?', default=None,
                         help='Element key (for click), URL (for navigate), text (for paste), key (for press)')
@@ -180,6 +180,21 @@ def main():
         ok = runtime.press(args.target)
         print(json.dumps({'pressed': ok, 'key': args.target}))
         return 0 if ok else 1
+
+    if args.action == 'clipboard':
+        if args.target == 'read' or args.target is None:
+            content = runtime.read_clipboard()
+            print(content)
+            return 0
+        elif args.target == 'clear':
+            runtime.write_clipboard("")
+            print(json.dumps({'cleared': True}))
+            return 0
+        else:
+            # Write to clipboard
+            runtime.write_clipboard(args.target)
+            print(json.dumps({'written': True, 'length': len(args.target)}))
+            return 0
 
 
 if __name__ == '__main__':
