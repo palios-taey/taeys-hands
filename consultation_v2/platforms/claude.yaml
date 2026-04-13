@@ -202,9 +202,7 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: keyboard_shortcut
-    keyboard_shortcut: ctrl+u
-    prefer_keyboard_shortcut: true
+    open_method: atspi_menu
     dialog_location_shortcut: ctrl+l
     validation: attach_success
 

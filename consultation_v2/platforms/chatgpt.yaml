@@ -224,6 +224,7 @@ workflow:
           snapshot: menu
           target: model_pro
           click_strategy: atspi_only
+          verified_by_checked_state: true
           validation: pro_active
         - snapshot: document
           target: extended_pro_option

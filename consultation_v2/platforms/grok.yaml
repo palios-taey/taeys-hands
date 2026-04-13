@@ -192,6 +192,7 @@ workflow:
   send:
     submit_via_return: true
     keypress: Return
+    confirmation_key: stop_button
     validation: send_success
 
   monitor:
