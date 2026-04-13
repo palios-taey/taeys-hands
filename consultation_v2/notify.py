@@ -40,8 +40,9 @@ def push_notification(
             'preview': preview[:200],
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
-        key = f'taey:{requester}:notifications'
-        r.rpush(key, payload)
+        # Direct delivery to requester's inbox (LPUSH for FIFO)
+        key = f'taey:{requester}:inbox'
+        r.lpush(key, payload)
         logger.info("Notification pushed to %s (plan=%s, status=%s)", key, plan_id, status)
         return True
     except Exception as exc:
