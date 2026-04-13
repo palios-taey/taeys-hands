@@ -84,6 +84,10 @@ tree:
       name: "Copy"
       role: push button
 
+    copy_contents_button:
+      name: "Copy contents"
+      role: push button
+
     new_thread:
       name: "New thread Ctrl I"
       role: push button
