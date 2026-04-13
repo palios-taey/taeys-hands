@@ -131,6 +131,13 @@ class ConsultationRuntime:
         return bool(inp.switch_to_platform(self.platform))
 
     def current_url(self) -> Optional[str]:
+        # In subprocess mode, get URL from snapshot (which uses subprocess scan)
+        try:
+            snap = self.snapshot()
+            return snap.url
+        except Exception:
+            pass
+        # In-process fallback
         firefox = atspi.find_firefox_for_platform(self.platform)
         doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
         return atspi.get_document_url(doc) if doc else None
@@ -272,7 +279,8 @@ class ConsultationRuntime:
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         before = self.current_url()
-        inp.focus_firefox()
+        # switch() already focused Firefox on the correct display.
+        # Don't call focus_firefox() which uses in-process AT-SPI (wrong bus).
         time.sleep(0.2)
         inp.press_key("Escape")
         time.sleep(0.1)

@@ -333,6 +333,7 @@ workflow:
     confirmation_key: stop_button
     trigger: send_button
     require_new_url: true
+    confirmation_timeout: 60
     validation: send_success
 
   monitor:
