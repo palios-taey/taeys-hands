@@ -164,12 +164,11 @@ def _subprocess_scan(platform: str) -> Snapshot:
     if not display or not bus:
         raise RuntimeError(f"{platform}: no display ({display}) or bus ({bus}) configured")
 
-    # Also need the DBUS session bus for this display
     session_bus_file = f'/tmp/dbus_session_bus_{display}'
     try:
         session_bus = Path(session_bus_file).read_text().strip()
     except FileNotFoundError:
-        session_bus = bus  # fall back to AT-SPI bus
+        session_bus = bus
 
     env = dict(os.environ)
     env['DISPLAY'] = display
@@ -177,8 +176,14 @@ def _subprocess_scan(platform: str) -> Snapshot:
     env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     env['PLATFORM_DISPLAYS'] = f'{platform}:{display.lstrip(":")}'
 
+    # Read scan_root from YAML — respects Rule #4 (YAML drives driver)
+    cfg = load_platform_yaml(platform)
+    tree_cfg = dict(cfg.get("tree") or {})
+    scan_root = tree_cfg.get("scan_root", "auto")
+
     result = subprocess.run(
-        [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'), 'scan', platform],
+        [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
+         'scan', platform, scan_root],
         capture_output=True, text=True, timeout=15, env=env,
     )
     if result.returncode != 0:

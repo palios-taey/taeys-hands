@@ -1161,15 +1161,31 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         except Exception:
             pass
 
-        self._sleep(extract_cfg.get("pause_before_extract", 1.0))
-        snap = self.runtime.snapshot()
+        # Wait for primary_key to appear in the tree (predicate wait)
+        extract_timeout = float(extract_cfg.get("extract_timeout", 15))
 
+        def _has_primary() -> bool:
+            snap = self.runtime.snapshot()
+            return snap.has(primary_key)
+
+        found = self.runtime.wait_until(_has_primary, timeout=extract_timeout, interval=2.0)
+        if not found:
+            snap = self.runtime.snapshot()
+            result.add_step(
+                "extract_primary",
+                False,
+                f"{self.platform} extraction target {primary_key!r} not found after {extract_timeout}s wait",
+                snapshot=snap.serializable(),
+            )
+            return False
+
+        snap = self.runtime.snapshot()
         content = self._click_and_read_clipboard(snap, primary_key, extract_cfg, "extract_primary", result)
         if not content:
             result.add_step(
                 "extract_primary",
                 False,
-                f"{self.platform} extraction target {primary_key!r} not found or clipboard empty",
+                f"{self.platform} clipboard empty after clicking {primary_key!r}",
                 snapshot=snap.serializable(),
             )
             return False

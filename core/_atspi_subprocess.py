@@ -101,56 +101,61 @@ def find_firefox_info(platform):
     return result
 
 
-def scan_elements(platform):
-    """Full element scan for platform. Returns list of element dicts."""
+def scan_elements(platform, scan_root='auto'):
+    """Full element scan for platform. Returns list of element dicts.
+
+    scan_root: 'auto' scans from document, 'app' scans from Firefox app root.
+    """
     desktop = Atspi.get_desktop(0)
+    # Clear cache for fresh tree
+    try:
+        desktop.clear_cache_single()
+    except Exception:
+        pass
+
     all_ff = []
     for i in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(i)
-        if app and 'firefox' in (app.get_name() or '').lower():
+        if app and app.get_name() == 'Firefox':
             all_ff.append(app)
 
     if not all_ff:
         return {'error': 'No Firefox found', 'elements': []}
 
-    # Find document
-    doc = None
-    for ff in all_ff:
-        for j in range(ff.get_child_count()):
-            frame = ff.get_child_at_index(j)
-            if frame:
-                doc = _find_document(frame, platform)
-                if doc:
-                    break
-        if doc:
-            break
-
-    if not doc:
-        return {'error': f'No {platform} document', 'elements': []}
-
-    url = _get_doc_url(doc)
-
-    # Get chrome Y
+    ff = all_ff[0]
     try:
-        ext = doc.get_extents(0)
-        chrome_y = ext.y if ext else 120
+        ff.clear_cache_single()
     except Exception:
-        chrome_y = 120
+        pass
+
+    # Find document for URL
+    doc = None
+    for j in range(ff.get_child_count()):
+        frame = ff.get_child_at_index(j)
+        if frame:
+            doc = _find_document(frame, platform)
+            if doc:
+                try:
+                    doc.clear_cache_single()
+                except Exception:
+                    pass
+                break
+
+    url = _get_doc_url(doc) if doc else None
+
+    # Determine scan scope
+    if scan_root == 'app' or doc is None:
+        scope = ff
+    else:
+        scope = doc
 
     # Scan tree
     elements = []
-    _scan(doc, elements, 0)
-    elements = [e for e in elements if e.get('y', 0) > chrome_y]
-
-    # Copy buttons
-    copy_count = sum(1 for e in elements
-                     if 'copy' in e.get('name', '').lower()
-                     and e.get('role') in ('push button',))
+    _scan(scope, elements, 0)
 
     return {
         'url': url,
         'elements': elements,
-        'copy_button_count': copy_count,
         'total': len(elements),
     }
 
@@ -206,10 +211,11 @@ def _scan(node, elements, depth):
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'find_firefox'
     platform = sys.argv[2] if len(sys.argv) > 2 else 'chatgpt'
+    scan_root = sys.argv[3] if len(sys.argv) > 3 else 'auto'
 
     if cmd == 'find_firefox':
         print(json.dumps(find_firefox_info(platform)))
     elif cmd == 'scan':
-        print(json.dumps(scan_elements(platform)))
+        print(json.dumps(scan_elements(platform, scan_root=scan_root)))
     else:
         print(json.dumps({'error': f'Unknown command: {cmd}'}))
