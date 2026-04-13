@@ -83,8 +83,7 @@ tree:
       name: "Model select"
       role: push button
 
-    send_button:
-      # SCAN PENDING
+    # Grok uses submit_via_return (Enter key) — no send button in AT-SPI tree.
 
     stop_button:
       name: "Stop model response"

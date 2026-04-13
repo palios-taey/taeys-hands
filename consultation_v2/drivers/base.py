@@ -879,8 +879,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
                     post_attach_buttons.add(el.name)
 
             new_buttons = post_attach_buttons - pre_attach_buttons
-            # Filter out empty names and browser chrome
-            new_buttons = {n for n in new_buttons if n and not n.startswith("Open context")}
+            new_buttons = {n for n in new_buttons if n}
 
             if new_buttons:
                 result.add_step(
@@ -1135,20 +1134,11 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         extract_cfg = dict(self._workflow().get("extract") or {})
         primary_key = extract_cfg.get("primary_key")
-        fallback_key = extract_cfg.get("fallback_key")
-
-        # At least one extraction key must be configured and mapped
-        keys_to_try = []
-        if primary_key and self._has_element_spec(primary_key):
-            keys_to_try.append(primary_key)
-        if fallback_key and self._has_element_spec(fallback_key):
-            keys_to_try.append(fallback_key)
-
-        if not keys_to_try:
+        if not (primary_key and self._has_element_spec(primary_key)):
             result.add_step(
                 "extract_primary",
                 False,
-                f"{self.platform} no extraction keys configured (primary={primary_key!r}, fallback={fallback_key!r})",
+                f"{self.platform} primary_key {primary_key!r} not configured or not in element_map",
             )
             return False
 
@@ -1167,29 +1157,25 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         self._sleep(extract_cfg.get("pause_before_extract", 1.0))
         snap = self.runtime.snapshot()
 
-        # Try each key in order — use the first one that produces content
-        for key in keys_to_try:
-            content = self._click_and_read_clipboard(snap, key, extract_cfg, "extract_primary", result)
-            if content:
-                result.response_text = content
-                result.add_step(
-                    "extract_primary",
-                    True,
-                    f"{self.platform} response copied via {key!r} ({len(content)} chars)",
-                    characters=len(content),
-                    key_used=key,
-                    preview=content[:200],
-                )
-                return True
+        content = self._click_and_read_clipboard(snap, primary_key, extract_cfg, "extract_primary", result)
+        if not content:
+            result.add_step(
+                "extract_primary",
+                False,
+                f"{self.platform} extraction target {primary_key!r} not found or clipboard empty",
+                snapshot=snap.serializable(),
+            )
+            return False
 
-        # All keys tried, none produced content
+        result.response_text = content
         result.add_step(
             "extract_primary",
-            False,
-            f"{self.platform} clipboard empty after trying keys: {keys_to_try}",
-            snapshot=snap.serializable(),
+            True,
+            f"{self.platform} response copied via {primary_key!r} ({len(content)} chars)",
+            characters=len(content),
+            preview=content[:200],
         )
-        return False
+        return True
 
     def extract_additional(
         self,
