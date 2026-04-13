@@ -156,10 +156,17 @@ class ConsultationRuntime:
                 and bool(inp.click_at(int(element.x), int(element.y)))
             )
         if chosen == "atspi_only":
-            return bool(
-                atspi_click(
-                    {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
+            # In subprocess scan mode, atspi_obj is None — use coordinates
+            if element.atspi_obj is not None:
+                return bool(
+                    atspi_click(
+                        {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
+                    )
                 )
+            return (
+                element.x is not None
+                and element.y is not None
+                and bool(inp.click_at(int(element.x), int(element.y)))
             )
         raise RuntimeError(
             f"{self.platform}: unknown click_strategy {chosen!r}. "

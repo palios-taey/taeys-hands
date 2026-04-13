@@ -9,13 +9,21 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from core import atspi
+from core.platforms import get_platform_display, get_platform_bus, is_multi_display
 from core.tree import find_elements, find_menu_items
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 
 
 
@@ -141,13 +149,64 @@ def _classify_elements(
     return snapshot
 
 
+def _needs_subprocess(platform: str) -> bool:
+    """True if this platform's display differs from the current process DISPLAY."""
+    if not is_multi_display():
+        return False
+    plat_display = get_platform_display(platform)
+    return plat_display is not None and plat_display != os.environ.get('DISPLAY', '')
+
+
+def _subprocess_scan(platform: str) -> Snapshot:
+    """Scan platform via subprocess with correct DISPLAY + AT_SPI_BUS_ADDRESS."""
+    display = get_platform_display(platform)
+    bus = get_platform_bus(platform)
+    if not display or not bus:
+        raise RuntimeError(f"{platform}: no display ({display}) or bus ({bus}) configured")
+
+    # Also need the DBUS session bus for this display
+    session_bus_file = f'/tmp/dbus_session_bus_{display}'
+    try:
+        session_bus = Path(session_bus_file).read_text().strip()
+    except FileNotFoundError:
+        session_bus = bus  # fall back to AT-SPI bus
+
+    env = dict(os.environ)
+    env['DISPLAY'] = display
+    env['AT_SPI_BUS_ADDRESS'] = bus
+    env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+    env['PLATFORM_DISPLAYS'] = f'{platform}:{display.lstrip(":")}'
+
+    result = subprocess.run(
+        [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'), 'scan', platform],
+        capture_output=True, text=True, timeout=15, env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"{platform} subprocess scan failed: {result.stderr[:200]}")
+
+    data = json.loads(result.stdout)
+    if data.get('error'):
+        raise RuntimeError(f"{platform} subprocess scan: {data['error']}")
+
+    snapshot = _classify_elements(platform, data.get('elements', []))
+    snapshot.url = data.get('url')
+    return snapshot
+
+
 def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Snapshot]:
     """Build AT-SPI snapshot.
 
     scan_root controls where to scan:
       'auto' — scan from document (default, most platforms)
       'app'  — scan from Firefox app root (for platforms where controls escape document subtree)
+
+    In multi-display mode, uses subprocess scanning to connect to the
+    correct AT-SPI bus for the platform's display.
     """
+    if _needs_subprocess(platform):
+        snapshot = _subprocess_scan(platform)
+        return None, None, snapshot
+
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get("tree") or {})
     try:
@@ -172,7 +231,6 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
 
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
-        # Check if YAML declares app-root scanning
         yaml_scan_root = tree_cfg.get("scan_root")
         if yaml_scan_root == "app":
             scan_root = "app"
@@ -181,7 +239,6 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
     url = atspi.get_document_url(doc) if doc else None
 
     yaml_scope = tree_cfg.get("scan_root")
-    fence = tree_cfg.get("fence_after") or []
     if scan_root == "app" or yaml_scope == "app":
         scope = firefox
     else:
@@ -194,6 +251,12 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+    # In multi-display subprocess mode, menu_snapshot uses the same scan
+    # (the subprocess scanner scans from app root, capturing menu items too)
+    if _needs_subprocess(platform):
+        snapshot = _subprocess_scan(platform)
+        return None, None, snapshot
+
     try:
         import gi
 
