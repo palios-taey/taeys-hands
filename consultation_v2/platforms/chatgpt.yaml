@@ -293,6 +293,8 @@ workflow:
 
   monitor:
     stop_key: stop_button
+    poll_interval: 2.0
+    required_stop_absent_cycles: 3
     complete_key: copy_button
     validation: response_complete
 

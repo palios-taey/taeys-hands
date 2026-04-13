@@ -1070,19 +1070,26 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             return False
 
         seen_stop = False
+        absent_cycles = 0
+        required_absent = int(monitor_cfg.get("required_stop_absent_cycles", 3))
 
         def _poll() -> bool:
-            nonlocal seen_stop
+            nonlocal seen_stop, absent_cycles
             snap = self.runtime.snapshot()
             if snap.has(str(stop_key)):
                 seen_stop = True
+                absent_cycles = 0
                 return False
-            return bool(seen_stop)
+            if seen_stop:
+                absent_cycles += 1
+                if absent_cycles >= required_absent:
+                    return True
+            return False
 
         completed = bool(self.runtime.wait_until(
             _poll,
             timeout=float(request.timeout),
-            interval=float(monitor_cfg.get("poll_interval") or 1.0),
+            interval=float(monitor_cfg.get("poll_interval", 2.0)),
         ))
         verify_snap = self.runtime.snapshot()
         result.add_step(
