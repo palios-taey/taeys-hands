@@ -70,7 +70,7 @@ def find_firefox_info(platform):
     all_ff = []
     for i in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(i)
-        if app and 'firefox' in (app.get_name() or '').lower():
+        if app and app.get_name() in ('Firefox', 'Mozilla Firefox', 'Firefox Web Browser'):
             all_ff.append(app)
 
     result['app_count'] = len(all_ff)
@@ -93,11 +93,6 @@ def find_firefox_info(platform):
                     result['url'] = _get_doc_url(doc)
                     return result
 
-    # Fallback: return first Firefox
-    try:
-        result['pid'] = all_ff[0].get_process_id()
-    except Exception:
-        pass
     return result
 
 

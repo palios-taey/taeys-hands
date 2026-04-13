@@ -237,7 +237,6 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         if element.x is None or element.y is None:
             return False
         env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
         try:
             subprocess.run(
                 ["xdotool", "mousemove", "--sync", str(int(element.x) + 4), str(int(element.y) + 4)],
@@ -1069,6 +1068,7 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             )
             return False
 
+        complete_key = monitor_cfg.get("complete_key")
         seen_stop = False
         absent_cycles = 0
         required_absent = int(monitor_cfg.get("required_stop_absent_cycles", 3))
@@ -1076,6 +1076,9 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
         def _poll() -> bool:
             nonlocal seen_stop, absent_cycles
             snap = self.runtime.snapshot()
+            # Fast-path: if complete_key (copy button) is present, response is done
+            if complete_key and snap.has(str(complete_key)):
+                return True
             if snap.has(str(stop_key)):
                 seen_stop = True
                 absent_cycles = 0

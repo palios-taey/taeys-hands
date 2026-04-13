@@ -56,15 +56,18 @@ class ConsultationRuntime:
             Do **not** close the ``xdg-desktop-portal-gtk`` *process* —
             only its named dialog windows are targeted here.
         """
+        from core.platforms import get_platform_display
         env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        plat_display = get_platform_display(self.platform)
+        if plat_display:
+            env['DISPLAY'] = plat_display
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         closed = 0
         for title in dialog_titles:
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", title],
+                    ["xdotool", "search", "--name", f"^{title}$"],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -94,14 +97,17 @@ class ConsultationRuntime:
         the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
         approach (tools/attach.py).
         """
+        from core.platforms import get_platform_display
         env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        plat_display = get_platform_display(self.platform)
+        if plat_display:
+            env['DISPLAY'] = plat_display
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         for title in dialog_titles:
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", title],
+                    ["xdotool", "search", "--name", f"^{title}$"],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -212,12 +218,8 @@ class ConsultationRuntime:
             # Subprocess mode — use AT-SPI action via subprocess
             if self._subprocess_click(element):
                 return True
-            # Last resort: coordinates (element was found by subprocess scan with coords)
-            return (
-                element.x is not None
-                and element.y is not None
-                and bool(inp.click_at(int(element.x), int(element.y)))
-            )
+            # atspi_only demanded — fail closed if AT-SPI click not available
+            return False
         raise RuntimeError(
             f"{self.platform}: unknown click_strategy {chosen!r}. "
             "YAML must declare 'atspi_only' or 'coordinate_only'."
