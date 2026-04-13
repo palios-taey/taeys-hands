@@ -157,7 +157,7 @@ def _needs_subprocess(platform: str) -> bool:
     return plat_display is not None and plat_display != os.environ.get('DISPLAY', '')
 
 
-def _subprocess_scan(platform: str) -> Snapshot:
+def _subprocess_scan(platform: str, scan_root: str = "document") -> Snapshot:
     """Scan platform via subprocess with correct DISPLAY + AT_SPI_BUS_ADDRESS."""
     display = get_platform_display(platform)
     bus = get_platform_bus(platform)
@@ -175,11 +175,6 @@ def _subprocess_scan(platform: str) -> Snapshot:
     env['AT_SPI_BUS_ADDRESS'] = bus
     env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     env['PLATFORM_DISPLAYS'] = f'{platform}:{display.lstrip(":")}'
-
-    # Read scan_root from YAML — respects Rule #4 (YAML drives driver)
-    cfg = load_platform_yaml(platform)
-    tree_cfg = dict(cfg.get("tree") or {})
-    scan_root = tree_cfg.get("scan_root", "auto")
 
     result = subprocess.run(
         [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
@@ -208,12 +203,14 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
     In multi-display mode, uses subprocess scanning to connect to the
     correct AT-SPI bus for the platform's display.
     """
-    if _needs_subprocess(platform):
-        snapshot = _subprocess_scan(platform)
-        return None, None, snapshot
-
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get("tree") or {})
+    yaml_scan_root = tree_cfg.get("scan_root")
+    effective_root = "app" if (scan_root == "app" or yaml_scan_root == "app") else "document"
+
+    if _needs_subprocess(platform):
+        snapshot = _subprocess_scan(platform, effective_root)
+        return None, None, snapshot
     try:
         import gi
 
@@ -256,10 +253,10 @@ def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Sn
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
-    # In multi-display subprocess mode, menu_snapshot uses the same scan
-    # (the subprocess scanner scans from app root, capturing menu items too)
+    # In multi-display subprocess mode, menu_snapshot uses app root
+    # to capture React portals and dropdown overlays
     if _needs_subprocess(platform):
-        snapshot = _subprocess_scan(platform)
+        snapshot = _subprocess_scan(platform, "app")
         return None, None, snapshot
 
     try:

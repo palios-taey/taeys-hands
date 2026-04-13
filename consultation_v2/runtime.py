@@ -147,6 +147,46 @@ class ConsultationRuntime:
     # Interaction primitives
     # ------------------------------------------------------------------
 
+    def _subprocess_click(self, element: ElementRef) -> bool:
+        """Click element via subprocess AT-SPI action (for multi-display mode)."""
+        from core.platforms import get_platform_display, get_platform_bus
+        from consultation_v2.yaml_contract import load_platform_yaml
+        display = get_platform_display(self.platform)
+        bus = get_platform_bus(self.platform)
+        if not display or not bus:
+            return False
+
+        session_bus_file = f'/tmp/dbus_session_bus_{display}'
+        try:
+            session_bus = open(session_bus_file).read().strip()
+        except FileNotFoundError:
+            session_bus = bus
+
+        cfg = load_platform_yaml(self.platform)
+        scan_root = cfg.get("tree", {}).get("scan_root", "document")
+
+        env = dict(os.environ)
+        env['DISPLAY'] = display
+        env['AT_SPI_BUS_ADDRESS'] = bus
+        env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+
+        import sys, json
+        _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        result = subprocess.run(
+            [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
+             'click', self.platform, scan_root,
+             element.name, element.role,
+             str(element.x), str(element.y)],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            data = json.loads(result.stdout)
+            return data.get('success', False)
+        except Exception:
+            return False
+
     def click(self, element: ElementRef, strategy: Optional[str] = None) -> bool:
         chosen = (strategy or self.click_strategy).strip()
         if chosen == "coordinate_only":
@@ -156,13 +196,16 @@ class ConsultationRuntime:
                 and bool(inp.click_at(int(element.x), int(element.y)))
             )
         if chosen == "atspi_only":
-            # In subprocess scan mode, atspi_obj is None — use coordinates
             if element.atspi_obj is not None:
                 return bool(
                     atspi_click(
                         {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
                     )
                 )
+            # Subprocess mode — use AT-SPI action via subprocess
+            if self._subprocess_click(element):
+                return True
+            # Last resort: coordinates (element was found by subprocess scan with coords)
             return (
                 element.x is not None
                 and element.y is not None

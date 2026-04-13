@@ -1156,17 +1156,14 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             )
             return False
 
+        # Ensure correct display is focused before scrolling
+        self.runtime.switch()
+
         # Scroll to bottom before extraction — brings copy buttons into view
         scroll_action = extract_cfg.get("scroll_before_extract")
         if scroll_action:
             self.runtime.press(str(scroll_action))
             self._sleep(2.0)
-
-        # Kill stale xsel processes that block clipboard writes
-        try:
-            subprocess.run(["pkill", "-f", "xsel.*clipboard"], capture_output=True, timeout=3)
-        except Exception:
-            pass
 
         # Wait for primary_key to appear in the tree (predicate wait)
         extract_timeout = float(extract_cfg.get("extract_timeout", 15))
