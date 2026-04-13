@@ -60,7 +60,9 @@ def setup_display(platform: str) -> str:
 
     a11y_file = f'/tmp/a11y_bus_{display}'
     try:
-        os.environ['AT_SPI_BUS_ADDRESS'] = Path(a11y_file).read_text().strip()
+        bus = Path(a11y_file).read_text().strip()
+        if bus:
+            os.environ['AT_SPI_BUS_ADDRESS'] = bus
     except FileNotFoundError:
         pass
 
@@ -73,6 +75,7 @@ def setup_display(platform: str) -> str:
 
     disp_num = display.lstrip(':')
     os.environ['PLATFORM_DISPLAYS'] = f'{platform}:{disp_num}'
+    os.environ['GTK_USE_PORTAL'] = '0'
     return display
 
 
@@ -110,18 +113,6 @@ def main():
             has_stop = snap.has(args.stop_key)
             has_copy = snap.has(args.copy_key)
 
-            # Fast-path: copy button present = response done
-            if has_copy and not has_stop:
-                elapsed = time.time() - start
-                print(json.dumps({
-                    'event': 'complete',
-                    'method': 'copy_button_present',
-                    'platform': args.platform,
-                    'elapsed': round(elapsed, 1),
-                    'url': snap.url,
-                }))
-                return 0
-
             if has_stop:
                 seen_stop = True
                 absent_cycles = 0
@@ -152,10 +143,11 @@ def main():
 
         except Exception as e:
             print(json.dumps({
-                'event': 'error',
+                'event': 'fatal',
                 'platform': args.platform,
                 'error': str(e),
             }), flush=True)
+            return 1
 
         time.sleep(args.interval)
 
