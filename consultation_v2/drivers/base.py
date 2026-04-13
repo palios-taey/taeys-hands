@@ -803,14 +803,16 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             abs_path = os.path.abspath(file_path)
 
             # Snapshot BEFORE attach — used for diff validation
+            # Collect all named elements (name, role tuples) for diff comparison
             pre_attach_snap = self.runtime.snapshot()
-            pre_attach_buttons = {
-                el.name for items in pre_attach_snap.mapped.values() for el in items
-                if el.role == "push button"
-            }
+            pre_attach_elements = set()
+            for items in pre_attach_snap.mapped.values():
+                for el in items:
+                    if el.name:
+                        pre_attach_elements.add((el.name, el.role))
             for el in pre_attach_snap.unknown:
-                if el.role == "push button":
-                    pre_attach_buttons.add(el.name)
+                if el.name:
+                    pre_attach_elements.add((el.name, el.role))
 
             if prefer_keyboard_shortcut and keyboard_shortcut:
                 opened = self.runtime.press(str(keyboard_shortcut))
@@ -875,32 +877,32 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
 
             verify_snap = self.runtime.snapshot()
 
-            # Diff-based attach validation: a new push button (file chip) must appear
-            post_attach_buttons = {
-                el.name for items in verify_snap.mapped.values() for el in items
-                if el.role == "push button"
-            }
+            # Diff-based attach validation: a new named element must appear
+            post_attach_elements = set()
+            for items in verify_snap.mapped.values():
+                for el in items:
+                    if el.name:
+                        post_attach_elements.add((el.name, el.role))
             for el in verify_snap.unknown:
-                if el.role == "push button":
-                    post_attach_buttons.add(el.name)
+                if el.name:
+                    post_attach_elements.add((el.name, el.role))
 
-            new_buttons = post_attach_buttons - pre_attach_buttons
-            new_buttons = {n for n in new_buttons if n}
-
-            if new_buttons:
+            new_elements = post_attach_elements - pre_attach_elements
+            if new_elements:
+                chip_name, chip_role = next(iter(new_elements))
                 result.add_step(
                     "attach",
                     True,
-                    f"attached {os.path.basename(abs_path)}; file chip: {next(iter(new_buttons))!r}",
+                    f"attached {os.path.basename(abs_path)}; new element: {chip_name!r} [{chip_role}]",
                     file=abs_path,
-                    new_elements=list(new_buttons),
+                    new_elements=[(n, r) for n, r in new_elements],
                     snapshot=verify_snap.serializable(),
                 )
             else:
                 result.add_step(
                     "attach",
                     False,
-                    f"{self.platform} no file chip appeared after attaching {os.path.basename(abs_path)}",
+                    f"{self.platform} no new element appeared after attaching {os.path.basename(abs_path)}",
                     file=abs_path,
                     snapshot=verify_snap.serializable(),
                 )
