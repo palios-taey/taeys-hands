@@ -28,11 +28,7 @@ class ConsultationRuntime:
     def __init__(self, platform: str):
         self.platform = platform
         self.cfg = load_platform_yaml(platform)
-        self.click_strategy = str(
-            self.cfg.get("click_strategy")
-            or self.cfg.get("workflow", {}).get("click_strategy")
-            or ""
-        )
+        self.click_strategy = str(self.cfg.get("click_strategy") or "")
         if not self.click_strategy:
             raise RuntimeError(f"{platform}: click_strategy not configured in YAML")
 
@@ -137,16 +133,11 @@ class ConsultationRuntime:
         return bool(inp.switch_to_platform(self.platform))
 
     def current_url(self) -> Optional[str]:
-        # In subprocess mode, get URL from snapshot (which uses subprocess scan)
         try:
             snap = self.snapshot()
             return snap.url
         except Exception:
-            pass
-        # In-process fallback
-        firefox = atspi.find_firefox_for_platform(self.platform)
-        doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
-        return atspi.get_document_url(doc) if doc else None
+            return None
 
     def snapshot(self) -> Snapshot:
         _, _, snapshot = build_snapshot(self.platform)
@@ -300,7 +291,4 @@ class ConsultationRuntime:
         if not verify_change:
             time.sleep(2.0)
             return True
-        return bool(
-            self.wait_for_url_change(before, timeout=20.0, interval=1.0)
-            or self.current_url()
-        )
+        return bool(self.wait_for_url_change(before, timeout=20.0, interval=1.0))

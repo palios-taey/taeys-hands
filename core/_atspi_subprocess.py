@@ -33,12 +33,11 @@ def _get_doc_url(doc):
 
 
 def _detect_platform(url):
-    url_lower = url.lower()
     for p, pat in _EXTRA_URL_PATTERNS.items():
-        if pat in url_lower:
+        if pat in url:
             return p
     for p, dom in URL_PATTERNS.items():
-        if dom in url_lower:
+        if dom in url:
             return p
     return None
 

@@ -1029,7 +1029,10 @@ class YamlDrivenConsultationDriver(BaseConsultationDriver):
             send_cfg.get("validation"),
         )
 
-        ok = bool(sent and (confirmed or validation_ok))
+        if has_confirmation:
+            ok = bool(sent and confirmed)
+        else:
+            ok = bool(sent and validation_ok)
 
         message = self._current_step_message("prompt sent", validation_status)
         if send_method:
