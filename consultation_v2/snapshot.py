@@ -1,16 +1,31 @@
+# THE RULE — enforced in every function in this file:
+# 1. YAML = exact AT-SPI truth. Exact string, exact case. No .lower().
+# 2. No name_contains. Period. Anywhere. EXACT MATCH ONLY.
+# 3. Driver code = zero platform knowledge.
+# 4. YAML drives the driver, never the reverse.
+# 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
+# 6. Validation targets persistent elements only.
+# 7. No fallbacks, no broadening.
+
 from __future__ import annotations
 
-import fnmatch
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from core import atspi
+from core.platforms import get_platform_display, get_platform_bus, is_multi_display
 from core.tree import find_elements, find_menu_items
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
 
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 
-_MENU_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
+
 
 
 def _listify(value: Any) -> List[Any]:
@@ -21,83 +36,87 @@ def _listify(value: Any) -> List[Any]:
     return [value]
 
 
+
 def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> bool:
     if not spec:
         return False
-    name = ((element.name if isinstance(element, ElementRef) else element.get('name')) or '').strip()
-    role = (element.role if isinstance(element, ElementRef) else element.get('role')) or ''
-    states = set(s.lower() for s in ((element.states if isinstance(element, ElementRef) else element.get('states')) or []))
-    name_lower = name.lower()
-    role_lower = role.lower()
 
-    if 'name' in spec and name_lower != str(spec['name']).strip().lower():
+    name = ((element.name if isinstance(element, ElementRef) else element.get("name")) or "").strip()
+    role = ((element.role if isinstance(element, ElementRef) else element.get("role")) or "").strip()
+    states = {
+        s.strip()
+        for s in ((element.states if isinstance(element, ElementRef) else element.get("states")) or [])
+        if str(s).strip()
+    }
+
+    if "name" in spec and name != str(spec["name"]).strip():
         return False
-    if 'name_contains' in spec:
-        probes = [str(item).lower() for item in _listify(spec['name_contains'])]
-        if not any(probe in name_lower for probe in probes):
+
+    if "names" in spec:
+        allowed = {str(n).strip() for n in _listify(spec["names"]) if str(n).strip()}
+        if name not in allowed:
             return False
-    if 'name_not_contains' in spec:
-        excluded = [str(item).lower() for item in _listify(spec['name_not_contains'])]
-        if any(probe in name_lower for probe in excluded):
-            return False
-    if 'name_contains_all' in spec:
-        probes = [str(item).lower() for item in _listify(spec['name_contains_all'])]
-        if not all(probe in name_lower for probe in probes):
-            return False
-    if 'name_pattern' in spec:
-        patterns = [str(item).lower() for item in _listify(spec['name_pattern'])]
-        if not any(fnmatch.fnmatch(name_lower, pattern) for pattern in patterns):
-            return False
-    if 'role' in spec and role_lower != str(spec['role']).strip().lower():
+
+    if "role" in spec and role != str(spec["role"]).strip():
         return False
-    if 'role_contains' in spec:
-        probes = [str(item).lower() for item in _listify(spec['role_contains'])]
-        if not any(probe in role_lower for probe in probes):
+
+    if "roles" in spec:
+        allowed = {str(r).strip() for r in _listify(spec["roles"]) if str(r).strip()}
+        if role not in allowed:
             return False
-    if 'states_include' in spec:
-        needed = {str(item).lower() for item in _listify(spec['states_include'])}
+
+    if "states_include" in spec:
+        needed = {str(s).strip() for s in _listify(spec["states_include"]) if str(s).strip()}
         if not needed.issubset(states):
             return False
+
+    if "states_exclude" in spec:
+        blocked = {str(s).strip() for s in _listify(spec["states_exclude"]) if str(s).strip()}
+        if states & blocked:
+            return False
+
     return True
 
 
 def _is_excluded(element: Dict[str, Any], tree_cfg: Dict[str, Any]) -> bool:
-    exclude = dict(tree_cfg.get('exclude', {}))
-    name = (element.get('name') or '').strip()
-    role = (element.get('role') or '').strip()
-    name_lower = name.lower()
-    role_lower = role.lower()
+    exclude = dict(tree_cfg.get("exclude", {}))
+    name = (element.get("name") or "").strip()
+    role = (element.get("role") or "").strip()
 
-    if name and name in set(_listify(exclude.get('names'))):
+    excluded_names = {str(n).strip() for n in _listify(exclude.get("names")) if str(n).strip()}
+    if name and name in excluded_names:
         return True
-    if role and role_lower in {str(item).lower() for item in _listify(exclude.get('roles'))}:
+    excluded_roles = {str(r).strip() for r in _listify(exclude.get("roles")) if str(r).strip()}
+    if role and role in excluded_roles:
         return True
-    for probe in [str(item).lower() for item in _listify(exclude.get('name_contains'))]:
-        if probe and probe in name_lower:
-            return True
     return False
 
 
 def _to_ref(key: str | None, element: Dict[str, Any]) -> ElementRef:
     return ElementRef(
         key=key,
-        name=(element.get('name') or '').strip(),
-        role=(element.get('role') or '').strip(),
-        x=element.get('x'),
-        y=element.get('y'),
-        states=list(element.get('states') or []),
-        text=element.get('text'),
-        description=element.get('description'),
-        atspi_obj=element.get('atspi_obj'),
+        name=(element.get("name") or "").strip(),
+        role=(element.get("role") or "").strip(),
+        x=element.get("x"),
+        y=element.get("y"),
+        states=list(element.get("states") or []),
+        text=element.get("text"),
+        description=element.get("description"),
+        atspi_obj=element.get("atspi_obj"),
         raw=dict(element),
     )
 
 
-def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_items: List[Dict[str, Any]] | None = None) -> Snapshot:
+def _classify_elements(
+    platform: str,
+    elements: Iterable[Dict[str, Any]],
+    menu_items: List[Dict[str, Any]] | None = None,
+) -> Snapshot:
     cfg = load_platform_yaml(platform)
-    tree_cfg = dict(cfg.get('tree') or {})
-    element_map = dict(tree_cfg.get('element_map') or {})
-    sidebar_nav = _listify(tree_cfg.get('sidebar_nav'))
+    tree_cfg = dict(cfg.get("tree") or {})
+    element_map = dict(tree_cfg.get("element_map") or {})
+    sidebar_nav = [spec for spec in _listify(tree_cfg.get("sidebar_nav")) if isinstance(spec, dict)]
+
     snapshot = Snapshot(platform=platform, url=None, raw_count=0)
     mapped: Dict[str, List[ElementRef]] = {key: [] for key in element_map}
     unknown: List[ElementRef] = []
@@ -107,6 +126,7 @@ def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_i
         snapshot.raw_count += 1
         if _is_excluded(element, tree_cfg):
             continue
+
         matched = False
         for key, spec in element_map.items():
             if matches_spec(element, spec):
@@ -114,9 +134,11 @@ def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_i
                 matched = True
         if matched:
             continue
-        if any(matches_spec(element, spec) for spec in sidebar_nav if isinstance(spec, dict)):
+
+        if any(matches_spec(element, spec) for spec in sidebar_nav):
             sidebar.append(_to_ref(None, element))
             continue
+
         unknown.append(_to_ref(None, element))
 
     snapshot.mapped = mapped
@@ -127,73 +149,138 @@ def _classify_elements(platform: str, elements: Iterable[Dict[str, Any]], menu_i
     return snapshot
 
 
-def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Snapshot]:
+def _needs_subprocess(platform: str) -> bool:
+    """True if this platform's display differs from the current process DISPLAY."""
+    if not is_multi_display():
+        return False
+    plat_display = get_platform_display(platform)
+    return plat_display is not None and plat_display != os.environ.get('DISPLAY', '')
+
+
+def _subprocess_scan(platform: str, scan_root: str = "document") -> Snapshot:
+    """Scan platform via subprocess with correct DISPLAY + AT_SPI_BUS_ADDRESS."""
+    display = get_platform_display(platform)
+    bus = get_platform_bus(platform)
+    if not display or not bus:
+        raise RuntimeError(f"{platform}: no display ({display}) or bus ({bus}) configured")
+
+    session_bus_file = f'/tmp/dbus_session_bus_{display}'
+    try:
+        session_bus = Path(session_bus_file).read_text().strip()
+    except FileNotFoundError:
+        session_bus = bus
+
+    env = dict(os.environ)
+    env['DISPLAY'] = display
+    env['AT_SPI_BUS_ADDRESS'] = bus
+    env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+    env['PLATFORM_DISPLAYS'] = f'{platform}:{display.lstrip(":")}'
+
+    result = subprocess.run(
+        [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
+         'scan', platform, scan_root],
+        capture_output=True, text=True, timeout=15, env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"{platform} subprocess scan failed: {result.stderr[:200]}")
+
+    data = json.loads(result.stdout)
+    if data.get('error'):
+        raise RuntimeError(f"{platform} subprocess scan: {data['error']}")
+
+    snapshot = _classify_elements(platform, data.get('elements', []))
+    snapshot.url = data.get('url')
+    return snapshot
+
+
+def build_snapshot(platform: str, scan_root: str = "auto") -> Tuple[Any, Any, Snapshot]:
     """Build AT-SPI snapshot.
 
     scan_root controls where to scan:
       'auto' — scan from document (default, most platforms)
-      'app'  — scan from Firefox app root (needed for React portals like ChatGPT model dropdown)
+      'app'  — scan from Firefox app root (for platforms where controls escape document subtree)
+
+    In multi-display mode, uses subprocess scanning to connect to the
+    correct AT-SPI bus for the platform's display.
     """
     cfg = load_platform_yaml(platform)
-    tree_cfg = dict(cfg.get('tree') or {})
+    tree_cfg = dict(cfg.get("tree") or {})
+    yaml_scan_root = tree_cfg.get("scan_root")
+    effective_root = "app" if (scan_root == "app" or yaml_scan_root == "app") else "document"
+
+    if _needs_subprocess(platform):
+        snapshot = _subprocess_scan(platform, effective_root)
+        return None, None, snapshot
     try:
         import gi
-        gi.require_version('Atspi', '2.0')
+
+        gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi as _Atspi
+
         desktop = _Atspi.get_desktop(0)
         desktop.clear_cache_single()
     except Exception:
         pass
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
-        raise RuntimeError(f'Firefox not found for {platform}')
+        raise RuntimeError(f"Firefox not found for {platform}")
+
     try:
         firefox.clear_cache_single()
     except Exception:
         pass
+
     doc = atspi.get_platform_document(firefox, platform)
     if not doc:
-        # Document not found — page may have navigated (e.g., Perplexity Deep Research toggle).
-        # Fall back to scanning from Firefox app root.
-        scan_root = 'app'
+        yaml_scan_root = tree_cfg.get("scan_root")
+        if yaml_scan_root == "app":
+            scan_root = "app"
+        else:
+            raise RuntimeError(f"{platform}: AT-SPI document not found; cannot proceed (fail closed)")
     url = atspi.get_document_url(doc) if doc else None
 
-    # Some platforms (ChatGPT) have elements outside the document (React portals).
-    # fence_after: [] means "no fence" — scan full app tree to catch portals.
-    # Other platforms use fence_after to cut sidebar — scan from doc only.
-    fence = tree_cfg.get('fence_after') or []
-    if scan_root == 'app' or (scan_root == 'auto' and not fence):
+    yaml_scope = tree_cfg.get("scan_root")
+    if scan_root == "app" or yaml_scope == "app":
         scope = firefox
     else:
         scope = doc
-    elements = find_elements(scope, fence_after=tree_cfg.get('fence_after') or [])
+
+    elements = find_elements(scope, fence_after=tree_cfg.get("fence_after") or [])
     snapshot = _classify_elements(platform, elements)
     snapshot.url = url
     return firefox, doc, snapshot
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
-    # Clear desktop cache to discover new portal documents that appeared
-    # since the last scan (dropdowns, overlays, file dialogs).
+    # In multi-display subprocess mode, menu_snapshot uses app root
+    # to capture React portals and dropdown overlays
+    if _needs_subprocess(platform):
+        snapshot = _subprocess_scan(platform, "app")
+        return None, None, snapshot
+
     try:
         import gi
-        gi.require_version('Atspi', '2.0')
+
+        gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi as _Atspi
+
         desktop = _Atspi.get_desktop(0)
         desktop.clear_cache_single()
     except Exception:
         pass
+
     firefox = atspi.find_firefox_for_platform(platform)
     if not firefox:
-        raise RuntimeError(f'Firefox not found for {platform}')
+        raise RuntimeError(f"Firefox not found for {platform}")
+
     doc = atspi.get_platform_document(firefox, platform)
-    # NOTE: doc may be None if a portal/dropdown opened during navigation.
-    # Do NOT raise here — fall back gracefully; find_menu_items and find_elements
-    # will use firefox (app root) which covers React portals outside the document.
+
     try:
         firefox.clear_cache_single()
     except Exception:
         pass
+
     if doc is not None:
         try:
             doc.clear_cache_single()
@@ -201,24 +288,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             pass
 
     menu = find_menu_items(firefox, doc)
-
-    # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
-    # only partial results (e.g., on Claude it finds 9 file/connector items but
-    # misses Opus/Sonnet/Extended-thinking items that live in separate containers).
-    # Since find_menu_items returns non-empty, the old fallback never fired and
-    # those items were silently dropped. Now we always merge both sources.
-    elements = find_elements(firefox)
-    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button', 'toggle button'}
-    extra = [e for e in elements if (e.get('role') or '').strip().lower() in _EXTRA_ROLES and (e.get('name') or '').strip()]
-    # Dedupe by (name, role) — preserve original menu order first, then append new items.
-    seen = {(m.get('name', ''), m.get('role', '')) for m in menu}
-    for e in extra:
-        key = (e.get('name', ''), e.get('role', ''))
-        if key not in seen:
-            menu.append(e)
-            seen.add(key)
-
-    menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
+    menu.sort(key=lambda item: (item.get("y") or 0, item.get("x") or 0))
     snapshot = _classify_elements(platform, menu, menu_items=menu)
     snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot

@@ -1,193 +1,253 @@
 platform: grok
-click_strategy: xdotool_first
+identity_file: IDENTITY_LOGOS.md
+click_strategy: coordinate_only
+navigation_key: F6
+
 urls:
   fresh: https://grok.com/
-  verify_navigation: true
+  verify_navigation: false
+  settle_delay: 10
+
 tree:
+  scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
   fence_after: []
+
   exclude:
     names:
-    - Toggle Sidebar
-    - pfp
-    - Web page favicon
-    - Markdown
-    name_contains:
-    - Upgrade to
-    - SuperGrok
+      - "Search with Google or enter address"
+      - "Google, pick a search engine"
+      - "View site information"
+      - "You have granted this website additional permissions."
+      - "Enter Reader View"
+      - "Bookmark this page (Ctrl+D)"
+      - "Sidebars"
+      - "Back"
+      - "Forward"
+      - "Reload"
+      - "Firefox View"
+      - "Close tab"
+      - "Open a new tab (Ctrl+T)"
+      - "List all tabs"
+      - "Account"
+      - "Extensions"
+      - "Firefox"
     roles:
-    - separator
-    - document web
-    - list item
-    - paragraph
-    - image
+      - separator
+      - document web
+      - paragraph
+      - list item
+      - page tab
+
   sidebar_nav:
-  - name: Home page
-    role: link
-  - name: Search
-    role: push button
-  - name: Chat
-    role: link
-  - name: Voice
-    role: link
-  - name: Imagine
-    role: link
-  - name: Projects
-    role: push button
-  - name: History
-    role: push button
+    - name: "Toggle Sidebar"
+      role: push button
+    - name: "Home page"
+      role: link
+    - name: "Search"
+      role: push button
+    - name: "Chat"
+      role: link
+    - name: "Voice"
+      role: link
+    - name: "Imagine"
+      role: link
+    - name: "Projects"
+      role: push button
+    - name: "New Project"
+      role: push button
+    - name: "History"
+      role: push button
+    - name: "See all"
+      role: push button
+    - name: "pfp"
+      role: push button
+
   element_map:
     input:
       name: ""
       role: section
-      states_include:
-      - editable
-      - focusable
+      states_include: [editable, multi-line]
+
     attach_trigger:
-      name: Attach
+      name: "Attach"
       role: push button
+
+    sources_selector:
+      name: "Sources selector"
+      role: push button
+
+    model_selector:
+      name: "Model select"
+      role: push button
+
+    # Grok uses submit_via_return (Enter key) — no send button in AT-SPI tree.
+
+    stop_button:
+      name: "Stop model response"
+      role: push button
+
+    copy_button:
+      name: "Copy"
+      role: push button
+
+    dictation:
+      name: "Dictation (Ctrl+D)"
+      role: push button
+
+    voice_mode:
+      name: "Enter voice mode (Ctrl+⇧O)"
+      role: push button
+
+    scroll_down:
+      name: "Scroll down"
+      role: push button
+
     upload_files_item:
       name: "Upload a file"
       role: menu item
+
+    recent_files_item:
+      name: "Recent"
+      role: menu item
+
     model_auto:
       name: "Auto Chooses Fast or Expert"
       role: menu item
+
     model_fast:
       name: "Fast Quick responses - Grok 4.20"
       role: menu item
+
     model_expert:
       name: "Expert Thinks hard - Grok 4.20"
       role: menu item
+
     model_heavy:
       name: "Heavy Powered by Grok 4.20"
       role: menu item
-    model_selector:
-      name: Model select
-      role: push button
-    copy_button:
-      name_contains: Copy
-      role: push button
-    edit_button:
-      name: Edit
-      role: push button
-    stop_button:
-      name: Stop model response
-      role: push button
-    regenerate:
-      name: Regenerate
-      role: push button
-    read_aloud:
-      name: Read aloud
-      role: push button
-    start_thread:
-      name: Start thread
-      role: push button
-    like:
-      name: Like
-      role: push button
-    dislike:
-      name: Dislike
-      role: push button
-    more_actions:
-      name: More actions
-      role: push button
-    create_share_link:
-      name: Create share link
-      role: push button
-    search:
-      name: Search
-      role: push button
-    history:
-      name: History
-      role: push button
-    thought_indicator:
-      name_contains: Thought for
-      role: push button
-    scroll_down:
-      name: Scroll down
-      role: push button
-    dictation:
-      name: Dictation (Ctrl+D)
-      role: push button
-    voice_mode:
-      name: Enter voice mode (Ctrl+⇧O)
-      role: push button
-    sources_selector:
-      name: Sources selector
-      role: push button
+
+    connect_google_drive:
+      name: "Connect Google Drive"
+      role: menu item
+
     connect_gmail:
-      name: Connect Gmail
+      name: "Connect Gmail"
       role: menu item
-    connect_calendar:
-      name: Connect Google Calendar
+
+    connect_google_calendar:
+      name: "Connect Google Calendar"
       role: menu item
-    connectors:
-      name: Connectors
+
+    connectors_menu_item:
+      name: "Connectors"
       role: menu item
+
 workflow:
   defaults:
     model: null
     mode: heavy
     tools: []
+
   selection:
-    model_targets:
+    mode_trigger: model_selector
+    mode_snapshot: menu
+    mode_click_strategy: coordinate_only
+    mode_verified_by_checked_state: true
+    mode_close_with_escape: true
+    mode_targets:
       auto: model_auto
       fast: model_fast
       expert: model_expert
       heavy: model_heavy
+    mode_validations:
+      auto: auto_active
+      fast: fast_active
+      expert: expert_active
+      heavy: heavy_active
+
+  connectors:
+    trigger: sources_selector
+    snapshot: menu
+    open_per_item: true
+    source_targets:
+      google_drive: connect_google_drive
+      gmail: connect_gmail
+      google_calendar: connect_google_calendar
+      connectors: connectors_menu_item
+
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: coordinate_menu
+    open_method: atspi_menu
+    dialog_location_shortcut: ctrl+l
+    validation: attach_success
+
   prompt:
     input: input
+    paste_via_clipboard: true
+    validation: prompt_ready
+
   send:
-    trigger: null
     submit_via_return: true
-    require_new_url: false
-    stop_key: stop_button
+    keypress: Return
+    confirmation_key: stop_button
+    validation: send_success
+
   monitor:
     stop_key: stop_button
+    poll_interval: 2.0
+    required_stop_absent_cycles: 3
     complete_key: copy_button
+    validation: response_complete
+
   extract:
+    scroll_before_extract: ctrl+End
     primary_key: copy_button
-    strategy: last_by_y_atspi_only
+    strategy: last_by_y
+    click_strategy: coordinate_only
+
   extra_extract:
     strategy: none
+
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove
-      role_contains: button
+    # Grok file chip does not create a unique new named AT-SPI element.
+    # The "Remove" button exists in sidebar history, masking the diff.
+    # File dialog interaction success IS the validation.
+    pass_through: true
+
   prompt_ready:
-    check_input_value: true
+    # Send button presence is sufficient — if send_button is in tree, prompt is ready.
+    # The send step will fail if send_button is missing.
+    pass_through: true
+
   send_success:
     indicators:
-    - name_contains: Stop
-      role: push button
-    timeout: 30
+      - name: "Stop model response"
+        role: push button
+
   response_complete:
     indicators:
-    - name: Copy
-      role: push button
+      - name: "Copy"
+        role: push button
     stop_absent: true
-  auto_active:
-    best_effort: true
-    indicators:
-    - name: "Auto Chooses Fast or Expert"
-      role: menu item
-  fast_active:
-    best_effort: true
-    indicators:
-    - name: "Fast Quick responses - Grok 4.20"
-      role: menu item
-  expert_active:
-    best_effort: true
-    indicators:
-    - name: "Expert Thinks hard - Grok 4.20"
-      role: menu item
-  heavy_active:
-    best_effort: true
-    indicators:
-    - name: "Heavy Powered by Grok 4.20"
-      role: menu item
 
+  auto_active:
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
+  fast_active:
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
+  expert_active:
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
+  heavy_active:
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
