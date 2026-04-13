@@ -133,7 +133,7 @@ collect_display_processes() {
         cmdline="$(tr '\0' ' ' < "${proc_entry}/cmdline" 2>/dev/null || true)"
         [[ -n "${cmdline}" ]] || continue
 
-        if [[ "${cmdline}" =~ (python|firefox|at-spi2-registryd|at-spi-bus-launcher|dbus-daemon|dbus-launch) ]]; then
+        if [[ "${cmdline}" =~ (python|firefox) ]] && ! [[ "${cmdline}" =~ (openbox|at-spi2-registryd|at-spi-bus-launcher|dbus-daemon|dbus-launch) ]]; then
             TARGET_PIDS+=("${pid}")
         fi
 
@@ -175,14 +175,8 @@ terminate_collected_processes() {
 
 cleanup_pid_files() {
     log "Cleaning lock files and display-scoped temp state"
-    rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}" "${FIREFOX_PID_FILE}" "${A11Y_BUS_FILE}" "${BOT_PID_FILE}"
-
-    local dbus_path
-    for dbus_path in "${DBUS_PATHS[@]:-}"; do
-        [[ "${dbus_path}" == /tmp/dbus-* ]] || continue
-        rm -f -- "${dbus_path}"
-        compgen -G "${dbus_path},*" >/dev/null && rm -f -- "${dbus_path}",*
-    done
+    rm -f "${FIREFOX_PID_FILE}" "${BOT_PID_FILE}"
+    # Keep Xvfb, DBUS sockets, and AT-SPI bus files — only Firefox needs restart
 
     rm -f "/tmp/bot_pid_${DISPLAY_STR}" "/tmp/hmm_bot_${DISPLAY_NUM}.pid" "/tmp/sft_gen_bot_${DISPLAY_NUM}.pid"
 }
@@ -195,7 +189,27 @@ kill_old_tmux_session() {
 }
 
 start_dbus_session() {
-    log "Starting D-Bus session"
+    # Try to reuse existing DBUS session from openbox or other display process
+    local existing_dbus=""
+    local proc_entry pid env_text
+    for proc_entry in /proc/[0-9]*; do
+        pid="${proc_entry##*/}"
+        [[ -r "${proc_entry}/environ" ]] || continue
+        env_text="$(tr '\0' '\n' < "${proc_entry}/environ" 2>/dev/null || true)"
+        [[ "${env_text}" == *"DISPLAY=${DISPLAY_STR}"* ]] || continue
+        existing_dbus="$(printf '%s\n' "${env_text}" | awk -F= '$1 == "DBUS_SESSION_BUS_ADDRESS" {print $2; exit}')"
+        if [[ -n "${existing_dbus}" ]]; then
+            # Verify bus is alive
+            if DBUS_SESSION_BUS_ADDRESS="${existing_dbus}" dbus-send --session --dest=org.freedesktop.DBus --type=method_call --print-reply /org/freedesktop/DBus org.freedesktop.DBus.GetId >/dev/null 2>&1; then
+                export DBUS_SESSION_BUS_ADDRESS="${existing_dbus}"
+                log "Reusing existing D-Bus session: ${DBUS_SESSION_BUS_ADDRESS}"
+                return 0
+            fi
+        fi
+    done
+
+    # No existing session — create new
+    log "Starting new D-Bus session"
     local dbus_output
     dbus_output="$(dbus-launch --sh-syntax --exit-with-session)" || fail "dbus-launch failed"
     eval "${dbus_output}"
@@ -209,8 +223,8 @@ start_registryd() {
     log "Waiting 3s before starting at-spi2-registryd"
     sleep 3
 
-    log "Starting at-spi2-registryd"
-    "${ATSPI_REGISTRYD_CMD}" >"${REGISTRY_LOG_FILE}" 2>&1 &
+    log "Starting at-spi-bus-launcher"
+    /usr/libexec/at-spi-bus-launcher --launch-immediately >"${REGISTRY_LOG_FILE}" 2>&1 &
     ATSPI_REGISTRYD_PID=$!
     export ATSPI_REGISTRYD_PID
 
@@ -226,13 +240,20 @@ start_registryd() {
 start_firefox() {
     mkdir -p "/tmp/${PROFILE}"
 
+    # Start openbox window manager if not already running
+    if ! pgrep -f "openbox.*DISPLAY=${DISPLAY_STR}" >/dev/null 2>&1; then
+        log "Starting openbox on ${DISPLAY_STR}"
+        DISPLAY="${DISPLAY_STR}" openbox &
+        sleep 1
+    fi
+
     log "Starting Firefox on ${DISPLAY_STR}"
     GTK_USE_PORTAL=0 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     MOZ_DISABLE_RDD_SANDBOX=1 \
     MOZ_DISABLE_GPU_SANDBOXING=1 \
     GDK_BACKEND=x11 \
-    firefox --display="${DISPLAY_STR}" --no-remote --profile "/tmp/${PROFILE}" "${URL}" >"${FIREFOX_LOG_FILE}" 2>&1 &
+    LD_LIBRARY_PATH=/usr/lib/firefox /usr/lib/firefox/firefox --display="${DISPLAY_STR}" --no-remote --profile "/tmp/${PROFILE}" "${URL}" >"${FIREFOX_LOG_FILE}" 2>&1 &
     FIREFOX_PID=$!
     export FIREFOX_PID
     printf '%s\n' "${FIREFOX_PID}" > "${FIREFOX_PID_FILE}"
