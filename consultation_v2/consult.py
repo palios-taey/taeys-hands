@@ -41,6 +41,8 @@ def act(platform: str, action: str, *args, timeout: float = 15.0) -> dict:
 
 def inspect_platform(platform: str, scope: str = 'document') -> dict:
     """Inspect and return full snapshot."""
+    if scope not in ('document', 'menu'):
+        return {'error': f'Invalid scope {scope!r} — must be document or menu'}
     args = [platform]
     if scope == 'menu':
         args += ['--scope', 'menu']
@@ -344,6 +346,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             if 'validation' not in last_step:
                 fail('mode_check', f'Tool sequence {tool!r} last step has no validation field', platform)
             tool_val_keys[tool] = last_step['validation']
+        else:
+            fail('setup', f'Tool {tool!r} has no sequence in workflow.selection.sequences', platform)
 
     # Step 2a: Set mode (via sequence or simple target)
     mode_set = False

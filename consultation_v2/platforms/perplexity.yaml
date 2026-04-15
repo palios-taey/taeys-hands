@@ -359,6 +359,8 @@ workflow:
 
   extract:
     scroll_before_extract: ctrl+End
+    scroll_delay: 2.0
+    post_click_delay: 1.0
     primary_key: copy_contents_button
     strategy: first
     click_strategy: atspi_only

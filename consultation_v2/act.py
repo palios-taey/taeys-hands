@@ -195,11 +195,22 @@ def main():
             print(json.dumps({'error': 'workflow.extract missing from YAML'}))
             return 1
 
+        # Read timing from YAML — no hardcoded sleeps
+        scroll_delay = extract_cfg.get('scroll_delay', None)
+        post_click_delay = extract_cfg.get('post_click_delay', None)
+
         # Step 1: Scroll to bottom (from YAML)
         scroll_key = extract_cfg.get('scroll_before_extract')
         if scroll_key:
+            if scroll_delay is None:
+                print(json.dumps({'error': 'workflow.extract.scroll_delay missing from YAML'}))
+                return 1
             runtime.press(scroll_key)
-            import time; time.sleep(2)
+            import time; time.sleep(scroll_delay)
+
+        if post_click_delay is None:
+            print(json.dumps({'error': 'workflow.extract.post_click_delay missing from YAML'}))
+            return 1
 
         # Step 2: Find the copy button by strategy
         primary_key = extract_cfg.get('primary_key')
@@ -228,7 +239,7 @@ def main():
             print(json.dumps({'error': f'Click on {primary_key!r} failed', 'element': element.name}))
             return 1
 
-        import time; time.sleep(1)
+        import time; time.sleep(post_click_delay)
 
         # Step 4: Read clipboard
         content = runtime.read_clipboard()
