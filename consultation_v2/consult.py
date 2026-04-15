@@ -418,7 +418,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     else:
         print(json.dumps({'event': 'step_ok', 'step': 'monitor', 'msg': 'skipped'}))
 
-    print(json.dumps({'event': 'complete', 'platform': platform, 'url': url[:80]}))
+    print(json.dumps({'event': 'dispatched', 'platform': platform, 'url': url[:80],
+                       'msg': 'Send confirmed, monitor spawned. Response NOT yet complete.'}))
     return 0
 
 
