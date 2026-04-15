@@ -239,7 +239,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         for i, step in enumerate(seq):
             trigger = step.get('trigger')
             target = step.get('target')
-            scope = step.get('snapshot', 'document')
+            if 'snapshot' not in step:
+                fail('mode_setup', f'Sequence step {i} missing snapshot scope', platform)
+            scope = step['snapshot']
             strategy = step.get('click_strategy')
 
             if trigger:
@@ -298,7 +300,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 fail('mode_setup', f'Mode trigger {trigger_key!r} failed: {result}', platform)
             time.sleep(timing['after_trigger_click'])
 
-            scope = selection.get('mode_snapshot', 'menu')
+            if 'mode_snapshot' not in selection:
+                fail('mode_setup', 'workflow.selection.mode_snapshot missing from YAML', platform)
+            scope = selection['mode_snapshot']
             strategy = selection.get('mode_click_strategy')
 
             # mode_skip_if_checked: inspect menu, skip click if target already checked

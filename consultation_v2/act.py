@@ -138,7 +138,7 @@ def main():
                 print(json.dumps({'error': f'Key {args.target!r} not found in snapshot',
                                   'available': list(k for k, v in snap.mapped.items() if v)}))
                 return 1
-        elif args.name:
+        elif args.name is not None:
             # Find by exact name (and optionally role)
             all_els = []
             for items in snap.mapped.values():
