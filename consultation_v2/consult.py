@@ -187,16 +187,32 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
     if not all([select_all_key, paste_key, confirm_key]):
         return False  # Missing dialog keys in YAML — fail closed
 
-    subprocess.run(['xdotool', 'key', location_shortcut], env=env, capture_output=True, timeout=3)
-    time.sleep(timing['dialog_after_focus'])
-    subprocess.run(['xdotool', 'key', select_all_key], env=env, capture_output=True, timeout=3)
+    # Execute dialog sequence — check each subprocess exit code
+    for cmd, delay_key in [
+        (['xdotool', 'key', location_shortcut], 'dialog_after_focus'),
+        (['xdotool', 'key', select_all_key], 'dialog_after_path_entry'),
+    ]:
+        r = subprocess.run(cmd, env=env, capture_output=True, timeout=3)
+        if r.returncode != 0:
+            return False
+        time.sleep(timing[delay_key])
+
+    r = subprocess.run(['xsel', '--clipboard', '--input'], input=file_path.encode(),
+                       env=env, capture_output=True, timeout=3)
+    if r.returncode != 0:
+        return False
     time.sleep(timing['dialog_after_path_entry'])
-    subprocess.run(['xsel', '--clipboard', '--input'], input=file_path.encode(),
-                   env=env, capture_output=True, timeout=3)
-    time.sleep(timing['dialog_after_path_entry'])
-    subprocess.run(['xdotool', 'key', paste_key], env=env, capture_output=True, timeout=3)
-    time.sleep(timing['dialog_after_paste'])
-    subprocess.run(['xdotool', 'key', confirm_key], env=env, capture_output=True, timeout=3)
+
+    for cmd, delay_key in [
+        (['xdotool', 'key', paste_key], 'dialog_after_paste'),
+        (['xdotool', 'key', confirm_key], None),
+    ]:
+        r = subprocess.run(cmd, env=env, capture_output=True, timeout=3)
+        if r.returncode != 0:
+            return False
+        if delay_key:
+            time.sleep(timing[delay_key])
+
     return True
 
 
@@ -573,6 +589,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if 'keypress' not in send_cfg:
             fail('send', 'workflow.send.keypress missing from YAML (submit_via_return is true)', platform)
         result = act(platform, 'press', send_cfg['keypress'])
+        if result.get('error'):
+            fail('send', f'Submit keypress failed: {result}', platform)
     else:
         if 'trigger' not in send_cfg:
             fail('send', 'workflow.send.trigger missing from YAML', platform)
