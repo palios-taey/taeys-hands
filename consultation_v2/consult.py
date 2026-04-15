@@ -179,6 +179,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     cfg = load_platform_yaml(platform)
     workflow = cfg.get('workflow', {})
     defaults = workflow.get('defaults', {})
+    timing = workflow.get('timing', {})
+    if not timing:
+        fail('setup', 'workflow.timing missing from YAML', platform)
 
     print(json.dumps({'event': 'start', 'platform': platform}))
 
@@ -223,7 +226,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 result = act(platform, 'click', trigger)
                 if result.get('error'):
                     fail('mode_setup', f'Trigger {trigger!r} failed: {result}', platform)
-                time.sleep(1.5)
+                time.sleep(timing['after_trigger_click'])
 
             if target:
                 skipped = False
@@ -239,7 +242,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     result = act(platform, 'click', *args_list)
                     if result.get('error'):
                         fail('mode_setup', f'Target {target!r} failed: {result}', platform)
-                    time.sleep(1)
+                    time.sleep(timing['after_target_click'])
 
                 if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
                     verify_snap = inspect_platform(platform, scope=scope)
@@ -252,7 +255,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
             if step.get('close_with_escape'):
                 act(platform, 'press', 'Escape')
-                time.sleep(1)
+                time.sleep(timing['after_escape'])
         return all_steps_ok
 
     # Step 2a: Set mode (via sequence or simple target)
@@ -273,7 +276,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             result = act(platform, 'click', trigger_key)
             if result.get('error'):
                 fail('mode_setup', f'Mode trigger {trigger_key!r} failed: {result}', platform)
-            time.sleep(1.5)
+            time.sleep(timing['after_trigger_click'])
 
             scope = selection.get('mode_snapshot', 'menu')
             strategy = selection.get('mode_click_strategy')
@@ -287,7 +290,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     # Already checked — close menu and move on
                     if selection.get('mode_close_with_escape'):
                         act(platform, 'press', 'Escape')
-                        time.sleep(1)
+                        time.sleep(timing['after_escape'])
 
             if not skipped:
                 args_list = [target_key, '--scope', scope]
@@ -296,7 +299,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 result = act(platform, 'click', *args_list)
                 if result.get('error'):
                     fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
-                time.sleep(1)
+                time.sleep(timing['after_target_click'])
 
                 # Verify checked state after clicking (before closing menu)
                 if selection.get('mode_verified_by_checked_state'):
@@ -312,7 +315,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
                 if selection.get('mode_close_with_escape'):
                     act(platform, 'press', 'Escape')
-                    time.sleep(1)
+                    time.sleep(timing['after_escape'])
             else:
                 # Skipped because already checked — that counts as verified
                 checked_state_verified = True
@@ -394,18 +397,18 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         result = act(platform, 'click', attach_trigger_key)
         if result.get('error'):
             fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
-        time.sleep(1.5)
+        time.sleep(timing['after_trigger_click'])
 
         # Click upload files item (from YAML workflow)
         result = act(platform, 'click', attach_menu_key, '--scope', 'menu')
         if result.get('error'):
             fail('attach', f'Upload item {attach_menu_key!r} failed: {result}', platform)
-        time.sleep(3)
+        time.sleep(timing['after_attach_menu'])
 
         # File dialog
         if not xdotool_file_dialog(platform, pkg, cfg=cfg):
             fail('attach', 'File dialog not found', platform)
-        time.sleep(5)
+        time.sleep(timing['after_file_dialog'])
 
         # Verify attachment
         if pre_attach_snap and attach_validation.get('diff_validated'):
@@ -433,12 +436,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     result = act(platform, 'click', input_key)
     if result.get('error'):
         fail('prompt', f'Input click ({input_key!r}) failed: {result}', platform)
-    time.sleep(0.5)
+    time.sleep(timing['after_input_click'])
 
     result = act(platform, 'paste', message)
     if not result.get('pasted'):
         fail('prompt', f'Paste failed: {result}', platform)
-    time.sleep(1)
+    time.sleep(timing['after_paste'])
     print(json.dumps({'event': 'step_ok', 'step': 'prompt', 'length': len(message)}))
 
     # Validate prompt_ready from YAML
@@ -500,7 +503,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             break
         if url_changed and not require_url:
             break
-        time.sleep(2)
+        time.sleep(timing['send_poll_interval'])
 
     # Verify based on YAML requirements
     if require_url and not url_changed:

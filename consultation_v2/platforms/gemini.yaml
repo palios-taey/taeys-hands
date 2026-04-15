@@ -166,10 +166,6 @@ workflow:
       fast: mode_fast
       thinking: mode_thinking
       pro: mode_pro
-    mode_validations:
-      fast: fast_active
-      thinking: thinking_active
-      pro: pro_active
 
     tool_trigger: tools_button
     tool_snapshot: menu
@@ -216,6 +212,16 @@ workflow:
     trigger: send_button
     confirmation_timeout: 15
     validation: send_success
+
+  timing:
+    after_trigger_click: 1.5
+    after_target_click: 1.0
+    after_escape: 1.0
+    after_input_click: 0.5
+    after_paste: 1.0
+    after_attach_menu: 3.0
+    after_file_dialog: 5.0
+    send_poll_interval: 2.0
 
   monitor:
     stop_key: stop_button

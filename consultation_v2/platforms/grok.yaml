@@ -163,11 +163,6 @@ workflow:
       fast: model_fast
       expert: model_expert
       heavy: model_heavy
-    mode_validations:
-      auto: auto_active
-      fast: fast_active
-      expert: expert_active
-      heavy: heavy_active
 
   connectors:
     trigger: sources_selector
@@ -197,6 +192,16 @@ workflow:
     confirmation_key: stop_button
     confirmation_timeout: 15
     validation: send_success
+
+  timing:
+    after_trigger_click: 1.5
+    after_target_click: 1.0
+    after_escape: 1.0
+    after_input_click: 0.5
+    after_paste: 1.0
+    after_attach_menu: 3.0
+    after_file_dialog: 5.0
+    send_poll_interval: 2.0
 
   monitor:
     stop_key: stop_button

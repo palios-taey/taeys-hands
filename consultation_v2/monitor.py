@@ -147,6 +147,17 @@ def main():
         print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.timeout missing from YAML'}))
         return 1
 
+    # Pre-flight: validate stop_key and complete_key exist in element_map
+    element_map = cfg.get('tree', {}).get('element_map', {})
+    if stop_key not in element_map:
+        print(json.dumps({'event': 'fatal', 'error': f'stop_key {stop_key!r} not in element_map'}))
+        _push_redis(args.platform, 'MONITOR_FATAL', f'stop_key {stop_key!r} not in element_map')
+        return 1
+    if complete_key not in element_map:
+        print(json.dumps({'event': 'fatal', 'error': f'complete_key {complete_key!r} not in element_map'}))
+        _push_redis(args.platform, 'MONITOR_FATAL', f'complete_key {complete_key!r} not in element_map')
+        return 1
+
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
 

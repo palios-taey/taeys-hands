@@ -275,10 +275,6 @@ workflow:
       computer: mode_computer_item
       deep_research: mode_deep_research_item
       model_council: mode_model_council_item
-    mode_validations:
-      computer: computer_active
-      deep_research: deep_research_active
-      model_council: model_council_active
 
     sequences:
       learn_step_by_step:
@@ -336,6 +332,16 @@ workflow:
     require_new_url: true
     confirmation_timeout: 60
     validation: send_success
+
+  timing:
+    after_trigger_click: 1.5
+    after_target_click: 1.0
+    after_escape: 1.0
+    after_input_click: 0.5
+    after_paste: 1.0
+    after_attach_menu: 3.0
+    after_file_dialog: 5.0
+    send_poll_interval: 2.0
 
   monitor:
     stop_key: stop_button

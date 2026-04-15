@@ -198,27 +198,6 @@ workflow:
     tools: []
 
   selection:
-    model_trigger: model_selector
-    model_snapshot: menu
-    model_click_strategy: atspi_only
-    model_verified_by_checked_state: true
-    model_targets:
-      instant: model_instant
-      thinking: model_thinking
-      pro: model_pro
-    model_validations:
-      instant: instant_active
-      thinking: thinking_active
-      pro: pro_active
-
-    tool_trigger: attach_trigger
-    tool_snapshot: menu
-    tool_click_strategy: atspi_only
-    tool_targets:
-      create_image: create_image_item
-      deep_research: deep_research_item
-      web_search: web_search_item
-
     sequences:
       pro_extended:
         - trigger: model_selector
@@ -271,9 +250,6 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: keyboard_shortcut
-    keyboard_shortcut: ctrl+u
-    prefer_keyboard_shortcut: true
     dialog_location_shortcut: ctrl+l
     validation: attach_success
 
@@ -288,6 +264,16 @@ workflow:
     require_new_url: true
     confirmation_timeout: 30
     validation: send_success
+
+  timing:
+    after_trigger_click: 1.5
+    after_target_click: 1.0
+    after_escape: 1.0
+    after_input_click: 0.5
+    after_paste: 1.0
+    after_attach_menu: 3.0
+    after_file_dialog: 5.0
+    send_poll_interval: 2.0
 
   monitor:
     stop_key: stop_button
