@@ -77,7 +77,7 @@ tree:
       role: push button
 
     stop_button:
-      name: "Cancel"
+      name: "Stop response (Esc)"
       role: push button
 
     copy_button:
