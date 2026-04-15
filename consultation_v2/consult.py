@@ -188,6 +188,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         seq_name = mode
 
     if seq_name and seq_name in sequences:
+        # Named sequence (e.g., deep_think, pro_extended)
         seq = sequences[seq_name]
         for i, step in enumerate(seq):
             trigger = step.get('trigger')
@@ -214,8 +215,34 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 act(platform, 'press', 'Escape')
                 time.sleep(1)
 
-        # Re-inspect after mode setup
         snap = inspect_platform(platform)
+    elif mode:
+        # Simple target (e.g., Grok heavy via mode_targets)
+        mode_targets = selection.get('mode_targets', {})
+        target_key = mode_targets.get(mode)
+        trigger_key = selection.get('mode_trigger')
+
+        if trigger_key and target_key:
+            result = act(platform, 'click', trigger_key)
+            if result.get('error'):
+                fail('mode_setup', f'Mode trigger {trigger_key!r} failed: {result}', platform)
+            time.sleep(1.5)
+
+            scope = selection.get('mode_snapshot', 'menu')
+            strategy = selection.get('mode_click_strategy')
+            args_list = [target_key, '--scope', scope]
+            if strategy:
+                args_list += ['--strategy', strategy]
+            result = act(platform, 'click', *args_list)
+            if result.get('error'):
+                fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
+            time.sleep(1)
+
+            if selection.get('mode_close_with_escape'):
+                act(platform, 'press', 'Escape')
+                time.sleep(1)
+
+            snap = inspect_platform(platform)
 
     # Check all relevant validation indicators: mode + tools
     # Look for any active indicator from mode_active, tool_active, etc.
@@ -248,8 +275,19 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if mode_verified:
         print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode, 'indicator': mode_indicator}))
     else:
-        path = screenshot(platform)
-        fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Checked: {check_keys}. Screenshot: {path}', platform)
+        # Check if ALL validation keys use verified_by_checked_state (no persistent indicator exists)
+        all_checked_state = all(
+            validation.get(k, {}).get('verified_by_checked_state', False)
+            for k in check_keys if validation.get(k)
+        )
+        mode_was_set = seq_name is not None or (mode and selection.get('mode_targets', {}).get(mode))
+        if all_checked_state and mode_was_set:
+            # Mode was set via sequence, no persistent indicator to verify — trust the sequence
+            print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode,
+                               'msg': 'verified_by_checked_state — sequence executed, no persistent indicator'}))
+        else:
+            path = screenshot(platform)
+            fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Checked: {check_keys}. Screenshot: {path}', platform)
 
     # ── Step 3: Attach file ──
     if file_path:
