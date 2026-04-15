@@ -256,6 +256,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     all_elements = snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]
 
+    verified_keys = set()
     for val_key in check_keys:
         val_cfg = validation.get(val_key, {})
         indicators = val_cfg.get('indicators', [])
@@ -264,13 +265,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             ind_role = indicator.get('role', '')
             for el in all_elements:
                 if el.get('name') == ind_name and el.get('role') == ind_role:
-                    mode_verified = True
-                    mode_indicator = ind_name
+                    verified_keys.add(val_key)
                     break
-            if mode_verified:
-                break
-        if mode_verified:
-            break
+
+    mode_verified = len(verified_keys) == len(check_keys) and len(check_keys) > 0
+    mode_indicator = ', '.join(verified_keys) if verified_keys else None
 
     if mode_verified:
         print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode, 'indicator': mode_indicator}))
@@ -281,7 +280,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             for k in check_keys if validation.get(k)
         )
         mode_was_set = seq_name is not None or (mode and selection.get('mode_targets', {}).get(mode))
-        if all_checked_state and mode_was_set:
+        if check_keys and all_checked_state and mode_was_set:
             # Mode was set via sequence, no persistent indicator to verify — trust the sequence
             print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode,
                                'msg': 'verified_by_checked_state — sequence executed, no persistent indicator'}))
@@ -297,16 +296,20 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if not pkg:
             fail('attach', 'Identity consolidation failed', platform)
 
-        # Click attach trigger
-        result = act(platform, 'click', 'attach_trigger')
+        # Click attach trigger (from YAML workflow)
+        attach_cfg = workflow.get('attachment', {})
+        attach_trigger_key = attach_cfg.get('trigger', 'attach_trigger')
+        attach_menu_key = attach_cfg.get('menu_target', 'upload_files_item')
+
+        result = act(platform, 'click', attach_trigger_key)
         if result.get('error'):
-            fail('attach', f'Attach trigger failed: {result}', platform)
+            fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
         time.sleep(1.5)
 
-        # Click upload files item
-        result = act(platform, 'click', 'upload_files_item', '--scope', 'menu')
+        # Click upload files item (from YAML workflow)
+        result = act(platform, 'click', attach_menu_key, '--scope', 'menu')
         if result.get('error'):
-            fail('attach', f'Upload item failed: {result}', platform)
+            fail('attach', f'Upload item {attach_menu_key!r} failed: {result}', platform)
         time.sleep(3)
 
         # File dialog
@@ -321,9 +324,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         print(json.dumps({'event': 'step_ok', 'step': 'attach', 'msg': 'no file'}))
 
     # ── Step 4: Paste message ──
-    result = act(platform, 'click', 'input')
+    prompt_cfg = workflow.get('prompt', {})
+    input_key = prompt_cfg.get('input', 'input')
+    result = act(platform, 'click', input_key)
     if result.get('error'):
-        fail('prompt', f'Input click failed: {result}', platform)
+        fail('prompt', f'Input click ({input_key!r}) failed: {result}', platform)
     time.sleep(0.5)
 
     result = act(platform, 'paste', message)
@@ -334,23 +339,42 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     # ── Step 5: Send ──
     send_cfg = workflow.get('send', {})
+    send_trigger_key = send_cfg.get('trigger', 'send_button')
+    confirmation_key = send_cfg.get('confirmation_key', 'stop_button')
+    confirmation_timeout = send_cfg.get('confirmation_timeout', 10)
+    require_url = send_cfg.get('require_new_url', False)
+
     if send_cfg.get('submit_via_return'):
         result = act(platform, 'press', send_cfg.get('keypress', 'Return'))
     else:
-        result = act(platform, 'click', 'send_button')
+        result = act(platform, 'click', send_trigger_key)
         if result.get('error'):
-            fail('send', f'Send button click failed: {result}', platform)
-    time.sleep(5)
+            fail('send', f'Send button click ({send_trigger_key!r}) failed: {result}', platform)
 
-    # Verify send: stop button appeared OR URL changed (for platforms like Perplexity DR)
-    snap = inspect_platform(platform)
-    url = snap.get('url', '')
-    has_stop = has_key(snap, 'stop_button')
-    url_changed = bool(url and fresh_url and url != fresh_url)
+    # Poll for send confirmation: stop button appeared OR URL changed
+    deadline = time.time() + confirmation_timeout
+    has_stop = False
+    url_changed = False
+    url = ''
+    while time.time() < deadline:
+        snap = inspect_platform(platform)
+        url = snap.get('url', '')
+        has_stop = has_key(snap, confirmation_key)
+        url_changed = bool(url and fresh_url and url != fresh_url)
+        if has_stop and url_changed:
+            break
+        if has_stop and not require_url:
+            break
+        if url_changed and not require_url:
+            break
+        time.sleep(2)
 
+    # Verify based on YAML requirements
+    if require_url and not url_changed:
+        fail('send', f'require_new_url is true but URL unchanged', platform)
     if not has_stop and not url_changed:
         path = screenshot(platform)
-        fail('send', f'Send not confirmed: no stop button, URL unchanged. Screenshot: {path}', platform)
+        fail('send', f'Send not confirmed: no {confirmation_key}, URL unchanged. Screenshot: {path}', platform)
 
     if has_stop:
         print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
@@ -360,7 +384,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     # ── Step 6: Monitor ──
     if start_monitor:
-        monitor_cmd = _MONITOR + [platform, '--interval', '3', '--absent', '3', '--timeout', '3600']
+        mon_cfg = workflow.get('monitor', {})
+        interval = str(mon_cfg.get('poll_interval', 3))
+        absent = str(mon_cfg.get('required_stop_absent_cycles', 3))
+        timeout = str(mon_cfg.get('timeout', 3600))
+        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent, '--timeout', timeout]
         log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
         with open(log_path, 'w') as log_f:
             proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,

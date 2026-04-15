@@ -86,7 +86,8 @@ def setup_display(platform: str) -> str:
 def main():
     parser = argparse.ArgumentParser(description='V2 single-action tool')
     parser.add_argument('action', choices=['inspect', 'click', 'navigate', 'paste', 'press', 'clipboard'])
-    parser.add_argument('platform', choices=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'])
+    _platforms = sorted(p.stem for p in (_PROJECT_ROOT / 'consultation_v2' / 'platforms').glob('*.yaml'))
+    parser.add_argument('platform', choices=_platforms)
     parser.add_argument('target', nargs='?', default=None,
                         help='Element key (for click), URL (for navigate), text (for paste), key (for press)')
     parser.add_argument('--name', default=None, help='Exact element name (alternative to key)')

@@ -81,6 +81,28 @@ def setup_display(platform: str) -> str:
     return display
 
 
+def _push_redis(platform: str, event_type: str, body: str, url: str | None = None):
+    """Push a notification to Redis inbox. Logs errors to stderr instead of swallowing."""
+    try:
+        import redis
+        r = redis.Redis(
+            host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+            port=int(os.environ.get('REDIS_PORT', '6379')),
+            decode_responses=True,
+        )
+        msg = {
+            'from': 'monitor',
+            'type': event_type,
+            'body': body,
+            'platform': platform,
+        }
+        if url is not None:
+            msg['url'] = url
+        r.lpush('taey:taeys-hands:inbox', json.dumps(msg))
+    except Exception as e:
+        print(json.dumps({'event': 'redis_error', 'error': str(e)}), file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Monitor platform for response completion')
     _platforms = sorted(p.stem for p in (Path(__file__).resolve().parents[1] / 'consultation_v2' / 'platforms').glob('*.yaml'))
@@ -93,6 +115,17 @@ def main():
 
     display = setup_display(args.platform)
 
+    # Load platform YAML — values as defaults, CLI args override
+    from consultation_v2.yaml_contract import load_platform_yaml
+    cfg = load_platform_yaml(args.platform)
+    mon_cfg = cfg.get('workflow', {}).get('monitor', {})
+
+    interval = args.interval if args.interval != parser.get_default('interval') else mon_cfg.get('poll_interval', 3.0)
+    required_absent = args.absent if args.absent != parser.get_default('absent') else mon_cfg.get('required_stop_absent_cycles', 3)
+    stop_key = args.stop_key if args.stop_key != parser.get_default('stop_key') else mon_cfg.get('stop_key', 'stop_button')
+    complete_key = mon_cfg.get('complete_key', None)
+    timeout = args.timeout if args.timeout != parser.get_default('timeout') else mon_cfg.get('timeout', 3600)
+
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
 
@@ -104,22 +137,55 @@ def main():
         'event': 'monitor_start',
         'platform': args.platform,
         'display': display,
-        'interval': args.interval,
-        'required_absent': args.absent,
-        'timeout': args.timeout,
+        'interval': interval,
+        'required_absent': required_absent,
+        'stop_key': stop_key,
+        'complete_key': complete_key,
+        'timeout': timeout,
     }))
 
-    while time.time() - start < args.timeout:
+    while time.time() - start < timeout:
         try:
             _, _, snap = build_snapshot(args.platform)
-            has_stop = snap.has(args.stop_key)
+
+            # Fast-path: response already complete before we saw stop
+            if complete_key and not seen_stop and snap.has(complete_key):
+                elapsed = time.time() - start
+                result = {
+                    'event': 'complete',
+                    'method': 'fast_path_complete_key',
+                    'platform': args.platform,
+                    'elapsed': round(elapsed, 1),
+                    'url': snap.url,
+                }
+                print(json.dumps(result))
+                _push_redis(args.platform, 'RESPONSE_COMPLETE',
+                            f'{args.platform} response complete via fast-path ({round(elapsed)}s). URL: {snap.url}',
+                            snap.url)
+                return 0
+
+            has_stop = snap.has(stop_key)
 
             if has_stop:
                 seen_stop = True
                 absent_cycles = 0
             elif seen_stop:
                 absent_cycles += 1
-                if absent_cycles >= args.absent:
+                if absent_cycles >= required_absent:
+                    # If complete_key defined, verify it's present before declaring complete
+                    if complete_key and not snap.has(complete_key):
+                        # Stop disappeared but complete_key not yet visible — keep waiting
+                        elapsed = time.time() - start
+                        print(json.dumps({
+                            'event': 'poll',
+                            'platform': args.platform,
+                            'status': f'stop_gone_awaiting_complete_key',
+                            'elapsed': round(elapsed, 1),
+                            'has_stop': False,
+                        }), flush=True)
+                        time.sleep(interval)
+                        continue
+
                     elapsed = time.time() - start
                     result = {
                         'event': 'complete',
@@ -130,26 +196,12 @@ def main():
                         'url': snap.url,
                     }
                     print(json.dumps(result))
-                    # Push completion to Redis
-                    try:
-                        import redis
-                        r = redis.Redis(
-                            host=os.environ.get('REDIS_HOST', '127.0.0.1'),
-                            port=int(os.environ.get('REDIS_PORT', '6379')),
-                            decode_responses=True,
-                        )
-                        r.lpush('taey:taeys-hands:inbox', json.dumps({
-                            'from': 'monitor',
-                            'type': 'RESPONSE_COMPLETE',
-                            'body': f'{args.platform} response complete ({round(elapsed)}s). URL: {snap.url}',
-                            'platform': args.platform,
-                            'url': snap.url,
-                        }))
-                    except Exception:
-                        pass
+                    _push_redis(args.platform, 'RESPONSE_COMPLETE',
+                                f'{args.platform} response complete ({round(elapsed)}s). URL: {snap.url}',
+                                snap.url)
                     return 0
 
-            status = 'generating' if has_stop else ('waiting' if not seen_stop else f'absent:{absent_cycles}/{args.absent}')
+            status = 'generating' if has_stop else ('waiting' if not seen_stop else f'absent:{absent_cycles}/{required_absent}')
             elapsed = time.time() - start
             print(json.dumps({
                 'event': 'poll',
@@ -167,7 +219,7 @@ def main():
             }), flush=True)
             return 1
 
-        time.sleep(args.interval)
+        time.sleep(interval)
 
     result = {
         'event': 'timeout',
@@ -175,21 +227,8 @@ def main():
         'elapsed': round(time.time() - start, 1),
     }
     print(json.dumps(result))
-    try:
-        import redis
-        r = redis.Redis(
-            host=os.environ.get('REDIS_HOST', '127.0.0.1'),
-            port=int(os.environ.get('REDIS_PORT', '6379')),
-            decode_responses=True,
-        )
-        r.lpush('taey:taeys-hands:inbox', json.dumps({
-            'from': 'monitor',
-            'type': 'MONITOR_TIMEOUT',
-            'body': f'{args.platform} monitor timed out after {round(time.time() - start)}s',
-            'platform': args.platform,
-        }))
-    except Exception:
-        pass
+    _push_redis(args.platform, 'MONITOR_TIMEOUT',
+                f'{args.platform} monitor timed out after {round(time.time() - start)}s')
     return 1
 
 
