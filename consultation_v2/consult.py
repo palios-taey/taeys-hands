@@ -163,7 +163,7 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
 
     # Find and focus file dialog
     for title in dialog_titles:
-        r = subprocess.run(['xdotool', 'search', '--name', title],
+        r = subprocess.run(['xdotool', 'search', '--name', '--exact', title],
                            capture_output=True, text=True, timeout=3, env=env)
         wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
         if wids:
@@ -258,7 +258,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if 'sequences' not in selection:
         fail('setup', 'workflow.selection.sequences missing from YAML', platform)
     sequences = selection['sequences']
-    checked_state_verified = False
+    checked_state_keys = set()  # Per-key tracking, not global boolean
 
     def _run_sequence(seq):
         """Run a named sequence (e.g., deep_think, pro_extended). Returns True if all steps verified."""
@@ -307,12 +307,34 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 time.sleep(timing['after_escape'])
         return all_steps_ok
 
+    # Resolve validation keys BEFORE setup so we can track per-key
+    mode_val_key = None
+    if mode:
+        if mode in sequences and sequences[mode]:
+            last_step = sequences[mode][-1]
+            if 'validation' not in last_step:
+                fail('mode_check', f'Sequence {mode!r} last step has no validation field', platform)
+            mode_val_key = last_step['validation']
+        else:
+            mode_vals = selection.get('mode_validations', {})
+            if mode not in mode_vals:
+                fail('mode_check', f'No validation key for mode {mode!r} in selection.mode_validations', platform)
+            mode_val_key = mode_vals[mode]
+
+    tool_val_keys = {}
+    for tool in (tools or []):
+        if tool in sequences and sequences[tool]:
+            last_step = sequences[tool][-1]
+            if 'validation' not in last_step:
+                fail('mode_check', f'Tool sequence {tool!r} last step has no validation field', platform)
+            tool_val_keys[tool] = last_step['validation']
+
     # Step 2a: Set mode (via sequence or simple target)
     mode_set = False
     if mode and mode in sequences:
-        # Mode has its own sequence (e.g., ChatGPT pro_extended, Perplexity learn_step_by_step)
         ok = _run_sequence(sequences[mode])
-        checked_state_verified = checked_state_verified or ok
+        if ok and mode_val_key:
+            checked_state_keys.add(mode_val_key)
         mode_set = True
         snap = inspect_platform(platform)
     elif mode:
@@ -356,11 +378,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 if selection.get('mode_verified_by_checked_state'):
                     verify_snap = inspect_platform(platform, scope=scope)
                     if _element_has_checked_state(verify_snap, cfg, target_key):
-                        checked_state_verified = True
+                        if mode_val_key:
+                            checked_state_keys.add(mode_val_key)
                     else:
-                        # AT-SPI doesn't expose checked state for this platform's menu items.
-                        # Click completed without error — accept as best-effort verification.
-                        checked_state_verified = True
+                        # AT-SPI doesn't expose checked state — click succeeded, accept for THIS mode only
+                        if mode_val_key:
+                            checked_state_keys.add(mode_val_key)
                         print(json.dumps({'event': 'mode_note', 'platform': platform,
                                           'msg': f'AT-SPI does not expose checked state for {target_key!r}. Click succeeded — accepting.'}), flush=True)
 
@@ -368,8 +391,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     act(platform, 'press', 'Escape')
                     time.sleep(timing['after_escape'])
             else:
-                # Skipped because already checked — that counts as verified
-                checked_state_verified = True
+                # Skipped because already checked — verified for THIS mode only
+                if mode_val_key:
+                    checked_state_keys.add(mode_val_key)
 
             snap = inspect_platform(platform)
         else:
@@ -379,36 +403,17 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     for tool in (tools or []):
         if tool in sequences:
             ok = _run_sequence(sequences[tool])
-            checked_state_verified = checked_state_verified or ok
+            if ok and tool in tool_val_keys:
+                checked_state_keys.add(tool_val_keys[tool])
             snap = inspect_platform(platform)
 
-    # Check all relevant validation indicators — read keys from YAML, never synthesize
-    mode_verified = False
-    mode_indicator = None
+    # Build check_keys from pre-resolved validation keys
     check_keys = []
-
-    # Mode validation key: from sequence's last step validation, or from mode_validations mapping
-    if mode:
-        if mode in sequences and sequences[mode]:
-            # Sequence mode: use last step's validation field
-            last_step = sequences[mode][-1]
-            if 'validation' not in last_step:
-                fail('mode_check', f'Sequence {mode!r} last step has no validation field', platform)
-            check_keys.append(last_step['validation'])
-        else:
-            # Simple target mode: use mode_validations mapping from YAML
-            mode_vals = selection.get('mode_validations', {})
-            if mode not in mode_vals:
-                fail('mode_check', f'No validation key for mode {mode!r} in selection.mode_validations', platform)
-            check_keys.append(mode_vals[mode])
-
-    # Tool validation keys: from each tool sequence's last step validation
+    if mode_val_key:
+        check_keys.append(mode_val_key)
     for tool in (tools or []):
-        if tool in sequences and sequences[tool]:
-            last_step = sequences[tool][-1]
-            if 'validation' not in last_step:
-                fail('mode_check', f'Tool sequence {tool!r} last step has no validation field', platform)
-            check_keys.append(last_step['validation'])
+        if tool in tool_val_keys:
+            check_keys.append(tool_val_keys[tool])
 
     all_elements = _all_elements(snap)
 
@@ -431,13 +436,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     verified_keys.add(val_key)
                     break
 
-    # For unverified keys, check if they can be verified via checked_state
-    if checked_state_verified:
-        for val_key in check_keys:
-            if val_key not in verified_keys:
-                val_cfg = validation.get(val_key, {})
-                if val_cfg.get('verified_by_checked_state', False):
-                    verified_keys.add(val_key)
+    # For unverified keys, check if they were verified via checked_state (per-key, no global bleed)
+    for val_key in check_keys:
+        if val_key not in verified_keys and val_key in checked_state_keys:
+            val_cfg = validation.get(val_key, {})
+            if val_cfg.get('verified_by_checked_state', False):
+                verified_keys.add(val_key)
 
     mode_verified = len(verified_keys) == len(check_keys) and len(check_keys) > 0
     mode_indicator = ', '.join(verified_keys) if verified_keys else None
@@ -577,7 +581,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if result.get('error'):
             fail('send', f'Send button click ({send_trigger_key!r}) failed: {result}', platform)
 
-    # Poll for send confirmation: stop button appeared OR URL changed
+    # Poll for send confirmation: stop button is the primary signal
     deadline = time.time() + confirmation_timeout
     has_stop = False
     url_changed = False
@@ -587,20 +591,22 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         url = snap.get('url', '')
         has_stop = has_key(snap, confirmation_key)
         url_changed = bool(url and pre_send_url and url != pre_send_url)
-        if has_stop and url_changed:
-            break
-        if has_stop and not require_url:
-            break
-        if url_changed and not require_url:
-            break
+        if require_url:
+            # Need BOTH stop button AND URL change
+            if has_stop and url_changed:
+                break
+        else:
+            # Stop button alone is sufficient
+            if has_stop:
+                break
         time.sleep(timing['send_poll_interval'])
 
     # Verify based on YAML requirements
+    if not has_stop:
+        path = screenshot(platform)
+        fail('send', f'Send not confirmed: {confirmation_key} not found. Screenshot: {path}', platform)
     if require_url and not url_changed:
         fail('send', f'require_new_url is true but URL unchanged', platform)
-    if not has_stop and not url_changed:
-        path = screenshot(platform)
-        fail('send', f'Send not confirmed: no {confirmation_key}, URL unchanged. Screenshot: {path}', platform)
 
     if has_stop:
         print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
