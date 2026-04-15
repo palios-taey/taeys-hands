@@ -506,8 +506,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
         time.sleep(timing['after_trigger_click'])
 
-        # Click upload files item (from YAML workflow)
-        result = act(platform, 'click', attach_menu_key, '--scope', 'menu')
+        # Click upload files item — scope from YAML
+        menu_scope = attach_cfg.get('menu_target_scope', 'menu')
+        result = act(platform, 'click', attach_menu_key, '--scope', menu_scope)
         if result.get('error'):
             fail('attach', f'Upload item {attach_menu_key!r} failed: {result}', platform)
         time.sleep(timing['after_attach_menu'])
@@ -632,11 +633,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if require_url and not url_changed:
         fail('send', f'require_new_url is true but URL unchanged', platform)
 
-    if has_stop:
-        print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
-    elif url_changed:
-        print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': False,
-                           'msg': 'URL changed — send confirmed via URL, no stop button yet'}))
+    # has_stop guaranteed True here (fail() exits if False)
+    print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True,
+                       'url_changed': url_changed}))
 
     # ── Step 6: Monitor ──
     if start_monitor:
