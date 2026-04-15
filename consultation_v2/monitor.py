@@ -110,10 +110,10 @@ def main():
     parser = argparse.ArgumentParser(description='Monitor platform for response completion')
     _platforms = sorted(p.stem for p in (Path(__file__).resolve().parents[1] / 'consultation_v2' / 'platforms').glob('*.yaml'))
     parser.add_argument('platform', choices=_platforms)
-    parser.add_argument('--interval', type=float, default=3.0, help='Poll interval in seconds')
-    parser.add_argument('--absent', type=int, default=3, help='Required consecutive absent polls')
-    parser.add_argument('--timeout', type=float, default=3600, help='Max wait time in seconds')
-    parser.add_argument('--stop-key', default='stop_button', help='YAML key for stop button')
+    parser.add_argument('--interval', type=float, default=None, help='Poll interval override')
+    parser.add_argument('--absent', type=int, default=None, help='Required absent polls override')
+    parser.add_argument('--timeout', type=float, default=None, help='Max wait time override')
+    parser.add_argument('--stop-key', default=None, help='YAML key for stop button override')
     args = parser.parse_args()
 
     display = setup_display(args.platform)
@@ -123,10 +123,8 @@ def main():
     cfg = load_platform_yaml(args.platform)
     mon_cfg = cfg.get('workflow', {}).get('monitor', {})
 
-    interval = args.interval if args.interval != parser.get_default('interval') else mon_cfg.get('poll_interval', 3.0)
-    required_absent = args.absent if args.absent != parser.get_default('absent') else mon_cfg.get('required_stop_absent_cycles', 3)
-
-    if args.stop_key != parser.get_default('stop_key'):
+    # stop_key
+    if args.stop_key is not None:
         stop_key = args.stop_key
     elif 'stop_key' in mon_cfg:
         stop_key = mon_cfg['stop_key']
@@ -134,18 +132,38 @@ def main():
         print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.stop_key missing from YAML'}))
         return 1
 
-    if 'complete_key' not in mon_cfg:
-        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.complete_key missing from YAML'}))
+    # interval
+    if args.interval is not None:
+        interval = args.interval
+    elif 'poll_interval' in mon_cfg:
+        interval = mon_cfg['poll_interval']
+    else:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.poll_interval missing from YAML'}))
         return 1
-    complete_key = mon_cfg['complete_key']
 
-    if args.timeout != parser.get_default('timeout'):
+    # required_absent
+    if args.absent is not None:
+        required_absent = args.absent
+    elif 'required_stop_absent_cycles' in mon_cfg:
+        required_absent = mon_cfg['required_stop_absent_cycles']
+    else:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.required_stop_absent_cycles missing from YAML'}))
+        return 1
+
+    # timeout
+    if args.timeout is not None:
         timeout = args.timeout
     elif 'timeout' in mon_cfg:
         timeout = mon_cfg['timeout']
     else:
         print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.timeout missing from YAML'}))
         return 1
+
+    # complete_key (already fails closed)
+    if 'complete_key' not in mon_cfg:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.complete_key missing from YAML'}))
+        return 1
+    complete_key = mon_cfg['complete_key']
 
     # Pre-flight: validate stop_key and complete_key exist in element_map
     element_map = cfg.get('tree', {}).get('element_map', {})

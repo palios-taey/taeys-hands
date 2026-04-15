@@ -274,6 +274,9 @@ workflow:
     after_attach_menu: 3.0
     after_file_dialog: 5.0
     send_poll_interval: 2.0
+    dialog_after_focus: 0.5
+    dialog_after_path_entry: 0.2
+    dialog_after_paste: 0.5
 
   monitor:
     stop_key: stop_button

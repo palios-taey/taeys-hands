@@ -133,7 +133,7 @@ def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
     return False
 
 
-def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
+def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing: dict = None):
     """Focus file dialog, enter path via Ctrl+L."""
     env = _platform_env(platform)
 
@@ -144,6 +144,13 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
     if not dialog_titles:
         return False  # No dialog titles in YAML — fail closed
 
+    # Timing must come from YAML — fail closed if missing
+    if not timing:
+        return False
+    for key in ('dialog_after_focus', 'dialog_after_path_entry', 'dialog_after_paste'):
+        if key not in timing:
+            return False
+
     # Find and focus file dialog
     for title in dialog_titles:
         r = subprocess.run(['xdotool', 'search', '--name', title],
@@ -152,7 +159,7 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
         if wids:
             subprocess.run(['xdotool', 'windowactivate', wids[-1]],
                            capture_output=True, timeout=5, env=env)
-            time.sleep(0.5)
+            time.sleep(timing['dialog_after_focus'])
             break
     else:
         return False
@@ -164,14 +171,14 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
         return False  # No dialog_location_shortcut in YAML — fail closed
 
     subprocess.run(['xdotool', 'key', location_shortcut], env=env, capture_output=True, timeout=3)
-    time.sleep(0.5)
+    time.sleep(timing['dialog_after_focus'])
     subprocess.run(['xdotool', 'key', 'ctrl+a'], env=env, capture_output=True, timeout=3)
-    time.sleep(0.2)
+    time.sleep(timing['dialog_after_path_entry'])
     subprocess.run(['xsel', '--clipboard', '--input'], input=file_path.encode(),
                    env=env, capture_output=True, timeout=3)
-    time.sleep(0.2)
+    time.sleep(timing['dialog_after_path_entry'])
     subprocess.run(['xdotool', 'key', 'ctrl+v'], env=env, capture_output=True, timeout=3)
-    time.sleep(0.5)
+    time.sleep(timing['dialog_after_paste'])
     subprocess.run(['xdotool', 'key', 'Return'], env=env, capture_output=True, timeout=3)
     return True
 
@@ -221,7 +228,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     # Execute mode and tool setup from YAML.
     # Mode and tools are independent — a platform can need BOTH (e.g., Gemini: pro mode + deep_think tool).
-    sequences = selection.get('sequences', {})
+    if 'sequences' not in selection:
+        fail('setup', 'workflow.selection.sequences missing from YAML', platform)
+    sequences = selection['sequences']
     checked_state_verified = False
 
     def _run_sequence(seq):
@@ -362,8 +371,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         val_cfg = validation[val_key]
         indicators = val_cfg.get('indicators', [])
         for indicator in indicators:
-            ind_name = indicator.get('name', '')
-            ind_role = indicator.get('role', '')
+            ind_name = indicator.get('name')
+            ind_role = indicator.get('role')
+            if ind_name is None or ind_role is None:
+                fail('mode_check', f'Malformed indicator in {val_key}: missing name or role', platform)
             for el in all_elements:
                 if el.get('name') == ind_name and el.get('role') == ind_role:
                     verified_keys.add(val_key)
@@ -425,7 +436,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         time.sleep(timing['after_attach_menu'])
 
         # File dialog
-        if not xdotool_file_dialog(platform, pkg, cfg=cfg):
+        if not xdotool_file_dialog(platform, pkg, cfg=cfg, timing=timing):
             fail('attach', 'File dialog not found', platform)
         time.sleep(timing['after_file_dialog'])
 
@@ -495,7 +506,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if 'confirmation_timeout' not in send_cfg:
         fail('send', 'workflow.send.confirmation_timeout missing from YAML', platform)
     confirmation_timeout = send_cfg['confirmation_timeout']
-    require_url = send_cfg.get('require_new_url', False)
+    if 'require_new_url' not in send_cfg:
+        fail('send', 'workflow.send.require_new_url missing from YAML', platform)
+    require_url = send_cfg['require_new_url']
 
     # Capture pre-send URL for accurate change detection
     pre_send_snap = inspect_platform(platform)
