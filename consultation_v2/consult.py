@@ -662,7 +662,24 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     else:
         print(json.dumps({'event': 'step_ok', 'step': 'monitor', 'msg': 'skipped'}))
 
+    # ── Step 7: Store in Neo4j ──
+    consultation_id = None
+    try:
+        from consultation_v2.store import store_consultation
+        consultation_id = store_consultation(
+            platform=platform,
+            prompt=message,
+            mode=mode,
+            tools=tools,
+            attachments=[file_path] if file_path else [],
+            url=url,
+        )
+        print(json.dumps({'event': 'step_ok', 'step': 'store', 'consultation_id': consultation_id}))
+    except Exception as e:
+        print(json.dumps({'event': 'step_warn', 'step': 'store', 'error': str(e)}))
+
     print(json.dumps({'event': 'dispatched', 'platform': platform, 'url': url[:80],
+                       'consultation_id': consultation_id,
                        'msg': 'Send confirmed, monitor spawned. Response NOT yet complete.'}))
     return 0
 
