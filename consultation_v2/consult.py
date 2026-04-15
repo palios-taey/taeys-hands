@@ -163,7 +163,7 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
 
     # Find and focus file dialog
     for title in dialog_titles:
-        r = subprocess.run(['xdotool', 'search', '--name', '--exact', title],
+        r = subprocess.run(['xdotool', 'search', '--name', title],
                            capture_output=True, text=True, timeout=3, env=env)
         wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
         if wids:
