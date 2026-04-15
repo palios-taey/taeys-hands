@@ -353,15 +353,33 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             checked_state_verified = checked_state_verified or ok
             snap = inspect_platform(platform)
 
-    # Check all relevant validation indicators: mode + tools
-    # Look for any active indicator from mode_active, tool_active, etc.
+    # Check all relevant validation indicators — read keys from YAML, never synthesize
     mode_verified = False
     mode_indicator = None
     check_keys = []
+
+    # Mode validation key: from sequence's last step validation, or from mode_validations mapping
     if mode:
-        check_keys.append(f'{mode}_active')
+        if mode in sequences and sequences[mode]:
+            # Sequence mode: use last step's validation field
+            last_step = sequences[mode][-1]
+            if 'validation' not in last_step:
+                fail('mode_check', f'Sequence {mode!r} last step has no validation field', platform)
+            check_keys.append(last_step['validation'])
+        else:
+            # Simple target mode: use mode_validations mapping from YAML
+            mode_vals = selection.get('mode_validations', {})
+            if mode not in mode_vals:
+                fail('mode_check', f'No validation key for mode {mode!r} in selection.mode_validations', platform)
+            check_keys.append(mode_vals[mode])
+
+    # Tool validation keys: from each tool sequence's last step validation
     for tool in (tools or []):
-        check_keys.append(f'{tool}_active')
+        if tool in sequences and sequences[tool]:
+            last_step = sequences[tool][-1]
+            if 'validation' not in last_step:
+                fail('mode_check', f'Tool sequence {tool!r} last step has no validation field', platform)
+            check_keys.append(last_step['validation'])
 
     all_elements = _all_elements(snap)
 

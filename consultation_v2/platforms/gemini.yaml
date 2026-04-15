@@ -166,6 +166,10 @@ workflow:
       fast: mode_fast
       thinking: mode_thinking
       pro: mode_pro
+    mode_validations:
+      fast: fast_active
+      thinking: thinking_active
+      pro: pro_active
 
     tool_trigger: tools_button
     tool_snapshot: menu

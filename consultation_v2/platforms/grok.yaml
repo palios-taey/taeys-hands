@@ -164,6 +164,11 @@ workflow:
       fast: model_fast
       expert: model_expert
       heavy: model_heavy
+    mode_validations:
+      auto: auto_active
+      fast: fast_active
+      expert: expert_active
+      heavy: heavy_active
 
   connectors:
     trigger: sources_selector

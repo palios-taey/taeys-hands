@@ -176,6 +176,8 @@ workflow:
     mode_close_with_escape: true
     mode_targets:
       extended_thinking: model_extended_thinking_item
+    mode_validations:
+      extended_thinking: extended_thinking_active
 
     tool_trigger: attach_trigger
     tool_snapshot: menu

@@ -275,6 +275,10 @@ workflow:
       computer: mode_computer_item
       deep_research: mode_deep_research_item
       model_council: mode_model_council_item
+    mode_validations:
+      computer: computer_active
+      deep_research: deep_research_active
+      model_council: model_council_active
 
     sequences:
       learn_step_by_step:
