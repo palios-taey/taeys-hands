@@ -148,9 +148,11 @@ def main():
         try:
             _, _, snap = build_snapshot(args.platform)
 
-            # Fast-path: response already complete before we saw stop
-            if complete_key and not seen_stop and snap.has(complete_key):
-                elapsed = time.time() - start
+            # Fast-path: response already complete before we saw stop.
+            # Only trigger after at least one full poll interval to avoid
+            # false positives from pre-existing copy buttons on the page.
+            elapsed = time.time() - start
+            if complete_key and not seen_stop and elapsed >= interval and snap.has(complete_key):
                 result = {
                     'event': 'complete',
                     'method': 'fast_path_complete_key',

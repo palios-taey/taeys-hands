@@ -344,24 +344,23 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     verified_keys.add(val_key)
                     break
 
+    # For unverified keys, check if they can be verified via checked_state
+    if checked_state_verified:
+        for val_key in check_keys:
+            if val_key not in verified_keys:
+                val_cfg = validation.get(val_key, {})
+                if val_cfg.get('verified_by_checked_state', False):
+                    verified_keys.add(val_key)
+
     mode_verified = len(verified_keys) == len(check_keys) and len(check_keys) > 0
     mode_indicator = ', '.join(verified_keys) if verified_keys else None
 
     if mode_verified:
         print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode, 'indicator': mode_indicator}))
     else:
-        # Check if ALL validation keys use verified_by_checked_state (no persistent indicator exists)
-        all_checked_state = all(
-            validation.get(k, {}).get('verified_by_checked_state', False)
-            for k in check_keys if validation.get(k)
-        )
-        if check_keys and all_checked_state and checked_state_verified:
-            # Actually verified via checked state during sequence/target execution
-            print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode,
-                               'msg': 'verified_by_checked_state — confirmed checked state during execution'}))
-        else:
-            path = screenshot(platform)
-            fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Checked: {check_keys}. Screenshot: {path}', platform)
+        path = screenshot(platform)
+        unverified = [k for k in check_keys if k not in verified_keys]
+        fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Unverified: {unverified}. Screenshot: {path}', platform)
 
     # ── Step 3: Attach file ──
     if file_path:
