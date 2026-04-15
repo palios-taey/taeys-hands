@@ -203,21 +203,14 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     validation = cfg.get('validation', {})
     selection = workflow.get('selection', {})
 
-    # Execute mode setup sequence from YAML if available
+    # Execute mode and tool setup from YAML.
+    # Mode and tools are independent — a platform can need BOTH (e.g., Gemini: pro mode + deep_think tool).
     sequences = selection.get('sequences', {})
-    # Determine which sequence to run: tools first (e.g., deep_think), then mode
-    seq_name = None
-    if tools and tools[0] in sequences:
-        seq_name = tools[0]
-    elif mode and mode in sequences:
-        seq_name = mode
-
     checked_state_verified = False
 
-    if seq_name and seq_name in sequences:
-        # Named sequence (e.g., deep_think, pro_extended)
-        seq = sequences[seq_name]
-        all_steps_verified = True
+    def _run_sequence(seq):
+        """Run a named sequence (e.g., deep_think, pro_extended). Returns True if all steps verified."""
+        all_steps_ok = True
         for i, step in enumerate(seq):
             trigger = step.get('trigger')
             target = step.get('target')
@@ -231,7 +224,6 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 time.sleep(1.5)
 
             if target:
-                # skip_if_checked: inspect menu, skip click if target already checked
                 skipped = False
                 if step.get('skip_if_checked'):
                     menu_snap = inspect_platform(platform, scope=scope)
@@ -247,22 +239,27 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                         fail('mode_setup', f'Target {target!r} failed: {result}', platform)
                     time.sleep(1)
 
-                # Verify checked state after click (or confirm already checked)
                 if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
                     verify_snap = inspect_platform(platform, scope=scope)
                     if _element_has_checked_state(verify_snap, cfg, target):
-                        pass  # Verified via AT-SPI checked state
+                        pass
                     elif step.get('verified_by_checked_state') and not skipped:
-                        # AT-SPI doesn't expose checked state — click succeeded, accept
                         pass
                     else:
-                        all_steps_verified = False
+                        all_steps_ok = False
 
             if step.get('close_with_escape'):
                 act(platform, 'press', 'Escape')
                 time.sleep(1)
+        return all_steps_ok
 
-        checked_state_verified = all_steps_verified
+    # Step 2a: Set mode (via sequence or simple target)
+    mode_set = False
+    if mode and mode in sequences:
+        # Mode has its own sequence (e.g., ChatGPT pro_extended, Perplexity learn_step_by_step)
+        ok = _run_sequence(sequences[mode])
+        checked_state_verified = checked_state_verified or ok
+        mode_set = True
         snap = inspect_platform(platform)
     elif mode:
         # Simple target (e.g., Grok heavy via mode_targets)
@@ -318,6 +315,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 # Skipped because already checked — that counts as verified
                 checked_state_verified = True
 
+            snap = inspect_platform(platform)
+
+    # Step 2b: Set tools (via sequences, independent of mode)
+    for tool in (tools or []):
+        if tool in sequences:
+            ok = _run_sequence(sequences[tool])
+            checked_state_verified = checked_state_verified or ok
             snap = inspect_platform(platform)
 
     # Check all relevant validation indicators: mode + tools
