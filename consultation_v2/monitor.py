@@ -120,14 +120,32 @@ def main():
                 absent_cycles += 1
                 if absent_cycles >= args.absent:
                     elapsed = time.time() - start
-                    print(json.dumps({
+                    result = {
                         'event': 'complete',
                         'method': 'stop_disappeared',
                         'platform': args.platform,
                         'elapsed': round(elapsed, 1),
                         'absent_cycles': absent_cycles,
                         'url': snap.url,
-                    }))
+                    }
+                    print(json.dumps(result))
+                    # Push completion to Redis
+                    try:
+                        import redis
+                        r = redis.Redis(
+                            host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                            port=int(os.environ.get('REDIS_PORT', '6379')),
+                            decode_responses=True,
+                        )
+                        r.lpush('taey:taeys-hands:inbox', json.dumps({
+                            'from': 'monitor',
+                            'type': 'RESPONSE_COMPLETE',
+                            'body': f'{args.platform} response complete ({round(elapsed)}s). URL: {snap.url}',
+                            'platform': args.platform,
+                            'url': snap.url,
+                        }))
+                    except Exception:
+                        pass
                     return 0
 
             status = 'generating' if has_stop else ('waiting' if not seen_stop else f'absent:{absent_cycles}/{args.absent}')
@@ -150,11 +168,27 @@ def main():
 
         time.sleep(args.interval)
 
-    print(json.dumps({
+    result = {
         'event': 'timeout',
         'platform': args.platform,
         'elapsed': round(time.time() - start, 1),
-    }))
+    }
+    print(json.dumps(result))
+    try:
+        import redis
+        r = redis.Redis(
+            host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+            port=int(os.environ.get('REDIS_PORT', '6379')),
+            decode_responses=True,
+        )
+        r.lpush('taey:taeys-hands:inbox', json.dumps({
+            'from': 'monitor',
+            'type': 'MONITOR_TIMEOUT',
+            'body': f'{args.platform} monitor timed out after {round(time.time() - start)}s',
+            'platform': args.platform,
+        }))
+    except Exception:
+        pass
     return 1
 
 
