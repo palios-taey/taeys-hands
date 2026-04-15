@@ -6,6 +6,7 @@ navigation_key: F6
 urls:
   fresh: https://www.perplexity.ai/
   verify_navigation: false
+  settle_delay: 5
 
 tree:
   # Empty fence is intentional: the compose controls appear after sidebar/history
@@ -341,6 +342,7 @@ workflow:
     poll_interval: 2.0
     required_stop_absent_cycles: 3
     complete_key: copy_button
+    timeout: 3600
     validation: response_complete
 
   extract:

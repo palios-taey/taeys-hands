@@ -195,6 +195,7 @@ workflow:
     submit_via_return: true
     keypress: Return
     confirmation_key: stop_button
+    confirmation_timeout: 15
     validation: send_success
 
   monitor:
@@ -202,6 +203,7 @@ workflow:
     poll_interval: 2.0
     required_stop_absent_cycles: 3
     complete_key: copy_button
+    timeout: 3600
     validation: response_complete
 
   extract:

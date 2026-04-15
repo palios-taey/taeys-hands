@@ -55,7 +55,10 @@ def _read_platform_displays() -> dict:
 
 def setup_display(platform: str) -> str:
     displays = _read_platform_displays()
-    display = displays.get(platform, os.environ.get('DISPLAY', ':0'))
+    if platform not in displays:
+        print(json.dumps({'error': f'Platform {platform!r} not in PLATFORM_DISPLAYS'}))
+        sys.exit(1)
+    display = displays[platform]
     os.environ['DISPLAY'] = display
 
     a11y_file = f'/tmp/a11y_bus_{display}'
@@ -122,9 +125,27 @@ def main():
 
     interval = args.interval if args.interval != parser.get_default('interval') else mon_cfg.get('poll_interval', 3.0)
     required_absent = args.absent if args.absent != parser.get_default('absent') else mon_cfg.get('required_stop_absent_cycles', 3)
-    stop_key = args.stop_key if args.stop_key != parser.get_default('stop_key') else mon_cfg.get('stop_key', 'stop_button')
-    complete_key = mon_cfg.get('complete_key', None)
-    timeout = args.timeout if args.timeout != parser.get_default('timeout') else mon_cfg.get('timeout', 3600)
+
+    if args.stop_key != parser.get_default('stop_key'):
+        stop_key = args.stop_key
+    elif 'stop_key' in mon_cfg:
+        stop_key = mon_cfg['stop_key']
+    else:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.stop_key missing from YAML'}))
+        return 1
+
+    if 'complete_key' not in mon_cfg:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.complete_key missing from YAML'}))
+        return 1
+    complete_key = mon_cfg['complete_key']
+
+    if args.timeout != parser.get_default('timeout'):
+        timeout = args.timeout
+    elif 'timeout' in mon_cfg:
+        timeout = mon_cfg['timeout']
+    else:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.timeout missing from YAML'}))
+        return 1
 
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
@@ -219,6 +240,7 @@ def main():
                 'platform': args.platform,
                 'error': str(e),
             }), flush=True)
+            _push_redis(args.platform, 'MONITOR_FATAL', f'{args.platform} monitor fatal: {str(e)}')
             return 1
 
         time.sleep(interval)

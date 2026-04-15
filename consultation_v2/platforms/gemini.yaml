@@ -6,6 +6,7 @@ navigation_key: F6
 urls:
   fresh: https://gemini.google.com/app
   verify_navigation: false
+  settle_delay: 5
 
 tree:
   scan_root: app
@@ -213,6 +214,7 @@ workflow:
   send:
     confirmation_key: stop_button
     trigger: send_button
+    confirmation_timeout: 15
     validation: send_success
 
   monitor:
@@ -220,6 +222,7 @@ workflow:
     poll_interval: 2.0
     required_stop_absent_cycles: 3
     complete_key: copy_button
+    timeout: 3600
     validation: response_complete
 
   extract:

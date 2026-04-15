@@ -187,7 +187,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if not fresh_url:
         fail('navigate', 'No fresh URL in YAML', platform)
     act(platform, 'navigate', fresh_url)
-    settle = cfg.get('urls', {}).get('settle_delay', 5)
+    settle = cfg.get('urls', {}).get('settle_delay')
+    if settle is None:
+        fail('navigate', 'urls.settle_delay missing from YAML', platform)
     time.sleep(settle)
 
     snap = inspect_platform(platform)
@@ -465,7 +467,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('send', 'workflow.send.confirmation_key missing from YAML', platform)
 
     confirmation_key = send_cfg['confirmation_key']
-    confirmation_timeout = send_cfg.get('confirmation_timeout', 10)
+    if 'confirmation_timeout' not in send_cfg:
+        fail('send', 'workflow.send.confirmation_timeout missing from YAML', platform)
+    confirmation_timeout = send_cfg['confirmation_timeout']
     require_url = send_cfg.get('require_new_url', False)
 
     if send_cfg.get('submit_via_return'):
@@ -522,8 +526,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('monitor', 'workflow.monitor.required_stop_absent_cycles missing from YAML', platform)
         interval = str(mon_cfg['poll_interval'])
         absent = str(mon_cfg['required_stop_absent_cycles'])
-        timeout = str(mon_cfg.get('timeout', 3600))
-        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent, '--timeout', timeout]
+        if 'stop_key' not in mon_cfg:
+            fail('monitor', 'workflow.monitor.stop_key missing from YAML', platform)
+        stop_key_val = mon_cfg['stop_key']
+        if 'timeout' not in mon_cfg:
+            fail('monitor', 'workflow.monitor.timeout missing from YAML', platform)
+        timeout = str(mon_cfg['timeout'])
+        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent, '--timeout', timeout, '--stop-key', stop_key_val]
         log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
         with open(log_path, 'w') as log_f:
             proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,

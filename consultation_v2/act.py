@@ -57,7 +57,10 @@ def _read_platform_displays() -> dict:
 
 def setup_display(platform: str) -> str:
     displays = _read_platform_displays()
-    display = displays.get(platform, os.environ.get('DISPLAY', ':0'))
+    if platform not in displays:
+        print(json.dumps({'error': f'Platform {platform!r} not in PLATFORM_DISPLAYS'}))
+        sys.exit(1)
+    display = displays[platform]
     os.environ['DISPLAY'] = display
 
     a11y_file = f'/tmp/a11y_bus_{display}'
