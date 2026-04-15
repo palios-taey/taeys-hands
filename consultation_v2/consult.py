@@ -425,12 +425,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 checked_state_keys.update(tool_val_keys[tool])
             snap = inspect_platform(platform)
 
-    # Build check_keys from pre-resolved validation keys
-    check_keys = []
-    check_keys.extend(mode_val_keys)
+    # Build check_keys from pre-resolved validation keys (deduplicated)
+    check_keys_set = set()
+    check_keys_set.update(mode_val_keys)
     for tool in (tools or []):
         if tool in tool_val_keys:
-            check_keys.extend(tool_val_keys[tool])
+            check_keys_set.update(tool_val_keys[tool])
+    check_keys = list(check_keys_set)
 
     all_elements = _all_elements(snap)
 
