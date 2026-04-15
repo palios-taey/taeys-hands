@@ -221,19 +221,24 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     else:
         result = act(platform, 'click', 'send_button')
         if result.get('error'):
-            # Try Return as fallback for send
-            result = act(platform, 'press', 'Return')
+            fail('send', f'Send button click failed: {result}', platform)
     time.sleep(5)
 
-    # Verify stop button appeared
+    # Verify send: stop button appeared OR URL changed (for platforms like Perplexity DR)
     snap = inspect_platform(platform)
     url = snap.get('url', '')
     has_stop = has_key(snap, 'stop_button')
+    url_changed = bool(url and fresh_url and url != fresh_url)
 
-    if not has_stop:
-        # Take screenshot — maybe the response was instant or send failed
+    if not has_stop and not url_changed:
         path = screenshot(platform)
-        fail('send', f'Stop button not found after send. URL={url[:50]}. Screenshot: {path}', platform)
+        fail('send', f'Send not confirmed: no stop button, URL unchanged. Screenshot: {path}', platform)
+
+    if not has_stop and url_changed:
+        # URL changed but no stop — platform started processing without visible stop button
+        print(json.dumps({'event': 'step_warn', 'step': 'send',
+                           'msg': 'URL changed but no stop button — platform processing',
+                           'url': url[:50]}))
 
     print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
 
