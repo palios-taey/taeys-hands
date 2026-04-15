@@ -224,20 +224,9 @@ def main():
             elif seen_stop:
                 absent_cycles += 1
                 if absent_cycles >= required_absent:
-                    # If complete_key defined, verify it's present before declaring complete
-                    if complete_key and not snap.has(complete_key):
-                        # Stop disappeared but complete_key not yet visible — keep waiting
-                        elapsed = time.time() - start
-                        print(json.dumps({
-                            'event': 'poll',
-                            'platform': args.platform,
-                            'status': f'stop_gone_awaiting_complete_key',
-                            'elapsed': round(elapsed, 1),
-                            'has_stop': False,
-                        }), flush=True)
-                        time.sleep(interval)
-                        continue
-
+                    # Stop button disappeared for required cycles — response complete.
+                    # Do NOT gate on complete_key: copy button may be off-screen
+                    # (platforms don't auto-scroll long responses).
                     elapsed = time.time() - start
                     result = {
                         'event': 'complete',
