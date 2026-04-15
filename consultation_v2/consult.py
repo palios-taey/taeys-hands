@@ -117,7 +117,7 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
     if cfg:
         dialog_titles = cfg.get('tree', {}).get('dialog_titles', [])
     if not dialog_titles:
-        dialog_titles = ['File Upload', 'Open', 'Open File']
+        return False  # No dialog titles in YAML — fail closed
 
     # Find and focus file dialog
     for title in dialog_titles:
@@ -352,13 +352,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         path = screenshot(platform)
         fail('send', f'Send not confirmed: no stop button, URL unchanged. Screenshot: {path}', platform)
 
-    if not has_stop and url_changed:
-        # URL changed but no stop — platform started processing without visible stop button
-        print(json.dumps({'event': 'step_warn', 'step': 'send',
-                           'msg': 'URL changed but no stop button — platform processing',
-                           'url': url[:50]}))
-
-    print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
+    if has_stop:
+        print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True}))
+    elif url_changed:
+        print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': False,
+                           'msg': 'URL changed — send confirmed via URL, no stop button yet'}))
 
     # ── Step 6: Monitor ──
     if start_monitor:
