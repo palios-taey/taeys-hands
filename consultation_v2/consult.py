@@ -172,36 +172,84 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('navigate', 'Input field not found after navigation', platform)
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
 
-    # ── Step 2: Verify mode via tree inspection ──
+    # ── Step 2: Set up and verify mode ──
     mode = defaults.get('mode')
+    tools = defaults.get('tools', [])
     validation = cfg.get('validation', {})
+    selection = workflow.get('selection', {})
 
-    # Check all mode validation indicators in the tree
+    # Execute mode setup sequence from YAML if available
+    sequences = selection.get('sequences', {})
+    # Determine which sequence to run: tools first (e.g., deep_think), then mode
+    seq_name = None
+    if tools and tools[0] in sequences:
+        seq_name = tools[0]
+    elif mode and mode in sequences:
+        seq_name = mode
+
+    if seq_name and seq_name in sequences:
+        seq = sequences[seq_name]
+        for i, step in enumerate(seq):
+            trigger = step.get('trigger')
+            target = step.get('target')
+            scope = step.get('snapshot', 'document')
+            strategy = step.get('click_strategy')
+
+            if trigger:
+                result = act(platform, 'click', trigger)
+                if result.get('error'):
+                    fail('mode_setup', f'Trigger {trigger!r} failed: {result}', platform)
+                time.sleep(1.5)
+
+            if target:
+                args_list = [target, '--scope', scope]
+                if strategy:
+                    args_list += ['--strategy', strategy]
+                result = act(platform, 'click', *args_list)
+                if result.get('error'):
+                    fail('mode_setup', f'Target {target!r} failed: {result}', platform)
+                time.sleep(1)
+
+            if step.get('close_with_escape'):
+                act(platform, 'press', 'Escape')
+                time.sleep(1)
+
+        # Re-inspect after mode setup
+        snap = inspect_platform(platform)
+
+    # Check all relevant validation indicators: mode + tools
+    # Look for any active indicator from mode_active, tool_active, etc.
     mode_verified = False
     mode_indicator = None
+    check_keys = []
     if mode:
-        # Look for validation key: {mode}_active
-        val_key = f'{mode}_active'
+        check_keys.append(f'{mode}_active')
+    for tool in (tools or []):
+        check_keys.append(f'{tool}_active')
+
+    all_elements = snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]
+
+    for val_key in check_keys:
         val_cfg = validation.get(val_key, {})
         indicators = val_cfg.get('indicators', [])
         for indicator in indicators:
             ind_name = indicator.get('name', '')
             ind_role = indicator.get('role', '')
-            # Search snapshot for this indicator
-            for el in snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]:
+            for el in all_elements:
                 if el.get('name') == ind_name and el.get('role') == ind_role:
                     mode_verified = True
                     mode_indicator = ind_name
                     break
             if mode_verified:
                 break
+        if mode_verified:
+            break
 
     if mode_verified:
         print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode, 'indicator': mode_indicator}))
     else:
-        # Mode not verified — take screenshot and halt
         path = screenshot(platform)
-        fail('mode_check', f'Mode {mode!r} not verified in tree. Screenshot: {path}', platform)
+        fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Checked: {check_keys}. Screenshot: {path}', platform)
 
     # ── Step 3: Attach file ──
     if file_path:
