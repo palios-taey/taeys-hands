@@ -95,7 +95,7 @@ def main():
                         help='Element key (for click), URL (for navigate), text (for paste), key (for press)')
     parser.add_argument('--name', default=None, help='Exact element name (alternative to key)')
     parser.add_argument('--role', default=None, help='Exact element role')
-    parser.add_argument('--consultation-id', default=None, help='Consultation UUID for Neo4j storage on extract')
+    parser.add_argument('--session-id', default=None, help='ChatSession UUID for Neo4j storage on extract')
     parser.add_argument('--strategy', default=None, help='Click strategy override')
     parser.add_argument('--scope', default='document', choices=['document', 'menu'],
                         help='Scan scope (default: document)')
@@ -245,13 +245,13 @@ def main():
         # Step 4: Read clipboard
         content = runtime.read_clipboard()
 
-        # Step 5: Store in Neo4j if consultation_id provided
-        response_id = None
-        if args.consultation_id and content:
+        # Step 5: Store in Neo4j if session_id provided
+        message_id = None
+        if args.session_id and content:
             try:
                 from consultation_v2.store import store_response
-                response_id = store_response(
-                    consultation_id=args.consultation_id,
+                message_id = store_response(
+                    session_id=args.session_id,
                     response_text=content,
                     url=snap.url,
                     extraction_method=f'{strategy}_{click_strategy or "default"}',
@@ -261,7 +261,7 @@ def main():
 
         print(json.dumps({'extracted': True, 'length': len(content), 'element': element.name,
                           'strategy': strategy, 'x': element.x, 'y': element.y,
-                          'consultation_id': args.consultation_id, 'response_id': response_id}))
+                          'session_id': args.session_id, 'message_id': message_id}))
         print('---CONTENT---')
         print(content)
         return 0
