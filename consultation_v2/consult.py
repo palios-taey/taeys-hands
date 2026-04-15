@@ -325,27 +325,28 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 time.sleep(timing['after_escape'])
         return all_steps_ok
 
-    # Resolve validation keys BEFORE setup so we can track per-key
-    mode_val_key = None
+    # Resolve ALL validation keys from ALL sequence steps (not just last)
+    mode_val_keys = []
     if mode:
         if mode in sequences and sequences[mode]:
-            last_step = sequences[mode][-1]
-            if 'validation' not in last_step:
-                fail('mode_check', f'Sequence {mode!r} last step has no validation field', platform)
-            mode_val_key = last_step['validation']
+            for step in sequences[mode]:
+                if 'validation' in step:
+                    mode_val_keys.append(step['validation'])
+            if not mode_val_keys:
+                fail('mode_check', f'Sequence {mode!r} has no validation fields on any step', platform)
         else:
             mode_vals = selection.get('mode_validations', {})
             if mode not in mode_vals:
                 fail('mode_check', f'No validation key for mode {mode!r} in selection.mode_validations', platform)
-            mode_val_key = mode_vals[mode]
+            mode_val_keys.append(mode_vals[mode])
 
     tool_val_keys = {}
     for tool in (tools or []):
         if tool in sequences and sequences[tool]:
-            last_step = sequences[tool][-1]
-            if 'validation' not in last_step:
-                fail('mode_check', f'Tool sequence {tool!r} last step has no validation field', platform)
-            tool_val_keys[tool] = last_step['validation']
+            keys = [step['validation'] for step in sequences[tool] if 'validation' in step]
+            if not keys:
+                fail('mode_check', f'Tool sequence {tool!r} has no validation fields on any step', platform)
+            tool_val_keys[tool] = keys
         else:
             fail('setup', f'Tool {tool!r} has no sequence in workflow.selection.sequences', platform)
 
@@ -353,8 +354,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     mode_set = False
     if mode and mode in sequences:
         ok = _run_sequence(sequences[mode])
-        if ok and mode_val_key:
-            checked_state_keys.add(mode_val_key)
+        if ok:
+            checked_state_keys.update(mode_val_keys)
         mode_set = True
         snap = inspect_platform(platform)
     elif mode:
@@ -398,12 +399,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 if selection.get('mode_verified_by_checked_state'):
                     verify_snap = inspect_platform(platform, scope=scope)
                     if _element_has_checked_state(verify_snap, cfg, target_key):
-                        if mode_val_key:
-                            checked_state_keys.add(mode_val_key)
+                        checked_state_keys.update(mode_val_keys)
                     else:
                         # AT-SPI doesn't expose checked state — click succeeded, accept for THIS mode only
-                        if mode_val_key:
-                            checked_state_keys.add(mode_val_key)
+                        checked_state_keys.update(mode_val_keys)
                         print(json.dumps({'event': 'mode_note', 'platform': platform,
                                           'msg': f'AT-SPI does not expose checked state for {target_key!r}. Click succeeded — accepting.'}), flush=True)
 
@@ -412,8 +411,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     time.sleep(timing['after_escape'])
             else:
                 # Skipped because already checked — verified for THIS mode only
-                if mode_val_key:
-                    checked_state_keys.add(mode_val_key)
+                checked_state_keys.update(mode_val_keys)
 
             snap = inspect_platform(platform)
         else:
@@ -424,16 +422,15 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if tool in sequences:
             ok = _run_sequence(sequences[tool])
             if ok and tool in tool_val_keys:
-                checked_state_keys.add(tool_val_keys[tool])
+                checked_state_keys.update(tool_val_keys[tool])
             snap = inspect_platform(platform)
 
     # Build check_keys from pre-resolved validation keys
     check_keys = []
-    if mode_val_key:
-        check_keys.append(mode_val_key)
+    check_keys.extend(mode_val_keys)
     for tool in (tools or []):
         if tool in tool_val_keys:
-            check_keys.append(tool_val_keys[tool])
+            check_keys.extend(tool_val_keys[tool])
 
     all_elements = _all_elements(snap)
 
