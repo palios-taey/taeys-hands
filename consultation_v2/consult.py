@@ -48,10 +48,14 @@ def inspect_platform(platform: str, scope: str = 'document') -> dict:
         args += ['--scope', 'menu']
     cmd = _ACT + ['inspect'] + args
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=20, cwd=str(_PROJECT_ROOT))
+    if r.returncode != 0:
+        return {'error': f'inspect failed (exit {r.returncode}): {r.stderr.strip()[:200]}'}
+    if not r.stdout.strip():
+        return {'error': 'inspect returned no output'}
     try:
         return json.loads(r.stdout)
     except (json.JSONDecodeError, TypeError):
-        return {}
+        return {'error': f'inspect returned invalid JSON: {r.stdout.strip()[:200]}'}
 
 
 def has_key(snap: dict, key: str) -> bool:

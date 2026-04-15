@@ -219,7 +219,13 @@ def main():
             print(json.dumps({'error': 'workflow.extract.primary_key missing from YAML'}))
             return 1
 
-        strategy = extract_cfg.get('strategy', 'first')
+        strategy = extract_cfg.get('strategy')
+        if not strategy:
+            print(json.dumps({'error': 'workflow.extract.strategy missing from YAML'}))
+            return 1
+        if strategy not in ('first', 'last_by_y'):
+            print(json.dumps({'error': f'Unknown extract strategy {strategy!r} — must be first or last_by_y'}))
+            return 1
         click_strategy = extract_cfg.get('click_strategy')
 
         _, _, snap = build_snapshot(args.platform)
@@ -242,8 +248,11 @@ def main():
 
         import time; time.sleep(post_click_delay)
 
-        # Step 4: Read clipboard
+        # Step 4: Read clipboard — fail if empty
         content = runtime.read_clipboard()
+        if not content or not content.strip():
+            print(json.dumps({'error': 'Clipboard empty after copy click — extraction failed'}))
+            return 1
 
         # Step 5: Store in Neo4j if session_id provided
         message_id = None
