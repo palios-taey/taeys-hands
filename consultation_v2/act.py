@@ -88,7 +88,7 @@ def setup_display(platform: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description='V2 single-action tool')
-    parser.add_argument('action', choices=['inspect', 'click', 'navigate', 'paste', 'press', 'clipboard'])
+    parser.add_argument('action', choices=['inspect', 'click', 'navigate', 'paste', 'press', 'clipboard', 'extract'])
     _platforms = sorted(p.stem for p in (_PROJECT_ROOT / 'consultation_v2' / 'platforms').glob('*.yaml'))
     parser.add_argument('platform', choices=_platforms)
     parser.add_argument('target', nargs='?', default=None,
@@ -185,6 +185,59 @@ def main():
         ok = runtime.press(args.target)
         print(json.dumps({'pressed': ok, 'key': args.target}))
         return 0 if ok else 1
+
+    if args.action == 'extract':
+        # Mechanical extraction: scroll to bottom, find copy button by YAML strategy, click, read clipboard
+        from consultation_v2.yaml_contract import load_platform_yaml
+        cfg = load_platform_yaml(args.platform)
+        extract_cfg = cfg.get('workflow', {}).get('extract', {})
+        if not extract_cfg:
+            print(json.dumps({'error': 'workflow.extract missing from YAML'}))
+            return 1
+
+        # Step 1: Scroll to bottom (from YAML)
+        scroll_key = extract_cfg.get('scroll_before_extract')
+        if scroll_key:
+            runtime.press(scroll_key)
+            import time; time.sleep(2)
+
+        # Step 2: Find the copy button by strategy
+        primary_key = extract_cfg.get('primary_key')
+        if not primary_key:
+            print(json.dumps({'error': 'workflow.extract.primary_key missing from YAML'}))
+            return 1
+
+        strategy = extract_cfg.get('strategy', 'first')
+        click_strategy = extract_cfg.get('click_strategy')
+
+        _, _, snap = build_snapshot(args.platform)
+
+        # Select element by YAML strategy
+        if strategy == 'last_by_y':
+            element = snap.last(primary_key)
+        else:
+            element = snap.first(primary_key)
+
+        if not element:
+            print(json.dumps({'error': f'No {primary_key!r} found in snapshot'}))
+            return 1
+
+        # Step 3: Click the copy button
+        ok = runtime.click(element, strategy=click_strategy)
+        if not ok:
+            print(json.dumps({'error': f'Click on {primary_key!r} failed', 'element': element.name}))
+            return 1
+
+        import time; time.sleep(1)
+
+        # Step 4: Read clipboard
+        content = runtime.read_clipboard()
+        print(json.dumps({'extracted': True, 'length': len(content), 'element': element.name,
+                          'strategy': strategy, 'x': element.x, 'y': element.y}))
+        # Write content to stdout on a separate line for easy piping
+        print('---CONTENT---')
+        print(content)
+        return 0
 
     if args.action == 'clipboard':
         if args.target == 'read' or args.target is None:
