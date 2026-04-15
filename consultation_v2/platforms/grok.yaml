@@ -228,8 +228,6 @@ workflow:
     strategy: last_by_y
     click_strategy: coordinate_only
 
-  extra_extract:
-    strategy: none
 
 validation:
   attach_success:

@@ -365,8 +365,6 @@ workflow:
     strategy: first
     click_strategy: atspi_only
 
-  extra_extract:
-    strategy: none
 
 validation:
   attach_success:
