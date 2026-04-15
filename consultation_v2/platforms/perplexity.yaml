@@ -259,7 +259,6 @@ tree:
 
 workflow:
   defaults:
-    model: null
     mode: deep_research
     tools: []
 
@@ -377,7 +376,7 @@ validation:
 
   send_success:
     indicators:
-      - name: "Cancel"
+      - name: "Stop response (Esc)"
         role: push button
 
   response_complete:

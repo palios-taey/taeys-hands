@@ -163,7 +163,6 @@ tree:
 
 workflow:
   defaults:
-    model: opus
     mode: extended_thinking
     tools: []
 

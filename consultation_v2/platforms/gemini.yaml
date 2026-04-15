@@ -151,7 +151,6 @@ tree:
 
 workflow:
   defaults:
-    model: null
     mode: pro
     tools:
       - deep_think

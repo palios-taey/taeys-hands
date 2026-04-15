@@ -24,15 +24,19 @@ _MONITOR = [sys.executable, '-m', 'consultation_v2.monitor']
 
 
 def act(platform: str, action: str, *args, timeout: float = 15.0) -> dict:
-    """Call act.py and return parsed JSON output."""
+    """Call act.py and return parsed JSON output. Nonzero exit = error."""
     cmd = _ACT + [action, platform] + list(args)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(_PROJECT_ROOT))
     if not r.stdout.strip():
         return {'error': f'act.py returned no output. stderr: {r.stderr.strip()[:200]}'}
     try:
-        return json.loads(r.stdout.strip())
+        result = json.loads(r.stdout.strip())
     except json.JSONDecodeError:
         return {'error': f'act.py returned invalid JSON: {r.stdout.strip()[:200]}'}
+    # Check exit code — nonzero means act.py failed
+    if r.returncode != 0 and 'error' not in result:
+        result['error'] = f'act.py exited with code {r.returncode}'
+    return result
 
 
 def inspect_platform(platform: str, scope: str = 'document') -> dict:
