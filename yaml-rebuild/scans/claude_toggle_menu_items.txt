@@ -1,0 +1,14 @@
+# Claude Toggle Menu (Add files, connectors, and more)
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Add files, connectors, and more" push button @ (681, 567)
+# State: Home page, Opus 4.6 Extended active
+
+[menu item] "Add files or photos Ctrl+U" @ (773,610)  states=[showing, focusable, enabled]
+[menu item] "Take a screenshot" @ (773,642)  states=[showing, focusable, enabled]
+[menu item] "Add to project" @ (773,674)  states=[showing, focusable, enabled]
+[menu item] "Add from GitHub" @ (773,706)  states=[showing, focusable, enabled]
+[menu item] "Skills" @ (773,751)  states=[showing, focusable, enabled]
+[menu item] "Add connectors" @ (773,783)  states=[showing, focusable, enabled]
+[check menu item] "Research" @ (773,827)  states=[showing, focusable, enabled]
+[check menu item] "Web search" @ (773,859)  states=[showing, checked, focusable, enabled]
+[menu item] "Use style" @ (773,891)  states=[showing, focusable, enabled]

@@ -33,12 +33,11 @@ def _get_doc_url(doc):
 
 
 def _detect_platform(url):
-    url_lower = url.lower()
     for p, pat in _EXTRA_URL_PATTERNS.items():
-        if pat in url_lower:
+        if pat in url:
             return p
     for p, dom in URL_PATTERNS.items():
-        if dom in url_lower:
+        if dom in url:
             return p
     return None
 
@@ -70,7 +69,7 @@ def find_firefox_info(platform):
     all_ff = []
     for i in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(i)
-        if app and 'firefox' in (app.get_name() or '').lower():
+        if app and app.get_name() in ('Firefox', 'Mozilla Firefox', 'Firefox Web Browser'):
             all_ff.append(app)
 
     result['app_count'] = len(all_ff)
@@ -93,34 +92,37 @@ def find_firefox_info(platform):
                     result['url'] = _get_doc_url(doc)
                     return result
 
-    # Fallback: return first Firefox
-    try:
-        result['pid'] = all_ff[0].get_process_id()
-    except Exception:
-        pass
     return result
 
 
-def scan_elements(platform):
-    """Full element scan for platform. Returns list of element dicts."""
+def scan_elements(platform, scan_root='document'):
     desktop = Atspi.get_desktop(0)
+    try:
+        desktop.clear_cache_single()
+    except Exception:
+        pass
     all_ff = []
     for i in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(i)
-        if app and 'firefox' in (app.get_name() or '').lower():
+        if app and app.get_name() in ('Firefox', 'Mozilla Firefox', 'Firefox Web Browser'):
+            try:
+                app.clear_cache_single()
+            except Exception:
+                pass
             all_ff.append(app)
 
     if not all_ff:
         return {'error': 'No Firefox found', 'elements': []}
 
-    # Find document
     doc = None
+    target_app = None
     for ff in all_ff:
         for j in range(ff.get_child_count()):
             frame = ff.get_child_at_index(j)
             if frame:
                 doc = _find_document(frame, platform)
                 if doc:
+                    target_app = ff
                     break
         if doc:
             break
@@ -128,35 +130,112 @@ def scan_elements(platform):
     if not doc:
         return {'error': f'No {platform} document', 'elements': []}
 
+    scope = target_app if scan_root == 'app' else doc
+    if scope:
+        try:
+            scope.clear_cache_single()
+        except Exception:
+            pass
+
     url = _get_doc_url(doc)
-
-    # Get chrome Y
-    try:
-        ext = doc.get_extents(0)
-        chrome_y = ext.y if ext else 120
-    except Exception:
-        chrome_y = 120
-
-    # Scan tree
     elements = []
-    _scan(doc, elements, 0)
-    elements = [e for e in elements if e.get('y', 0) > chrome_y]
-
-    # Copy buttons
-    copy_count = sum(1 for e in elements
-                     if 'copy' in e.get('name', '').lower()
-                     and e.get('role') in ('push button',))
+    _scan(scope, elements, 0)
 
     return {
         'url': url,
         'elements': elements,
-        'copy_button_count': copy_count,
         'total': len(elements),
     }
 
 
+def perform_action(platform, scan_root, name, role, x, y):
+    """Find element by exact name+role and perform AT-SPI action (click via accessibility API)."""
+    desktop = Atspi.get_desktop(0)
+    try:
+        desktop.clear_cache_single()
+    except Exception:
+        pass
+    all_ff = []
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app and app.get_name() in ('Firefox', 'Mozilla Firefox', 'Firefox Web Browser'):
+            try:
+                app.clear_cache_single()
+            except Exception:
+                pass
+            all_ff.append(app)
+
+    doc = None
+    target_app = None
+    for ff in all_ff:
+        for j in range(ff.get_child_count()):
+            frame = ff.get_child_at_index(j)
+            if frame:
+                doc = _find_document(frame, platform)
+                if doc:
+                    target_app = ff
+                    break
+        if doc:
+            break
+
+    if not doc:
+        return {'success': False, 'error': f'No {platform} document'}
+
+    scope = target_app if scan_root == 'app' else doc
+    if scope:
+        try:
+            scope.clear_cache_single()
+        except Exception:
+            pass
+
+    best_node = None
+    best_dist = float('inf')
+
+    def _find(node, depth):
+        nonlocal best_node, best_dist
+        if depth > 50:
+            return
+        try:
+            n_name = (node.get_name() or '').strip()
+            n_role = node.get_role_name() or ''
+            if n_name[:200] == name and n_role == role:
+                try:
+                    ext = node.get_extents(0)
+                    cx = ext.x + ext.width // 2
+                    cy = ext.y + ext.height // 2
+                    if x is not None and y is not None:
+                        dist = (cx - x)**2 + (cy - y)**2
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_node = node
+                    else:
+                        best_node = node
+                        best_dist = 0
+                except Exception:
+                    if best_node is None:
+                        best_node = node
+            for i in range(node.get_child_count()):
+                child = node.get_child_at_index(i)
+                if child:
+                    _find(child, depth + 1)
+        except Exception:
+            pass
+
+    _find(scope, 0)
+    if best_node:
+        try:
+            action = best_node.get_action_iface()
+            if action and action.get_n_actions() > 0:
+                action.do_action(0)
+                return {'success': True}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': 'No action interface'}
+    return {'success': False, 'error': 'Element not found'}
+
+
 def _scan(node, elements, depth):
-    if depth > 30:
+    if depth > 100:
         return
     try:
         name = (node.get_name() or '').strip()
@@ -205,11 +284,29 @@ def _scan(node, elements, depth):
 
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'find_firefox'
-    platform = sys.argv[2] if len(sys.argv) > 2 else 'chatgpt'
 
     if cmd == 'find_firefox':
+        if len(sys.argv) < 3:
+            print(json.dumps({'error': 'platform argument required'}))
+            sys.exit(1)
+        platform = sys.argv[2]
         print(json.dumps(find_firefox_info(platform)))
     elif cmd == 'scan':
-        print(json.dumps(scan_elements(platform)))
+        if len(sys.argv) < 3:
+            print(json.dumps({'error': 'platform argument required'}))
+            sys.exit(1)
+        platform = sys.argv[2]
+        scan_root = sys.argv[3] if len(sys.argv) > 3 else 'document'
+        print(json.dumps(scan_elements(platform, scan_root)))
+    elif cmd == 'click':
+        platform = sys.argv[2]
+        scan_root = sys.argv[3]
+        name = sys.argv[4]
+        role = sys.argv[5]
+        x_str = sys.argv[6]
+        y_str = sys.argv[7]
+        x = float(x_str) if x_str != 'None' else None
+        y = float(y_str) if y_str != 'None' else None
+        print(json.dumps(perform_action(platform, scan_root, name, role, x, y)))
     else:
         print(json.dumps({'error': f'Unknown command: {cmd}'}))

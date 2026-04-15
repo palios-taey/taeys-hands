@@ -21,7 +21,12 @@ def _get_env() -> dict:
 
 
 def set_display(display: str):
-    _get_env()['DISPLAY'] = display
+    env = _get_env()
+    env['DISPLAY'] = display
+    # Sync DBUS from os.environ (set by switch_to_platform)
+    dbus = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if dbus:
+        env['DBUS_SESSION_BUS_ADDRESS'] = dbus
 
 
 def _get_lock_path() -> str:

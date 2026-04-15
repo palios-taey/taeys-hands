@@ -1,0 +1,8 @@
+# Gemini Mode Picker Dropdown
+# Captured: 2026-04-10 via scan_tree.py
+# Trigger: "Open mode picker" push button @ (1357, 932)
+# Screenshot: gemini_mode_dropdown.png
+
+[menu item] "Fast Answers quickly" @ (1115,760)  states=[showing, visible, enabled, focusable]
+[menu item] "Thinking Solves complex problems" @ (1115,812)  states=[showing, visible, enabled, focusable]
+[menu item] "Pro Advanced math and code with 3.1 Pro" @ (1115,864)  states=[showing, visible, focused, enabled, focusable]

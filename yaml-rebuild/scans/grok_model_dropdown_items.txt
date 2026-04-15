@@ -1,0 +1,9 @@
+# Grok Model Selector Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Model select" push button @ (1336, 598)
+# State: Home page
+
+[menu item] "Auto Chooses Fast or Expert" @ (1265,653)  states=[showing, focusable, enabled]
+[menu item] "Fast Quick responses - Grok 4.20" @ (1265,706)  states=[showing, focusable, enabled]
+[menu item] "Expert Thinks hard - Grok 4.20" @ (1265,758)  states=[showing, focusable, enabled]
+[menu item] "Heavy Powered by Grok 4.20" @ (1265,811)  states=[showing, focusable, enabled]

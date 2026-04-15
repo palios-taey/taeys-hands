@@ -1,0 +1,13 @@
+# Gemini Tools Dropdown
+# Captured: 2026-04-10 via scan_tree.py
+# Trigger: "Tools" push button @ (795, 933)
+# State: Deep think currently checked
+# Screenshot: gemini_tools_dropdown.png
+
+[check menu item] "Create image New" @ (795,633)  states=[showing, visible, enabled, focusable]
+[check menu item] "Canvas" @ (795,673)  states=[showing, visible, enabled, focusable]
+[check menu item] "Deep research" @ (795,713)  states=[showing, visible, enabled, focusable]
+[check menu item] "Create video" @ (795,753)  states=[showing, visible, enabled, focusable]
+[check menu item] "Create music New" @ (795,793)  states=[showing, visible, enabled, focusable]
+[check menu item] "Guided learning" @ (795,833)  states=[showing, visible, enabled, focusable]
+[check menu item] "Deep think" @ (795,873)  states=[showing, visible, checked, enabled, focusable]

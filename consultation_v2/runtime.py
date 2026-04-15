@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+# THE RULE — enforced in every function in this file:
+# 1. YAML = exact AT-SPI truth. Exact string, exact case. No .lower().
+# 2. No name_contains. Period. Anywhere. EXACT MATCH ONLY.
+# 3. Driver code = zero platform knowledge.
+# 4. YAML drives the driver, never the reverse.
+# 5. Two scan scopes: snapshot() = document, menu_snapshot() = portals.
+# 6. Validation targets persistent elements only.
+# 7. No fallbacks, no broadening. Fail closed on missing config.
+
 import logging
 import os
 import subprocess
@@ -19,11 +28,9 @@ class ConsultationRuntime:
     def __init__(self, platform: str):
         self.platform = platform
         self.cfg = load_platform_yaml(platform)
-        self.click_strategy = str(
-            self.cfg.get("click_strategy")
-            or self.cfg.get("workflow", {}).get("click_strategy")
-            or "xdotool_first"
-        )
+        self.click_strategy = str(self.cfg.get("click_strategy") or "")
+        if not self.click_strategy:
+            raise RuntimeError(f"{platform}: click_strategy not configured in YAML")
 
     # ------------------------------------------------------------------
     # Stale file dialog cleanup
@@ -45,11 +52,20 @@ class ConsultationRuntime:
             Do **not** close the ``xdg-desktop-portal-gtk`` *process* —
             only its named dialog windows are targeted here.
         """
+        from core.platforms import get_platform_display
+        from pathlib import Path
         env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        plat_display = get_platform_display(self.platform)
+        if plat_display:
+            env['DISPLAY'] = plat_display
+            try:
+                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
+            except FileNotFoundError:
+                pass
 
+        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         closed = 0
-        for title in ("File Upload", "Open", "Open File"):
+        for title in dialog_titles:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -82,10 +98,19 @@ class ConsultationRuntime:
         the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
         approach (tools/attach.py).
         """
+        from core.platforms import get_platform_display
+        from pathlib import Path
         env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        plat_display = get_platform_display(self.platform)
+        if plat_display:
+            env['DISPLAY'] = plat_display
+            try:
+                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
+            except FileNotFoundError:
+                pass
 
-        for title in ("File Upload", "Open", "Open File"):
+        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
+        for title in dialog_titles:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -115,19 +140,14 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def switch(self) -> bool:
-        if inp.switch_to_platform(self.platform):
-            return True
-        # Fallback: if DISPLAY is already set correctly for this platform,
-        # just verify Firefox is accessible on the current display
-        firefox = atspi.find_firefox_for_platform(self.platform)
-        if firefox:
-            return True
-        return False
+        return bool(inp.switch_to_platform(self.platform))
 
     def current_url(self) -> Optional[str]:
-        firefox = atspi.find_firefox_for_platform(self.platform)
-        doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
-        return atspi.get_document_url(doc) if doc else None
+        try:
+            snap = self.snapshot()
+            return snap.url
+        except Exception:
+            return None
 
     def snapshot(self) -> Snapshot:
         _, _, snapshot = build_snapshot(self.platform)
@@ -141,8 +161,48 @@ class ConsultationRuntime:
     # Interaction primitives
     # ------------------------------------------------------------------
 
+    def _subprocess_click(self, element: ElementRef) -> bool:
+        """Click element via subprocess AT-SPI action (for multi-display mode)."""
+        from core.platforms import get_platform_display, get_platform_bus
+        from consultation_v2.yaml_contract import load_platform_yaml
+        display = get_platform_display(self.platform)
+        bus = get_platform_bus(self.platform)
+        if not display or not bus:
+            return False
+
+        session_bus_file = f'/tmp/dbus_session_bus_{display}'
+        try:
+            session_bus = open(session_bus_file).read().strip()
+        except FileNotFoundError:
+            session_bus = bus
+
+        cfg = load_platform_yaml(self.platform)
+        scan_root = cfg.get("tree", {}).get("scan_root", "document")
+
+        env = dict(os.environ)
+        env['DISPLAY'] = display
+        env['AT_SPI_BUS_ADDRESS'] = bus
+        env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+
+        import sys, json
+        _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        result = subprocess.run(
+            [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
+             'click', self.platform, scan_root,
+             element.name, element.role,
+             str(element.x), str(element.y)],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            data = json.loads(result.stdout)
+            return data.get('success', False)
+        except Exception:
+            return False
+
     def click(self, element: ElementRef, strategy: Optional[str] = None) -> bool:
-        chosen = (strategy or self.click_strategy or "xdotool_first").lower()
+        chosen = (strategy or self.click_strategy).strip()
         if chosen == "coordinate_only":
             return (
                 element.x is not None
@@ -150,32 +210,20 @@ class ConsultationRuntime:
                 and bool(inp.click_at(int(element.x), int(element.y)))
             )
         if chosen == "atspi_only":
-            return bool(
-                atspi_click(
-                    {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
+            if element.atspi_obj is not None:
+                return bool(
+                    atspi_click(
+                        {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
+                    )
                 )
-            )
-        if chosen == "atspi_first":
-            if atspi_click(
-                {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-            ):
+            # Subprocess mode — use AT-SPI action via subprocess
+            if self._subprocess_click(element):
                 return True
-            return (
-                element.x is not None
-                and element.y is not None
-                and bool(inp.click_at(int(element.x), int(element.y)))
-            )
-        # Default: xdotool_first
-        if (
-            element.x is not None
-            and element.y is not None
-            and inp.click_at(int(element.x), int(element.y))
-        ):
-            return True
-        return bool(
-            atspi_click(
-                {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-            )
+            # atspi_only demanded — fail closed if AT-SPI click not available
+            return False
+        raise RuntimeError(
+            f"{self.platform}: unknown click_strategy {chosen!r}. "
+            "YAML must declare 'atspi_only' or 'coordinate_only'."
         )
 
     def press(self, key: str) -> bool:
@@ -234,24 +282,23 @@ class ConsultationRuntime:
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         before = self.current_url()
-        inp.focus_firefox()
+        # switch() already focused Firefox on the correct display.
+        # Don't call focus_firefox() which uses in-process AT-SPI (wrong bus).
         time.sleep(0.2)
         inp.press_key("Escape")
         time.sleep(0.1)
-        # Use platform-configured address bar key (F6 for Claude which intercepts Ctrl+L)
-        nav_key = str(self.cfg.get("navigation_key") or "ctrl+l")
+        nav_key = self.cfg.get("navigation_key")
+        if not nav_key:
+            raise RuntimeError(f"{self.platform}: navigation_key not configured in YAML")
         inp.press_key(nav_key)
         time.sleep(0.2)
         inp.press_key("ctrl+a")
         time.sleep(0.1)
         if not self.paste(url):
-            self.type_text(url, delay_ms=5)
+            return False
         time.sleep(0.2)
         inp.press_key("Return")
         if not verify_change:
             time.sleep(2.0)
             return True
-        return bool(
-            self.wait_for_url_change(before, timeout=20.0, interval=1.0)
-            or self.current_url()
-        )
+        return bool(self.wait_for_url_change(before, timeout=20.0, interval=1.0))

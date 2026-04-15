@@ -164,12 +164,21 @@ def switch_to_platform(platform: str) -> bool:
         set_display(plat_display)
         from core.clipboard import set_display as clip_set_display
         clip_set_display(plat_display)
+        # Set DBUS session bus for this display (xdotool needs it)
+        from core.platforms import get_platform_bus
+        from pathlib import Path
+        session_bus_file = f'/tmp/dbus_session_bus_{plat_display}'
+        try:
+            session_bus = Path(session_bus_file).read_text().strip()
+            if session_bus:
+                os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+        except FileNotFoundError:
+            pass
 
         # Focus Firefox on that display
         ff_pid = get_platform_firefox_pid(platform)
         if ff_pid:
             try:
-                # Find the Firefox window by PID on the correct display
                 r = subprocess.run(
                     ['xdotool', 'search', '--pid', str(ff_pid), '--name', ''],
                     env=_get_env(), capture_output=True, text=True, timeout=5,
@@ -180,21 +189,30 @@ def switch_to_platform(platform: str) -> bool:
                         ['xdotool', 'windowactivate', wids[-1]],
                         env=_get_env(), capture_output=True, timeout=10,
                     )
-                    time.sleep(0.3)
-                    if _on_target(pid=ff_pid):
-                        return True
+                    time.sleep(0.5)
+                    return True
             except subprocess.TimeoutExpired:
                 logger.warning(f"Multi-display focus timed out for PID {ff_pid}")
             except Exception as e:
                 logger.warning(f"Multi-display focus failed: {e}")
-        shortcut = TAB_SHORTCUTS.get(platform)
-        if shortcut:
-            press_key(shortcut)
-            time.sleep(0.5)
-            if _on_target(pid=ff_pid):
+        # No PID file — try focusing any Firefox on this display
+        try:
+            r = subprocess.run(
+                ['xdotool', 'search', '--name', 'Mozilla Firefox'],
+                env=_get_env(), capture_output=True, text=True, timeout=5,
+            )
+            wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+            if wids:
+                subprocess.run(
+                    ['xdotool', 'windowactivate', wids[-1]],
+                    env=_get_env(), capture_output=True, timeout=10,
+                )
+                time.sleep(0.5)
                 return True
-        logger.warning(f"Could not switch to {platform} on dedicated display {plat_display}")
-        return _on_target(pid=ff_pid)
+        except Exception:
+            pass
+        logger.warning(f"Could not switch to {platform} on display {plat_display}")
+        return False
 
     if not focus_firefox():
         return False

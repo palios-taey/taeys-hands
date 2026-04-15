@@ -1,217 +1,272 @@
 platform: gemini
-click_strategy: atspi_first
+identity_file: IDENTITY_COSMOS.md
+click_strategy: atspi_only
+navigation_key: F6
+
 urls:
   fresh: https://gemini.google.com/app
   verify_navigation: false
+
 tree:
-  fence_after:
-  - name: Chats
-    role: heading
+  scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
+  fence_after: []
+
   exclude:
     names:
-    - Gemini
-    name_contains:
-    - Gemini Apps Activity
-    - Manage extensions
-    - ', Google Account'
-    - tap to use tool
+      - "Search with Google or enter address"
+      - "Google, pick a search engine"
+      - "View site information"
+      - "You have granted this website additional permissions."
+      - "Enter Reader View"
+      - "Bookmark this page (Ctrl+D)"
+      - "Sidebars"
+      - "Back"
+      - "Forward"
+      - "Reload"
+      - "Firefox View"
+      - "Close tab"
+      - "Open a new tab (Ctrl+T)"
+      - "List all tabs"
+      - "Account"
+      - "Extensions"
+      - "Firefox"
     roles:
-    - separator
-    - document web
-    - paragraph
+      - separator
+      - document web
+      - paragraph
+      - list item
+      - page tab
+
   sidebar_nav:
-  - name: New chat
-    role: link
-  - name: New chat
-    role: push button
-  - name: Main menu
-    role: push button
-  - name: Search
-    role: push button
-  - name: Projects
-    role: push button
-  - name: History
-    role: push button
-  - name: Chats
-    role: heading
+    - name: "Main menu"
+      role: push button
+    - name: "Search"
+      role: push button
+    - name: "New chat"
+      role: link
+    - name: "My stuff"
+      role: link
+    - name: "Gems"
+      role: link
+    - name: "Settings & help"
+      role: push button
+
   element_map:
     input:
-      name: Enter a prompt for Gemini
+      name: "Enter a prompt for Gemini"
       role: entry
-      states_include:
-      - editable
-    input_alt:
-      name: ""
-      role: section
-      states_include:
-      - editable
-      - focusable
-    mode_picker:
-      name: Open mode picker
+      states_include: [editable, multi-line]
+
+    attach_trigger:
+      name: "Open upload file menu"
       role: push button
+
     tools_button:
-      name: Tools
+      name: "Tools"
       role: push button
-    upload_menu:
-      name: Open upload file menu
+
+    mode_picker:
+      name: "Open mode picker"
       role: push button
-    copy_button:
-      name_contains: Copy
-      role: push button
-    stop_button:
-      name: Stop response
-      role: push button
+
     send_button:
-      name: Send message
+      name: "Send message"
       role: push button
-    share_export:
-      name: Share & export
+
+    stop_button:
+      name: "Stop response"
       role: push button
-    start_research:
-      name: Start research
+
+    copy_button:
+      name: "Copy"
       role: push button
+
     microphone:
-      name: Microphone
+      name: "Microphone"
       role: toggle button
-    new_chat:
-      name: New chat
+
+    deep_think_active_indicator:
+      name: "Deselect Deep think"
       role: push button
-    # BUG 4 FIX: exact AT-SPI name for upload dropdown item
+
     upload_files_item:
       name: "Upload files. Documents, data, code files"
       role: menu item
-    # BUG 4 FIX: exact AT-SPI name for Drive item
+
     add_from_drive_item:
       name: "Add from Drive. Sheets, Docs, Slides"
       role: menu item
+
     import_code_item:
-      name: Import code
+      name: "Import code"
       role: menu item
+
     notebooklm_item:
-      name: NotebookLM
+      name: "NotebookLM"
       role: menu item
+
     mode_fast:
-      name: Fast Answers quickly
+      name: "Fast Answers quickly"
       role: menu item
+
     mode_thinking:
-      name: Thinking Solves complex problems
+      name: "Thinking Solves complex problems"
       role: menu item
-    # BUG 1 FIX: exact AT-SPI name for Pro mode
+
     mode_pro:
       name: "Pro Advanced math and code with 3.1 Pro"
       role: menu item
-    # BUG 2 FIX: all tool items are check menu item, not menu item
-    # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
+
     tool_create_image:
       name: "Create image New"
       role: check menu item
+
     tool_canvas:
-      name: Canvas
+      name: "Canvas"
       role: check menu item
+
     tool_deep_research:
-      name: Deep research
+      name: "Deep research"
       role: check menu item
-    # BUG 5 FIX: three new tool entries present in live AT-SPI scan
+
     tool_create_video:
-      name: Create video
+      name: "Create video"
       role: check menu item
+
     tool_create_music:
       name: "Create music New"
       role: check menu item
+
     tool_guided_learning:
-      name: Guided learning
+      name: "Guided learning"
       role: check menu item
+
     tool_deep_think:
-      name: Deep think
+      name: "Deep think"
       role: check menu item
-    tool_deselect_deep_think:
-      name: Deselect Deep think
-      role: push button
+
 workflow:
   defaults:
     model: null
-    mode: deep_think
-    tools: []
+    mode: pro
+    tools:
+      - deep_think
+
   selection:
-    model_targets:
+    mode_trigger: mode_picker
+    mode_snapshot: menu
+    mode_click_strategy: atspi_only
+    mode_verified_by_checked_state: true
+    mode_targets:
       fast: mode_fast
       thinking: mode_thinking
       pro: mode_pro
+    mode_validations:
+      fast: fast_active
+      thinking: thinking_active
+      pro: pro_active
+
+    tool_trigger: tools_button
+    tool_snapshot: menu
+    tool_click_strategy: atspi_only
+    tool_skip_if_checked: true
     tool_targets:
-      deep_think: tool_deep_think
-      deep_research: tool_deep_research
-      canvas: tool_canvas
       create_image: tool_create_image
+      canvas: tool_canvas
+      deep_research: tool_deep_research
       create_video: tool_create_video
       create_music: tool_create_music
       guided_learning: tool_guided_learning
-      import_code: import_code_item
+
+    sequences:
+      deep_think:
+        - trigger: mode_picker
+          snapshot: menu
+          target: mode_pro
+          click_strategy: atspi_only
+          verified_by_checked_state: true
+          validation: pro_active
+        - trigger: tools_button
+          snapshot: menu
+          target: tool_deep_think
+          click_strategy: atspi_only
+          skip_if_checked: true
+          close_with_escape: true
+          verify_snapshot: document
+          validation: deep_think_active
+
   attachment:
-    trigger: upload_menu
+    trigger: attach_trigger
     menu_target: upload_files_item
     open_method: atspi_menu
+    dialog_location_shortcut: ctrl+l
+    validation: attach_success
+
   prompt:
     input: input
-    input_fallback: input_alt
-    send_button: send_button
+    paste_via_clipboard: true
+    validation: prompt_ready
+
   send:
+    confirmation_key: stop_button
     trigger: send_button
-    require_new_url: false
-    stop_key: stop_button
-    post_send_key: start_research
+    validation: send_success
+
   monitor:
     stop_key: stop_button
+    poll_interval: 2.0
+    required_stop_absent_cycles: 3
     complete_key: copy_button
+    validation: response_complete
+
   extract:
+    scroll_before_extract: ctrl+End
     primary_key: copy_button
     strategy: last_by_y
+    click_strategy: atspi_only
+
   extra_extract:
-    strategy: share_export_copy_content
-    share_export_key: share_export
-    copy_content_key: copy_content_item
+    strategy: none
+
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove
-      role_contains: button
+    # Validated by snapshot diff in driver — new push button (file chip) must appear.
+    # No YAML indicators needed; driver compares pre/post-attach snapshots.
+    diff_validated: true
+
   prompt_ready:
-    indicators:
-    - name: Send message
-      role: push button
+    # Send button presence is sufficient — if send_button is in tree, prompt is ready.
+    # The send step will fail if send_button is missing.
+    pass_through: true
+
   send_success:
     indicators:
-    - name: Stop response
-      role: push button
-    timeout: 30
-  # BUG 6 FIX: name_contains: Copy (not exact name: Copy) per driver spec
+      - name: "Stop response"
+        role: push button
+
   response_complete:
     indicators:
-    - name_contains: Copy
+      - name: "Copy"
+        role: push button
     stop_absent: true
-  # BUG 7 FIX: mode validation uses checked state, not selected
+
   fast_active:
-    indicators:
-    - name: Fast Answers quickly
-      states_include: [checked]
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
   thinking_active:
-    indicators:
-    - name: Thinking Solves complex problems
-      states_include: [checked]
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
   pro_active:
-    indicators:
-    - name: "Pro Advanced math and code with 3.1 Pro"
-      states_include: [checked]
+    # No persistent indicator — verified by checked state during selection
+    verified_by_checked_state: true
+
   deep_think_active:
     indicators:
-    - name: Deselect Deep think
-      role: push button
-  deep_research_active:
-    indicators:
-    - name: Start research
-      role: push button
-    - name: Share & export
-      role: push button
-  canvas_active:
-    indicators:
-    - name: Canvas
-      states_include: [checked]
+      - name: "Deselect Deep think"
+        role: push button

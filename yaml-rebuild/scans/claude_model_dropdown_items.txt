@@ -1,0 +1,10 @@
+# Claude Model Selector Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Opus 4.6 Extended" push button @ (1185, 567)
+# Note: Trigger button name changes with current model selection
+
+[menu item] "Opus 4.6 Most capable for ambitious work" @ (1139,620)  states=[showing, focusable, enabled]
+[menu item] "Sonnet 4.6 Most efficient for everyday tasks" @ (1139,672)  states=[showing, focusable, enabled]
+[menu item] "Haiku 4.5 Fastest for quick answers" @ (1139,724)  states=[showing, focusable, enabled]
+[menu item] "Extended thinking Think longer for complex tasks Extended thinking" @ (1139,789)  states=[showing, focused, focusable, enabled]
+[menu item] "More models" @ (1139,843)  states=[showing, focusable, enabled]

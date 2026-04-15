@@ -10,10 +10,10 @@ PLATFORM_DIR = ROOT / 'consultation_v2' / 'platforms'
 REQUIRED_TOP_LEVEL = {'platform', 'urls', 'tree', 'workflow', 'validation'}
 REQUIRED_ELEMENT_KEYS = {
     'chatgpt': {'input', 'model_selector', 'attach_trigger', 'send_button', 'stop_button', 'copy_button'},
-    'claude': {'input', 'toggle_menu', 'send_button', 'stop_button', 'copy_button'},
-    'gemini': {'input', 'mode_picker', 'tools_button', 'upload_menu', 'send_button', 'stop_button', 'copy_button'},
+    'claude': {'input', 'attach_trigger', 'send_button', 'stop_button', 'copy_button', 'model_selector'},
+    'gemini': {'input', 'mode_picker', 'tools_button', 'attach_trigger', 'send_button', 'stop_button', 'copy_button'},
     'grok': {'input', 'attach_trigger', 'model_selector', 'stop_button', 'copy_button'},
-    'perplexity': {'input', 'attach_trigger', 'model_selector', 'submit_button', 'stop_button', 'copy_button'},
+    'perplexity': {'input', 'attach_trigger', 'send_button', 'stop_button', 'copy_button'},
 }
 
 

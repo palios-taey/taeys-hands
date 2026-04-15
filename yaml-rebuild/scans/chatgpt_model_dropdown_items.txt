@@ -1,0 +1,9 @@
+# ChatGPT Model Selector Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Model selector" push button @ (645, 173)
+# State: Home page, Pro currently selected (checked)
+
+[radio menu item] "Instant For everyday chats" @ (694,258)  states=[showing, focusable, enabled]
+[radio menu item] "Thinking For complex questions" @ (694,309)  states=[showing, focusable, enabled]
+[radio menu item] "Pro Research-grade intelligence" @ (694,360)  states=[showing, checked, focusable, enabled]
+[menu item] "Configure..." @ (694,413)  states=[showing, focusable, enabled]

@@ -1,0 +1,34 @@
+# Perplexity Connectors and Sources Panel
+# Captured: 2026-04-10 via AT-SPI scan after clicking "Connectors and sources"
+# Parent: "Connectors and sources" menu item in attach dropdown
+# Screenshot: perplexity_connectors_panel.png
+
+# Search bar
+[entry] "Search sources" @ (1021,649)  states=[showing, enabled, focusable, editable]
+
+# Source toggles (check menu items — checked = enabled as search source)
+[check menu item] "Web" @ (986,679)  states=[showing, checked, enabled, focusable]
+[check menu item] "GitHub GitHub" @ (986,715)  states=[showing, enabled, focusable]
+[check menu item] "Academic" @ (986,751)  states=[showing, enabled, focusable]
+[check menu item] "Gmail with Calendar Gmail with Calendar" @ (986,787)  states=[showing, enabled, focusable]
+[check menu item] "Google Drive Google Drive" @ (986,823)  states=[showing, enabled, focusable]
+[check menu item] "Health" @ (986,859)  states=[showing, enabled, focusable]
+[check menu item] "Social" @ (986,895)  states=[showing, enabled, focusable]
+[check menu item] "Blockscout Blockscout" @ (986,931)  states=[showing, enabled, focusable]
+[check menu item] "CB Insights CB Insights" @ (986,967)  states=[enabled, focusable]
+[check menu item] "GoDaddy GoDaddy" @ (986,1003)  states=[enabled, focusable]
+[check menu item] "PitchBook PitchBook" @ (986,1039)  states=[enabled, focusable]
+[check menu item] "Statista Statista" @ (986,1075)  states=[enabled, focusable]
+[check menu item] "Trivago Trivago" @ (986,1111)  states=[enabled, focusable]
+[check menu item] "Wiley logo Wiley" @ (986,1147)  states=[enabled, focusable]
+
+# Cloud connectors (menu items — click to connect, not toggles)
+[menu item] "Add files from cloud" @ (986,958)  states=[showing, enabled, focusable]
+[menu item] "Manage Connectors" @ (986,994)  states=[showing, enabled, focusable]
+
+# Individual cloud services (below fold)
+[menu item] "Asana Asana" @ (986,1192)  states=[enabled, focusable]
+[menu item] "Box Box" @ (986,1228)  states=[enabled, focusable]
+[menu item] "Cloudinary Cloudinary" @ (986,1264)  states=[enabled, focusable]
+[menu item] "Confluence Confluence" @ (986,1300)  states=[enabled, focusable]
+[menu item] "Dropbox Dropbox" @ (986,1336)  states=[enabled, focusable]

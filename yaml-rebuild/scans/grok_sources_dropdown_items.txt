@@ -1,0 +1,9 @@
+# Grok Sources Selector Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Sources selector" push button @ (802, 598)
+# State: Home page
+
+[menu item] "Connect Google Drive" @ (883,645)  states=[showing, focusable, enabled]
+[menu item] "Connect Gmail" @ (883,686)  states=[showing, focusable, enabled]
+[menu item] "Connect Google Calendar" @ (883,727)  states=[showing, focusable, enabled]
+[menu item] "Connectors" @ (883,778)  states=[showing, focusable, enabled]

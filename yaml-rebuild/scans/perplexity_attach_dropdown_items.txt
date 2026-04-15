@@ -1,0 +1,11 @@
+# Perplexity Attach/Tools Dropdown
+# Captured: 2026-04-10 via select_dropdown MCP tool
+# Trigger: "Add files or tools" push button @ (769, 591)
+# State: Home page, Deep Research active (checked)
+
+[menu item] "Upload files or images" @ (867,633)  states=[showing, focusable, enabled]
+[menu item] "Connectors and sources" @ (867,669)  states=[showing, focusable, enabled]
+[radio menu item] "Computer" @ (867,714)  states=[showing, focusable, enabled]
+[radio menu item] "Deep research" @ (867,750)  states=[showing, checked, focusable, enabled]
+[radio menu item] "Model council Max" @ (867,786)  states=[showing, focusable, enabled]
+[menu item] "More" @ (867,822)  states=[showing, focusable, enabled]
