@@ -196,7 +196,6 @@ workflow:
           click_strategy: atspi_only
           skip_if_checked: true
           close_with_escape: true
-          verify_snapshot: document
           validation: deep_think_active
 
   attachment:

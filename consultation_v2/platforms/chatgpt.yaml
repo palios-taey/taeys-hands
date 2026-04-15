@@ -235,7 +235,6 @@ workflow:
         - trigger: attach_trigger
           snapshot: menu
           target: more_submenu_trigger
-          action: hover
         - snapshot: menu
           target: agent_mode_item
           click_strategy: atspi_only
@@ -245,7 +244,6 @@ workflow:
         - trigger: attach_trigger
           snapshot: menu
           target: more_submenu_trigger
-          action: hover
         - snapshot: menu
           target: github_item
           click_strategy: atspi_only
@@ -255,7 +253,6 @@ workflow:
         - trigger: attach_trigger
           snapshot: menu
           target: more_submenu_trigger
-          action: hover
         - snapshot: menu
           target: gmail_item
           click_strategy: atspi_only
@@ -265,7 +262,6 @@ workflow:
         - trigger: attach_trigger
           snapshot: menu
           target: more_submenu_trigger
-          action: hover
         - snapshot: menu
           target: quizzes_item
           click_strategy: atspi_only
