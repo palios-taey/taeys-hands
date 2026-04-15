@@ -157,8 +157,13 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
     else:
         return False
 
-    # Ctrl+L, Ctrl+A, paste path, Enter
-    subprocess.run(['xdotool', 'key', 'ctrl+l'], env=env, capture_output=True, timeout=3)
+    # Read keyboard shortcut from YAML — no hardcoded keys
+    attach_cfg = cfg.get('workflow', {}).get('attachment', {}) if cfg else {}
+    location_shortcut = attach_cfg.get('dialog_location_shortcut')
+    if not location_shortcut:
+        return False  # No dialog_location_shortcut in YAML — fail closed
+
+    subprocess.run(['xdotool', 'key', location_shortcut], env=env, capture_output=True, timeout=3)
     time.sleep(0.5)
     subprocess.run(['xdotool', 'key', 'ctrl+a'], env=env, capture_output=True, timeout=3)
     time.sleep(0.2)
