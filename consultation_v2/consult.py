@@ -27,12 +27,12 @@ def act(platform: str, action: str, *args, timeout: float = 15.0) -> dict:
     """Call act.py and return parsed JSON output."""
     cmd = _ACT + [action, platform] + list(args)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(_PROJECT_ROOT))
-    if r.stdout.strip():
-        try:
-            return json.loads(r.stdout.strip())
-        except json.JSONDecodeError:
-            return {'raw': r.stdout.strip()}
-    return {'empty': True, 'stderr': r.stderr.strip()[:200]}
+    if not r.stdout.strip():
+        return {'error': f'act.py returned no output. stderr: {r.stderr.strip()[:200]}'}
+    try:
+        return json.loads(r.stdout.strip())
+    except json.JSONDecodeError:
+        return {'error': f'act.py returned invalid JSON: {r.stdout.strip()[:200]}'}
 
 
 def inspect_platform(platform: str, scope: str = 'document') -> dict:
@@ -172,20 +172,36 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('navigate', 'Input field not found after navigation', platform)
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
 
-    # ── Step 2: Verify/set mode ──
-    # Platform-specific mode setup read from YAML defaults
+    # ── Step 2: Verify mode via tree inspection ──
     mode = defaults.get('mode')
-    tools = defaults.get('tools', [])
+    validation = cfg.get('validation', {})
 
-    # Check mode indicators from YAML
-    selection = workflow.get('selection', {})
+    # Check all mode validation indicators in the tree
+    mode_verified = False
+    mode_indicator = None
+    if mode:
+        # Look for validation key: {mode}_active
+        val_key = f'{mode}_active'
+        val_cfg = validation.get(val_key, {})
+        indicators = val_cfg.get('indicators', [])
+        for indicator in indicators:
+            ind_name = indicator.get('name', '')
+            ind_role = indicator.get('role', '')
+            # Search snapshot for this indicator
+            for el in snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]:
+                if el.get('name') == ind_name and el.get('role') == ind_role:
+                    mode_verified = True
+                    mode_indicator = ind_name
+                    break
+            if mode_verified:
+                break
 
-    # Mode selection varies per platform — use YAML-driven sequences
-    # For now, check if the expected indicator is present
-    # If not, the operator must set mode manually before running consult.py
-    # This is a known limitation — mode selection automation is platform-specific
-
-    print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode}))
+    if mode_verified:
+        print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode, 'indicator': mode_indicator}))
+    else:
+        # Mode not verified — take screenshot and halt
+        path = screenshot(platform)
+        fail('mode_check', f'Mode {mode!r} not verified in tree. Screenshot: {path}', platform)
 
     # ── Step 3: Attach file ──
     if file_path:
