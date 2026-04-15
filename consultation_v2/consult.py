@@ -375,7 +375,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
 def main():
     parser = argparse.ArgumentParser(description='Validated consultation orchestrator')
-    parser.add_argument('platform', choices=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'])
+    _platforms = sorted(p.stem for p in (_PROJECT_ROOT / 'consultation_v2' / 'platforms').glob('*.yaml'))
+    parser.add_argument('platform', choices=_platforms)
     parser.add_argument('message', help='Prompt message text')
     parser.add_argument('--file', default=None, help='File to attach')
     parser.add_argument('--no-monitor', action='store_true', help='Skip starting monitor')

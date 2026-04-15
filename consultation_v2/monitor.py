@@ -83,7 +83,8 @@ def setup_display(platform: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description='Monitor platform for response completion')
-    parser.add_argument('platform', choices=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'])
+    _platforms = sorted(p.stem for p in (Path(__file__).resolve().parents[1] / 'consultation_v2' / 'platforms').glob('*.yaml'))
+    parser.add_argument('platform', choices=_platforms)
     parser.add_argument('--interval', type=float, default=3.0, help='Poll interval in seconds')
     parser.add_argument('--absent', type=int, default=3, help='Required consecutive absent polls')
     parser.add_argument('--timeout', type=float, default=3600, help='Max wait time in seconds')
