@@ -70,7 +70,9 @@ def _platform_display(platform: str) -> str:
             plat, dnum = pair.rsplit(':', 1)
             if plat.strip() == platform:
                 return f':{dnum.strip()}'
-    return ':0'
+    print(json.dumps({'event': 'HALT', 'step': 'display',
+                       'error': f'No display mapping for platform {platform!r} in PLATFORM_DISPLAYS'}))
+    sys.exit(1)
 
 
 def _platform_env(platform: str) -> dict:
@@ -106,6 +108,29 @@ def fail(step: str, msg: str, platform: str):
         'platform': platform,
     }))
     sys.exit(1)
+
+
+def _all_elements(snap: dict) -> list:
+    """Flatten snapshot into a single list of elements."""
+    return snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]
+
+
+def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
+    """Check whether a named YAML element has 'checked' in its AT-SPI states.
+
+    Looks up the element name/role from cfg's element_map, then searches
+    the snapshot for a matching element with 'checked' state.
+    """
+    target_cfg = cfg.get('tree', {}).get('element_map', {}).get(element_key, {})
+    target_name = target_cfg.get('name', '')
+    target_role = target_cfg.get('role', '')
+    if not target_name and not target_role:
+        return False
+    for el in _all_elements(snap):
+        if el.get('name') == target_name and el.get('role') == target_role:
+            if 'checked' in el.get('states', []):
+                return True
+    return False
 
 
 def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None):
@@ -187,9 +212,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     elif mode and mode in sequences:
         seq_name = mode
 
+    checked_state_verified = False
+
     if seq_name and seq_name in sequences:
         # Named sequence (e.g., deep_think, pro_extended)
         seq = sequences[seq_name]
+        all_steps_verified = True
         for i, step in enumerate(seq):
             trigger = step.get('trigger')
             target = step.get('target')
@@ -203,18 +231,35 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 time.sleep(1.5)
 
             if target:
-                args_list = [target, '--scope', scope]
-                if strategy:
-                    args_list += ['--strategy', strategy]
-                result = act(platform, 'click', *args_list)
-                if result.get('error'):
-                    fail('mode_setup', f'Target {target!r} failed: {result}', platform)
-                time.sleep(1)
+                # skip_if_checked: inspect menu, skip click if target already checked
+                skipped = False
+                if step.get('skip_if_checked'):
+                    menu_snap = inspect_platform(platform, scope=scope)
+                    if _element_has_checked_state(menu_snap, cfg, target):
+                        skipped = True
+
+                if not skipped:
+                    args_list = [target, '--scope', scope]
+                    if strategy:
+                        args_list += ['--strategy', strategy]
+                    result = act(platform, 'click', *args_list)
+                    if result.get('error'):
+                        fail('mode_setup', f'Target {target!r} failed: {result}', platform)
+                    time.sleep(1)
+
+                # Verify checked state after click (or confirm already checked)
+                if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
+                    verify_snap = inspect_platform(platform, scope=scope)
+                    if _element_has_checked_state(verify_snap, cfg, target):
+                        pass  # Verified
+                    else:
+                        all_steps_verified = False
 
             if step.get('close_with_escape'):
                 act(platform, 'press', 'Escape')
                 time.sleep(1)
 
+        checked_state_verified = all_steps_verified
         snap = inspect_platform(platform)
     elif mode:
         # Simple target (e.g., Grok heavy via mode_targets)
@@ -230,17 +275,39 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
             scope = selection.get('mode_snapshot', 'menu')
             strategy = selection.get('mode_click_strategy')
-            args_list = [target_key, '--scope', scope]
-            if strategy:
-                args_list += ['--strategy', strategy]
-            result = act(platform, 'click', *args_list)
-            if result.get('error'):
-                fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
-            time.sleep(1)
 
-            if selection.get('mode_close_with_escape'):
-                act(platform, 'press', 'Escape')
+            # mode_skip_if_checked: inspect menu, skip click if target already checked
+            skipped = False
+            if selection.get('mode_skip_if_checked'):
+                menu_snap = inspect_platform(platform, scope=scope)
+                if _element_has_checked_state(menu_snap, cfg, target_key):
+                    skipped = True
+                    # Already checked — close menu and move on
+                    if selection.get('mode_close_with_escape'):
+                        act(platform, 'press', 'Escape')
+                        time.sleep(1)
+
+            if not skipped:
+                args_list = [target_key, '--scope', scope]
+                if strategy:
+                    args_list += ['--strategy', strategy]
+                result = act(platform, 'click', *args_list)
+                if result.get('error'):
+                    fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
                 time.sleep(1)
+
+                # Verify checked state after clicking (before closing menu)
+                if selection.get('mode_verified_by_checked_state'):
+                    verify_snap = inspect_platform(platform, scope=scope)
+                    if _element_has_checked_state(verify_snap, cfg, target_key):
+                        checked_state_verified = True
+
+                if selection.get('mode_close_with_escape'):
+                    act(platform, 'press', 'Escape')
+                    time.sleep(1)
+            else:
+                # Skipped because already checked — that counts as verified
+                checked_state_verified = True
 
             snap = inspect_platform(platform)
 
@@ -254,7 +321,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     for tool in (tools or []):
         check_keys.append(f'{tool}_active')
 
-    all_elements = snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]
+    all_elements = _all_elements(snap)
 
     verified_keys = set()
     for val_key in check_keys:
@@ -279,11 +346,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             validation.get(k, {}).get('verified_by_checked_state', False)
             for k in check_keys if validation.get(k)
         )
-        mode_was_set = seq_name is not None or (mode and selection.get('mode_targets', {}).get(mode))
-        if check_keys and all_checked_state and mode_was_set:
-            # Mode was set via sequence, no persistent indicator to verify — trust the sequence
+        if check_keys and all_checked_state and checked_state_verified:
+            # Actually verified via checked state during sequence/target execution
             print(json.dumps({'event': 'step_ok', 'step': 'mode_check', 'mode': mode,
-                               'msg': 'verified_by_checked_state — sequence executed, no persistent indicator'}))
+                               'msg': 'verified_by_checked_state — confirmed checked state during execution'}))
         else:
             path = screenshot(platform)
             fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Checked: {check_keys}. Screenshot: {path}', platform)
@@ -305,6 +371,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         attach_trigger_key = attach_cfg['trigger']
         attach_menu_key = attach_cfg['menu_target']
 
+        # Pre-attach snapshot for diff_validated
+        attach_validation = validation.get('attach_success', {})
+        pre_attach_snap = None
+        if attach_validation.get('diff_validated'):
+            pre_attach_snap = inspect_platform(platform)
+
         result = act(platform, 'click', attach_trigger_key)
         if result.get('error'):
             fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
@@ -321,9 +393,21 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('attach', 'File dialog not found', platform)
         time.sleep(5)
 
-        # Verify attachment via screenshot — tree detection is unreliable across platforms
-        path = screenshot(platform)
-        print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path}))
+        # Verify attachment
+        if pre_attach_snap and attach_validation.get('diff_validated'):
+            post_attach_snap = inspect_platform(platform)
+            pre_names = {(e.get('name'), e.get('role')) for e in _all_elements(pre_attach_snap)}
+            post_names = {(e.get('name'), e.get('role')) for e in _all_elements(post_attach_snap)}
+            new_elements = post_names - pre_names
+            if not new_elements:
+                fail('attach', 'diff_validated: no new elements after attach — file chip not detected', platform)
+            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'new_elements': len(new_elements)}))
+        elif attach_validation.get('pass_through'):
+            path = screenshot(platform)
+            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path,
+                               'msg': 'pass_through — no AT-SPI validation'}))
+        else:
+            fail('attach', 'No attach_success validation defined in YAML', platform)
     else:
         print(json.dumps({'event': 'step_ok', 'step': 'attach', 'msg': 'no file'}))
 
@@ -342,6 +426,24 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('prompt', f'Paste failed: {result}', platform)
     time.sleep(1)
     print(json.dumps({'event': 'step_ok', 'step': 'prompt', 'length': len(message)}))
+
+    # Validate prompt_ready from YAML
+    prompt_validation = validation.get('prompt_ready', {})
+    if prompt_validation.get('pass_through'):
+        pass  # Explicitly no validation — YAML says this is OK
+    elif prompt_validation.get('indicators'):
+        prompt_snap = inspect_platform(platform)
+        prompt_elements = _all_elements(prompt_snap)
+        for indicator in prompt_validation['indicators']:
+            found = any(
+                e.get('name') == indicator.get('name') and e.get('role') == indicator.get('role')
+                for e in prompt_elements
+            )
+            if not found:
+                fail('prompt', f'prompt_ready indicator not found: {indicator}', platform)
+        print(json.dumps({'event': 'step_ok', 'step': 'prompt_ready'}))
+    else:
+        fail('prompt', 'No prompt_ready validation defined in YAML', platform)
 
     # ── Step 5: Send ──
     send_cfg = workflow.get('send', {})
