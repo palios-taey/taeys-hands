@@ -388,7 +388,6 @@ validation:
     indicators:
       - name: "Copy"
         role: push button
-    stop_absent: true
 
   deep_research_active:
     indicators:

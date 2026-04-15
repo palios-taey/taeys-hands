@@ -269,7 +269,6 @@ validation:
     indicators:
       - name: "Copy"
         role: push button
-    stop_absent: true
 
   fast_active:
     # No persistent indicator — verified by checked state during selection

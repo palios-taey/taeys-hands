@@ -318,7 +318,6 @@ validation:
     indicators:
       - name: "Copy response"
         role: push button
-    stop_absent: true
 
   pro_active:
     # No persistent indicator — verified by checked state during selection
