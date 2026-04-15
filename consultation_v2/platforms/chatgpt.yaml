@@ -5,7 +5,6 @@ navigation_key: F6
 
 urls:
   fresh: https://chatgpt.com/
-  verify_navigation: false
   settle_delay: 5
 
 tree:
@@ -255,7 +254,6 @@ workflow:
 
   prompt:
     input: input
-    paste_via_clipboard: true
     validation: prompt_ready
 
   send:

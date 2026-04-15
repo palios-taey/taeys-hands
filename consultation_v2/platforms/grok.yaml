@@ -5,7 +5,6 @@ navigation_key: F6
 
 urls:
   fresh: https://grok.com/
-  verify_navigation: false
   settle_delay: 10
 
 tree:
@@ -183,13 +182,11 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: atspi_menu
     dialog_location_shortcut: ctrl+l
     validation: attach_success
 
   prompt:
     input: input
-    paste_via_clipboard: true
     validation: prompt_ready
 
   send:
