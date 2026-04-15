@@ -194,7 +194,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     fresh_url = cfg.get('urls', {}).get('fresh', '')
     if not fresh_url:
         fail('navigate', 'No fresh URL in YAML', platform)
-    act(platform, 'navigate', fresh_url)
+    result = act(platform, 'navigate', fresh_url)
+    if result.get('error'):
+        fail('navigate', f'Navigation failed: {result}', platform)
     settle = cfg.get('urls', {}).get('settle_delay')
     if settle is None:
         fail('navigate', 'urls.settle_delay missing from YAML', platform)
@@ -203,8 +205,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     snap = inspect_platform(platform)
     if not snap.get('url'):
         fail('navigate', 'No URL after navigation', platform)
-    if not has_key(snap, 'input'):
-        fail('navigate', 'Input field not found after navigation', platform)
+    prompt_cfg = workflow.get('prompt', {})
+    if 'input' not in prompt_cfg:
+        fail('navigate', 'workflow.prompt.input missing from YAML', platform)
+    input_key = prompt_cfg['input']
+    if not has_key(snap, input_key):
+        fail('navigate', f'Input key {input_key!r} not found after navigation', platform)
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
 
     # ── Step 2: Set up and verify mode ──
@@ -346,9 +352,14 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     all_elements = _all_elements(snap)
 
+    # Verify all check_keys exist in validation section — fail if missing
+    for val_key in check_keys:
+        if val_key not in validation:
+            fail('mode_check', f'Validation key {val_key!r} not defined in YAML validation section', platform)
+
     verified_keys = set()
     for val_key in check_keys:
-        val_cfg = validation.get(val_key, {})
+        val_cfg = validation[val_key]
         indicators = val_cfg.get('indicators', [])
         for indicator in indicators:
             ind_name = indicator.get('name', '')
@@ -393,8 +404,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         attach_trigger_key = attach_cfg['trigger']
         attach_menu_key = attach_cfg['menu_target']
 
-        # Pre-attach snapshot for diff_validated
-        attach_validation = validation.get('attach_success', {})
+        # Read validation key from YAML workflow.attachment.validation
+        attach_val_key = attach_cfg.get('validation')
+        if not attach_val_key:
+            fail('attach', 'workflow.attachment.validation missing from YAML', platform)
+        attach_validation = validation.get(attach_val_key, {})
         pre_attach_snap = None
         if attach_validation.get('diff_validated'):
             pre_attach_snap = inspect_platform(platform)
@@ -449,8 +463,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     time.sleep(timing['after_paste'])
     print(json.dumps({'event': 'step_ok', 'step': 'prompt', 'length': len(message)}))
 
-    # Validate prompt_ready from YAML
-    prompt_validation = validation.get('prompt_ready', {})
+    # Validate prompt_ready — read validation key from YAML workflow.prompt.validation
+    prompt_val_key = prompt_cfg.get('validation')
+    if not prompt_val_key:
+        fail('prompt', 'workflow.prompt.validation missing from YAML', platform)
+    prompt_validation = validation.get(prompt_val_key, {})
     if prompt_validation.get('pass_through'):
         pass  # Explicitly no validation — YAML says this is OK
     elif prompt_validation.get('indicators'):
@@ -480,6 +497,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     confirmation_timeout = send_cfg['confirmation_timeout']
     require_url = send_cfg.get('require_new_url', False)
 
+    # Capture pre-send URL for accurate change detection
+    pre_send_snap = inspect_platform(platform)
+    pre_send_url = pre_send_snap.get('url', '')
+
     if send_cfg.get('submit_via_return'):
         if 'keypress' not in send_cfg:
             fail('send', 'workflow.send.keypress missing from YAML (submit_via_return is true)', platform)
@@ -501,7 +522,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         snap = inspect_platform(platform)
         url = snap.get('url', '')
         has_stop = has_key(snap, confirmation_key)
-        url_changed = bool(url and fresh_url and url != fresh_url)
+        url_changed = bool(url and pre_send_url and url != pre_send_url)
         if has_stop and url_changed:
             break
         if has_stop and not require_url:
