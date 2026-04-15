@@ -124,14 +124,20 @@ def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
 
     Looks up the element name/role from cfg's element_map, then searches
     the snapshot for a matching element with 'checked' state.
+    Handles both 'name' (singular string) and 'names' (list of alternatives).
     """
     target_cfg = cfg.get('tree', {}).get('element_map', {}).get(element_key, {})
-    target_name = target_cfg.get('name', '')
+    # Handle both 'name' (singular string) and 'names' (list of alternatives)
+    target_names = target_cfg.get('names', [])
+    if not target_names:
+        single_name = target_cfg.get('name')
+        if single_name is not None:
+            target_names = [single_name]
     target_role = target_cfg.get('role', '')
-    if not target_name and not target_role:
+    if not target_names and not target_role:
         return False
     for el in _all_elements(snap):
-        if el.get('name') == target_name and el.get('role') == target_role:
+        if el.get('role') == target_role and el.get('name', '') in target_names:
             if 'checked' in el.get('states', []):
                 return True
     return False
@@ -174,16 +180,23 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
     if not location_shortcut:
         return False  # No dialog_location_shortcut in YAML — fail closed
 
+    # Read dialog keystrokes from YAML — no hardcoded keys
+    select_all_key = attach_cfg.get('dialog_select_all_key')
+    paste_key = attach_cfg.get('dialog_paste_key')
+    confirm_key = attach_cfg.get('dialog_confirm_key')
+    if not all([select_all_key, paste_key, confirm_key]):
+        return False  # Missing dialog keys in YAML — fail closed
+
     subprocess.run(['xdotool', 'key', location_shortcut], env=env, capture_output=True, timeout=3)
     time.sleep(timing['dialog_after_focus'])
-    subprocess.run(['xdotool', 'key', 'ctrl+a'], env=env, capture_output=True, timeout=3)
+    subprocess.run(['xdotool', 'key', select_all_key], env=env, capture_output=True, timeout=3)
     time.sleep(timing['dialog_after_path_entry'])
     subprocess.run(['xsel', '--clipboard', '--input'], input=file_path.encode(),
                    env=env, capture_output=True, timeout=3)
     time.sleep(timing['dialog_after_path_entry'])
-    subprocess.run(['xdotool', 'key', 'ctrl+v'], env=env, capture_output=True, timeout=3)
+    subprocess.run(['xdotool', 'key', paste_key], env=env, capture_output=True, timeout=3)
     time.sleep(timing['dialog_after_paste'])
-    subprocess.run(['xdotool', 'key', 'Return'], env=env, capture_output=True, timeout=3)
+    subprocess.run(['xdotool', 'key', confirm_key], env=env, capture_output=True, timeout=3)
     return True
 
 
@@ -198,6 +211,16 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     timing = workflow.get('timing', {})
     if not timing:
         fail('setup', 'workflow.timing missing from YAML', platform)
+
+    required_timing_keys = [
+        'after_trigger_click', 'after_target_click', 'after_escape',
+        'after_input_click', 'after_paste', 'after_attach_menu',
+        'after_file_dialog', 'send_poll_interval',
+        'dialog_after_focus', 'dialog_after_path_entry', 'dialog_after_paste',
+    ]
+    for key in required_timing_keys:
+        if key not in timing:
+            fail('setup', f'workflow.timing.{key} missing from YAML', platform)
 
     print(json.dumps({'event': 'start', 'platform': platform}))
 
@@ -349,6 +372,8 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 checked_state_verified = True
 
             snap = inspect_platform(platform)
+        else:
+            fail('mode_setup', f'mode_trigger or mode_targets[{mode!r}] missing from YAML', platform)
 
     # Step 2b: Set tools (via sequences, independent of mode)
     for tool in (tools or []):
