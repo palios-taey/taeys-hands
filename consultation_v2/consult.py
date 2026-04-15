@@ -296,10 +296,14 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if not pkg:
             fail('attach', 'Identity consolidation failed', platform)
 
-        # Click attach trigger (from YAML workflow)
+        # Click attach trigger (from YAML workflow — no defaults)
         attach_cfg = workflow.get('attachment', {})
-        attach_trigger_key = attach_cfg.get('trigger', 'attach_trigger')
-        attach_menu_key = attach_cfg.get('menu_target', 'upload_files_item')
+        if 'trigger' not in attach_cfg:
+            fail('attach', 'workflow.attachment.trigger missing from YAML', platform)
+        if 'menu_target' not in attach_cfg:
+            fail('attach', 'workflow.attachment.menu_target missing from YAML', platform)
+        attach_trigger_key = attach_cfg['trigger']
+        attach_menu_key = attach_cfg['menu_target']
 
         result = act(platform, 'click', attach_trigger_key)
         if result.get('error'):
@@ -325,7 +329,9 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     # ── Step 4: Paste message ──
     prompt_cfg = workflow.get('prompt', {})
-    input_key = prompt_cfg.get('input', 'input')
+    if 'input' not in prompt_cfg:
+        fail('prompt', 'workflow.prompt.input missing from YAML', platform)
+    input_key = prompt_cfg['input']
     result = act(platform, 'click', input_key)
     if result.get('error'):
         fail('prompt', f'Input click ({input_key!r}) failed: {result}', platform)
@@ -339,14 +345,23 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
     # ── Step 5: Send ──
     send_cfg = workflow.get('send', {})
-    send_trigger_key = send_cfg.get('trigger', 'send_button')
-    confirmation_key = send_cfg.get('confirmation_key', 'stop_button')
+    if not send_cfg:
+        fail('send', 'workflow.send missing from YAML', platform)
+    if 'confirmation_key' not in send_cfg:
+        fail('send', 'workflow.send.confirmation_key missing from YAML', platform)
+
+    confirmation_key = send_cfg['confirmation_key']
     confirmation_timeout = send_cfg.get('confirmation_timeout', 10)
     require_url = send_cfg.get('require_new_url', False)
 
     if send_cfg.get('submit_via_return'):
-        result = act(platform, 'press', send_cfg.get('keypress', 'Return'))
+        if 'keypress' not in send_cfg:
+            fail('send', 'workflow.send.keypress missing from YAML (submit_via_return is true)', platform)
+        result = act(platform, 'press', send_cfg['keypress'])
     else:
+        if 'trigger' not in send_cfg:
+            fail('send', 'workflow.send.trigger missing from YAML', platform)
+        send_trigger_key = send_cfg['trigger']
         result = act(platform, 'click', send_trigger_key)
         if result.get('error'):
             fail('send', f'Send button click ({send_trigger_key!r}) failed: {result}', platform)
@@ -385,8 +400,14 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     # ── Step 6: Monitor ──
     if start_monitor:
         mon_cfg = workflow.get('monitor', {})
-        interval = str(mon_cfg.get('poll_interval', 3))
-        absent = str(mon_cfg.get('required_stop_absent_cycles', 3))
+        if not mon_cfg:
+            fail('monitor', 'workflow.monitor missing from YAML', platform)
+        if 'poll_interval' not in mon_cfg:
+            fail('monitor', 'workflow.monitor.poll_interval missing from YAML', platform)
+        if 'required_stop_absent_cycles' not in mon_cfg:
+            fail('monitor', 'workflow.monitor.required_stop_absent_cycles missing from YAML', platform)
+        interval = str(mon_cfg['poll_interval'])
+        absent = str(mon_cfg['required_stop_absent_cycles'])
         timeout = str(mon_cfg.get('timeout', 3600))
         monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent, '--timeout', timeout]
         log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
