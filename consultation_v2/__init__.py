@@ -1,15 +1,8 @@
-"""Isolated consultation workflow drivers.
+"""Consultation V2 — YAML-driven AT-SPI browser automation.
 
-Consultation V2 intentionally keeps platform workflow logic separate.
-Shared code in this package is limited to AT-SPI/YAML plumbing and result
-data structures.
+Production tools:
+  consult.py  — validated consultation orchestrator
+  monitor.py  — response completion polling with Redis notifications
+  act.py      — manual element interaction (inspect/click/paste/press/navigate/extract)
+  store.py    — Neo4j consultation storage
 """
-
-from .orchestrator import run_consultation
-from .types import ConsultationRequest, ConsultationResult
-
-__all__ = [
-    'ConsultationRequest',
-    'ConsultationResult',
-    'run_consultation',
-]

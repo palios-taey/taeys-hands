@@ -88,3 +88,4 @@ RELEASE_READINESS.md
 .ntm/
 .claude/worktrees/
 .ipynb_checkpoints/
+.archive/

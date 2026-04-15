@@ -1,1 +1,0 @@
-# Central response monitor package
