@@ -155,8 +155,8 @@ tree:
       name: "Haiku 4.5 Fastest for quick answers"
       role: radio menu item
 
-    model_extended_thinking_item:
-      name: "Extended thinking Think longer for complex tasks Extended thinking"
+    model_adaptive_thinking_item:
+      name: "Adaptive thinking Thinks only when needed Adaptive thinking"
       role: menu item
 
     model_more_item:
@@ -175,7 +175,7 @@ workflow:
     mode_click_strategy: coordinate_only
     mode_close_with_escape: true
     mode_targets:
-      extended_thinking: model_extended_thinking_item
+      extended_thinking: model_adaptive_thinking_item
     mode_validations:
       extended_thinking: extended_thinking_active
 
