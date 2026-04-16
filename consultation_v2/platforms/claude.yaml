@@ -89,6 +89,8 @@ tree:
     model_selector:
       # Exact current-model button names only; no substring matching.
       names:
+        - "Opus 4.7"
+        - "Opus 4.7 Adaptive"
         - "Opus 4.6"
         - "Opus 4.6 Extended"
         - "Sonnet 4.6"
@@ -142,16 +144,16 @@ tree:
       role: menu item
 
     model_opus:
-      name: "Opus 4.6 Most capable for ambitious work"
-      role: menu item
+      name: "Opus 4.7 Most capable for ambitious work"
+      role: radio menu item
 
     model_sonnet:
       name: "Sonnet 4.6 Most efficient for everyday tasks"
-      role: menu item
+      role: radio menu item
 
     model_haiku:
       name: "Haiku 4.5 Fastest for quick answers"
-      role: menu item
+      role: radio menu item
 
     model_extended_thinking_item:
       name: "Extended thinking Think longer for complex tasks Extended thinking"
@@ -260,6 +262,10 @@ validation:
 
   opus_active:
     indicators:
+      - name: "Opus 4.7"
+        role: push button
+      - name: "Opus 4.7 Adaptive"
+        role: push button
       - name: "Opus 4.6"
         role: push button
       - name: "Opus 4.6 Extended"
@@ -281,6 +287,8 @@ validation:
 
   extended_thinking_active:
     indicators:
+      - name: "Opus 4.7 Adaptive"
+        role: push button
       - name: "Opus 4.6 Extended"
         role: push button
       - name: "Sonnet 4.6 Extended"
