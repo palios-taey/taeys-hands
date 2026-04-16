@@ -118,15 +118,15 @@ tree:
       role: menu item
 
     model_fast:
-      name: "Fast Quick responses - Grok 4.20"
+      name: "Fast Quick responses"
       role: menu item
 
     model_expert:
-      name: "Expert Thinks hard - Grok 4.20"
+      name: "Expert Thinks hard"
       role: menu item
 
     model_heavy:
-      name: "Heavy Powered by Grok 4.20"
+      name: "Heavy Team of Experts"
       role: menu item
 
     connect_google_drive:
