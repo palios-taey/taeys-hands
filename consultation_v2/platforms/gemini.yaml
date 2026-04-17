@@ -156,7 +156,7 @@ workflow:
   defaults:
     mode: pro
     tools:
-      - deep_research
+      - deep_think
 
   selection:
     mode_trigger: mode_picker
