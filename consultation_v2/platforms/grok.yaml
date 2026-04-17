@@ -230,7 +230,11 @@ workflow:
     post_click_delay: 1.0
     primary_key: copy_button
     strategy: last_by_y
-    click_strategy: coordinate_only
+    # Coordinate click on the Copy at (713, 3564) misses the button — the
+    # response action-bar icons are dense and something adjacent catches the
+    # click. atspi_only routes the click through the accessibility API to the
+    # exact element, which works reliably. Verified live 2026-04-17.
+    click_strategy: atspi_only
 
 
 validation:
