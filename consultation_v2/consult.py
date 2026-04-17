@@ -317,8 +317,15 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
                            capture_output=True, text=True, timeout=3, env=env)
         wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
         if wids:
-            subprocess.run(['xdotool', 'windowactivate', wids[-1]],
-                           capture_output=True, timeout=5, env=env)
+            # R10-1: check windowactivate return. If the WM rejects activation
+            # (race where dialog closed between search and activate, or stale
+            # window ID), an unchecked fail here means Ctrl+L hits the
+            # Firefox address bar instead of the dialog's location bar, and
+            # the file path gets typed into the URL.
+            r_act = subprocess.run(['xdotool', 'windowactivate', wids[-1]],
+                                   capture_output=True, timeout=5, env=env)
+            if r_act.returncode != 0:
+                return False
             time.sleep(timing['dialog_after_focus'])
             break
     else:
@@ -488,7 +495,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
             if target:
                 skipped = False
                 if step.get('skip_if_checked'):
-                    menu_snap = inspect_platform(platform, scope=scope)
+                    menu_snap = must_inspect(platform, "mode_setup", scope=scope)
                     if _element_has_checked_state(menu_snap, cfg, target, platform):
                         skipped = True
 
@@ -502,7 +509,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                     time.sleep(timing['after_target_click'])
 
                 if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
-                    verify_snap = inspect_platform(platform, scope=scope)
+                    verify_snap = must_inspect(platform, "mode_setup", scope=scope)
                     if not _element_has_checked_state(verify_snap, cfg, target, platform):
                         # Menu auto-closed after click (Gemini): scope='menu' is empty.
                         # Fall back to indicator-based verification in document scope
@@ -512,7 +519,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                         step_val_key = step.get('validation')
                         indicator_verified = False
                         if step_val_key:
-                            doc_snap = inspect_platform(platform)
+                            doc_snap = must_inspect(platform, "mode_setup")
                             val_cfg = validation.get(step_val_key, {})
                             indicators = val_cfg.get('indicators', [])
                             doc_elements = _all_elements(doc_snap)
@@ -635,7 +642,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
             # mode_skip_if_checked: inspect menu, skip click if target already checked
             skipped = False
             if selection.get('mode_skip_if_checked'):
-                menu_snap = inspect_platform(platform, scope=scope)
+                menu_snap = must_inspect(platform, "mode_setup", scope=scope)
                 if _element_has_checked_state(menu_snap, cfg, target_key, platform):
                     skipped = True
                     # Already checked — close menu and move on
@@ -661,7 +668,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                 # post-click menu snapshot is empty. For those, re-trigger the menu
                 # to bring the target back into scope, verify, then close.
                 if selection.get('mode_verified_by_checked_state'):
-                    verify_snap = inspect_platform(platform, scope=scope)
+                    verify_snap = must_inspect(platform, "mode_setup", scope=scope)
                     verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
                     if not verified and selection.get('mode_reverify_via_reopen'):
                         # Re-open menu for verification (menu auto-closed on selection)
@@ -671,7 +678,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                                  f'Re-open trigger {trigger_key!r} failed during verification: {result}',
                                  platform)
                         time.sleep(timing['after_trigger_click'])
-                        verify_snap = inspect_platform(platform, scope=scope)
+                        verify_snap = must_inspect(platform, "mode_setup", scope=scope)
                         verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
                     if verified:
                         checked_state_keys.update(mode_val_keys)
@@ -917,23 +924,29 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
              platform)
     live_text = txt_result.get('text', '') or ''
     live_count = txt_result.get('char_count', 0)
-    # Require at least 80% of expected characters — tolerates minor platform
-    # whitespace normalization (ProseMirror collapsing trailing newlines,
-    # \r\n → \n etc). No 20-char floor: for short prompts (e.g., "hi" at 2
-    # chars) the floor inverted the intent and let ~any 20+ char live_text
-    # pass. Any non-zero expected paste must produce non-zero live chars.
+    # R10-4: absolute slack, not percentage. The only expected delta is
+    # minor whitespace normalization (ProseMirror collapsing trailing
+    # newlines, \r\n → \n) — that's a handful of characters, bounded.
+    # 80% percentage let 20% of a 12KB prompt (2.4KB) be silently dropped
+    # and still pass. Fixed 20-char slack catches wholesale missing paste
+    # while tolerating the real normalization delta.
     expected = len(message)
-    threshold = int(expected * 0.8)
+    PASTE_SLACK = 20
     if expected > 0 and live_count == 0:
         fail('prompt',
              f'Paste did not land: input has 0 chars, expected {expected}. '
              f'Live text head: {live_text[:80]!r}',
              platform)
-    if live_count < threshold:
-        fail('prompt',
-             f'Paste incomplete: input has {live_count} chars, expected ~{expected} '
-             f'(threshold {threshold}). Live text head: {live_text[:80]!r}',
-             platform)
+    # Short prompts: require non-zero (already covered above) and any
+    # count up to `expected` is acceptable — can't meaningfully tolerate
+    # slack when the message is shorter than the slack.
+    if expected > PASTE_SLACK:
+        min_chars = expected - PASTE_SLACK
+        if live_count < min_chars:
+            fail('prompt',
+                 f'Paste incomplete: input has {live_count} chars, expected {expected} '
+                 f'(slack {PASTE_SLACK}). Live text head: {live_text[:80]!r}',
+                 platform)
 
     # Head-check: the prompt must appear at the START of the composer, not
     # anywhere inside it. `in` would pass if prior paste residue contained

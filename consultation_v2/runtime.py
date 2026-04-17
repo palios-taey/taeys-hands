@@ -33,122 +33,11 @@ class ConsultationRuntime:
             raise RuntimeError(f"{platform}: click_strategy not configured in YAML")
 
     # ------------------------------------------------------------------
-    # Stale file dialog cleanup
-    # ------------------------------------------------------------------
-
-    def close_stale_dialogs(self) -> int:
-        """Close orphaned GTK, Nautilus, and xdg-desktop-portal-gtk file
-        dialogs that interfere with subsequent AT-SPI operations.
-
-        Searches for windows whose titles match known file-dialog patterns
-        (``File Upload``, ``Open``, ``Open File``) using ``xdotool`` and
-        closes each one with ``xdotool windowclose``.
-
-        Returns the count of windows closed.
-
-        .. warning::
-            Do **not** close windows named exactly ``Firefox`` — those are
-            normal IPC helper windows; closing them kills the browser.
-            Do **not** close the ``xdg-desktop-portal-gtk`` *process* —
-            only its named dialog windows are targeted here.
-        """
-        import re
-        from core.platforms import get_platform_display
-        from pathlib import Path
-        env = dict(os.environ)
-        plat_display = get_platform_display(self.platform)
-        if plat_display:
-            env['DISPLAY'] = plat_display
-            # xdotool only needs DISPLAY; we don't use AT-SPI here. Still, set
-            # the session bus if the file exists so subprocess env is coherent
-            # with the other helpers. Missing file = log and continue (xdotool
-            # doesn't need it), but never reuse the a11y bus as the session bus.
-            try:
-                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
-            except FileNotFoundError:
-                logger.warning("close_stale_dialogs: session bus file missing for %s", plat_display)
-
-        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
-        closed = 0
-        for title in dialog_titles:
-            # Anchor the search the same way consult.py does: start + word
-            # boundary so "Open" doesn't match "OpenAI - ChatGPT". Real
-            # dialog titles look like "File Upload - <app> — Mozilla Firefox".
-            anchored = f'^{re.escape(title)}\\b'
-            try:
-                r = subprocess.run(
-                    ["xdotool", "search", "--name", anchored],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                    env=env,
-                )
-                for wid in (r.stdout.strip().split() if r.stdout.strip() else []):
-                    subprocess.run(
-                        ["xdotool", "windowclose", wid],
-                        capture_output=True,
-                        timeout=3,
-                        env=env,
-                    )
-                    closed += 1
-            except subprocess.TimeoutExpired as e:
-                logger.warning("close_stale_dialogs: xdotool timeout on %r: %s", title, e)
-
-        if closed:
-            logger.info(f"close_stale_dialogs: closed {closed} stale file dialog(s)")
-            time.sleep(1.0)
-
-        return closed
-
-    def focus_file_dialog(self) -> bool:
-        """Focus the GTK file dialog window before sending Ctrl+L.
-
-        Without this, Ctrl+L targets Firefox's address bar instead of
-        the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
-        approach (tools/attach.py).
-        """
-        import re
-        from core.platforms import get_platform_display
-        from pathlib import Path
-        env = dict(os.environ)
-        plat_display = get_platform_display(self.platform)
-        if plat_display:
-            env['DISPLAY'] = plat_display
-            try:
-                env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
-            except FileNotFoundError:
-                logger.warning("focus_file_dialog: session bus file missing for %s", plat_display)
-
-        dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
-        for title in dialog_titles:
-            anchored = f'^{re.escape(title)}\\b'
-            try:
-                r = subprocess.run(
-                    ["xdotool", "search", "--name", anchored],
-                    capture_output=True,
-                    text=True,
-                    timeout=2,
-                    env=env,
-                )
-                if r.stdout.strip():
-                    wid = r.stdout.strip().split("\n")[0]
-                    subprocess.run(
-                        ["xdotool", "windowactivate", wid],
-                        capture_output=True,
-                        timeout=5,
-                        env=env,
-                    )
-                    logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
-                    time.sleep(0.5)
-                    return True
-            except subprocess.TimeoutExpired as e:
-                logger.warning("focus_file_dialog: xdotool timeout on %r: %s", title, e)
-        logger.warning("focus_file_dialog: no file dialog window found")
-        return False
-
-    # ------------------------------------------------------------------
     # Display / navigation helpers
     # ------------------------------------------------------------------
+    # Note: close_stale_dialogs and focus_file_dialog were removed (R10-6).
+    # They had zero callers; the live file-dialog path is
+    # consult.xdotool_file_dialog. Dead duplicates accrete divergent fixes.
 
     def switch(self) -> bool:
         return bool(inp.switch_to_platform(self.platform))
@@ -280,6 +169,13 @@ class ConsultationRuntime:
             session_bus = Path(session_bus_path).read_text().strip()
         except FileNotFoundError as e:
             return {'error': f'Bus file missing: {e}'}
+        # Session bus must be non-empty. An empty file silently exporting
+        # DBUS_SESSION_BUS_ADDRESS='' would let the subprocess fall back to
+        # the parent env or the default $XDG_RUNTIME_DIR/bus — the prompt
+        # would be verified against a composer on the wrong display.
+        # Same contract _subprocess_click enforces (R9-A).
+        if not session_bus:
+            return {'error': f'Session bus file empty: {session_bus_path}'}
 
         env = dict(os.environ)
         env['DISPLAY'] = display

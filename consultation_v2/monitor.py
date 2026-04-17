@@ -284,20 +284,39 @@ def main():
                     # Stop button disappeared for required cycles — generation
                     # has stopped. That alone is not proof of a SUCCESSFUL
                     # response (abort / error / network drop can also remove
-                    # stop). Confirm with a live check of complete_key from
-                    # the validation.response_complete indicators. If the copy
-                    # button is off-screen, scroll-to-bottom once and retry
-                    # before declaring complete. If still absent, emit
-                    # completion_unverified so callers know the UI state
-                    # doesn't match a healthy finished response.
+                    # stop). Confirm with a live check of complete_key. If
+                    # absent, scroll-to-bottom and recheck ONCE before
+                    # declaring completion_unverified.
                     elapsed = time.time() - start
                     has_complete = snap.has(complete_key)
                     if not has_complete:
+                        # R10-3: scroll must happen with Firefox focused. inp
+                        # presses go to whatever has X11 focus; if we don't
+                        # switch first, ctrl+End lands in the Firefox address
+                        # bar or another window. Also: between sleep and
+                        # snapshot, a new generation can start and put stop
+                        # back in the tree — then any pre-existing chat-
+                        # history Copy button would falsely satisfy the
+                        # complete check. Require stop_key ABSENT in the
+                        # post-scroll snapshot before trusting complete_key.
+                        try:
+                            inp.switch_to_platform(args.platform)
+                        except Exception as e:
+                            print(json.dumps({'event': 'warning',
+                                              'msg': f'switch_to_platform failed: {e}'}))
                         try:
                             inp.press_key('ctrl+End')
                             time.sleep(2.0)
                             _, _, scroll_snap = build_snapshot(args.platform)
-                            has_complete = scroll_snap.has(complete_key)
+                            if scroll_snap.has(stop_key):
+                                # A new generation started during scroll — the
+                                # tree moved. Don't trust a complete_key match.
+                                has_complete = False
+                                print(json.dumps({'event': 'warning',
+                                                  'msg': 'stop_key reappeared during scroll retry — '
+                                                         'treating as unverified'}))
+                            else:
+                                has_complete = scroll_snap.has(complete_key)
                             snap = scroll_snap
                         except Exception as e:
                             print(json.dumps({'event': 'warning',
@@ -305,8 +324,9 @@ def main():
 
                     method = 'stop_disappeared_and_complete_key' if has_complete \
                              else 'stop_disappeared_only'
+                    event_kind = 'complete' if has_complete else 'completion_unverified'
                     result = {
-                        'event': 'complete' if has_complete else 'completion_unverified',
+                        'event': event_kind,
                         'method': method,
                         'platform': args.platform,
                         'elapsed': round(elapsed, 1),
@@ -316,10 +336,14 @@ def main():
                     }
                     print(json.dumps(result))
                     notif = 'RESPONSE_COMPLETE' if has_complete else 'RESPONSE_UNVERIFIED'
-                    suffix = '' if has_complete else ' (complete_key absent)'
-                    _push_redis(args.platform, notif,
-                                f'{args.platform} response complete ({round(elapsed)}s){suffix}. URL: {snap.url}',
-                                snap.url)
+                    # R10-6: body text must match the event. "response complete"
+                    # was misleading when has_complete=False — downstream systems
+                    # keying off body text could misread unverified as success.
+                    body = (f'{args.platform} response complete ({round(elapsed)}s). URL: {snap.url}'
+                            if has_complete else
+                            f'{args.platform} response stopped; completion unverified '
+                            f'({round(elapsed)}s, complete_key absent). URL: {snap.url}')
+                    _push_redis(args.platform, notif, body, snap.url)
                     return 0 if has_complete else 2
 
             status = 'generating' if has_stop else ('waiting' if not seen_stop else f'absent:{absent_cycles}/{required_absent}')

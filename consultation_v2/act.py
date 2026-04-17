@@ -218,7 +218,12 @@ def main():
             if scroll_delay is None:
                 print(json.dumps({'error': 'workflow.extract.scroll_delay missing from YAML'}))
                 return 1
-            runtime.press(scroll_key)
+            # R10-7: if scroll fails, we extract from the wrong visible area
+            # (on platforms where last_by_y picks a Copy button that scrolls
+            # into view). Fail closed.
+            if not runtime.press(scroll_key):
+                print(json.dumps({'error': f'scroll_before_extract keypress {scroll_key!r} failed'}))
+                return 1
             import time; time.sleep(scroll_delay)
 
         if post_click_delay is None:
@@ -344,14 +349,17 @@ def main():
             print(content)
             return 0
         elif args.target == 'clear':
-            runtime.write_clipboard("")
-            print(json.dumps({'cleared': True}))
-            return 0
+            # R10-5: fail closed on write failure. External callers that shell
+            # out `act clipboard clear` before an extract expect the clipboard
+            # to actually be empty afterwards; a spurious {'cleared': True}
+            # when xsel failed would let stale content be read as response.
+            ok = runtime.write_clipboard("")
+            print(json.dumps({'cleared': ok}))
+            return 0 if ok else 1
         else:
-            # Write to clipboard
-            runtime.write_clipboard(args.target)
-            print(json.dumps({'written': True, 'length': len(args.target)}))
-            return 0
+            ok = runtime.write_clipboard(args.target)
+            print(json.dumps({'written': ok, 'length': len(args.target)}))
+            return 0 if ok else 1
 
 
 if __name__ == '__main__':
