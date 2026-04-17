@@ -168,23 +168,28 @@ def detect_ui_drift(snap: dict, cfg: dict, platform: str) -> dict:
         for name in names:
             declared.add((name, role))
 
-    # Which element_map keys were NOT found?
-    # Only report keys referenced by the current workflow (critical at this step).
-    # Menu items, mode radio items etc. only appear when dropdowns are open — skip.
+    # Which element_map keys are REQUIRED on the fresh page and missing?
+    # Drift is checked immediately after navigate, so only keys that MUST
+    # be present on a fresh idle composer qualify. send_button, stop_button,
+    # and copy_button all appear later in the pipeline (after paste, after
+    # send, after generation) — they are not drift on a fresh page.
+    #
+    # Keys required post-navigate on the fresh page:
+    #   - prompt.input                  (the composer must exist)
+    #   - attachment.trigger            (the attach/+ button must exist)
+    # Keys that appear LATER and are not drift at this stage:
+    #   - send.trigger (send_button)    — appears after text is pasted
+    #   - send.confirmation_key (stop)  — appears after send
+    #   - monitor.complete_key (copy)   — appears after response
     mapped_keys = set(snap.get('_summary', {}).get('mapped_keys', []))
     workflow = cfg.get('workflow', {})
     critical_keys = set()
-    # Keys used at the top level of workflow on document scope
-    for section in ('attachment', 'prompt', 'send', 'monitor'):
-        sec = workflow.get(section, {})
-        for field in ('trigger', 'input', 'confirmation_key', 'stop_key'):
-            v = sec.get(field)
-            if v:
-                critical_keys.add(v)
-    # Also add 'input' key which is always expected post-navigate
     prompt_input = workflow.get('prompt', {}).get('input')
     if prompt_input:
         critical_keys.add(prompt_input)
+    attach_trigger = workflow.get('attachment', {}).get('trigger')
+    if attach_trigger:
+        critical_keys.add(attach_trigger)
     missing_keys = sorted(critical_keys - mapped_keys)
 
     # Firefox chrome roles/names that are never platform-specific
