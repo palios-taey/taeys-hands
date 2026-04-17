@@ -241,10 +241,10 @@ workflow:
 
 validation:
   attach_success:
-    # Validated by snapshot diff in driver — new push button (file chip) must appear.
-    # No YAML indicators needed; driver compares pre/post-attach snapshots.
+    # Claude's chip adds " MD" suffix (uppercase extension) after filename.
+    # Pattern: "taey_package_claude_1776442894.md MD"
     diff_validated: true
-    file_chip_template: "{filename}"
+    file_chip_template: "{filename} MD"
 
   prompt_ready:
     # Send button must be present after paste — persistent indicator

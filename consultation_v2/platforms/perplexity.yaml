@@ -368,10 +368,12 @@ workflow:
 
 validation:
   attach_success:
-    # Validated by snapshot diff in driver — new push button (file chip) must appear.
-    # No YAML indicators needed; driver compares pre/post-attach snapshots.
+    # Perplexity truncates long filenames in chip display: "taey_package_perplexity_...md"
+    # and appends size as " {size_kb} KB". The template below encodes this exact
+    # visible pattern — our package filenames always start with the stable prefix
+    # "taey_package_perplexity_" so the truncation point is predictable.
     diff_validated: true
-    file_chip_template: "{filename}"
+    file_chip_template: "taey_package_perplexity_...md {size_kb} KB"
 
   prompt_ready:
     # Send button must be present after paste — persistent indicator

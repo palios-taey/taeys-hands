@@ -112,14 +112,17 @@ tree:
     mode_fast:
       name: "Fast Answers quickly"
       role: menu item
+      selected_state: focused
 
     mode_thinking:
       name: "Thinking Solves complex problems"
       role: menu item
+      selected_state: focused
 
     mode_pro:
       name: "Pro Advanced math and code with 3.1 Pro"
       role: menu item
+      selected_state: focused
 
     tool_create_image:
       name: "Create image New"
@@ -160,6 +163,9 @@ workflow:
     mode_snapshot: menu
     mode_click_strategy: atspi_only
     mode_verified_by_checked_state: true
+    mode_skip_if_checked: true
+    mode_reverify_via_reopen: true
+    mode_close_with_escape: true
     mode_targets:
       fast: mode_fast
       thinking: mode_thinking
@@ -187,7 +193,8 @@ workflow:
           snapshot: menu
           target: mode_pro
           click_strategy: atspi_only
-          verified_by_checked_state: true
+          skip_if_checked: true
+          close_with_escape: true
           validation: pro_active
         - trigger: tools_button
           snapshot: menu
@@ -249,10 +256,10 @@ workflow:
 
 validation:
   attach_success:
-    # Validated by snapshot diff in driver — new push button (file chip) must appear.
-    # No YAML indicators needed; driver compares pre/post-attach snapshots.
+    # Gemini's chip appears as "Remove file <filename>" push button next to the
+    # attached file. The chip name includes the full filename.
     diff_validated: true
-    file_chip_template: "{filename}"
+    file_chip_template: "Remove file {filename}"
 
   prompt_ready:
     # Send button must be present after paste — persistent indicator

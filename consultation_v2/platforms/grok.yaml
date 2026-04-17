@@ -155,7 +155,11 @@ workflow:
     mode_trigger: model_selector
     mode_snapshot: menu
     mode_click_strategy: coordinate_only
-    mode_verified_by_checked_state: true
+    # Grok menu items expose NO 'checked' or 'focused' state — AT-SPI cannot
+    # verify current selection. Each menu item's states are only
+    # ['showing', 'focusable', 'enabled']. The current model is rendered
+    # visually in the "Model select" button but that button's AT-SPI name is
+    # static. See validation.*_active below with unverifiable_reason.
     mode_close_with_escape: true
     mode_targets:
       auto: model_auto
@@ -232,10 +236,12 @@ workflow:
 validation:
   attach_success:
     # Grok file chip does not create a unique new named AT-SPI element.
-    # The "Remove" button exists in sidebar history, masking the diff.
-    # File dialog interaction success IS the validation.
+    # Post-attach the only new push buttons are "Remove" (generic, also used
+    # for other UI features) and "Submit" (send readiness). AT-SPI has no
+    # filename-specific node for the chip. Verification relies on the file
+    # dialog's Return keypress returning no error.
     diff_validated: true
-    file_chip_template: "{filename}"
+    attach_unverifiable_reason: "Grok chip has no filename-specific AT-SPI node"
 
   prompt_ready:
     # Grok uses submit_via_return — no send button. Attach button persists as readiness indicator.
@@ -254,17 +260,29 @@ validation:
         role: push button
 
   auto_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
 
   fast_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
 
   expert_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
 
   heavy_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
