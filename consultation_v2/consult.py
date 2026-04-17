@@ -518,15 +518,38 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('attach', 'File dialog not found', platform)
         time.sleep(timing['after_file_dialog'])
 
-        # Verify attachment
+        # Verify attachment — strict: require new push button (file chip) to appear
         if pre_attach_snap and attach_validation.get('diff_validated'):
-            post_attach_snap = inspect_platform(platform)
-            pre_names = {(e.get('name'), e.get('role')) for e in _all_elements(pre_attach_snap)}
-            post_names = {(e.get('name'), e.get('role')) for e in _all_elements(post_attach_snap)}
-            new_elements = post_names - pre_names
-            if not new_elements:
-                fail('attach', 'diff_validated: no new elements after attach — file chip not detected', platform)
-            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'new_elements': len(new_elements)}))
+            pre_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(pre_attach_snap)
+                           if e.get('role') == 'push button'}
+            # Poll for file chip to appear (up to 15s)
+            chip_found = False
+            new_buttons = set()
+            for _ in range(15):
+                post_attach_snap = inspect_platform(platform)
+                post_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(post_attach_snap)
+                                if e.get('role') == 'push button'}
+                new_buttons = post_buttons - pre_buttons
+                # Filter out irrelevant new buttons (tooltips, menu transients)
+                # File chips typically have the filename or contain "Remove"/"Delete" attached to them
+                relevant = [b for b in new_buttons
+                            if b[0] and (
+                                'remove' in b[0].lower() or
+                                'delete' in b[0].lower() or
+                                'attach' in b[0].lower() or
+                                '.md' in b[0].lower() or
+                                '.txt' in b[0].lower() or
+                                '.pdf' in b[0].lower() or
+                                'taey_package' in b[0].lower()
+                            )]
+                if relevant:
+                    chip_found = True
+                    break
+                time.sleep(1)
+            if not chip_found:
+                path = screenshot(platform)
+                fail('attach', f'diff_validated: no file chip push button after 15s. Screenshot: {path}. New buttons: {list(new_buttons)[:5]}', platform)
+            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'new_buttons': len(new_buttons), 'chip_match': True}))
         elif attach_validation.get('pass_through'):
             path = screenshot(platform)
             print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path,
