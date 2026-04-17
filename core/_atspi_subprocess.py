@@ -234,16 +234,20 @@ def perform_action(platform, scan_root, name, role, x, y):
     return {'success': False, 'error': 'Element not found'}
 
 
-def read_element_text(platform, scan_root, name, role):
-    """Read text content of an element by (name, role) via AT-SPI Text interface.
+def read_element_text(platform, scan_root, name, role, required_states=None):
+    """Read text content of an element by (name, role, states) via AT-SPI Text.
 
     Returns {'text': <str>, 'char_count': <int>} on success, or {'error': ...}.
 
-    Used to verify prompt paste landed in the composer. The Text interface
-    returns rendered text including the pasted content for editable entries
-    and contenteditable sections. If the element does not implement Text,
-    falls back to attempting Value (used by some sliders/controls; harmless here).
+    required_states is a list of AT-SPI state names (e.g., ['editable',
+    'multi-line']) that the matched element MUST have. Required for inputs
+    with name="" (Grok section, Perplexity entry) where many unrelated
+    elements share the role — the state filter is what makes the match
+    unambiguous. If the YAML element_map specifies states_include, they
+    MUST be passed here; failing to do so falls back to first-match-wins
+    which silently picks the wrong element.
     """
+    required_states = required_states or []
     desktop = Atspi.get_desktop(0)
     try:
         desktop.clear_cache_single()
@@ -280,18 +284,35 @@ def read_element_text(platform, scan_root, name, role):
     except Exception:
         pass
 
-    match = None
+    def _node_states(node):
+        try:
+            ss = node.get_state_set()
+        except Exception:
+            return set()
+        found = set()
+        for sn in ['showing', 'focused', 'editable', 'focusable',
+                   'enabled', 'checked', 'pressed', 'expanded',
+                   'selected', 'multi-line']:
+            se = getattr(Atspi.StateType, sn.upper().replace('-', '_'), None)
+            if se and ss.contains(se):
+                found.add(sn)
+        return found
+
+    matches = []
 
     def _find(node, depth):
-        nonlocal match
-        if match is not None or depth > 50:
+        if depth > 50:
             return
         try:
             n_name = (node.get_name() or '').strip()
             n_role = node.get_role_name() or ''
             if n_name == name and n_role == role:
-                match = node
-                return
+                if required_states:
+                    n_states = _node_states(node)
+                    if all(s in n_states for s in required_states):
+                        matches.append(node)
+                else:
+                    matches.append(node)
             for i in range(node.get_child_count()):
                 child = node.get_child_at_index(i)
                 if child:
@@ -300,53 +321,67 @@ def read_element_text(platform, scan_root, name, role):
             pass
 
     _find(scope, 0)
-    if match is None:
-        return {'error': f'Element (name={name!r}, role={role!r}) not found'}
+    if not matches:
+        return {'error': f'Element (name={name!r}, role={role!r}, '
+                         f'states_include={required_states!r}) not found'}
+    if len(matches) > 1:
+        return {'error': f'Element (name={name!r}, role={role!r}, '
+                         f'states_include={required_states!r}) matched {len(matches)} '
+                         f'candidates — ambiguous, cannot safely verify paste'}
+    match = matches[0]
 
-    try:
-        text_iface = match.get_text_iface()
-    except Exception:
-        text_iface = None
-    if text_iface is not None:
+    # Proper AT-SPI Text API: call Atspi.Text module-level functions on the
+    # Accessible, NOT the deprecated Accessible.get_text() (which takes only
+    # self). The module-level function takes (accessible, start, end).
+    def _read_text(node):
         try:
-            n = text_iface.get_character_count()
-            text = text_iface.get_text(0, n) if n > 0 else ''
-            return {'text': text, 'char_count': n}
-        except Exception as e:
-            return {'error': f'Text interface error: {e}'}
-
-    # Some platforms (ProseMirror div) don't expose Text directly on the
-    # section; recurse children looking for the first descendant with Text.
-    def _walk(node, depth=0):
-        if depth > 6:
+            n = Atspi.Text.get_character_count(node)
+        except Exception:
+            return None
+        if n is None:
             return None
         try:
-            ti = node.get_text_iface()
+            txt = Atspi.Text.get_text(node, 0, n) if n > 0 else ''
         except Exception:
-            ti = None
-        if ti is not None:
-            try:
-                n = ti.get_character_count()
-                txt = ti.get_text(0, n) if n > 0 else ''
-                if txt or n > 0:
-                    return {'text': txt, 'char_count': n}
-            except Exception:
-                pass
+            txt = ''
+        return (txt, n)
+
+    # Collect text from the element AND all descendants. ProseMirror-based
+    # composers (ChatGPT, Claude) expose U+FFFC (object replacement char, '￼')
+    # as the input's own text because content lives in child paragraph /
+    # section nodes. Native `entry` elements (Gemini) expose their text
+    # directly. Walk the subtree and concatenate. The descendant text is
+    # what actually matches the pasted content.
+    PLACEHOLDER = '\ufffc'
+    collected = []
+    total_chars = 0
+
+    def _walk(node, depth=0):
+        nonlocal total_chars
+        if depth > 8:
+            return
+        result = _read_text(node)
+        if result is not None:
+            txt, n = result
+            # Strip the U+FFFC placeholder that ProseMirror uses at the
+            # composer root — it's not real content.
+            real = txt.replace(PLACEHOLDER, '') if txt else ''
+            if real:
+                collected.append(real)
+                total_chars += len(real)
         try:
             for i in range(node.get_child_count()):
                 ch = node.get_child_at_index(i)
                 if ch:
-                    res = _walk(ch, depth + 1)
-                    if res:
-                        return res
+                    _walk(ch, depth + 1)
         except Exception:
             pass
-        return None
 
-    res = _walk(match)
-    if res:
-        return res
-    return {'error': 'Element has no Text interface and no text-bearing children'}
+    _walk(match)
+    if total_chars == 0:
+        return {'text': '', 'char_count': 0}
+    full = '\n'.join(collected)
+    return {'text': full, 'char_count': total_chars}
 
 
 def _scan(node, elements, depth):
@@ -424,14 +459,18 @@ if __name__ == '__main__':
         y = float(y_str) if y_str != 'None' else None
         print(json.dumps(perform_action(platform, scan_root, name, role, x, y)))
     elif cmd == 'read_text':
-        # Read the AT-SPI Text / Value interface of an element, used to prove
-        # pasted prompt text actually landed in the composer rather than going
-        # to some other focused element. name may be '' (Perplexity/Grok input
-        # has no accessible name); role + position selects the right instance.
+        # Read the AT-SPI Text interface of an element, used to prove pasted
+        # prompt text actually landed in the composer rather than going to
+        # some other focused element. name may be '' (Perplexity/Grok input
+        # has no accessible name); the states argument (comma-separated)
+        # MUST be passed if the YAML element_map specifies states_include,
+        # otherwise first-match-wins picks the wrong unnamed element.
         platform = sys.argv[2]
         scan_root = sys.argv[3]
         name = sys.argv[4]
         role = sys.argv[5]
-        print(json.dumps(read_element_text(platform, scan_root, name, role)))
+        states_arg = sys.argv[6] if len(sys.argv) > 6 else ''
+        required_states = [s for s in states_arg.split(',') if s]
+        print(json.dumps(read_element_text(platform, scan_root, name, role, required_states)))
     else:
         print(json.dumps({'error': f'Unknown command: {cmd}'}))

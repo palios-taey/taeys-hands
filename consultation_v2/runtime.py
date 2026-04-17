@@ -232,14 +232,20 @@ class ConsultationRuntime:
     def paste(self, text: str) -> bool:
         return bool(inp.clipboard_paste(text))
 
-    def read_element_text(self, name: str, role: str) -> dict:
-        """Read the AT-SPI Text interface of an element by (name, role).
+    def read_element_text(self, name: str, role: str,
+                           required_states: list | None = None) -> dict:
+        """Read the AT-SPI Text interface of an element by (name, role, states).
 
         Returns {'text': str, 'char_count': int} on success, {'error': str}
         on failure. Used to prove pasted prompt text actually landed in the
         composer — without this, runtime.paste() returning True only proves
         the clipboard write + Ctrl+V subprocess succeeded, not that the text
         reached the intended input element.
+
+        required_states: list of AT-SPI state names the matched element MUST
+        have. Needed for inputs with name="" (Grok section, Perplexity entry)
+        where the role alone is too broad. YAML element_map.states_include
+        must be passed here verbatim.
         """
         from core.platforms import get_platform_display
         from pathlib import Path
@@ -252,21 +258,23 @@ class ConsultationRuntime:
         bus_path = f"/tmp/a11y_bus_{display}"
         session_bus_path = f"/tmp/dbus_session_bus_{display}"
         try:
-            bus = Path(bus_path).read_text().strip()
+            bus_raw = Path(bus_path).read_text().strip()
             session_bus = Path(session_bus_path).read_text().strip()
         except FileNotFoundError as e:
             return {'error': f'Bus file missing: {e}'}
 
         env = dict(os.environ)
         env['DISPLAY'] = display
-        env['AT_SPI_BUS_ADDRESS'] = bus
+        if bus_raw:
+            env['AT_SPI_BUS_ADDRESS'] = bus_raw
         env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
 
         import sys, json
         _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        states_arg = ','.join(required_states or [])
         r = subprocess.run(
             [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
-             'read_text', self.platform, scan_root, name, role],
+             'read_text', self.platform, scan_root, name, role, states_arg],
             capture_output=True, text=True, timeout=10, env=env,
         )
         if r.returncode != 0:

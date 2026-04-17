@@ -892,12 +892,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     input_spec = cfg.get('tree', {}).get('element_map', {}).get(input_key, {})
     input_name = input_spec.get('name', '')
     input_role = input_spec.get('role', '')
+    input_states = input_spec.get('states_include', [])
     if not input_role:
         fail('prompt', f'element_map.{input_key}.role missing from YAML', platform)
 
     from consultation_v2.runtime import ConsultationRuntime
     _rt = ConsultationRuntime(platform)
-    txt_result = _rt.read_element_text(input_name, input_role)
+    txt_result = _rt.read_element_text(input_name, input_role, required_states=input_states)
     if 'error' in txt_result:
         fail('prompt',
              f'Cannot verify paste landed in {input_key!r}: {txt_result["error"]}. '
