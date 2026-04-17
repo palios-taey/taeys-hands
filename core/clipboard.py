@@ -82,15 +82,26 @@ def clear():
 
 
 def write(text: str) -> bool:
-    """Write text to clipboard via xclip."""
+    """Write text to clipboard via xsel.
+
+    Uses xsel, not xclip: xclip forks into a daemon that blocks until
+    some other process reads the selection, so `xclip -selection
+    clipboard` reliably hits the 3-second timeout even on a successful
+    write, and the function would return False while the content was
+    actually on the clipboard. xsel reads stdin and exits cleanly, so
+    returncode is a genuine success signal.
+    """
     env = _get_env()
     try:
         r = subprocess.run(
-            ['xclip', '-selection', 'clipboard'],
+            ['xsel', '--clipboard', '--input'],
             input=text, capture_output=True, text=True, timeout=3.0, env=env,
         )
         return r.returncode == 0
-    except Exception:
+    except subprocess.TimeoutExpired:
+        return False
+    except FileNotFoundError:
+        logger.error("xsel not installed; clipboard writes will fail")
         return False
 
 
