@@ -230,6 +230,7 @@ def main():
 
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
+    from core import input as inp
 
     # consult.py confirms `stop_button` present at send-confirmation before
     # spawning the monitor. We inherit that fact via --seen-stop so the first
@@ -280,23 +281,46 @@ def main():
             elif seen_stop:
                 absent_cycles += 1
                 if absent_cycles >= required_absent:
-                    # Stop button disappeared for required cycles — response complete.
-                    # Do NOT gate on complete_key: copy button may be off-screen
-                    # (platforms don't auto-scroll long responses).
+                    # Stop button disappeared for required cycles — generation
+                    # has stopped. That alone is not proof of a SUCCESSFUL
+                    # response (abort / error / network drop can also remove
+                    # stop). Confirm with a live check of complete_key from
+                    # the validation.response_complete indicators. If the copy
+                    # button is off-screen, scroll-to-bottom once and retry
+                    # before declaring complete. If still absent, emit
+                    # completion_unverified so callers know the UI state
+                    # doesn't match a healthy finished response.
                     elapsed = time.time() - start
+                    has_complete = snap.has(complete_key)
+                    if not has_complete:
+                        try:
+                            inp.press_key('ctrl+End')
+                            time.sleep(2.0)
+                            _, _, scroll_snap = build_snapshot(args.platform)
+                            has_complete = scroll_snap.has(complete_key)
+                            snap = scroll_snap
+                        except Exception as e:
+                            print(json.dumps({'event': 'warning',
+                                              'msg': f'scroll-to-end failed: {e}'}))
+
+                    method = 'stop_disappeared_and_complete_key' if has_complete \
+                             else 'stop_disappeared_only'
                     result = {
-                        'event': 'complete',
-                        'method': 'stop_disappeared',
+                        'event': 'complete' if has_complete else 'completion_unverified',
+                        'method': method,
                         'platform': args.platform,
                         'elapsed': round(elapsed, 1),
                         'absent_cycles': absent_cycles,
+                        'complete_key_present': has_complete,
                         'url': snap.url,
                     }
                     print(json.dumps(result))
-                    _push_redis(args.platform, 'RESPONSE_COMPLETE',
-                                f'{args.platform} response complete ({round(elapsed)}s). URL: {snap.url}',
+                    notif = 'RESPONSE_COMPLETE' if has_complete else 'RESPONSE_UNVERIFIED'
+                    suffix = '' if has_complete else ' (complete_key absent)'
+                    _push_redis(args.platform, notif,
+                                f'{args.platform} response complete ({round(elapsed)}s){suffix}. URL: {snap.url}',
                                 snap.url)
-                    return 0
+                    return 0 if has_complete else 2
 
             status = 'generating' if has_stop else ('waiting' if not seen_stop else f'absent:{absent_cycles}/{required_absent}')
             elapsed = time.time() - start

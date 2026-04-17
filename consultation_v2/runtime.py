@@ -52,23 +52,32 @@ class ConsultationRuntime:
             Do **not** close the ``xdg-desktop-portal-gtk`` *process* —
             only its named dialog windows are targeted here.
         """
+        import re
         from core.platforms import get_platform_display
         from pathlib import Path
         env = dict(os.environ)
         plat_display = get_platform_display(self.platform)
         if plat_display:
             env['DISPLAY'] = plat_display
+            # xdotool only needs DISPLAY; we don't use AT-SPI here. Still, set
+            # the session bus if the file exists so subprocess env is coherent
+            # with the other helpers. Missing file = log and continue (xdotool
+            # doesn't need it), but never reuse the a11y bus as the session bus.
             try:
                 env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
             except FileNotFoundError:
-                pass
+                logger.warning("close_stale_dialogs: session bus file missing for %s", plat_display)
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         closed = 0
         for title in dialog_titles:
+            # Anchor the search the same way consult.py does: start + word
+            # boundary so "Open" doesn't match "OpenAI - ChatGPT". Real
+            # dialog titles look like "File Upload - <app> — Mozilla Firefox".
+            anchored = f'^{re.escape(title)}\\b'
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", title],
+                    ["xdotool", "search", "--name", anchored],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -82,8 +91,8 @@ class ConsultationRuntime:
                         env=env,
                     )
                     closed += 1
-            except Exception:
-                pass
+            except subprocess.TimeoutExpired as e:
+                logger.warning("close_stale_dialogs: xdotool timeout on %r: %s", title, e)
 
         if closed:
             logger.info(f"close_stale_dialogs: closed {closed} stale file dialog(s)")
@@ -98,6 +107,7 @@ class ConsultationRuntime:
         the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
         approach (tools/attach.py).
         """
+        import re
         from core.platforms import get_platform_display
         from pathlib import Path
         env = dict(os.environ)
@@ -107,13 +117,14 @@ class ConsultationRuntime:
             try:
                 env['DBUS_SESSION_BUS_ADDRESS'] = Path(f'/tmp/dbus_session_bus_{plat_display}').read_text().strip()
             except FileNotFoundError:
-                pass
+                logger.warning("focus_file_dialog: session bus file missing for %s", plat_display)
 
         dialog_titles = self.cfg.get("tree", {}).get("dialog_titles", [])
         for title in dialog_titles:
+            anchored = f'^{re.escape(title)}\\b'
             try:
                 r = subprocess.run(
-                    ["xdotool", "search", "--name", title],
+                    ["xdotool", "search", "--name", anchored],
                     capture_output=True,
                     text=True,
                     timeout=2,
@@ -130,8 +141,8 @@ class ConsultationRuntime:
                     logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
                     time.sleep(0.5)
                     return True
-            except Exception:
-                pass
+            except subprocess.TimeoutExpired as e:
+                logger.warning("focus_file_dialog: xdotool timeout on %r: %s", title, e)
         logger.warning("focus_file_dialog: no file dialog window found")
         return False
 
@@ -174,7 +185,14 @@ class ConsultationRuntime:
         try:
             session_bus = open(session_bus_file).read().strip()
         except FileNotFoundError:
-            session_bus = bus
+            logger.error("Session bus file missing: %s. "
+                         "Reusing the AT-SPI bus as the session bus is a "
+                         "fallback — disabled. Click fails closed.",
+                         session_bus_file)
+            return False
+        if not session_bus:
+            logger.error("Session bus file empty: %s", session_bus_file)
+            return False
 
         cfg = load_platform_yaml(self.platform)
         scan_root = cfg.get("tree", {}).get("scan_root", "document")

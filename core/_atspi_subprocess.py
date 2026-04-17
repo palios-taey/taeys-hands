@@ -306,7 +306,10 @@ def read_element_text(platform, scan_root, name, role, required_states=None):
         try:
             n_name = (node.get_name() or '').strip()
             n_role = node.get_role_name() or ''
-            if n_name == name and n_role == role:
+            # Match the scan's 200-char truncation: YAML names come from
+            # scan output which truncates at 200 chars, so compare up to
+            # the same bound. perform_action uses the same pattern.
+            if n_name[:200] == name and n_role == role:
                 if required_states:
                     n_states = _node_states(node)
                     if all(s in n_states for s in required_states):

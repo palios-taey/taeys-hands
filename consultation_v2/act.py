@@ -255,7 +255,12 @@ def main():
         # Step 3: Clear clipboard BEFORE click. Without this, a silently-failed
         # click leaves stale content in the clipboard (commonly the prompt text
         # just pasted), which the extractor would accept as the response.
-        runtime.write_clipboard("")
+        # Fail closed if the clear itself failed — otherwise stale content
+        # remains and the next read would silently accept it.
+        if not runtime.write_clipboard(""):
+            print(json.dumps({'error': 'write_clipboard("") failed before extract — '
+                                        'stale clipboard would be read as response'}))
+            return 1
 
         # Step 4: Click the copy button
         ok = runtime.click(element, strategy=click_strategy)

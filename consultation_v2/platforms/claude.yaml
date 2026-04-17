@@ -178,16 +178,9 @@ workflow:
       extended_thinking: model_adaptive_thinking_item
     mode_validations:
       extended_thinking: extended_thinking_active
-
-    tool_trigger: attach_trigger
-    tool_snapshot: menu
-    tool_click_strategy: coordinate_only
-    tool_skip_if_checked: true
-    tool_close_with_escape: true
-    tool_targets:
-      research: research_item
-      web_search: web_search_item
-      github: add_from_github_item
+    # Claude has no simple-target tool path; tools are handled via
+    # workflow.selection.sequences only. If a tool needs adding (research,
+    # web_search, github), declare it as a sequence entry.
 
   attachment:
     trigger: attach_trigger

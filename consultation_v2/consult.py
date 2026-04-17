@@ -530,7 +530,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                                  platform)
 
             if step.get('close_with_escape'):
-                act(platform, 'press', 'Escape')
+                esc_result = act(platform, 'press', 'Escape')
+                if esc_result.get('error'):
+                    fail('mode_setup',
+                         f'Escape keypress failed at sequence step {i}: {esc_result}',
+                         platform)
                 time.sleep(timing['after_escape'])
         return None
 
@@ -636,7 +640,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                     skipped = True
                     # Already checked — close menu and move on
                     if selection.get('mode_close_with_escape'):
-                        act(platform, 'press', 'Escape')
+                        esc_result = act(platform, 'press', 'Escape')
+                        if esc_result.get('error'):
+                            fail('mode_setup',
+                                 f'Escape keypress failed after skip_if_checked: {esc_result}',
+                                 platform)
                         time.sleep(timing['after_escape'])
 
             if not skipped:
@@ -674,13 +682,17 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                              platform)
 
                 if selection.get('mode_close_with_escape'):
-                    act(platform, 'press', 'Escape')
+                    esc_result = act(platform, 'press', 'Escape')
+                    if esc_result.get('error'):
+                        fail('mode_setup',
+                             f'Escape keypress failed after click: {esc_result}',
+                             platform)
                     time.sleep(timing['after_escape'])
             else:
                 # Skipped because already checked — verified for THIS mode only
                 checked_state_keys.update(mode_val_keys)
 
-            snap = inspect_platform(platform)
+            snap = must_inspect(platform, 'mode_setup')
         else:
             fail('mode_setup', f'mode_trigger or mode_targets[{mode!r}] missing from YAML', platform)
 
@@ -905,22 +917,38 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
              platform)
     live_text = txt_result.get('text', '') or ''
     live_count = txt_result.get('char_count', 0)
-    # Accept small deltas: some platforms normalize whitespace, ProseMirror
-    # may collapse trailing newlines, etc. Require at least 80% of the
-    # expected character count — enough to catch wholesale-missing paste but
-    # tolerate minor tokenization. Also require the first 30 chars match.
+    # Require at least 80% of expected characters — tolerates minor platform
+    # whitespace normalization (ProseMirror collapsing trailing newlines,
+    # \r\n → \n etc). No 20-char floor: for short prompts (e.g., "hi" at 2
+    # chars) the floor inverted the intent and let ~any 20+ char live_text
+    # pass. Any non-zero expected paste must produce non-zero live chars.
     expected = len(message)
-    threshold = max(20, int(expected * 0.8))
+    threshold = int(expected * 0.8)
+    if expected > 0 and live_count == 0:
+        fail('prompt',
+             f'Paste did not land: input has 0 chars, expected {expected}. '
+             f'Live text head: {live_text[:80]!r}',
+             platform)
     if live_count < threshold:
         fail('prompt',
-             f'Paste did not land: input has {live_count} chars, expected ~{expected} '
+             f'Paste incomplete: input has {live_count} chars, expected ~{expected} '
              f'(threshold {threshold}). Live text head: {live_text[:80]!r}',
              platform)
-    head_len = min(30, len(message.strip()))
-    if head_len > 0 and message.strip()[:head_len] not in live_text:
+
+    # Head-check: the prompt must appear at the START of the composer, not
+    # anywhere inside it. `in` would pass if prior paste residue contained
+    # the prefix; startswith rejects that. lstrip only (not full strip) so
+    # trailing content from the paste itself is still legitimate signal.
+    # Normalize whitespace runs to single spaces to tolerate ProseMirror
+    # block-level spacing differences.
+    def _norm_ws(s: str) -> str:
+        return ' '.join(s.split())
+    msg_head = _norm_ws(message)[:30]
+    live_head = _norm_ws(live_text)[:200]
+    if msg_head and not live_head.startswith(msg_head):
         fail('prompt',
-             f'Paste corrupted: expected prefix {message.strip()[:head_len]!r} '
-             f'not found in live input text head {live_text[:80]!r}',
+             f'Paste corrupted: expected prefix {msg_head!r} at start of input. '
+             f'Live head (normalized): {live_head[:80]!r}',
              platform)
     print(json.dumps({'event': 'step_ok', 'step': 'prompt_text_verified',
                       'expected_chars': expected, 'live_chars': live_count}))
