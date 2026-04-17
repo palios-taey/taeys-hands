@@ -366,8 +366,7 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
     return True
 
 
-def run_consultation(platform: str, message: str, file_path: str | None = None,
-                     start_monitor: bool = True):
+def run_consultation(platform: str, message: str, file_path: str | None = None):
     """Run the full validated consultation workflow."""
 
     from consultation_v2.yaml_contract import load_platform_yaml
@@ -1042,36 +1041,36 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                        'url_changed': url_changed,
                        'validation': send_val_key}))
 
-    # ── Step 6: Monitor ──
-    if start_monitor:
-        mon_cfg = workflow.get('monitor', {})
-        if not mon_cfg:
-            fail('monitor', 'workflow.monitor missing from YAML', platform)
-        if 'poll_interval' not in mon_cfg:
-            fail('monitor', 'workflow.monitor.poll_interval missing from YAML', platform)
-        if 'required_stop_absent_cycles' not in mon_cfg:
-            fail('monitor', 'workflow.monitor.required_stop_absent_cycles missing from YAML', platform)
-        interval = str(mon_cfg['poll_interval'])
-        absent = str(mon_cfg['required_stop_absent_cycles'])
-        if 'stop_key' not in mon_cfg:
-            fail('monitor', 'workflow.monitor.stop_key missing from YAML', platform)
-        stop_key_val = mon_cfg['stop_key']
-        if 'timeout' not in mon_cfg:
-            fail('monitor', 'workflow.monitor.timeout missing from YAML', platform)
-        timeout = str(mon_cfg['timeout'])
-        # Send step already confirmed stop_button was present. Pass --seen-stop
-        # so the monitor doesn't need to rediscover that from the tree (which
-        # could race with stop disappearing if generation was very fast) and
-        # can't be fooled by a pre-existing copy_button into declaring complete.
-        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent,
-                                  '--timeout', timeout, '--stop-key', stop_key_val, '--seen-stop']
-        log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
-        with open(log_path, 'w') as log_f:
-            proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,
-                                    cwd=str(_PROJECT_ROOT))
-        print(json.dumps({'event': 'step_ok', 'step': 'monitor', 'pid': proc.pid, 'log': log_path}))
-    else:
-        print(json.dumps({'event': 'step_ok', 'step': 'monitor', 'msg': 'skipped'}))
+    # ── Step 6: Monitor (always) ──
+    # Monitor spawn is mandatory. Without it there is no RESPONSE_COMPLETE
+    # notification and no gate on when the response is actually done —
+    # skipping it would be a fallback that lets the caller proceed as if
+    # the work were complete when it isn't.
+    mon_cfg = workflow.get('monitor', {})
+    if not mon_cfg:
+        fail('monitor', 'workflow.monitor missing from YAML', platform)
+    if 'poll_interval' not in mon_cfg:
+        fail('monitor', 'workflow.monitor.poll_interval missing from YAML', platform)
+    if 'required_stop_absent_cycles' not in mon_cfg:
+        fail('monitor', 'workflow.monitor.required_stop_absent_cycles missing from YAML', platform)
+    interval = str(mon_cfg['poll_interval'])
+    absent = str(mon_cfg['required_stop_absent_cycles'])
+    if 'stop_key' not in mon_cfg:
+        fail('monitor', 'workflow.monitor.stop_key missing from YAML', platform)
+    stop_key_val = mon_cfg['stop_key']
+    if 'timeout' not in mon_cfg:
+        fail('monitor', 'workflow.monitor.timeout missing from YAML', platform)
+    timeout = str(mon_cfg['timeout'])
+    # Send step already confirmed stop_button was present. Pass --seen-stop
+    # so the monitor inherits that fact and can't be fooled by a pre-existing
+    # copy_button (chat history, homepage cards) into declaring complete.
+    monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent,
+                              '--timeout', timeout, '--stop-key', stop_key_val, '--seen-stop']
+    log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
+    with open(log_path, 'w') as log_f:
+        proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,
+                                cwd=str(_PROJECT_ROOT))
+    print(json.dumps({'event': 'step_ok', 'step': 'monitor', 'pid': proc.pid, 'log': log_path}))
 
     # ── Step 7: Store in Neo4j ──
     session_id = None
@@ -1101,14 +1100,12 @@ def main():
     parser.add_argument('platform', choices=_platforms)
     parser.add_argument('message', help='Prompt message text')
     parser.add_argument('--file', default=None, help='File to attach')
-    parser.add_argument('--no-monitor', action='store_true', help='Skip starting monitor')
     args = parser.parse_args()
 
     return run_consultation(
         platform=args.platform,
         message=args.message,
         file_path=args.file,
-        start_monitor=not args.no_monitor,
     )
 
 
