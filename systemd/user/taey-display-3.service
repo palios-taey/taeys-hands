@@ -1,13 +1,13 @@
 [Unit]
 Description=Taey Display :3 (Claude)
-After=default.target
+After=taey-xvfb@3.service
+Requires=taey-xvfb@3.service
 
 [Service]
 Type=simple
 Environment=DISPLAY=:3
-ExecStartPre=/usr/bin/bash -lc 'rm -f /tmp/.X3-lock /tmp/.X11-unix/X3 /tmp/a11y_bus_:3 /tmp/firefox_pid_:3; pkill -f "Xvfb :3 " 2>/dev/null || true; pkill -f "/tmp/ff-profile-mira-claude" 2>/dev/null || true; /usr/bin/Xvfb :3 -screen 0 1920x1080x24 -ac -noreset >/tmp/taey-display-3-xvfb.log 2>&1 &'
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc '/usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 1; A11Y_ADDR=$(xprop -display :3 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:3; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-claude; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 firefox --no-remote --profile /tmp/ff-profile-mira-claude "https://claude.ai/new" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:3; wait ${FIREFOX_PID}'
-ExecStopPost=/usr/bin/bash -lc 'pkill -f "Xvfb :3 " 2>/dev/null || true; rm -f /tmp/.X3-lock /tmp/.X11-unix/X3 /tmp/a11y_bus_:3 /tmp/firefox_pid_:3'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:3; /usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 2; A11Y_ADDR=$(xprop -display :3 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:3; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-claude; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/firefox/firefox --no-remote --profile /tmp/ff-profile-mira-claude "https://claude.ai/new" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:3; wait ${FIREFOX_PID}'
+ExecStopPost=/usr/bin/bash -lc 'rm -f /tmp/a11y_bus_:3 /tmp/dbus_session_bus_:3 /tmp/firefox_pid_:3'
 Restart=always
 RestartSec=10
 
