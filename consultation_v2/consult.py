@@ -518,38 +518,43 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('attach', 'File dialog not found', platform)
         time.sleep(timing['after_file_dialog'])
 
-        # Verify attachment — strict: require new push button (file chip) to appear
+        # Verify attachment — STRICT: require push button containing EXACT filename
         if pre_attach_snap and attach_validation.get('diff_validated'):
             pre_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(pre_attach_snap)
                            if e.get('role') == 'push button'}
-            # Poll for file chip to appear (up to 15s)
+            # The expected filename (basename) from the consolidated package
+            expected_filename = Path(pkg).name
+            # Filename may be truncated in UI (e.g., "taey_packa...1776440164" + "MD")
+            # Use a stem prefix that's unlikely to be in transients
+            filename_stem = Path(pkg).stem  # e.g., "taey_package_claude_1776440164"
+            # Poll for file chip to appear (up to 20s)
             chip_found = False
+            matched_chip = None
             new_buttons = set()
-            for _ in range(15):
+            for _ in range(20):
                 post_attach_snap = inspect_platform(platform)
                 post_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(post_attach_snap)
                                 if e.get('role') == 'push button'}
                 new_buttons = post_buttons - pre_buttons
-                # Filter out irrelevant new buttons (tooltips, menu transients)
-                # File chips typically have the filename or contain "Remove"/"Delete" attached to them
-                relevant = [b for b in new_buttons
-                            if b[0] and (
-                                'remove' in b[0].lower() or
-                                'delete' in b[0].lower() or
-                                'attach' in b[0].lower() or
-                                '.md' in b[0].lower() or
-                                '.txt' in b[0].lower() or
-                                '.pdf' in b[0].lower() or
-                                'taey_package' in b[0].lower()
-                            )]
-                if relevant:
-                    chip_found = True
+                # STRICT: new push button must contain the exact package filename stem.
+                # This anchors to THE file we uploaded, not any transient element.
+                for name, role in new_buttons:
+                    if name and filename_stem in name:
+                        chip_found = True
+                        matched_chip = (name, role)
+                        break
+                if chip_found:
                     break
                 time.sleep(1)
             if not chip_found:
                 path = screenshot(platform)
-                fail('attach', f'diff_validated: no file chip push button after 15s. Screenshot: {path}. New buttons: {list(new_buttons)[:5]}', platform)
-            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'new_buttons': len(new_buttons), 'chip_match': True}))
+                fail('attach',
+                     f'diff_validated: no push button containing filename {filename_stem!r} after 20s. '
+                     f'Screenshot: {path}. New buttons: {list(new_buttons)[:10]}',
+                     platform)
+            print(json.dumps({'event': 'step_ok', 'step': 'attach',
+                              'matched_chip': matched_chip[0],
+                              'expected_filename': expected_filename}))
         elif attach_validation.get('pass_through'):
             path = screenshot(platform)
             print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path,
