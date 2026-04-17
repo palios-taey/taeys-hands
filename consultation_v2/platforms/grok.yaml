@@ -238,9 +238,10 @@ validation:
     file_chip_template: "{filename}"
 
   prompt_ready:
-    # Send button presence is sufficient — if send_button is in tree, prompt is ready.
-    # The send step will fail if send_button is missing.
-    pass_through: true
+    # Grok uses submit_via_return — no send button. Attach button persists as readiness indicator.
+    indicators:
+      - name: "Attach"
+        role: push button
 
   send_success:
     indicators:

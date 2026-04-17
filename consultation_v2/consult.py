@@ -320,12 +320,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
                 if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
                     verify_snap = inspect_platform(platform, scope=scope)
-                    if _element_has_checked_state(verify_snap, cfg, target):
-                        pass
-                    elif step.get('verified_by_checked_state') and not skipped:
-                        pass
-                    else:
-                        all_steps_ok = False
+                    if not _element_has_checked_state(verify_snap, cfg, target):
+                        # Fail closed — AT-SPI checked state is required by YAML
+                        fail('mode_setup',
+                             f'Sequence step {i}: target {target!r} not in checked state after click',
+                             platform)
 
             if step.get('close_with_escape'):
                 act(platform, 'press', 'Escape')
@@ -402,16 +401,16 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                     fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
                 time.sleep(timing['after_target_click'])
 
-                # Verify checked state after clicking (before closing menu)
+                # Verify checked state after clicking (before closing menu) — fail closed
                 if selection.get('mode_verified_by_checked_state'):
                     verify_snap = inspect_platform(platform, scope=scope)
                     if _element_has_checked_state(verify_snap, cfg, target_key):
                         checked_state_keys.update(mode_val_keys)
                     else:
-                        # AT-SPI doesn't expose checked state — click succeeded, accept for THIS mode only
-                        checked_state_keys.update(mode_val_keys)
-                        print(json.dumps({'event': 'mode_note', 'platform': platform,
-                                          'msg': f'AT-SPI does not expose checked state for {target_key!r}. Click succeeded — accepting.'}), flush=True)
+                        fail('mode_setup',
+                             f'Mode {mode!r} target {target_key!r} not in checked state after click. '
+                             f'AT-SPI verification required by mode_verified_by_checked_state=true.',
+                             platform)
 
                 if selection.get('mode_close_with_escape'):
                     act(platform, 'press', 'Escape')
@@ -557,12 +556,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                      platform)
             print(json.dumps({'event': 'step_ok', 'step': 'attach',
                               'chip': expected_name, 'match': 'exact'}))
-        elif attach_validation.get('pass_through'):
-            path = screenshot(platform)
-            print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path,
-                               'msg': 'pass_through — no AT-SPI validation'}))
         else:
-            fail('attach', 'No attach_success validation defined in YAML', platform)
+            fail('attach',
+                 f'validation.{attach_val_key}.diff_validated must be true — no pass_through allowed',
+                 platform)
     else:
         print(json.dumps({'event': 'step_ok', 'step': 'attach', 'msg': 'no file'}))
 
@@ -587,21 +584,20 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if not prompt_val_key:
         fail('prompt', 'workflow.prompt.validation missing from YAML', platform)
     prompt_validation = validation.get(prompt_val_key, {})
-    if prompt_validation.get('pass_through'):
-        pass  # Explicitly no validation — YAML says this is OK
-    elif prompt_validation.get('indicators'):
-        prompt_snap = inspect_platform(platform)
-        prompt_elements = _all_elements(prompt_snap)
-        for indicator in prompt_validation['indicators']:
-            found = any(
-                e.get('name') == indicator.get('name') and e.get('role') == indicator.get('role')
-                for e in prompt_elements
-            )
-            if not found:
-                fail('prompt', f'prompt_ready indicator not found: {indicator}', platform)
-        print(json.dumps({'event': 'step_ok', 'step': 'prompt_ready'}))
-    else:
-        fail('prompt', 'No prompt_ready validation defined in YAML', platform)
+    # No pass_through — every platform must define indicators
+    indicators = prompt_validation.get('indicators')
+    if not indicators:
+        fail('prompt', f'validation.{prompt_val_key}.indicators missing or empty — required', platform)
+    prompt_snap = inspect_platform(platform)
+    prompt_elements = _all_elements(prompt_snap)
+    for indicator in indicators:
+        found = any(
+            e.get('name') == indicator.get('name') and e.get('role') == indicator.get('role')
+            for e in prompt_elements
+        )
+        if not found:
+            fail('prompt', f'prompt_ready indicator not found: {indicator}', platform)
+    print(json.dumps({'event': 'step_ok', 'step': 'prompt_ready'}))
 
     # ── Step 5: Send ──
     send_cfg = workflow.get('send', {})
@@ -621,6 +617,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     # Capture pre-send URL for accurate change detection
     pre_send_snap = inspect_platform(platform)
     pre_send_url = pre_send_snap.get('url', '')
+
+    # Fail closed if stop_button already present — send would false-confirm on stale state
+    if has_key(pre_send_snap, confirmation_key):
+        fail('send',
+             f'Confirmation key {confirmation_key!r} already present before send — '
+             f'stale state from previous generation',
+             platform)
 
     if send_cfg.get('submit_via_return'):
         if 'keypress' not in send_cfg:
