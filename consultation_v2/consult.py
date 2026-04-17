@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -62,6 +63,20 @@ def inspect_platform(platform: str, scope: str = 'document') -> dict:
 def has_key(snap: dict, key: str) -> bool:
     """Check if a YAML key has mapped elements in snapshot."""
     return key in snap.get('_summary', {}).get('mapped_keys', [])
+
+
+def must_inspect(platform: str, step: str, scope: str = 'document') -> dict:
+    """Inspect and fail closed if the subprocess/inspection errored.
+
+    Callers that drive validation decisions from the snapshot must never
+    silently proceed with an empty-on-error dict — doing so would make diffs
+    and has_key checks spuriously pass/fail. Use this instead of
+    inspect_platform() anywhere the result gates a fail/proceed choice.
+    """
+    snap = inspect_platform(platform, scope)
+    if 'error' in snap:
+        fail(step, f'inspect failed ({scope}): {snap["error"]}', platform)
+    return snap
 
 
 def _platform_display(platform: str) -> str:
@@ -252,9 +267,11 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
         if key not in timing:
             return False
 
-    # Find and focus file dialog
+    # Find and focus file dialog — anchor regex to avoid matching
+    # unrelated windows (e.g., "Open" vs "OpenAI - ChatGPT").
     for title in dialog_titles:
-        r = subprocess.run(['xdotool', 'search', '--name', title],
+        anchored = f'^{re.escape(title)}$'
+        r = subprocess.run(['xdotool', 'search', '--name', anchored],
                            capture_output=True, text=True, timeout=3, env=env)
         wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
         if wids:
@@ -354,10 +371,43 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('navigate', f'Input key {input_key!r} not found after navigation', platform)
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
 
-    # ── UI drift detection — flag new/missing elements vs YAML ──
+    # ── UI drift detection — fail closed on critical drift ──
+    # detect_ui_drift's `missing_keys` is already scoped to workflow-critical
+    # keys (attachment.trigger, prompt.input, send.trigger/confirmation_key,
+    # monitor.stop_key). If any of those aren't in the live tree, the workflow
+    # cannot proceed — fail rather than halt with a confusing error later.
+    # Unknown elements + blocker patterns come from the YAML drift policy.
     drift = detect_ui_drift(snap, cfg, platform)
     if drift['missing_keys'] or drift['unknown_count'] > 0:
         print(json.dumps({'event': 'ui_drift', **drift}))
+
+    if drift['missing_keys']:
+        fail('navigate',
+             f'UI drift: workflow-critical YAML keys missing from live tree: '
+             f'{drift["missing_keys"]}. Either the YAML is wrong or the platform '
+             f'UI changed. Fix before proceeding.',
+             platform)
+
+    # Optional blocker-name policy: YAML can declare names that, if present on
+    # the fresh page, indicate a modal/banner is covering the UI and
+    # coordinate clicks would land on it.
+    drift_policy = cfg.get('tree', {}).get('drift', {})
+    blocker_names = set(drift_policy.get('fail_on_blocker_names', []))
+    if blocker_names:
+        for el in drift.get('unknown_elements', []):
+            if el.get('name') in blocker_names:
+                fail('navigate',
+                     f'UI drift: blocker element present on fresh page: '
+                     f'{el.get("name")!r} ({el.get("role")}). '
+                     f'Declared in tree.drift.fail_on_blocker_names.',
+                     platform)
+    max_unknown = drift_policy.get('max_unknown_elements')
+    if max_unknown is not None and drift['unknown_count'] > max_unknown:
+        fail('navigate',
+             f'UI drift: {drift["unknown_count"]} unknown elements exceeds '
+             f'tree.drift.max_unknown_elements={max_unknown}. '
+             f'Platform UI may have changed.',
+             platform)
 
     # ── Step 2: Set up and verify mode ──
     mode = defaults.get('mode')
@@ -373,8 +423,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     checked_state_keys = set()  # Per-key tracking, not global boolean
 
     def _run_sequence(seq):
-        """Run a named sequence (e.g., deep_think, pro_extended). Returns True if all steps verified."""
-        all_steps_ok = True
+        """Run a named sequence (e.g., deep_think). Returns None.
+
+        Every per-step failure calls fail() which sys.exit(1)s, so normal
+        return means every step succeeded. The old `all_steps_ok = True`
+        return value was always True and callers treated it as meaningful
+        — that was misleading and a refactoring hazard.
+        """
         for i, step in enumerate(seq):
             trigger = step.get('trigger')
             target = step.get('target')
@@ -436,7 +491,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             if step.get('close_with_escape'):
                 act(platform, 'press', 'Escape')
                 time.sleep(timing['after_escape'])
-        return all_steps_ok
+        return None
 
     # Resolve ALL validation keys from ALL sequence steps (not just last)
     mode_val_keys = []
@@ -508,11 +563,13 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if pre_satisfied:
         pass  # Skip — already in target state
     elif mode and mode in sequences:
-        ok = _run_sequence(sequences[mode])
-        if ok:
-            checked_state_keys.update(mode_val_keys)
+        # _run_sequence fails closed on any step failure (sys.exit). If we
+        # return here, every step succeeded — so mark all declared validation
+        # keys verified via checked_state.
+        _run_sequence(sequences[mode])
+        checked_state_keys.update(mode_val_keys)
         mode_set = True
-        snap = inspect_platform(platform)
+        snap = must_inspect(platform, 'mode_setup')
     elif mode:
         # Simple target (e.g., Grok heavy via mode_targets)
         mode_targets = selection.get('mode_targets', {})
@@ -590,10 +647,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if not pre_satisfied:
         for tool in (tools or []):
             if tool in sequences:
-                ok = _run_sequence(sequences[tool])
-                if ok and tool in tool_val_keys:
+                _run_sequence(sequences[tool])
+                if tool in tool_val_keys:
                     checked_state_keys.update(tool_val_keys[tool])
-                snap = inspect_platform(platform)
+                snap = must_inspect(platform, 'mode_setup')
 
     # Build check_keys from pre-resolved validation keys (deduplicated)
     check_keys_set = set()
@@ -679,15 +736,19 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         attach_validation = validation.get(attach_val_key, {})
         pre_attach_snap = None
         if attach_validation.get('diff_validated'):
-            pre_attach_snap = inspect_platform(platform)
+            # Fail closed on inspect errors — an empty pre-buttons Counter would
+            # make the later diff treat every post-attach button as new.
+            pre_attach_snap = must_inspect(platform, 'attach')
 
         result = act(platform, 'click', attach_trigger_key)
         if result.get('error'):
             fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
         time.sleep(timing['after_trigger_click'])
 
-        # Click upload files item — scope from YAML
-        menu_scope = attach_cfg.get('menu_target_scope', 'menu')
+        # Click upload files item — scope MUST come from YAML (no default).
+        if 'menu_target_scope' not in attach_cfg:
+            fail('attach', 'workflow.attachment.menu_target_scope missing from YAML', platform)
+        menu_scope = attach_cfg['menu_target_scope']
         result = act(platform, 'click', attach_menu_key, '--scope', menu_scope)
         if result.get('error'):
             fail('attach', f'Upload item {attach_menu_key!r} failed: {result}', platform)
@@ -790,7 +851,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     indicators = prompt_validation.get('indicators')
     if not indicators:
         fail('prompt', f'validation.{prompt_val_key}.indicators missing or empty — required', platform)
-    prompt_snap = inspect_platform(platform)
+    prompt_snap = must_inspect(platform, 'prompt')
     prompt_elements = _all_elements(prompt_snap)
     for indicator in indicators:
         found = any(
@@ -816,8 +877,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         fail('send', 'workflow.send.require_new_url missing from YAML', platform)
     require_url = send_cfg['require_new_url']
 
-    # Capture pre-send URL for accurate change detection
-    pre_send_snap = inspect_platform(platform)
+    # Capture pre-send URL for accurate change detection. Fail closed on
+    # inspect errors — a silently-empty snap makes the stale-stop-button
+    # check at line below pass spuriously.
+    pre_send_snap = must_inspect(platform, 'send')
     pre_send_url = pre_send_snap.get('url', '')
 
     # Fail closed if stop_button already present — send would false-confirm on stale state
@@ -889,7 +952,12 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
         if 'timeout' not in mon_cfg:
             fail('monitor', 'workflow.monitor.timeout missing from YAML', platform)
         timeout = str(mon_cfg['timeout'])
-        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent, '--timeout', timeout, '--stop-key', stop_key_val]
+        # Send step already confirmed stop_button was present. Pass --seen-stop
+        # so the monitor doesn't need to rediscover that from the tree (which
+        # could race with stop disappearing if generation was very fast) and
+        # can't be fooled by a pre-existing copy_button into declaring complete.
+        monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent,
+                                  '--timeout', timeout, '--stop-key', stop_key_val, '--seen-stop']
         log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
         with open(log_path, 'w') as log_f:
             proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,

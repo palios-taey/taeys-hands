@@ -207,6 +207,7 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
+    menu_target_scope: menu
     dialog_location_shortcut: ctrl+l
     dialog_select_all_key: ctrl+a
     dialog_paste_key: ctrl+v

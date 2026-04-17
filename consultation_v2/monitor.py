@@ -64,19 +64,25 @@ def setup_display(platform: str) -> str:
     a11y_file = f'/tmp/a11y_bus_{display}'
     try:
         bus = Path(a11y_file).read_text().strip()
-        if bus:
-            os.environ['AT_SPI_BUS_ADDRESS'] = bus
     except FileNotFoundError:
-        pass
+        print(json.dumps({'error': f'AT-SPI bus file missing: {a11y_file}'}))
+        sys.exit(1)
+    if not bus:
+        print(json.dumps({'error': f'AT-SPI bus file empty: {a11y_file}'}))
+        sys.exit(1)
+    os.environ['AT_SPI_BUS_ADDRESS'] = bus
 
     session_file = f'/tmp/dbus_session_bus_{display}'
     try:
         session_bus = Path(session_file).read_text().strip()
-        if session_bus:
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     except FileNotFoundError:
-        if os.environ.get('AT_SPI_BUS_ADDRESS'):
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = os.environ['AT_SPI_BUS_ADDRESS']
+        print(json.dumps({'error': f'Session bus file missing: {session_file}. '
+                                    f'Reusing the AT-SPI bus as the session bus is a fallback — disabled.'}))
+        sys.exit(1)
+    if not session_bus:
+        print(json.dumps({'error': f'Session bus file empty: {session_file}'}))
+        sys.exit(1)
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
 
     disp_num = display.lstrip(':')
     os.environ['PLATFORM_DISPLAYS'] = f'{platform}:{disp_num}'
@@ -114,6 +120,11 @@ def main():
     parser.add_argument('--absent', type=int, default=None, help='Required absent polls override')
     parser.add_argument('--timeout', type=float, default=None, help='Max wait time override')
     parser.add_argument('--stop-key', default=None, help='YAML key for stop button override')
+    parser.add_argument('--seen-stop', action='store_true',
+                        help='Caller confirmed stop_button was present at send-confirmation. '
+                             'Without this flag the monitor requires stop_key on the first poll '
+                             'or fails fatal — this prevents a pre-existing copy_button (chat '
+                             'history, homepage) from being misread as completion.')
     args = parser.parse_args()
 
     display = setup_display(args.platform)
@@ -179,7 +190,12 @@ def main():
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
 
-    seen_stop = False
+    # consult.py confirms `stop_button` present at send-confirmation before
+    # spawning the monitor. We inherit that fact via --seen-stop so the first
+    # poll can distinguish "response still generating" from "response finished
+    # between send-confirm and first poll" without falling for a pre-existing
+    # copy button (chat history, homepage cards, etc.).
+    seen_stop = args.seen_stop
     absent_cycles = 0
     start = time.time()
 
@@ -192,30 +208,29 @@ def main():
         'stop_key': stop_key,
         'complete_key': complete_key,
         'timeout': timeout,
+        'seen_stop_at_start': seen_stop,
     }))
+
+    # Pre-flight: if the caller did NOT pass --seen-stop, the monitor has no
+    # ground truth that generation actually started. In that case, require the
+    # first snapshot to show stop_key; otherwise fail fatal. This eliminates
+    # the old fast-path false positive where a pre-existing copy_button was
+    # interpreted as completion.
+    if not seen_stop:
+        _, _, first_snap = build_snapshot(args.platform)
+        if not first_snap.has(stop_key):
+            print(json.dumps({'event': 'fatal',
+                              'error': f'{stop_key!r} not present at monitor start and --seen-stop not passed. '
+                                       f'Caller must confirm send before spawning monitor.'}))
+            _push_redis(args.platform, 'MONITOR_FATAL',
+                        f'{stop_key!r} absent at monitor start — cannot confirm generation started')
+            return 1
+        seen_stop = True
 
     while time.time() - start < timeout:
         try:
             _, _, snap = build_snapshot(args.platform)
-
-            # Fast-path: response already complete before we saw stop.
-            # Only trigger after at least one full poll interval to avoid
-            # false positives from pre-existing copy buttons on the page.
             elapsed = time.time() - start
-            if complete_key and not seen_stop and elapsed >= interval and snap.has(complete_key):
-                result = {
-                    'event': 'complete',
-                    'method': 'fast_path_complete_key',
-                    'platform': args.platform,
-                    'elapsed': round(elapsed, 1),
-                    'url': snap.url,
-                }
-                print(json.dumps(result))
-                _push_redis(args.platform, 'RESPONSE_COMPLETE',
-                            f'{args.platform} response complete via fast-path ({round(elapsed)}s). URL: {snap.url}',
-                            snap.url)
-                return 0
-
             has_stop = snap.has(stop_key)
 
             if has_stop:

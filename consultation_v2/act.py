@@ -66,19 +66,25 @@ def setup_display(platform: str) -> str:
     a11y_file = f'/tmp/a11y_bus_{display}'
     try:
         bus = Path(a11y_file).read_text().strip()
-        if bus:
-            os.environ['AT_SPI_BUS_ADDRESS'] = bus
     except FileNotFoundError:
-        pass
+        print(json.dumps({'error': f'AT-SPI bus file missing: {a11y_file}'}))
+        sys.exit(1)
+    if not bus:
+        print(json.dumps({'error': f'AT-SPI bus file empty: {a11y_file}'}))
+        sys.exit(1)
+    os.environ['AT_SPI_BUS_ADDRESS'] = bus
 
     session_file = f'/tmp/dbus_session_bus_{display}'
     try:
         session_bus = Path(session_file).read_text().strip()
-        if session_bus:
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     except FileNotFoundError:
-        if os.environ.get('AT_SPI_BUS_ADDRESS'):
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = os.environ['AT_SPI_BUS_ADDRESS']
+        print(json.dumps({'error': f'Session bus file missing: {session_file}. '
+                                    f'Reusing the AT-SPI bus as the session bus is a fallback — disabled.'}))
+        sys.exit(1)
+    if not session_bus:
+        print(json.dumps({'error': f'Session bus file empty: {session_file}'}))
+        sys.exit(1)
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
 
     disp_num = display.lstrip(':')
     os.environ['PLATFORM_DISPLAYS'] = f'{platform}:{disp_num}'
@@ -240,7 +246,12 @@ def main():
             print(json.dumps({'error': f'No {primary_key!r} found in snapshot'}))
             return 1
 
-        # Step 3: Click the copy button
+        # Step 3: Clear clipboard BEFORE click. Without this, a silently-failed
+        # click leaves stale content in the clipboard (commonly the prompt text
+        # just pasted), which the extractor would accept as the response.
+        runtime.write_clipboard("")
+
+        # Step 4: Click the copy button
         ok = runtime.click(element, strategy=click_strategy)
         if not ok:
             print(json.dumps({'error': f'Click on {primary_key!r} failed', 'element': element.name}))
@@ -248,7 +259,7 @@ def main():
 
         import time; time.sleep(post_click_delay)
 
-        # Step 4: Read clipboard — fail if empty
+        # Step 5: Read clipboard — fail if empty (click was a no-op)
         content = runtime.read_clipboard()
         if not content or not content.strip():
             print(json.dumps({'error': 'Clipboard empty after copy click — extraction failed'}))
