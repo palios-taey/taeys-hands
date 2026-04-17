@@ -154,9 +154,30 @@ def detect_ui_drift(snap: dict, cfg: dict, platform: str) -> dict:
             declared.add((name, role))
 
     # Which element_map keys were NOT found?
+    # Only report keys referenced by the current workflow (critical at this step).
+    # Menu items, mode radio items etc. only appear when dropdowns are open — skip.
     mapped_keys = set(snap.get('_summary', {}).get('mapped_keys', []))
-    all_element_map_keys = set(element_map.keys())
-    missing_keys = sorted(all_element_map_keys - mapped_keys)
+    workflow = cfg.get('workflow', {})
+    critical_keys = set()
+    # Keys used at the top level of workflow on document scope
+    for section in ('attachment', 'prompt', 'send', 'monitor'):
+        sec = workflow.get(section, {})
+        for field in ('trigger', 'input', 'confirmation_key', 'stop_key'):
+            v = sec.get(field)
+            if v:
+                critical_keys.add(v)
+    # Also add 'input' key which is always expected post-navigate
+    prompt_input = workflow.get('prompt', {}).get('input')
+    if prompt_input:
+        critical_keys.add(prompt_input)
+    missing_keys = sorted(critical_keys - mapped_keys)
+
+    # Firefox chrome roles/names that are never platform-specific
+    FIREFOX_CHROME_ROLES = {
+        'frame', 'menu bar', 'menu', 'tool bar', 'landmark',
+        'section', 'heading', 'internal frame', 'panel', 'scroll pane',
+        'window', 'application',
+    }
 
     # Which tree elements are NOT in element_map, sidebar_nav, or exclude?
     unknown_elements = []
@@ -164,6 +185,8 @@ def detect_ui_drift(snap: dict, cfg: dict, platform: str) -> dict:
         name = el.get('name', '')
         role = el.get('role', '')
         if role in exclude_roles:
+            continue
+        if role in FIREFOX_CHROME_ROLES:
             continue
         if name in exclude_names:
             continue
