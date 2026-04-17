@@ -63,16 +63,22 @@ def setup_display(platform: str) -> str:
     display = displays[platform]
     os.environ['DISPLAY'] = display
 
+    # Bus discovery contract:
+    # - /tmp/a11y_bus_{display}  : dedicated AT-SPI bus address. On this
+    #   system it is legitimately empty (AT-SPI rides on the session bus);
+    #   we still require the FILE to exist as an explicit "we looked and
+    #   there is no separate a11y bus" signal. Empty contents = skip.
+    # - /tmp/dbus_session_bus_{display} : session bus address, ALWAYS
+    #   required. Missing file or empty contents = fail closed. We do NOT
+    #   reuse the a11y bus as a session bus fallback.
     a11y_file = f'/tmp/a11y_bus_{display}'
     try:
         bus = Path(a11y_file).read_text().strip()
     except FileNotFoundError:
         print(json.dumps({'error': f'AT-SPI bus file missing: {a11y_file}'}))
         sys.exit(1)
-    if not bus:
-        print(json.dumps({'error': f'AT-SPI bus file empty: {a11y_file}'}))
-        sys.exit(1)
-    os.environ['AT_SPI_BUS_ADDRESS'] = bus
+    if bus:
+        os.environ['AT_SPI_BUS_ADDRESS'] = bus
 
     session_file = f'/tmp/dbus_session_bus_{display}'
     try:

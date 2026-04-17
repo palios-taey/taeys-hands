@@ -61,16 +61,18 @@ def setup_display(platform: str) -> str:
     display = displays[platform]
     os.environ['DISPLAY'] = display
 
+    # Bus discovery contract (see consultation_v2/act.py setup_display):
+    # - a11y_bus_{display}: file required, contents may be empty (a11y rides
+    #   on the session bus on this system). Empty = skip setting the env var.
+    # - dbus_session_bus_{display}: always required, must be non-empty.
     a11y_file = f'/tmp/a11y_bus_{display}'
     try:
         bus = Path(a11y_file).read_text().strip()
     except FileNotFoundError:
         print(json.dumps({'error': f'AT-SPI bus file missing: {a11y_file}'}))
         sys.exit(1)
-    if not bus:
-        print(json.dumps({'error': f'AT-SPI bus file empty: {a11y_file}'}))
-        sys.exit(1)
-    os.environ['AT_SPI_BUS_ADDRESS'] = bus
+    if bus:
+        os.environ['AT_SPI_BUS_ADDRESS'] = bus
 
     session_file = f'/tmp/dbus_session_bus_{display}'
     try:
