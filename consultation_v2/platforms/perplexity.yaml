@@ -88,6 +88,19 @@ tree:
       name: "Copy contents"
       role: push button
 
+    # Response container for extract.strategy=tree_walk.
+    # Perplexity's page has 4 landmarks:
+    #   - "Main" at x=420 y=590 states=[showing,enabled,visible]   ← sidebar
+    #   - ""     at x=1060 y=590 states=[showing,enabled,visible]  ← response
+    #   - ""     at x=960 y=562 states=[enabled,visible]           ← header
+    #   - ""     at x=-2 y=-2   states=[enabled,visible]           ← offscreen
+    # Distinguished by having a SHOWING state with an empty name.
+    # states_include filters to the unique response content landmark.
+    response_landmark:
+      name: ""
+      role: landmark
+      states_include: [showing]
+
     new_thread:
       name: "New thread Ctrl I"
       role: push button
@@ -362,8 +375,14 @@ workflow:
     scroll_before_extract: ctrl+End
     scroll_delay: 2.0
     post_click_delay: 1.0
-    primary_key: copy_contents_button
-    strategy: first
+    # Perplexity Deep Research: extract via tree walk of the response
+    # landmark, not the Copy button. Rationale: the action-bar "Copy"
+    # button truncates long DR responses, and "Copy contents" is inside
+    # a More menu that isn't in the default AT-SPI tree. The AT-SPI
+    # Text interface on the response landmark returns the full rendered
+    # answer including citations and section structure.
+    primary_key: response_landmark
+    strategy: tree_walk
     click_strategy: atspi_only
 
 

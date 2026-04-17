@@ -235,8 +235,8 @@ def main():
         if not strategy:
             print(json.dumps({'error': 'workflow.extract.strategy missing from YAML'}))
             return 1
-        if strategy not in ('first', 'last_by_y'):
-            print(json.dumps({'error': f'Unknown extract strategy {strategy!r} — must be first or last_by_y'}))
+        if strategy not in ('first', 'last_by_y', 'tree_walk'):
+            print(json.dumps({'error': f'Unknown extract strategy {strategy!r} — must be first, last_by_y, or tree_walk'}))
             return 1
         click_strategy = extract_cfg.get('click_strategy')
 
@@ -251,6 +251,47 @@ def main():
         if not element:
             print(json.dumps({'error': f'No {primary_key!r} found in snapshot'}))
             return 1
+
+        # tree_walk: skip clipboard entirely. Perplexity Deep Research
+        # responses can't reliably be extracted via the Copy button (the
+        # action-bar "Copy" truncates, the "Copy contents" button lives
+        # inside a menu that isn't in the default tree). Instead, walk the
+        # AT-SPI Text interface of a named response container (declared in
+        # YAML via extract.primary_key → element_map[key]) and return the
+        # concatenated text. This is the documented pattern for DR mode.
+        if strategy == 'tree_walk':
+            input_spec = runtime.cfg.get('tree', {}).get('element_map', {}).get(primary_key, {})
+            ct_name = input_spec.get('name', '')
+            ct_role = input_spec.get('role', '')
+            ct_states = input_spec.get('states_include', [])
+            if not ct_role:
+                print(json.dumps({'error': f'element_map.{primary_key}.role missing from YAML'}))
+                return 1
+            txt = runtime.read_element_text(ct_name, ct_role, required_states=ct_states)
+            if 'error' in txt:
+                print(json.dumps({'error': f'tree_walk read failed: {txt["error"]}'}))
+                return 1
+            content = txt.get('text', '')
+            if not content or not content.strip():
+                print(json.dumps({'error': 'tree_walk returned empty content'}))
+                return 1
+            message_id = None
+            if args.session_id:
+                try:
+                    from consultation_v2.store import store_response
+                    message_id = store_response(
+                        session_id=args.session_id, response_text=content,
+                        url=snap.url, extraction_method='tree_walk',
+                    )
+                except Exception as e:
+                    print(json.dumps({'store_error': str(e)}), file=sys.stderr)
+            print(json.dumps({'extracted': True, 'length': len(content),
+                              'element': element.name, 'strategy': strategy,
+                              'x': element.x, 'y': element.y,
+                              'session_id': args.session_id, 'message_id': message_id}))
+            print('---CONTENT---')
+            print(content)
+            return 0
 
         # Step 3: Clear clipboard BEFORE click. Without this, a silently-failed
         # click leaves stale content in the clipboard (commonly the prompt text
