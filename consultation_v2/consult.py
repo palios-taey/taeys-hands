@@ -128,6 +128,62 @@ def _all_elements(snap: dict) -> list:
             [e for v in snap.get('mapped', {}).values() for e in v])
 
 
+def detect_ui_drift(snap: dict, cfg: dict, platform: str) -> dict:
+    """Compare live AT-SPI tree against YAML element_map.
+
+    Returns dict with:
+      - missing_keys: YAML element_map keys that had no matching element in tree
+      - unknown_elements: tree elements not in YAML element_map or sidebar_nav or exclude
+      - count: total unknown elements
+
+    Does NOT fail — just reports. Drift is informational.
+    """
+    tree_cfg = cfg.get('tree', {})
+    element_map = tree_cfg.get('element_map', {})
+    exclude_names = set(tree_cfg.get('exclude', {}).get('names', []))
+    exclude_roles = set(tree_cfg.get('exclude', {}).get('roles', []))
+    sidebar_nav = tree_cfg.get('sidebar_nav', [])
+    sidebar_keys = {(s.get('name'), s.get('role')) for s in sidebar_nav}
+
+    # Build set of declared (name, role) pairs from element_map
+    declared = set()
+    for key, spec in element_map.items():
+        role = spec.get('role', '')
+        names = spec.get('names') or ([spec.get('name')] if 'name' in spec else [])
+        for name in names:
+            declared.add((name, role))
+
+    # Which element_map keys were NOT found?
+    mapped_keys = set(snap.get('_summary', {}).get('mapped_keys', []))
+    all_element_map_keys = set(element_map.keys())
+    missing_keys = sorted(all_element_map_keys - mapped_keys)
+
+    # Which tree elements are NOT in element_map, sidebar_nav, or exclude?
+    unknown_elements = []
+    for el in snap.get('unknown', []):
+        name = el.get('name', '')
+        role = el.get('role', '')
+        if role in exclude_roles:
+            continue
+        if name in exclude_names:
+            continue
+        if (name, role) in sidebar_keys:
+            continue
+        if (name, role) in declared:
+            continue
+        if not name:  # Skip unnamed generic containers
+            continue
+        unknown_elements.append({'name': name, 'role': role,
+                                  'x': el.get('x'), 'y': el.get('y')})
+
+    return {
+        'platform': platform,
+        'missing_keys': missing_keys,
+        'unknown_elements': unknown_elements[:20],  # Cap at 20 for readability
+        'unknown_count': len(unknown_elements),
+    }
+
+
 def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
     """Check whether a named YAML element has 'checked' in its AT-SPI states.
 
@@ -271,6 +327,11 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if not has_key(snap, input_key):
         fail('navigate', f'Input key {input_key!r} not found after navigation', platform)
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
+
+    # ── UI drift detection — flag new/missing elements vs YAML ──
+    drift = detect_ui_drift(snap, cfg, platform)
+    if drift['missing_keys'] or drift['unknown_count'] > 0:
+        print(json.dumps({'event': 'ui_drift', **drift}))
 
     # ── Step 2: Set up and verify mode ──
     mode = defaults.get('mode')
