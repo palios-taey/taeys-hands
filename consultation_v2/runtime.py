@@ -232,6 +232,50 @@ class ConsultationRuntime:
     def paste(self, text: str) -> bool:
         return bool(inp.clipboard_paste(text))
 
+    def read_element_text(self, name: str, role: str) -> dict:
+        """Read the AT-SPI Text interface of an element by (name, role).
+
+        Returns {'text': str, 'char_count': int} on success, {'error': str}
+        on failure. Used to prove pasted prompt text actually landed in the
+        composer — without this, runtime.paste() returning True only proves
+        the clipboard write + Ctrl+V subprocess succeeded, not that the text
+        reached the intended input element.
+        """
+        from core.platforms import get_platform_display
+        from pathlib import Path
+        cfg = load_platform_yaml(self.platform)
+        scan_root = cfg.get("tree", {}).get("scan_root", "document")
+
+        display = get_platform_display(self.platform)
+        if not display.startswith(":"):
+            display = f":{display}"
+        bus_path = f"/tmp/a11y_bus_{display}"
+        session_bus_path = f"/tmp/dbus_session_bus_{display}"
+        try:
+            bus = Path(bus_path).read_text().strip()
+            session_bus = Path(session_bus_path).read_text().strip()
+        except FileNotFoundError as e:
+            return {'error': f'Bus file missing: {e}'}
+
+        env = dict(os.environ)
+        env['DISPLAY'] = display
+        env['AT_SPI_BUS_ADDRESS'] = bus
+        env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+
+        import sys, json
+        _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        r = subprocess.run(
+            [sys.executable, os.path.join(_PROJECT_ROOT, 'core', '_atspi_subprocess.py'),
+             'read_text', self.platform, scan_root, name, role],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        if r.returncode != 0:
+            return {'error': f'read_text exit {r.returncode}: {r.stderr.strip()[:200]}'}
+        try:
+            return json.loads(r.stdout)
+        except Exception as e:
+            return {'error': f'read_text invalid JSON: {e}'}
+
     def type_text(self, text: str, delay_ms: int = 5) -> bool:
         return bool(inp.type_text(text, delay_ms=delay_ms))
 

@@ -187,6 +187,45 @@ def main():
         _push_redis(args.platform, 'MONITOR_FATAL', f'complete_key {complete_key!r} not in element_map')
         return 1
 
+    # Load monitor.validation (response_complete) and enforce cross-check
+    # against element_map[complete_key]. Previously this YAML block was
+    # declared in every platform but never consumed — its indicators could
+    # drift silently. Now every indicator name/role must correspond to the
+    # live meaning of complete_key at monitor start.
+    mon_val_key = mon_cfg.get('validation')
+    if not mon_val_key:
+        print(json.dumps({'event': 'fatal', 'error': 'workflow.monitor.validation missing from YAML'}))
+        _push_redis(args.platform, 'MONITOR_FATAL', 'workflow.monitor.validation missing')
+        return 1
+    mon_validation = cfg.get('validation', {}).get(mon_val_key, {})
+    if not mon_validation:
+        print(json.dumps({'event': 'fatal', 'error': f'validation.{mon_val_key!r} missing from YAML'}))
+        _push_redis(args.platform, 'MONITOR_FATAL', f'validation.{mon_val_key!r} missing')
+        return 1
+    mon_indicators = mon_validation.get('indicators', [])
+    if not mon_indicators:
+        print(json.dumps({'event': 'fatal',
+                          'error': f'validation.{mon_val_key}.indicators missing or empty'}))
+        _push_redis(args.platform, 'MONITOR_FATAL',
+                    f'validation.{mon_val_key}.indicators missing')
+        return 1
+
+    # Cross-check: every indicator must be consistent with element_map[complete_key].
+    ck_spec = element_map[complete_key]
+    ck_names = ck_spec.get('names') or ([ck_spec.get('name')] if ck_spec.get('name') is not None else [])
+    ck_role = ck_spec.get('role')
+    for ind in mon_indicators:
+        ind_name = ind.get('name')
+        ind_role = ind.get('role')
+        if ind_role != ck_role or ind_name not in ck_names:
+            print(json.dumps({'event': 'fatal',
+                              'error': f'validation.{mon_val_key} indicator {ind!r} inconsistent with '
+                                       f'element_map[{complete_key!r}] '
+                                       f'(names={ck_names}, role={ck_role!r})'}))
+            _push_redis(args.platform, 'MONITOR_FATAL',
+                        f'response_complete indicator drift: {ind!r} vs complete_key spec')
+            return 1
+
     # NOW import V2 modules
     from consultation_v2.snapshot import build_snapshot
 

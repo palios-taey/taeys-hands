@@ -234,6 +234,121 @@ def perform_action(platform, scan_root, name, role, x, y):
     return {'success': False, 'error': 'Element not found'}
 
 
+def read_element_text(platform, scan_root, name, role):
+    """Read text content of an element by (name, role) via AT-SPI Text interface.
+
+    Returns {'text': <str>, 'char_count': <int>} on success, or {'error': ...}.
+
+    Used to verify prompt paste landed in the composer. The Text interface
+    returns rendered text including the pasted content for editable entries
+    and contenteditable sections. If the element does not implement Text,
+    falls back to attempting Value (used by some sliders/controls; harmless here).
+    """
+    desktop = Atspi.get_desktop(0)
+    try:
+        desktop.clear_cache_single()
+    except Exception:
+        pass
+    all_ff = []
+    for i in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(i)
+        if app and app.get_name() in ('Firefox', 'Mozilla Firefox', 'Firefox Web Browser'):
+            try:
+                app.clear_cache_single()
+            except Exception:
+                pass
+            all_ff.append(app)
+
+    doc = None
+    target_app = None
+    for ff in all_ff:
+        for j in range(ff.get_child_count()):
+            frame = ff.get_child_at_index(j)
+            if frame:
+                doc = _find_document(frame, platform)
+                if doc:
+                    target_app = ff
+                    break
+        if doc:
+            break
+    if not doc:
+        return {'error': f'No {platform} document'}
+
+    scope = target_app if scan_root == 'app' else doc
+    try:
+        scope.clear_cache_single()
+    except Exception:
+        pass
+
+    match = None
+
+    def _find(node, depth):
+        nonlocal match
+        if match is not None or depth > 50:
+            return
+        try:
+            n_name = (node.get_name() or '').strip()
+            n_role = node.get_role_name() or ''
+            if n_name == name and n_role == role:
+                match = node
+                return
+            for i in range(node.get_child_count()):
+                child = node.get_child_at_index(i)
+                if child:
+                    _find(child, depth + 1)
+        except Exception:
+            pass
+
+    _find(scope, 0)
+    if match is None:
+        return {'error': f'Element (name={name!r}, role={role!r}) not found'}
+
+    try:
+        text_iface = match.get_text_iface()
+    except Exception:
+        text_iface = None
+    if text_iface is not None:
+        try:
+            n = text_iface.get_character_count()
+            text = text_iface.get_text(0, n) if n > 0 else ''
+            return {'text': text, 'char_count': n}
+        except Exception as e:
+            return {'error': f'Text interface error: {e}'}
+
+    # Some platforms (ProseMirror div) don't expose Text directly on the
+    # section; recurse children looking for the first descendant with Text.
+    def _walk(node, depth=0):
+        if depth > 6:
+            return None
+        try:
+            ti = node.get_text_iface()
+        except Exception:
+            ti = None
+        if ti is not None:
+            try:
+                n = ti.get_character_count()
+                txt = ti.get_text(0, n) if n > 0 else ''
+                if txt or n > 0:
+                    return {'text': txt, 'char_count': n}
+            except Exception:
+                pass
+        try:
+            for i in range(node.get_child_count()):
+                ch = node.get_child_at_index(i)
+                if ch:
+                    res = _walk(ch, depth + 1)
+                    if res:
+                        return res
+        except Exception:
+            pass
+        return None
+
+    res = _walk(match)
+    if res:
+        return res
+    return {'error': 'Element has no Text interface and no text-bearing children'}
+
+
 def _scan(node, elements, depth):
     if depth > 100:
         return
@@ -308,5 +423,15 @@ if __name__ == '__main__':
         x = float(x_str) if x_str != 'None' else None
         y = float(y_str) if y_str != 'None' else None
         print(json.dumps(perform_action(platform, scan_root, name, role, x, y)))
+    elif cmd == 'read_text':
+        # Read the AT-SPI Text / Value interface of an element, used to prove
+        # pasted prompt text actually landed in the composer rather than going
+        # to some other focused element. name may be '' (Perplexity/Grok input
+        # has no accessible name); role + position selects the right instance.
+        platform = sys.argv[2]
+        scan_root = sys.argv[3]
+        name = sys.argv[4]
+        role = sys.argv[5]
+        print(json.dumps(read_element_text(platform, scan_root, name, role)))
     else:
         print(json.dumps({'error': f'Unknown command: {cmd}'}))

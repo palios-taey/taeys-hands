@@ -222,17 +222,28 @@ def detect_ui_drift(snap: dict, cfg: dict, platform: str) -> dict:
     }
 
 
-def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
+def _element_has_checked_state(snap: dict, cfg: dict, element_key: str,
+                                platform: str = '') -> bool:
     """Check whether a named YAML element is in its 'active/selected' AT-SPI state.
 
-    The state is YAML-driven via element_map[key].selected_state (defaults to 'checked').
-    Gemini's menu items use 'focused' (Material Design pattern: opening the menu
-    focuses the currently-selected item). Radio menus use 'checked'.
+    Invariants enforced:
+    - The element_map entry MUST have a non-empty name or names list. Empty-string
+      names would match ANY element whose AT-SPI name is also empty (Perplexity's
+      `input` element deliberately has name: "" — if such a key were ever passed
+      here, it would silently match a wrong element of matching role with 'checked'
+      state). Fail closed.
+    - Exactly ONE element must match (name, role) in the snapshot. Zero = not
+      present (return False as before). Two or more = the label appears in multiple
+      scopes (stale portal, multiple tabs, feature promos) — return False and
+      emit a warning so the caller falls through to its fail path instead of
+      trusting an arbitrary first match.
 
-    Handles both 'name' (singular string) and 'names' (list of alternatives).
+    The state is YAML-driven via element_map[key].selected_state (defaults to
+    'checked'). Gemini's menu items use 'focused' (Material Design pattern:
+    opening the menu focuses the currently-selected item). Radio menus use
+    'checked'.
     """
     target_cfg = cfg.get('tree', {}).get('element_map', {}).get(element_key, {})
-    # Handle both 'name' (singular string) and 'names' (list of alternatives)
     target_names = target_cfg.get('names', [])
     if not target_names:
         single_name = target_cfg.get('name')
@@ -240,13 +251,27 @@ def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
             target_names = [single_name]
     target_role = target_cfg.get('role', '')
     selected_state = target_cfg.get('selected_state', 'checked')
-    if not target_names and not target_role:
+
+    # Guard against empty-name specs being used for state checks.
+    if not target_names or all((n == '' or n is None) for n in target_names):
+        fail('mode_setup',
+             f'Element {element_key!r} has no name — cannot safely check selected state. '
+             f'Empty names match any unnamed element of the same role.',
+             platform)
+    if not target_role:
         return False
-    for el in _all_elements(snap):
-        if el.get('role') == target_role and el.get('name', '') in target_names:
-            if selected_state in el.get('states', []):
-                return True
-    return False
+
+    matches = [el for el in _all_elements(snap)
+               if el.get('role') == target_role and el.get('name', '') in target_names]
+    if len(matches) == 0:
+        return False
+    if len(matches) > 1:
+        print(json.dumps({'event': 'warning', 'step': 'checked_state',
+                          'element': element_key,
+                          'match_count': len(matches),
+                          'note': 'multiple instances — cannot safely verify'}))
+        return False
+    return selected_state in matches[0].get('states', [])
 
 
 def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing: dict = None):
@@ -448,7 +473,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 skipped = False
                 if step.get('skip_if_checked'):
                     menu_snap = inspect_platform(platform, scope=scope)
-                    if _element_has_checked_state(menu_snap, cfg, target):
+                    if _element_has_checked_state(menu_snap, cfg, target, platform):
                         skipped = True
 
                 if not skipped:
@@ -462,7 +487,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
 
                 if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
                     verify_snap = inspect_platform(platform, scope=scope)
-                    if not _element_has_checked_state(verify_snap, cfg, target):
+                    if not _element_has_checked_state(verify_snap, cfg, target, platform):
                         # Menu auto-closed after click (Gemini): scope='menu' is empty.
                         # Fall back to indicator-based verification in document scope
                         # using the step's validation key. This is not a fallback in the
@@ -591,7 +616,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             skipped = False
             if selection.get('mode_skip_if_checked'):
                 menu_snap = inspect_platform(platform, scope=scope)
-                if _element_has_checked_state(menu_snap, cfg, target_key):
+                if _element_has_checked_state(menu_snap, cfg, target_key, platform):
                     skipped = True
                     # Already checked — close menu and move on
                     if selection.get('mode_close_with_escape'):
@@ -613,7 +638,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                 # to bring the target back into scope, verify, then close.
                 if selection.get('mode_verified_by_checked_state'):
                     verify_snap = inspect_platform(platform, scope=scope)
-                    verified = _element_has_checked_state(verify_snap, cfg, target_key)
+                    verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
                     if not verified and selection.get('mode_reverify_via_reopen'):
                         # Re-open menu for verification (menu auto-closed on selection)
                         result = act(platform, 'click', trigger_key)
@@ -623,7 +648,7 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
                                  platform)
                         time.sleep(timing['after_trigger_click'])
                         verify_snap = inspect_platform(platform, scope=scope)
-                        verified = _element_has_checked_state(verify_snap, cfg, target_key)
+                        verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
                     if verified:
                         checked_state_keys.update(mode_val_keys)
                     else:
@@ -842,6 +867,47 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     time.sleep(timing['after_paste'])
     print(json.dumps({'event': 'step_ok', 'step': 'prompt', 'length': len(message)}))
 
+    # Prove the pasted text actually landed in the composer. runtime.paste()
+    # returning True only proves the clipboard write + Ctrl+V subprocess
+    # succeeded, not that the text reached the input element (focus could
+    # have been on a modal, a different focused entry, etc.). Use the AT-SPI
+    # Text interface on the input element to verify character count.
+    input_spec = cfg.get('tree', {}).get('element_map', {}).get(input_key, {})
+    input_name = input_spec.get('name', '')
+    input_role = input_spec.get('role', '')
+    if not input_role:
+        fail('prompt', f'element_map.{input_key}.role missing from YAML', platform)
+
+    from consultation_v2.runtime import ConsultationRuntime
+    _rt = ConsultationRuntime(platform)
+    txt_result = _rt.read_element_text(input_name, input_role)
+    if 'error' in txt_result:
+        fail('prompt',
+             f'Cannot verify paste landed in {input_key!r}: {txt_result["error"]}. '
+             f'No way to prove text reached the composer.',
+             platform)
+    live_text = txt_result.get('text', '') or ''
+    live_count = txt_result.get('char_count', 0)
+    # Accept small deltas: some platforms normalize whitespace, ProseMirror
+    # may collapse trailing newlines, etc. Require at least 80% of the
+    # expected character count — enough to catch wholesale-missing paste but
+    # tolerate minor tokenization. Also require the first 30 chars match.
+    expected = len(message)
+    threshold = max(20, int(expected * 0.8))
+    if live_count < threshold:
+        fail('prompt',
+             f'Paste did not land: input has {live_count} chars, expected ~{expected} '
+             f'(threshold {threshold}). Live text head: {live_text[:80]!r}',
+             platform)
+    head_len = min(30, len(message.strip()))
+    if head_len > 0 and message.strip()[:head_len] not in live_text:
+        fail('prompt',
+             f'Paste corrupted: expected prefix {message.strip()[:head_len]!r} '
+             f'not found in live input text head {live_text[:80]!r}',
+             platform)
+    print(json.dumps({'event': 'step_ok', 'step': 'prompt_text_verified',
+                      'expected_chars': expected, 'live_chars': live_count}))
+
     # Validate prompt_ready — read validation key from YAML workflow.prompt.validation
     prompt_val_key = prompt_cfg.get('validation')
     if not prompt_val_key:
@@ -931,9 +997,32 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     if require_url and not url_changed:
         fail('send', f'require_new_url is true but URL unchanged', platform)
 
+    # Enforce workflow.send.validation indicators against the current snap.
+    # Previously this YAML field was declared but never read — the indicators
+    # could drift silently. Now they must match the live tree at send-confirm.
+    send_val_key = send_cfg.get('validation')
+    if not send_val_key:
+        fail('send', 'workflow.send.validation missing from YAML', platform)
+    send_validation = validation.get(send_val_key, {})
+    if not send_validation:
+        fail('send', f'validation.{send_val_key!r} missing from YAML', platform)
+    send_indicators = send_validation.get('indicators', [])
+    if not send_indicators:
+        fail('send', f'validation.{send_val_key}.indicators missing or empty', platform)
+    send_elements = _all_elements(snap)
+    for ind in send_indicators:
+        ind_name = ind.get('name')
+        ind_role = ind.get('role')
+        if ind_name is None or ind_role is None:
+            fail('send', f'Malformed indicator in validation.{send_val_key}: {ind}', platform)
+        found = any(e.get('name') == ind_name and e.get('role') == ind_role for e in send_elements)
+        if not found:
+            fail('send', f'send_success indicator not found in live tree: {ind}', platform)
+
     # has_stop guaranteed True here (fail() exits if False)
     print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True,
-                       'url_changed': url_changed}))
+                       'url_changed': url_changed,
+                       'validation': send_val_key}))
 
     # ── Step 6: Monitor ──
     if start_monitor:
