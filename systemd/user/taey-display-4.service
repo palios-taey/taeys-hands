@@ -6,8 +6,8 @@ Requires=taey-xvfb@4.service
 [Service]
 Type=simple
 Environment=DISPLAY=:4
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:4; /usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 2; A11Y_ADDR=$(xprop -display :4 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:4; openbox & sleep 1; mkdir -p /tmp/ff-profile-mira-gemini; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/firefox/firefox --no-remote --profile /tmp/ff-profile-mira-gemini "https://gemini.google.com/app" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:4; wait ${FIREFOX_PID}'
-ExecStopPost=/usr/bin/bash -lc 'rm -f /tmp/a11y_bus_:4 /tmp/dbus_session_bus_:4 /tmp/firefox_pid_:4'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:4; /usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 2; A11Y_ADDR=$(xprop -display :4 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:4; openbox & sleep 1; /usr/bin/x11vnc -display :4 -rfbport 5904 -rfbauth $HOME/.taey/vnc_passwd -forever -shared -bg -o /tmp/x11vnc-4.log; mkdir -p $HOME/.taey/profiles/gemini; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/firefox/firefox --no-remote --profile $HOME/.taey/profiles/gemini "https://gemini.google.com/app" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:4; wait ${FIREFOX_PID}'
+ExecStopPost=/usr/bin/bash -lc 'pkill -f "x11vnc.*rfbport 5904" 2>/dev/null || true; rm -f /tmp/a11y_bus_:4 /tmp/dbus_session_bus_:4 /tmp/firefox_pid_:4'
 Restart=always
 RestartSec=10
 
