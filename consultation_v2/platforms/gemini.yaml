@@ -156,7 +156,7 @@ workflow:
   defaults:
     mode: pro
     tools:
-      - deep_think
+      - deep_research
 
   selection:
     mode_trigger: mode_picker
@@ -203,6 +203,26 @@ workflow:
           skip_if_checked: true
           close_with_escape: true
           validation: deep_think_active
+
+      # Deep Research is a DIFFERENT tool from Deep Think. DR performs
+      # multi-source web research with citations and typically runs 10+ min.
+      # Deep Think is extended reasoning on model-internal context only.
+      # They are mutually exclusive; selecting one deselects the other.
+      deep_research:
+        - trigger: mode_picker
+          snapshot: menu
+          target: mode_pro
+          click_strategy: atspi_only
+          skip_if_checked: true
+          close_with_escape: true
+          validation: pro_active
+        - trigger: tools_button
+          snapshot: menu
+          target: tool_deep_research
+          click_strategy: atspi_only
+          skip_if_checked: true
+          close_with_escape: true
+          validation: deep_research_active
 
   attachment:
     trigger: attach_trigger
@@ -293,4 +313,11 @@ validation:
   deep_think_active:
     indicators:
       - name: "Deselect Deep think"
+        role: push button
+
+  # Deep Research is mutually exclusive with Deep Think. Gemini's tool UI
+  # shows a "Deselect <tool>" push button for whichever is currently active.
+  deep_research_active:
+    indicators:
+      - name: "Deselect Deep research"
         role: push button

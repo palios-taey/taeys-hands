@@ -924,28 +924,35 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
              platform)
     live_text = txt_result.get('text', '') or ''
     live_count = txt_result.get('char_count', 0)
-    # R10-4: absolute slack, not percentage. The only expected delta is
-    # minor whitespace normalization (ProseMirror collapsing trailing
-    # newlines, \r\n → \n) — that's a handful of characters, bounded.
-    # 80% percentage let 20% of a 12KB prompt (2.4KB) be silently dropped
-    # and still pass. Fixed 20-char slack catches wholesale missing paste
-    # while tolerating the real normalization delta.
+    # Paste slack = max(20 chars, 1% of expected).
+    # - 20 char floor: absolute tolerance for small prompts and basic
+    #   whitespace normalization (\r\n → \n, trailing newline stripping).
+    # - 1% ceiling: for structured documents (Markdown with blank lines,
+    #   code fences, nested lists), ProseMirror and other editors
+    #   collapse/normalize whitespace more aggressively. A 12KB prompt can
+    #   legitimately lose ~100 chars of structural whitespace. 1% bounds
+    #   this tightly — far tighter than the original 80% percentage
+    #   (which permitted silent 2.4KB truncation on 12KB).
+    # - An 80-char loss on a 100-byte message stays failing (slack=20).
+    # - An 80-char loss on an 8KB message passes (slack=80) — real
+    #   normalization. 800-char loss on same message fails.
     expected = len(message)
-    PASTE_SLACK = 20
+    PASTE_SLACK = max(20, int(expected * 0.01))
     if expected > 0 and live_count == 0:
         fail('prompt',
              f'Paste did not land: input has 0 chars, expected {expected}. '
              f'Live text head: {live_text[:80]!r}',
              platform)
-    # Short prompts: require non-zero (already covered above) and any
-    # count up to `expected` is acceptable — can't meaningfully tolerate
-    # slack when the message is shorter than the slack.
+    # Short prompts: require non-zero (covered above) and any count up to
+    # `expected` is acceptable — can't meaningfully tolerate slack when
+    # the message is shorter than the slack.
     if expected > PASTE_SLACK:
         min_chars = expected - PASTE_SLACK
         if live_count < min_chars:
             fail('prompt',
                  f'Paste incomplete: input has {live_count} chars, expected {expected} '
-                 f'(slack {PASTE_SLACK}). Live text head: {live_text[:80]!r}',
+                 f'(slack {PASTE_SLACK}, min {min_chars}). '
+                 f'Live text head: {live_text[:80]!r}',
                  platform)
 
     # Head-check: the prompt must appear at the START of the composer, not
