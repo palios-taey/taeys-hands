@@ -301,6 +301,7 @@ validation:
     # Validated by snapshot diff in driver — new push button (file chip) must appear.
     # No YAML indicators needed; driver compares pre/post-attach snapshots.
     diff_validated: true
+    file_chip_template: "{filename}"
 
   prompt_ready:
     # Send button presence is sufficient — if send_button is in tree, prompt is ready.

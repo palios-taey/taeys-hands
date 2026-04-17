@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -121,8 +122,10 @@ def fail(step: str, msg: str, platform: str):
 
 
 def _all_elements(snap: dict) -> list:
-    """Flatten snapshot into a single list of elements."""
-    return snap.get('unknown', []) + [e for v in snap.get('mapped', {}).values() for e in v]
+    """Flatten snapshot into a single list of elements including sidebar."""
+    return (snap.get('unknown', []) +
+            snap.get('sidebar', []) +
+            [e for v in snap.get('mapped', {}).values() for e in v])
 
 
 def _element_has_checked_state(snap: dict, cfg: dict, element_key: str) -> bool:
@@ -518,43 +521,42 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
             fail('attach', 'File dialog not found', platform)
         time.sleep(timing['after_file_dialog'])
 
-        # Verify attachment — STRICT: require push button containing EXACT filename
+        # Verify attachment — STRICT: YAML-driven template + Counter multiset diff
         if pre_attach_snap and attach_validation.get('diff_validated'):
-            pre_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(pre_attach_snap)
-                           if e.get('role') == 'push button'}
-            # The expected filename (basename) from the consolidated package
-            expected_filename = Path(pkg).name
-            # Filename may be truncated in UI (e.g., "taey_packa...1776440164" + "MD")
-            # Use a stem prefix that's unlikely to be in transients
+            # YAML-driven chip name template: {filename} or {filename_stem} or literal
+            chip_template = attach_validation.get('file_chip_template')
+            if not chip_template:
+                fail('attach',
+                     f'YAML validation.{attach_val_key}.file_chip_template missing — required for diff_validated',
+                     platform)
+
+            filename = Path(pkg).name  # e.g., "taey_package_claude_1776440164.md"
             filename_stem = Path(pkg).stem  # e.g., "taey_package_claude_1776440164"
-            # Poll for file chip to appear (up to 20s)
+            expected_name = chip_template.replace('{filename}', filename).replace('{filename_stem}', filename_stem)
+
+            # Counter-based multiset diff — catches duplicates that set() subtraction masks
+            pre_buttons = Counter(e.get('name') for e in _all_elements(pre_attach_snap)
+                                   if e.get('role') == 'push button')
             chip_found = False
-            matched_chip = None
-            new_buttons = set()
+            new_buttons = Counter()
             for _ in range(20):
                 post_attach_snap = inspect_platform(platform)
-                post_buttons = {(e.get('name'), e.get('role')) for e in _all_elements(post_attach_snap)
-                                if e.get('role') == 'push button'}
+                post_buttons = Counter(e.get('name') for e in _all_elements(post_attach_snap)
+                                        if e.get('role') == 'push button')
                 new_buttons = post_buttons - pre_buttons
-                # STRICT: new push button must contain the exact package filename stem.
-                # This anchors to THE file we uploaded, not any transient element.
-                for name, role in new_buttons:
-                    if name and filename_stem in name:
-                        chip_found = True
-                        matched_chip = (name, role)
-                        break
-                if chip_found:
+                # EXACT string match (==) — no substring, no .lower()
+                if expected_name in new_buttons and new_buttons[expected_name] > 0:
+                    chip_found = True
                     break
                 time.sleep(1)
             if not chip_found:
                 path = screenshot(platform)
                 fail('attach',
-                     f'diff_validated: no push button containing filename {filename_stem!r} after 20s. '
-                     f'Screenshot: {path}. New buttons: {list(new_buttons)[:10]}',
+                     f'diff_validated: no new push button {expected_name!r} after 20s. '
+                     f'Screenshot: {path}. New buttons: {dict(new_buttons)}',
                      platform)
             print(json.dumps({'event': 'step_ok', 'step': 'attach',
-                              'matched_chip': matched_chip[0],
-                              'expected_filename': expected_filename}))
+                              'chip': expected_name, 'match': 'exact'}))
         elif attach_validation.get('pass_through'):
             path = screenshot(platform)
             print(json.dumps({'event': 'step_ok', 'step': 'attach', 'screenshot': path,
