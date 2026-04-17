@@ -297,10 +297,22 @@ def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing:
         if key not in timing:
             return False
 
-    # Find and focus file dialog — anchor regex to avoid matching
-    # unrelated windows (e.g., "Open" vs "OpenAI - ChatGPT").
+    # Find and focus file dialog.
+    #
+    # Dialog window titles on this system look like:
+    #   "File Upload - ChatGPT — Mozilla Firefox"
+    #   "Open - Gemini — Mozilla Firefox"
+    # So the YAML dialog_titles entries ("File Upload", "Open", "Open File")
+    # are PREFIXES of the real title. A bare substring regex would wrongly
+    # match a main-tab title like "OpenAI - ChatGPT — Mozilla Firefox"
+    # because "OpenAI" contains "Open" as a prefix.
+    #
+    # Use a start-anchored word-boundary regex: "^<title>\b". This requires
+    # the title to appear at the start AND be followed by a non-word char
+    # (space, dash, em-dash) or end of string. "OpenAI..." fails because
+    # "A" after "Open" is a word char. "Open - ..." passes.
     for title in dialog_titles:
-        anchored = f'^{re.escape(title)}$'
+        anchored = f'^{re.escape(title)}\\b'
         r = subprocess.run(['xdotool', 'search', '--name', anchored],
                            capture_output=True, text=True, timeout=3, env=env)
         wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
