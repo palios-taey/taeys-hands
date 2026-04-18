@@ -158,21 +158,32 @@ def _needs_subprocess(platform: str) -> bool:
 
 
 def _subprocess_scan(platform: str, scan_root: str = "document") -> Snapshot:
-    """Scan platform via subprocess with correct DISPLAY + AT_SPI_BUS_ADDRESS."""
+    """Scan platform via subprocess with correct DISPLAY + AT_SPI_BUS_ADDRESS.
+
+    On systems where /tmp/a11y_bus_:X is intentionally empty (AT-SPI rides
+    on the session bus), get_platform_bus returns None — that's the normal
+    configuration here, not an error. Set AT_SPI_BUS_ADDRESS only if the
+    a11y file has content; the session bus file is always required.
+    Same contract that act.py setup_display enforces.
+    """
     display = get_platform_display(platform)
-    bus = get_platform_bus(platform)
-    if not display or not bus:
-        raise RuntimeError(f"{platform}: no display ({display}) or bus ({bus}) configured")
+    if not display:
+        raise RuntimeError(f"{platform}: no display configured")
+
+    bus = get_platform_bus(platform)  # may be None if a11y bus file is empty
 
     session_bus_file = f'/tmp/dbus_session_bus_{display}'
     try:
         session_bus = Path(session_bus_file).read_text().strip()
     except FileNotFoundError:
-        session_bus = bus
+        raise RuntimeError(f"{platform}: session bus file missing: {session_bus_file}")
+    if not session_bus:
+        raise RuntimeError(f"{platform}: session bus file empty: {session_bus_file}")
 
     env = dict(os.environ)
     env['DISPLAY'] = display
-    env['AT_SPI_BUS_ADDRESS'] = bus
+    if bus:
+        env['AT_SPI_BUS_ADDRESS'] = bus
     env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
     env['PLATFORM_DISPLAYS'] = f'{platform}:{display.lstrip(":")}'
 
