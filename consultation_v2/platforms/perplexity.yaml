@@ -129,6 +129,14 @@ tree:
       name: "Your Computer is ready"
       role: push button
 
+    # Deep Research expands its report behind a "Show full report" push
+    # button. Without clicking it, Copy / Copy contents return a collapsed
+    # summary with empty bullets where URLs should be. Used by
+    # extract.pre_expand_click_key.
+    show_full_report_button:
+      name: "Show full report"
+      role: push button
+
     # Toolbar mode-tile semantics:
     # - Active mode appears as a push button with the mode name (toolbar tile).
     # - The adjacent "Remove" push button appears with the active tile.
@@ -374,15 +382,23 @@ workflow:
   extract:
     scroll_before_extract: ctrl+End
     scroll_delay: 2.0
-    post_click_delay: 1.0
-    # Perplexity Deep Research: extract via tree walk of the response
-    # landmark, not the Copy button. Rationale: the action-bar "Copy"
-    # button truncates long DR responses, and "Copy contents" is inside
-    # a More menu that isn't in the default AT-SPI tree. The AT-SPI
-    # Text interface on the response landmark returns the full rendered
-    # answer including citations and section structure.
-    primary_key: response_landmark
-    strategy: tree_walk
+    post_click_delay: 2.0
+    # Perplexity Deep Research: the report is collapsed by default. The
+    # "Show full report" push button expands it into a document viewer with
+    # a dedicated "Copy contents" button that yields the full Markdown
+    # (tables, URL lists, citations intact). Without expansion, Copy and
+    # Copy contents both return a summary stub with empty bullets where
+    # URLs should be.
+    #
+    # Flow:
+    #   1. Click pre_expand_click_key → UI expands the report document.
+    #   2. Wait pre_expand_delay for the document card to render.
+    #   3. Click primary_key (Copy contents) → clipboard gets full text.
+    #   4. Read clipboard.
+    pre_expand_click_key: show_full_report_button
+    pre_expand_delay: 3.0
+    primary_key: copy_contents_button
+    strategy: first
     click_strategy: atspi_only
 
 

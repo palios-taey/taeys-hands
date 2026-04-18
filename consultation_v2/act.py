@@ -230,6 +230,36 @@ def main():
             print(json.dumps({'error': 'workflow.extract.post_click_delay missing from YAML'}))
             return 1
 
+        # Step 1.5: Optional pre-expand click. Perplexity Deep Research shows
+        # a collapsed summary by default and reveals the full report only
+        # after clicking "Show full report". Without this the extract picks
+        # the Copy button from the collapsed view and gets empty bullets
+        # where URLs should be. YAML declares which element to click and how
+        # long to wait for the expanded view to render.
+        pre_expand_key = extract_cfg.get('pre_expand_click_key')
+        if pre_expand_key:
+            pre_expand_delay = extract_cfg.get('pre_expand_delay')
+            if pre_expand_delay is None:
+                print(json.dumps({'error': 'workflow.extract.pre_expand_delay missing from YAML '
+                                            '(required when pre_expand_click_key is set)'}))
+                return 1
+            _, _, pe_snap = build_snapshot(args.platform)
+            pe_element = pe_snap.first(pre_expand_key)
+            if pe_element:
+                pe_strategy = extract_cfg.get('pre_expand_click_strategy') or extract_cfg.get('click_strategy')
+                ok = runtime.click(pe_element, strategy=pe_strategy)
+                if not ok:
+                    print(json.dumps({'error': f'pre_expand_click {pre_expand_key!r} failed'}))
+                    return 1
+                import time; time.sleep(pre_expand_delay)
+            # If the button isn't present, assume the report is already
+            # expanded (or the view doesn't need it) and continue. YAML can
+            # enforce presence by declaring pre_expand_required: true.
+            elif extract_cfg.get('pre_expand_required'):
+                print(json.dumps({'error': f'pre_expand_click_key {pre_expand_key!r} not found '
+                                            f'and pre_expand_required=true'}))
+                return 1
+
         # Step 2: Find the copy button by strategy
         primary_key = extract_cfg.get('primary_key')
         if not primary_key:
