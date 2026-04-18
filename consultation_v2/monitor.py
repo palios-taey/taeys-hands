@@ -151,14 +151,13 @@ def main():
     result = run_sequence(ctx, mon_sequence, step_name='monitor')
     elapsed = round(time.time() - start, 1)
 
-    # The monitor sequence typically ends in wait_for_indicator on
-    # response_complete indicators. If that step succeeded, generation
-    # finished AND the complete indicator is live → RESPONSE_COMPLETE.
-    # If the terminal complete-indicator check was optional (skipped
-    # via absent_optional / timeout), generation stopped but completion
-    # isn't verified → RESPONSE_UNVERIFIED. YAML sets `into: complete_key_present`
-    # on the final wait step OR the platform YAML can declare the
-    # contract differently.
+    # Completion contract: the YAML sequence MUST set complete_key_present
+    # (True | False) via `into:` on the terminal wait_for_indicator step.
+    # True  → response complete, copy button visible → RESPONSE_COMPLETE.
+    # False → generation stopped, copy button absent  → RESPONSE_UNVERIFIED.
+    # None  → YAML forgot `into:` — fail closed, do NOT assume completion.
+    #         (ChatGPT audit caught this: treating None as complete would
+    #         let a YAML typo silently promote unverified runs to complete.)
     complete = ctx['vars'].get('complete_key_present', None)
     if not result['ok']:
         # Non-ok means a hard failure in the sequence (e.g. inspect error).
@@ -176,9 +175,21 @@ def main():
     except Exception:
         url = ''
 
+    if complete is None:
+        # YAML contract violation — the monitor sequence didn't record
+        # an outcome. Treat as fatal rather than false-completing.
+        _push_redis(args.platform, 'MONITOR_FATAL',
+                    f'{args.platform} monitor sequence returned ok but did not set '
+                    f'complete_key_present. Add `into: complete_key_present` to the '
+                    f'terminal wait_for_indicator step in workflow.monitor.sequence.')
+        print(json.dumps({'event': 'fatal',
+                          'error': 'complete_key_present var not set by YAML sequence',
+                          'elapsed': elapsed}), flush=True)
+        return 1
+
     if complete is False:
         # Explicit unverified — sequence set complete_key_present=False
-        # (e.g., scroll-retry primitive couldn't find the complete key).
+        # (e.g., terminal wait_for_indicator with optional: true timed out).
         _push_redis(args.platform, 'RESPONSE_UNVERIFIED',
                     f'{args.platform} response stopped; completion unverified '
                     f'({elapsed}s, complete_key absent). URL: {url}',

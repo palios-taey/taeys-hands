@@ -758,7 +758,10 @@ def regenerate_if_short(ctx: dict, step: dict) -> dict:
     required_absent_cycles = step.get('required_stop_absent_cycles', 3)
     poll = step.get('poll_interval', 2.0)
     regen_timeout = step.get('regen_timeout', 3600)
-    click_strategy = step.get('click_strategy', 'atspi_only')
+    # click_strategy: if absent from step, pass None to rt.click so it
+    # uses the platform's top-level click_strategy default. Hardcoding
+    # 'atspi_only' here was a rule-2 violation (Perplexity audit RV-2).
+    click_strategy = step.get('click_strategy')
 
     rt = ctx['runtime']
     attempts = 0
@@ -805,14 +808,22 @@ def regenerate_if_short(ctx: dict, step: dict) -> dict:
                          f'regeneration timed out on attempt {attempt}: '
                          f'{done_res["error"]}')
 
-        # Wait (briefly) for the completion indicator (copy_button). If
-        # it doesn't appear we still re-read — a regeneration that left
-        # the copy button absent still produced text in the response
-        # landmark, and the length check decides the next step.
-        wait_for_indicator(ctx, {
+        # Wait (briefly) for the completion indicator (copy_button). A
+        # timeout here is acceptable — a regeneration that left the copy
+        # button absent still produced text in the response landmark,
+        # and the length check below decides. But a HARD error (inspect
+        # failure, bus crash) must propagate — fail-closed discipline
+        # requires distinguishing timeout from real failure. Claude/Gemini
+        # /ChatGPT audits all flagged this silent-swallow as a rule
+        # violation.
+        complete_res = wait_for_indicator(ctx, {
             'validation': complete_validation,
             'timeout': 30, 'poll_interval': poll,
         })
+        if not complete_res['ok'] and complete_res.get('kind') != 'timeout':
+            return _fail('regenerate_if_short',
+                         f'completion check errored on attempt {attempt}: '
+                         f'{complete_res["error"]}')
 
         # Re-read the response into the same var.
         read_res = read_element_text_primitive(ctx, {
@@ -838,10 +849,9 @@ def regenerate_if_short(ctx: dict, step: dict) -> dict:
 @primitive('mode_select_step')
 def mode_select_step(ctx: dict, step: dict) -> dict:
     """Execute one mode/tool selection step: (trigger → target-in-menu →
-    verify-checked [→ reverify-via-reopen] → escape). Encapsulates the
-    mode-setup logic that used to live in consult.py's inline
-    _run_sequence. YAML keys mirror the existing selection.sequences
-    step shape so no YAML rewrite is needed.
+    [verify] → escape). Encapsulates the mode-setup logic that used to
+    live in consult.py's inline _run_sequence. YAML keys mirror the
+    existing selection.sequences step shape so no YAML rewrite is needed.
 
     Fields:
       trigger: element_map key of the menu trigger (optional — some
@@ -851,19 +861,24 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
       snapshot: 'menu' or 'document' — the scope to inspect when
         looking up the target (required if target is set).
       click_strategy: forwarded to runtime.click for the target click.
-      skip_if_checked: if true, inspect scope first and skip the target
-        click when its selected_state is already set (avoids toggling
-        off a mode the user wanted ON).
-      verified_by_checked_state: after click, inspect scope and confirm
-        selected_state is set. Falls back to document-scope indicators
-        named by step.validation if the scope snapshot is empty (menu
-        auto-close after select).
-      reverify_via_reopen: if post-click verify fails AND trigger is set,
-        re-click trigger and verify again. For UIs whose menu auto-closes
-        on selection (Gemini simple-mode path).
+      skip_if_checked: inspect scope first; if target already has its
+        selected_state, skip the click and mark verified. Avoids
+        toggling off a mode/tool the user wanted ON.
+      verified_by_checked_state: after clicking the target, verify
+        selected_state in scope. If the scope snapshot is empty
+        (e.g. menu auto-closed), fall back to document-scope
+        indicators declared under validation.<step.validation>. Fail
+        closed if neither proves selection.
       close_with_escape: press Escape after the step.
-      validation: name of the validation.<key> entry used for the
-        fallback document-indicator verification.
+      validation: name of the validation.<key> used for the
+        document-indicator fallback (and for post-check verification in
+        consult.py).
+
+    Note: no `reverify_via_reopen`. If a platform's UI auto-closes its
+    menu on select, declare a document-scope indicator tile (e.g.
+    Gemini's "Deselect Deep think" push button) and rely on the
+    indicator fallback. Re-opening the menu to prove selection is a
+    retry chain — rule-5 forbidden.
     """
     from consultation_v2.consult import _element_has_checked_state
     rt = ctx['runtime']
@@ -914,7 +929,13 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
                 skipped = True
 
         if not skipped:
+            menu_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
+            if err:
+                return err
             from consultation_v2.snapshot import build_menu_snapshot, build_snapshot
+            # Re-scan for the click target. _must_inspect routes through
+            # the act.py subprocess path; re-scanning here in-process gives
+            # the ElementRef with x/y that rt.click needs.
             if scope == 'menu':
                 _, _, snap = build_menu_snapshot(ctx['platform'])
             else:
@@ -928,43 +949,27 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
                              f'target click {target!r} returned False')
             time.sleep(timing['after_target_click'])
 
-        # Verify checked state (either because skip_if_checked was set, or
-        # verified_by_checked_state was explicitly requested). On mismatch,
-        # fall back to document-scope indicators under validation.<key>.
-        # The YAML declares the fallback by naming the validation key.
-        if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
+        # Post-click verification is OPT-IN via verified_by_checked_state.
+        # When we skipped (already checked), verification is already proven;
+        # no further work needed. When we clicked and the YAML asks for
+        # verification, try checked-state in scope first, then fall back
+        # to document-scope indicators under validation.<key>. The YAML
+        # names the validation key; the indicator tiles ("Deselect Deep
+        # think", "Extended Pro", etc.) are the canonical document-scope
+        # source of truth when the menu auto-closed on selection.
+        if not skipped and step.get('verified_by_checked_state'):
             verify_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
             if err:
                 return err
             verified = _element_has_checked_state(
                 verify_snap, cfg, target, ctx['platform'])
 
-            if not verified and step.get('reverify_via_reopen') and trigger:
-                # Gemini-style: menu auto-closes after selection, re-open
-                # to bring the target back into menu scope for verification.
-                # Trigger uses platform default strategy (see trigger click
-                # above for rationale).
-                from consultation_v2.snapshot import build_snapshot
-                _, _, snap = build_snapshot(ctx['platform'])
-                el = snap.first(trigger)
-                if not el:
-                    return _fail('mode_select_step',
-                                 f'reverify re-open: trigger {trigger!r} absent')
-                if not rt.click(el):
-                    return _fail('mode_select_step',
-                                 f'reverify re-open: trigger {trigger!r} click failed')
-                time.sleep(timing['after_trigger_click'])
-                verify_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
-                if err:
-                    return err
-                verified = _element_has_checked_state(
-                    verify_snap, cfg, target, ctx['platform'])
-
             if not verified:
-                # Final fallback: check document-scope indicators declared
-                # under validation.<key>. Some platforms (Claude Adaptive)
-                # expose the active state only as a toolbar button rename,
-                # not a menu-item checked state.
+                # Document-scope indicator fallback. This isn't a retry in
+                # the rule-5 sense — the YAML declares the indicator as
+                # the authoritative post-click signal (e.g. Gemini's
+                # "Deselect Deep think" tile appears only when Deep think
+                # is the active tool).
                 if validation_key:
                     val_cfg = cfg.get('validation', {}).get(validation_key, {})
                     indicators = val_cfg.get('indicators', [])

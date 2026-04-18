@@ -501,7 +501,6 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
             'click_strategy': selection.get('mode_click_strategy'),
             'skip_if_checked': selection.get('mode_skip_if_checked'),
             'verified_by_checked_state': selection.get('mode_verified_by_checked_state'),
-            'reverify_via_reopen': selection.get('mode_reverify_via_reopen'),
             'close_with_escape': selection.get('mode_close_with_escape'),
             'validation': mode_vals[mode_name],
         }
@@ -676,9 +675,14 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     # package path, then run the YAML attach sequence with pkg in ctx.
     from consultation_v2.identity import consolidate_attachments
     caller_files = [file_path] if file_path else []
-    pkg = consolidate_attachments(platform, caller_files)
-    if not pkg:
-        fail('attach', 'Identity consolidation failed — cannot send without identity package', platform)
+    # consolidate_attachments raises if FAMILY_KERNEL or the platform
+    # IDENTITY file is missing — HARD RULE enforcement happens there.
+    # Catch and surface through the standard fail() path so the caller
+    # sees a structured HALT event instead of a raw traceback.
+    try:
+        pkg = consolidate_attachments(platform, caller_files)
+    except Exception as e:
+        fail('attach', f'Identity consolidation failed — {e}', platform)
 
     attach_cfg = workflow.get('attachment', {})
     attach_sequence = attach_cfg.get('sequence')

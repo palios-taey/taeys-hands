@@ -172,9 +172,17 @@ workflow:
     mode_trigger: mode_picker
     mode_snapshot: menu
     mode_click_strategy: atspi_only
+    # Gemini's menu auto-closes on select. We do NOT re-open to verify —
+    # that's a retry chain (rule 5 forbidden). Verification relies on the
+    # document-scope indicator tiles ("Deselect Deep think" /
+    # "Deselect Deep research") that appear after selection, declared
+    # under validation.deep_think_active / deep_research_active. For Pro
+    # mode itself (no tile), skip_if_checked handles the happy path
+    # (Pro is Gemini's default), and if the click must happen the
+    # sequence's tool step will catch any real failure since the tool
+    # cannot activate unless Pro is the model.
     mode_verified_by_checked_state: true
     mode_skip_if_checked: true
-    mode_reverify_via_reopen: true
     mode_close_with_escape: true
     mode_targets:
       fast: mode_fast
@@ -289,6 +297,10 @@ workflow:
     require_new_url: false
     confirmation_timeout: 15
     validation: send_success
+    # send.sequence stops at send-confirmation (stop_button visible).
+    # DR two-phase continuation moved to monitor.sequence — on non-DR
+    # prompts the old trailing wait_for_indicator here hung 15s waiting
+    # for a Stop button that never reappeared (audit: Gemini edge 1).
     sequence:
       - action: capture_url
         into: pre_send_url
@@ -301,30 +313,6 @@ workflow:
         validation: send_success
         timeout: 15
         poll_interval: 2.0
-      # Gemini R11 #2: Deep Research two-phase flow. After the prompt is
-      # sent with DR active, Gemini produces a research PLAN first
-      # (stop_button flickers, disappears). A "Start research" push button
-      # then appears. Clicking it begins the actual 10+ minute research
-      # phase (stop_button reappears and stays until synthesis completes).
-      # For non-DR prompts, start_research_button never appears and the
-      # optional steps below become no-ops (the wait_for_indicator_absent
-      # hits its timeout harmlessly; click returns absent_optional).
-      - action: wait_for_indicator_absent
-        validation: send_success
-        required_absent_cycles: 2
-        timeout: 60
-        poll_interval: 2.0
-        optional: true
-      - action: click
-        element: start_research_button
-        click_strategy: atspi_only
-        delay: 1.0
-        optional: true
-      - action: wait_for_indicator
-        validation: send_success
-        timeout: 15
-        poll_interval: 2.0
-        optional: true
 
   timing:
     after_trigger_click: 1.5
@@ -346,12 +334,44 @@ workflow:
     complete_key: copy_button
     timeout: 3600
     validation: response_complete
+    # Gemini DR two-phase flow lives here (was previously in send.sequence,
+    # where it hung 15s on every non-DR prompt waiting for a second Stop
+    # button that never appeared — audit: Gemini edge 1).
+    # Flow:
+    #   1. Wait for stop_button to be absent N cycles — first generation
+    #      phase done. For DR this is the plan phase; for non-DR this is
+    #      the real response.
+    #   2. Optional: click "Start research" if present. Only exists on DR.
+    #      absent_optional on non-DR → skip.
+    #   3. If we clicked Start research, wait for stop_button to appear
+    #      again (synth phase starts). Optional — no-op on non-DR.
+    #   4. Wait for stop_button to be absent N cycles again — final phase
+    #      done. Optional on non-DR (already absent).
+    #   5. Verify response_complete indicator (copy_button) with
+    #      `into: complete_key_present` for the RESPONSE_COMPLETE vs
+    #      RESPONSE_UNVERIFIED branch in monitor.py.
     sequence:
       - action: wait_for_indicator_absent
         validation: send_success
         required_absent_cycles: 3
         poll_interval: 2.0
         timeout: 3600
+      - action: click
+        element: start_research_button
+        click_strategy: atspi_only
+        delay: 1.0
+        optional: true
+      - action: wait_for_indicator
+        validation: send_success
+        timeout: 15
+        poll_interval: 2.0
+        optional: true
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 3
+        poll_interval: 2.0
+        timeout: 3600
+        optional: true
       - action: wait_for_indicator
         validation: response_complete
         into: complete_key_present
