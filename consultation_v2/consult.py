@@ -759,12 +759,20 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     session_id = None
     try:
         from consultation_v2.store import store_consultation
+        # Record the actual consolidated package that was uploaded (the
+        # /tmp/taey_package_*.md), not just the caller's file — audit
+        # provenance needs the FAMILY_KERNEL + IDENTITY artifact that
+        # went to the platform. Caller file is recoverable from pkg
+        # section headers. (ChatGPT audit bug 4.)
+        attachments = [pkg]
+        if file_path and file_path != pkg:
+            attachments.append(file_path)
         session_id = store_consultation(
             platform=platform,
             prompt=message,
             mode=mode,
             tools=tools,
-            attachments=[file_path] if file_path else [],
+            attachments=attachments,
             url=url,
         )
         print(json.dumps({'event': 'step_ok', 'step': 'store', 'session_id': session_id}))

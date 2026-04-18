@@ -381,7 +381,7 @@ def wait_for_indicator(ctx: dict, step: dict) -> dict:
             timeout: 15
             poll_interval: 2.0`
     """
-    from consultation_v2.consult import inspect_platform, _all_elements
+    from consultation_v2.consult import _all_elements
     val_key = step.get('validation')
     if not val_key:
         return _fail('wait_for_indicator', 'step.validation missing')
@@ -442,7 +442,7 @@ def wait_for_indicator_absent(ctx: dict, step: dict) -> dict:
             poll_interval: 2.0
             timeout: 3600`
     """
-    from consultation_v2.consult import inspect_platform, _all_elements
+    from consultation_v2.consult import _all_elements
     val_key = step.get('validation')
     if not val_key:
         return _fail('wait_for_indicator_absent', 'step.validation missing')
@@ -483,26 +483,36 @@ def wait_for_indicator_absent(ctx: dict, step: dict) -> dict:
 
 @primitive('snapshot_buttons')
 def snapshot_buttons(ctx: dict, step: dict) -> dict:
-    """Capture a Counter of push-button names in the current document
-    snapshot into a named variable. Used as the baseline for
+    """Capture a Counter of element names in the current document snapshot
+    into a named variable, filtered by role. Used as the baseline for
     verify_attachment_chip (pre-attach vs post-attach diff).
 
+    The role filter is REQUIRED from YAML — a hardcoded 'push button'
+    default would be a rule-2 violation: not every platform exposes the
+    attachment chip as a push button (Gemini audit flagged this).
+
     YAML: `- action: snapshot_buttons
-            into: pre_attach_buttons`
+            into: pre_attach_buttons
+            role: push button`
     """
     from collections import Counter
     from consultation_v2.consult import _all_elements
     into = step.get('into')
     if not into:
         return _fail('snapshot_buttons', 'step.into (variable name) missing')
+    role = step.get('role')
+    if not role:
+        return _fail('snapshot_buttons',
+                     'step.role missing — the chip element role must be '
+                     'declared in YAML, not hardcoded in the primitive')
     snap, err = _must_inspect(ctx, 'snapshot_buttons')
     if err:
         return err
     buttons = Counter(e.get('name') for e in _all_elements(snap)
-                      if e.get('role') == 'push button')
+                      if e.get('role') == role)
     ctx.setdefault('vars', {})[into] = buttons
     return _ok({'event': 'step_ok', 'action': 'snapshot_buttons',
-                'into': into, 'unique_buttons': len(buttons)})
+                'into': into, 'role': role, 'unique_elements': len(buttons)})
 
 
 @primitive('file_dialog_upload')
@@ -677,6 +687,14 @@ def verify_attachment_chip(ctx: dict, step: dict) -> dict:
         return _fail('verify_attachment_chip',
                      f'baseline var {baseline_var!r} not set (run snapshot_buttons first)')
 
+    # Role must match the one used by snapshot_buttons to produce the
+    # baseline — otherwise the Counter subtraction is meaningless.
+    # Required from YAML (same rationale as snapshot_buttons).
+    role = step.get('role')
+    if not role:
+        return _fail('verify_attachment_chip',
+                     'step.role missing — the chip element role must be '
+                     'declared in YAML (match snapshot_buttons step.role)')
     timeout = step.get('timeout', 20)
     poll = step.get('poll_interval', 1.0)
     deadline = time.time() + timeout
@@ -686,15 +704,15 @@ def verify_attachment_chip(ctx: dict, step: dict) -> dict:
         if err:
             return err
         post_buttons = Counter(e.get('name') for e in _all_elements(snap)
-                               if e.get('role') == 'push button')
+                               if e.get('role') == role)
         new_buttons = post_buttons - baseline
         if expected in new_buttons and new_buttons[expected] > 0:
             return _ok({'event': 'step_ok', 'action': 'verify_attachment_chip',
                         'chip': expected, 'match': 'exact'})
         time.sleep(poll)
     return _fail('verify_attachment_chip',
-                 f'no new push button {expected!r} within {timeout}s. '
-                 f'New buttons: {dict(new_buttons)}')
+                 f'no new element {expected!r} (role={role!r}) within {timeout}s. '
+                 f'New elements: {dict(new_buttons)}')
 
 
 @primitive('capture_url')
@@ -1013,7 +1031,6 @@ def require_url_changed(ctx: dict, step: dict) -> dict:
             timeout: 30
             poll_interval: 1.0`
     """
-    from consultation_v2.consult import inspect_platform
     baseline_var = step.get('baseline')
     if not baseline_var:
         return _fail('require_url_changed', 'step.baseline var name missing')

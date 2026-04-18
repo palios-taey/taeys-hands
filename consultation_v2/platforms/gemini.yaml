@@ -254,6 +254,7 @@ workflow:
     sequence:
       - action: snapshot_buttons
         into: pre_attach_buttons
+        role: push button
       - action: click
         element: attach_trigger
         delay: 1.5
@@ -266,6 +267,7 @@ workflow:
         delay: 5.0
       - action: verify_attachment_chip
         baseline: pre_attach_buttons
+        role: push button
         validation: attach_success
         file: ${pkg}
         timeout: 20
