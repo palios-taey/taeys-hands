@@ -373,6 +373,20 @@ workflow:
     require_new_url: true
     confirmation_timeout: 60
     validation: send_success
+    sequence:
+      - action: capture_url
+        into: pre_send_url
+      - action: assert_indicator_absent
+        validation: send_success
+      - action: click
+        element: send_button
+        delay: 0.5
+      - action: wait_for_indicator
+        validation: send_success
+        timeout: 60
+        poll_interval: 2.0
+      - action: require_url_changed
+        baseline: pre_send_url
 
   timing:
     after_trigger_click: 1.5

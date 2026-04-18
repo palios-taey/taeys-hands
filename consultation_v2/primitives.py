@@ -309,6 +309,38 @@ def read_element_text_primitive(ctx: dict, step: dict) -> dict:
                 'element': element_key, 'into': into, 'chars': count})
 
 
+@primitive('assert_indicator_absent')
+def assert_indicator_absent(ctx: dict, step: dict) -> dict:
+    """Fail immediately if any of the named validation indicators is
+    currently present in the document tree. Used for stale-state checks
+    (e.g. pre-send: stop_button must NOT already be there from a prior
+    generation, else the send step would false-confirm).
+
+    YAML: `- action: assert_indicator_absent
+            validation: send_success`
+    """
+    from consultation_v2.consult import inspect_platform, _all_elements
+    val_key = step.get('validation')
+    if not val_key:
+        return _fail('assert_indicator_absent', 'step.validation missing')
+    cfg = ctx['cfg']
+    val_cfg = cfg.get('validation', {}).get(val_key, {})
+    indicators = val_cfg.get('indicators', [])
+    if not indicators:
+        return _fail('assert_indicator_absent',
+                     f'validation.{val_key}.indicators missing or empty')
+    snap = inspect_platform(ctx['platform'])
+    elements = _all_elements(snap)
+    for ind in indicators:
+        if any(e.get('name') == ind.get('name') and
+               e.get('role') == ind.get('role') for e in elements):
+            return _fail('assert_indicator_absent',
+                         f'validation.{val_key} indicator {ind!r} is present — '
+                         f'stale state from previous step')
+    return _ok({'event': 'step_ok', 'action': 'assert_indicator_absent',
+                'validation': val_key})
+
+
 @primitive('wait_for_indicator')
 def wait_for_indicator(ctx: dict, step: dict) -> dict:
     """Poll until every indicator under validation.<key>.indicators is

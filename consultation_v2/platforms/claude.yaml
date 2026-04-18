@@ -218,6 +218,18 @@ workflow:
     require_new_url: false
     confirmation_timeout: 15
     validation: send_success
+    sequence:
+      - action: capture_url
+        into: pre_send_url
+      - action: assert_indicator_absent
+        validation: send_success
+      - action: click
+        element: send_button
+        delay: 0.5
+      - action: wait_for_indicator
+        validation: send_success
+        timeout: 15
+        poll_interval: 2.0
 
   timing:
     after_trigger_click: 1.5

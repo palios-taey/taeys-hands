@@ -907,101 +907,22 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     if not res['ok']:
         fail('prompt', res['error'], platform)
 
-    # ── Step 5: Send ──
+    # ── Step 5: Send (YAML-driven sequence) ──
+    # Each platform declares its own send sequence: capture URL baseline,
+    # assert no stale stop-button, click send button or press Return,
+    # wait for send_success indicators, optionally require_url_changed.
     send_cfg = workflow.get('send', {})
-    if not send_cfg:
-        fail('send', 'workflow.send missing from YAML', platform)
-    if 'confirmation_key' not in send_cfg:
-        fail('send', 'workflow.send.confirmation_key missing from YAML', platform)
-
-    confirmation_key = send_cfg['confirmation_key']
-    if 'confirmation_timeout' not in send_cfg:
-        fail('send', 'workflow.send.confirmation_timeout missing from YAML', platform)
-    confirmation_timeout = send_cfg['confirmation_timeout']
-    if 'require_new_url' not in send_cfg:
-        fail('send', 'workflow.send.require_new_url missing from YAML', platform)
-    require_url = send_cfg['require_new_url']
-
-    # Capture pre-send URL for accurate change detection. Fail closed on
-    # inspect errors — a silently-empty snap makes the stale-stop-button
-    # check at line below pass spuriously.
-    pre_send_snap = must_inspect(platform, 'send')
-    pre_send_url = pre_send_snap.get('url', '')
-
-    # Fail closed if stop_button already present — send would false-confirm on stale state
-    if has_key(pre_send_snap, confirmation_key):
-        fail('send',
-             f'Confirmation key {confirmation_key!r} already present before send — '
-             f'stale state from previous generation',
-             platform)
-
-    if send_cfg.get('submit_via_return'):
-        if 'keypress' not in send_cfg:
-            fail('send', 'workflow.send.keypress missing from YAML (submit_via_return is true)', platform)
-        result = act(platform, 'press', send_cfg['keypress'])
-        if result.get('error'):
-            fail('send', f'Submit keypress failed: {result}', platform)
-    else:
-        if 'trigger' not in send_cfg:
-            fail('send', 'workflow.send.trigger missing from YAML', platform)
-        send_trigger_key = send_cfg['trigger']
-        result = act(platform, 'click', send_trigger_key)
-        if result.get('error'):
-            fail('send', f'Send button click ({send_trigger_key!r}) failed: {result}', platform)
-
-    # Poll for send confirmation: stop button is the primary signal
-    deadline = time.time() + confirmation_timeout
-    has_stop = False
-    url_changed = False
-    url = ''
-    while time.time() < deadline:
-        snap = inspect_platform(platform)
-        url = snap.get('url', '')
-        has_stop = has_key(snap, confirmation_key)
-        url_changed = bool(url and pre_send_url and url != pre_send_url)
-        if require_url:
-            # Need BOTH stop button AND URL change
-            if has_stop and url_changed:
-                break
-        else:
-            # Stop button alone is sufficient
-            if has_stop:
-                break
-        time.sleep(timing['send_poll_interval'])
-
-    # Verify based on YAML requirements
-    if not has_stop:
-        path = screenshot(platform)
-        fail('send', f'Send not confirmed: {confirmation_key} not found. Screenshot: {path}', platform)
-    if require_url and not url_changed:
-        fail('send', f'require_new_url is true but URL unchanged', platform)
-
-    # Enforce workflow.send.validation indicators against the current snap.
-    # Previously this YAML field was declared but never read — the indicators
-    # could drift silently. Now they must match the live tree at send-confirm.
-    send_val_key = send_cfg.get('validation')
-    if not send_val_key:
-        fail('send', 'workflow.send.validation missing from YAML', platform)
-    send_validation = validation.get(send_val_key, {})
-    if not send_validation:
-        fail('send', f'validation.{send_val_key!r} missing from YAML', platform)
-    send_indicators = send_validation.get('indicators', [])
-    if not send_indicators:
-        fail('send', f'validation.{send_val_key}.indicators missing or empty', platform)
-    send_elements = _all_elements(snap)
-    for ind in send_indicators:
-        ind_name = ind.get('name')
-        ind_role = ind.get('role')
-        if ind_name is None or ind_role is None:
-            fail('send', f'Malformed indicator in validation.{send_val_key}: {ind}', platform)
-        found = any(e.get('name') == ind_name and e.get('role') == ind_role for e in send_elements)
-        if not found:
-            fail('send', f'send_success indicator not found in live tree: {ind}', platform)
-
-    # has_stop guaranteed True here (fail() exits if False)
-    print(json.dumps({'event': 'step_ok', 'step': 'send', 'url': url[:50], 'stop': True,
-                       'url_changed': url_changed,
-                       'validation': send_val_key}))
+    send_sequence = send_cfg.get('sequence')
+    if not send_sequence:
+        fail('send', 'workflow.send.sequence missing from YAML', platform)
+    res = run_sequence(ctx, send_sequence, step_name='send')
+    if not res['ok']:
+        fail('send', res['error'], platform)
+    # Re-snap to capture the post-send URL for dispatched-event logging
+    # and Neo4j storage. This is the URL that identifies the thread the
+    # monitor will watch.
+    post_send_snap = must_inspect(platform, 'send')
+    url = post_send_snap.get('url', '')
 
     # ── Step 6: Monitor (always) ──
     # Monitor spawn is mandatory. Without it there is no RESPONSE_COMPLETE
