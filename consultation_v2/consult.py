@@ -458,94 +458,57 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
              platform)
 
     # ── Step 2: Set up and verify mode ──
+    # Driver stays dumb: it synthesizes a list of YAML-declared mode/tool
+    # steps and hands them to the primitive runner. Each step is a
+    # `mode_select_step` primitive call with fields sourced from
+    # workflow.selection.sequences[X] (multi-step sequences like
+    # Gemini deep_think) OR from workflow.selection.mode_*/mode_targets
+    # (simple one-trigger-one-target cases like Grok heavy). No
+    # platform-specific branching here.
     mode = defaults.get('mode')
     tools = defaults.get('tools', [])
     validation = cfg.get('validation', {})
     selection = workflow.get('selection', {})
 
-    # Execute mode and tool setup from YAML.
-    # Mode and tools are independent — a platform can need BOTH (e.g., Gemini: pro mode + deep_think tool).
     if 'sequences' not in selection:
         fail('setup', 'workflow.selection.sequences missing from YAML', platform)
     sequences = selection['sequences']
     checked_state_keys = set()  # Per-key tracking, not global boolean
 
-    def _run_sequence(seq):
-        """Run a named sequence (e.g., deep_think). Returns None.
+    def _synth_simple_mode_step(mode_name):
+        """Build a mode_select_step dict from selection.mode_* defaults +
+        mode_targets[mode_name]. Used when the mode has no named sequence
+        (the simple one-trigger-one-target path)."""
+        mode_targets = selection.get('mode_targets', {})
+        target_key = mode_targets.get(mode_name)
+        trigger_key = selection.get('mode_trigger')
+        if not (trigger_key and target_key):
+            fail('mode_setup',
+                 f'mode_trigger or mode_targets[{mode_name!r}] missing from YAML',
+                 platform)
+        if 'mode_snapshot' not in selection:
+            fail('mode_setup', 'workflow.selection.mode_snapshot missing from YAML', platform)
+        mode_vals = selection.get('mode_validations', {})
+        if mode_name not in mode_vals:
+            fail('mode_setup',
+                 f'No validation key for mode {mode_name!r} in selection.mode_validations',
+                 platform)
+        return {
+            'action': 'mode_select_step',
+            'trigger': trigger_key,
+            'target': target_key,
+            'snapshot': selection['mode_snapshot'],
+            'click_strategy': selection.get('mode_click_strategy'),
+            'skip_if_checked': selection.get('mode_skip_if_checked'),
+            'verified_by_checked_state': selection.get('mode_verified_by_checked_state'),
+            'reverify_via_reopen': selection.get('mode_reverify_via_reopen'),
+            'close_with_escape': selection.get('mode_close_with_escape'),
+            'validation': mode_vals[mode_name],
+        }
 
-        Every per-step failure calls fail() which sys.exit(1)s, so normal
-        return means every step succeeded. The old `all_steps_ok = True`
-        return value was always True and callers treated it as meaningful
-        — that was misleading and a refactoring hazard.
-        """
-        for i, step in enumerate(seq):
-            trigger = step.get('trigger')
-            target = step.get('target')
-            if 'snapshot' not in step:
-                fail('mode_setup', f'Sequence step {i} missing snapshot scope', platform)
-            scope = step['snapshot']
-            strategy = step.get('click_strategy')
-
-            if trigger:
-                result = act(platform, 'click', trigger)
-                if result.get('error'):
-                    fail('mode_setup', f'Trigger {trigger!r} failed: {result}', platform)
-                time.sleep(timing['after_trigger_click'])
-
-            if target:
-                skipped = False
-                if step.get('skip_if_checked'):
-                    menu_snap = must_inspect(platform, "mode_setup", scope=scope)
-                    if _element_has_checked_state(menu_snap, cfg, target, platform):
-                        skipped = True
-
-                if not skipped:
-                    args_list = [target, '--scope', scope]
-                    if strategy:
-                        args_list += ['--strategy', strategy]
-                    result = act(platform, 'click', *args_list)
-                    if result.get('error'):
-                        fail('mode_setup', f'Target {target!r} failed: {result}', platform)
-                    time.sleep(timing['after_target_click'])
-
-                if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
-                    verify_snap = must_inspect(platform, "mode_setup", scope=scope)
-                    if not _element_has_checked_state(verify_snap, cfg, target, platform):
-                        # Menu auto-closed after click (Gemini): scope='menu' is empty.
-                        # Fall back to indicator-based verification in document scope
-                        # using the step's validation key. This is not a fallback in the
-                        # "try multiple guesses" sense — it's using the authoritative
-                        # indicator the YAML declared for this step.
-                        step_val_key = step.get('validation')
-                        indicator_verified = False
-                        if step_val_key:
-                            doc_snap = must_inspect(platform, "mode_setup")
-                            val_cfg = validation.get(step_val_key, {})
-                            indicators = val_cfg.get('indicators', [])
-                            doc_elements = _all_elements(doc_snap)
-                            for ind in indicators:
-                                for el in doc_elements:
-                                    if el.get('name') == ind.get('name') and el.get('role') == ind.get('role'):
-                                        indicator_verified = True
-                                        break
-                                if indicator_verified:
-                                    break
-                        if not indicator_verified:
-                            fail('mode_setup',
-                                 f'Sequence step {i}: target {target!r} not in checked state and '
-                                 f'no document-scope validation indicator found for {step_val_key!r}',
-                                 platform)
-
-            if step.get('close_with_escape'):
-                esc_result = act(platform, 'press', 'Escape')
-                if esc_result.get('error'):
-                    fail('mode_setup',
-                         f'Escape keypress failed at sequence step {i}: {esc_result}',
-                         platform)
-                time.sleep(timing['after_escape'])
-        return None
-
-    # Resolve ALL validation keys from ALL sequence steps (not just last)
+    # Resolve validation keys for pre-check and post-verify. Sequences
+    # declare one validation key per step; the simple-target path uses
+    # mode_validations[mode].
     mode_val_keys = []
     if mode:
         if mode in sequences and sequences[mode]:
@@ -570,10 +533,10 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
         else:
             fail('setup', f'Tool {tool!r} has no sequence in workflow.selection.sequences', platform)
 
-    # Pre-check: if mode/tool indicators are ALL already present, skip setup entirely.
-    # This is the "check first, don't touch if already active" rule — avoids toggling
-    # off a setting (Claude Adaptive, Perplexity Incognito) or clicking radios that
-    # AT-SPI doesn't verify post-click (Gemini Pro).
+    # Pre-check: if every validation indicator is already present in the
+    # current doc snapshot, skip setup entirely. Avoids toggling an
+    # already-on setting off (Claude Adaptive, Perplexity Incognito) or
+    # clicking radios whose post-click state AT-SPI won't verify.
     all_required_val_keys = list(mode_val_keys)
     for _t in (tools or []):
         if _t in tool_val_keys:
@@ -610,107 +573,41 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                           'mode': mode, 'tools': tools,
                           'note': 'all indicators already present — setup skipped'}))
 
-    # Step 2a: Set mode (via sequence or simple target)
-    mode_set = False
-    if pre_satisfied:
-        pass  # Skip — already in target state
-    elif mode and mode in sequences:
-        # _run_sequence fails closed on any step failure (sys.exit). If we
-        # return here, every step succeeded — so mark all declared validation
-        # keys verified via checked_state.
-        _run_sequence(sequences[mode])
-        checked_state_keys.update(mode_val_keys)
-        mode_set = True
-        snap = must_inspect(platform, 'mode_setup')
-    elif mode:
-        # Simple target (e.g., Grok heavy via mode_targets)
-        mode_targets = selection.get('mode_targets', {})
-        target_key = mode_targets.get(mode)
-        trigger_key = selection.get('mode_trigger')
-
-        if trigger_key and target_key:
-            result = act(platform, 'click', trigger_key)
-            if result.get('error'):
-                fail('mode_setup', f'Mode trigger {trigger_key!r} failed: {result}', platform)
-            time.sleep(timing['after_trigger_click'])
-
-            if 'mode_snapshot' not in selection:
-                fail('mode_setup', 'workflow.selection.mode_snapshot missing from YAML', platform)
-            scope = selection['mode_snapshot']
-            strategy = selection.get('mode_click_strategy')
-
-            # mode_skip_if_checked: inspect menu, skip click if target already checked
-            skipped = False
-            if selection.get('mode_skip_if_checked'):
-                menu_snap = must_inspect(platform, "mode_setup", scope=scope)
-                if _element_has_checked_state(menu_snap, cfg, target_key, platform):
-                    skipped = True
-                    # Already checked — close menu and move on
-                    if selection.get('mode_close_with_escape'):
-                        esc_result = act(platform, 'press', 'Escape')
-                        if esc_result.get('error'):
-                            fail('mode_setup',
-                                 f'Escape keypress failed after skip_if_checked: {esc_result}',
-                                 platform)
-                        time.sleep(timing['after_escape'])
-
-            if not skipped:
-                args_list = [target_key, '--scope', scope]
-                if strategy:
-                    args_list += ['--strategy', strategy]
-                result = act(platform, 'click', *args_list)
-                if result.get('error'):
-                    fail('mode_setup', f'Mode target {target_key!r} failed: {result}', platform)
-                time.sleep(timing['after_target_click'])
-
-                # Verify checked state after clicking — fail closed.
-                # Some platforms (Gemini) auto-close the menu on selection, so the
-                # post-click menu snapshot is empty. For those, re-trigger the menu
-                # to bring the target back into scope, verify, then close.
-                if selection.get('mode_verified_by_checked_state'):
-                    verify_snap = must_inspect(platform, "mode_setup", scope=scope)
-                    verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
-                    if not verified and selection.get('mode_reverify_via_reopen'):
-                        # Re-open menu for verification (menu auto-closed on selection)
-                        result = act(platform, 'click', trigger_key)
-                        if result.get('error'):
-                            fail('mode_setup',
-                                 f'Re-open trigger {trigger_key!r} failed during verification: {result}',
-                                 platform)
-                        time.sleep(timing['after_trigger_click'])
-                        verify_snap = must_inspect(platform, "mode_setup", scope=scope)
-                        verified = _element_has_checked_state(verify_snap, cfg, target_key, platform)
-                    if verified:
-                        checked_state_keys.update(mode_val_keys)
-                    else:
-                        fail('mode_setup',
-                             f'Mode {mode!r} target {target_key!r} not in selected state after click. '
-                             f'AT-SPI verification required by mode_verified_by_checked_state=true.',
-                             platform)
-
-                if selection.get('mode_close_with_escape'):
-                    esc_result = act(platform, 'press', 'Escape')
-                    if esc_result.get('error'):
-                        fail('mode_setup',
-                             f'Escape keypress failed after click: {esc_result}',
-                             platform)
-                    time.sleep(timing['after_escape'])
-            else:
-                # Skipped because already checked — verified for THIS mode only
-                checked_state_keys.update(mode_val_keys)
-
-            snap = must_inspect(platform, 'mode_setup')
-        else:
-            fail('mode_setup', f'mode_trigger or mode_targets[{mode!r}] missing from YAML', platform)
-
-    # Step 2b: Set tools (via sequences, independent of mode)
     if not pre_satisfied:
+        # Build the combined mode + tools sequence. Sequences from YAML are
+        # action-less dicts (historical shape) — inject action name here.
+        combined_steps = []
+        if mode:
+            if mode in sequences and sequences[mode]:
+                for s in sequences[mode]:
+                    if 'snapshot' not in s:
+                        fail('mode_setup', f'Mode {mode!r} sequence step missing snapshot scope', platform)
+                    combined_steps.append({**s, 'action': 'mode_select_step'})
+            else:
+                combined_steps.append(_synth_simple_mode_step(mode))
         for tool in (tools or []):
-            if tool in sequences:
-                _run_sequence(sequences[tool])
-                if tool in tool_val_keys:
-                    checked_state_keys.update(tool_val_keys[tool])
-                snap = must_inspect(platform, 'mode_setup')
+            for s in sequences[tool]:
+                if 'snapshot' not in s:
+                    fail('mode_setup', f'Tool {tool!r} sequence step missing snapshot scope', platform)
+                combined_steps.append({**s, 'action': 'mode_select_step'})
+
+        if combined_steps:
+            from consultation_v2.runtime import ConsultationRuntime
+            from consultation_v2.primitives import run_sequence
+            rt = ConsultationRuntime(platform)
+            ctx = {'platform': platform, 'runtime': rt, 'cfg': cfg,
+                   'message': message, 'vars': {}}
+            res = run_sequence(ctx, combined_steps, step_name='mode_setup')
+            if not res['ok']:
+                fail('mode_setup', res['error'], platform)
+            # Every step of mode_select_step either skipped-because-checked
+            # or clicked-then-verified, so all declared val keys are verified
+            # via checked_state for the purposes of the post-check below.
+            checked_state_keys.update(mode_val_keys)
+            for t in (tools or []):
+                if t in tool_val_keys:
+                    checked_state_keys.update(tool_val_keys[t])
+            snap = must_inspect(platform, 'mode_setup')
 
     # Build check_keys from pre-resolved validation keys (deduplicated)
     check_keys_set = set()

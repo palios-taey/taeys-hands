@@ -717,6 +717,156 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('mode_select_step')
+def mode_select_step(ctx: dict, step: dict) -> dict:
+    """Execute one mode/tool selection step: (trigger → target-in-menu →
+    verify-checked [→ reverify-via-reopen] → escape). Encapsulates the
+    mode-setup logic that used to live in consult.py's inline
+    _run_sequence. YAML keys mirror the existing selection.sequences
+    step shape so no YAML rewrite is needed.
+
+    Fields:
+      trigger: element_map key of the menu trigger (optional — some
+        composite sequences invoke this primitive after a prior step
+        already opened the right scope).
+      target: element_map key of the item to check.
+      snapshot: 'menu' or 'document' — the scope to inspect when
+        looking up the target (required if target is set).
+      click_strategy: forwarded to runtime.click for the target click.
+      skip_if_checked: if true, inspect scope first and skip the target
+        click when its selected_state is already set (avoids toggling
+        off a mode the user wanted ON).
+      verified_by_checked_state: after click, inspect scope and confirm
+        selected_state is set. Falls back to document-scope indicators
+        named by step.validation if the scope snapshot is empty (menu
+        auto-close after select).
+      reverify_via_reopen: if post-click verify fails AND trigger is set,
+        re-click trigger and verify again. For UIs whose menu auto-closes
+        on selection (Gemini simple-mode path).
+      close_with_escape: press Escape after the step.
+      validation: name of the validation.<key> entry used for the
+        fallback document-indicator verification.
+    """
+    from consultation_v2.consult import _element_has_checked_state
+    rt = ctx['runtime']
+    cfg = ctx['cfg']
+    timing = cfg.get('workflow', {}).get('timing', {})
+    for t in ('after_trigger_click', 'after_target_click', 'after_escape'):
+        if t not in timing:
+            return _fail('mode_select_step',
+                         f'workflow.timing.{t} missing from YAML')
+
+    trigger = step.get('trigger')
+    target = step.get('target')
+    scope = step.get('snapshot')
+    strategy = step.get('click_strategy')
+    validation_key = step.get('validation')
+
+    if trigger:
+        from consultation_v2.snapshot import build_snapshot
+        _, _, snap = build_snapshot(ctx['platform'])
+        el = snap.first(trigger)
+        if not el:
+            return _fail('mode_select_step',
+                         f'trigger {trigger!r} not in document snapshot')
+        if not rt.click(el, strategy=strategy):
+            return _fail('mode_select_step',
+                         f'trigger click {trigger!r} returned False')
+        time.sleep(timing['after_trigger_click'])
+
+    if target:
+        if not scope:
+            return _fail('mode_select_step',
+                         f'target {target!r} set but step.snapshot (scope) missing')
+
+        skipped = False
+        if step.get('skip_if_checked'):
+            menu_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
+            if err:
+                return err
+            if _element_has_checked_state(menu_snap, cfg, target, ctx['platform']):
+                skipped = True
+
+        if not skipped:
+            from consultation_v2.snapshot import build_menu_snapshot, build_snapshot
+            if scope == 'menu':
+                _, _, snap = build_menu_snapshot(ctx['platform'])
+            else:
+                _, _, snap = build_snapshot(ctx['platform'])
+            el = snap.first(target)
+            if not el:
+                return _fail('mode_select_step',
+                             f'target {target!r} not in {scope} snapshot')
+            if not rt.click(el, strategy=strategy):
+                return _fail('mode_select_step',
+                             f'target click {target!r} returned False')
+            time.sleep(timing['after_target_click'])
+
+        # Verify checked state (either because skip_if_checked was set, or
+        # verified_by_checked_state was explicitly requested). On mismatch,
+        # fall back to document-scope indicators under validation.<key>.
+        # The YAML declares the fallback by naming the validation key.
+        if step.get('verified_by_checked_state') or step.get('skip_if_checked'):
+            verify_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
+            if err:
+                return err
+            verified = _element_has_checked_state(
+                verify_snap, cfg, target, ctx['platform'])
+
+            if not verified and step.get('reverify_via_reopen') and trigger:
+                # Gemini-style: menu auto-closes after selection, re-open
+                # to bring the target back into menu scope for verification.
+                from consultation_v2.snapshot import build_snapshot
+                _, _, snap = build_snapshot(ctx['platform'])
+                el = snap.first(trigger)
+                if not el:
+                    return _fail('mode_select_step',
+                                 f'reverify re-open: trigger {trigger!r} absent')
+                if not rt.click(el, strategy=strategy):
+                    return _fail('mode_select_step',
+                                 f'reverify re-open: trigger {trigger!r} click failed')
+                time.sleep(timing['after_trigger_click'])
+                verify_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
+                if err:
+                    return err
+                verified = _element_has_checked_state(
+                    verify_snap, cfg, target, ctx['platform'])
+
+            if not verified:
+                # Final fallback: check document-scope indicators declared
+                # under validation.<key>. Some platforms (Claude Adaptive)
+                # expose the active state only as a toolbar button rename,
+                # not a menu-item checked state.
+                if validation_key:
+                    val_cfg = cfg.get('validation', {}).get(validation_key, {})
+                    indicators = val_cfg.get('indicators', [])
+                    if indicators:
+                        from consultation_v2.consult import _all_elements
+                        doc_snap, err = _must_inspect(ctx, 'mode_select_step')
+                        if err:
+                            return err
+                        doc_elements = _all_elements(doc_snap)
+                        for ind in indicators:
+                            if any(e.get('name') == ind.get('name') and
+                                   e.get('role') == ind.get('role') for e in doc_elements):
+                                verified = True
+                                break
+
+            if not verified:
+                return _fail('mode_select_step',
+                             f'target {target!r} not in checked state after click '
+                             f'(validation={validation_key!r})')
+
+    if step.get('close_with_escape'):
+        if not rt.press('Escape'):
+            return _fail('mode_select_step', 'Escape keypress returned False')
+        time.sleep(timing['after_escape'])
+
+    return _ok({'event': 'step_ok', 'action': 'mode_select_step',
+                'trigger': trigger, 'target': target,
+                'scope': scope, 'validation': validation_key})
+
+
 @primitive('require_url_changed')
 def require_url_changed(ctx: dict, step: dict) -> dict:
     """Poll until the current URL differs from the baseline variable, or
