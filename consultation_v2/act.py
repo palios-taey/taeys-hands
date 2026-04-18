@@ -200,7 +200,6 @@ def main():
         return 0 if ok else 1
 
     if args.action == 'extract':
-        # Mechanical extraction: scroll to bottom, find copy button by YAML strategy, click, read clipboard
         from consultation_v2.yaml_contract import load_platform_yaml
         cfg = load_platform_yaml(args.platform)
         extract_cfg = cfg.get('workflow', {}).get('extract', {})
@@ -208,7 +207,51 @@ def main():
             print(json.dumps({'error': 'workflow.extract missing from YAML'}))
             return 1
 
-        # Read timing from YAML — no hardcoded sleeps
+        # YAML-driven sequence path (preferred). Drivers hold zero platform
+        # knowledge; workflow.extract.sequence is an ordered list of
+        # primitive steps the runner executes. After the sequence, we read
+        # the variable named in extract.output_var and emit the final
+        # `extracted` event + store in Neo4j if session_id is provided.
+        sequence = extract_cfg.get('sequence')
+        if sequence:
+            from consultation_v2.primitives import run_sequence
+            output_var = extract_cfg.get('output_var', 'response')
+            ctx = {
+                'platform': args.platform,
+                'runtime': runtime,
+                'cfg': cfg,
+                'message': '',
+                'vars': {},
+            }
+            res = run_sequence(ctx, sequence, step_name='extract')
+            if not res['ok']:
+                print(json.dumps({'error': f'extract sequence failed: {res["error"]}'}))
+                return 1
+            content = ctx['vars'].get(output_var, '')
+            if not content or not content.strip():
+                print(json.dumps({'error': f'extract sequence output_var {output_var!r} empty'}))
+                return 1
+            message_id = None
+            if args.session_id:
+                try:
+                    from consultation_v2.store import store_response
+                    from consultation_v2.snapshot import build_snapshot
+                    _, _, final_snap = build_snapshot(args.platform)
+                    message_id = store_response(
+                        session_id=args.session_id, response_text=content,
+                        url=final_snap.url, extraction_method='yaml_sequence',
+                    )
+                except Exception as e:
+                    print(json.dumps({'store_error': str(e)}), file=sys.stderr)
+            print(json.dumps({'extracted': True, 'length': len(content),
+                              'strategy': 'yaml_sequence', 'output_var': output_var,
+                              'session_id': args.session_id, 'message_id': message_id}))
+            print('---CONTENT---')
+            print(content)
+            return 0
+
+        # Legacy strategy-based path — kept as a bridge while platforms
+        # migrate to sequences. Read timing from YAML — no hardcoded sleeps.
         scroll_delay = extract_cfg.get('scroll_delay', None)
         post_click_delay = extract_cfg.get('post_click_delay', None)
 
