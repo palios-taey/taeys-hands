@@ -717,6 +717,124 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('regenerate_if_short')
+def regenerate_if_short(ctx: dict, step: dict) -> dict:
+    """Post-extract retry loop: if the response stored in `response_var`
+    is below `min_chars`, click `retry_element` (typically the platform's
+    Rewrite/Regenerate button), wait for generation to restart and finish,
+    re-read the response. Up to `max_retries` iterations. Fails closed if
+    the response is still short after retries — caller surfaces this as
+    an UNVERIFIED outcome.
+
+    Used for Perplexity Deep Research when the synthesis phase stops
+    after announcing a plan but never writes the report. Jesse observed
+    responses like "Let me compose the report" with ~30 chars where a
+    real DR report is 2000+ chars.
+
+    YAML:
+      - action: regenerate_if_short
+        response_var: response
+        min_chars: 500
+        retry_element: rewrite_thread
+        stop_validation: send_success
+        complete_validation: response_complete
+        extract_element: response_landmark
+        max_retries: 3
+        required_stop_absent_cycles: 3
+        poll_interval: 2.0
+        regen_timeout: 3600
+    """
+    for k in ('response_var', 'min_chars', 'retry_element',
+              'stop_validation', 'complete_validation', 'extract_element'):
+        if step.get(k) in (None, ''):
+            return _fail('regenerate_if_short', f'step.{k} missing')
+    response_var = step['response_var']
+    min_chars = step['min_chars']
+    retry_element = step['retry_element']
+    stop_validation = step['stop_validation']
+    complete_validation = step['complete_validation']
+    extract_element = step['extract_element']
+    max_retries = step.get('max_retries', 3)
+    required_absent_cycles = step.get('required_stop_absent_cycles', 3)
+    poll = step.get('poll_interval', 2.0)
+    regen_timeout = step.get('regen_timeout', 3600)
+    click_strategy = step.get('click_strategy', 'atspi_only')
+
+    rt = ctx['runtime']
+    attempts = 0
+    for attempt in range(1, max_retries + 1):
+        current = ctx.get('vars', {}).get(response_var, '') or ''
+        if len(current) >= min_chars:
+            return _ok({'event': 'step_ok', 'action': 'regenerate_if_short',
+                        'attempts': attempts, 'length': len(current),
+                        'note': 'no retry needed'})
+
+        # Click retry button (Rewrite Thread / Regenerate / etc).
+        from consultation_v2.snapshot import build_snapshot
+        _, _, snap = build_snapshot(ctx['platform'])
+        el = snap.first(retry_element)
+        if not el:
+            return _fail('regenerate_if_short',
+                         f'retry element {retry_element!r} not in snapshot '
+                         f'(attempt {attempt}, response was {len(current)} chars)')
+        if not rt.click(el, strategy=click_strategy):
+            return _fail('regenerate_if_short',
+                         f'click on {retry_element!r} returned False (attempt {attempt})')
+        attempts = attempt
+        time.sleep(poll)
+
+        # Wait for generation to restart (stop_button appears).
+        start_res = wait_for_indicator(ctx, {
+            'validation': stop_validation,
+            'timeout': 30, 'poll_interval': poll,
+        })
+        if not start_res['ok']:
+            return _fail('regenerate_if_short',
+                         f'generation did not restart after retry {attempt}: '
+                         f'{start_res["error"]}')
+
+        # Wait for generation to finish (stop_button absent N cycles).
+        done_res = wait_for_indicator_absent(ctx, {
+            'validation': stop_validation,
+            'required_absent_cycles': required_absent_cycles,
+            'poll_interval': poll,
+            'timeout': regen_timeout,
+        })
+        if not done_res['ok']:
+            return _fail('regenerate_if_short',
+                         f'regeneration timed out on attempt {attempt}: '
+                         f'{done_res["error"]}')
+
+        # Wait (briefly) for the completion indicator (copy_button). If
+        # it doesn't appear we still re-read — a regeneration that left
+        # the copy button absent still produced text in the response
+        # landmark, and the length check decides the next step.
+        wait_for_indicator(ctx, {
+            'validation': complete_validation,
+            'timeout': 30, 'poll_interval': poll,
+        })
+
+        # Re-read the response into the same var.
+        read_res = read_element_text_primitive(ctx, {
+            'element': extract_element,
+            'into': response_var,
+            'min_chars': 1,
+        })
+        if not read_res['ok']:
+            return _fail('regenerate_if_short',
+                         f'post-retry read failed on attempt {attempt}: '
+                         f'{read_res["error"]}')
+
+    # Exhausted retries — check final length.
+    final = ctx.get('vars', {}).get(response_var, '') or ''
+    if len(final) < min_chars:
+        return _fail('regenerate_if_short',
+                     f'response still {len(final)} chars after {max_retries} retries '
+                     f'(min {min_chars})')
+    return _ok({'event': 'step_ok', 'action': 'regenerate_if_short',
+                'attempts': attempts, 'length': len(final)})
+
+
 @primitive('mode_select_step')
 def mode_select_step(ctx: dict, step: dict) -> dict:
     """Execute one mode/tool selection step: (trigger → target-in-menu →

@@ -88,6 +88,15 @@ tree:
       name: "Copy contents"
       role: push button
 
+    # Rewrite Thread button sits in the response action bar next to Copy
+    # (Share / Download / Copy / Rewrite Thread / 1 source / Helpful /
+    # Not helpful / More actions). Used when Deep Research stops after
+    # announcing a synthesis plan but never writes the report — click
+    # this to re-run synthesis against the already-gathered source set.
+    rewrite_thread:
+      name: "Rewrite Thread"
+      role: push button
+
     # Response container for extract.strategy=tree_walk.
     # Perplexity's page has 4 landmarks:
     #   - "Main" at x=420 y=590 states=[showing,enabled,visible]   ← sidebar
@@ -475,6 +484,13 @@ workflow:
     # Text interface on the response landmark returns the full rendered
     # answer regardless of which rendering is active — one canonical path
     # that doesn't need pre-expand clicks or multi-state fallbacks.
+    #
+    # After the initial read, the regenerate_if_short step handles the
+    # Deep Research validation-failure pattern where synthesis stops
+    # after announcing a plan (~30 char response) but never writes the
+    # report. Clicks Rewrite Thread (next to Copy), waits for the fresh
+    # generation pass to complete, re-reads. Up to 3 retries. Healthy
+    # DR responses (2000+ chars) skip the retry entirely.
     output_var: response
     sequence:
       - action: press
@@ -484,6 +500,17 @@ workflow:
         element: response_landmark
         into: response
         min_chars: 20
+      - action: regenerate_if_short
+        response_var: response
+        min_chars: 500
+        retry_element: rewrite_thread
+        stop_validation: send_success
+        complete_validation: response_complete
+        extract_element: response_landmark
+        max_retries: 3
+        required_stop_absent_cycles: 3
+        poll_interval: 2.0
+        regen_timeout: 3600
 
 
 validation:
