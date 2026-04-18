@@ -172,16 +172,16 @@ workflow:
     mode_trigger: mode_picker
     mode_snapshot: menu
     mode_click_strategy: atspi_only
-    # Gemini's menu auto-closes on select. We do NOT re-open to verify —
-    # that's a retry chain (rule 5 forbidden). Verification relies on the
-    # document-scope indicator tiles ("Deselect Deep think" /
-    # "Deselect Deep research") that appear after selection, declared
-    # under validation.deep_think_active / deep_research_active. For Pro
-    # mode itself (no tile), skip_if_checked handles the happy path
-    # (Pro is Gemini's default), and if the click must happen the
-    # sequence's tool step will catch any real failure since the tool
-    # cannot activate unless Pro is the model.
-    mode_verified_by_checked_state: true
+    # Gemini's menu auto-closes on select. We do NOT re-open to verify
+    # (rule 5 forbidden), and we do NOT request post-click checked-state
+    # verification either — with an auto-closed menu, the in-scope check
+    # always fails, and fast/thinking/pro have no document-scope
+    # indicator tiles to fall back on. Their validation keys declare
+    # unverifiable_reason so the post-check routes through the warning
+    # path. For deep_think/deep_research (which DO have document tiles:
+    # "Deselect Deep think" / "Deselect Deep research"), the explicit
+    # sequences under workflow.selection.sequences handle the tool click
+    # and the post-check finds the tile indicator. R2 audit (Gemini §3.A).
     mode_skip_if_checked: true
     mode_close_with_escape: true
     mode_targets:
@@ -193,17 +193,11 @@ workflow:
       thinking: thinking_active
       pro: pro_active
 
-    tool_trigger: tools_button
-    tool_snapshot: menu
-    tool_click_strategy: atspi_only
-    tool_skip_if_checked: true
-    tool_targets:
-      create_image: tool_create_image
-      canvas: tool_canvas
-      deep_research: tool_deep_research
-      create_video: tool_create_video
-      create_music: tool_create_music
-      guided_learning: tool_guided_learning
+    # Tools must be declared as explicit entries under sequences below —
+    # consult.py no longer synthesizes simple tool steps from tool_*
+    # defaults. If canvas / create_image / etc. are ever needed, add
+    # them as sequence entries following the deep_think / deep_research
+    # pattern. R2 audit (Gemini §3.C).
 
     sequences:
       deep_think:
@@ -363,10 +357,17 @@ workflow:
         click_strategy: atspi_only
         delay: 1.0
         optional: true
+      # Timeout dropped to 3s (was 15s) — when Start research was clicked,
+      # the synth-phase Stop button appears near-instantly. On non-DR
+      # prompts this step is a no-op (absent_optional from the click
+      # above skips) but the runner still executes this timeout-as-skip
+      # unless we keep it short. 3s is plenty for the real DR case and
+      # trims 12s of wall-clock cost from every non-DR Gemini dispatch.
+      # R2 audit (Gemini §3.B).
       - action: wait_for_indicator
         validation: send_success
-        timeout: 15
-        poll_interval: 2.0
+        timeout: 3
+        poll_interval: 1.0
         optional: true
       - action: wait_for_indicator_absent
         validation: send_success
@@ -427,17 +428,21 @@ validation:
       - name: "Copy"
         role: push button
 
+  # Gemini base modes (fast/thinking/pro) have no document-scope tile
+  # indicator and the menu auto-closes on select, so in-scope checked
+  # verification isn't available. The primitive clicks blindly; this
+  # unverifiable_reason routes the post-check through the documented
+  # warning path. Tools (deep_think / deep_research) DO have tile
+  # indicators ("Deselect Deep think" / "Deselect Deep research") and
+  # validate via those. R2 audit (Gemini §3.A).
   fast_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    unverifiable_reason: "Menu auto-closes on select; no document tile indicator exists for Fast."
 
   thinking_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    unverifiable_reason: "Menu auto-closes on select; no document tile indicator exists for Thinking."
 
   pro_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    unverifiable_reason: "Menu auto-closes on select; no document tile indicator exists for Pro alone. deep_think_active / deep_research_active tiles are the canonical proof when tools are used."
 
   deep_think_active:
     indicators:

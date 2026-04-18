@@ -62,13 +62,22 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def _subprocess_click(self, element: ElementRef) -> bool:
-        """Click element via subprocess AT-SPI action (for multi-display mode)."""
+        """Click element via subprocess AT-SPI action (for multi-display mode).
+
+        Bus-file contract matches snapshot._subprocess_scan: DISPLAY and
+        session bus are required; AT-SPI bus file can be empty (the
+        a11y bus rides on the session bus in that mode) and
+        AT_SPI_BUS_ADDRESS is only set when non-empty. ChatGPT R2 audit
+        caught this primitive as stricter than the scan contract —
+        atspi_only clicks were failing on systems with empty
+        /tmp/a11y_bus_:X even though snapshot scans worked.
+        """
         from core.platforms import get_platform_display, get_platform_bus
         from consultation_v2.yaml_contract import load_platform_yaml
         display = get_platform_display(self.platform)
-        bus = get_platform_bus(self.platform)
-        if not display or not bus:
+        if not display:
             return False
+        bus = get_platform_bus(self.platform)  # may be None/empty — legitimate
 
         session_bus_file = f'/tmp/dbus_session_bus_{display}'
         try:
@@ -88,7 +97,8 @@ class ConsultationRuntime:
 
         env = dict(os.environ)
         env['DISPLAY'] = display
-        env['AT_SPI_BUS_ADDRESS'] = bus
+        if bus:
+            env['AT_SPI_BUS_ADDRESS'] = bus
         env['DBUS_SESSION_BUS_ADDRESS'] = session_bus
 
         import sys, json

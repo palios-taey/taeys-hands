@@ -279,100 +279,6 @@ def _element_has_checked_state(snap: dict, cfg: dict, element_key: str,
     return selected_state in matches[0].get('states', [])
 
 
-def xdotool_file_dialog(platform: str, file_path: str, cfg: dict = None, timing: dict = None):
-    """Focus file dialog, enter path via Ctrl+L."""
-    env = _platform_env(platform)
-
-    # Read dialog titles from YAML, not hardcoded
-    dialog_titles = []
-    if cfg:
-        dialog_titles = cfg.get('tree', {}).get('dialog_titles', [])
-    if not dialog_titles:
-        return False  # No dialog titles in YAML — fail closed
-
-    # Timing must come from YAML — fail closed if missing
-    if not timing:
-        return False
-    for key in ('dialog_after_focus', 'dialog_after_path_entry', 'dialog_after_paste'):
-        if key not in timing:
-            return False
-
-    # Find and focus file dialog.
-    #
-    # Dialog window titles on this system look like:
-    #   "File Upload - ChatGPT — Mozilla Firefox"
-    #   "Open - Gemini — Mozilla Firefox"
-    # So the YAML dialog_titles entries ("File Upload", "Open", "Open File")
-    # are PREFIXES of the real title. A bare substring regex would wrongly
-    # match a main-tab title like "OpenAI - ChatGPT — Mozilla Firefox"
-    # because "OpenAI" contains "Open" as a prefix.
-    #
-    # Use a start-anchored word-boundary regex: "^<title>\b". This requires
-    # the title to appear at the start AND be followed by a non-word char
-    # (space, dash, em-dash) or end of string. "OpenAI..." fails because
-    # "A" after "Open" is a word char. "Open - ..." passes.
-    for title in dialog_titles:
-        anchored = f'^{re.escape(title)}\\b'
-        r = subprocess.run(['xdotool', 'search', '--name', anchored],
-                           capture_output=True, text=True, timeout=3, env=env)
-        wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
-        if wids:
-            # R10-1: check windowactivate return. If the WM rejects activation
-            # (race where dialog closed between search and activate, or stale
-            # window ID), an unchecked fail here means Ctrl+L hits the
-            # Firefox address bar instead of the dialog's location bar, and
-            # the file path gets typed into the URL.
-            r_act = subprocess.run(['xdotool', 'windowactivate', wids[-1]],
-                                   capture_output=True, timeout=5, env=env)
-            if r_act.returncode != 0:
-                return False
-            time.sleep(timing['dialog_after_focus'])
-            break
-    else:
-        return False
-
-    # Read keyboard shortcut from YAML — no hardcoded keys
-    attach_cfg = cfg.get('workflow', {}).get('attachment', {}) if cfg else {}
-    location_shortcut = attach_cfg.get('dialog_location_shortcut')
-    if not location_shortcut:
-        return False  # No dialog_location_shortcut in YAML — fail closed
-
-    # Read dialog keystrokes from YAML — no hardcoded keys
-    select_all_key = attach_cfg.get('dialog_select_all_key')
-    paste_key = attach_cfg.get('dialog_paste_key')
-    confirm_key = attach_cfg.get('dialog_confirm_key')
-    if not all([select_all_key, paste_key, confirm_key]):
-        return False  # Missing dialog keys in YAML — fail closed
-
-    # Execute dialog sequence — check each subprocess exit code
-    for cmd, delay_key in [
-        (['xdotool', 'key', location_shortcut], 'dialog_after_focus'),
-        (['xdotool', 'key', select_all_key], 'dialog_after_path_entry'),
-    ]:
-        r = subprocess.run(cmd, env=env, capture_output=True, timeout=3)
-        if r.returncode != 0:
-            return False
-        time.sleep(timing[delay_key])
-
-    r = subprocess.run(['xsel', '--clipboard', '--input'], input=file_path.encode(),
-                       env=env, capture_output=True, timeout=3)
-    if r.returncode != 0:
-        return False
-    time.sleep(timing['dialog_after_path_entry'])
-
-    for cmd, delay_key in [
-        (['xdotool', 'key', paste_key], 'dialog_after_paste'),
-        (['xdotool', 'key', confirm_key], None),
-    ]:
-        r = subprocess.run(cmd, env=env, capture_output=True, timeout=3)
-        if r.returncode != 0:
-            return False
-        if delay_key:
-            time.sleep(timing[delay_key])
-
-    return True
-
-
 def run_consultation(platform: str, message: str, file_path: str | None = None):
     """Run the full validated consultation workflow."""
 
@@ -599,13 +505,21 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
             res = run_sequence(ctx, combined_steps, step_name='mode_setup')
             if not res['ok']:
                 fail('mode_setup', res['error'], platform)
-            # Every step of mode_select_step either skipped-because-checked
-            # or clicked-then-verified, so all declared val keys are verified
-            # via checked_state for the purposes of the post-check below.
-            checked_state_keys.update(mode_val_keys)
-            for t in (tools or []):
-                if t in tool_val_keys:
-                    checked_state_keys.update(tool_val_keys[t])
+            # Per-step checked-state credit. Only add a step's validation
+            # key to checked_state_keys when the step ACTUALLY verified
+            # (either skip_if_checked skipped because target was already
+            # checked, OR verified_by_checked_state made the primitive
+            # verify post-click). A step with neither flag is just a blind
+            # click — we do NOT claim verification for it, and the
+            # post-check below must find the document indicator or an
+            # unverifiable_reason to succeed. R2 audit caught this
+            # false-positive in the old bulk-update. (Gemini R2 §2.A)
+            for s in combined_steps:
+                val_key = s.get('validation')
+                if not val_key:
+                    continue
+                if s.get('skip_if_checked') or s.get('verified_by_checked_state'):
+                    checked_state_keys.add(val_key)
             snap = must_inspect(platform, 'mode_setup')
 
     # Build check_keys from pre-resolved validation keys (deduplicated)

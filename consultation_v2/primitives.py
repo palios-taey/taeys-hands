@@ -947,13 +947,13 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
                 skipped = True
 
         if not skipped:
-            menu_snap, err = _must_inspect(ctx, 'mode_select_step', scope=scope)
-            if err:
-                return err
             from consultation_v2.snapshot import build_menu_snapshot, build_snapshot
-            # Re-scan for the click target. _must_inspect routes through
-            # the act.py subprocess path; re-scanning here in-process gives
-            # the ElementRef with x/y that rt.click needs.
+            # Build the in-process snapshot to get an ElementRef with
+            # x/y for the click. Claude R2 audit caught a redundant
+            # _must_inspect here that was effectively a bus canary —
+            # removed; if the bus is dead, snap.first(target) returns
+            # None and we fail_closed below with a clear target-absent
+            # error (propagates to the caller via the runner).
             if scope == 'menu':
                 _, _, snap = build_menu_snapshot(ctx['platform'])
             else:

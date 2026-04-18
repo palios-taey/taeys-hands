@@ -207,12 +207,21 @@ workflow:
   selection:
     sequences:
       pro_extended:
+        # Step 1: open model picker, select Pro if not already. Do NOT
+        # verify_by_checked_state — pro_active has no persistent document
+        # indicator (only "Extended Pro, click to remove" which needs
+        # step 2 first), and the menu auto-closes on select so in-scope
+        # checked verification would always fail. close_with_escape is
+        # required on the skip path so the next step (document-scope
+        # extended_pro_option click) isn't obstructed by an open menu.
+        # pro_extended_active is the real post-sequence proof (step 2
+        # validates it). R2 audit (ChatGPT + Gemini).
         - trigger: model_selector
           snapshot: menu
           target: model_pro
           click_strategy: atspi_only
           skip_if_checked: true
-          verified_by_checked_state: true
+          close_with_escape: true
           validation: pro_active
         - snapshot: document
           target: extended_pro_option
@@ -422,8 +431,15 @@ validation:
         role: push button
 
   pro_active:
-    # No persistent indicator — verified by checked state during selection
-    verified_by_checked_state: true
+    # No persistent document indicator exists for Pro alone — "Extended
+    # Pro" only appears when Extended Pro is toggled (step 2 of the
+    # pro_extended sequence validates that). When pro_extended's step 1
+    # either skipped (Pro already selected) or clicked and the menu
+    # auto-closed, in-scope checked verification isn't possible here.
+    # The primitive clicks blindly; this unverifiable_reason routes the
+    # post-check (consult.py) through the documented warning path.
+    # Step 2's pro_extended_active indicator is the real confirmation.
+    unverifiable_reason: "No document indicator for Pro alone; pro_extended_active (step 2) is the canonical proof."
 
   pro_extended_active:
     indicators:
