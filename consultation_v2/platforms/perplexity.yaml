@@ -346,6 +346,25 @@ workflow:
     dialog_paste_key: ctrl+v
     dialog_confirm_key: Return
     validation: attach_success
+    sequence:
+      - action: snapshot_buttons
+        into: pre_attach_buttons
+      - action: click
+        element: attach_trigger
+        delay: 1.5
+      - action: click
+        element: upload_files_item
+        scope: menu
+        delay: 3.0
+      - action: file_dialog_upload
+        file: ${pkg}
+        delay: 5.0
+      - action: verify_attachment_chip
+        baseline: pre_attach_buttons
+        validation: attach_success
+        file: ${pkg}
+        timeout: 20
+        poll_interval: 1.0
 
   prompt:
     input: input

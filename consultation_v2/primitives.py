@@ -471,6 +471,222 @@ def wait_for_indicator_absent(ctx: dict, step: dict) -> dict:
                  kind='timeout')
 
 
+@primitive('snapshot_buttons')
+def snapshot_buttons(ctx: dict, step: dict) -> dict:
+    """Capture a Counter of push-button names in the current document
+    snapshot into a named variable. Used as the baseline for
+    verify_attachment_chip (pre-attach vs post-attach diff).
+
+    YAML: `- action: snapshot_buttons
+            into: pre_attach_buttons`
+    """
+    from collections import Counter
+    from consultation_v2.consult import _all_elements
+    into = step.get('into')
+    if not into:
+        return _fail('snapshot_buttons', 'step.into (variable name) missing')
+    snap, err = _must_inspect(ctx, 'snapshot_buttons')
+    if err:
+        return err
+    buttons = Counter(e.get('name') for e in _all_elements(snap)
+                      if e.get('role') == 'push button')
+    ctx.setdefault('vars', {})[into] = buttons
+    return _ok({'event': 'step_ok', 'action': 'snapshot_buttons',
+                'into': into, 'unique_buttons': len(buttons)})
+
+
+@primitive('file_dialog_upload')
+def file_dialog_upload(ctx: dict, step: dict) -> dict:
+    """Drive a GTK file dialog to upload a given file path. Uses the
+    platform YAML's tree.dialog_titles to find the dialog window and
+    workflow.attachment.dialog_* keys for keystrokes (dialog_location_
+    shortcut, dialog_select_all_key, dialog_paste_key, dialog_confirm_key).
+
+    The file path typically comes from the identity-consolidated package
+    path which consult.py writes into ctx.vars before the sequence runs.
+
+    YAML: `- action: file_dialog_upload
+            file: ${pkg}
+            delay: 5.0`
+    """
+    import subprocess as _subp
+    import re as _re
+    file_path = resolve(ctx, step.get('file', ''))
+    if not file_path:
+        return _fail('file_dialog_upload', 'step.file missing (or empty after resolve)')
+    cfg = ctx['cfg']
+    tree = cfg.get('tree', {})
+    attach = cfg.get('workflow', {}).get('attachment', {})
+    dialog_titles = tree.get('dialog_titles', [])
+    if not dialog_titles:
+        return _fail('file_dialog_upload', 'tree.dialog_titles missing from YAML')
+    location_shortcut = attach.get('dialog_location_shortcut')
+    select_all_key = attach.get('dialog_select_all_key')
+    paste_key = attach.get('dialog_paste_key')
+    confirm_key = attach.get('dialog_confirm_key')
+    if not all([location_shortcut, select_all_key, paste_key, confirm_key]):
+        return _fail('file_dialog_upload',
+                     'workflow.attachment.dialog_* keys missing from YAML '
+                     '(need dialog_location_shortcut, dialog_select_all_key, '
+                     'dialog_paste_key, dialog_confirm_key)')
+    timing = cfg.get('workflow', {}).get('timing', {})
+    for t in ('dialog_after_focus', 'dialog_after_path_entry', 'dialog_after_paste'):
+        if t not in timing:
+            return _fail('file_dialog_upload', f'workflow.timing.{t} missing from YAML')
+
+    import os as _os
+    env = dict(_os.environ)
+    # DISPLAY is already set by run_sequence's _ensure_platform_env.
+
+    # Find the dialog window — anchored word-boundary regex so "Open"
+    # doesn't match "OpenAI - ChatGPT". Real dialog titles look like
+    # "File Upload - <app> — Mozilla Firefox".
+    found_wid = None
+    for title in dialog_titles:
+        anchored = f'^{_re.escape(title)}\\b'
+        r = _subp.run(['xdotool', 'search', '--name', anchored],
+                      capture_output=True, text=True, timeout=3, env=env)
+        wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+        if wids:
+            found_wid = wids[-1]
+            break
+    if not found_wid:
+        return _fail('file_dialog_upload',
+                     f'no dialog window matching any of {dialog_titles!r}')
+
+    # Activate the dialog so subsequent keystrokes land there.
+    r = _subp.run(['xdotool', 'windowactivate', found_wid],
+                  capture_output=True, timeout=5, env=env)
+    if r.returncode != 0:
+        return _fail('file_dialog_upload',
+                     f'windowactivate failed for wid {found_wid}: {r.stderr!r}')
+    time.sleep(timing['dialog_after_focus'])
+
+    # Sequence: Ctrl+L (location bar) → Ctrl+A (select) → xsel paste →
+    # Ctrl+V → Enter.
+    for cmd, delay_key in [
+        (['xdotool', 'key', location_shortcut], 'dialog_after_focus'),
+        (['xdotool', 'key', select_all_key], 'dialog_after_path_entry'),
+    ]:
+        r = _subp.run(cmd, env=env, capture_output=True, timeout=3)
+        if r.returncode != 0:
+            return _fail('file_dialog_upload',
+                         f'{cmd[-1]} keypress failed: {r.stderr!r}')
+        time.sleep(timing[delay_key])
+
+    r = _subp.run(['xsel', '--clipboard', '--input'],
+                  input=file_path.encode(), env=env, capture_output=True, timeout=3)
+    if r.returncode != 0:
+        return _fail('file_dialog_upload', f'xsel write failed: {r.stderr!r}')
+    time.sleep(timing['dialog_after_path_entry'])
+
+    for cmd, delay_key in [
+        (['xdotool', 'key', paste_key], 'dialog_after_paste'),
+        (['xdotool', 'key', confirm_key], None),
+    ]:
+        r = _subp.run(cmd, env=env, capture_output=True, timeout=3)
+        if r.returncode != 0:
+            return _fail('file_dialog_upload',
+                         f'{cmd[-1]} keypress failed: {r.stderr!r}')
+        if delay_key:
+            time.sleep(timing[delay_key])
+
+    delay = step.get('delay', 0)
+    if delay:
+        time.sleep(delay)
+    return _ok({'event': 'step_ok', 'action': 'file_dialog_upload',
+                'file': file_path, 'dialog_wid': found_wid})
+
+
+@primitive('verify_attachment_chip')
+def verify_attachment_chip(ctx: dict, step: dict) -> dict:
+    """Compare pre-attach and post-attach push-button Counters; require
+    at least one new button whose name matches the YAML chip template.
+    Some platforms (Grok) have no filename-specific chip — those YAMLs
+    should declare validation.<key>.attach_unverifiable_reason and the
+    primitive emits a warning event while returning ok. Other platforms
+    declare file_chip_template with {filename}, {size_kb}, etc.
+
+    YAML: `- action: verify_attachment_chip
+            baseline: pre_attach_buttons
+            validation: attach_success
+            file: ${pkg}
+            timeout: 20
+            poll_interval: 1.0`
+    """
+    from collections import Counter
+    from pathlib import Path as _Path
+    from consultation_v2.consult import _all_elements
+    baseline_var = step.get('baseline')
+    val_key = step.get('validation')
+    if not baseline_var:
+        return _fail('verify_attachment_chip', 'step.baseline var missing')
+    if not val_key:
+        return _fail('verify_attachment_chip', 'step.validation missing')
+    cfg = ctx['cfg']
+    val_cfg = cfg.get('validation', {}).get(val_key, {})
+    if not val_cfg:
+        return _fail('verify_attachment_chip',
+                     f'validation.{val_key!r} missing from YAML')
+
+    # Unverifiable path: YAML explicitly documents that the platform's
+    # chip has no filename-specific AT-SPI node. Emit warning, return ok.
+    unverifiable = val_cfg.get('attach_unverifiable_reason')
+    if unverifiable:
+        return _ok({'event': 'warning',
+                    'action': 'verify_attachment_chip',
+                    'validation': val_key,
+                    'unverifiable_reason': unverifiable,
+                    'note': 'dialog-success only — chip not AT-SPI verifiable'})
+
+    # Standard chip template validation.
+    if not val_cfg.get('diff_validated'):
+        return _fail('verify_attachment_chip',
+                     f'validation.{val_key}.diff_validated must be true '
+                     f'(or declare attach_unverifiable_reason)')
+    template = val_cfg.get('file_chip_template')
+    if not template:
+        return _fail('verify_attachment_chip',
+                     f'validation.{val_key}.file_chip_template missing')
+    file_path = resolve(ctx, step.get('file', ''))
+    if not file_path:
+        return _fail('verify_attachment_chip',
+                     'step.file missing (or empty after resolve)')
+    filename = _Path(file_path).name
+    filename_stem = _Path(file_path).stem
+    size_bytes = _Path(file_path).stat().st_size
+    size_kb_str = f"{size_bytes / 1000:.1f}"
+    expected = (template
+                .replace('{filename}', filename)
+                .replace('{filename_stem}', filename_stem)
+                .replace('{size_kb}', size_kb_str)
+                .replace('{size_bytes}', str(size_bytes)))
+
+    baseline = ctx.get('vars', {}).get(baseline_var)
+    if baseline is None:
+        return _fail('verify_attachment_chip',
+                     f'baseline var {baseline_var!r} not set (run snapshot_buttons first)')
+
+    timeout = step.get('timeout', 20)
+    poll = step.get('poll_interval', 1.0)
+    deadline = time.time() + timeout
+    new_buttons = Counter()
+    while time.time() < deadline:
+        snap, err = _must_inspect(ctx, 'verify_attachment_chip')
+        if err:
+            return err
+        post_buttons = Counter(e.get('name') for e in _all_elements(snap)
+                               if e.get('role') == 'push button')
+        new_buttons = post_buttons - baseline
+        if expected in new_buttons and new_buttons[expected] > 0:
+            return _ok({'event': 'step_ok', 'action': 'verify_attachment_chip',
+                        'chip': expected, 'match': 'exact'})
+        time.sleep(poll)
+    return _fail('verify_attachment_chip',
+                 f'no new push button {expected!r} within {timeout}s. '
+                 f'New buttons: {dict(new_buttons)}')
+
+
 @primitive('capture_url')
 def capture_url(ctx: dict, step: dict) -> dict:
     """Capture the current URL into a named variable. Fails closed if the

@@ -774,120 +774,28 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
 
     # ── Step 3: Attach identity package (HARD RULE — always) ──
     # EVERY session gets the identity package (FAMILY_KERNEL + platform
-    # IDENTITY file). No caller gets to skip this. If the caller supplied
-    # extra files they are consolidated with identity; if not, identity is
-    # attached alone. Skipping this makes the Chats answer a stranger, not
-    # Taey — and we have no way to recover context after the fact.
+    # IDENTITY file). No caller gets to skip this. Consolidation happens
+    # here (not inside a primitive) because it's setup — compute the
+    # package path, then run the YAML attach sequence with pkg in ctx.
     from consultation_v2.identity import consolidate_attachments
     caller_files = [file_path] if file_path else []
     pkg = consolidate_attachments(platform, caller_files)
     if not pkg:
         fail('attach', 'Identity consolidation failed — cannot send without identity package', platform)
-    if True:  # unconditional attach block (no more file_path gate)
 
-        # Click attach trigger (from YAML workflow — no defaults)
-        attach_cfg = workflow.get('attachment', {})
-        if 'trigger' not in attach_cfg:
-            fail('attach', 'workflow.attachment.trigger missing from YAML', platform)
-        if 'menu_target' not in attach_cfg:
-            fail('attach', 'workflow.attachment.menu_target missing from YAML', platform)
-        attach_trigger_key = attach_cfg['trigger']
-        attach_menu_key = attach_cfg['menu_target']
+    attach_cfg = workflow.get('attachment', {})
+    attach_sequence = attach_cfg.get('sequence')
+    if not attach_sequence:
+        fail('attach', 'workflow.attachment.sequence missing from YAML', platform)
 
-        # Read validation key from YAML workflow.attachment.validation
-        attach_val_key = attach_cfg.get('validation')
-        if not attach_val_key:
-            fail('attach', 'workflow.attachment.validation missing from YAML', platform)
-        attach_validation = validation.get(attach_val_key, {})
-        pre_attach_snap = None
-        if attach_validation.get('diff_validated'):
-            # Fail closed on inspect errors — an empty pre-buttons Counter would
-            # make the later diff treat every post-attach button as new.
-            pre_attach_snap = must_inspect(platform, 'attach')
-
-        result = act(platform, 'click', attach_trigger_key)
-        if result.get('error'):
-            fail('attach', f'Attach trigger {attach_trigger_key!r} failed: {result}', platform)
-        time.sleep(timing['after_trigger_click'])
-
-        # Click upload files item — scope MUST come from YAML (no default).
-        if 'menu_target_scope' not in attach_cfg:
-            fail('attach', 'workflow.attachment.menu_target_scope missing from YAML', platform)
-        menu_scope = attach_cfg['menu_target_scope']
-        result = act(platform, 'click', attach_menu_key, '--scope', menu_scope)
-        if result.get('error'):
-            fail('attach', f'Upload item {attach_menu_key!r} failed: {result}', platform)
-        time.sleep(timing['after_attach_menu'])
-
-        # File dialog
-        if not xdotool_file_dialog(platform, pkg, cfg=cfg, timing=timing):
-            fail('attach', 'File dialog not found', platform)
-        time.sleep(timing['after_file_dialog'])
-
-        # Verify attachment — STRICT: YAML-driven template + Counter multiset diff
-        if pre_attach_snap and attach_validation.get('diff_validated'):
-            # YAML-documented unverifiable: the platform's chip does not expose
-            # a stable filename-containing AT-SPI name (Grok shows only "Remove"
-            # which is a generic button that could exist elsewhere). In that case
-            # the file-dialog Return keypress returning no error is the only
-            # available signal. YAML must declare this explicitly.
-            if attach_validation.get('attach_unverifiable_reason'):
-                print(json.dumps({'event': 'warning', 'step': 'attach',
-                                  'unverifiable_reason': attach_validation['attach_unverifiable_reason']}))
-                print(json.dumps({'event': 'step_ok', 'step': 'attach',
-                                  'note': 'dialog-success only — chip not AT-SPI verifiable'}))
-                # Skip chip diff verification for this platform
-                # Fall through to end of attach block
-                attach_validation_done = True
-            else:
-                attach_validation_done = False
-
-            # YAML-driven chip name template: {filename} or {filename_stem} or literal
-            chip_template = attach_validation.get('file_chip_template')
-            if not attach_validation_done and not chip_template:
-                fail('attach',
-                     f'YAML validation.{attach_val_key}.file_chip_template missing — required for diff_validated',
-                     platform)
-
-            if not attach_validation_done:
-                filename = Path(pkg).name  # e.g., "taey_package_claude_1776440164.md"
-                filename_stem = Path(pkg).stem  # e.g., "taey_package_claude_1776440164"
-                # Size in KB, one decimal (matches Perplexity chip format "148.2 KB")
-                size_bytes = Path(pkg).stat().st_size
-                size_kb_str = f"{size_bytes / 1000:.1f}"
-                expected_name = (chip_template
-                                 .replace('{filename}', filename)
-                                 .replace('{filename_stem}', filename_stem)
-                                 .replace('{size_kb}', size_kb_str)
-                                 .replace('{size_bytes}', str(size_bytes)))
-
-                # Counter-based multiset diff — catches duplicates that set() subtraction masks
-                pre_buttons = Counter(e.get('name') for e in _all_elements(pre_attach_snap)
-                                       if e.get('role') == 'push button')
-                chip_found = False
-                new_buttons = Counter()
-                for _ in range(20):
-                    post_attach_snap = inspect_platform(platform)
-                    post_buttons = Counter(e.get('name') for e in _all_elements(post_attach_snap)
-                                            if e.get('role') == 'push button')
-                    new_buttons = post_buttons - pre_buttons
-                    # EXACT string match (==) — no substring, no .lower()
-                    if expected_name in new_buttons and new_buttons[expected_name] > 0:
-                        chip_found = True
-                        break
-                    time.sleep(1)
-                if not chip_found:
-                    path = screenshot(platform)
-                    fail('attach',
-                         f'diff_validated: no new push button {expected_name!r} after 20s. '
-                         f'Screenshot: {path}. New buttons: {dict(new_buttons)}',
-                         platform)
-                print(json.dumps({'event': 'step_ok', 'step': 'attach',
-                                  'chip': expected_name, 'match': 'exact'}))
-        else:
-            fail('attach',
-                 f'validation.{attach_val_key}.diff_validated must be true — no pass_through allowed',
-                 platform)
+    from consultation_v2.primitives import run_sequence
+    from consultation_v2.runtime import ConsultationRuntime as _Rt
+    _rt = _Rt(platform)
+    ctx = {'platform': platform, 'runtime': _rt, 'cfg': cfg, 'message': message,
+           'vars': {'pkg': pkg}}
+    res = run_sequence(ctx, attach_sequence, step_name='attach')
+    if not res['ok']:
+        fail('attach', res['error'], platform)
 
     # ── Step 4: Prompt (YAML-driven sequence) ──
     # workflow.prompt.sequence is a list of primitives executed by the
