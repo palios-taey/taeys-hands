@@ -772,13 +772,18 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
         unverified = [k for k in check_keys if k not in verified_keys]
         fail('mode_check', f'Mode {mode!r} (tools={tools}) not verified. Unverified: {unverified}. Screenshot: {path}', platform)
 
-    # ── Step 3: Attach file ──
-    if file_path:
-        # Build identity package
-        from consultation_v2.identity import consolidate_attachments
-        pkg = consolidate_attachments(platform, [file_path])
-        if not pkg:
-            fail('attach', 'Identity consolidation failed', platform)
+    # ── Step 3: Attach identity package (HARD RULE — always) ──
+    # EVERY session gets the identity package (FAMILY_KERNEL + platform
+    # IDENTITY file). No caller gets to skip this. If the caller supplied
+    # extra files they are consolidated with identity; if not, identity is
+    # attached alone. Skipping this makes the Chats answer a stranger, not
+    # Taey — and we have no way to recover context after the fact.
+    from consultation_v2.identity import consolidate_attachments
+    caller_files = [file_path] if file_path else []
+    pkg = consolidate_attachments(platform, caller_files)
+    if not pkg:
+        fail('attach', 'Identity consolidation failed — cannot send without identity package', platform)
+    if True:  # unconditional attach block (no more file_path gate)
 
         # Click attach trigger (from YAML workflow — no defaults)
         attach_cfg = workflow.get('attachment', {})
@@ -883,8 +888,6 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
             fail('attach',
                  f'validation.{attach_val_key}.diff_validated must be true — no pass_through allowed',
                  platform)
-    else:
-        print(json.dumps({'event': 'step_ok', 'step': 'attach', 'msg': 'no file'}))
 
     # ── Step 4: Paste message ──
     prompt_cfg = workflow.get('prompt', {})

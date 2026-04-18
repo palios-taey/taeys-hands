@@ -75,10 +75,14 @@ def consolidate_attachments(
 
     all_files = [p for p in identity_files if os.path.isfile(p)] + clean
 
-    if len(all_files) <= 1:
-        return all_files[0] if all_files else None
+    if not all_files:
+        return None
 
-    # Consolidate into single package
+    # Always consolidate, even when all_files has length 1. Returning the
+    # bare identity path (e.g. FAMILY_KERNEL.md) would give every session
+    # the SAME filename on the chip, which breaks filename-exact chip
+    # validation across retries. The consolidated taey_package_* path
+    # carries a unique timestamp per run.
     sections = [f"# Package for {platform}\n\n**Files**: {len(all_files)}\n"]
     for path in all_files:
         if not os.path.isfile(path):
