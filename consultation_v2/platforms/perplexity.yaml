@@ -387,6 +387,26 @@ workflow:
         poll_interval: 2.0
       - action: require_url_changed
         baseline: pre_send_url
+        timeout: 30
+        poll_interval: 1.0
+      # Perplexity R11 #C: Deep Research is two-phase — the stop_button
+      # disappears briefly after the source-gathering pass, then
+      # reappears for the synthesis phase. Without this continuation,
+      # the monitor sees the first stop-disappearance and declares
+      # complete before the actual report is written. For non-DR
+      # prompts, the first stop vanish is the real completion and
+      # these optional steps time out harmlessly.
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 2
+        timeout: 120
+        poll_interval: 2.0
+        optional: true
+      - action: wait_for_indicator
+        validation: send_success
+        timeout: 30
+        poll_interval: 2.0
+        optional: true
 
   timing:
     after_trigger_click: 1.5

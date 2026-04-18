@@ -230,6 +230,14 @@ workflow:
         validation: send_success
         timeout: 15
         poll_interval: 2.0
+      # Claude R11 #1: session URL transitions claude.ai/new →
+      # claude.ai/chat/{uuid} on send. Without this gate a residual
+      # Stop response from an earlier dispatched request (back/forward
+      # cache, slow cleanup) could false-confirm.
+      - action: require_url_changed
+        baseline: pre_send_url
+        timeout: 15
+        poll_interval: 1.0
 
   timing:
     after_trigger_click: 1.5

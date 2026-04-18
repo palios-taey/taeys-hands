@@ -63,12 +63,32 @@ def resolve(ctx: dict, value: Any) -> Any:
     return _VAR_REF.sub(repl, value)
 
 
-def _fail(step_name: str, msg: str) -> dict:
-    return {'ok': False, 'event': None, 'error': f'{step_name}: {msg}'}
+def _fail(step_name: str, msg: str, kind: str = 'error') -> dict:
+    """Fail result. `kind` distinguishes hard failures from 'absent_optional'
+    which the runner may skip when the step declares optional: true. All
+    other failure kinds (click/inspect/verify failures) must halt even on
+    optional steps — optional only means 'the element may not be present',
+    it does NOT mean 'ignore any failure'."""
+    return {'ok': False, 'event': None, 'error': f'{step_name}: {msg}', 'kind': kind}
 
 
 def _ok(event: Optional[dict] = None) -> dict:
     return {'ok': True, 'event': event, 'error': None}
+
+
+def _must_inspect(ctx: dict, primitive_name: str, scope: str = 'document'):
+    """Inspect and fail closed if the inspection errored. Primitives that
+    gate state on snapshot contents must never silently proceed with an
+    empty-on-error dict — a missing-snapshot branch would make
+    assert_indicator_absent falsely pass, wait_for_indicator_absent
+    falsely declare completion, and require_url_changed falsely verify
+    a change (empty != baseline).
+    """
+    from consultation_v2.consult import inspect_platform
+    snap = inspect_platform(ctx['platform'], scope)
+    if 'error' in snap:
+        return None, _fail(primitive_name, f'inspect failed ({scope}): {snap["error"]}')
+    return snap, None
 
 
 # ---------------------------------------------------------------------------
@@ -151,14 +171,22 @@ def click(ctx: dict, step: dict) -> dict:
     else:
         return _fail('click', f'unknown pick strategy {pick!r} (must be first or last_by_y)')
     if not el:
-        if step.get('optional'):
-            return _ok({'event': 'step_ok', 'action': 'click', 'element': element_key,
-                        'skipped': True, 'reason': 'absent and optional'})
-        return _fail('click', f'element {element_key!r} not in snapshot (scope={scope}, pick={pick})')
+        # Element absent. `optional: true` means "this element may not
+        # exist in every state" — e.g. ChatGPT's "Show in text field"
+        # only appears on long paste auto-attach; Gemini's "Start
+        # research" only appears after the DR plan phase. Return an
+        # absent_optional result so the runner can skip THIS specific
+        # case. Click failures when the element IS present are
+        # different and must NOT be skipped by optional.
+        return _fail('click',
+                     f'element {element_key!r} not in snapshot (scope={scope}, pick={pick})',
+                     kind='absent_optional' if step.get('optional') else 'error')
     strategy = step.get('click_strategy')
     rt = ctx['runtime']
     ok = rt.click(el, strategy=strategy)
     if not ok:
+        # Element was present but the click itself failed (permission,
+        # race, stale atspi). Do NOT skip even if optional is set.
         return _fail('click', f'click on {element_key!r} returned False')
     delay = step.get('delay', 0)
     if delay:
@@ -319,7 +347,7 @@ def assert_indicator_absent(ctx: dict, step: dict) -> dict:
     YAML: `- action: assert_indicator_absent
             validation: send_success`
     """
-    from consultation_v2.consult import inspect_platform, _all_elements
+    from consultation_v2.consult import _all_elements
     val_key = step.get('validation')
     if not val_key:
         return _fail('assert_indicator_absent', 'step.validation missing')
@@ -329,7 +357,9 @@ def assert_indicator_absent(ctx: dict, step: dict) -> dict:
     if not indicators:
         return _fail('assert_indicator_absent',
                      f'validation.{val_key}.indicators missing or empty')
-    snap = inspect_platform(ctx['platform'])
+    snap, err = _must_inspect(ctx, 'assert_indicator_absent')
+    if err:
+        return err
     elements = _all_elements(snap)
     for ind in indicators:
         if any(e.get('name') == ind.get('name') and
@@ -364,8 +394,15 @@ def wait_for_indicator(ctx: dict, step: dict) -> dict:
     timeout = step.get('timeout', 15)
     poll = step.get('poll_interval', 2.0)
     deadline = time.time() + timeout
+    # Claude R11 #2: initialize `missing` BEFORE the loop. If deadline is
+    # reached before the first poll (e.g. very small timeout, clock skew,
+    # budget burned by prior steps), the loop body never runs and the
+    # fail message below would NameError without this initialization.
+    missing = list(indicators)
     while time.time() < deadline:
-        snap = inspect_platform(ctx['platform'])
+        snap, err = _must_inspect(ctx, 'wait_for_indicator')
+        if err:
+            return err
         elements = _all_elements(snap)
         missing = []
         for ind in indicators:
@@ -378,7 +415,8 @@ def wait_for_indicator(ctx: dict, step: dict) -> dict:
                         'validation': val_key, 'elapsed': round(time.time() - (deadline - timeout), 1)})
         time.sleep(poll)
     return _fail('wait_for_indicator',
-                 f'validation.{val_key} indicators not present within {timeout}s: {missing}')
+                 f'validation.{val_key} indicators not present within {timeout}s: {missing}',
+                 kind='timeout')
 
 
 @primitive('wait_for_indicator_absent')
@@ -410,7 +448,9 @@ def wait_for_indicator_absent(ctx: dict, step: dict) -> dict:
     deadline = time.time() + timeout
     absent_cycles = 0
     while time.time() < deadline:
-        snap = inspect_platform(ctx['platform'])
+        snap, err = _must_inspect(ctx, 'wait_for_indicator_absent')
+        if err:
+            return err
         elements = _all_elements(snap)
         any_present = False
         for ind in indicators:
@@ -427,20 +467,28 @@ def wait_for_indicator_absent(ctx: dict, step: dict) -> dict:
                             'validation': val_key, 'absent_cycles': absent_cycles})
         time.sleep(poll)
     return _fail('wait_for_indicator_absent',
-                 f'validation.{val_key} indicators still present at timeout {timeout}s')
+                 f'validation.{val_key} indicators still present at timeout {timeout}s',
+                 kind='timeout')
 
 
 @primitive('capture_url')
 def capture_url(ctx: dict, step: dict) -> dict:
-    """Capture the current URL into a named variable."""
-    from consultation_v2.consult import inspect_platform
+    """Capture the current URL into a named variable. Fails closed if the
+    URL is empty — subsequent require_url_changed checks need a non-empty
+    baseline to be meaningful.
+    """
     into = step.get('into')
     if not into:
         return _fail('capture_url', 'step.into missing')
-    snap = inspect_platform(ctx['platform'])
-    ctx.setdefault('vars', {})[into] = snap.get('url', '') or ''
+    snap, err = _must_inspect(ctx, 'capture_url')
+    if err:
+        return err
+    url = snap.get('url', '') or ''
+    if not url:
+        return _fail('capture_url', 'snapshot has no URL — navigation not complete?')
+    ctx.setdefault('vars', {})[into] = url
     return _ok({'event': 'step_ok', 'action': 'capture_url',
-                'into': into, 'url': ctx['vars'][into][:100]})
+                'into': into, 'url': url[:100]})
 
 
 @primitive('require_url_changed')
@@ -468,7 +516,9 @@ def require_url_changed(ctx: dict, step: dict) -> dict:
     poll = step.get('poll_interval', 1.0)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        snap = inspect_platform(ctx['platform'])
+        snap, err = _must_inspect(ctx, 'require_url_changed')
+        if err:
+            return err
         current = snap.get('url', '') or ''
         if current and current != baseline:
             return _ok({'event': 'step_ok', 'action': 'require_url_changed',
@@ -543,10 +593,20 @@ def run_sequence(ctx: dict, steps: List[dict], step_name: str = 'sequence') -> d
             ev['step_index'] = i
             print(json.dumps(ev))
         if not result['ok']:
-            if step.get('optional'):
+            # `optional: true` skips ONLY expected-non-presence failures:
+            #   - absent_optional: click target not in snapshot (YAML knows
+            #     this element may not exist in every UI state, e.g.
+            #     ChatGPT Show-in-text-field or Gemini Start-research)
+            #   - timeout: wait_for_indicator / wait_for_indicator_absent
+            #     deadline hit (the condition never triggered, which for
+            #     DR two-phase flows means "non-DR prompt, skip").
+            # Hard failures (click-failed, inspect-errored, text-landed
+            # mismatch, URL-didn't-change) are never skipped — optional
+            # does not mean "ignore any failure."
+            if step.get('optional') and result.get('kind') in ('absent_optional', 'timeout'):
                 print(json.dumps({'event': 'step_skip', 'action': action,
                                   'step_index': i, 'error': result['error'],
-                                  'reason': 'optional'}))
+                                  'reason': result['kind']}))
                 result = _ok(None)
                 continue
             return result
