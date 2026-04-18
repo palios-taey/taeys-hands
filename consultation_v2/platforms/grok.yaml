@@ -226,16 +226,25 @@ workflow:
     validation: response_complete
 
   extract:
-    scroll_before_extract: ctrl+End
-    scroll_delay: 2.0
-    post_click_delay: 1.0
-    primary_key: copy_button
-    strategy: last_by_y
-    # Coordinate click on the Copy at (713, 3564) misses the button — the
-    # response action-bar icons are dense and something adjacent catches the
-    # click. atspi_only routes the click through the accessibility API to the
-    # exact element, which works reliably. Verified live 2026-04-17.
-    click_strategy: atspi_only
+    # Grok's response action bar icons are densely packed; coordinate click
+    # on the Copy button at (713, 3564) misses because something adjacent
+    # catches the click. atspi_only routes through the accessibility API
+    # to the exact element. Pick last-by-y for the most recent response.
+    output_var: response
+    sequence:
+      - action: press
+        key: ctrl+End
+        delay: 2.0
+      - action: write_clipboard
+        text: ""
+      - action: click
+        element: copy_button
+        pick: last_by_y
+        click_strategy: atspi_only
+        delay: 2.0
+      - action: read_clipboard
+        into: response
+        min_chars: 100
 
 
 validation:

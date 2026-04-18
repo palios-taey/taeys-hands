@@ -289,12 +289,25 @@ workflow:
     validation: response_complete
 
   extract:
-    scroll_before_extract: ctrl+End
-    scroll_delay: 2.0
-    post_click_delay: 1.0
-    primary_key: copy_button
-    strategy: last_by_y
-    click_strategy: atspi_only
+    # ChatGPT shows a "Copy response" push button on each completed message.
+    # For the most recent response, pick last_by_y. Clear clipboard first
+    # so a silently-failed click reads stale content (would be the prompt
+    # text from the paste).
+    output_var: response
+    sequence:
+      - action: press
+        key: ctrl+End
+        delay: 2.0
+      - action: write_clipboard
+        text: ""
+      - action: click
+        element: copy_button
+        pick: last_by_y
+        click_strategy: atspi_only
+        delay: 2.0
+      - action: read_clipboard
+        into: response
+        min_chars: 100
 
 
 validation:

@@ -267,12 +267,26 @@ workflow:
     validation: response_complete
 
   extract:
-    scroll_before_extract: ctrl+End
-    scroll_delay: 2.0
-    post_click_delay: 1.0
-    primary_key: copy_button
-    strategy: last_by_y
-    click_strategy: atspi_only
+    # Gemini shows a Copy button on each completed assistant message. Pick
+    # the last-by-y (most recent response). For Deep Research specifically,
+    # the regular Copy button truncates the report; those responses need
+    # the Share & Export → Copy menu path (TODO: handle separately, e.g.,
+    # via a mode-specific extract sequence, once DR flow is promoted to YAML).
+    output_var: response
+    sequence:
+      - action: press
+        key: ctrl+End
+        delay: 2.0
+      - action: write_clipboard
+        text: ""
+      - action: click
+        element: copy_button
+        pick: last_by_y
+        click_strategy: atspi_only
+        delay: 2.0
+      - action: read_clipboard
+        into: response
+        min_chars: 100
 
 
 validation:

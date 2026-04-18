@@ -121,11 +121,17 @@ def click(ctx: dict, step: dict) -> dict:
     """Click a YAML element_map key. Fail closed if element not present
     unless step.optional=true (then log and continue).
 
+    pick controls selection when multiple elements match the key:
+      - 'first' (default): first hit in the snapshot's mapped list.
+      - 'last_by_y': highest y-coordinate among matches (e.g., the most
+        recent response's Copy button at the bottom of the page).
+
     YAML: `- action: click
-            element: show_full_report_button
+            element: copy_button
+            pick: last_by_y
             scope: document     # document|menu, default document
             click_strategy: atspi_only
-            delay: 3.0
+            delay: 1.0
             optional: false`
     """
     from consultation_v2.snapshot import build_menu_snapshot, build_snapshot
@@ -137,12 +143,18 @@ def click(ctx: dict, step: dict) -> dict:
         _, _, snap = build_menu_snapshot(ctx['platform'])
     else:
         _, _, snap = build_snapshot(ctx['platform'])
-    el = snap.first(element_key)
+    pick = step.get('pick', 'first')
+    if pick == 'last_by_y':
+        el = snap.last(element_key)
+    elif pick == 'first':
+        el = snap.first(element_key)
+    else:
+        return _fail('click', f'unknown pick strategy {pick!r} (must be first or last_by_y)')
     if not el:
         if step.get('optional'):
             return _ok({'event': 'step_ok', 'action': 'click', 'element': element_key,
                         'skipped': True, 'reason': 'absent and optional'})
-        return _fail('click', f'element {element_key!r} not in snapshot (scope={scope})')
+        return _fail('click', f'element {element_key!r} not in snapshot (scope={scope}, pick={pick})')
     strategy = step.get('click_strategy')
     rt = ctx['runtime']
     ok = rt.click(el, strategy=strategy)
@@ -152,7 +164,7 @@ def click(ctx: dict, step: dict) -> dict:
     if delay:
         time.sleep(delay)
     return _ok({'event': 'step_ok', 'action': 'click', 'element': element_key,
-                'x': el.x, 'y': el.y})
+                'pick': pick, 'x': el.x, 'y': el.y})
 
 
 @primitive('write_clipboard')
