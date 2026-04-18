@@ -94,6 +94,15 @@ tree:
       name: "Copy response"
       role: push button
 
+    # ChatGPT converts pastes above ~5000 chars into a file-attachment chip
+    # with a "Show in text field" link that restores the content into the
+    # composer. Without clicking it, the input has only the "Ask anything"
+    # placeholder (13 chars) and verify_text_landed correctly fails. The
+    # prompt sequence clicks this (optional — absent for short pastes).
+    show_in_text_field_button:
+      name: "Show in text field"
+      role: push button
+
     model_selector:
       name: "Model selector"
       role: push button
@@ -259,6 +268,33 @@ workflow:
   prompt:
     input: input
     validation: prompt_ready
+    # ChatGPT-specific: pastes > ~5000 chars get converted into a file-
+    # attachment chip automatically. A "Show in text field" push button
+    # appears that restores the content into the composer. The step is
+    # optional — for shorter pastes the button never appears. verify_text_
+    # landed catches the case where auto-attach happened AND the show-in-
+    # text-field button is also missing (UI broke).
+    sequence:
+      - action: click
+        element: input
+        delay: 0.5
+      - action: paste
+        text: ${message}
+        delay: 1.0
+      - action: click
+        element: show_in_text_field_button
+        click_strategy: atspi_only
+        delay: 2.0
+        optional: true
+      - action: verify_text_landed
+        element: input
+        slack_absolute: 20
+        slack_ratio: 0.01
+        head_chars: 30
+      - action: wait_for_indicator
+        validation: prompt_ready
+        timeout: 10
+        poll_interval: 1.0
 
   send:
     confirmation_key: stop_button

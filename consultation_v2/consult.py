@@ -889,112 +889,23 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
                  f'validation.{attach_val_key}.diff_validated must be true — no pass_through allowed',
                  platform)
 
-    # ── Step 4: Paste message ──
+    # ── Step 4: Prompt (YAML-driven sequence) ──
+    # workflow.prompt.sequence is a list of primitives executed by the
+    # runner. Each platform declares exactly what to do: click input,
+    # paste ${message}, click auxiliary buttons (e.g. ChatGPT's
+    # "Show in text field" for long pastes), verify text landed, wait
+    # for prompt_ready indicator. No driver branching on platform.
     prompt_cfg = workflow.get('prompt', {})
-    if 'input' not in prompt_cfg:
-        fail('prompt', 'workflow.prompt.input missing from YAML', platform)
-    input_key = prompt_cfg['input']
-    result = act(platform, 'click', input_key)
-    if result.get('error'):
-        fail('prompt', f'Input click ({input_key!r}) failed: {result}', platform)
-    time.sleep(timing['after_input_click'])
-
-    result = act(platform, 'paste', message)
-    if not result.get('pasted'):
-        fail('prompt', f'Paste failed: {result}', platform)
-    time.sleep(timing['after_paste'])
-    print(json.dumps({'event': 'step_ok', 'step': 'prompt', 'length': len(message)}))
-
-    # Prove the pasted text actually landed in the composer. runtime.paste()
-    # returning True only proves the clipboard write + Ctrl+V subprocess
-    # succeeded, not that the text reached the input element (focus could
-    # have been on a modal, a different focused entry, etc.). Use the AT-SPI
-    # Text interface on the input element to verify character count.
-    input_spec = cfg.get('tree', {}).get('element_map', {}).get(input_key, {})
-    input_name = input_spec.get('name', '')
-    input_role = input_spec.get('role', '')
-    input_states = input_spec.get('states_include', [])
-    if not input_role:
-        fail('prompt', f'element_map.{input_key}.role missing from YAML', platform)
-
-    from consultation_v2.runtime import ConsultationRuntime
-    _rt = ConsultationRuntime(platform)
-    txt_result = _rt.read_element_text(input_name, input_role, required_states=input_states)
-    if 'error' in txt_result:
-        fail('prompt',
-             f'Cannot verify paste landed in {input_key!r}: {txt_result["error"]}. '
-             f'No way to prove text reached the composer.',
-             platform)
-    live_text = txt_result.get('text', '') or ''
-    live_count = txt_result.get('char_count', 0)
-    # Paste slack = max(20 chars, 1% of expected).
-    # - 20 char floor: absolute tolerance for small prompts and basic
-    #   whitespace normalization (\r\n → \n, trailing newline stripping).
-    # - 1% ceiling: for structured documents (Markdown with blank lines,
-    #   code fences, nested lists), ProseMirror and other editors
-    #   collapse/normalize whitespace more aggressively. A 12KB prompt can
-    #   legitimately lose ~100 chars of structural whitespace. 1% bounds
-    #   this tightly — far tighter than the original 80% percentage
-    #   (which permitted silent 2.4KB truncation on 12KB).
-    # - An 80-char loss on a 100-byte message stays failing (slack=20).
-    # - An 80-char loss on an 8KB message passes (slack=80) — real
-    #   normalization. 800-char loss on same message fails.
-    expected = len(message)
-    PASTE_SLACK = max(20, int(expected * 0.01))
-    if expected > 0 and live_count == 0:
-        fail('prompt',
-             f'Paste did not land: input has 0 chars, expected {expected}. '
-             f'Live text head: {live_text[:80]!r}',
-             platform)
-    # Short prompts: require non-zero (covered above) and any count up to
-    # `expected` is acceptable — can't meaningfully tolerate slack when
-    # the message is shorter than the slack.
-    if expected > PASTE_SLACK:
-        min_chars = expected - PASTE_SLACK
-        if live_count < min_chars:
-            fail('prompt',
-                 f'Paste incomplete: input has {live_count} chars, expected {expected} '
-                 f'(slack {PASTE_SLACK}, min {min_chars}). '
-                 f'Live text head: {live_text[:80]!r}',
-                 platform)
-
-    # Head-check: the prompt must appear at the START of the composer, not
-    # anywhere inside it. `in` would pass if prior paste residue contained
-    # the prefix; startswith rejects that. lstrip only (not full strip) so
-    # trailing content from the paste itself is still legitimate signal.
-    # Normalize whitespace runs to single spaces to tolerate ProseMirror
-    # block-level spacing differences.
-    def _norm_ws(s: str) -> str:
-        return ' '.join(s.split())
-    msg_head = _norm_ws(message)[:30]
-    live_head = _norm_ws(live_text)[:200]
-    if msg_head and not live_head.startswith(msg_head):
-        fail('prompt',
-             f'Paste corrupted: expected prefix {msg_head!r} at start of input. '
-             f'Live head (normalized): {live_head[:80]!r}',
-             platform)
-    print(json.dumps({'event': 'step_ok', 'step': 'prompt_text_verified',
-                      'expected_chars': expected, 'live_chars': live_count}))
-
-    # Validate prompt_ready — read validation key from YAML workflow.prompt.validation
-    prompt_val_key = prompt_cfg.get('validation')
-    if not prompt_val_key:
-        fail('prompt', 'workflow.prompt.validation missing from YAML', platform)
-    prompt_validation = validation.get(prompt_val_key, {})
-    # No pass_through — every platform must define indicators
-    indicators = prompt_validation.get('indicators')
-    if not indicators:
-        fail('prompt', f'validation.{prompt_val_key}.indicators missing or empty — required', platform)
-    prompt_snap = must_inspect(platform, 'prompt')
-    prompt_elements = _all_elements(prompt_snap)
-    for indicator in indicators:
-        found = any(
-            e.get('name') == indicator.get('name') and e.get('role') == indicator.get('role')
-            for e in prompt_elements
-        )
-        if not found:
-            fail('prompt', f'prompt_ready indicator not found: {indicator}', platform)
-    print(json.dumps({'event': 'step_ok', 'step': 'prompt_ready'}))
+    prompt_sequence = prompt_cfg.get('sequence')
+    if not prompt_sequence:
+        fail('prompt', 'workflow.prompt.sequence missing from YAML', platform)
+    from consultation_v2.primitives import run_sequence
+    from consultation_v2.runtime import ConsultationRuntime as _Rt
+    _rt = _Rt(platform)
+    ctx = {'platform': platform, 'runtime': _rt, 'cfg': cfg, 'message': message, 'vars': {}}
+    res = run_sequence(ctx, prompt_sequence, step_name='prompt')
+    if not res['ok']:
+        fail('prompt', res['error'], platform)
 
     # ── Step 5: Send ──
     send_cfg = workflow.get('send', {})

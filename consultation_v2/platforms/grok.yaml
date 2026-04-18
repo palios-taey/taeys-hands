@@ -195,6 +195,22 @@ workflow:
   prompt:
     input: input
     validation: prompt_ready
+    sequence:
+      - action: click
+        element: input
+        delay: 0.5
+      - action: paste
+        text: ${message}
+        delay: 1.0
+      - action: verify_text_landed
+        element: input
+        slack_absolute: 20
+        slack_ratio: 0.01
+        head_chars: 30
+      - action: wait_for_indicator
+        validation: prompt_ready
+        timeout: 10
+        poll_interval: 1.0
 
   send:
     submit_via_return: true
