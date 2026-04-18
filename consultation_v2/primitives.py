@@ -393,6 +393,7 @@ def wait_for_indicator(ctx: dict, step: dict) -> dict:
                      f'validation.{val_key}.indicators missing or empty')
     timeout = step.get('timeout', 15)
     poll = step.get('poll_interval', 2.0)
+    into = step.get('into')
     deadline = time.time() + timeout
     # Claude R11 #2: initialize `missing` BEFORE the loop. If deadline is
     # reached before the first poll (e.g. very small timeout, clock skew,
@@ -411,9 +412,18 @@ def wait_for_indicator(ctx: dict, step: dict) -> dict:
             if not found:
                 missing.append(ind)
         if not missing:
+            if into:
+                ctx.setdefault('vars', {})[into] = True
             return _ok({'event': 'step_ok', 'action': 'wait_for_indicator',
                         'validation': val_key, 'elapsed': round(time.time() - (deadline - timeout), 1)})
         time.sleep(poll)
+    # Timeout: if `into` is set, record the negative outcome so downstream
+    # logic (e.g. monitor deciding RESPONSE_COMPLETE vs RESPONSE_UNVERIFIED)
+    # can distinguish a present-but-late indicator from a never-appeared
+    # one. The step's `optional: true` still determines whether the runner
+    # halts or skips — `into` only records the state.
+    if into:
+        ctx.setdefault('vars', {})[into] = False
     return _fail('wait_for_indicator',
                  f'validation.{val_key} indicators not present within {timeout}s: {missing}',
                  kind='timeout')

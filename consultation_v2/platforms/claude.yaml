@@ -278,6 +278,18 @@ workflow:
     complete_key: copy_button
     timeout: 3600
     validation: response_complete
+    sequence:
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 3
+        poll_interval: 2.0
+        timeout: 3600
+      - action: wait_for_indicator
+        validation: response_complete
+        into: complete_key_present
+        timeout: 30
+        poll_interval: 2.0
+        optional: true
 
   extract:
     # Claude shows a Copy button on each completed assistant message. Pick

@@ -356,6 +356,23 @@ workflow:
     complete_key: copy_button
     timeout: 3600
     validation: response_complete
+    # Generation is done when stop_button has been absent for N consecutive
+    # cycles; completion is verified when the Copy button appears on the
+    # latest assistant message. The final wait records its outcome via
+    # `into: complete_key_present` so the monitor process can distinguish
+    # RESPONSE_COMPLETE (True) from RESPONSE_UNVERIFIED (False).
+    sequence:
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 3
+        poll_interval: 2.0
+        timeout: 3600
+      - action: wait_for_indicator
+        validation: response_complete
+        into: complete_key_present
+        timeout: 30
+        poll_interval: 2.0
+        optional: true
 
   extract:
     # ChatGPT shows a "Copy response" push button on each completed message.

@@ -837,26 +837,17 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     # notification and no gate on when the response is actually done —
     # skipping it would be a fallback that lets the caller proceed as if
     # the work were complete when it isn't.
+    #
+    # The monitor is a thin runner for workflow.monitor.sequence (YAML).
+    # All polling intervals, cycles, timeouts, and stop/complete element
+    # keys live in the sequence itself — consult.py passes only the
+    # platform name and the monitor loads everything from YAML.
     mon_cfg = workflow.get('monitor', {})
     if not mon_cfg:
         fail('monitor', 'workflow.monitor missing from YAML', platform)
-    if 'poll_interval' not in mon_cfg:
-        fail('monitor', 'workflow.monitor.poll_interval missing from YAML', platform)
-    if 'required_stop_absent_cycles' not in mon_cfg:
-        fail('monitor', 'workflow.monitor.required_stop_absent_cycles missing from YAML', platform)
-    interval = str(mon_cfg['poll_interval'])
-    absent = str(mon_cfg['required_stop_absent_cycles'])
-    if 'stop_key' not in mon_cfg:
-        fail('monitor', 'workflow.monitor.stop_key missing from YAML', platform)
-    stop_key_val = mon_cfg['stop_key']
-    if 'timeout' not in mon_cfg:
-        fail('monitor', 'workflow.monitor.timeout missing from YAML', platform)
-    timeout = str(mon_cfg['timeout'])
-    # Send step already confirmed stop_button was present. Pass --seen-stop
-    # so the monitor inherits that fact and can't be fooled by a pre-existing
-    # copy_button (chat history, homepage cards) into declaring complete.
-    monitor_cmd = _MONITOR + [platform, '--interval', interval, '--absent', absent,
-                              '--timeout', timeout, '--stop-key', stop_key_val, '--seen-stop']
+    if not mon_cfg.get('sequence'):
+        fail('monitor', 'workflow.monitor.sequence missing from YAML', platform)
+    monitor_cmd = _MONITOR + [platform]
     log_path = f'/tmp/monitor_{platform}_{int(time.time())}.log'
     with open(log_path, 'w') as log_f:
         proc = subprocess.Popen(monitor_cmd, stdout=log_f, stderr=subprocess.STDOUT,

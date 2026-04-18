@@ -447,6 +447,24 @@ workflow:
     complete_key: copy_button
     timeout: 3600
     validation: response_complete
+    # Perplexity Deep Research is two-phase: the stop_button disappears
+    # briefly between the source-gathering pass and the synthesis phase.
+    # The send step already rides out the gap via its two optional
+    # wait_for_indicator_absent/wait_for_indicator pair; by the time the
+    # monitor starts, we're in the synthesis phase and waiting for the
+    # real final stop_button disappearance.
+    sequence:
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 3
+        poll_interval: 2.0
+        timeout: 3600
+      - action: wait_for_indicator
+        validation: response_complete
+        into: complete_key_present
+        timeout: 30
+        poll_interval: 2.0
+        optional: true
 
   extract:
     # Perplexity Deep Research: multiple UI states can exist for the same
