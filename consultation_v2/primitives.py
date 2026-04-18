@@ -468,6 +468,41 @@ def require_url_changed(ctx: dict, step: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_platform_env(platform: str) -> None:
+    """Populate os.environ with DISPLAY and DBUS_SESSION_BUS_ADDRESS for
+    the platform so in-process primitives (runtime.click / runtime.paste /
+    xdotool subprocess) can reach the right X display. Does nothing if
+    env is already set and matches (e.g. consult.py was launched with
+    platform env already). Called at the start of every run_sequence.
+    """
+    import os as _os
+    from pathlib import Path as _Path
+    try:
+        from core.platforms import get_platform_display
+    except Exception:
+        return
+    display = get_platform_display(platform)
+    if not display:
+        return
+    _os.environ['DISPLAY'] = display
+    _os.environ.setdefault('PLATFORM_DISPLAYS', f'{platform}:{display.lstrip(":")}')
+    session_bus_file = f'/tmp/dbus_session_bus_{display}'
+    try:
+        session_bus = _Path(session_bus_file).read_text().strip()
+    except FileNotFoundError:
+        return
+    if session_bus:
+        _os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+    # a11y bus is legitimately empty on this system; only set when non-empty
+    a11y_file = f'/tmp/a11y_bus_{display}'
+    try:
+        bus = _Path(a11y_file).read_text().strip()
+    except FileNotFoundError:
+        bus = ''
+    if bus:
+        _os.environ['AT_SPI_BUS_ADDRESS'] = bus
+
+
 def run_sequence(ctx: dict, steps: List[dict], step_name: str = 'sequence') -> dict:
     """Execute a list of primitive steps. Returns the last primitive's result.
     Prints each step's event as JSON to stdout. Fails closed on the first
@@ -476,6 +511,7 @@ def run_sequence(ctx: dict, steps: List[dict], step_name: str = 'sequence') -> d
     Every step dict must have an `action` key naming the primitive.
     Unknown actions are hard errors (they indicate a YAML-driver mismatch).
     """
+    _ensure_platform_env(ctx.get('platform', ''))
     result = _ok({'event': 'step_ok', 'action': 'sequence_start', 'name': step_name,
                   'steps': len(steps)})
     print(json.dumps(result['event']))
