@@ -445,22 +445,37 @@ def capture_url(ctx: dict, step: dict) -> dict:
 
 @primitive('require_url_changed')
 def require_url_changed(ctx: dict, step: dict) -> dict:
-    """Fail if current URL equals the baseline URL captured earlier."""
+    """Poll until the current URL differs from the baseline variable, or
+    fail on timeout. Platforms that redirect to a session URL after send
+    (ChatGPT /c/<id>, Perplexity /search/<...>) don't redirect instantly
+    — the stop_button appears before the URL updates — so this primitive
+    polls for up to `timeout` seconds.
+
+    YAML: `- action: require_url_changed
+            baseline: pre_send_url
+            timeout: 30
+            poll_interval: 1.0`
+    """
     from consultation_v2.consult import inspect_platform
     baseline_var = step.get('baseline')
     if not baseline_var:
         return _fail('require_url_changed', 'step.baseline var name missing')
     baseline = ctx.get('vars', {}).get(baseline_var, '')
-    snap = inspect_platform(ctx['platform'])
-    current = snap.get('url', '') or ''
     if not baseline:
         return _fail('require_url_changed',
                      f'baseline var {baseline_var!r} is empty; nothing to compare')
-    if current == baseline:
-        return _fail('require_url_changed',
-                     f'URL unchanged from baseline {baseline[:60]!r}')
-    return _ok({'event': 'step_ok', 'action': 'require_url_changed',
-                'from': baseline[:60], 'to': current[:60]})
+    timeout = step.get('timeout', 30)
+    poll = step.get('poll_interval', 1.0)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        snap = inspect_platform(ctx['platform'])
+        current = snap.get('url', '') or ''
+        if current and current != baseline:
+            return _ok({'event': 'step_ok', 'action': 'require_url_changed',
+                        'from': baseline[:60], 'to': current[:60]})
+        time.sleep(poll)
+    return _fail('require_url_changed',
+                 f'URL unchanged from baseline {baseline[:60]!r} after {timeout}s')
 
 
 # ---------------------------------------------------------------------------
