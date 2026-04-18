@@ -887,7 +887,15 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
         if not el:
             return _fail('mode_select_step',
                          f'trigger {trigger!r} not in document snapshot')
-        if not rt.click(el, strategy=strategy):
+        # Trigger click uses the platform's default strategy (YAML
+        # top-level click_strategy), NOT the step's click_strategy.
+        # The step's strategy applies to the target click only — e.g.
+        # ChatGPT's pro_extended sequence has click_strategy: atspi_only
+        # for the menu item (model_pro), but the model_selector trigger
+        # needs coordinate_only (platform default) to actually open the
+        # dropdown. This matches the pre-refactor behavior of calling
+        # act.py without --strategy for the trigger click.
+        if not rt.click(el):
             return _fail('mode_select_step',
                          f'trigger click {trigger!r} returned False')
         time.sleep(timing['after_trigger_click'])
@@ -934,13 +942,15 @@ def mode_select_step(ctx: dict, step: dict) -> dict:
             if not verified and step.get('reverify_via_reopen') and trigger:
                 # Gemini-style: menu auto-closes after selection, re-open
                 # to bring the target back into menu scope for verification.
+                # Trigger uses platform default strategy (see trigger click
+                # above for rationale).
                 from consultation_v2.snapshot import build_snapshot
                 _, _, snap = build_snapshot(ctx['platform'])
                 el = snap.first(trigger)
                 if not el:
                     return _fail('mode_select_step',
                                  f'reverify re-open: trigger {trigger!r} absent')
-                if not rt.click(el, strategy=strategy):
+                if not rt.click(el):
                     return _fail('mode_select_step',
                                  f'reverify re-open: trigger {trigger!r} click failed')
                 time.sleep(timing['after_trigger_click'])
