@@ -491,3 +491,18 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Canonical Notification Protocol
+
+**Single source of truth:** `/home/mira/the-conductor/NOTIFICATION_PROTOCOL.md`
+
+If anything in this file conflicts with the protocol doc, the protocol doc wins. Summary:
+
+- Send: `taey-notify TARGET "message"`
+- Receive (active session): PostToolUse hook delivers via `additionalContext`
+- Receive (idle session): daemon injects via tmux when `taey:YOU:idle=1` (Stop hook)
+- NEVER use `!!` as prefix (bash history expansion breaks delivery)
+- NEVER set `idle=1` from anywhere except the Stop hook
+- Sessions talk directly; conductor does NOT relay
+
+Targets: `conductor`, `weaver`, `tutor`, `infra`, `taeys-hands`, `taey`
