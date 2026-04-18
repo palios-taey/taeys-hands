@@ -376,7 +376,7 @@ workflow:
         delay: 2.0
       - action: read_clipboard
         into: response
-        min_chars: 100
+        min_chars: 20
 
 
 validation:

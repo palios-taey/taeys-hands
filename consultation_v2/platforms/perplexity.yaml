@@ -465,7 +465,7 @@ workflow:
       - action: read_element_text
         element: response_landmark
         into: response
-        min_chars: 500
+        min_chars: 20
 
 
 validation:
