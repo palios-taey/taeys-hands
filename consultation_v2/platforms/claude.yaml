@@ -244,8 +244,17 @@ workflow:
         into: pre_send_url
       - action: assert_indicator_absent
         validation: send_success
+      # Send must use atspi_only. Coordinate click at the AT-SPI-reported
+      # position (1291, 1047) returns success but doesn't actually
+      # trigger Claude.ai's send action — reproducible HALT at
+      # wait_for_indicator(send_success). atspi_only routes through the
+      # accessibility API's invoke action and works reliably. Root cause
+      # is likely React's synthetic event system not accepting raw
+      # xdotool clicks at those coordinates; this is Claude-UI-specific
+      # so the fix stays scoped to this step, not the platform default.
       - action: click
         element: send_button
+        click_strategy: atspi_only
         delay: 0.5
       - action: wait_for_indicator
         validation: send_success
