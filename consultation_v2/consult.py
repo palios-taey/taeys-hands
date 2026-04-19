@@ -321,8 +321,34 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     if 'input' not in prompt_cfg:
         fail('navigate', 'workflow.prompt.input missing from YAML', platform)
     input_key = prompt_cfg['input']
+
+    # If the input element isn't in the snapshot, the composer may be
+    # holding a residual draft from a prior consultation that HALTed
+    # mid-paste (e.g., verify_text_landed slack trip). ChatGPT and
+    # Claude persist composer drafts client-side — the URL reloads but
+    # the draft state and the composer's AT-SPI exposure both depend
+    # on its focus/content state. Recovery: press Escape (close any
+    # modal), nudge focus into the content with F6, then clear via
+    # Ctrl+A + Delete. Re-inspect. If input is STILL missing, the
+    # YAML or UI has genuinely drifted — fail closed as before.
     if not has_key(snap, input_key):
-        fail('navigate', f'Input key {input_key!r} not found after navigation', platform)
+        import subprocess as _subp
+        env = _platform_env(platform)
+        for keys in ('Escape', 'F6', 'ctrl+a', 'Delete'):
+            _subp.run(['xdotool', 'key', keys], env=env,
+                      capture_output=True, timeout=3)
+            time.sleep(0.3)
+        time.sleep(1.0)
+        snap = inspect_platform(platform)
+        if not has_key(snap, input_key):
+            fail('navigate',
+                 f'Input key {input_key!r} not found after navigation '
+                 f'(attempted composer-clear recovery — no effect). '
+                 f'YAML may be stale or platform UI changed.',
+                 platform)
+        print(json.dumps({'event': 'step_ok', 'step': 'navigate_recovered',
+                          'note': 'composer had residual state; cleared via Escape+F6+Ctrl+A+Delete'}))
+
     print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:50]}))
 
     # ── UI drift detection — fail closed on critical drift ──
