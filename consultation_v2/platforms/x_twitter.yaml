@@ -27,6 +27,13 @@ tree:
   fence_after: []
 
   exclude:
+    # Right sidebar cutoff — x ≥ 1450 on 1920x1080 is the trending/
+    # who-to-follow/live-spaces column, pure noise for our automation.
+    # Individual "More" / "Follow" buttons inside trending cards would
+    # otherwise match our element_map entries and pollute picks.
+    # (Jesse guidance 2026-04-20: right sidebar is tree noise, exclude.)
+    x_gte: 1450
+
     # Curated noise list from the v1 yaml + verified against live AT-SPI scan.
     names:
       - "Search with Google or enter address"
@@ -92,6 +99,50 @@ tree:
       name: "Close"
       role: push button
 
+    # Status-page "More" button — the three-dot menu on the main tweet.
+    # Multiple "More" buttons exist on a status page (main tweet + each
+    # thread reply + rightbar cards). Main tweet's More is at the
+    # smallest y in the main column (~y=177 on 1920x1080 status view).
+    # click pick: first_by_y targets it specifically.
+    more_trigger_status:
+      name: "More"
+      role: push button
+
+    # Menu items that appear in More → dropdown for the main tweet.
+    # "Pin to your profile" shows when tweet is NOT pinned.
+    # "Unpin from profile" shows when tweet IS pinned.
+    # These are mutually exclusive — presence of one implies absence of
+    # the other. Both use optional: true in the sequences so the action
+    # is idempotent (pin_post on already-pinned tweet = no-op).
+    pin_menu_item:
+      name: "Pin to your profile"
+      role: menu item
+
+    unpin_menu_item:
+      name: "Unpin from profile"
+      role: menu item
+
+    # Confirm buttons in the Pin/Unpin dialog. X shows a modal dialog
+    # after clicking the menu item with a primary button matching the
+    # action name ("Pin" or "Unpin"). These are distinct from the
+    # composer's submit_button ("Post"/"Reply") — different names.
+    pin_confirm:
+      name: "Pin"
+      role: push button
+
+    unpin_confirm:
+      name: "Unpin"
+      role: push button
+
+    # Delete menu item + delete confirm (for delete_post action).
+    delete_menu_item:
+      name: "Delete"
+      role: menu item
+
+    delete_confirm:
+      name: "Delete"
+      role: push button
+
 workflow:
   # x_twitter does not use the consultation flow (mode_setup/attach/prompt/
   # send/monitor/extract). It has action-specific sequences under
@@ -135,6 +186,92 @@ workflow:
           element: composer_input
           into: post_composer_after
           min_chars: 0
+
+    # pin_post — pin a tweet to profile. Navigate to status URL first
+    # (caller passes --url). Idempotent: dispatching on an already-
+    # pinned tweet is a no-op (pin_menu_item won't be in the menu,
+    # step skips via absent_optional; pin_confirm likewise).
+    pin_post:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: click
+          element: more_trigger_status
+          pick: first_by_y
+          delay: 2.0
+        - action: click
+          element: pin_menu_item
+          scope: menu
+          delay: 1.5
+          optional: true
+        - action: click
+          element: pin_confirm
+          delay: 2.0
+          optional: true
+        - action: press
+          key: Escape
+          delay: 0.5
+
+    # unpin_post — mirror of pin_post. Idempotent the same way.
+    unpin_post:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: click
+          element: more_trigger_status
+          pick: first_by_y
+          delay: 2.0
+        - action: click
+          element: unpin_menu_item
+          scope: menu
+          delay: 1.5
+          optional: true
+        - action: click
+          element: unpin_confirm
+          delay: 2.0
+          optional: true
+        - action: press
+          key: Escape
+          delay: 0.5
+
+    # delete_post — delete own tweet. Navigate to status URL first.
+    # Only the author's tweets show 'Delete' in the More menu; on a
+    # non-owned tweet the delete_menu_item won't be there and the step
+    # skips (sequence completes with no effect — treat as a no-op for
+    # non-author tweets; caller is responsible for URL ownership).
+    delete_post:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: click
+          element: more_trigger_status
+          pick: first_by_y
+          delay: 2.0
+        - action: click
+          element: delete_menu_item
+          scope: menu
+          delay: 1.5
+          optional: true
+        - action: click
+          element: delete_confirm
+          delay: 2.0
+          optional: true
+        - action: press
+          key: Escape
+          delay: 0.5
+
+    # like_post — press 'l' keyboard shortcut while the target tweet
+    # is focused (navigate to its status URL first so it IS the focused
+    # main tweet). X toggles like state; dispatching on an already-
+    # liked tweet un-likes it. Caller can check state beforehand if
+    # idempotency matters.
+    like_post:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: press
+          key: l
+          delay: 1.5
 
     reply:
       identity_attach: false

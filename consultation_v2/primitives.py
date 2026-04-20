@@ -168,8 +168,16 @@ def click(ctx: dict, step: dict) -> dict:
         el = snap.last(element_key)
     elif pick == 'first':
         el = snap.first(element_key)
+    elif pick == 'first_by_y':
+        # Lowest-y match — for pages with multiple same-named elements
+        # where the topmost is the target (e.g. status-page "More"
+        # button on the main tweet vs thread-reply "More" buttons
+        # below it). Not the same as `first` which uses tree-walk
+        # order; first_by_y explicitly sorts by vertical position.
+        items = snap.mapped.get(element_key) or []
+        el = sorted(items, key=lambda i: (i.y or 0, i.x or 0))[0] if items else None
     else:
-        return _fail('click', f'unknown pick strategy {pick!r} (must be first or last_by_y)')
+        return _fail('click', f'unknown pick strategy {pick!r} (must be first, first_by_y, or last_by_y)')
     if not el:
         # Element absent. `optional: true` means "this element may not
         # exist in every state" — e.g. ChatGPT's "Show in text field"

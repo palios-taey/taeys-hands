@@ -89,6 +89,19 @@ def _is_excluded(element: Dict[str, Any], tree_cfg: Dict[str, Any]) -> bool:
     excluded_roles = {str(r).strip() for r in _listify(exclude.get("roles")) if str(r).strip()}
     if role and role in excluded_roles:
         return True
+    # Coordinate-based exclusion — exclude elements whose x is at or
+    # above the declared threshold. Used for right-sidebar noise on
+    # x_twitter (trending cards, who-to-follow). Exclude is platform-
+    # scoped: YAML sets the cutoff in tree.exclude.x_gte; platforms
+    # that don't set it are unaffected.
+    x_gte = exclude.get("x_gte")
+    if x_gte is not None:
+        try:
+            x = element.get("x")
+            if x is not None and int(x) >= int(x_gte):
+                return True
+        except (TypeError, ValueError):
+            pass
     return False
 
 
