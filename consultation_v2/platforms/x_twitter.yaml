@@ -382,6 +382,22 @@ workflow:
           max_items: 50
           item_type: post
 
+    # search_x — query X's search. Caller passes --url with the
+    # fully-encoded search URL:
+    #   https://x.com/search?q=<encoded_query>&src=typed_query&f=live
+    # (f=live sorts by recency, most useful for the radar use case).
+    # Article scan returns {from_handle, type='post', timestamp,
+    # preview_text, ...} via x_scan_articles. Same shape as
+    # read_home_timeline.
+    search_x:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_scan_articles
+          into: items
+          max_items: 50
+          item_type: post
+
     # read_notifications — LIMITED. X's notification cards render
     # visually but expose empty accessible names via AT-SPI, so the
     # scan returns mostly-empty records with just article coordinates
