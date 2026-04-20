@@ -743,6 +743,77 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('x_follow_toggle')
+def x_follow_toggle(ctx: dict, step: dict) -> dict:
+    """X-specific follow/unfollow primitive. Profile Follow buttons have
+    dynamic names ("Follow @<handle>" / "Following @<handle>") which
+    can't be matched by exact element_map without knowing the handle
+    at YAML-authoring time. This primitive reads the handle from the
+    current URL (https://x.com/<handle>) or from step.handle, builds
+    the exact name at dispatch time, and clicks.
+
+    Idempotent: action=follow on already-followed profile is a no-op
+    (the "Follow @handle" button isn't present — "Following @handle"
+    is). Fails-closed on missing expected button for the intended
+    action.
+
+    YAML:
+      - action: x_follow_toggle
+        mode: follow          # or 'unfollow'
+    """
+    mode = step.get('mode')
+    if mode not in ('follow', 'unfollow'):
+        return _fail('x_follow_toggle',
+                     f'step.mode must be "follow" or "unfollow" (got {mode!r})')
+
+    # Extract handle from current page URL
+    from consultation_v2.snapshot import build_snapshot
+    _, _, snap = build_snapshot(ctx['platform'])
+    url = snap.url or ''
+    handle = step.get('handle')
+    if not handle:
+        # Parse from https://x.com/<handle> (profile URL root, no path segments)
+        import re as _re
+        m = _re.match(r'https?://(?:www\.)?x\.com/([A-Za-z0-9_]{1,15})/?(?:\?|$)', url or '')
+        if not m:
+            return _fail('x_follow_toggle',
+                         f'could not extract handle from URL {url!r} — '
+                         f'expected https://x.com/<handle>')
+        handle = m.group(1)
+
+    target_name = f'Follow @{handle}' if mode == 'follow' else f'Following @{handle}'
+    # Search for exact match via the unknown bucket (Follow/Following
+    # are not in element_map because names are dynamic).
+    candidates = [e for e in snap.unknown
+                  if e.role == 'push button' and e.name == target_name]
+    if not candidates:
+        if step.get('optional'):
+            return _fail('x_follow_toggle',
+                         f'{target_name!r} not found (already in target state, or handle absent)',
+                         kind='absent_optional')
+        # Default: if mode=follow and target button absent, that means already
+        # following → treat as idempotent no-op success.
+        if mode == 'follow':
+            return _ok({'event': 'step_ok', 'action': 'x_follow_toggle',
+                        'mode': mode, 'handle': handle,
+                        'note': 'already following — no-op'})
+        # mode=unfollow with Following button absent means already not-following
+        return _ok({'event': 'step_ok', 'action': 'x_follow_toggle',
+                    'mode': mode, 'handle': handle,
+                    'note': 'not following — no-op'})
+
+    # Click the first match (there should be exactly one after x_gte filter)
+    el = candidates[0]
+    rt = ctx['runtime']
+    if not rt.click(el):
+        return _fail('x_follow_toggle',
+                     f'click on {target_name!r} returned False')
+    time.sleep(step.get('delay', 1.5))
+    return _ok({'event': 'step_ok', 'action': 'x_follow_toggle',
+                'mode': mode, 'handle': handle,
+                'clicked_x': el.x, 'clicked_y': el.y})
+
+
 @primitive('thread_compose')
 def thread_compose(ctx: dict, step: dict) -> dict:
     """Compose a multi-tweet thread using X's native '+' composer.

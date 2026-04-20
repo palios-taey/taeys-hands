@@ -308,6 +308,34 @@ workflow:
           element: submit_button
           delay: 2.5
 
+    # follow_user — navigate to @handle profile URL and click the
+    # Follow button. Idempotent: if already following ("Following
+    # @handle" button is present instead of "Follow @handle"), the
+    # action is a silent no-op success. Handle is parsed from the
+    # --url (https://x.com/<handle>); no separate handle arg needed.
+    follow_user:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_follow_toggle
+          mode: follow
+          delay: 1.5
+
+    # unfollow_user — mirror; clicks "Following @handle" which opens
+    # X's confirm dialog. Dialog confirmation is NOT in this sequence
+    # yet — first click gives the dialog state for future scan to
+    # find the exact confirm-unfollow button. Currently lands on the
+    # confirmation modal without completing. Safe partial: no
+    # unintended unfollow happens without the second click.
+    unfollow_user:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_follow_toggle
+          mode: unfollow
+          delay: 1.5
+        # TODO (post-scan): click confirm-unfollow button.
+
     # get_newest_status_id — navigate to an @handle's profile
     # (caller passes --url like https://x.com/handle), click the
     # topmost NON-pinned article (pinned article's accessible name
