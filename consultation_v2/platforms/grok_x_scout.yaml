@@ -1,0 +1,363 @@
+platform: grok_x_scout
+identity_file: IDENTITY_LOGOS.md
+click_strategy: coordinate_only
+navigation_key: F6
+
+urls:
+  fresh: https://grok.com/
+  settle_delay: 10
+
+tree:
+  scan_root: app
+  dialog_titles:
+    - "File Upload"
+    - "Open"
+    - "Open File"
+  fence_after: []
+
+  exclude:
+    names:
+      - "Search with Google or enter address"
+      - "Google, pick a search engine"
+      - "View site information"
+      - "You have granted this website additional permissions."
+      - "Enter Reader View"
+      - "Bookmark this page (Ctrl+D)"
+      - "Sidebars"
+      - "Back"
+      - "Forward"
+      - "Reload"
+      - "Firefox View"
+      - "Close tab"
+      - "Open a new tab (Ctrl+T)"
+      - "List all tabs"
+      - "Account"
+      - "Extensions"
+      - "Firefox"
+    roles:
+      - separator
+      - document web
+      - paragraph
+      - list item
+      - page tab
+
+  sidebar_nav:
+    - name: "Toggle Sidebar"
+      role: push button
+    - name: "Home page"
+      role: link
+    - name: "Search"
+      role: push button
+    - name: "Chat"
+      role: link
+    - name: "Voice"
+      role: link
+    - name: "Imagine"
+      role: link
+    - name: "Projects"
+      role: push button
+    - name: "New Project"
+      role: push button
+    - name: "History"
+      role: push button
+    - name: "See all"
+      role: push button
+    - name: "pfp"
+      role: push button
+
+  element_map:
+    input:
+      name: ""
+      role: section
+      states_include: [editable, multi-line]
+
+    attach_trigger:
+      name: "Attach"
+      role: push button
+
+    sources_selector:
+      name: "Sources selector"
+      role: push button
+
+    model_selector:
+      name: "Model select"
+      role: push button
+
+    # Grok uses submit_via_return (Enter key) — no send button in AT-SPI tree.
+
+    stop_button:
+      name: "Stop model response"
+      role: push button
+
+    copy_button:
+      name: "Copy"
+      role: push button
+
+    dictation:
+      name: "Dictation (Ctrl+D)"
+      role: push button
+
+    voice_mode:
+      name: "Enter voice mode (Ctrl+⇧O)"
+      role: push button
+
+    scroll_down:
+      name: "Scroll down"
+      role: push button
+
+    upload_files_item:
+      name: "Upload a file"
+      role: menu item
+
+    recent_files_item:
+      name: "Recent"
+      role: menu item
+
+    model_auto:
+      name: "Auto Chooses Fast or Expert"
+      role: menu item
+
+    model_fast:
+      name: "Fast Quick responses"
+      role: menu item
+
+    model_expert:
+      name: "Expert Thinks hard"
+      role: menu item
+
+    model_heavy:
+      name: "Heavy Team of Experts"
+      role: menu item
+
+    connect_google_drive:
+      name: "Connect Google Drive"
+      role: menu item
+
+    connect_gmail:
+      name: "Connect Gmail"
+      role: menu item
+
+    connect_google_calendar:
+      name: "Connect Google Calendar"
+      role: menu item
+
+    connectors_menu_item:
+      name: "Connectors"
+      role: menu item
+
+workflow:
+  defaults:
+    mode: heavy
+    tools: []
+
+  selection:
+    sequences: {}
+    mode_trigger: model_selector
+    mode_snapshot: menu
+    mode_click_strategy: coordinate_only
+    # Grok menu items expose NO 'checked' or 'focused' state — AT-SPI cannot
+    # verify current selection. Each menu item's states are only
+    # ['showing', 'focusable', 'enabled']. The current model is rendered
+    # visually in the "Model select" button but that button's AT-SPI name is
+    # static. See validation.*_active below with unverifiable_reason.
+    mode_close_with_escape: true
+    mode_targets:
+      auto: model_auto
+      fast: model_fast
+      expert: model_expert
+      heavy: model_heavy
+    mode_validations:
+      auto: auto_active
+      fast: fast_active
+      expert: expert_active
+      heavy: heavy_active
+
+  connectors:
+    trigger: sources_selector
+    snapshot: menu
+    open_per_item: true
+    source_targets:
+      google_drive: connect_google_drive
+      gmail: connect_gmail
+      google_calendar: connect_google_calendar
+      connectors: connectors_menu_item
+
+  attachment:
+    trigger: attach_trigger
+    menu_target: upload_files_item
+    menu_target_scope: menu
+    dialog_location_shortcut: ctrl+l
+    dialog_select_all_key: ctrl+a
+    dialog_paste_key: ctrl+v
+    dialog_confirm_key: Return
+    validation: attach_success
+    sequence:
+      - action: snapshot_buttons
+        into: pre_attach_buttons
+        role: push button
+      - action: click
+        element: attach_trigger
+        delay: 1.5
+      - action: click
+        element: upload_files_item
+        scope: menu
+        delay: 3.0
+      - action: file_dialog_upload
+        file: ${pkg}
+        delay: 5.0
+      - action: verify_attachment_chip
+        baseline: pre_attach_buttons
+        role: push button
+        validation: attach_success
+        file: ${pkg}
+        timeout: 20
+        poll_interval: 1.0
+
+  prompt:
+    input: input
+    validation: prompt_ready
+    sequence:
+      - action: click
+        element: input
+        delay: 0.5
+      - action: paste
+        text: ${message}
+        delay: 1.0
+      - action: verify_text_landed
+        element: input
+        slack_absolute: 20
+        slack_ratio: 0.01
+        head_chars: 30
+      - action: wait_for_indicator
+        validation: prompt_ready
+        timeout: 10
+        poll_interval: 1.0
+
+  send:
+    submit_via_return: true
+    keypress: Return
+    confirmation_key: stop_button
+    require_new_url: false
+    confirmation_timeout: 15
+    validation: send_success
+    sequence:
+      - action: capture_url
+        into: pre_send_url
+      - action: assert_indicator_absent
+        validation: send_success
+      - action: press
+        key: Return
+        delay: 0.5
+      - action: wait_for_indicator
+        validation: send_success
+        timeout: 15
+        poll_interval: 2.0
+
+  timing:
+    after_trigger_click: 1.5
+    after_target_click: 1.0
+    after_escape: 1.0
+    after_input_click: 0.5
+    after_paste: 1.0
+    after_attach_menu: 3.0
+    after_file_dialog: 5.0
+    send_poll_interval: 2.0
+    dialog_after_focus: 0.5
+    dialog_after_path_entry: 0.2
+    dialog_after_paste: 0.5
+
+  monitor:
+    stop_key: stop_button
+    poll_interval: 2.0
+    required_stop_absent_cycles: 3
+    complete_key: copy_button
+    timeout: 3600
+    validation: response_complete
+    sequence:
+      - action: wait_for_indicator_absent
+        validation: send_success
+        required_absent_cycles: 3
+        poll_interval: 2.0
+        timeout: 3600
+      - action: wait_for_indicator
+        validation: response_complete
+        into: complete_key_present
+        timeout: 30
+        poll_interval: 2.0
+        optional: true
+
+  extract:
+    # Grok's response action bar icons are densely packed; coordinate click
+    # on the Copy button at (713, 3564) misses because something adjacent
+    # catches the click. atspi_only routes through the accessibility API
+    # to the exact element. Pick last-by-y for the most recent response.
+    output_var: response
+    sequence:
+      - action: press
+        key: ctrl+End
+        delay: 2.0
+      - action: write_clipboard
+        text: ""
+      - action: click
+        element: copy_button
+        pick: last_by_y
+        click_strategy: atspi_only
+        delay: 2.0
+      - action: read_clipboard
+        into: response
+        min_chars: 20
+
+
+validation:
+  attach_success:
+    # Grok file chip does not create a unique new named AT-SPI element.
+    # Post-attach the only new push buttons are "Remove" (generic, also used
+    # for other UI features) and "Submit" (send readiness). AT-SPI has no
+    # filename-specific node for the chip. Verification relies on the file
+    # dialog's Return keypress returning no error.
+    diff_validated: true
+    attach_unverifiable_reason: "Grok chip has no filename-specific AT-SPI node"
+
+  prompt_ready:
+    # Grok uses submit_via_return — no send button. Attach button persists as readiness indicator.
+    indicators:
+      - name: "Attach"
+        role: push button
+
+  send_success:
+    indicators:
+      - name: "Stop model response"
+        role: push button
+
+  response_complete:
+    indicators:
+      - name: "Copy"
+        role: push button
+
+  auto_active:
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
+
+  fast_active:
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
+
+  expert_active:
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
+
+  heavy_active:
+    # Grok does NOT expose current model selection via AT-SPI.
+    # Menu items have states=['showing','focusable','enabled'] only.
+    # "Model select" button text is static. Only visual signal exists.
+    # The click action returning no error is the sole verification signal.
+    unverifiable_reason: "Grok UI exposes no AT-SPI state for current model selection"
