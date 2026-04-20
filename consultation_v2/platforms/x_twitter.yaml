@@ -216,6 +216,42 @@ workflow:
           into: post_composer_after
           min_chars: 0
 
+    # update_pinned — replace the current pinned tweet with a new one.
+    # X's actual behavior: when you pin a tweet, the previously-pinned
+    # tweet is automatically unpinned (X enforces one-pin-per-profile).
+    # So update_pinned is effectively an alias of pin_post — navigate
+    # to the new target URL, open More menu, click 'Pin to your
+    # profile', confirm. The OLD pinned tweet is auto-unpinned by X
+    # as a side effect.
+    #
+    # If live dispatch reveals X actually REJECTS pinning while a
+    # previous pin exists (treasurer hypothesis: "pinning is fragile
+    # sequentially"), the iteration is: add an unpin step first that
+    # navigates to the current pinned URL (caller would need to pass
+    # --old-pinned-url) and unpins it before navigating to --url for
+    # the pin. Not implementing that path tonight — dispatch the
+    # simple form and observe X's behavior.
+    update_pinned:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: click
+          element: more_trigger_status
+          pick: first_by_y
+          delay: 2.0
+        - action: click
+          element: pin_menu_item
+          scope: menu
+          delay: 1.5
+          optional: true
+        - action: click
+          element: pin_confirm
+          delay: 2.0
+          optional: true
+        - action: press
+          key: Escape
+          delay: 0.5
+
     # pin_post — pin a tweet to profile. Navigate to status URL first
     # (caller passes --url). Idempotent: dispatching on an already-
     # pinned tweet is a no-op (pin_menu_item won't be in the menu,
