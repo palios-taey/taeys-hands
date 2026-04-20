@@ -725,14 +725,205 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     return 0
 
 
+def _rate_limit_wait(platform: str, cfg: dict, overrides: dict) -> None:
+    """Enforce per-platform rate limit via Redis-backed action log.
+
+    Reads config from workflow/top-level rate_limit block:
+      max_actions_per_hour, min_delay_seconds, jitter_seconds [min,max],
+      defer_warn_threshold_seconds.
+
+    CLI overrides dict can provide max_per_hour / min_delay to tighten
+    the YAML-declared defaults. If the required wait would exceed the
+    defer_warn threshold (default 600s), logs a WARN event before
+    sleeping — dispatcher can catch it and back off upstream rather
+    than silently sleeping 30+ min.
+    """
+    rl = cfg.get('rate_limit') or cfg.get('workflow', {}).get('rate_limit')
+    if not rl:
+        return
+    import random
+    try:
+        import redis
+    except ImportError:
+        print(json.dumps({'event': 'warning', 'step': 'rate_limit',
+                          'note': 'redis module not available; rate limit disabled'}))
+        return
+
+    max_per_hour = overrides.get('max_per_hour') or rl.get('max_actions_per_hour', 3)
+    min_delay = overrides.get('min_delay') or rl.get('min_delay_seconds', 60)
+    jitter = rl.get('jitter_seconds', [0, 0])
+    warn_threshold = rl.get('defer_warn_threshold_seconds', 600)
+
+    r = redis.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
+                    port=int(os.environ.get('REDIS_PORT', '6379')),
+                    decode_responses=True)
+    key = f'taey:rate:{platform}'
+    now = int(time.time())
+    hour_ago = now - 3600
+
+    # Trim old entries + get current action log
+    r.zremrangebyscore(key, 0, hour_ago)
+    recent = [int(s) for s in r.zrangebyscore(key, hour_ago, '+inf')]
+    in_last_hour = len(recent)
+    last_action_ts = max(recent) if recent else 0
+
+    # Compute required wait
+    hour_wait = 0
+    if in_last_hour >= max_per_hour:
+        oldest_in_window = min(recent)
+        hour_wait = (oldest_in_window + 3600) - now
+    delay_wait = max(0, (last_action_ts + min_delay) - now) if last_action_ts else 0
+    base_wait = max(hour_wait, delay_wait)
+
+    if jitter and len(jitter) == 2 and jitter[1] > 0:
+        jitter_add = random.uniform(jitter[0], jitter[1])
+    else:
+        jitter_add = 0
+    total_wait = int(base_wait + jitter_add)
+
+    if total_wait > warn_threshold:
+        print(json.dumps({'event': 'warning', 'step': 'rate_limit',
+                          'platform': platform,
+                          'wait_seconds': total_wait,
+                          'warn_threshold': warn_threshold,
+                          'in_last_hour': in_last_hour,
+                          'max_per_hour': max_per_hour,
+                          'note': f'rate-limit defer >{warn_threshold}s — dispatcher should back off'}))
+    if total_wait > 0:
+        print(json.dumps({'event': 'step_ok', 'step': 'rate_limit_wait',
+                          'platform': platform, 'wait_seconds': total_wait,
+                          'in_last_hour': in_last_hour, 'max_per_hour': max_per_hour}))
+        time.sleep(total_wait)
+    # Record this action's timestamp
+    r.zadd(key, {str(int(time.time()) * 1000 + random.randint(0, 999)): int(time.time())})
+    # Keep 24h of history (TTL-safe)
+    r.expire(key, 86400)
+
+
+def run_action(platform: str, action_name: str, message: str,
+               url_override: str | None = None,
+               rate_overrides: dict | None = None) -> int:
+    """Run a single action sequence (post / reply / etc) instead of the
+    full consultation flow. Used by action-based platforms (x_twitter).
+
+    Action-based platforms declare workflow.actions.<name> with a
+    sequence and an identity_attach flag. No mode_setup, no attach,
+    no monitor, no extract — just navigate + action.sequence.
+    """
+    from consultation_v2.yaml_contract import load_platform_yaml
+    cfg = load_platform_yaml(platform)
+    actions = cfg.get('workflow', {}).get('actions', {})
+    if action_name not in actions:
+        fail('action', f'action {action_name!r} not in workflow.actions for {platform}', platform)
+    action_cfg = actions[action_name]
+
+    print(json.dumps({'event': 'start', 'platform': platform, 'action': action_name}))
+
+    # Rate limit before the action fires.
+    _rate_limit_wait(platform, cfg, rate_overrides or {})
+
+    # Navigate to URL. Action may require a URL override (e.g. reply
+    # needs the status URL). Otherwise use urls.fresh from YAML.
+    if action_cfg.get('requires_url') and not url_override:
+        fail('navigate', f'action {action_name!r} requires --url', platform)
+    target_url = url_override or cfg.get('urls', {}).get('fresh', '')
+    if not target_url:
+        fail('navigate', 'No URL to navigate to (no --url and no urls.fresh)', platform)
+    result = act(platform, 'navigate', target_url)
+    if result.get('error'):
+        fail('navigate', f'Navigation failed: {result}', platform)
+    settle = cfg.get('urls', {}).get('settle_delay', 5)
+    time.sleep(settle)
+
+    snap = inspect_platform(platform)
+    if not snap.get('url'):
+        fail('navigate', 'No URL after navigation', platform)
+    print(json.dumps({'event': 'step_ok', 'step': 'navigate', 'url': snap.get('url', '')[:80]}))
+
+    # HARD RULE amendment (approved by treasurer 2026-04-20): action-
+    # based platforms may opt out of identity attach. x_twitter post/
+    # reply actions set identity_attach: false because attaching
+    # FAMILY_KERNEL+IDENTITY to a public tweet is unsafe. Other
+    # platforms can adopt per-action. When identity_attach is true
+    # (or absent with default), we'd invoke consolidate_attachments —
+    # but no current action needs it, so we skip the full path here.
+    if action_cfg.get('identity_attach', True):
+        fail('action',
+             f'action {action_name!r} requested identity_attach: true but '
+             f'run_action has no attach pipeline — implement or set false',
+             platform)
+
+    # Run the action sequence via the primitive runner.
+    sequence = action_cfg.get('sequence')
+    if not sequence:
+        fail('action', f'workflow.actions.{action_name}.sequence missing', platform)
+
+    from consultation_v2.runtime import ConsultationRuntime
+    from consultation_v2.primitives import run_sequence
+    rt = ConsultationRuntime(platform)
+    ctx = {'platform': platform, 'runtime': rt, 'cfg': cfg,
+           'message': message, 'vars': {}}
+    res = run_sequence(ctx, sequence, step_name=f'action:{action_name}')
+    if not res['ok']:
+        fail('action', res['error'], platform)
+
+    # Capture the post-action URL for logs.
+    post_snap = inspect_platform(platform)
+    final_url = post_snap.get('url', '') or ''
+    print(json.dumps({'event': 'dispatched', 'platform': platform,
+                      'action': action_name,
+                      'url': final_url[:100],
+                      'msg': f'{action_name} action complete.'}))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description='Validated consultation orchestrator')
     _platforms = sorted(p.stem for p in (_PROJECT_ROOT / 'consultation_v2' / 'platforms').glob('*.yaml'))
     parser.add_argument('platform', choices=_platforms)
-    parser.add_argument('message', help='Prompt message text')
-    parser.add_argument('--file', default=None, help='File to attach')
+    parser.add_argument('message', help='Prompt message text (or content for post/reply)')
+    parser.add_argument('--file', default=None, help='File to attach (consultation only)')
+    parser.add_argument('--action', default=None,
+                        help='Action name for action-based platforms (x_twitter: post, reply). '
+                             'Default: full consultation flow.')
+    parser.add_argument('--url', default=None,
+                        help='URL override for navigate (e.g. reply target status URL)')
+    parser.add_argument('--urls-file', default=None,
+                        help='Batch reply: JSON list of {url, message} objects. Iterates with '
+                             'rate limiting between each.')
+    parser.add_argument('--max-per-hour', type=int, default=None,
+                        help='Override rate_limit.max_actions_per_hour')
+    parser.add_argument('--min-delay', type=int, default=None,
+                        help='Override rate_limit.min_delay_seconds')
     args = parser.parse_args()
 
+    # If --urls-file given, iterate batch. Each entry is a separate
+    # action dispatch — rate limiter applies between them.
+    if args.urls_file:
+        if not args.action:
+            fail('cli', '--urls-file requires --action', args.platform)
+        with open(args.urls_file) as f:
+            batch = json.load(f)
+        rate_overrides = {'max_per_hour': args.max_per_hour, 'min_delay': args.min_delay}
+        exit_codes = []
+        for entry in batch:
+            url = entry.get('url')
+            msg = entry.get('message') or args.message
+            code = run_action(args.platform, args.action, msg, url, rate_overrides)
+            exit_codes.append(code)
+        return 0 if all(c == 0 for c in exit_codes) else 1
+
+    # Single dispatch.
+    if args.action:
+        return run_action(
+            platform=args.platform,
+            action_name=args.action,
+            message=args.message,
+            url_override=args.url,
+            rate_overrides={'max_per_hour': args.max_per_hour, 'min_delay': args.min_delay},
+        )
+
+    # Default: consultation flow.
     return run_consultation(
         platform=args.platform,
         message=args.message,

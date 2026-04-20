@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import yaml
 
-KNOWN_PLATFORMS = ('chatgpt', 'claude', 'gemini', 'grok', 'perplexity')
+KNOWN_PLATFORMS = ('chatgpt', 'claude', 'gemini', 'grok', 'perplexity', 'x_twitter')
 
 
 def _repo_root() -> Path:

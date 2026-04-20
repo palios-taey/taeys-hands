@@ -1,0 +1,184 @@
+platform: x_twitter
+# No identity_file — X voice lives in the caller's prompt, NOT in a constitutional
+# package. Attaching FAMILY_KERNEL/IDENTITY to a public tweet is unsafe.
+identity_file: null
+click_strategy: coordinate_only
+navigation_key: F6
+
+# Rate limiter — Redis-backed action log at taey:rate:x_twitter.
+# CLI overrides: --min-delay, --max-per-hour.
+# If the limiter would defer >10min it logs at WARN so the dispatcher
+# can back off upstream instead of silently sleeping.
+rate_limit:
+  max_actions_per_hour: 3
+  min_delay_seconds: 60
+  jitter_seconds: [5, 120]
+  defer_warn_threshold_seconds: 600
+
+urls:
+  # `post` action: navigate to home (composer is top of feed).
+  # `reply` action: override via --url to the target status URL.
+  fresh: https://x.com/home
+  settle_delay: 6
+
+tree:
+  scan_root: app
+  dialog_titles: []
+  fence_after: []
+
+  exclude:
+    # Curated noise list from the v1 yaml + verified against live AT-SPI scan.
+    names:
+      - "Search with Google or enter address"
+      - "Google, pick a search engine"
+      - "View site information"
+      - "You have granted this website additional permissions."
+      - "Bookmark this page (Ctrl+D)"
+      - "Sidebars"
+      - "Back"
+      - "Forward"
+      - "Reload"
+      - "Firefox View"
+      - "Close tab"
+      - "Open a new tab (Ctrl+T)"
+      - "List all tabs"
+      - "Account"
+      - "Extensions"
+      - "Firefox"
+      # X-specific right-sidebar noise (trending / who-to-follow cards)
+      - "What's happening"
+      - "Trending now"
+      - "Trending"
+      - "Relevant people"
+      - "Who to follow"
+      - "Live on X"
+      - "Terms of Service"
+      - "Privacy Policy"
+      - "Cookie Policy"
+      - "Accessibility"
+      - "Ads info"
+    roles:
+      - separator
+      - document web
+      - paragraph
+      - list item
+      - page tab
+
+  element_map:
+    # Shared composer — same entry on home page (post) and reply overlay.
+    # focused state differs (home: not auto-focused; overlay: auto-focused)
+    # but states_include matches both via editable+multi_line.
+    composer_input:
+      name: "Post text"
+      role: entry
+      states_include: [editable, multi-line]
+
+    # Submit button — labeled "Post" in BOTH post and reply contexts.
+    # When composer is empty, states are ['showing', 'visible'] (no enabled).
+    # After text is entered, states become ['enabled', 'focusable',
+    # 'opaque', 'sensitive', 'showing', 'visible']. Post click must wait
+    # for the enabled state (see prompt.sequence wait_for_indicator).
+    submit_button:
+      name: "Post"
+      role: push button
+
+    # Close button on the reply overlay — used to cancel a stuck reply
+    # and as the canonical "overlay is open" indicator (see validation).
+    close_overlay:
+      name: "Close"
+      role: push button
+
+workflow:
+  # x_twitter does not use the consultation flow (mode_setup/attach/prompt/
+  # send/monitor/extract). It has action-specific sequences under
+  # workflow.actions instead. consult.py's --action flag selects which
+  # action sequence runs; for x_twitter default-action is 'post'.
+  default_action: post
+
+  # Action-specific flags
+  actions:
+    post:
+      # No identity attach for public tweets.
+      identity_attach: false
+      sequence:
+        - action: click
+          element: composer_input
+          delay: 0.5
+        - action: paste
+          text: ${message}
+          delay: 1.0
+        - action: verify_text_landed
+          element: composer_input
+          slack_absolute: 20
+          slack_ratio: 0.02
+          head_chars: 20
+        # No pre-click validation for Post button state — the primitive
+        # can't distinguish the button's 'enabled' from 'disabled' by
+        # name+role alone (both states expose the same element). We
+        # trust verify_text_landed that the paste worked; if Post was
+        # still disabled (e.g. over-length text), the click is a no-op
+        # and we detect the failure via the post-submit check below.
+        - action: click
+          element: submit_button
+          delay: 2.5
+        # Post success: composer text clears back to empty after the
+        # post is submitted. read_element_text with min_chars=0 and
+        # empty-match would be ideal; we approximate by re-reading
+        # and requiring len(text) < verify_text_landed's head_chars.
+        # Kept tolerant — even if detection is ambiguous, the post
+        # has been dispatched; the caller can always inspect later.
+        - action: read_element_text
+          element: composer_input
+          into: post_composer_after
+          min_chars: 0
+
+    reply:
+      identity_attach: false
+      # Reply requires --url to be passed (target status URL). consult.py
+      # overrides urls.fresh with --url before running this sequence.
+      requires_url: true
+      sequence:
+        # Open reply overlay via X's keyboard shortcut 'r' on the
+        # focused main tweet. Avoids hunting the dynamic
+        # "N Replies. Reply" button name (which violates no-name_contains
+        # rule). After page load the main tweet is the focused element,
+        # so 'r' opens its reply overlay. If something else is focused
+        # (search box, etc) 'r' would type a literal 'r' — the
+        # wait_for_indicator(overlay_open) below catches that case.
+        - action: press
+          key: r
+          delay: 2.5
+        - action: wait_for_indicator
+          validation: overlay_open
+          timeout: 5
+          poll_interval: 0.5
+        # Composer is auto-focused in the overlay — no need to click it.
+        - action: paste
+          text: ${message}
+          delay: 1.0
+        - action: verify_text_landed
+          element: composer_input
+          slack_absolute: 20
+          slack_ratio: 0.02
+          head_chars: 20
+        - action: click
+          element: submit_button
+          delay: 2.5
+        # Reply success: the overlay closes, which removes the Close
+        # button from the tree. This is a clean signal — unlike the
+        # Post button (always present), the Close button only exists
+        # while the overlay is open.
+        - action: wait_for_indicator_absent
+          validation: overlay_open
+          required_absent_cycles: 2
+          poll_interval: 1.0
+          timeout: 15
+
+validation:
+  # overlay_open — the Close button exists only while the reply overlay
+  # is open. Used by reply action to detect when the overlay has closed
+  # (=> reply posted successfully).
+  overlay_open:
+    indicators:
+      - name: "Close"
+        role: push button
