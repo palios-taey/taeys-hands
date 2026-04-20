@@ -873,12 +873,14 @@ def run_action(platform: str, action_name: str, message: str,
     if not res['ok']:
         fail('action', res['error'], platform)
 
-    # Capture the post-action URL for logs.
+    # Capture the post-action URL for logs. URL is NOT truncated —
+    # get_newest_status_id relies on the full status URL in the
+    # 'dispatched' event output for the caller to parse.
     post_snap = inspect_platform(platform)
     final_url = post_snap.get('url', '') or ''
     print(json.dumps({'event': 'dispatched', 'platform': platform,
                       'action': action_name,
-                      'url': final_url[:100],
+                      'url': final_url,
                       'msg': f'{action_name} action complete.'}))
     return 0
 

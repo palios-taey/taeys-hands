@@ -743,6 +743,65 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('click_newest_article')
+def click_newest_article(ctx: dict, step: dict) -> dict:
+    """Click the topmost article (role=article) that does NOT start
+    with a given prefix. Designed for X/Twitter profiles where a
+    pinned tweet shows above chronologically-newer posts; the pinned
+    article's accessible name always starts with "Pinned " and we
+    want to skip past it to the first actual newest tweet.
+
+    Walks the doc snapshot's unknown bucket (articles aren't mapped
+    to an element_map key), sorts by y ascending, returns the first
+    one whose name doesn't start with step.skip_prefix. Clicks its
+    approximate center (x at article.x, y at article.y + offset).
+
+    YAML:
+      - action: click_newest_article
+        skip_prefix: "Pinned "
+        y_offset: 30
+        delay: 5.0
+    """
+    from consultation_v2.snapshot import build_snapshot
+    skip_prefix = step.get('skip_prefix', '')
+    y_offset = step.get('y_offset', 30)
+    _, _, snap = build_snapshot(ctx['platform'])
+    articles = [e for e in snap.unknown if e.role == 'article']
+    if not articles:
+        return _fail('click_newest_article', 'no article elements in snapshot')
+    # Sort by y ascending (topmost first)
+    articles.sort(key=lambda a: a.y or 0)
+    # Find first that doesn't match skip_prefix
+    target = None
+    for a in articles:
+        if skip_prefix and (a.name or '').startswith(skip_prefix):
+            continue
+        target = a
+        break
+    if not target:
+        return _fail('click_newest_article',
+                     f'all {len(articles)} articles match skip_prefix {skip_prefix!r}')
+    # Click the article body (not the timestamp link — clicking body
+    # navigates to the status URL same as clicking timestamp).
+    # Coordinate click via xdotool; DISPLAY was already set by
+    # run_sequence's _ensure_platform_env at the start of the run.
+    click_x = int(target.x) if target.x else 900
+    click_y = int(target.y or 0) + int(y_offset)
+    import subprocess as _subp
+    r = _subp.run(['xdotool', 'mousemove', str(click_x), str(click_y),
+                   'click', '1'], capture_output=True, timeout=5)
+    if r.returncode != 0:
+        return _fail('click_newest_article',
+                     f'xdotool click_at({click_x}, {click_y}) failed: '
+                     f'{r.stderr.decode()[:200]}')
+    delay = step.get('delay', 0)
+    if delay:
+        time.sleep(delay)
+    return _ok({'event': 'step_ok', 'action': 'click_newest_article',
+                'clicked_x': click_x, 'clicked_y': click_y,
+                'article_name_head': (target.name or '')[:60]})
+
+
 @primitive('regenerate_if_short')
 def regenerate_if_short(ctx: dict, step: dict) -> dict:
     """Post-extract retry loop: if the response stored in `response_var`

@@ -273,6 +273,21 @@ workflow:
           key: l
           delay: 1.5
 
+    # get_newest_status_id — navigate to an @handle's profile
+    # (caller passes --url like https://x.com/handle), click the
+    # topmost NON-pinned article (pinned article's accessible name
+    # always starts with "Pinned " on X), capture the resulting
+    # status URL. Output is in run_action's final 'dispatched'
+    # event URL field — caller parses that JSON and pulls .url.
+    get_newest_status_id:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: click_newest_article
+          skip_prefix: "Pinned "
+          y_offset: 30
+          delay: 5.0
+
     reply:
       identity_attach: false
       # Reply requires --url to be passed (target status URL). consult.py
