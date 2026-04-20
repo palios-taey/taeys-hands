@@ -743,6 +743,119 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('x_scan_articles')
+def x_scan_articles(ctx: dict, step: dict) -> dict:
+    """X-specific: walk the doc tree for role=article elements and
+    extract structured items. Emits a list into ctx.vars[into] that
+    run_action includes in its final dispatched event.
+
+    Works for pages where X articles have full accessible names
+    (timeline, status-page replies) — NOT for notifications where
+    the article elements have empty names (X's notification cards
+    don't expose text via AT-SPI).
+
+    Parses each article's accessible name via regex into:
+      from_handle (the @handle), timestamp, preview_text (remainder)
+
+    Reply/like counts come from sibling push-button names in the
+    article's children ("N Replies. Reply", "N Likes. Like" etc).
+
+    YAML:
+      - action: x_scan_articles
+        into: items
+        skip_prefix: "Pinned "      # skip pinned at top (optional)
+        skip_first: true             # skip article[0] when it's the main tweet (reply view)
+        max_items: 50
+        item_type: "reply"           # 'reply'|'post'|'notification'
+        our_handle: "jesselarose"    # used to populate our_status_id when article is ours
+    """
+    import re as _re
+    from consultation_v2.snapshot import build_snapshot
+    into = step.get('into', 'items')
+    skip_prefix = step.get('skip_prefix', '')
+    skip_first = bool(step.get('skip_first', False))
+    max_items = int(step.get('max_items', 50))
+    item_type = step.get('item_type', 'post')
+    our_handle = step.get('our_handle') or ''
+
+    _, _, snap = build_snapshot(ctx['platform'])
+    articles = [e for e in snap.unknown if e.role == 'article']
+    articles.sort(key=lambda e: e.y or 0)
+
+    # Filter pinned
+    if skip_prefix:
+        articles = [a for a in articles
+                    if not (a.name or '').startswith(skip_prefix)]
+    # Skip first article (main tweet on status page)
+    if skip_first and articles:
+        articles = articles[1:]
+
+    truncated = len(articles) > max_items
+    articles = articles[:max_items]
+
+    # Parse each article's accessible name.
+    # X timeline/reply articles' name pattern:
+    #   "<Display name> [Verified account] @<handle> <timestamp> <preview...>"
+    # With engagement counters often appended:
+    #   "... <N> replies, <N> likes, <N> views"
+    handle_re = _re.compile(r'@([A-Za-z0-9_]{1,15})')
+    # Timestamps: "5h", "Apr 20", "35 minutes ago", "4h ago", "2026-04-20"
+    # Pattern: match anything after @handle up to a preview word boundary.
+    # Simpler: split on @handle and use the rest as "after".
+    items = []
+    for a in articles:
+        name = (a.name or '').strip()
+        if not name:
+            # Notification-style empty-name article — emit minimal record
+            items.append({
+                'from_handle': None,
+                'type': item_type,
+                'status_id': None,
+                'preview_text': None,
+                'timestamp': None,
+                'our_status_id': None,
+                'like_count': None,
+                '_note': 'empty accessible name (X did not expose content via AT-SPI)',
+                '_y': a.y,
+            })
+            continue
+        handle_m = handle_re.search(name)
+        from_handle = handle_m.group(1) if handle_m else None
+        # Everything after the first @handle match
+        after = name[handle_m.end():].lstrip() if handle_m else name
+        # Timestamp: first "N minutes/hours/... ago" OR short like "5h", "Apr 20"
+        ts_m = (_re.match(r'(\d+\s+(?:second|minute|hour|day|week)s?\s+ago)', after)
+                or _re.match(r'(\d+[hms])\b', after)
+                or _re.match(r'([A-Z][a-z]{2}\s+\d{1,2}(?:,?\s+\d{4})?)', after))
+        if ts_m:
+            timestamp = ts_m.group(1)
+            preview = after[ts_m.end():].strip()
+        else:
+            timestamp = None
+            preview = after
+        # Cap preview at 200 chars
+        preview = preview[:200] if preview else None
+        # Determine our_status_id: if article is ours, the status_id would be
+        # embedded in links — AT-SPI doesn't reliably expose link hrefs, so
+        # populate null for this round. Flag for future work.
+        items.append({
+            'from_handle': from_handle,
+            'type': item_type,
+            'status_id': None,   # AT-SPI doesn't expose link URL directly
+            'preview_text': preview,
+            'timestamp': timestamp,
+            'our_status_id': None,
+            'like_count': None,  # would need to drill into engagement button subtree
+        })
+
+    ctx.setdefault('vars', {})[into] = items
+    if truncated:
+        ctx['vars']['truncated'] = True
+    return _ok({'event': 'step_ok', 'action': 'x_scan_articles',
+                'into': into, 'count': len(items),
+                'truncated': truncated})
+
+
 @primitive('x_follow_toggle')
 def x_follow_toggle(ctx: dict, step: dict) -> dict:
     """X-specific follow/unfollow primitive. Profile Follow buttons have

@@ -336,6 +336,65 @@ workflow:
           delay: 1.5
         # TODO (post-scan): click confirm-unfollow button.
 
+    # read_tweet_replies — navigate to a status URL, scrape articles
+    # below the main tweet as structured items. First article on a
+    # status page is the tweet itself, skipped via skip_first: true.
+    # Output in the final 'dispatched' event: items + count +
+    # truncated flag. Caps at 50 items per treasurer contract.
+    read_tweet_replies:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_scan_articles
+          into: items
+          skip_first: true
+          max_items: 50
+          item_type: reply
+
+    # read_home_timeline — scrape the home feed (caller should pass
+    # --url https://x.com/home). Articles on the timeline have full
+    # accessible names; item_type='post' per treasurer's shape.
+    read_home_timeline:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_scan_articles
+          into: items
+          max_items: 50
+          item_type: post
+
+    # read_notifications — LIMITED. X's notification cards render
+    # visually but expose empty accessible names via AT-SPI, so the
+    # scan returns mostly-empty records with just article coordinates
+    # and timestamps. Caller should expect the emitted items to have
+    # from_handle=null and preview_text=null. For real notification
+    # consumption a different route is needed (screenshot + vision
+    # model, X API, or drilling into each card individually).
+    # Preserved as an action so treasurer can count unread and drill
+    # in manually via VNC if needed.
+    read_notifications:
+      identity_attach: false
+      sequence:
+        - action: x_scan_articles
+          into: items
+          max_items: 50
+          item_type: notification
+
+    # retweet_post — press X's 't' keyboard shortcut on the focused
+    # status page (navigate first). Toggles retweet state; repeating
+    # un-retweets. Caller can verify via subsequent scan if needed.
+    # Actually X uses Ctrl+Shift+R or hover+click, not a plain key.
+    # Using keyboard isn't reliable here — treasurer should validate
+    # live on first dispatch. If broken, next iteration replaces
+    # with explicit click of the repost button + confirm dialog.
+    retweet_post:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: press
+          key: t
+          delay: 1.5
+
     # get_newest_status_id — navigate to an @handle's profile
     # (caller passes --url like https://x.com/handle), click the
     # topmost NON-pinned article (pinned article's accessible name

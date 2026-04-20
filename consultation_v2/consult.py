@@ -878,10 +878,21 @@ def run_action(platform: str, action_name: str, message: str,
     # 'dispatched' event output for the caller to parse.
     post_snap = inspect_platform(platform)
     final_url = post_snap.get('url', '') or ''
-    print(json.dumps({'event': 'dispatched', 'platform': platform,
-                      'action': action_name,
-                      'url': final_url,
-                      'msg': f'{action_name} action complete.'}))
+    # Output payload: include structured list + truncated flag if a
+    # scrape primitive (x_scan_articles) populated them. Keeps the
+    # single-event contract per treasurer (2026-04-20): caller parses
+    # one dispatched line, gets items + count + truncated.
+    out = {'event': 'dispatched', 'platform': platform,
+           'action': action_name,
+           'url': final_url,
+           'msg': f'{action_name} action complete.'}
+    items = ctx.get('vars', {}).get('items')
+    if items is not None:
+        out['items'] = items
+        out['count'] = len(items)
+        if ctx.get('vars', {}).get('truncated'):
+            out['truncated'] = True
+    print(json.dumps(out))
     return 0
 
 
