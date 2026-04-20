@@ -761,9 +761,15 @@ def _rate_limit_wait(platform: str, cfg: dict, overrides: dict) -> None:
     now = int(time.time())
     hour_ago = now - 3600
 
-    # Trim old entries + get current action log
+    # Trim old entries + get current action log.
+    # zrangebyscore without withscores=True returns MEMBERS (unique ms+rand
+    # suffix strings stored below); we need the SCORES (unix seconds)
+    # to compute wait times. Treasurer caught this 2026-04-20: the old
+    # code read members as if they were seconds, producing wait values
+    # of ~1.77e12 seconds and OverflowError on time.sleep().
     r.zremrangebyscore(key, 0, hour_ago)
-    recent = [int(s) for s in r.zrangebyscore(key, hour_ago, '+inf')]
+    recent_scored = r.zrangebyscore(key, hour_ago, '+inf', withscores=True)
+    recent = [int(score) for _member, score in recent_scored]
     in_last_hour = len(recent)
     last_action_ts = max(recent) if recent else 0
 

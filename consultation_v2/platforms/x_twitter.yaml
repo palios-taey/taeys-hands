@@ -73,13 +73,17 @@ tree:
       role: entry
       states_include: [editable, multi-line]
 
-    # Submit button — labeled "Post" in BOTH post and reply contexts.
+    # Submit button — labeled "Post" for top-level composer and
+    # first-level reply overlays, labeled "Reply" for reply-to-reply
+    # overlays (X renames the submit in nested-reply context).
+    # Treasurer caught this 2026-04-20 launching the pinned thread —
+    # tweet 3 halted with 'submit_button not in snapshot' because we
+    # were only matching "Post". names: [] accepts either.
     # When composer is empty, states are ['showing', 'visible'] (no enabled).
     # After text is entered, states become ['enabled', 'focusable',
-    # 'opaque', 'sensitive', 'showing', 'visible']. Post click must wait
-    # for the enabled state (see prompt.sequence wait_for_indicator).
+    # 'opaque', 'sensitive', 'showing', 'visible'].
     submit_button:
-      name: "Post"
+      names: ["Post", "Reply"]
       role: push button
 
     # Close button on the reply overlay — used to cancel a stuck reply
