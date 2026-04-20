@@ -743,6 +743,46 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('x_click_engagement_button')
+def x_click_engagement_button(ctx: dict, step: dict) -> dict:
+    """X-specific: click the main tweet's engagement button (Repost,
+    Like, etc) whose AT-SPI name carries a dynamic count prefix
+    like "3821 reposts. Repost" or "33K Likes. Like". Exact
+    element_map matching can't cover the variable counts, so this
+    primitive matches by name_suffix + picks first_by_y (main tweet's
+    row is topmost).
+
+    Narrow platform-specific primitive — same justification as
+    x_follow_toggle: accessibility-exposed content is dynamic at
+    runtime, not authorable in YAML.
+
+    YAML:
+      - action: x_click_engagement_button
+        name_suffix: "reposts. Repost"    # or "repost. Repost" singular
+        delay: 1.0
+    """
+    suffix = step.get('name_suffix')
+    if not suffix:
+        return _fail('x_click_engagement_button', 'step.name_suffix missing')
+    from consultation_v2.snapshot import build_snapshot
+    _, _, snap = build_snapshot(ctx['platform'])
+    candidates = [e for e in snap.unknown
+                  if e.role == 'push button' and (e.name or '').endswith(suffix)]
+    if not candidates:
+        return _fail('x_click_engagement_button',
+                     f'no push button ending with {suffix!r}')
+    # Main tweet's engagement row is topmost; pick first by y ascending.
+    candidates.sort(key=lambda e: (e.y or 0, e.x or 0))
+    el = candidates[0]
+    rt = ctx['runtime']
+    if not rt.click(el):
+        return _fail('x_click_engagement_button',
+                     f'click on {el.name!r} returned False')
+    time.sleep(step.get('delay', 1.0))
+    return _ok({'event': 'step_ok', 'action': 'x_click_engagement_button',
+                'name': el.name, 'x': el.x, 'y': el.y})
+
+
 @primitive('x_scan_articles')
 def x_scan_articles(ctx: dict, step: dict) -> dict:
     """X-specific: walk the doc tree for role=article elements and

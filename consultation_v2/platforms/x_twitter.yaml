@@ -10,8 +10,15 @@ navigation_key: F6
 # If the limiter would defer >10min it logs at WARN so the dispatcher
 # can back off upstream instead of silently sleeping.
 rate_limit:
-  max_actions_per_hour: 3
-  min_delay_seconds: 60
+  # Calibrated for @jesselarose (Premium+ verified, established account) per
+  # Grok Heavy Think-mode analysis 2026-04-20: observed ceilings from the
+  # @swyx/@levelsio/@jeremyphoward entrepreneur cohort are 15-18 actions/hour
+  # burst and ~180 actions/day at plateau. Premium+ reply boost + established
+  # history gives 2-3× tolerance vs unverified. Operational default is 15/hr
+  # with 30s min delay; tighten via --max-per-hour on sensitive operations
+  # (follow sprees especially — X flags follow pattern separately).
+  max_actions_per_hour: 15
+  min_delay_seconds: 30
   jitter_seconds: [5, 120]
   defer_warn_threshold_seconds: 600
 
@@ -152,6 +159,18 @@ tree:
     delete_confirm:
       name: "Delete"
       role: push button
+
+    # Repost dropdown menu items — appear after clicking the main
+    # tweet's repost trigger (dynamic name matched by x_click_engagement
+    # _button suffix). "Repost" = pure retweet, "Quote" = quote-tweet
+    # with commentary. Live-scanned 2026-04-20 on :7.
+    repost_menu_item:
+      name: "Repost"
+      role: menu item
+
+    quote_menu_item:
+      name: "Quote"
+      role: menu item
 
 workflow:
   # x_twitter does not use the consultation flow (mode_setup/attach/prompt/
@@ -380,20 +399,50 @@ workflow:
           max_items: 50
           item_type: notification
 
-    # retweet_post — press X's 't' keyboard shortcut on the focused
-    # status page (navigate first). Toggles retweet state; repeating
-    # un-retweets. Caller can verify via subsequent scan if needed.
-    # Actually X uses Ctrl+Shift+R or hover+click, not a plain key.
-    # Using keyboard isn't reliable here — treasurer should validate
-    # live on first dispatch. If broken, next iteration replaces
-    # with explicit click of the repost button + confirm dialog.
+    # retweet_post — navigate to status URL, click main tweet's
+    # Repost button (dynamic name "<count> reposts. Repost"), click
+    # "Repost" menu item in the dropdown. Live-scanned 2026-04-20:
+    # Repost button opens a dropdown with exact items "Repost" and
+    # "Quote" — reposting is the menu-item click, not the trigger
+    # click itself.
     retweet_post:
       identity_attach: false
       requires_url: true
       sequence:
-        - action: press
-          key: t
+        - action: x_click_engagement_button
+          name_suffix: "reposts. Repost"
           delay: 1.5
+        - action: click
+          element: repost_menu_item
+          scope: menu
+          delay: 1.5
+
+    # quote_tweet — navigate to status URL, open Repost dropdown, click
+    # "Quote" menu item (opens composer overlay with the quoted tweet
+    # inline), paste commentary, submit. ${message} becomes the QT
+    # commentary prepended to the original.
+    quote_tweet:
+      identity_attach: false
+      requires_url: true
+      sequence:
+        - action: x_click_engagement_button
+          name_suffix: "reposts. Repost"
+          delay: 1.5
+        - action: click
+          element: quote_menu_item
+          scope: menu
+          delay: 2.0
+        - action: paste
+          text: ${message}
+          delay: 1.0
+        - action: verify_text_landed
+          element: composer_input
+          slack_absolute: 20
+          slack_ratio: 0.02
+          head_chars: 20
+        - action: click
+          element: submit_button
+          delay: 2.5
 
     # get_newest_status_id — navigate to an @handle's profile
     # (caller passes --url like https://x.com/handle), click the
