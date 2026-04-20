@@ -81,17 +81,27 @@ tree:
       states_include: [editable, multi-line]
 
     # Submit button — labeled "Post" for top-level composer and
-    # first-level reply overlays, labeled "Reply" for reply-to-reply
-    # overlays (X renames the submit in nested-reply context).
-    # Treasurer caught this 2026-04-20 launching the pinned thread —
-    # tweet 3 halted with 'submit_button not in snapshot' because we
-    # were only matching "Post". names: [] accepts either.
+    # first-level reply overlays, "Reply" for reply-to-reply overlays
+    # (X renames the submit in nested-reply context), "Post all" when
+    # in thread mode (multiple composers chained). names: [] accepts
+    # any of these exact labels.
     # When composer is empty, states are ['showing', 'visible'] (no enabled).
     # After text is entered, states become ['enabled', 'focusable',
     # 'opaque', 'sensitive', 'showing', 'visible'].
     submit_button:
-      names: ["Post", "Reply"]
+      names: ["Post", "Reply", "Post all"]
       role: push button
+
+    # Add post link — the "+" icon in the composer toolbar that creates
+    # a new composer below the current one, enabling thread mode. Only
+    # appears when the current composer has text (X disables it on
+    # empty composers). Role is link, not push button.
+    # Note: AT-SPI reports the link's top-left but its clickable visual
+    # icon is offset ~11px right and ~12px down; thread_compose primitive
+    # applies add_post_x_offset / add_post_y_offset to hit the icon.
+    add_post_link:
+      name: "Add post"
+      role: link
 
     # Close button on the reply overlay — used to cancel a stuck reply
     # and as the canonical "overlay is open" indicator (see validation).
@@ -272,6 +282,31 @@ workflow:
         - action: press
           key: l
           delay: 1.5
+
+    # thread_post — compose an atomic multi-tweet thread using X's
+    # native thread composer (the '+' icon that adds a new composer
+    # below the current). Caller passes --message as a JSON-encoded
+    # array of tweet strings:
+    #   python3 -m consultation_v2.consult x_twitter \
+    #     '["tweet 1", "tweet 2", "tweet 3"]' --action thread_post
+    # Each tweet becomes one post in the thread. "Post all" click at
+    # the end submits the whole thread atomically. Beats the old
+    # reply-chain workaround per Jesse's 2026-04-20 direction.
+    thread_post:
+      identity_attach: false
+      sequence:
+        - action: click
+          element: composer_input
+          pick: first_by_y
+          delay: 0.5
+        - action: thread_compose
+          add_post_element: add_post_link
+          add_post_x_offset: 11
+          add_post_y_offset: 12
+          delay_between_tweets: 1.5
+        - action: click
+          element: submit_button
+          delay: 2.5
 
     # get_newest_status_id — navigate to an @handle's profile
     # (caller passes --url like https://x.com/handle), click the

@@ -743,6 +743,92 @@ def capture_url(ctx: dict, step: dict) -> dict:
                 'into': into, 'url': url[:100]})
 
 
+@primitive('thread_compose')
+def thread_compose(ctx: dict, step: dict) -> dict:
+    """Compose a multi-tweet thread using X's native '+' composer.
+
+    Input: ctx['message'] is a JSON-encoded array of tweet strings.
+    The primitive pastes tweet[0] into the focused first composer,
+    then for each subsequent tweet: clicks the 'Add post' link to
+    create a new composer below, focuses it, pastes the tweet. Does
+    NOT submit — caller's next sequence step clicks submit_button
+    ("Post all") to ship the thread atomically.
+
+    Designed for x_twitter.yaml workflow.actions.thread_post. Pattern
+    preserves the YAML-drives-driver rule: all UI specifics (element
+    names, click offsets) come from step fields and element_map.
+
+    YAML:
+      - action: thread_compose
+        add_post_element: add_post_link   # element_map key for '+' link
+        add_post_x_offset: 11             # offset from AT-SPI reported x
+        add_post_y_offset: 12             # offset from AT-SPI reported y
+        delay_between_tweets: 1.5
+    """
+    import json as _json
+    import subprocess as _subp
+    try:
+        tweets = _json.loads(ctx.get('message', ''))
+    except Exception as e:
+        return _fail('thread_compose',
+                     f'message must be a JSON array of tweet strings (got: {e})')
+    if not isinstance(tweets, list) or not tweets:
+        return _fail('thread_compose',
+                     'message must be a non-empty JSON array of tweet strings')
+    for i, t in enumerate(tweets):
+        if not isinstance(t, str):
+            return _fail('thread_compose', f'tweet[{i}] is not a string')
+
+    add_key = step.get('add_post_element')
+    if not add_key:
+        return _fail('thread_compose', 'step.add_post_element missing')
+    dx = int(step.get('add_post_x_offset', 0))
+    dy = int(step.get('add_post_y_offset', 0))
+    delay = float(step.get('delay_between_tweets', 1.5))
+
+    from consultation_v2.snapshot import build_snapshot
+    rt = ctx['runtime']
+
+    for i, tweet in enumerate(tweets):
+        if i > 0:
+            # Click the 'Add post' link to create a new composer below
+            _, _, snap = build_snapshot(ctx['platform'])
+            add_el = snap.first(add_key)
+            if not add_el:
+                return _fail('thread_compose',
+                             f'{add_key!r} not in snapshot before tweet {i} '
+                             f'(X may have disabled Add post on empty composer, '
+                             f'or the previous tweet did not paste)')
+            cx = int(add_el.x or 0) + dx
+            cy = int(add_el.y or 0) + dy
+            r = _subp.run(['xdotool', 'mousemove', str(cx), str(cy),
+                           'click', '1'], capture_output=True, timeout=5)
+            if r.returncode != 0:
+                return _fail('thread_compose',
+                             f'xdotool Add post click ({cx},{cy}) failed: '
+                             f'{r.stderr.decode()[:150]}')
+            time.sleep(delay)
+            # Focus the newest composer (lowest on page = last_by_y in y asc sort)
+            _, _, snap = build_snapshot(ctx['platform'])
+            composers = snap.mapped.get('composer_input') or []
+            if len(composers) <= i:
+                return _fail('thread_compose',
+                             f'expected ≥{i+1} composers after Add post, '
+                             f'found {len(composers)}')
+            new_composer = sorted(composers, key=lambda e: (e.y or 0))[-1]
+            if not rt.click(new_composer):
+                return _fail('thread_compose',
+                             f'focus on new composer failed at tweet {i}')
+            time.sleep(0.5)
+        # Paste the tweet text
+        if not rt.paste(tweet):
+            return _fail('thread_compose', f'paste failed at tweet {i}')
+        time.sleep(delay)
+
+    return _ok({'event': 'step_ok', 'action': 'thread_compose',
+                'tweet_count': len(tweets)})
+
+
 @primitive('click_newest_article')
 def click_newest_article(ctx: dict, step: dict) -> dict:
     """Click the topmost article (role=article) that does NOT start
