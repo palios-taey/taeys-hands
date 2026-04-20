@@ -1,0 +1,15 @@
+[Unit]
+Description=Taey Display :10 (Grok-X-scout — isolated from consult Grok on :5)
+After=taey-xvfb@10.service
+Requires=taey-xvfb@10.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:10
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:10; /usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 2; A11Y_ADDR=$(xprop -display :10 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:10; openbox & sleep 1; /usr/bin/x11vnc -display :10 -rfbport 5910 -rfbauth $HOME/.taey/vnc_passwd -forever -shared -bg -o /tmp/x11vnc-10.log; mkdir -p $HOME/.taey/profiles/grok-x-scout; cp $HOME/taeys-hands/systemd/user/firefox-user.js $HOME/.taey/profiles/grok-x-scout/user.js; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/firefox/firefox --no-remote --profile $HOME/.taey/profiles/grok-x-scout "https://grok.com/" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:10; wait ${FIREFOX_PID}'
+ExecStopPost=/usr/bin/bash -lc 'pkill -f "x11vnc.*rfbport 5910" 2>/dev/null || true; rm -f /tmp/a11y_bus_:10 /tmp/dbus_session_bus_:10 /tmp/firefox_pid_:10'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

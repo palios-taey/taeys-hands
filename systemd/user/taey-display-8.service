@@ -1,0 +1,15 @@
+[Unit]
+Description=Taey Display :8 (Upwork)
+After=taey-xvfb@8.service
+Requires=taey-xvfb@8.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:8
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:8; /usr/libexec/at-spi-bus-launcher --launch-immediately & sleep 2; A11Y_ADDR=$(xprop -display :8 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$//"); echo "${A11Y_ADDR}" > /tmp/a11y_bus_:8; openbox & sleep 1; /usr/bin/x11vnc -display :8 -rfbport 5908 -rfbauth $HOME/.taey/vnc_passwd -forever -shared -bg -o /tmp/x11vnc-8.log; mkdir -p $HOME/.taey/profiles/upwork; cp $HOME/taeys-hands/systemd/user/firefox-user.js $HOME/.taey/profiles/upwork/user.js; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/firefox/firefox --no-remote --profile $HOME/.taey/profiles/upwork "https://www.upwork.com/" & FIREFOX_PID=$!; echo "${FIREFOX_PID}" > /tmp/firefox_pid_:8; wait ${FIREFOX_PID}'
+ExecStopPost=/usr/bin/bash -lc 'pkill -f "x11vnc.*rfbport 5908" 2>/dev/null || true; rm -f /tmp/a11y_bus_:8 /tmp/dbus_session_bus_:8 /tmp/firefox_pid_:8'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
