@@ -279,7 +279,9 @@ def _element_has_checked_state(snap: dict, cfg: dict, element_key: str,
     return selected_state in matches[0].get('states', [])
 
 
-def run_consultation(platform: str, message: str, file_path: str | None = None):
+def run_consultation(platform: str, message: str, file_path: str | None = None,
+                     mode_override: str | None = None,
+                     tools_override: list[str] | None = None):
     """Run the full validated consultation workflow."""
 
     from consultation_v2.yaml_contract import load_platform_yaml
@@ -397,14 +399,23 @@ def run_consultation(platform: str, message: str, file_path: str | None = None):
     # Gemini deep_think) OR from workflow.selection.mode_*/mode_targets
     # (simple one-trigger-one-target cases like Grok heavy). No
     # platform-specific branching here.
-    mode = defaults.get('mode')
-    tools = defaults.get('tools', [])
+    mode = mode_override if mode_override is not None else defaults.get('mode')
+    tools = tools_override if tools_override is not None else defaults.get('tools', [])
     validation = cfg.get('validation', {})
     selection = workflow.get('selection', {})
 
     if 'sequences' not in selection:
         fail('setup', 'workflow.selection.sequences missing from YAML', platform)
     sequences = selection['sequences']
+
+    # Validate overrides reference existing sequences (caller typos fail closed)
+    if mode_override is not None and mode not in sequences:
+        fail('setup', f'--mode {mode!r} not in workflow.selection.sequences for {platform}', platform)
+    if tools_override is not None:
+        for tool in tools:
+            if tool not in sequences:
+                fail('setup', f'--tools entry {tool!r} not in workflow.selection.sequences for {platform}', platform)
+
     checked_state_keys = set()  # Per-key tracking, not global boolean
 
     def _synth_simple_mode_step(mode_name):
@@ -907,6 +918,15 @@ def main():
                              'Default: full consultation flow.')
     parser.add_argument('--url', default=None,
                         help='URL override for navigate (e.g. reply target status URL)')
+    parser.add_argument('--mode', default=None,
+                        help='Override workflow.defaults.mode for this dispatch only '
+                             '(e.g. "deep_research" for ChatGPT). Must be a key in '
+                             'workflow.selection.sequences, otherwise dispatch halts.')
+    parser.add_argument('--tools', default=None,
+                        help='Override workflow.defaults.tools for this dispatch only. '
+                             'Comma-separated list of sequence names (e.g. "deep_research" '
+                             'for Gemini). Empty string = no tools. Each must be a key in '
+                             'workflow.selection.sequences.')
     parser.add_argument('--urls-file', default=None,
                         help='Batch reply: JSON list of {url, message} objects. Iterates with '
                              'rate limiting between each.')
@@ -942,11 +962,18 @@ def main():
             rate_overrides={'max_per_hour': args.max_per_hour, 'min_delay': args.min_delay},
         )
 
+    # Parse --tools CSV (empty string = empty list, None = use YAML default)
+    tools_override = None
+    if args.tools is not None:
+        tools_override = [t.strip() for t in args.tools.split(',') if t.strip()]
+
     # Default: consultation flow.
     return run_consultation(
         platform=args.platform,
         message=args.message,
         file_path=args.file,
+        mode_override=args.mode,
+        tools_override=tools_override,
     )
 
 

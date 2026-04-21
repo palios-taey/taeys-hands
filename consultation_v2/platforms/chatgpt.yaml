@@ -123,6 +123,10 @@ tree:
       name: "Agent, click to remove"
       role: push button
 
+    deep_research_active_indicator:
+      name: "Deep research, click to remove"
+      role: push button
+
     github_active_indicator:
       name: "GitHub, click to remove"
       role: push button
@@ -263,6 +267,13 @@ workflow:
           target: quizzes_item
           click_strategy: atspi_only
           validation: quizzes_active
+
+      deep_research:
+        - trigger: attach_trigger
+          snapshot: menu
+          target: deep_research_item
+          click_strategy: atspi_only
+          validation: deep_research_active
 
   attachment:
     trigger: attach_trigger
@@ -424,6 +435,8 @@ validation:
     indicators:
       - name: "Stop streaming"
         role: push button
+      - name: "Stop research"
+        role: push button
 
   response_complete:
     indicators:
@@ -457,6 +470,11 @@ validation:
   agent_mode_active:
     indicators:
       - name: "Agent, click to remove"
+        role: push button
+
+  deep_research_active:
+    indicators:
+      - name: "Deep research, click to remove"
         role: push button
 
   github_active:
