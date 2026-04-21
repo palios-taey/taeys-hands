@@ -108,7 +108,7 @@ tree:
       role: push button
 
     upload_files_item:
-      name: "Add files or photos"
+      name: "Add files or photos Ctrl+U"
       role: menu item
 
     take_screenshot_item:
