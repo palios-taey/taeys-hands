@@ -156,7 +156,13 @@ tree:
       role: radio menu item
 
     model_adaptive_thinking_item:
-      name: "Adaptive thinking Thinks only when needed Adaptive thinking"
+      # Anthropic redesigned this control as a toggle switch (default ON for
+      # Opus 4.7) with new description text. Keep role as 'menu item' until
+      # we have AT-SPI confirmation of the new role; the pre-check via
+      # extended_thinking_active.indicators (matching the trigger button
+      # name "Model: Opus 4.7 Adaptive") should skip mode_setup entirely
+      # when adaptive is already active, so the click rarely fires.
+      name: "Adaptive thinking Thinks for more complex tasks"
       role: menu item
 
     model_more_item:
@@ -348,36 +354,41 @@ validation:
 
   opus_active:
     indicators:
-      - name: "Opus 4.7"
+      - name: "Model: Opus 4.7"
         role: push button
-      - name: "Opus 4.7 Adaptive"
+      - name: "Model: Opus 4.7 Adaptive"
         role: push button
-      - name: "Opus 4.6"
+      - name: "Model: Opus 4.6"
         role: push button
-      - name: "Opus 4.6 Extended"
+      - name: "Model: Opus 4.6 Extended"
         role: push button
 
   sonnet_active:
     indicators:
-      - name: "Sonnet 4.6"
+      - name: "Model: Sonnet 4.6"
         role: push button
-      - name: "Sonnet 4.6 Extended"
+      - name: "Model: Sonnet 4.6 Extended"
         role: push button
 
   haiku_active:
     indicators:
-      - name: "Haiku 4.5"
+      - name: "Model: Haiku 4.5"
         role: push button
-      - name: "Haiku 4.5 Extended"
+      - name: "Model: Haiku 4.5 Extended"
         role: push button
 
   extended_thinking_active:
+    # Trigger-button names carry the "Model: " prefix after AT-SPI drift
+    # (see commit d1f8726). When mode_setup pre-checks this indicator
+    # block and the trigger button name already matches, mode_setup
+    # skips the dropdown click entirely — which is the right behavior
+    # for Opus 4.7 where Adaptive thinking is ON by default.
     indicators:
-      - name: "Opus 4.7 Adaptive"
+      - name: "Model: Opus 4.7 Adaptive"
         role: push button
-      - name: "Opus 4.6 Extended"
+      - name: "Model: Opus 4.6 Extended"
         role: push button
-      - name: "Sonnet 4.6 Extended"
+      - name: "Model: Sonnet 4.6 Extended"
         role: push button
-      - name: "Haiku 4.5 Extended"
+      - name: "Model: Haiku 4.5 Extended"
         role: push button
