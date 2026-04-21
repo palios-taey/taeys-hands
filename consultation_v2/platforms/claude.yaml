@@ -89,14 +89,14 @@ tree:
     model_selector:
       # Exact current-model button names only; no substring matching.
       names:
-        - "Opus 4.7"
-        - "Opus 4.7 Adaptive"
-        - "Opus 4.6"
-        - "Opus 4.6 Extended"
-        - "Sonnet 4.6"
-        - "Sonnet 4.6 Extended"
-        - "Haiku 4.5"
-        - "Haiku 4.5 Extended"
+        - "Model: Opus 4.7"
+        - "Model: Opus 4.7 Adaptive"
+        - "Model: Opus 4.6"
+        - "Model: Opus 4.6 Extended"
+        - "Model: Sonnet 4.6"
+        - "Model: Sonnet 4.6 Extended"
+        - "Model: Haiku 4.5"
+        - "Model: Haiku 4.5 Extended"
       role: push button
 
     voice_mode:
