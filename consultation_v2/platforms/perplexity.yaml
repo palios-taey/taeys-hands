@@ -419,6 +419,14 @@ workflow:
         baseline: pre_send_url
         timeout: 30
         poll_interval: 1.0
+        # When baseline is already a /search/<id> thread URL, the send
+        # appends a follow-up to that thread and the URL doesn't change.
+        # The send itself is verified by the preceding wait_for_indicator
+        # on send_success (Stop response button appearing), so the
+        # URL-change assertion is the right thing to relax here, not the
+        # send-fired assertion. See primitives.require_url_changed for
+        # the rationale.
+        skip_if_baseline_contains: '/search/'
       # Perplexity R11 #C: Deep Research is two-phase — the stop_button
       # disappears briefly after the source-gathering pass, then
       # reappears for the synthesis phase. Without this continuation,
@@ -478,41 +486,29 @@ workflow:
         optional: true
 
   extract:
-    # Perplexity Deep Research: multiple UI states can exist for the same
-    # completed report (collapsed summary with "Show full report" button,
-    # expanded document viewer card with "Copy contents", inline scrolled
-    # answer with only the regular Copy button). Each path has different
-    # element requirements and the state isn't predictable. The AT-SPI
-    # Text interface on the response landmark returns the full rendered
-    # answer regardless of which rendering is active — one canonical path
-    # that doesn't need pre-expand clicks or multi-state fallbacks.
+    # Perplexity Deep Research: the completed report is rendered as a
+    # document artifact card, separate from the thread's response_landmark.
+    # The card has its own header bar with "Copy contents" / "View full
+    # screen" / "Download" push buttons. Clicking "Copy contents" puts the
+    # full markdown-formatted report in the clipboard — structured
+    # sections, inline URLs, no prompt contamination.
     #
-    # After the initial read, the regenerate_if_short step handles the
-    # Deep Research validation-failure pattern where synthesis stops
-    # after announcing a plan (~30 char response) but never writes the
-    # report. Clicks Rewrite Thread (next to Copy), waits for the fresh
-    # generation pass to complete, re-reads. Up to 3 retries. Healthy
-    # DR responses (2000+ chars) skip the retry entirely.
+    # Old path (read_element_text on response_landmark) captured the
+    # thread WRAPPER: prompt + summary paragraph + search-step footnotes,
+    # without the artifact's structured source entries. For most DR
+    # runs this produced ~12–60K chars but the content was 80%+ prompt
+    # and summary, not the actual cited-source report.
+    #
+    # See consultation_v2/EXTRACTION_PATTERNS.md for the full rationale.
     output_var: response
     sequence:
-      - action: press
-        key: ctrl+End
+      - action: click
+        element: copy_contents_button
+        click_strategy: atspi_only
         delay: 2.0
-      - action: read_element_text
-        element: response_landmark
+      - action: read_clipboard
         into: response
-        min_chars: 20
-      - action: regenerate_if_short
-        response_var: response
         min_chars: 500
-        retry_element: rewrite_thread
-        stop_validation: send_success
-        complete_validation: response_complete
-        extract_element: response_landmark
-        max_retries: 3
-        required_stop_absent_cycles: 3
-        poll_interval: 2.0
-        regen_timeout: 3600
 
 
 validation:

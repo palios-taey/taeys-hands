@@ -1403,10 +1403,19 @@ def require_url_changed(ctx: dict, step: dict) -> dict:
     — the stop_button appears before the URL updates — so this primitive
     polls for up to `timeout` seconds.
 
+    Optional `skip_if_baseline_contains: <substring>`: when the baseline
+    URL already contains this substring, skip the change check and return
+    success. This handles the existing-thread-reuse case (e.g. Perplexity
+    sending into an already-open /search/<id> thread doesn't redirect —
+    the URL stays put because we're already in the thread). The send
+    itself is still verified by the preceding wait_for_indicator on
+    send_success; this option only relaxes the URL-changed assertion.
+
     YAML: `- action: require_url_changed
             baseline: pre_send_url
             timeout: 30
-            poll_interval: 1.0`
+            poll_interval: 1.0
+            skip_if_baseline_contains: '/search/'  # optional`
     """
     baseline_var = step.get('baseline')
     if not baseline_var:
@@ -1415,6 +1424,11 @@ def require_url_changed(ctx: dict, step: dict) -> dict:
     if not baseline:
         return _fail('require_url_changed',
                      f'baseline var {baseline_var!r} is empty; nothing to compare')
+    skip_substring = step.get('skip_if_baseline_contains')
+    if skip_substring and skip_substring in baseline:
+        return _ok({'event': 'step_ok', 'action': 'require_url_changed',
+                    'note': f'skipped (baseline contains {skip_substring!r}: existing-thread reuse)',
+                    'baseline': baseline[:60]})
     timeout = step.get('timeout', 30)
     poll = step.get('poll_interval', 1.0)
     deadline = time.time() + timeout
