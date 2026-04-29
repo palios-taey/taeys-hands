@@ -6,8 +6,6 @@ navigation_key: F6
 urls:
   fresh: https://grok.com/
   settle_delay: 10
-  fresh_url_must_not_contain:
-    - /c/
 
 tree:
   scan_root: app

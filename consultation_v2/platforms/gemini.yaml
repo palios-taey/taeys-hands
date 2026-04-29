@@ -6,8 +6,6 @@ navigation_key: F6
 urls:
   fresh: https://gemini.google.com/app
   settle_delay: 5
-  fresh_url_must_not_contain:
-    - /app/
 
 tree:
   scan_root: app
