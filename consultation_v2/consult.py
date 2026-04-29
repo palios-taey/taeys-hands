@@ -319,29 +319,6 @@ def run_consultation(platform: str, message: str, file_path: str | None = None,
     snap = inspect_platform(platform)
     if not snap.get('url'):
         fail('navigate', 'No URL after navigation', platform)
-
-    # Stale-thread guard. If the post-navigate URL contains a
-    # platform-declared stale-thread marker (e.g. /search/ on Perplexity,
-    # /c/ on ChatGPT, /chat/<uuid> on Claude), the navigate landed in an
-    # existing thread instead of a fresh one — typically because the
-    # signed-in session auto-redirected, or because Firefox no-op'd the
-    # paste-Return when the URL technically matched. Sending into a
-    # stale thread means the consultation appends to a prior conversation
-    # and the URL is dirty even when DR-style content is fresh. Fail
-    # closed; operator must clear the thread manually before retry.
-    stale_markers = cfg.get('urls', {}).get('fresh_url_must_not_contain', [])
-    landed_url = snap.get('url', '')
-    for marker in stale_markers:
-        if marker in landed_url:
-            fail('navigate',
-                 f'Stale-thread URL after navigate: {landed_url!r} contains '
-                 f'declared stale marker {marker!r}. Browser was likely parked '
-                 f'on an existing thread and the navigate to {fresh_url!r} did '
-                 f'not break out. Operator: open the platform UI on display '
-                 f'{cfg.get("display", "?")}, click "+ New" or close the stale '
-                 f'tab, then redispatch.',
-                 platform)
-
     prompt_cfg = workflow.get('prompt', {})
     if 'input' not in prompt_cfg:
         fail('navigate', 'workflow.prompt.input missing from YAML', platform)

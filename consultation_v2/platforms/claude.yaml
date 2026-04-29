@@ -6,8 +6,6 @@ navigation_key: F6
 urls:
   fresh: https://claude.ai/new
   settle_delay: 5
-  fresh_url_must_not_contain:
-    - /chat/
 
 tree:
   scan_root: app
