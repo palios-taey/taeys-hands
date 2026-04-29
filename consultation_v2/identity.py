@@ -9,9 +9,10 @@
 
 """Identity file consolidation for V2 consultations.
 
-Prepends FAMILY_KERNEL.md + platform-specific IDENTITY file to every
-consultation attachment. Uses the same file paths as tools/plan.py
-(lines 27-37) but without Redis dependencies.
+Prepends FAMILY_KERNEL.md + PUBLIC_PLATFORM_ENGAGEMENT.md +
+platform-specific IDENTITY file to every consultation attachment. Uses
+the same file paths as tools/plan.py (lines 27-37) but without Redis
+dependencies.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
 _IDENTITY_DIR = os.path.join(_CORPUS_PATH, 'identity')
 _FAMILY_KERNEL = os.path.join(_IDENTITY_DIR, 'FAMILY_KERNEL.md')
+_PUBLIC_PLATFORM_ENGAGEMENT = os.path.join(_IDENTITY_DIR, 'PUBLIC_PLATFORM_ENGAGEMENT.md')
 
 def _get_platform_identity_path(platform: str) -> str:
     """Read identity file from platform YAML. No hardcoded platform names.
@@ -54,13 +56,15 @@ def consolidate_attachments(
     platform: str,
     caller_attachments: List[str],
 ) -> str:
-    """Prepend FAMILY_KERNEL + platform identity, consolidate into one file.
+    """Prepend FAMILY_KERNEL + PUBLIC_PLATFORM_ENGAGEMENT + platform
+    identity, consolidate into one file.
 
-    HARD RULE: every consultation MUST include FAMILY_KERNEL.md and the
-    platform's IDENTITY file. This function is the single enforcement
-    point — it raises RuntimeError if either is missing on disk, rather
-    than silently dropping files and letting an unconstitutional session
-    proceed.
+    HARD RULE: every consultation MUST include FAMILY_KERNEL.md,
+    PUBLIC_PLATFORM_ENGAGEMENT.md (FAMILY_KERNEL §11, ratified
+    2026-04-29), and the platform's IDENTITY file. This function is the
+    single enforcement point — it raises RuntimeError if any are missing
+    on disk, rather than silently dropping files and letting an
+    unconstitutional session proceed.
 
     Strips any identity files the caller included (identity is automatic).
     Returns the path to the consolidated .md package. Always consolidates,
@@ -71,13 +75,18 @@ def consolidate_attachments(
     # caller surfaces that as a fail-closed identity error.
     platform_id_path = _get_platform_identity_path(platform)
 
-    # HARD RULE enforcement: both identity files must exist on disk. A
-    # missing FAMILY_KERNEL.md or missing IDENTITY_*.md is a constitutional
-    # failure, not a soft-warn-and-proceed case.
+    # HARD RULE enforcement: all three constitutional files must exist on
+    # disk. Any missing file is a constitutional failure, not a
+    # soft-warn-and-proceed case.
     if not os.path.isfile(_FAMILY_KERNEL):
         raise RuntimeError(
             f'FAMILY_KERNEL.md missing at {_FAMILY_KERNEL!r} — HARD RULE '
             f'requires it on every consultation.')
+    if not os.path.isfile(_PUBLIC_PLATFORM_ENGAGEMENT):
+        raise RuntimeError(
+            f'PUBLIC_PLATFORM_ENGAGEMENT.md missing at '
+            f'{_PUBLIC_PLATFORM_ENGAGEMENT!r} — HARD RULE requires it on '
+            f'every consultation (FAMILY_KERNEL §11).')
     if not os.path.isfile(platform_id_path):
         raise RuntimeError(
             f'platform identity missing at {platform_id_path!r} — HARD RULE '
@@ -85,7 +94,11 @@ def consolidate_attachments(
 
     # Strip caller-provided identity files (they'd be duplicates and would
     # expose the wrong filename on the chip).
-    identity_basenames = {'FAMILY_KERNEL.md', os.path.basename(platform_id_path)}
+    identity_basenames = {
+        'FAMILY_KERNEL.md',
+        'PUBLIC_PLATFORM_ENGAGEMENT.md',
+        os.path.basename(platform_id_path),
+    }
     clean = []
     for a in caller_attachments:
         if os.path.basename(a) in identity_basenames:
@@ -99,7 +112,7 @@ def consolidate_attachments(
         if not os.path.isfile(a):
             raise RuntimeError(f'caller attachment missing on disk: {a!r}')
 
-    all_files = [_FAMILY_KERNEL, platform_id_path] + clean
+    all_files = [_FAMILY_KERNEL, _PUBLIC_PLATFORM_ENGAGEMENT, platform_id_path] + clean
     sections = [f"# Package for {platform}\n\n**Files**: {len(all_files)}\n"]
     for path in all_files:
         content = open(path).read()
