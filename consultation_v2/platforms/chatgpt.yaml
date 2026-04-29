@@ -6,6 +6,8 @@ navigation_key: F6
 urls:
   fresh: https://chatgpt.com/
   settle_delay: 5
+  fresh_url_must_not_contain:
+    - /c/
 
 tree:
   # Empty fence keeps snapshot() on the Firefox app root. ChatGPT needs this

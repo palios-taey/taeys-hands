@@ -6,6 +6,10 @@ navigation_key: F6
 urls:
   fresh: https://www.perplexity.ai/
   settle_delay: 5
+  # Fail closed if the post-navigate URL contains any of these markers —
+  # browser was parked on a stale thread and navigate didn't break out.
+  fresh_url_must_not_contain:
+    - /search/
 
 tree:
   # Empty fence is intentional: the compose controls appear after sidebar/history
