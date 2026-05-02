@@ -70,6 +70,13 @@ URL_PATTERNS = {
     'gemini': 'gemini.google.com', 'grok': 'grok.com',
     'perplexity': 'perplexity.ai', 'x_twitter': 'x.com',
     'linkedin': 'linkedin.com',
+    # Treasurer-side platforms (used by <OPERATOR_HOME>/treasurer/scripts/)
+    'upwork': 'upwork.com',
+    'lesswrong': 'lesswrong.com',
+    'reddit': 'reddit.com',
+    'nvidia_forum': 'developer.nvidia.com',  # matches both forums.developer.nvidia.com and login on developer.nvidia.com
+    'ea_funds': 'effectivealtruism.org',
+    'paperform': 'paperform.co',  # EA Funds form host
 }
 
 BASE_URLS = {
