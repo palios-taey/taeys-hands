@@ -201,6 +201,7 @@ tree:
     submit_button:
       name: Submit
       role: push button
+      pick: last_by_y
     stop_button:
       name_contains: Stop response
       role: push button

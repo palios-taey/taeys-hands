@@ -604,7 +604,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         pasted = self.runtime.paste(request.message)
         time.sleep(1.0)
         verify_snap = self.runtime.snapshot()
-        submit_visible = self.find_first(verify_snap, 'submit_button')
+        submit_visible = self.find_last(verify_snap, 'submit_button')
         msg = 'Perplexity prompt entered'
         if submit_visible:
             msg += ' (Submit button appeared)'
@@ -624,7 +624,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         before = result.session_url_before
         snap = self.runtime.snapshot()
-        send_button = self.find_first(snap, 'submit_button')
+        send_button = self.find_last(snap, 'submit_button')
         if send_button:
             clicked = self.runtime.click(send_button)
         else:
