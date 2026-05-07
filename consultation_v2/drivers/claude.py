@@ -15,6 +15,39 @@ except Exception:  # pragma: no cover - optional dependency in runtime
 class ClaudeConsultationDriver(BaseConsultationDriver):
     platform = 'claude'
 
+    def _read_input_text(self) -> str:
+        snapshot = self.runtime.snapshot()
+        input_el = self.find_first(snapshot, 'input')
+        if not input_el or not input_el.atspi_obj:
+            return ''
+        try:
+            text_iface = input_el.atspi_obj.get_text_iface()
+            if text_iface:
+                return text_iface.get_text(0, -1) or ''
+        except Exception:
+            pass
+        try:
+            value_iface = input_el.atspi_obj.get_value_iface()
+            if value_iface is not None:
+                value = value_iface.get_current_value()
+                return '' if value is None else str(value)
+        except Exception:
+            pass
+        return ''
+
+    def _prompt_text_status(self, message: str) -> tuple[int, bool]:
+        live_text = self._read_input_text()
+        landed_chars = len(live_text)
+        expected = len(message)
+        if expected <= 0:
+            return landed_chars, True
+        slack = max(20, int(expected * 0.01))
+        min_chars = max(0, expected - slack)
+        normalized_message = ' '.join(message.split())
+        normalized_live = ' '.join(live_text.split())
+        prefix_matches = not normalized_message or normalized_live.startswith(normalized_message[:30])
+        return landed_chars, landed_chars >= min_chars and prefix_matches
+
     def run(self, request: ConsultationRequest) -> ConsultationResult:
         result = self.result(request)
         urls = self.cfg.get('urls', {})
@@ -274,8 +307,20 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
         verify_snap = self.runtime.snapshot()
-        verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
-        result.add_step('prompt', verified, 'Claude prompt entered',
+        landed_chars, landed_ok = self._prompt_text_status(request.message)
+        prompt_ready = self.validation_passes(verify_snap, 'prompt_ready')
+        verified = bool(pasted and prompt_ready and landed_ok)
+        message = 'Claude prompt entered'
+        if pasted and prompt_ready and not landed_ok:
+            self.runtime.type_text(request.message, delay_ms=5)
+            time.sleep(0.5)
+            verify_snap = self.runtime.snapshot()
+            landed_chars, landed_ok = self._prompt_text_status(request.message)
+            prompt_ready = self.validation_passes(verify_snap, 'prompt_ready')
+            verified = bool(prompt_ready and landed_ok)
+            message = 'Claude prompt entered via type_text fallback'
+        result.add_step('prompt', verified, message,
+                        landed_chars=landed_chars, expected_chars=len(request.message),
                         snapshot=verify_snap.serializable())
         return verified
 
