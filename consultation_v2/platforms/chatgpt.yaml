@@ -53,7 +53,7 @@ tree:
       states_include:
       - editable
     model_selector:
-      name: Model selector
+      name: Extended Pro
       role: push button
     attach_trigger:
       name: Add files and more

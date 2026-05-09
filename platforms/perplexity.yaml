@@ -71,8 +71,7 @@ stop_patterns:
 mode_guidance:
   deep_research:
     when: "Need facts, citations, multi-source synthesis, current events, comprehensive documentation"
-    how: "Click 'Add files or tools' button, select 'Deep research New' radio item"
-    keyboard_nav: 5  # Down×5 from dropdown open = Deep research (5th item)
+    how: "Click 'Deep research' push button (top-level toggle, name='Deep research', role=push button)"
     timeout: 7200
     note: "Takes 5-30 minutes. Copy button = summary only. Use Export > Download as Markdown for full report."
   model_council:

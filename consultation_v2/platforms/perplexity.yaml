@@ -250,7 +250,7 @@ workflow:
     # is available with exact [radio menu item] names.
     model_targets: {}
     mode_targets:
-      deep_research: deep_research
+      deep_research: deep_research_toggle
       model_council: tool_model_council
       computer: computer_dropdown
       create_files_and_apps: mode_create_files

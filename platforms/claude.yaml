@@ -118,7 +118,7 @@ element_map:
     name: "Add from GitHub"
     role_contains: item
   model_selector:
-    name_contains: ["Opus 4.6", "Sonnet 4.6", "Haiku 4.5"]
+    name: "Model: Opus 4.7 Adaptive"
     role: push button
   # Model dropdown items
   model_opus:

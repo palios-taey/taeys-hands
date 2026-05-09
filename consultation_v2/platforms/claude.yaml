@@ -109,10 +109,7 @@ tree:
 
     # -- Model selector (label changes with active model) --
     model_selector:
-      name_contains:
-      - Opus 4.6
-      - Sonnet 4.6
-      - Haiku 4.5
+      name: "Model: Opus 4.7 Adaptive"
       role: push button
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --

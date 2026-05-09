@@ -158,7 +158,7 @@ element_map:
     role: entry
     states_include: [editable]
   model_selector:
-    name_contains: "Model selector"
+    name: "Extended Pro"
     role: push button
   attach_trigger:
     name: "Add files and more"
