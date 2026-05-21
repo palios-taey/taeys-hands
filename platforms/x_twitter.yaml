@@ -415,6 +415,18 @@ failure_modes:
       width 50-130, height 25-50. Verify with the visible element on the actual
       target page rather than hardcoding the first observed range.
 
+  - id: long_post_action_bar_below_initial_viewport
+    description: |
+      2026-05-21 sjsandeep_jain + Vtrivedy10 reply attempts: scroll-N-lines pattern
+      failed silently because long posts push the action bar (Reply icon at bottom)
+      ~y=1366+, well below initial viewport. Hardcoded "scroll 4 lines" / "scroll
+      8 lines" guesswork was unreliable across post lengths.
+    rule: Use atspi_helpers.scroll_until_found(predicate, max_attempts=15) — loops
+      probe-scroll-reprobe until target lands in safe viewport. Reliable for ANY
+      post length. ALTERNATIVE: use atspi_helpers.reply_via_r_shortcut(article_pred)
+      — clicks the tweet article, presses 'r' keyboard shortcut, opens modal compose
+      centered. No scroll dependency.
+
   - id: target_account_already_followed_by_human_history
     description: |
       2026-05-21 chain-follow attempt against 8 mid-tier handles from Grok's
