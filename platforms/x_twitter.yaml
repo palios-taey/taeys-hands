@@ -373,3 +373,32 @@ failure_modes:
       exist" page). Add this as a pre-action gate in the follow flow OR validate
       handles when ingesting them into the follow queue. Don't trust Grok handle
       suggestions verbatim — they have stale/wrong handles.
+
+  - id: viewport_edge_click_unreliable
+    description: |
+      2026-05-21 NielsRogge reply attempt: speech-bubble Reply icon found at center
+      y=1080, exactly at the viewport edge (screen is 1080 tall). atspi_helpers'
+      _in_viewport check passed because it allowed `cy <= SCREEN_HEIGHT - margin`
+      with margin=0. Click at y=1080 either missed the element or got dispatched
+      to underlying browser chrome. First attempt looked successful (modal opened,
+      paste happened, Ctrl+Return sent) but reply count didn't increment and text
+      didn't appear in thread.
+    rule: Treat elements with center y < 80 or > 1000 as effectively off-screen for
+      click purposes (use 80px margin from each edge). Updated atspi_helpers._in_viewport
+      to enforce this. If the YAML predicate would match an edge-zone element, either
+      scroll into safer zone OR refuse and let caller scroll. Same applies to x-edges
+      with same 80px margin.
+
+  - id: ctrl_return_eaten_by_error_banner
+    description: |
+      2026-05-21 NielsRogge reply (second attempt): paste succeeded, Ctrl+Return
+      DID NOT submit. An X error banner ("Something went wrong, but don't fret —
+      let's give it another shot") was present at the top of the modal — likely
+      lingering from the failed first attempt. Ctrl+Return was consumed by the
+      banner's focus / X's error-state handling, not by the compose submit.
+    rule: After Ctrl+Return, ALWAYS verify externally (canonical state check).
+      If the post doesn't appear, the fallback is to find the Reply / Post submit
+      button by AT-SPI (role=push_button, name="Reply" or "Post", width>=60) and
+      click it directly. Click-the-button is more reliable than the keyboard
+      shortcut under error-banner conditions. Long-term: prefer click-the-button
+      over Ctrl+Return for all submit actions.
