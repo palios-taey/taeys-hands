@@ -109,13 +109,21 @@ element_map:
     role_contains: section
     states_include: [editable, focusable, multi-line]
   mode_picker:
-    name: "Open mode picker"
+    # Live name is dynamic: "Open mode picker, currently Pro" (UI 2026-05-21)
+    name_contains: "Open mode picker"
     role: push button
+  # Gemini merged "Tools" and the upload menu into one "Upload & tools"
+  # button (UI 2026-05-21); both keys reference the same live element.
   tools_button:
-    name: "Tools"
+    name: "Upload & tools"
     role: push button
   upload_menu:
-    name: "Open upload file menu"
+    name: "Upload & tools"
+    role: push button
+  # "Deep think" / "Guided learning" sit behind this expander inside the
+  # Upload & tools menu — expand before the deep_think item is in the tree.
+  more_tools:
+    name: "More tools"
     role: push button
   copy_button:
     name_contains: "Copy"
