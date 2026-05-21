@@ -210,6 +210,63 @@ flows:
       navigate_to: https://x.com/jesselarose/with_replies
       atspi_text_fragment_search: true
 
+  thread:
+    description: Multi-tweet thread via compose modal "+ Add post" chaining
+    navigate_to: https://x.com/compose/post
+    settle_after_nav_seconds: 5
+    helper: atspi_helpers.get_compose_textarea + find Add-post button by name='Add post'
+    # KEY: the "Add post" button only appears AFTER text is typed into the first
+    # textarea. So the sequence is: paste part 1 first, THEN find Add post.
+    steps:
+      - find:
+          role: entry
+          name: Post text
+          states_required: [editable]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_text
+        text_source: parts[0]
+        post_delay_seconds: 1.0
+      # Loop the remaining parts:
+      - for_each: parts[1:]
+        steps:
+          - find:
+              role: push button
+              name: Add post
+              # Always the lowest "Add post" in viewport (newest one for current bottom tweet)
+              pick: lowest_y
+              require_in_viewport: true
+            action: click
+            post_delay_seconds: 1.5
+          - find:
+              role: entry
+              name: Post text
+              states_required: [editable]
+              # Newly-added empty textarea — pick the LOWEST y
+              pick: lowest_y
+              require_in_viewport: true
+            action: click
+            post_delay_seconds: 0.8
+          - action: paste_text
+            text_source: current_part
+            post_delay_seconds: 1.0
+      - find:
+          role: push button
+          name: Post all
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 4
+    verify_externally:
+      navigate_to: https://x.com/jesselarose
+      settle_seconds: 6
+      atspi_text_fragment_search: true  # check ALL parts landed
+      verify_all_parts: true
+    notes: |
+      X counts a thread as ONE composed post (single Post all submit). Action
+      tracker should record as 1 original, not N. Premium+ accounts can chain
+      arbitrarily many parts; first one shows in feed timeline, expand to see rest.
+
   article:
     description: Long-form Article (X Premium+; up to 25k chars)
     # Direct URL is unreliable — /compose/article 404s. Navigate via Articles tab.
