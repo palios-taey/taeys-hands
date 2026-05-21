@@ -15,19 +15,89 @@ tree:
       - "Docs"
       - "Downloads"
       - "Training"
+      - "Choose What I Share"
+      - "Bookmark this page (Ctrl+D)"
     roles:
       - "banner"
       - "complementary"
+  # Per-element selectors validated 2026-05-21 against thread 368365 on display :12 (logged in as jesse75).
+  # Two buttons share the exact name+role "Reply, push button":
+  #   (a) THREAD-LEVEL Reply in the post-action toolbar at y≈624 — opens the composer
+  #   (b) COMPOSE Submit Reply at y≈974 — only present after composer is open
+  # We disambiguate by document order: thread-level Reply appears first; composer Submit appears last.
   element_map:
-    reply_compose:
+    # Thread-level Reply (opens the composer). Match the FIRST exact-name "Reply" push button.
+    open_reply_composer:
       name: "Reply"
       role: "push button"
+      name_match: exact
+      select: first
+    # Compose textarea — Discourse uses a contenteditable; AT-SPI exposes it as role=entry.
+    # The name field carries the placeholder text "Type here. Use Markdown, BBCode, or HTML to format. Drag or ..."
+    compose_textarea:
+      role: "entry"
+      name_starts_with: "Type here. Use Markdown"
+      states_include:
+        - editable
+    # Compose submit. Match the LAST exact-name "Reply" push button (only present after composer opens).
     submit_reply_button:
       name: "Reply"
       role: "push button"
-    quote_reply_tool:
-      name: "Quote"
+      name_match: exact
+      select: last
+    # Discard button (cancel without submit). Used for manual walkthrough cleanup.
+    discard_button:
+      name: "Discard"
       role: "push button"
+      name_match: exact
+    # Compose-internal save-and-close-as-draft icon.
+    save_and_close_draft:
+      name: "Save and close"
+      role: "push button"
+      name_match: exact
+    # Per-post Reply buttons ("Reply to post #N by @handle") — NOT used by our automation
+    # (we always reply at the thread level, not as a quote-reply to a specific post). Listed for
+    # documentation only.
+    quote_reply_per_post:
+      name_starts_with: "Reply to post #"
+      role: "push button"
+  # Pre-action checks — if any of these match in the page, REFUSE to proceed (cannot-lie).
+  closed_thread_markers:
+    - "This topic was automatically closed"
+    - "New replies are no longer allowed"
+    - "Closed on "
 workflow:
-  actions: {}
-validation: {}
+  actions:
+    reply:
+      # Validated 2026-05-21 on thread 368365.
+      precheck:
+        - check: closed_thread_markers
+          action: refuse_if_present
+          reason: "Thread is closed; cannot post reply"
+      steps:
+        - locate: open_reply_composer
+        - click: open_reply_composer
+        - wait_for: compose_textarea
+        - locate: compose_textarea
+        - clear_field: compose_textarea
+        - paste_clipboard: compose_textarea
+        - screenshot:
+            label: pre_submit
+        - locate: submit_reply_button
+        - click: submit_reply_button
+        - wait_seconds: 5
+        - verify_externally:
+            navigate: same_thread_url
+            require_author: jesse75
+            require_content_slice: first_80_chars_of_draft
+validation:
+  # When automation runs `consult.py nvidia_forum send-message --target <url>`,
+  # it MUST first fetch <url> via Discourse JSON API (<AUXILIARY_URL>/t/<id>.json)
+  # and check that closed=False before proceeding. This protects against the 14-day auto-close
+  # pattern observed on threads 366986 (closed 2026-05-04) and 366266 (closed 2026-04-28).
+  pre_navigation:
+    - check: discourse_json_thread_state
+      url_pattern: "<AUXILIARY_URL>/t/{thread_id}.json"
+      require:
+        closed: false
+        archived: false
