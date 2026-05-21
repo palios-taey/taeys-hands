@@ -6,11 +6,11 @@ verify_navigation: false
 tab_shortcut: alt+2
 
 capabilities:
-  # Model button shows current model name (e.g. "Opus 4.6 Extended", "Sonnet 4.6")
-  # Click opens dropdown with Extended thinking toggle + More models link
-  # Available models (via More models): Opus 4.6, Sonnet 4.6, Haiku 4.5
+  # Model button shows current model name (e.g. "Opus 4.7 Adaptive", "Sonnet 4.6")
+  # Click opens dropdown with Adaptive thinking toggle + More models link
+  # Available models: Opus 4.7, Sonnet 4.6, Haiku 4.5 (UI 2026-05-15)
   models:
-    - Extended thinking Think longer for complex tasks
+    - Adaptive thinking Thinks for more complex tasks Adaptive thinking
     - More models
   # "Toggle menu" button dropdown — contains both tools and sources
   modes: []
@@ -50,8 +50,8 @@ quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
   - attach: "'Toggle menu' button -> 'Add files or photos' menu item. xdotool coordinate clicks work on Claude menu items."
-  - model_default: "Sonnet 4.6 is default for Pro plans. Opus 4.6 Extended for Max plans."
-  - model_selector: "Button shows current model name. Click opens dropdown with Extended thinking toggle and More models link."
+  - model_default: "Sonnet 4.6 is default for Pro plans. Opus 4.7 Adaptive for Max plans."
+  - model_selector: "Button shows current model name. Click opens dropdown with Adaptive thinking toggle and More models link."
   - paste_as_document: "Large clipboard pastes (>5KB) auto-convert to 'Pasted Text' document chip. Workaround for broken file dialog."
   - prosemirror: "ProseMirror contenteditable does NOT accept AT-SPI insert_text(). Clipboard paste is the only reliable input method."
 
@@ -62,8 +62,13 @@ stop_patterns:
 mode_guidance:
   extended_thinking:
     when: "Complex reasoning, code generation, architectural review, multi-step analysis"
-    how: "Click model button, toggle 'Extended thinking' on, or select model with 'Extended' suffix"
+    how: "Click model_selector ('Model: Opus 4.7 Adaptive'), select 'Opus 4.7 Most capable for ambitious work', then click 'Adaptive thinking Thinks for more complex tasks Adaptive thinking' to enable adaptive thinking (UI 2026-05-15)"
     timeout: 3600
+    steps:
+      - trigger: model_selector
+        select: model_opus
+      - trigger: null
+        select: model_adaptive_thinking
   research:
     when: "Need multi-pass web research, current events, comprehensive documentation lookup"
     how: "Toggle menu -> enable 'Research' check menu item"
@@ -74,7 +79,7 @@ mode_guidance:
     timeout: 1800
   normal:
     when: "Quick questions, simple tasks, conversational"
-    how: "Default model without Extended thinking"
+    how: "Default model without Adaptive thinking"
     timeout: 1800
 
 # ─── Sidebar Fence ────────────────────────────────────────────────
@@ -120,25 +125,22 @@ element_map:
   model_selector:
     name: "Model: Opus 4.7 Adaptive"
     role: push button
-  # Model dropdown items
+  # Model dropdown items (UI as of 2026-05-15; live AT-SPI roles)
   model_opus:
-    name_contains: "Opus 4.6 Most capable"
-    role: push button
+    name: "Opus 4.7 Most capable for ambitious work"
+    role: radio menu item
   model_sonnet:
-    name_contains: "Sonnet 4.6 Most efficient"
-    role: push button
+    name: "Sonnet 4.6 Responsive everyday work"
+    role: radio menu item
   model_haiku:
-    name_contains: "Haiku 4.5 Fastest"
-    role: push button
-  model_sonnet_extended:
-    name: "Sonnet 4.6 Extended"
-    role: push button
-  model_extended_thinking:
-    name_contains: "Extended thinking"
-    role: push button
+    name: "Haiku 4.5 Fastest, most efficient"
+    role: radio menu item
+  model_adaptive_thinking:
+    name: "Adaptive thinking Thinks for more complex tasks Adaptive thinking"
+    role: menu item
   model_more:
     name: "More models"
-    role: push button
+    role: menu item
   copy_button:
     name_contains: "Copy"
     role_contains: button
@@ -188,7 +190,7 @@ validation:
       name_match: filename_extension
   model_selected:
     # Model selector button name IS the current model name
-    # e.g. "Opus 4.6 Extended", "Sonnet 4.6"
+    # e.g. "Opus 4.7 Adaptive", "Sonnet 4.6"
     read_from: model_selector
     name_is_model: true
   send_success:

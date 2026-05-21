@@ -114,19 +114,22 @@ tree:
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --
     model_opus:
-      name: Opus 4.6 Most capable for ambitious work
-      role: menu item
+      name: Opus 4.7 Most capable for ambitious work
+      role: radio menu item
     model_sonnet:
-      name: Sonnet 4.6 Most efficient for everyday tasks
-      role: menu item
+      name: Sonnet 4.6 Responsive everyday work
+      role: radio menu item
     model_haiku:
-      name: Haiku 4.5 Fastest for quick answers
-      role: menu item
+      name: Haiku 4.5 Fastest, most efficient
+      role: radio menu item
+    # Platform renamed "Extended thinking" -> "Adaptive thinking" (Opus 4.7).
+    # Logical mode key stays extended_thinking (driver-aligned); name/role
+    # below match the live AT-SPI tree exactly.
     model_extended_thinking:
-      name: "Extended thinking Think longer for complex tasks"
+      name: "Adaptive thinking Thinks for more complex tasks Adaptive thinking"
       role: menu item
     toggle_extended_thinking:
-      name: Extended thinking
+      name: Adaptive thinking
       role: toggle button
     model_more:
       name: More models
@@ -196,7 +199,7 @@ validation:
       role: push button
   opus_active:
     indicators:
-    - name_contains: Opus 4.6
+    - name_contains: Opus 4.7
       role: push button
   haiku_active:
     indicators:
@@ -204,5 +207,5 @@ validation:
       role: push button
   extended_thinking_active:
     indicators:
-    - name_contains: Extended
+    - name_contains: Adaptive
       role: push button
