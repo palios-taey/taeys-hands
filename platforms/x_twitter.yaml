@@ -358,3 +358,18 @@ failure_modes:
       layout. Hardcoding "(1032, 279)" works on one page-state and fails on others.
     rule: Query AT-SPI for the element by role+name fresh on every call. Compute
       click target from the returned bbox center. atspi_helpers.py provides this.
+
+  - id: handle_doesnt_exist_silent_no_follow_button
+    description: |
+      2026-05-21 YAML validation: tried to follow @timdettmers per the Grok mid-tier
+      list. No Follow button found by the strict YAML predicate. Initially looked
+      like YAML drift. Actual cause: the handle "@timdettmers" returns "This account
+      doesn't exist" on X. The real handle uses different casing/underscore.
+      The YAML predicate correctly found nothing because there was no profile-header
+      Follow button to find — only sidebar "Who to follow" suggestions for other
+      accounts.
+    rule: Before following from a Grok-derived mid-tier list or scout output,
+      curl -I or HEAD the profile URL to verify it returns 200 (not a "doesn't
+      exist" page). Add this as a pre-action gate in the follow flow OR validate
+      handles when ingesting them into the follow queue. Don't trust Grok handle
+      suggestions verbatim — they have stale/wrong handles.
