@@ -59,3 +59,245 @@ element_hints:
   send_role: push button
   send_name_pattern: post
   compose_name_pattern: compose
+
+# ─── Action flows ─────────────────────────────────────────────────────────────
+# Each flow names the AT-SPI elements (by role + name pattern) to find and the
+# action sequence. Scripts read this YAML to know what to look for instead of
+# rederiving each session. All flows assume DISPLAY=:7 and PLATFORM_DISPLAYS
+# already maps x_twitter→:7. Element coords are NOT hardcoded — scripts query
+# AT-SPI fresh each call, validate the bbox is in-viewport (0 < y < 1080), and
+# scroll into view if not.
+#
+# Verified working 2026-05-20 in a single live session.
+flows:
+  original:
+    # Single original post (not thread)
+    description: Post a single tweet via the compose modal
+    navigate_to: https://x.com/compose/post
+    settle_after_nav_seconds: 5
+    steps:
+      - find:
+          role: entry
+          name: Post text
+          states_required: [editable]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_text
+        post_delay_seconds: 1.0
+      - action: key
+        key: ctrl+Return
+        post_delay_seconds: 3
+    verify_externally:
+      navigate_to: https://x.com/jesselarose
+      settle_seconds: 6
+      atspi_text_fragment_search: true  # text_landed_externally(fragment)
+
+  reply:
+    description: Reply to an existing thread via the compose modal (NOT inline)
+    navigate_to: "{thread_url}"  # caller substitutes
+    settle_after_nav_seconds: 6
+    # CRITICAL: inline 'Post text' entry below the tweet is unreliable to focus
+    # (often at viewport edge y~1000+). The MODAL compose, opened by clicking the
+    # speech-bubble Reply icon under the tweet, is reliable.
+    steps:
+      - find:
+          role: push button
+          name_contains: "Reply"
+          # The speech-bubble icon is icon-sized (~38x47 typical)
+          # Distinguish from the inline submit (75x36) and the action-bar "N Replies. Reply"
+          # which is also the icon
+          bbox_width_range: [30, 50]
+          bbox_height_range: [40, 55]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 2
+        note: This opens a modal compose dialog centered on screen.
+      - find:
+          role: entry
+          name: Post text
+          states_required: [editable, focused]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_text
+        post_delay_seconds: 1.2
+      - action: key
+        key: ctrl+Return
+        post_delay_seconds: 3
+    verify_externally:
+      navigate_to: https://x.com/jesselarose/with_replies
+      settle_seconds: 6
+      atspi_text_fragment_search: true
+
+  like:
+    description: Like a post via the heart icon (or 'l' keyboard shortcut when post is focused)
+    navigate_to: "{thread_url}"
+    settle_after_nav_seconds: 6
+    steps:
+      - find:
+          role: push button
+          name_pattern: "^[0-9.,Kk]* ?Like[s]?\\. Like$"  # e.g. "59 Likes. Like" or "Like"
+          bbox_width_range: [30, 60]
+          bbox_height_range: [30, 60]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 1.5
+    verify_in_place:
+      # Same button should now read "Liked" or "Unlike"
+      find:
+        role: push button
+        name_contains: "Liked"  # or "Unlike"
+      expected: present
+    # Keyboard alternative: focus the tweet, press 'l'
+
+  follow:
+    description: Follow an account from their profile page
+    navigate_to: https://x.com/{handle}
+    settle_after_nav_seconds: 6
+    steps:
+      - find:
+          role: push button
+          name_pattern: "^Follow @?{handle}?$"
+          # Header-level Follow button on profile page
+          bbox_width_range: [50, 120]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 2
+    verify_in_place:
+      find:
+        role: push button
+        name_pattern: "^Following @?{handle}?$"
+      expected: present
+
+  quote_tweet:
+    description: Quote tweet — Repost menu → Quote item → modal compose
+    navigate_to: "{thread_url}"
+    settle_after_nav_seconds: 6
+    steps:
+      - find:
+          role: push button
+          name_pattern: "^[0-9.,Kk]* ?repost[s]?\\. Repost$|^Repost$"
+          # Icon size, not the menu-item size
+          bbox_width_range: [30, 50]
+          bbox_height_range: [40, 55]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 1.5
+        note: Opens a popup menu with Repost + Quote options.
+      - find:
+          role: push button
+          name: Quote
+          # Menu items are wider (~114x44)
+          bbox_width_range: [80, 200]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 2
+        note: Opens modal compose with the quoted-tweet embedded.
+      - find:
+          role: entry
+          name: Post text
+          states_required: [editable, focused]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_text
+        post_delay_seconds: 1.0
+      - action: key
+        key: ctrl+Return
+        post_delay_seconds: 3
+    verify_externally:
+      navigate_to: https://x.com/jesselarose/with_replies
+      atspi_text_fragment_search: true
+
+  article:
+    description: Long-form Article (X Premium+; up to 25k chars)
+    # Direct URL is unreliable — /compose/article 404s. Navigate via Articles tab.
+    flow:
+      - navigate_to: https://x.com/compose/articles
+        settle_after_nav_seconds: 5
+      # The Articles tab lands you on a "Your drafts live here / This is where you write / Write" landing.
+      # The "Write" button name in AT-SPI doesn't match name=='Write' reliably — fallback to coord-find
+      # by visible location. Better: click 'Write' via name search OR via the article-edit icon next to "Articles" header.
+      - find:
+          role: push button
+          name_contains: "Write"
+          require_in_viewport: true
+          # If not found, click the pencil-icon next to "Articles" header at top-right of left panel
+        action: click
+        fallback_coord: [1175, 620]  # observed Write button location 2026-05-20
+        post_delay_seconds: 5
+      - find:
+          role: entry
+          name: Add a title
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_title
+        post_delay_seconds: 1.0
+      - find:
+          role: entry
+          name: ""  # empty-name editable below title field
+          states_required: [editable]
+          # body field is the largest editable section below title
+          bbox_height_range: [100, 999]
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 0.8
+      - action: paste_body
+        post_delay_seconds: 1.5
+      - find:
+          role: push button
+          name: Publish
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 3
+      # Confirm dialog appears with a second Publish button at center
+      - find:
+          role: push button
+          name: Publish
+          require_in_viewport: true
+        action: click
+        post_delay_seconds: 5
+    verify_externally:
+      navigate_to: https://x.com/jesselarose/articles
+      settle_seconds: 6
+      atspi_text_fragment_search: true
+
+# ─── Failure-mode notes (cannot-lie lessons from 2026-05-20 first run) ────────
+failure_modes:
+  - id: viewport_bounds_silent_false_positive
+    description: |
+      AT-SPI returns logical coords for off-screen elements (negative y above viewport,
+      y > 1080 below). Clicking those coords sends the click to the SCREEN position,
+      not the element. The first vllm reply failed because the inline 'Post text'
+      entry was at y=1106 (below the 1080 viewport); click went nowhere useful, but
+      "page loaded" check passed because elements existed.
+    rule: Always validate 0 < (y + h/2) < SCREEN_HEIGHT before clicking. If not in
+      viewport, scroll until it is, then re-query.
+
+  - id: inline_reply_field_focus_resistance
+    description: |
+      The inline 'Post text' entry below a tweet (vs. the modal compose) is hard to
+      reliably focus — clicks land but the 'focused' state doesn't set, paste goes
+      nowhere. Suspected cause: viewport-edge positioning, z-index issues with floating
+      bottom UI (e.g., "Don't miss what's happening" banner).
+    rule: For reply flows, click the speech-bubble Reply ICON under the tweet to open
+      the modal compose. The modal textarea is reliably centered and focusable.
+
+  - id: tree_growth_as_success_false_positive
+    description: |
+      x_reply_bot.py's success heuristic was "AT-SPI tree size grew after submit,
+      composer field cleared." Both true after the failed first vllm reply — but the
+      actual reply text never landed. The Ctrl+Return dismissed the empty composer
+      without posting.
+    rule: After every post-class action, navigate to the canonical verify URL and
+      run text_landed_externally() with a distinctive fragment of the posted text.
+      Only mark success=true after that external verify.
+
+  - id: hardcoded_coords_brittle
+    description: |
+      Coords change run-to-run based on viewport scroll, modal vs inline, dynamic
+      layout. Hardcoding "(1032, 279)" works on one page-state and fails on others.
+    rule: Query AT-SPI for the element by role+name fresh on every call. Compute
+      click target from the returned bbox center. atspi_helpers.py provides this.
