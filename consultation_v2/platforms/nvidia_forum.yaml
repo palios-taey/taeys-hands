@@ -1,0 +1,33 @@
+platform: nvidia_forum
+click_strategy: coordinate_only
+navigation_key: F6
+urls:
+  fresh: <AUXILIARY_URL>
+tree:
+  exclude:
+    names:
+      - "Navigation menu"
+      - "Search the Forums"
+      - "Color mode"
+      - "Home"
+      - "Blog"
+      - "Forums"
+      - "Docs"
+      - "Downloads"
+      - "Training"
+    roles:
+      - "banner"
+      - "complementary"
+  element_map:
+    reply_compose:
+      name: "Reply"
+      role: "push button"
+    submit_reply_button:
+      name: "Reply"
+      role: "push button"
+    quote_reply_tool:
+      name: "Quote"
+      role: "push button"
+workflow:
+  actions: {}
+validation: {}

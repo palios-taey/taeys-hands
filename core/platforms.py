@@ -87,10 +87,12 @@ BASE_URLS = {
     'perplexity': 'https://perplexity.ai/',
     'x_twitter': '<AUXILIARY_URL>',
     'linkedin': 'https://www.linkedin.com/feed/',
+    'reddit': '<AUXILIARY_URL>',
+    'nvidia_forum': '<AUXILIARY_URL>/',
 }
 
 CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
-SOCIAL_PLATFORMS = {'x_twitter', 'linkedin'}
+SOCIAL_PLATFORMS = {'x_twitter', 'linkedin', 'reddit', 'nvidia_forum'}
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
 # ─── Multi-Display Support ──────────────────────────────────────────────

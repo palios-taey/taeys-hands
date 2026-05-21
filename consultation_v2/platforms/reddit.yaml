@@ -1,0 +1,40 @@
+platform: reddit
+click_strategy: coordinate_only
+navigation_key: F6
+urls:
+  fresh: <AUXILIARY_URL>
+tree:
+  exclude:
+    names:
+      - "Create post"
+      - "Open chat"
+      - "Open inbox"
+      - "Advertise on Reddit"
+      - "GAMES ON REDDIT"
+      - "CUSTOM FEEDS"
+      - "RECENT"
+      - "COMMUNITIES"
+      - "RESOURCES"
+      - "Reddit resources"
+    roles:
+      - "content info"
+      - "complementary"
+  element_map:
+    comment_compose:
+      name: "Join the conversation"
+      role: "entry"
+    post_comment_button:
+      name: "Comment"
+      role: "push button"
+    reply_button:
+      name: "Reply"
+      role: "push button"
+    upvote_button:
+      name: "Upvote"
+      role: "push button"
+    downvote_button:
+      name: "Downvote"
+      role: "push button"
+workflow:
+  actions: {}
+validation: {}
