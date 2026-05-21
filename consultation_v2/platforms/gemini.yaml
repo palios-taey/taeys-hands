@@ -47,13 +47,22 @@ tree:
       - editable
       - focusable
     mode_picker:
-      name: Open mode picker
+      # Live name is dynamic: "Open mode picker, currently Pro" (UI 2026-05-21)
+      name_contains: Open mode picker
       role: push button
+    # Gemini merged "Tools" and the upload menu into one "Upload & tools"
+    # button (UI 2026-05-21). Both keys reference the same live element.
     tools_button:
-      name: Tools
+      name: Upload & tools
       role: push button
     upload_menu:
-      name: Open upload file menu
+      name: Upload & tools
+      role: push button
+    # "Deep think" + "Guided learning" now live behind a "More tools"
+    # expander inside the Upload & tools menu — the driver must click this
+    # before the deep_think check menu item is present in the tree.
+    more_tools:
+      name: More tools
       role: push button
     copy_button:
       name_contains: Copy

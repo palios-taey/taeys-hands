@@ -134,6 +134,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 menu_snap = self.runtime.menu_snapshot()
                 item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
                 if not item:
+                    # "Deep think" / "Guided learning" live behind a "More tools"
+                    # expander inside the Upload & tools menu (UI 2026-05-21).
+                    # Expand it before declaring the tool missing.
+                    more = self.find_first(menu_snap, 'more_tools')
+                    if more and self.runtime.click(more, strategy='atspi_first'):
+                        time.sleep(0.6)
+                        menu_snap = self.runtime.menu_snapshot()
+                        item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
+                if not item:
                     result.add_step('select_mode', False,
                                     f'Gemini tool item {requested_mode} not found',
                                     menu=menu_snap.serializable())
