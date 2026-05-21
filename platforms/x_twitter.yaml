@@ -402,3 +402,32 @@ failure_modes:
       click it directly. Click-the-button is more reliable than the keyboard
       shortcut under error-banner conditions. Long-term: prefer click-the-button
       over Ctrl+Return for all submit actions.
+
+  - id: predicate_bbox_dimensions_too_tight
+    description: |
+      2026-05-21 chain-follow attempt: bbox dimension filter `30 <= h <= 60`
+      missed Like buttons that are 20px tall on profile feed views. Profile-feed
+      Like buttons render smaller than thread-view Like buttons. Width also
+      varies: profile-Follow buttons range 78-81 wide (mid-tier accounts) but
+      can be larger on smaller accounts. Tight ranges fail silently.
+    rule: Use loose bbox dimension ranges in YAML predicates. For action-bar icons
+      (Like, Reply, Repost): width 15-70, height 15-70. For profile-Follow buttons:
+      width 50-130, height 25-50. Verify with the visible element on the actual
+      target page rather than hardcoding the first observed range.
+
+  - id: target_account_already_followed_by_human_history
+    description: |
+      2026-05-21 chain-follow attempt against 8 mid-tier handles from Grok's
+      "20 follow targets" list. ZERO Follow buttons found across all 8. Cause:
+      Jesse already follows many of these accounts manually (predates x-claude;
+      his existing HF/alignment/ML-infra follow history). The script's predicate
+      for "Follow @handle" correctly didn't match because the button is
+      "Following @handle" instead.
+    rule: Before queueing a follow batch, check whether the account is already
+      followed. Either: (a) read x_strategy's mid-tier list against an existing
+      follows snapshot, or (b) on profile load, check for "Following @handle"
+      BEFORE looking for "Follow @handle"; if Following found, skip. The chain
+      script must distinguish "already-following = skip and continue" from
+      "follow click failed = retry/diagnose". Print outcomes explicitly so the
+      caller can tell the difference (`already following` vs `no Follow button
+      found` vs `follow click failed verify`).
