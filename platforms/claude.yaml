@@ -122,6 +122,15 @@ element_map:
   git_connector_item:
     name: "Add from GitHub"
     role_contains: item
+  # GitHub flow (verified live 2026-05-22): git_connector_item ->
+  # "Try Claude Code for GitHub" modal -> github_continue_sync ->
+  # "Add content from GitHub" modal (repo combo / paste URL -> pick files)
+  github_continue_sync:
+    name: "Continue to GitHub sync"
+    role: push button
+  github_paste_url:
+    name: "Paste GitHub URL"
+    role: push button
   model_selector:
     name: "Model: Opus 4.7 Adaptive"
     role: push button

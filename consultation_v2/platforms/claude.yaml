@@ -91,11 +91,24 @@ tree:
     git_connector_item:
       name: Add from GitHub
       role: menu item
+    # GitHub flow (verified live 2026-05-22):
+    # +menu -> git_connector_item -> "Try Claude Code for GitHub" modal ->
+    # github_continue_sync -> "Add content from GitHub" modal (repo select / paste URL -> pick files)
+    github_continue_sync:
+      name: Continue to GitHub sync
+      role: push button
+    github_paste_url:
+      name: Paste GitHub URL
+      role: push button
+    # NOTE: the repo dropdown renders as a combo box whose displayed text is
+    # "Select a repository" but whose AT-SPI name is empty — needs a live re-scan
+    # in the open "Add content from GitHub" modal to capture an exact matchable
+    # name/role before the driver can target it deterministically.
     skills:
       name: Skills
       role: menu item
     add_connectors:
-      name: Add connectors
+      name: Connectors
       role: menu item
     tool_research:
       name: Research

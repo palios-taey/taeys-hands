@@ -115,13 +115,29 @@ tree:
     tool_recent_files:
       name: Recent files
       role: menu item
-    # Bug 2 fixed: these 5 are radio menu item in AT-SPI, not menu item
-    # Bug 2 also: tool_create_image was entirely missing, now added
+    # Re-baselined 2026-05-22 (live scan, "More" submenu EXPANDED).
+    # TOP-LEVEL items of the "Add files and more" menu:
     tool_create_image:
       name: Create image
       role: radio menu item
+    tool_deep_research:
+      name: Deep research
+      role: radio menu item
     tool_web_search:
       name: Web search
+      role: radio menu item
+    tool_more:
+      name: More
+      role: menu item
+    # "More" SUBMENU items (must hover/click tool_more first to reveal these):
+    tool_agent_mode:
+      name: Agent mode
+      role: radio menu item
+    tool_create_task:
+      name: Create task
+      role: radio menu item
+    tool_finances:
+      name: Finances
       role: radio menu item
     tool_github:
       name: GitHub
@@ -129,15 +145,29 @@ tree:
     tool_gmail:
       name: Gmail
       role: radio menu item
-    tool_quizzes:
-      name: Quizzes
+    tool_openai_platform:
+      name: OpenAI Platform
       role: radio menu item
-    # Bug 3: removed stale entries not present in current AT-SPI scan:
-    #   tool_deep_research ("Deep research")
-    #   tool_google_drive ("Add from Google Drive")
-    #   tool_study ("Study and learn")
-    #   tool_more ("More")
-    #   tool_agent_mode ("Agent mode")
+    # GitHub repo picker (after selecting tool_github, a chip + selector appear in
+    # the composer). Verified live 2026-05-22:
+    github_chip:
+      name_contains: "GitHub, click to remove"
+      role: push button
+    github_repo_selector:
+      name: GitHub
+      role: push button
+    github_search_repos:
+      name: "Search repositories…"
+      role: menu item
+    github_configure_repos:
+      name: Configure Repositories
+      role: menu item
+    # Repo menu items render as: name="palios-taey/<repo>"; UN-INDEXED repos carry a
+    # trailing " Not indexed" in the name (e.g. "palios-taey/taeys-hands-v2 Not indexed").
+    # Indexed repos (e.g. "palios-taey/taeys-hands") are selectable directly.
+    github_repo_item:
+      name_pattern: "palios-taey/*"
+      role: menu item
 workflow:
   defaults:
     model: pro
@@ -163,10 +193,29 @@ workflow:
       - trigger: extended_pro
         target: thinking_extended
         verification: extended_thinking_active
-    # Bug 3 follow-on: removed stale tool_targets that referenced deleted elements
+    # Re-baselined 2026-05-22. Top-level tools selectable directly; tools marked
+    # `via: tool_more` live in the "More" submenu (driver must click tool_more first).
     tool_targets:
+      deep_research: tool_deep_research
       web_search: tool_web_search
-      github: tool_github
+      create_image: tool_create_image
+      github: { target: tool_github, via: tool_more }
+      gmail: { target: tool_gmail, via: tool_more }
+      agent_mode: { target: tool_agent_mode, via: tool_more }
+  # GitHub repo connector flow (verified live 2026-05-22):
+  #  attach_trigger -> tool_more -> tool_github (activates tool) ->
+  #  github_repo_selector (push button) -> repo dropdown
+  #  (github_search_repos to filter; click github_repo_item "palios-taey/<repo>").
+  # INDEXING: repo items ending " Not indexed" must be indexed first via
+  # github_configure_repos (slow/async). Select an indexed repo to scope it.
+  connectors:
+    trigger: attach_trigger
+    enable_tool: { target: tool_github, via: tool_more }
+    repo_selector: github_repo_selector
+    repo_search: github_search_repos
+    repo_item_pattern: "palios-taey/{repo}"
+    not_indexed_suffix: " Not indexed"
+    configure: github_configure_repos
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
