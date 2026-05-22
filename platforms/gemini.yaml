@@ -58,7 +58,21 @@ stop_patterns:
 mode_guidance:
   deep_think:
     when: "Complex reasoning, step-by-step analysis, math, code audits"
-    how: "Click 'Tools' button, select 'Deep think' check menu item"
+    # Verified live 2026-05-22 (Ultra account). REAL Deep Think (NOT the "3.5
+    # Thinking" model — that is a different thing). Path:
+    #   1. Mode/model picker -> select "3.1 Pro".
+    #   2. "Upload & tools" (the composer + button) -> open via do_action(0)
+    #      (xdotool coordinate clicks intermittently fail to open the menu).
+    #   3. Hover "More tools" (LAST menu item, below "Create music"). NOTE: the
+    #      menu items sit at the menu's own x-range (~x=796+), NOT the left edge;
+    #      "More tools" is often NOT exposed as an AT-SPI node (visual only) —
+    #      hover it by coordinate within the menu's x-range.
+    #   4. Its flyout opens to the RIGHT (~x=1037): "Deep think" + "Guided
+    #      learning" appear as menu items there. Click "Deep think".
+    #   5. Verify the "Deselect Deep think" button / "Deep think" composer chip.
+    # SEND: also use do_action(0) on "Send message" (coordinate click fails when
+    # the composer is tall with chips). Gemini input needs grab_focus before type.
+    how: "Select 3.1 Pro -> Upload & tools (do_action) -> hover More tools -> click Deep think in right-flyout"
     timeout: 3600
   deep_research:
     when: "Research questions, fact-finding, comprehensive analysis"
