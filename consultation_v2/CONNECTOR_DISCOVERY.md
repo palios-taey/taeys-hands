@@ -133,3 +133,20 @@ Per driver (all element keys are now in the committed YAML `tree.element_map`):
 
 First-error-stop discipline: a missing connector element = full stop + scan + fix YAML,
 never a fallback chain (THE RULE).
+
+---
+
+## Claude repo-combo GAP — RESOLVED (live re-scan 2026-05-22)
+
+- The "Select a repository" trigger IS an empty-name `combo box` (cannot match by name).
+  Open it by role (the single `combo box` inside the "Add content from GitHub" dialog
+  subtree) or by coordinate (next to the GitHub-icon, left end of the modal's top bar).
+- Once open, the repo options are **`list item`** elements WITH names, format:
+  `palios-taey / <repo>`  — i.e. the separator is ` / ` using NON-BREAKING SPACES
+  (U+00A0) on both sides, not plain spaces. Driver must match with NBSP or normalize whitespace.
+  Examples present: `palios-taey / rag-canary-msrc`, `palios-taey / hunter`,
+  `palios-taey / taeys-hands`, `palios-taey / the-conductor`, `palios-taey / embedding-server`.
+  (Also a few `spark-rushmore / <repo>`.) No search box in the dropdown — list is directly clickable.
+- The "Try Claude Code for GitHub" interstitial (`github_continue_sync`) appears ONLY THE
+  FIRST TIME; subsequent opens of `git_connector_item` go straight to "Add content from GitHub".
+  Driver should treat `github_continue_sync` as best-effort/optional (click if present).
