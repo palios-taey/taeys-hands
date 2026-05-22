@@ -122,10 +122,17 @@ def _consolidate_attachments(files: List[str], platform: str) -> Optional[str]:
                 logger.warning("Skipping disallowed path in consolidation: %s", path)
                 continue
             content = open(path).read()
+            basename = os.path.basename(path)
             lang = _EXT_LANG.get(os.path.splitext(path)[1].lower(), '')
+            block = f"```{lang}\n{content}\n```\n"
+            # Mandated constitutional/identity files are inlined verbatim;
+            # wrap them in VERBATIM markers so prompting-lint skips them for the
+            # authored-quality checks (PROMPTING_STANDARDS §3.2). Caller files
+            # stay unmarked so the authored wrapper is still fully linted.
+            if basename in _IDENTITY_BASENAMES:
+                block = f"<!-- BEGIN-VERBATIM: {basename} -->\n{block}<!-- END-VERBATIM -->\n"
             sections.append(
-                f"\n---\n\n## {os.path.basename(path)}\n\n`{path}`\n\n"
-                f"```{lang}\n{content}\n```\n"
+                f"\n---\n\n## {basename}\n\n`{path}`\n\n" + block
             )
         out_path = f"/tmp/taey_package_{platform}_{int(time.time())}.md"
         with open(out_path, 'w') as f:
