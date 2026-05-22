@@ -93,3 +93,43 @@ Re-verify the live element names match (deferred — Perplexity busy on other wo
 | ChatGPT | YES (authed) | Add files and more → More → GitHub → repo dropdown; per-repo INDEXING (` Not indexed` flag) | HARD (indexing, React portals) |
 | Perplexity | YES (driver done) | toggle_connectors (Connectors and sources) | already implemented |
 | Gemini | **NO** | only Upload files + Add from Drive — no GitHub surface | N/A — use file upload (packed repo) |
+
+---
+
+## DRIVER SPEC FOR CONDUCTOR (6SIGMA — taeys-hands does NOT write driver code)
+
+Add a `connect_repo` step to the consultation_v2 drivers, invoked when
+`request.connectors` contains a github entry, BEFORE `enter_prompt`. Reference
+implementation: `consultation_v2/drivers/perplexity.py::toggle_connectors()`.
+CLI already plumbs `--connector` → `ConsultationRequest.connectors`; suggest accepting
+`--connector github=<owner/repo>` and parsing the repo out.
+
+Per driver (all element keys are now in the committed YAML `tree.element_map`):
+
+- **drivers/claude.py** — open `toggle_menu` → click `git_connector_item` →
+  click `github_continue_sync` (push button) → in the "Add content from GitHub"
+  modal pick the repo (combo OR `github_paste_url` + type repo URL) → select files → confirm.
+  ⚠ The repo combo currently exposes an EMPTY AT-SPI name — needs one live re-scan to
+  capture an exact matchable selector; until then prefer the `github_paste_url` path.
+  Verify via repo chip / capacity meter > 0%.
+
+- **drivers/grok.py** — COORDINATE-click `attach_trigger` (React portal; `do_action(0)`
+  does NOT open it) → click `connectors` menu item → click `github_connector`
+  (check menu item) to toggle ON → verify `checked` state. (workflow.connectors.source_targets.github)
+
+- **drivers/chatgpt.py** — COORDINATE-click `attach_trigger` → hover/click `tool_more`
+  → click `tool_github` (activates tool) → click `github_repo_selector` (push button) →
+  type into `github_search_repos` to filter → click `github_repo_item` `palios-taey/<repo>`.
+  INDEXING GATE: if the matched repo item name ends with `" Not indexed"`, the repo is not
+  ready — do NOT block the cycle; report defect/escalate (indexing is async/minutes via
+  `github_configure_repos`). Select only indexed repos. All clicks are coordinate-based.
+
+- **drivers/gemini.py** — NO-OP for connectors (platform has no GitHub surface). If a
+  github connector is requested for Gemini, fall back to attaching a packed repo file, or
+  fail loud with a clear "Gemini has no GitHub connector" message.
+
+- **drivers/perplexity.py** — already implemented; just re-verify the live element names
+  for `git_connector_item` ("Connectors and sources") + `search_sources` match.
+
+First-error-stop discipline: a missing connector element = full stop + scan + fix YAML,
+never a fallback chain (THE RULE).
