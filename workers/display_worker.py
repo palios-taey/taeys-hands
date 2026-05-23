@@ -21,6 +21,7 @@ import logging
 import os
 import signal
 import socket
+import subprocess
 import sys
 import time
 import traceback
@@ -28,6 +29,102 @@ from fnmatch import fnmatch
 import hashlib
 
 # ─── MUST set display env before any AT-SPI/GTK imports ─────────────
+def _warn_display_env(message: str):
+    print(f"display_worker env warning: {message}", file=sys.stderr)
+
+
+def _read_isolated_bus_file(bus_file: str):
+    try:
+        with open(bus_file) as f:
+            bus = f.read().strip()
+        return bus or None
+    except FileNotFoundError:
+        return None
+
+
+def _read_isolated_bus_xprop(display: str):
+    try:
+        result = subprocess.run(
+            ['xprop', '-display', display, '-root', 'AT_SPI_BUS'],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _warn_display_env(f"xprop AT_SPI_BUS read failed on {display}: {exc}")
+        return None
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        _warn_display_env(f"xprop AT_SPI_BUS read failed on {display}: {stderr or result.returncode}")
+        return None
+
+    if '"' not in result.stdout:
+        return None
+    bus = result.stdout.split('"', 2)[1].strip()
+    return bus if bus.startswith('unix:') else None
+
+
+def _write_isolated_bus_file(bus_file: str, bus: str):
+    tmp_file = f'{bus_file}.tmp'
+    with open(tmp_file, 'w') as f:
+        f.write(f'{bus}\n')
+    os.replace(tmp_file, bus_file)
+
+
+def _a11y_bus_responds(bus: str):
+    try:
+        result = subprocess.run(
+            [
+                '/usr/bin/gdbus',
+                'call',
+                '--address',
+                bus,
+                '--dest',
+                'org.freedesktop.DBus',
+                '--object-path',
+                '/org/freedesktop/DBus',
+                '--method',
+                'org.freedesktop.DBus.ListNames',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        _warn_display_env("gdbus missing; cannot connection-test cached AT-SPI bus before import")
+        return False
+    except (OSError, subprocess.SubprocessError) as exc:
+        _warn_display_env(f"cached AT-SPI bus connection test errored: {exc}")
+        return False
+    if result.returncode == 0:
+        return True
+
+    stderr = result.stderr.strip()
+    _warn_display_env(f"cached AT-SPI bus connection rejected: {stderr or result.returncode}")
+    return False
+
+
+def _read_isolated_bus(display: str, bus_file: str):
+    bus = _read_isolated_bus_file(bus_file)
+    if bus and 'guid=' in bus and _a11y_bus_responds(bus):
+        return bus
+
+    if bus:
+        reason = "missing guid" if 'guid=' not in bus else "connection rejected"
+        _warn_display_env(f"cached AT-SPI bus for {display} needs refresh: {reason}")
+
+    fresh_bus = _read_isolated_bus_xprop(display)
+    if not fresh_bus:
+        return bus
+
+    try:
+        _write_isolated_bus_file(bus_file, fresh_bus)
+    except OSError as exc:
+        _warn_display_env(f"could not rewrite {bus_file}: {exc}")
+    return fresh_bus
+
+
 def _setup_display_env(display: str):
     """Configure process environment for this display's AT-SPI bus."""
     os.environ['DISPLAY'] = display
@@ -40,14 +137,10 @@ def _setup_display_env(display: str):
     os.environ.pop('PLATFORM_DISPLAYS', None)
 
     bus_file = f'/tmp/a11y_bus_{display}'
-    try:
-        with open(bus_file) as f:
-            bus = f.read().strip()
-        if bus:
-            os.environ['AT_SPI_BUS_ADDRESS'] = bus
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
-    except FileNotFoundError:
-        pass  # Bus file may not exist yet — AT-SPI will fall back
+    bus = _read_isolated_bus(display, bus_file)
+    if bus:
+        os.environ['AT_SPI_BUS_ADDRESS'] = bus
+        os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
 
 
 # Parse args and setup BEFORE any project imports
