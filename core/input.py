@@ -57,6 +57,55 @@ def click_at(x: int, y: int, timeout: int = 5) -> bool:
         return False
 
 
+def hover(x: int, y: int, timeout: int = 5) -> bool:
+    """Move the mouse to screen coordinates."""
+    try:
+        r = subprocess.run(
+            ['xdotool', 'mousemove', str(x), str(y)],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if r.returncode != 0:
+            logger.warning(f"Hover at ({x},{y}) failed: {r.stderr.decode()}")
+        return r.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"Hover at ({x},{y}) timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Hover at ({x},{y}) error: {e}")
+        return False
+
+
+def scroll_wheel(direction: str, clicks: int = 3,
+                 hover_point: tuple[int, int] | None = None,
+                 timeout: int = 5) -> bool:
+    """Scroll via mouse wheel. direction is 'down' or 'up'."""
+    if direction not in ('down', 'up'):
+        logger.error(f"scroll_wheel invalid direction: {direction}")
+        return False
+    if clicks < 1:
+        logger.error(f"scroll_wheel invalid clicks: {clicks}")
+        return False
+    try:
+        if hover_point is not None:
+            hx, hy = hover_point
+            if not hover(hx, hy, timeout=timeout):
+                return False
+        button = '5' if direction == 'down' else '4'
+        r = subprocess.run(
+            ['xdotool', 'click', '--repeat', str(clicks), button],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if r.returncode != 0:
+            logger.warning(f"Scroll {direction} failed: {r.stderr.decode()}")
+        return r.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"Scroll {direction} timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Scroll {direction} error: {e}")
+        return False
+
+
 def type_text(text: str, delay_ms: int = 5, timeout: int = 30) -> bool:
     """Type text via xdotool (use clipboard_paste for long text)."""
     actual_timeout = timeout + (len(text) * 0.1)

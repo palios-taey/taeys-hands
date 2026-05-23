@@ -35,8 +35,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import atspi
 from core import input as inp
 from core.tree import find_elements, filter_useful_elements, detect_chrome_y
+from agents.atspi_helpers import (
+    focus_clear_paste,
+    scroll_into_band,
+    text_landed_externally,
+)
 
 NOTIFY_TARGET = os.environ.get('NOTIFY_TARGET', 'claw')
+OUR_HANDLE = 'GodEqualsMath'
 LOG_FILE = os.path.expanduser(
     '~/.claude/projects/-home-spark-taeys-hands/memory/x_engagement_log.md'
 )
@@ -71,11 +77,16 @@ def scan_page() -> list:
 def find_reply_field(elements: list):
     """Find 'Post text' reply entry field. Returns (x, y) or None."""
     for e in elements:
-        if (e.get('role') == 'entry'
-                and e.get('name') == 'Post text'
-                and 'editable' in e.get('states', [])):
+        if reply_field_predicate(e):
             return (e['x'], e['y'])
     return None
+
+
+def reply_field_predicate(element: dict) -> bool:
+    """Return True for X's editable reply composer field."""
+    return (element.get('role') == 'entry'
+            and element.get('name') == 'Post text'
+            and 'editable' in element.get('states', []))
 
 
 def find_follow_button(elements: list, handle: str = ''):
@@ -93,17 +104,17 @@ def find_follow_button(elements: list, handle: str = ''):
     return None
 
 
-def check_already_replied(elements: list) -> bool:
-    """Check if @GodEqualsMath already replied to this post."""
+def check_already_replied(elements: list, our_handle: str = OUR_HANDLE) -> bool:
+    """Check if our account already replied to this post."""
     # Look for our handle in reply articles below the main post
     reply_zone = False
     for e in elements:
         if e.get('name') == 'Post text':
             reply_zone = True
             continue
-        if reply_zone and 'GodEqualsMath' in (e.get('name') or ''):
+        if reply_zone and our_handle in (e.get('name') or ''):
             return True
-        if reply_zone and 'GodEqualsMath' in (e.get('text') or ''):
+        if reply_zone and our_handle in (e.get('text') or ''):
             return True
     return False
 
@@ -128,7 +139,14 @@ def navigate_to_url(url: str):
 
 def post_reply(url: str, text: str, handle: str = '', topic: str = '') -> dict:
     """Post a reply to a specific X post. Returns result dict."""
-    result = {'url': url, 'handle': handle, 'topic': topic, 'success': False, 'error': None}
+    result = {
+        'url': url,
+        'handle': handle,
+        'topic': topic,
+        'success': False,
+        'error': None,
+        'text_landed_externally': None,
+    }
     label = handle or url.split('/')[-1][:20]
 
     print(f"\n{'='*60}")
@@ -178,22 +196,40 @@ def post_reply(url: str, text: str, handle: str = '', topic: str = '') -> dict:
     else:
         print(f"  [4/7] Already following {handle or 'author'} (no Follow button)")
 
-    # Step 6: Click reply field
-    coords = find_reply_field(elements)
-    x, y = coords
-    print(f"  [5/7] Clicking reply field at ({x}, {y})...")
-    inp.click_at(x, y)
-    time.sleep(0.5)
+    # Step 6: Bring reply field into the safe viewport band, then click/clear/paste
+    print("  [5/7] Scrolling reply field into viewport band...")
+    reply_field = scroll_into_band(
+        scan_page,
+        reply_field_predicate,
+        band=(150, 850),
+        max_iters=40,
+    )
+    if not reply_field:
+        result['error'] = "Reply field not reachable in viewport band (150,850)"
+        print(f"  [FAIL] {result['error']}")
+        return result
 
-    # Step 7: Paste reply text
-    print(f"  [6/7] Pasting reply ({len(text)} chars)...")
-    inp.clipboard_paste(text)
-    time.sleep(0.3)
+    print(f"  [6/7] Clearing and pasting reply ({len(text)} chars) at "
+          f"({reply_field['x']}, {reply_field['y']})...")
+    if not focus_clear_paste(reply_field, text):
+        result['error'] = "Failed to focus, clear, and paste reply text"
+        print(f"  [FAIL] {result['error']}")
+        return result
 
     # Step 8: Submit with Ctrl+Enter
     print("  [7/7] Submitting (Ctrl+Enter)...")
-    inp.press_key('ctrl+Return')
+    if not inp.press_key('ctrl+Return'):
+        result['error'] = "Ctrl+Return submit failed"
+        print(f"  [FAIL] {result['error']}")
+        return result
     time.sleep(2)
+
+    landed = text_landed_externally(scan_page, OUR_HANDLE, text)
+    result['text_landed_externally'] = landed
+    if not landed:
+        result['error'] = "Post-submit external text verification failed"
+        print(f"  [FAIL] {result['error']}")
+        return result
 
     # Clear clipboard to avoid accidental re-paste
     try:
