@@ -362,15 +362,24 @@ python3 agents/unified_bot.py --platforms chatgpt gemini grok
 python3 agents/unified_bot.py --orchestrator --platforms chatgpt gemini grok
 ```
 
-## 6SIGMA Change Protocol — MANDATORY
+## 6SIGMA Design Philosophy + Workflow — MANDATORY (fleet-canonical, wired 2026-05-25)
 
-ALL code changes go through The Conductor. No instance writes code directly.
+**Canonical spec:** `<OPERATOR_HOME>/the-conductor/6SIGMA_WORKFLOW.md`. Owned by Conductor; same propagation pattern as ISMA — wired into all peer globals (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.grok/AGENTS.md`) + conductor CLAUDE.md + global `<OPERATOR_HOME>/CLAUDE.md`. Worked example driving the principle: taeys-hands audit_657 / safetensors PR #657 (Part 1 root-cause vs Part 2 patch→refactor).
 
-Process: Conductor receives request → Gemini CLI analyzes (MEASURE+ANALYZE) → Codex CLI implements on branch (IMPROVE) → Conductor verifies and merges (CONTROL).
+**THE PRINCIPLE — root-cause vs patch:** A *root-cause* fix SIMPLIFIES code — corrects iteration domain / data shape / algebra upstream so the broken path is no longer reached. Same line count or smaller. Leaves the codebase better than it was found. A *patch* ADDS branches, guards, special-cases (`if X: continue`, `try/except SpecificError`) to bypass a broken path. Same runtime, but the codebase grows more conditional. **Diagnostic:** if your change adds a bypass, ASK — why is the broken path reached at all? can upstream be corrected so the bypass becomes unnecessary? If yes, that's the root-cause shape. Take it.
 
-**You do NOT modify code.** You identify defects, send them to the Conductor with full context, and wait for the PR.
+**THE WORKFLOW (six steps):**
+1. **SELECT** — the project. One target at a time.
+2. **INGEST** — `npx gitnexus analyze` at the repo root. GitNexus graph is the substrate for measure.
+3. **MEASURE + ANALYZE** — `gitnexus_query` for concept, `gitnexus_context` for 360° on a symbol, `gitnexus_impact` for blast radius. Pin the cause first; don't patch blind.
+4. **IMPROVE** — Codex implements on a branch (root-cause shape per principle above). Dispatched via `ROUTING.md`.
+5. **PRODUCTION RUN** — on the actual target hardware. Real workload, real repro, matching substrate. **NO TESTS, ever.** A passing test on synthetic input is not evidence; a clean run of the real workload on the real machine is.
+6. **CONTROL** — Conductor verifies + merges. Merge is the gate. Nothing ships upstream until step 5 is on record.
 
-**First error = full stop.** Do not retry. Do not patch. Report to Conductor with root cause analysis.
+**THE ROLE — taeys-hands specifically:**
+- ALL code changes go through The Conductor. No instance writes code directly.
+- **You do NOT modify code.** You identify defects, run MEASURE+ANALYZE via GitNexus, send to Conductor with full context, then run production validation (step 5) when the IMPROVE branch lands.
+- **First error = full stop.** Do not retry. Do not patch. Report to Conductor with root-cause analysis grounded in GitNexus.
 
 ## Inter-Session Communication
 
