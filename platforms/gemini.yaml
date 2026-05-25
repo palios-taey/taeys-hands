@@ -9,9 +9,9 @@ capabilities:
   # "Open mode picker" button — radio menu items with descriptions
   # Mode picker is SEPARATE from Tools menu
   models:
-    - Fast Answers quickly
-    - Thinking Solves complex problems
-    - Pro Advanced math and code with 3.1 Pro
+    - 3.5 Flash All-around help New
+    - 3.5 Thinking Solves complex problems
+    - 3.1 Pro Advanced math and code
   modes: []
   tools:
     # "Tools" button -> check menu items (AT-SPI do_action opens dropdown)
@@ -58,21 +58,7 @@ stop_patterns:
 mode_guidance:
   deep_think:
     when: "Complex reasoning, step-by-step analysis, math, code audits"
-    # Verified live 2026-05-22 (Ultra account). REAL Deep Think (NOT the "3.5
-    # Thinking" model — that is a different thing). Path:
-    #   1. Mode/model picker -> select "3.1 Pro".
-    #   2. "Upload & tools" (the composer + button) -> open via do_action(0)
-    #      (xdotool coordinate clicks intermittently fail to open the menu).
-    #   3. Hover "More tools" (LAST menu item, below "Create music"). NOTE: the
-    #      menu items sit at the menu's own x-range (~x=796+), NOT the left edge;
-    #      "More tools" is often NOT exposed as an AT-SPI node (visual only) —
-    #      hover it by coordinate within the menu's x-range.
-    #   4. Its flyout opens to the RIGHT (~x=1037): "Deep think" + "Guided
-    #      learning" appear as menu items there. Click "Deep think".
-    #   5. Verify the "Deselect Deep think" button / "Deep think" composer chip.
-    # SEND: also use do_action(0) on "Send message" (coordinate click fails when
-    # the composer is tall with chips). Gemini input needs grab_focus before type.
-    how: "Select 3.1 Pro -> Upload & tools (do_action) -> hover More tools -> click Deep think in right-flyout"
+    how: "Default 3.1 Pro state — no selection needed"
     timeout: 3600
   deep_research:
     when: "Research questions, fact-finding, comprehensive analysis"
@@ -89,7 +75,7 @@ mode_guidance:
     timeout: 3600
   normal:
     when: "Quick questions, creative writing, conversational"
-    how: "Click 'Open mode picker', select 'Fast' radio item"
+    how: "Default mode — no selection needed"
     timeout: 1800
 
 # ─── Sidebar Fence ────────────────────────────────────────────────
@@ -172,17 +158,13 @@ element_map:
     role: menu item
   # Mode picker items
   mode_fast:
-    name: "Fast Answers quickly"
+    name: "3.5 Flash All-around help New"
     role_contains: item
   mode_thinking:
-    name: "Thinking Solves complex problems"
+    name: "3.5 Thinking Solves complex problems"
     role_contains: item
   mode_pro:
-    name_contains: "Pro Advanced math"
-    role_contains: item
-  # Tool toggle items (from Tools dropdown)
-  tool_deep_think:
-    name: "Deep think"
+    name_contains: "3.1 Pro Advanced math and code"
     role_contains: item
   tool_deep_research:
     name: "Deep research"
@@ -193,9 +175,6 @@ element_map:
   tool_create_image:
     name_contains: "Create image"
     role_contains: item
-  tool_deselect_deep_think:
-    name: "Deselect Deep think"
-    role_contains: button
 
 sidebar_nav:
   - { name: "New chat", role: link }

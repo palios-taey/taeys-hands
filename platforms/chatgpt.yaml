@@ -38,7 +38,7 @@ attach_method: keyboard_nav
 dropdown_method: keyboard_nav
 
 consultation_defaults:
-  model: pro
+  model: null
   mode: pro
   attach_method: atspi_menu
   extract_method: last_copy_button
@@ -77,7 +77,7 @@ mode_guidance:
     timeout: 3600
   pro:
     when: "Research-grade intelligence, standard thinking time"
-    how: "Click model selector, select 'Pro'"
+    how: "Default Extended Pro state on Pro-plan accounts — no selection needed"
     timeout: 7200
   # UI 2026-05-22: the separate "Extended" thinking tile was REMOVED.
   # Max reasoning is now a single dropdown choice "Pro" (= "Pro • Extended";

@@ -66,9 +66,9 @@ mode_guidance:
     timeout: 3600
     steps:
       - trigger: model_selector
-        select: model_opus
+        select: opus
       - trigger: null
-        select: model_adaptive_thinking
+        select: "adaptive thinking"
   research:
     when: "Need multi-pass web research, current events, comprehensive documentation lookup"
     how: "Toggle menu -> enable 'Research' check menu item"
@@ -79,7 +79,7 @@ mode_guidance:
     timeout: 1800
   normal:
     when: "Quick questions, simple tasks, conversational"
-    how: "Default model without Adaptive thinking"
+    how: "Default model — no selection needed"
     timeout: 1800
 
 # ─── Sidebar Fence ────────────────────────────────────────────────

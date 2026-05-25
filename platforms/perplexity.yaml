@@ -47,7 +47,7 @@ dropdown_method: atspi_enum
 
 consultation_defaults:
   model: null
-  mode: deep_research
+  mode: normal
   attach_method: keyboard_nav
   extract_method: copy_contents
 
@@ -71,9 +71,9 @@ stop_patterns:
 mode_guidance:
   deep_research:
     when: "Need facts, citations, multi-source synthesis, current events, comprehensive documentation"
-    how: "Click 'Deep research' push button (top-level toggle, name='Deep research', role=push button)"
+    how: "Default mode, no selection needed"
     timeout: 7200
-    note: "Takes 5-30 minutes. Copy button = summary only. Use Export > Download as Markdown for full report."
+    note: "Live 2026-05-25 UI exposes Deep Research as a 'Run deep research' starter card that routes to /computer/tasks with a canned template prompt, not as a selector-compatible mode toggle."
   model_council:
     when: "Need consensus from multiple models, cross-validation of complex claims"
     how: "Click 'Add files or tools' button, select 'Model council Max' radio item"
@@ -88,7 +88,7 @@ mode_guidance:
     timeout: 7200
   normal:
     when: "Quick questions, simple lookups, conversational queries"
-    how: "Default - no tool selection needed"
+    how: "Default mode, no selection needed"
     timeout: 3600
 
 # ─── Sidebar Fence ────────────────────────────────────────────────
