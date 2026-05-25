@@ -980,6 +980,15 @@ def _verify_mode_selection(platform: str, target_mode: str, selection_result: di
     verification_config = mode_config.get('verification', {})
     verification_check = verification_config.get('check')
 
+    note_lower = str(selection_result.get('note', '')).lower()
+    if (
+        selection_result.get('success')
+        and not selection_result.get('selected_item')
+        and not selection_result.get('completed_steps')
+        and 'no selection' in note_lower
+    ):
+        return {'verified': True, 'method': 'no_op', 'mode': target_mode}
+
     selected_item = selection_result.get('selected_item')
     if verification_check == 'completed_steps':
         completed_steps = selection_result.get('completed_steps') or []
