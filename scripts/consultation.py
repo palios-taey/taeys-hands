@@ -980,18 +980,26 @@ def _verify_mode_selection(platform: str, target_mode: str, selection_result: di
     verification_config = mode_config.get('verification', {})
     verification_check = verification_config.get('check')
 
+    completed_steps = selection_result.get('completed_steps') or []
+    if (
+        selection_result.get('success')
+        and completed_steps
+        and all(step.get('verified') for step in completed_steps)
+    ):
+        logger.info("Mode verified by composition: all %s step(s) verified", len(completed_steps))
+        return {'verified': True, 'method': 'all_steps_verified', 'mode': target_mode}
+
     note_lower = str(selection_result.get('note', '')).lower()
     if (
         selection_result.get('success')
         and not selection_result.get('selected_item')
-        and not selection_result.get('completed_steps')
+        and not completed_steps
         and 'no selection' in note_lower
     ):
         return {'verified': True, 'method': 'no_op', 'mode': target_mode}
 
     selected_item = selection_result.get('selected_item')
     if verification_check == 'completed_steps':
-        completed_steps = selection_result.get('completed_steps') or []
         expected_steps = verification_config.get('expected_steps')
         if selection_result.get('success') and len(completed_steps) == expected_steps:
             logger.info("Mode verified via completed steps: %s/%s",

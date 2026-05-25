@@ -17,7 +17,7 @@ RESOLUTION="1920x1080x24"
 
 # Platform URLs (match tab_shortcut order: Alt+1 through Alt+5)
 URLS=(
-    "https://chatgpt.com/?temporary-chat=true"
+    "https://chatgpt.com/"
     "https://claude.ai/new"
     "https://gemini.google.com/app"
     "https://grok.com/"

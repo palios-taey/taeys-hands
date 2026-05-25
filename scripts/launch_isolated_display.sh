@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./scripts/launch_isolated_display.sh <display> <platform> <profile> <url>
-#   ./scripts/launch_isolated_display.sh 5 chatgpt ff-profile-chatgpt2 "https://chatgpt.com/?temporary-chat=true"
+#   ./scripts/launch_isolated_display.sh 5 chatgpt ff-profile-chatgpt2 "https://chatgpt.com/"
 
 set -euo pipefail
 

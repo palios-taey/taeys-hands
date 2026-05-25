@@ -60,7 +60,7 @@ done
 # Fallback if no machine.env
 if [[ ${#PLATFORMS[@]} -eq 0 ]]; then
     PLATFORMS=(
-        [2]="chatgpt|https://chatgpt.com/?temporary-chat=true"
+        [2]="chatgpt|https://chatgpt.com/"
         [3]="gemini|https://gemini.google.com/app"
         [4]="grok|https://grok.com/"
     )

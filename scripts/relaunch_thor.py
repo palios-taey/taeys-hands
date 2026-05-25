@@ -10,9 +10,9 @@ DISPLAYS = {
     8:  ("claude", "https://claude.ai/new?incognito", "ff-profile-claude2"),
     9:  ("perplexity", "https://www.perplexity.ai/", "ff-profile-perplexity"),
     10: ("claude", "https://claude.ai/new?incognito", "ff-profile-claude3"),
-    11: ("chatgpt", "https://chatgpt.com/?temporary-chat=true", "ff-profile-chatgpt"),
+    11: ("chatgpt", "https://chatgpt.com/", "ff-profile-chatgpt"),
     12: ("grok", "https://grok.com/", "ff-profile-grok2"),
-    13: ("chatgpt", "https://chatgpt.com/?temporary-chat=true", "ff-profile-chatgpt2"),
+    13: ("chatgpt", "https://chatgpt.com/", "ff-profile-chatgpt2"),
 }
 
 print("=== FULL CLEANUP — kill ALL user automation processes ===")

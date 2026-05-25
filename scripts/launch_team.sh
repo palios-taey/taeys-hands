@@ -73,7 +73,7 @@ for display in "${TEAM_DISPLAYS[@]}"; do
     else
         # Fallback defaults if no machine.env
         case $display in
-            2|5) platform="chatgpt"; url="https://chatgpt.com/?temporary-chat=true"; profile="ff-profile-chatgpt"; tmux_session="hmm-chatgpt" ;;
+            2|5) platform="chatgpt"; url="https://chatgpt.com/"; profile="ff-profile-chatgpt"; tmux_session="hmm-chatgpt" ;;
             3|6) platform="gemini"; url="https://gemini.google.com/app"; profile="ff-profile-gemini"; tmux_session="hmm-gemini" ;;
             4|7) platform="grok"; url="https://grok.com/"; profile="ff-profile-grok"; tmux_session="hmm-grok" ;;
         esac
