@@ -366,6 +366,18 @@ def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optiona
             logger.info("[claude] Discovered live model selector: %s", selected.get('name', ''))
             return selected
 
+    if platform == 'gemini' and element_key == 'mode_picker':
+        candidates = [
+            e for e in elements
+            if e.get('role') == 'push button'
+            and (e.get('name') or '').strip().startswith('Open mode picker, currently ')
+        ]
+        if candidates:
+            candidates.sort(key=lambda e: (e.get('y', 0), e.get('x', 0)))
+            selected = candidates[-1]
+            logger.info("[gemini] Discovered live mode picker: %s", selected.get('name', ''))
+            return selected
+
     # Import inspect's matching logic
     from tools.inspect import _match_element
 

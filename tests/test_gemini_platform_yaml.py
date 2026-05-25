@@ -18,6 +18,14 @@ def test_root_gemini_deep_think_uses_more_tools_flow() -> None:
     data = yaml.safe_load((ROOT / 'platforms' / 'gemini.yaml').read_text())
 
     element_map = data['element_map']
+    assert element_map['mode_picker'] == {
+        'name_pattern': 'Open mode picker, currently *',
+        'role': 'push button',
+    }
+    assert element_map['model_3_5_thinking'] == {
+        'name': '3.5 Thinking Solves complex problems',
+        'role': 'radio menu item',
+    }
     assert element_map['upload_tools'] == {
         'name': 'Upload & tools',
         'role': 'push button',
@@ -37,6 +45,7 @@ def test_root_gemini_deep_think_uses_more_tools_flow() -> None:
 
     deep_think = data['mode_guidance']['deep_think']
     assert deep_think['steps'] == [
+        {'trigger': 'mode_picker', 'select': 'model_3_5_thinking'},
         {'trigger': 'upload_tools', 'select': 'more_tools_button'},
         {'trigger': None, 'select': 'deep_think_item'},
     ]

@@ -57,10 +57,12 @@ stop_patterns:
 
 mode_guidance:
   deep_think:
-    when: "Architecture-grade scrutiny, complex multi-step reasoning, deep math/code analysis"
-    how: "Click 'Upload & tools' (+), click 'More tools' at bottom of flyout to expand, click 'Deep think' check menu item. Verify by 'Deselect Deep think' push button appearing in composer."
+    when: "Architecture-grade scrutiny, complex multi-step reasoning"
+    how: "Click mode picker, select 3.5 Thinking, then click 'Upload & tools' (+), click 'More tools' at bottom of flyout to expand, click 'Deep think' check menu item. Verify by 'Deselect Deep think' push button appearing in composer."
     timeout: 3600
     steps:
+      - trigger: mode_picker
+        select: model_3_5_thinking
       - trigger: upload_tools
         select: more_tools_button
       - trigger: null
@@ -119,8 +121,8 @@ element_map:
     role_contains: section
     states_include: [editable, focusable, multi-line]
   mode_picker:
-    # Live name is dynamic: "Open mode picker, currently Pro" (UI 2026-05-21)
-    name_contains: "Open mode picker"
+    # Live name is stateful. Driver discovers the exact current label at runtime.
+    name_pattern: "Open mode picker, currently *"
     role: push button
   # Gemini merged "Tools" and the upload menu into one "Upload & tools"
   # button (UI 2026-05-21); both keys reference the same live element.
@@ -178,13 +180,16 @@ element_map:
   # Mode picker items
   mode_fast:
     name: "3.5 Flash All-around help New"
-    role_contains: item
+    role: radio menu item
+  model_3_5_thinking:
+    name: "3.5 Thinking Solves complex problems"
+    role: radio menu item
   mode_thinking:
     name: "3.5 Thinking Solves complex problems"
-    role_contains: item
+    role: radio menu item
   mode_pro:
-    name_contains: "3.1 Pro Advanced math and code"
-    role_contains: item
+    name: "3.1 Pro Advanced math and code"
+    role: radio menu item
   tool_deep_research:
     name: "Deep research"
     role_contains: item

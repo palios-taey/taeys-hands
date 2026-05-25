@@ -366,6 +366,31 @@ def test_multi_step_select_scans_null_trigger_step_after_settle_delay(monkeypatc
     assert result['selected_item'] == 'Deep think'
 
 
+def test_find_button_by_element_map_discovers_live_gemini_mode_picker(monkeypatch):
+    from core.mode_select import _find_button_by_element_map
+
+    monkeypatch.setattr('core.mode_select.get_element_spec', lambda platform, key: {
+        'name_pattern': 'Open mode picker, currently *',
+        'role': 'push button',
+    })
+    monkeypatch.setattr('core.mode_select.get_platform_config', lambda platform: {
+        'fence_after': [],
+    })
+    monkeypatch.setattr('core.mode_select.find_elements', lambda doc, fence_after=None: [
+        {'name': 'Upload & tools', 'role': 'push button', 'x': 10, 'y': 20},
+        {'name': 'Open mode picker, currently 3.5 Thinking', 'role': 'push button', 'x': 20, 'y': 30},
+    ])
+
+    result = _find_button_by_element_map(object(), 'mode_picker', 'gemini')
+
+    assert result == {
+        'name': 'Open mode picker, currently 3.5 Thinking',
+        'role': 'push button',
+        'x': 20,
+        'y': 30,
+    }
+
+
 def test_gemini_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('gemini', reload=True)
