@@ -778,9 +778,14 @@ def _verify_attach_success(platform: str, firefox=None, doc=None) -> bool:
     Returns True if any indicator is matched.
     """
     config = get_platform_config(platform)
-    indicators = (config.get('validation', {})
-                      .get('attach_success', {})
-                      .get('indicators', []))
+    attach_success = (config.get('validation', {})
+                          .get('attach_success', {}))
+    indicators = attach_success.get('indicators', [])
+    method = str(attach_success.get('method', '')).strip()
+
+    if method == 'file_dialog_close':
+        firefox = firefox or atspi.find_firefox(platform)
+        return bool(firefox) and _any_file_dialog_open(firefox) == ''
 
     # Use multi-display-aware scan
     elements = _scan_elements_for_platform(platform)

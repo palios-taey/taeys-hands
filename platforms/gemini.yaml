@@ -214,10 +214,9 @@ sidebar_nav:
 # ─── Validation Expectations ───────────────────────────────────────
 validation:
   attach_success:
-    # Gemini shows attached files as chips near the input. Input Y shifts after attach.
-    file_chip:
-      roles: [heading, push button, toggle button, link]
-      name_match: filename_extension
+    # Gemini's visual file chip is not exposed to AT-SPI. Trust the exact
+    # dialog lifecycle signal instead: successful selection closes the file dialog.
+    method: file_dialog_close
   model_selected:
     # Mode picker button doesn't change text — read from mode items' checked state
     read_from: mode_picker
