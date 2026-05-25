@@ -209,9 +209,11 @@ def find_copy_buttons(elements: List[Dict]) -> List[Dict]:
     return buttons
 
 
-def find_menu_items(firefox, platform_doc=None) -> List[Dict]:
+def find_menu_items(firefox, platform_doc=None, allowed_roles=None) -> List[Dict]:
     """Find visible menu items with flat subtree search and container fallback."""
-    _ITEM_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
+    _ITEM_ROLES = set(allowed_roles or {
+        'menu item', 'radio menu item', 'check menu item', 'list item', 'option',
+    })
     _STRICT = {'menu', 'popup menu', 'listbox'}
     _LOOSE = {'list', 'panel'}
 

@@ -185,10 +185,14 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
     from core.interact import atspi_click
 
     completed_steps = []
+    config = get_platform_config(platform)
+    element_map = config.get('element_map', {})
 
     for i, step in enumerate(steps):
         trigger_key = step.get('trigger')
         select_target = str(step.get('select', '')).lower().strip()
+        select_spec = element_map.get(step.get('select'), {}) if step.get('select') else {}
+        select_role = select_spec.get('role') if isinstance(select_spec, dict) else None
 
         if not select_target:
             return {'success': False, 'error': f'Step {i+1}: no select target specified'}
@@ -221,11 +225,12 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
 
         if trigger_key:
             # Dropdown was opened — look for menu items
-            menu_items = find_menu_items(firefox, doc)
+            allowed_roles = [select_role] if select_role else None
+            menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
             if not menu_items:
                 time.sleep(1.0)
                 doc = atspi.get_platform_document(firefox, platform) or doc
-                menu_items = find_menu_items(firefox, doc)
+                menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
 
         if not menu_items:
             # Fallback: scan full tree for element_map buttons AND any matching elements

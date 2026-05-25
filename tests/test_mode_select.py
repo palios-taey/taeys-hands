@@ -226,6 +226,69 @@ def test_multi_step_select_requires_verified_steps(monkeypatch):
     ]
 
 
+def test_multi_step_select_honors_yaml_role_for_select_target(monkeypatch):
+    from core.mode_select import _multi_step_select
+
+    calls = []
+
+    monkeypatch.setattr('core.mode_select.get_platform_config', lambda platform: {
+        'element_map': {
+            'more_tools_button': {
+                'name': 'More tools',
+                'role': 'push button',
+            },
+        },
+    })
+    monkeypatch.setattr('core.mode_select._find_button_by_element_map', lambda *args, **kwargs: {
+        'name': 'Upload & tools',
+        'x': 1,
+        'y': 1,
+    })
+    monkeypatch.setattr('core.mode_select._click_element', lambda *args, **kwargs: True)
+    def _fake_find_menu_items(*args, **kwargs):
+        calls.append(kwargs.get('allowed_roles'))
+        items = [
+            {'name': 'Upload files', 'role': 'menu item'},
+            {'name': 'More tools', 'role': 'push button'},
+            {'name': 'Deep research', 'role': 'menu item'},
+        ]
+        allowed_roles = kwargs.get('allowed_roles')
+        if allowed_roles:
+            items = [item for item in items if item['role'] in allowed_roles]
+        return items
+
+    monkeypatch.setattr('core.mode_select.find_menu_items', _fake_find_menu_items)
+    monkeypatch.setattr('core.mode_select._match_and_click', lambda items, target, platform: {
+        'success': True,
+        'selected_item': items[0]['name'],
+    })
+    monkeypatch.setattr(
+        'core.mode_select._verify_multi_step_selection',
+        lambda *args, **kwargs: {'verified': True, 'method': 'checked_state'},
+    )
+
+    result = _multi_step_select(
+        'gemini',
+        [{'trigger': 'upload_tools', 'select': 'more_tools_button'}],
+        'deep_think',
+        object(),
+        object(),
+    )
+
+    assert result['success'] is True
+    assert calls == [['push button']]
+    assert result['selected_item'] == 'More tools'
+    assert result['completed_steps'] == [
+        {
+            'step': 1,
+            'trigger': 'upload_tools',
+            'selected': 'More tools',
+            'verified': True,
+            'verify_method': 'checked_state',
+        }
+    ]
+
+
 def test_gemini_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('gemini', reload=True)

@@ -104,3 +104,30 @@ def test_find_menu_items_uses_flat_search_across_split_siblings():
     items = find_menu_items(None, root)
 
     assert [item['name'] for item in items] == ['Deep Research', 'Normal']
+
+
+def test_find_menu_items_can_collect_exact_allowed_roles():
+    from core.tree import Atspi, find_menu_items
+
+    showing = {Atspi.StateType.SHOWING}
+    root = _FakeNode(
+        'document frame',
+        children=[
+            _FakeNode('push button', 'More tools', states=showing, y=20),
+            _FakeNode('menu item', 'Upload files', states=showing, y=40),
+        ],
+        states=showing,
+    )
+
+    items = find_menu_items(None, root, allowed_roles={'push button'})
+
+    assert items == [
+        {
+            'name': 'More tools',
+            'role': 'push button',
+            'x': 20,
+            'y': 30,
+            'atspi_obj': root.get_child_at_index(0),
+            'states': ['showing'],
+        }
+    ]
