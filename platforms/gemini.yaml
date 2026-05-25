@@ -57,9 +57,19 @@ stop_patterns:
 
 mode_guidance:
   deep_think:
-    when: "Complex reasoning, step-by-step analysis, math, code audits"
-    how: "Default 3.1 Pro state — no selection needed"
+    when: "Architecture-grade scrutiny, complex multi-step reasoning, deep math/code analysis"
+    how: "Click 'Upload & tools' (+), click 'More tools' at bottom of flyout to expand, click 'Deep think' check menu item. Verify by 'Deselect Deep think' push button appearing in composer."
     timeout: 3600
+    steps:
+      - trigger: upload_tools
+        select: more_tools_button
+      - trigger: null
+        select: deep_think_item
+    validation:
+      deep_think_active:
+        indicators:
+          - name: "Deselect Deep think"
+            role: push button
   deep_research:
     when: "Research questions, fact-finding, comprehensive analysis"
     how: "Click 'Tools' button, select 'Deep research' check menu item"
@@ -117,13 +127,22 @@ element_map:
   tools_button:
     name: "Upload & tools"
     role: push button
+  upload_tools:
+    name: "Upload & tools"
+    role: push button
   upload_menu:
     name: "Upload & tools"
     role: push button
   # "Deep think" / "Guided learning" sit behind this expander inside the
   # Upload & tools menu — expand before the deep_think item is in the tree.
-  more_tools:
+  more_tools_button:
     name: "More tools"
+    role: push button
+  deep_think_item:
+    name: "Deep think"
+    role: check menu item
+  deep_think_active:
+    name: "Deselect Deep think"
     role: push button
   copy_button:
     name_contains: "Copy"
