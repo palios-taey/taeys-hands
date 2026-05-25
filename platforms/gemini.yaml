@@ -196,8 +196,6 @@ sidebar_nav:
 validation:
   attach_success:
     # Gemini shows attached files as chips near the input. Input Y shifts after attach.
-    indicators:
-      - { name_contains: "Remove", role_contains: button }
     file_chip:
       roles: [heading, push button, toggle button, link]
       name_match: filename_extension
