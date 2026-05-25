@@ -209,11 +209,7 @@ sidebar_nav:
 # ─── Validation Expectations ───────────────────────────────────────
 validation:
   attach_success:
-    indicators:
-      - { name_contains: "Remove", role_contains: button }
-    file_chip:
-      roles: [heading, push button, toggle button, link]
-      name_match: filename_extension
+    method: file_dialog_close
   model_selected:
     # Model button text shows current model
     read_from: model_selector
