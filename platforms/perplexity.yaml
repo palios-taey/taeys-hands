@@ -47,7 +47,7 @@ dropdown_method: atspi_enum
 
 consultation_defaults:
   model: null
-  mode: normal
+  mode: deep_research
   attach_method: keyboard_nav
   extract_method: copy_contents
 
@@ -55,8 +55,7 @@ quirks:
   - sidebar: "Left sidebar OPEN (Search, Computer, New Thread, History, Discover, Spaces, Finance, More). Right sidebar always CLOSE."
   - model_selector: "'Model' button visible in search landing page input area (role=push button). Opens model selector. NOT visible in Computer mode."
   - tools_button: "'Add files or tools' (+ button) opens dropdown with tools and file upload options"
-  - deep_research: "Deep research is a radio menu item in the tools dropdown, NOT a standalone mode. May be enabled by default on new threads — check state before toggling."
-  - deep_research_toggle: "Standalone 'Deep research' button near input is a TOGGLE. If already on (checked in dropdown), clicking it turns it OFF."
+  - deep_research: "'Search' toggle button opens radio menu items: Search, Deep research, Model council Max."
   - computer_mode: "Two ways to enter Computer mode: (1) 'Computer' link in sidebar (role=link, always visible), (2) 'Computer' push button in search input area (role=push button, search mode only). URL becomes /computer/tasks. Task input is standard entry field with 'Add files or tools' button. Task table shows Status/Task/Files/Updated columns. Sidebar changes: Search mode has New Thread/History/Discover/Spaces/Finance/More. Computer mode has New Task/Tasks/Files/Connectors/Skills/Gallery."
   - copy_summary_only: "Copy button returns summary only. For Deep Research full reports, use Export > Download as Markdown."
   - file_dialog: "File upload dialog may open as Firefox-embedded GTK dialog OR Nautilus portal depending on session context. Firefox GTK dialog has Ctrl+L conflict (navigates URL bar). Nautilus portal: xdotool search --class Nautilus."
@@ -71,9 +70,12 @@ stop_patterns:
 mode_guidance:
   deep_research:
     when: "Need facts, citations, multi-source synthesis, current events, comprehensive documentation"
-    how: "Default mode, no selection needed"
+    how: "Click 'Search' toggle button, select 'Deep research' radio menu item from dropdown"
     timeout: 7200
-    note: "Live 2026-05-25 UI exposes Deep Research as a 'Run deep research' starter card that routes to /computer/tasks with a canned template prompt, not as a selector-compatible mode toggle."
+    steps:
+      - trigger: search_toggle
+        select: deep_research_radio
+    note: "Takes 5-30 minutes. Copy button = summary only. Use Export > Download as Markdown for full report."
   model_council:
     when: "Need consensus from multiple models, cross-validation of complex claims"
     how: "Click 'Add files or tools' button, select 'Model council Max' radio item"
@@ -117,6 +119,12 @@ element_map:
   input:
     role: entry
     states_include: [editable]
+  search_toggle:
+    name: "Search"
+    role: toggle button
+  deep_research_radio:
+    name: "Deep research"
+    role: radio menu item
   attach_trigger:
     name: "Add files or tools"
     role: push button
