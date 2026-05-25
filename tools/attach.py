@@ -115,7 +115,7 @@ def _set_attach_checkpoint(platform: str, file_path: str, redis_client):
 # --- Element matching (from inspect.py) ---
 
 def _match_element(element: dict, criteria: dict) -> bool:
-    """Check if element matches all criteria (name, name_contains, name_pattern, role, states)."""
+    """Check if element matches all criteria."""
     name = (element.get('name') or '').strip()
     name_lower = name.lower()
     role = element.get('role', '')
@@ -123,6 +123,12 @@ def _match_element(element: dict, criteria: dict) -> bool:
 
     if 'name' in criteria and name_lower != str(criteria['name']).lower():
         return False
+    if 'names_any_of' in criteria:
+        names_any_of = criteria['names_any_of']
+        if isinstance(names_any_of, str):
+            names_any_of = [names_any_of]
+        if not any(name_lower == str(candidate).lower() for candidate in names_any_of):
+            return False
     if 'name_contains' in criteria:
         pats = criteria['name_contains']
         if isinstance(pats, str):

@@ -153,7 +153,12 @@ element_map:
     name_contains: "Copy"
     role_contains: button
   stop_button:
-    name_contains: "Stop"
+    names_any_of:
+      - "Stop answering"
+      - "Stop response"
+      - "Stop streaming"
+      - "Stop generating"
+      - "Stop"
     role: push button
   pro_indicator:
     name_pattern: "Pro, click to remove"
