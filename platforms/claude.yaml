@@ -132,7 +132,7 @@ element_map:
     name: "Paste GitHub URL"
     role: push button
   model_selector:
-    name_contains: "Model: Opus 4.7"
+    name_pattern: "Model: *"
     role: push button
   # Model dropdown items (UI as of 2026-05-15; live AT-SPI roles)
   model_opus:
