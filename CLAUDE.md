@@ -393,7 +393,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (1517 symbols, 4612 relationships, 123 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (1573 symbols, 4829 relationships, 127 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -491,3 +491,19 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# ISMA Prose Retrieval (fleet-wide, wired 2026-05-25)
+
+~2,400 of our own `.md` (foundations / recaps / drafts / docs / corpus) are now hybrid-searchable **prose** in ISMA. Use it for research, drafting, and dispatch-packet grounding. Full spec: `<OPERATOR_HOME>/embedding-server/ISMA_PROSE_RETRIEVAL_SPEC.md`.
+
+**Three rules (Jesse/weaver/conductor directive):**
+1. **NO HMM.** Use `/v2/search` or `isma_adaptive_search` with `enriched_only=false`. NEVER `/search/hmm`, `isma_motif_search`, or `enriched_only=true` — the prose is `hmm_enriched=false`, so HMM paths HIDE it.
+2. **GO DEEP.** `top_k>=25` (40–50 for broad), `scale=full_4096`, 3–6 phrasings + union the hits, expand promising hits via `curl :8095/document/<hash>/text`. A few snippets = a FAILED query, not an answer.
+3. **CANNOT-LIE.** Prose is FRAMING/depth, NOT a metric source (it holds superseded/scrubbed numbers). Cross-check every number against `<OPERATOR_HOME>/treasurer/foundations/tech_baselines/INDEX.md` before using it.
+
+**Canonical call:**
+```bash
+curl -s -X POST http://localhost:8095/v2/search -H 'Content-Type: application/json' \
+  -d '{"query":"<topic>","top_k":25,"scale":"full_4096"}'
+```
+**Convenience (on PATH):** `isma-query "what do we know about <topic>" -k 40 --precision --our-prose --json`
