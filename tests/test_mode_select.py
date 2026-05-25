@@ -295,6 +295,77 @@ def test_multi_step_select_honors_yaml_role_for_select_target(monkeypatch):
     ]
 
 
+def test_multi_step_select_scans_null_trigger_step_after_settle_delay(monkeypatch):
+    from core.mode_select import _multi_step_select
+
+    calls = []
+    sleep_calls = []
+    match_targets = []
+
+    monkeypatch.setattr('core.mode_select.get_platform_config', lambda platform: {
+        'element_map': {
+            'more_tools_button': {
+                'name': 'More tools',
+                'role': 'push button',
+            },
+            'deep_think_item': {
+                'name': 'Deep think',
+                'role': 'check menu item',
+            },
+        },
+    })
+    monkeypatch.setattr('core.mode_select._find_button_by_element_map', lambda *args, **kwargs: {
+        'name': 'Upload & tools',
+        'x': 1,
+        'y': 1,
+    })
+    monkeypatch.setattr('core.mode_select._click_element', lambda *args, **kwargs: True)
+    monkeypatch.setattr('core.mode_select.time.sleep', lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr('core.mode_select.atspi.get_platform_document', lambda *args, **kwargs: object())
+
+    def _fake_find_menu_items(*args, **kwargs):
+        allowed_roles = kwargs.get('allowed_roles')
+        calls.append(allowed_roles)
+        if allowed_roles == ['push button']:
+            return [{'name': 'More tools', 'role': 'push button'}]
+        if allowed_roles == ['check menu item']:
+            return [{'name': 'Deep think', 'role': 'check menu item'}]
+        return []
+
+    monkeypatch.setattr('core.mode_select.find_menu_items', _fake_find_menu_items)
+    monkeypatch.setattr('core.mode_select.find_elements', lambda *args, **kwargs: [])
+
+    def _fake_match_and_click(items, target, platform):
+        match_targets.append(target)
+        return {
+            'success': True,
+            'selected_item': items[0]['name'],
+        }
+
+    monkeypatch.setattr('core.mode_select._match_and_click', _fake_match_and_click)
+    monkeypatch.setattr(
+        'core.mode_select._verify_multi_step_selection',
+        lambda *args, **kwargs: {'verified': True, 'method': 'checked_state'},
+    )
+
+    result = _multi_step_select(
+        'gemini',
+        [
+            {'trigger': 'upload_tools', 'select': 'more_tools_button'},
+            {'trigger': None, 'select': 'deep_think_item'},
+        ],
+        'deep_think',
+        object(),
+        object(),
+    )
+
+    assert result['success'] is True
+    assert calls == [['push button'], ['check menu item']]
+    assert match_targets == ['more tools', 'deep think']
+    assert 0.75 in sleep_calls
+    assert result['selected_item'] == 'Deep think'
+
+
 def test_gemini_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('gemini', reload=True)

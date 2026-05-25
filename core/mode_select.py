@@ -23,6 +23,7 @@ from core.config import (
 from core.tree import find_elements, find_menu_items, detect_chrome_y
 
 logger = logging.getLogger(__name__)
+DEFAULT_MULTI_STEP_SETTLE_DELAY = 0.75
 
 
 def select_mode_model(platform: str, mode: str = None, model: str = None,
@@ -196,6 +197,7 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
         select_role = select_spec.get('role') if isinstance(select_spec, dict) else None
         select_name = select_spec.get('name') if isinstance(select_spec, dict) else None
         match_target = str(select_name or select_key).lower().strip()
+        settle_delay = float(step.get('settle_delay', DEFAULT_MULTI_STEP_SETTLE_DELAY))
 
         if not select_target:
             return {'success': False, 'error': f'Step {i+1}: no select target specified'}
@@ -226,14 +228,12 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
         # visible in the page (e.g., ChatGPT Extended/Standard after Pro selection).
         menu_items = []
 
-        if trigger_key:
-            # Dropdown was opened — look for menu items
-            allowed_roles = [select_role] if select_role else None
+        allowed_roles = [select_role] if select_role else None
+        menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
+        if not menu_items:
+            time.sleep(1.0)
+            doc = atspi.get_platform_document(firefox, platform) or doc
             menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
-            if not menu_items:
-                time.sleep(1.0)
-                doc = atspi.get_platform_document(firefox, platform) or doc
-                menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
 
         if not menu_items:
             # Fallback: scan full tree for element_map buttons AND any matching elements
@@ -269,6 +269,9 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
             step_result['step'] = i + 1
             step_result['completed_steps'] = completed_steps
             return step_result
+
+        time.sleep(settle_delay)
+        doc = atspi.get_platform_document(firefox, platform) or doc
 
         step_verification = _verify_multi_step_selection(
             platform, select_target, firefox, doc
