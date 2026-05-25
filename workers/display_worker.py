@@ -382,25 +382,25 @@ def _check_stop_button() -> dict:
 
     config = get_platform_config(PLATFORM)
     stop_spec = config.get('element_map', {}).get('stop_button') or {}
-    stop_name = stop_spec.get('name_contains')
     stop_role = stop_spec.get('role')
+    stop_name = stop_spec.get('name')
+    stop_names_any_of = stop_spec.get('names_any_of')
 
-    if not isinstance(stop_name, str) or not isinstance(stop_role, str):
+    if not isinstance(stop_role, str) or (
+        not isinstance(stop_name, str)
+        and not (
+            isinstance(stop_names_any_of, list)
+            and all(isinstance(item, str) for item in stop_names_any_of)
+        )
+    ):
         return {
             'stop_found': False,
             'error': f'Missing stop_button config for {PLATFORM}',
         }
 
-    stop_name = stop_name.lower()
-    stop_role = stop_role.lower()
-
     elements = []
     _scan_named_elements(doc, elements)
-    stop_found = any(
-        (element.get('role') or '').strip().lower() == stop_role
-        and stop_name in (element.get('name') or '').strip().lower()
-        for element in elements
-    )
+    stop_found = any(_spec_matches(element, stop_spec) for element in elements)
     return {'stop_found': stop_found, 'platform': PLATFORM}
 
 
@@ -464,16 +464,6 @@ def _value_matches(value: str, expected) -> bool:
     return False
 
 
-def _contains_matches(value: str, expected) -> bool:
-    if expected is None:
-        return True
-    if isinstance(expected, list):
-        return any(_contains_matches(value, item) for item in expected)
-    if isinstance(expected, str):
-        return expected in value
-    return False
-
-
 def _spec_matches(element: dict, spec: dict) -> bool:
     name = (element.get('name') or '').strip()
     role = element.get('role') or ''
@@ -481,7 +471,13 @@ def _spec_matches(element: dict, spec: dict) -> bool:
 
     if 'name' in spec and not _value_matches(name, spec.get('name')):
         return False
-    if 'name_contains' in spec and not _contains_matches(name, spec.get('name_contains')):
+    if 'names_any_of' in spec:
+        names_any_of = spec.get('names_any_of')
+        if isinstance(names_any_of, str):
+            names_any_of = [names_any_of]
+        if not any(_value_matches(name, candidate) for candidate in (names_any_of or [])):
+            return False
+    if 'name_contains' in spec:
         return False
     if 'name_pattern' in spec:
         patterns = spec.get('name_pattern')
@@ -492,11 +488,7 @@ def _spec_matches(element: dict, spec: dict) -> bool:
     if 'role' in spec and role != spec.get('role'):
         return False
     if 'role_contains' in spec:
-        role_contains = spec.get('role_contains')
-        if isinstance(role_contains, str):
-            role_contains = [role_contains]
-        if not any(token in role for token in role_contains):
-            return False
+        return False
     required_states = set(spec.get('states_include') or [])
     if required_states and not required_states.issubset(states):
         return False
