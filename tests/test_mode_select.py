@@ -391,6 +391,46 @@ def test_find_button_by_element_map_discovers_live_gemini_mode_picker(monkeypatc
     }
 
 
+def test_select_mode_model_uses_single_step_workflow_when_steps_present(monkeypatch):
+    from core.mode_select import select_mode_model
+
+    monkeypatch.setattr('core.mode_select.get_mode_guidance', lambda platform: {
+        'deep_research': {
+            'how': "Click 'Search' toggle button, select 'Deep research' radio menu item from dropdown",
+            'timeout': 7200,
+            'steps': [{'trigger': 'search_toggle', 'select': 'deep_research_radio'}],
+        },
+    })
+    monkeypatch.setattr('core.mode_select.atspi.find_firefox_for_platform', lambda *args, **kwargs: object())
+    monkeypatch.setattr('core.mode_select.atspi.get_platform_document', lambda *args, **kwargs: object())
+
+    captured = {}
+
+    def _fake_multi_step(platform, steps, target_mode, firefox, doc):
+        captured['platform'] = platform
+        captured['steps'] = steps
+        captured['target_mode'] = target_mode
+        return {
+            'success': True,
+            'selected_mode': target_mode,
+            'selected_item': 'Deep research',
+            'platform': platform,
+            'completed_steps': [],
+        }
+
+    monkeypatch.setattr('core.mode_select._multi_step_select', _fake_multi_step)
+
+    result = select_mode_model('perplexity', mode='deep_research')
+
+    assert result['success'] is True
+    assert result['timeout'] == 7200
+    assert captured == {
+        'platform': 'perplexity',
+        'steps': [{'trigger': 'search_toggle', 'select': 'deep_research_radio'}],
+        'target_mode': 'deep_research',
+    }
+
+
 def test_gemini_mode_guidance():
     from core.config import get_platform_config
     config = get_platform_config('gemini', reload=True)

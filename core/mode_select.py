@@ -90,8 +90,8 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     if not doc:
         return {'success': False, 'error': f'{platform} document not found'}
 
-    # Multi-step selection (e.g., ChatGPT Pro + Extended Thinking)
-    if steps and isinstance(steps, list) and len(steps) > 1:
+    # Step-driven selection (single-step or multi-step)
+    if steps and isinstance(steps, list):
         result = _multi_step_select(platform, steps, target_mode_lower,
                                      firefox, doc)
         if result.get('success'):
