@@ -190,15 +190,18 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
 
     for i, step in enumerate(steps):
         trigger_key = step.get('trigger')
-        select_target = str(step.get('select', '')).lower().strip()
-        select_spec = element_map.get(step.get('select'), {}) if step.get('select') else {}
+        select_key = str(step.get('select', '')).strip()
+        select_target = select_key.lower()
+        select_spec = element_map.get(select_key, {}) if select_key else {}
         select_role = select_spec.get('role') if isinstance(select_spec, dict) else None
+        select_name = select_spec.get('name') if isinstance(select_spec, dict) else None
+        match_target = str(select_name or select_key).lower().strip()
 
         if not select_target:
             return {'success': False, 'error': f'Step {i+1}: no select target specified'}
 
         logger.info(f"[{platform}] Multi-step {i+1}/{len(steps)}: "
-                    f"trigger={trigger_key}, select='{select_target}'")
+                    f"trigger={trigger_key}, select='{select_target}', match='{match_target}'")
 
         # Click trigger if specified (step 1 opens model dropdown)
         if trigger_key:
@@ -236,7 +239,7 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
             # Fallback: scan full tree for element_map buttons AND any matching elements
             fences = get_fence_after(platform)
             all_elements = find_elements(doc, fence_after=fences)
-            menu_items = _find_model_buttons_in_tree(platform, select_target, all_elements)
+            menu_items = _find_model_buttons_in_tree(platform, match_target, all_elements)
 
         if not menu_items:
             # Last resort: find ANY visible button/element matching the select target
@@ -247,7 +250,7 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
                 ename = (e.get('name') or '').strip().lower()
                 erole = e.get('role', '')
                 if erole in ('push button', 'toggle button', 'button', 'radio button') and \
-                   select_target in ename:
+                   match_target in ename:
                     menu_items = [e]
                     logger.info(f"[{platform}] Found '{e.get('name')}' ({erole}) via tree scan")
                     break
@@ -261,7 +264,7 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
             }
 
         # Match and click
-        step_result = _match_and_click(menu_items, select_target, platform)
+        step_result = _match_and_click(menu_items, match_target, platform)
         if not step_result.get('success'):
             step_result['step'] = i + 1
             step_result['completed_steps'] = completed_steps

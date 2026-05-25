@@ -230,6 +230,7 @@ def test_multi_step_select_honors_yaml_role_for_select_target(monkeypatch):
     from core.mode_select import _multi_step_select
 
     calls = []
+    match_targets = []
 
     monkeypatch.setattr('core.mode_select.get_platform_config', lambda platform: {
         'element_map': {
@@ -258,10 +259,14 @@ def test_multi_step_select_honors_yaml_role_for_select_target(monkeypatch):
         return items
 
     monkeypatch.setattr('core.mode_select.find_menu_items', _fake_find_menu_items)
-    monkeypatch.setattr('core.mode_select._match_and_click', lambda items, target, platform: {
-        'success': True,
-        'selected_item': items[0]['name'],
-    })
+    def _fake_match_and_click(items, target, platform):
+        match_targets.append(target)
+        return {
+            'success': True,
+            'selected_item': items[0]['name'],
+        }
+
+    monkeypatch.setattr('core.mode_select._match_and_click', _fake_match_and_click)
     monkeypatch.setattr(
         'core.mode_select._verify_multi_step_selection',
         lambda *args, **kwargs: {'verified': True, 'method': 'checked_state'},
@@ -277,6 +282,7 @@ def test_multi_step_select_honors_yaml_role_for_select_target(monkeypatch):
 
     assert result['success'] is True
     assert calls == [['push button']]
+    assert match_targets == ['more tools']
     assert result['selected_item'] == 'More tools'
     assert result['completed_steps'] == [
         {
