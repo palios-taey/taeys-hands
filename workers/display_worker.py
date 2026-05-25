@@ -135,12 +135,21 @@ def _setup_display_env(display: str):
     # (inherited from parent MCP server) and returns _RemoteFirefox
     # sentinels instead of using direct AT-SPI on our bus.
     os.environ.pop('PLATFORM_DISPLAYS', None)
+    os.environ.pop('AT_SPI_BUS_ADDRESS', None)
+    os.environ.pop('DBUS_SESSION_BUS_ADDRESS', None)
 
     bus_file = f'/tmp/a11y_bus_{display}'
     bus = _read_isolated_bus(display, bus_file)
     if bus:
         os.environ['AT_SPI_BUS_ADDRESS'] = bus
         os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
+
+
+def _reassert_worker_env():
+    """Reapply isolated display env after .env loads or other mutations."""
+    os.environ.pop('PLATFORM_DISPLAYS', None)
+    _PLATFORM_DISPLAYS.clear()
+    _setup_display_env(DISPLAY)
 
 
 # Parse args and setup BEFORE any project imports
@@ -164,7 +173,14 @@ if os.path.exists(_env_path):
             _line = _line.strip()
             if _line and not _line.startswith('#') and '=' in _line:
                 _key, _val = _line.split('=', 1)
-                os.environ.setdefault(_key.strip(), _val.strip())
+                _key = _key.strip()
+                if _key in {
+                    'DISPLAY', 'PLATFORM_DISPLAYS',
+                    'AT_SPI_BUS_ADDRESS', 'DBUS_SESSION_BUS_ADDRESS',
+                    'GTK_USE_PORTAL',
+                }:
+                    continue
+                os.environ.setdefault(_key, _val.strip())
 
 # NOW import AT-SPI and project modules
 import gi
@@ -177,6 +193,7 @@ from gi.repository import Atspi  # noqa: E402
 # find_firefox_for_platform() uses the direct local AT-SPI path.
 from core.platforms import _PLATFORM_DISPLAYS  # noqa: E402
 _PLATFORM_DISPLAYS.clear()
+_reassert_worker_env()
 
 from storage.redis_pool import get_client as get_redis, node_key  # noqa: E402
 
@@ -372,9 +389,17 @@ def _check_stop_button() -> dict:
     from core import atspi
     from core.config import get_platform_config
 
+    _reassert_worker_env()
+
     firefox = atspi.find_firefox_for_platform(PLATFORM)
     if not firefox:
-        return {'stop_found': False, 'error': 'Firefox not found'}
+        firefox = atspi.find_firefox(PLATFORM)
+    if not firefox:
+        return {
+            'stop_found': False,
+            'error': 'Firefox not found',
+            'display': os.environ.get('DISPLAY', ''),
+        }
 
     doc = atspi.get_platform_document(firefox, PLATFORM)
     if not doc:
@@ -408,7 +433,11 @@ def _get_monitor_document():
     """Get the active Firefox document for this worker platform."""
     from core import atspi
 
+    _reassert_worker_env()
+
     firefox = atspi.find_firefox_for_platform(PLATFORM)
+    if not firefox:
+        firefox = atspi.find_firefox(PLATFORM)
     if not firefox:
         return None, None, {'error': 'Firefox not found'}
 
