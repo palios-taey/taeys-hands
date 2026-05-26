@@ -35,7 +35,7 @@ dropdown_method: atspi_enum
 
 consultation_defaults:
   model: null
-  mode: deep_think
+  mode: pro
   attach_method: atspi_menu
   extract_method: last_copy_button
 
@@ -81,6 +81,18 @@ mode_guidance:
       type: click_button
       name_contains: Start research
       wait_before: 3
+  pro:
+    when: "High-quality reasoning, best Gemini model (default)"
+    how: "Click 'Open mode picker', select '3.1 Pro Advanced math and code' radio item"
+    timeout: 3600
+    steps:
+      - trigger: mode_picker
+        select: mode_pro
+    validation:
+      pro_active:
+        indicators:
+          - name_pattern: "Open mode picker, currently *Pro*"
+            role: push button
   thinking:
     when: "Medium complexity reasoning"
     how: "Click 'Open mode picker', select 'Thinking' radio item"
