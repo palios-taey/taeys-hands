@@ -118,7 +118,11 @@ element_map:
     name: "Edit"
     role: push button
   stop_button:
-    name: "Stop"
+    names_any_of:
+      - "Stop"
+      - "Stop generating"
+      - "Stop thinking"
+      - "Stop response"
     role: push button
   regenerate:
     name: "Regenerate"
