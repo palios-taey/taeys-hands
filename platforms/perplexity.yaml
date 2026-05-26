@@ -144,7 +144,9 @@ element_map:
     name: "Copy code"
     role: push button
   stop_button:
-    name: "Stop response"
+    names_any_of:
+      - "Stop response (Esc)"
+      - "Stop response"
     role: push button
   submit_button:
     name: "Submit"
