@@ -89,9 +89,10 @@ mode_guidance:
     url_pattern: "/computer/tasks"
     timeout: 7200
   normal:
-    when: "Quick questions, simple lookups, conversational queries"
-    how: "Default mode, no selection needed"
-    timeout: 3600
+    when: "Synthesis, opinion, conversational — no web research needed"
+    how: "No mode action required; Perplexity defaults to Search/chat mode on landing page"
+    timeout: 1800
+    steps: []
 
 # ─── Sidebar Fence ────────────────────────────────────────────────
 # When this element is encountered during traversal, it is collected but

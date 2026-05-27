@@ -79,6 +79,15 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
             'timeout': timeout,
         }
 
+    # Explicit empty workflow means the landing-page default state is the target.
+    if isinstance(steps, list) and len(steps) == 0:
+        return {
+            'success': True,
+            'selected_mode': target_mode_lower,
+            'note': 'Explicit empty workflow — no selection needed',
+            'timeout': timeout,
+        }
+
     # Get AT-SPI references
     if not firefox:
         firefox = atspi.find_firefox_for_platform(platform, pid=our_pid)
