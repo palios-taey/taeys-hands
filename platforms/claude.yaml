@@ -67,8 +67,8 @@ mode_guidance:
     steps:
       - trigger: model_selector
         select: opus
-      - trigger: null
-        select: "adaptive thinking"
+      - trigger: model_selector
+        select: model_adaptive_thinking
   research:
     when: "Need multi-pass web research, current events, comprehensive documentation lookup"
     how: "Toggle menu -> enable 'Research' check menu item"
