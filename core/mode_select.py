@@ -647,7 +647,7 @@ def _verify_selection(platform: str, mode_key: str,
                 'fast': ['fast'],
                 'deep_think': ['deep think'],
                 'deep_research': ['deep research'],
-                'extended_thinking': ['extended', 'adaptive'],
+                'extended_thinking': ['extended', 'adaptive', 'high'],
             }
             terms = _VERIFY_TERMS.get(mode_lower, [mode_lower])
             if any(t in button_name for t in terms):

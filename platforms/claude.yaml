@@ -6,11 +6,11 @@ verify_navigation: false
 tab_shortcut: alt+2
 
 capabilities:
-  # Model button shows current model name (e.g. "Opus 4.7 Adaptive", "Sonnet 4.6")
-  # Click opens dropdown with Adaptive thinking toggle + More models link
-  # Available models: Opus 4.7, Sonnet 4.6, Haiku 4.5 (UI 2026-05-15)
+  # Model button shows current model name (e.g. "Opus 4.8 High", "Sonnet 4.6")
+  # Click opens dropdown with model items plus Effort High and More models
+  # Available models: Opus 4.8, Sonnet 4.6, Haiku 4.5 (UI 2026-05-29)
   models:
-    - Adaptive thinking Thinks for more complex tasks Adaptive thinking
+    - Effort High
     - More models
   # "Toggle menu" button dropdown — contains both tools and sources
   modes: []
@@ -50,8 +50,8 @@ quirks:
   - sidebar: "Left sidebar OPEN, right sidebar always CLOSE before interaction"
   - artifacts: "Code/documents appear as artifacts - use preview_then_copy strategy"
   - attach: "'Toggle menu' button -> 'Add files or photos' menu item. xdotool coordinate clicks work on Claude menu items."
-  - model_default: "Sonnet 4.6 is default for Pro plans. Opus 4.7 Adaptive for Max plans."
-  - model_selector: "Button shows current model name. Click opens dropdown with Adaptive thinking toggle and More models link."
+  - model_default: "Opus 4.8 High is the fresh-session default observed on Max plans (UI 2026-05-29)."
+  - model_selector: "Button shows current model name. Click opens dropdown with model radio items plus 'Effort High' and 'More models'."
   - paste_as_document: "Large clipboard pastes (>5KB) auto-convert to 'Pasted Text' document chip. Workaround for broken file dialog."
   - prosemirror: "ProseMirror contenteditable does NOT accept AT-SPI insert_text(). Clipboard paste is the only reliable input method."
 
@@ -62,13 +62,11 @@ stop_patterns:
 mode_guidance:
   extended_thinking:
     when: "Complex reasoning, code generation, architectural review, multi-step analysis"
-    how: "Click model_selector ('Model: Opus 4.7 Adaptive'), select 'Opus 4.7 Most capable for ambitious work', then click 'Adaptive thinking Thinks for more complex tasks Adaptive thinking' to enable adaptive thinking (UI 2026-05-15)"
+    how: "Click model_selector ('Model: Opus 4.8 High') and select 'Opus 4.8 Most capable for ambitious work'. Fresh Opus 4.8 sessions currently realize extended thinking as 'High' with no separate Adaptive toggle exposed (UI 2026-05-29)"
     timeout: 3600
     steps:
       - trigger: model_selector
         select: opus
-      - trigger: model_selector
-        select: model_adaptive_thinking
   research:
     when: "Need multi-pass web research, current events, comprehensive documentation lookup"
     how: "Toggle menu -> enable 'Research' check menu item"
@@ -134,18 +132,18 @@ element_map:
   model_selector:
     name_pattern: "Model: *"
     role: push button
-  # Model dropdown items (UI as of 2026-05-15; live AT-SPI roles)
+  # Model dropdown items (UI as of 2026-05-29; live AT-SPI roles)
   model_opus:
-    name: "Opus 4.7 Most capable for ambitious work"
+    name: "Opus 4.8 Most capable for ambitious work"
     role: radio menu item
   model_sonnet:
-    name: "Sonnet 4.6 Responsive everyday work"
+    name: "Sonnet 4.6 Most efficient for everyday tasks"
     role: radio menu item
   model_haiku:
-    name: "Haiku 4.5 Fastest, most efficient"
+    name: "Haiku 4.5 Fastest for quick answers"
     role: radio menu item
-  model_adaptive_thinking:
-    name: "Adaptive thinking Thinks for more complex tasks Adaptive thinking"
+  model_effort_high:
+    name: "Effort High"
     role: menu item
   model_more:
     name: "More models"
