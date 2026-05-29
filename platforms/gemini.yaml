@@ -58,11 +58,11 @@ stop_patterns:
 mode_guidance:
   deep_think:
     when: "Architecture-grade scrutiny, complex multi-step reasoning"
-    how: "Click mode picker, select 3.5 Thinking, then click 'Upload & tools' (+), click 'More tools' at bottom of flyout to expand, click 'Deep think' check menu item. Verify by 'Deselect Deep think' push button appearing in composer."
+    how: "Click mode picker, select 3.1 Pro, then click 'Upload & tools' (+), click 'More tools' at bottom of flyout to expand, click 'Deep think' check menu item. Verify by 'Open mode picker, currently Pro' plus 'Deselect Deep think' push button appearing in composer."
     timeout: 3600
     steps:
       - trigger: mode_picker
-        select: model_3_5_thinking
+        select: mode_pro
       - trigger: upload_tools
         select: more_tools_button
       - trigger: null
