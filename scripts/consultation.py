@@ -160,6 +160,8 @@ def parse_args():
                         help='X11 display (e.g. :4). Auto-detected if not set.')
     parser.add_argument('--output', default=None,
                         help='Output file path (default: ~/Downloads/{platform}_{timestamp}.md)')
+    parser.add_argument('--requester', default=None,
+                        help='Session/node to notify when the response file lands')
     parser.add_argument('--timeout', type=int, default=3600,
                         help='Response wait timeout in seconds (default: 3600)')
     parser.add_argument('--no-neo4j', action='store_true',
@@ -248,6 +250,62 @@ logging.basicConfig(
 logger = logging.getLogger('consultation')
 
 DEFAULT_STEP_ORDER = ['navigate', 'model', 'mode', 'attach', 'message', 'send']
+_REQUESTER_ENV_KEYS = ('TAEY_SESSION', 'TAEY_REQUESTER', 'REQUESTER_SESSION', 'SESSION_NAME')
+
+
+def _resolve_requester(explicit_requester: str | None) -> str:
+    """Resolve the requester session for completion notifications."""
+    if explicit_requester and explicit_requester.strip():
+        return explicit_requester.strip()
+
+    for key in _REQUESTER_ENV_KEYS:
+        value = os.environ.get(key, '').strip()
+        if value:
+            return value
+
+    try:
+        proc = subprocess.run(
+            ['tmux', 'display-message', '-p', '#S'],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        session_name = proc.stdout.strip()
+        if proc.returncode == 0 and session_name:
+            return session_name
+    except Exception:
+        pass
+
+    raise SystemExit(
+        "consultation.py requires --requester or a caller session env "
+        f"({', '.join(_REQUESTER_ENV_KEYS)}) so response completion can be notified."
+    )
+
+
+def _notify_requester(requester: str, platform: str, output_path: str) -> None:
+    """Fire taey-notify immediately after the response file lands."""
+    size_bytes = os.path.getsize(output_path)
+    message = (
+        f"Family Chat consultation response from {platform.upper()} landed at "
+        f"{output_path} ({size_bytes} bytes). Review + acknowledge."
+    )
+    proc = subprocess.run(
+        [
+            '/usr/local/bin/taey-notify',
+            requester,
+            message,
+            '--type', 'response_ready',
+            '--from', 'taeys-hands',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or 'taey-notify failed').strip())
+    logger.info("Requester notified: %s", proc.stdout.strip())
 
 
 def _neo4j_available() -> bool:
@@ -1346,6 +1404,7 @@ def main():
     message = args.message
     attachments = args.attach
     timeout = args.timeout
+    requester = _resolve_requester(args.requester)
 
     logger.info(f"Consultation: {platform}")
     logger.info(f"  Message: {message[:100]}{'...' if len(message) > 100 else ''}")
@@ -1364,6 +1423,7 @@ def main():
         'platform': platform, 'success': False,
         'message_length': len(message), 'attachments': attachments,
         'followup': is_followup,
+        'requester': requester,
     }
     if is_followup:
         result['session_url'] = args.session_url
@@ -1596,6 +1656,17 @@ def main():
     output_path = save_response(content, platform, args.output)
     result['output_path'] = output_path
     result['content_length'] = len(content)
+
+    # Step 9a: Notify requester immediately after the file lands
+    logger.info("Step 9a: Notifying requester")
+    try:
+        _notify_requester(requester, platform, output_path)
+        result['requester_notified'] = True
+    except Exception as e:
+        result['error'] = f'notify_failed: {e}'
+        result['requester_notified'] = False
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
 
     # Step 10: Store in Neo4j
     if not args.no_neo4j:
