@@ -85,6 +85,17 @@ Canonical source: `<OPERATOR_HOME>/taeys-hands/plans/taeys-hands-platform-grade.
 | T74 | HIGH | OPEN | Gemini: support Deep Think AND Deep Research (both). |
 | T75 | MEDIUM | OPEN | Tools beyond text: Grok Imagine (X images), ChatGPT image gen, Gemini Canvas. YAML `--tool` flag support per platform. |
 
+## Grok driver structural violations (taeys-hands-grok pre-p1 baseline @audit_logs/pre-p1-baseline-grok-driver-vs-rule.md)
+
+| id | severity | status | summary |
+|---|---|---|---|
+| N1 | HIGH | OPEN | `consultation_v2/drivers/grok.py:122,127,132,167,172,186-189,214-218,230-232` — Grok-specific behavioral accommodations + platform defects encoded as first-class driver code + comments. Explicit "Grok requires..." comment at line 132; unconditional Escape on every error path; `_input_has_text` dual try/except with silent pass; or-condition send confirmation. Violates THE RULE §2 (zero driver-side platform knowledge). |
+| N2 | MEDIUM | OPEN | `consultation_v2/drivers/grok.py:285-287` — `extract_additional` is a permanent no-op stub that returns success unconditionally. 8-step consultation contract requires the call but Grok's implementation declares success without doing work. Partial contract masked as done. |
+| N3 | HIGH | OPEN | `consultation_v2/drivers/grok.py:122,127,167,172,189` — Escape used as universal error-recovery and post-action hygiene at driver level. Far more prominent in Grok driver than other 4 V2 drivers. Driver-level fallback strategy, not YAML-declared. Should move to `on_error: [Escape]` / `post_dialog_cleanup: Escape` YAML primitives. |
+| N4 | MEDIUM | OPEN | `consultation_v2/drivers/grok.py:190-192` — Hardcoded `time.sleep(3.0)` before attach verification with comment "FIX 3: Increased wait from 2.0s → 3.0s ... AT-SPI tree has time to reflect Remove chip." Grok-specific timing constant baked into driver, not YAML `workflow.timing`. |
+
+These findings feed `p1-grok-map` (taeys-hands owns). On p1-grok-map close-out, N1-N4 should be RESOLVED with the structural fix applied (move Grok-specific knowledge into YAML primitives or remove the accommodation entirely).
+
 ## OUT_OF_SCOPE — explicitly NOT addressed in this plan (Jesse 2026-05-31)
 
 | id | severity | status | summary |
