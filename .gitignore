@@ -88,3 +88,9 @@ RELEASE_READINESS.md
 .ntm/
 .claude/worktrees/
 .ipynb_checkpoints/
+
+# Archive snapshots (legacy reference, kept locally, not tracked)
+.archive/
+
+# Scheduled task locks (runtime state)
+.claude/scheduled_tasks.lock
