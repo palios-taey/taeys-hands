@@ -1,0 +1,1215 @@
+{
+  "platform": "perplexity",
+  "display": ":6",
+  "element_count": 151,
+  "elements": [
+    {
+      "name": "Minimize",
+      "role": "push button",
+      "x": 1801,
+      "y": -7,
+      "w": 37,
+      "h": 24
+    },
+    {
+      "name": "Maximize",
+      "role": "push button",
+      "x": 1838,
+      "y": -7,
+      "w": 37,
+      "h": 24
+    },
+    {
+      "name": "Close",
+      "role": "push button",
+      "x": 1875,
+      "y": -7,
+      "w": 40,
+      "h": 24
+    },
+    {
+      "name": "Firefox View",
+      "role": "toggle button",
+      "x": 45,
+      "y": 5,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Close tab",
+      "role": "push button",
+      "x": 291,
+      "y": 15,
+      "w": 18,
+      "h": 24
+    },
+    {
+      "name": "Open a new tab (Ctrl+T)",
+      "role": "push button",
+      "x": 315,
+      "y": 5,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "List all tabs",
+      "role": "push button",
+      "x": 1721,
+      "y": 5,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Minimize",
+      "role": "push button",
+      "x": 1801,
+      "y": 5,
+      "w": 37,
+      "h": 44
+    },
+    {
+      "name": "Maximize",
+      "role": "push button",
+      "x": 1838,
+      "y": 5,
+      "w": 37,
+      "h": 44
+    },
+    {
+      "name": "Close",
+      "role": "push button",
+      "x": 1875,
+      "y": 5,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Sidebars",
+      "role": "push button",
+      "x": 5,
+      "y": 49,
+      "w": 42,
+      "h": 40
+    },
+    {
+      "name": "Back",
+      "role": "push button",
+      "x": 47,
+      "y": 49,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Forward",
+      "role": "push button",
+      "x": 83,
+      "y": 49,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Reload",
+      "role": "push button",
+      "x": 119,
+      "y": 49,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Google, pick a search engine",
+      "role": "push button",
+      "x": 274,
+      "y": -946,
+      "w": 46,
+      "h": 22
+    },
+    {
+      "name": "No trackers known to Firefox were detected on this page.",
+      "role": "push button",
+      "x": 274,
+      "y": 55,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "View site information",
+      "role": "push button",
+      "x": 302,
+      "y": 55,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "Search with Google or enter address",
+      "role": "entry",
+      "x": 334,
+      "y": 55,
+      "w": 1320,
+      "h": 28
+    },
+    {
+      "name": "Bookmark this page (Ctrl+D)",
+      "role": "push button",
+      "x": 1654,
+      "y": 55,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "Account",
+      "role": "push button",
+      "x": 1801,
+      "y": 49,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Extensions",
+      "role": "push button",
+      "x": 1837,
+      "y": 49,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Firefox",
+      "role": "push button",
+      "x": 1873,
+      "y": 49,
+      "w": 42,
+      "h": 40
+    },
+    {
+      "name": "Perplexity",
+      "role": "link",
+      "x": 13,
+      "y": 98,
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "Collapse sidebar",
+      "role": "push button",
+      "x": 157,
+      "y": 98,
+      "w": 40,
+      "h": 40
+    },
+    {
+      "name": "New",
+      "role": "link",
+      "x": 13,
+      "y": 147,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Computer",
+      "role": "link",
+      "x": 13,
+      "y": 188,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Expand Computer",
+      "role": "push button",
+      "x": 21,
+      "y": 196,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Spaces",
+      "role": "link",
+      "x": 13,
+      "y": 229,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Expand Spaces",
+      "role": "push button",
+      "x": 21,
+      "y": 237,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Artifacts",
+      "role": "link",
+      "x": 13,
+      "y": 270,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Expand Artifacts",
+      "role": "push button",
+      "x": 21,
+      "y": 278,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Customize",
+      "role": "link",
+      "x": 13,
+      "y": 311,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Expand Customize",
+      "role": "push button",
+      "x": 21,
+      "y": 319,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "History",
+      "role": "link",
+      "x": 13,
+      "y": 352,
+      "w": 184,
+      "h": 40
+    },
+    {
+      "name": "Collapse History",
+      "role": "push button",
+      "x": 21,
+      "y": 360,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "taeys-hands production-grade audit \u2014 full implementation review of YAMLs + drive",
+      "role": "link",
+      "x": 13,
+      "y": 393,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Thread actions",
+      "role": "push button",
+      "x": 168,
+      "y": 395,
+      "w": 27,
+      "h": 24
+    },
+    {
+      "name": "YAML schema question \u2014 exact-match accessibility automation with empty-name and ",
+      "role": "link",
+      "x": 13,
+      "y": 422,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 FAMILY RETROSPECTIVE BRIEF \u2014 TIGHT single-question retrospectiv",
+      "role": "link",
+      "x": 13,
+      "y": 451,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 FULL AUDIT ADDENDUM \u2014 TIGHT re-verify v1.3.1 + v1.3.2 fixes lan",
+      "role": "link",
+      "x": 13,
+      "y": 480,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 PUBLIC ANNOUNCE THREAD CONTENT AUDIT \u2014 LIGHT scope (PR review).",
+      "role": "link",
+      "x": 13,
+      "y": 509,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 FULL CODEBASE PRE-RELEASE AUDIT \u2014 standard scope. Conductor ski",
+      "role": "link",
+      "x": 13,
+      "y": 538,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "# Overnight Scout \u2014 last 8 hours (post-launch settling window) ## Context Treasu",
+      "role": "link",
+      "x": 13,
+      "y": 567,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 Stage B-Final LIGHT Family audit \u2014 verification of pre-approved",
+      "role": "link",
+      "x": 13,
+      "y": 596,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 Stage B ROUND 5 LIGHT RE-AUDIT \u2014 did your round-4 amendments la",
+      "role": "link",
+      "x": 13,
+      "y": 625,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Sprint-6 CLARITY follow-up dispatch attached. Single-platform Perplexity Deep Re",
+      "role": "link",
+      "x": 13,
+      "y": 654,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 Stage B IMPLEMENTATION audit (round 4 \u2014 fourth code-level audit",
+      "role": "link",
+      "x": 13,
+      "y": 683,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 Stage A IMPLEMENTATION audit (first code-level review on branch",
+      "role": "link",
+      "x": 13,
+      "y": 712,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "# Narrow Scout \u2014 last 4 hours only ## Context Treasurer cycle 2026-05-30 20:40 U",
+      "role": "link",
+      "x": 13,
+      "y": 741,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 v4 LIGHT RE-AUDIT \u2014 folded amendments from round 1; bounded fol",
+      "role": "link",
+      "x": 13,
+      "y": 770,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "# Combined Scout: Rescue Bank + Product-Anchored Acute Pain (48-72h) ## Context ",
+      "role": "link",
+      "x": 13,
+      "y": 799,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "ISMA v0.1.3 public release contradiction-check re-audit (DR pass, supersedes pri",
+      "role": "link",
+      "x": 13,
+      "y": 828,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "Conductor v1.3.0 stop-reason discipline engine \u2014 Family audit, see attached pack",
+      "role": "link",
+      "x": 13,
+      "y": 857,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "/www.perplexity.ai/",
+      "role": "link",
+      "x": 13,
+      "y": 886,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "https://www.perplexity.ai//tmp/taey_package_perplexity_1780157962.md",
+      "role": "link",
+      "x": 13,
+      "y": 915,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "https://www.perplexity.ai/",
+      "role": "link",
+      "x": 13,
+      "y": 944,
+      "w": 184,
+      "h": 28
+    },
+    {
+      "name": "User avatar Jesse LaRose",
+      "role": "push button",
+      "x": 21,
+      "y": 1027,
+      "w": 138,
+      "h": 40
+    },
+    {
+      "name": "Notifications",
+      "role": "push button",
+      "x": 160,
+      "y": 1027,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Thread actions",
+      "role": "push button",
+      "x": 1773,
+      "y": 102,
+      "w": 36,
+      "h": 32
+    },
+    {
+      "name": "Share",
+      "role": "push button",
+      "x": 1817,
+      "y": 102,
+      "w": 82,
+      "h": 32
+    },
+    {
+      "name": "Edit query",
+      "role": "push button",
+      "x": 744,
+      "y": -383,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy query",
+      "role": "push button",
+      "x": 780,
+      "y": -383,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "taeys-hands production-grade audit \u2014 full implementation review of YAMLs + drive",
+      "role": "heading",
+      "x": 820,
+      "y": -487,
+      "w": 600,
+      "h": 144
+    },
+    {
+      "name": "taey_package_perplexity_1780239355.md",
+      "role": "push button",
+      "x": 1220,
+      "y": -339,
+      "w": 200,
+      "h": 34
+    },
+    {
+      "name": "Completed 3 steps",
+      "role": "push button",
+      "x": 700,
+      "y": -273,
+      "w": 145,
+      "h": 20
+    },
+    {
+      "name": "Copy contents",
+      "role": "push button",
+      "x": 1218,
+      "y": -221,
+      "w": 36,
+      "h": 32
+    },
+    {
+      "name": "Open full screen",
+      "role": "push button",
+      "x": 1258,
+      "y": -221,
+      "w": 36,
+      "h": 32
+    },
+    {
+      "name": "Download",
+      "role": "push button",
+      "x": 1302,
+      "y": -221,
+      "w": 110,
+      "h": 32
+    },
+    {
+      "name": "taeys-hands Production-Grade Audit",
+      "role": "heading",
+      "x": 716,
+      "y": -169,
+      "w": 688,
+      "h": 25
+    },
+    {
+      "name": "Executive Summary",
+      "role": "heading",
+      "x": 716,
+      "y": 67,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "\u00a70 Audit Frame",
+      "role": "heading",
+      "x": 716,
+      "y": 345,
+      "w": 688,
+      "h": 22
+    },
+    {
+      "name": "\u00a71 Violation Census",
+      "role": "heading",
+      "x": 716,
+      "y": 813,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "\u00a7Q1 \u2014 YAML Cleanup (Primary Platform: platforms/perplexity.yaml)",
+      "role": "heading",
+      "x": 716,
+      "y": 1279,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "Q1.1 Complete BEFORE \u2192 AFTER Diff",
+      "role": "heading",
+      "x": 716,
+      "y": 1352,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 1426,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 1646,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 2027,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 2270,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 2578,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 2822,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 3203,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 3446,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 3778,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 3995,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Q1.2 Cross-Platform Patterns Requiring Attention",
+      "role": "heading",
+      "x": 716,
+      "y": 4257,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 4425,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 4923,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 5325,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 5896,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "\u00a7Q2 \u2014 Driver Zero-Knowledge Audit",
+      "role": "heading",
+      "x": 716,
+      "y": 6207,
+      "w": 688,
+      "h": 22
+    },
+    {
+      "name": "Q2.1 Observed Violations (verbatim, lines 369\u2013390 and 528)",
+      "role": "heading",
+      "x": 716,
+      "y": 6331,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 6371,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Q2.2 Elimination Path \u2014 Option A: name_startswith Primitive",
+      "role": "heading",
+      "x": 716,
+      "y": 6913,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 6987,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 7202,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Q2.3 Elimination Path \u2014 Option B: Enumerated names_any_of (No Resolver Change)",
+      "role": "heading",
+      "x": 716,
+      "y": 7532,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 7606,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Q2.4 core/mode_select.py:528 \u2014 ChatGPT Extended",
+      "role": "heading",
+      "x": 716,
+      "y": 8201,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 8241,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "\u00a7Q3 \u2014 Driver Size Review",
+      "role": "heading",
+      "x": 716,
+      "y": 8584,
+      "w": 688,
+      "h": 22
+    },
+    {
+      "name": "Q3.1 perplexity.py \u2014 Primary Focus (917 LOC)",
+      "role": "heading",
+      "x": 716,
+      "y": 8932,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "\u00a7Q4 \u2014 Extraction Integrity",
+      "role": "heading",
+      "x": 716,
+      "y": 9819,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "Q4.1 The copy_button: name_contains: \"Copy\" Defect",
+      "role": "heading",
+      "x": 716,
+      "y": 9858,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 9958,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Q4.2 Does _match_element Honor names_any_of Order?",
+      "role": "heading",
+      "x": 716,
+      "y": 10320,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 10712,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "\u00a7Q5 \u2014 Git Connector Workflow (Perplexity Platform)",
+      "role": "heading",
+      "x": 716,
+      "y": 11231,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "Q5.1 Perplexity Git Connector \u2014 Test Protocol Design",
+      "role": "heading",
+      "x": 716,
+      "y": 11382,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 12106,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy code",
+      "role": "push button",
+      "x": 1368,
+      "y": 12660,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "\u00a7Q6 \u2014 Production-Grade Gap Inventory",
+      "role": "heading",
+      "x": 716,
+      "y": 13100,
+      "w": 688,
+      "h": 22
+    },
+    {
+      "name": "BLOCKING",
+      "role": "heading",
+      "x": 716,
+      "y": 13138,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "HIGH",
+      "role": "heading",
+      "x": 716,
+      "y": 13628,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "MEDIUM",
+      "role": "heading",
+      "x": 716,
+      "y": 14298,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "LOW",
+      "role": "heading",
+      "x": 716,
+      "y": 14866,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "\u00a7Q7 \u2014 Verdict",
+      "role": "heading",
+      "x": 716,
+      "y": 15173,
+      "w": 688,
+      "h": 23
+    },
+    {
+      "name": "BLOCK",
+      "role": "heading",
+      "x": 716,
+      "y": 15212,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Minimum Fix Set to Flip to ENDORSE",
+      "role": "heading",
+      "x": 716,
+      "y": 15904,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "Path to ENDORSE",
+      "role": "heading",
+      "x": 716,
+      "y": 16664,
+      "w": 688,
+      "h": 20
+    },
+    {
+      "name": "taeys-hands Production-Grade Audit",
+      "role": "push button",
+      "x": 700,
+      "y": -181,
+      "w": 720,
+      "h": 400
+    },
+    {
+      "name": "Share",
+      "role": "push button",
+      "x": 692,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Download",
+      "role": "push button",
+      "x": 728,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 764,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Rewrite Thread",
+      "role": "push button",
+      "x": 800,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "1 source",
+      "role": "push button",
+      "x": 836,
+      "y": 1043,
+      "w": 91,
+      "h": 32
+    },
+    {
+      "name": "Helpful",
+      "role": "push button",
+      "x": 1316,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Not helpful",
+      "role": "push button",
+      "x": 1352,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "More actions",
+      "role": "push button",
+      "x": 1388,
+      "y": 1043,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Add files or tools",
+      "role": "push button",
+      "x": 713,
+      "y": 1014,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Deep research",
+      "role": "toggle button",
+      "x": 753,
+      "y": 1014,
+      "w": 151,
+      "h": 32
+    },
+    {
+      "name": "Dictation",
+      "role": "push button",
+      "x": 1335,
+      "y": 1014,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Submit",
+      "role": "push button",
+      "x": 1375,
+      "y": 1014,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Mozilla Firefox",
+      "role": "heading",
+      "x": 305,
+      "y": 413,
+      "w": 1311,
+      "h": 64
+    },
+    {
+      "name": "Search with Google or enter address",
+      "role": "push button",
+      "x": 600,
+      "y": 509,
+      "w": 720,
+      "h": 52
+    },
+    {
+      "name": "Amazon",
+      "role": "link",
+      "x": 480,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Amazon",
+      "role": "push button",
+      "x": 576,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Expedia",
+      "role": "link",
+      "x": 600,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Expedia",
+      "role": "push button",
+      "x": 696,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Walmart",
+      "role": "link",
+      "x": 720,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Walmart",
+      "role": "push button",
+      "x": 816,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Perplexity",
+      "role": "link",
+      "x": 840,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Perplexity",
+      "role": "push button",
+      "x": 936,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Wikipedia",
+      "role": "link",
+      "x": 960,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Wikipedia",
+      "role": "push button",
+      "x": 1056,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "YouTube",
+      "role": "link",
+      "x": 1080,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for YouTube",
+      "role": "push button",
+      "x": 1176,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Reddit",
+      "role": "link",
+      "x": 1200,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Reddit",
+      "role": "push button",
+      "x": 1296,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Add-ons for Firefox",
+      "role": "link",
+      "x": 1320,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Add-ons for Firefox",
+      "role": "push button",
+      "x": 1416,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Customize",
+      "role": "push button",
+      "x": 1851,
+      "y": 1009,
+      "w": 40,
+      "h": 42
+    }
+  ]
+}

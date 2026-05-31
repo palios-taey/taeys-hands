@@ -1,0 +1,1607 @@
+{
+  "platform": "chatgpt",
+  "display": ":2",
+  "element_count": 202,
+  "elements": [
+    {
+      "name": "Minimize",
+      "role": "push button",
+      "x": 1486,
+      "y": 42,
+      "w": 37,
+      "h": 24
+    },
+    {
+      "name": "Maximize",
+      "role": "push button",
+      "x": 1523,
+      "y": 42,
+      "w": 37,
+      "h": 24
+    },
+    {
+      "name": "Close",
+      "role": "push button",
+      "x": 1560,
+      "y": 42,
+      "w": 40,
+      "h": 24
+    },
+    {
+      "name": "Firefox View",
+      "role": "toggle button",
+      "x": 360,
+      "y": 54,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Close tab",
+      "role": "push button",
+      "x": 606,
+      "y": 64,
+      "w": 18,
+      "h": 24
+    },
+    {
+      "name": "Open a new tab (Ctrl+T)",
+      "role": "push button",
+      "x": 630,
+      "y": 54,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "List all tabs",
+      "role": "push button",
+      "x": 1406,
+      "y": 54,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Minimize",
+      "role": "push button",
+      "x": 1486,
+      "y": 54,
+      "w": 37,
+      "h": 44
+    },
+    {
+      "name": "Maximize",
+      "role": "push button",
+      "x": 1523,
+      "y": 54,
+      "w": 37,
+      "h": 44
+    },
+    {
+      "name": "Close",
+      "role": "push button",
+      "x": 1560,
+      "y": 54,
+      "w": 40,
+      "h": 44
+    },
+    {
+      "name": "Sidebars",
+      "role": "push button",
+      "x": 320,
+      "y": 98,
+      "w": 42,
+      "h": 40
+    },
+    {
+      "name": "Back",
+      "role": "push button",
+      "x": 362,
+      "y": 98,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Forward",
+      "role": "push button",
+      "x": 398,
+      "y": 98,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Reload",
+      "role": "push button",
+      "x": 434,
+      "y": 98,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Google, pick a search engine",
+      "role": "push button",
+      "x": 571,
+      "y": -897,
+      "w": 46,
+      "h": 22
+    },
+    {
+      "name": "No trackers known to Firefox were detected on this page.",
+      "role": "push button",
+      "x": 571,
+      "y": 104,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "View site information",
+      "role": "push button",
+      "x": 599,
+      "y": 104,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "You have granted this website additional permissions.",
+      "role": "push button",
+      "x": 627,
+      "y": 104,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "Search with Google or enter address",
+      "role": "entry",
+      "x": 659,
+      "y": 104,
+      "w": 698,
+      "h": 28
+    },
+    {
+      "name": "Bookmark this page (Ctrl+D)",
+      "role": "push button",
+      "x": 1357,
+      "y": 104,
+      "w": 28,
+      "h": 28
+    },
+    {
+      "name": "Account",
+      "role": "push button",
+      "x": 1486,
+      "y": 98,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Extensions",
+      "role": "push button",
+      "x": 1522,
+      "y": 98,
+      "w": 36,
+      "h": 40
+    },
+    {
+      "name": "Firefox",
+      "role": "push button",
+      "x": 1558,
+      "y": 98,
+      "w": 42,
+      "h": 40
+    },
+    {
+      "name": "Skip to content",
+      "role": "link",
+      "x": 251,
+      "y": 138,
+      "w": 137,
+      "h": 16
+    },
+    {
+      "name": "Chat history",
+      "role": "heading",
+      "x": 319,
+      "y": 138,
+      "w": 1,
+      "h": 1
+    },
+    {
+      "name": "Home",
+      "role": "link",
+      "x": 328,
+      "y": 147,
+      "w": 95,
+      "h": 36
+    },
+    {
+      "name": "Close sidebar",
+      "role": "push button",
+      "x": 536,
+      "y": 147,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "New chat Control Shift O",
+      "role": "link",
+      "x": 326,
+      "y": 199,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Search chats Control K",
+      "role": "push button",
+      "x": 326,
+      "y": 235,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Library",
+      "role": "link",
+      "x": 326,
+      "y": 271,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Apps",
+      "role": "link",
+      "x": 326,
+      "y": 307,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Codex",
+      "role": "link",
+      "x": 326,
+      "y": 343,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Projects",
+      "role": "push button",
+      "x": 320,
+      "y": 427,
+      "w": 254,
+      "h": 32
+    },
+    {
+      "name": "Projects",
+      "role": "heading",
+      "x": 336,
+      "y": 433,
+      "w": 55,
+      "h": 20
+    },
+    {
+      "name": "New project",
+      "role": "push button",
+      "x": 326,
+      "y": 459,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "ai-execution-system",
+      "role": "push button",
+      "x": 326,
+      "y": 495,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open project home",
+      "role": "push button",
+      "x": 508,
+      "y": 487,
+      "w": 38,
+      "h": 52
+    },
+    {
+      "name": "Open project options for ai-execution-system",
+      "role": "push button",
+      "x": 536,
+      "y": 487,
+      "w": 38,
+      "h": 52
+    },
+    {
+      "name": "Default color, black in light mode, white in dark mode Folder Move",
+      "role": "push button",
+      "x": 326,
+      "y": 531,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open project home",
+      "role": "push button",
+      "x": 508,
+      "y": 523,
+      "w": 38,
+      "h": 52
+    },
+    {
+      "name": "Open project options for Move",
+      "role": "push button",
+      "x": 536,
+      "y": 523,
+      "w": 38,
+      "h": 52
+    },
+    {
+      "name": "Recents",
+      "role": "push button",
+      "x": 320,
+      "y": 587,
+      "w": 254,
+      "h": 32
+    },
+    {
+      "name": "Recents",
+      "role": "heading",
+      "x": 336,
+      "y": 593,
+      "w": 54,
+      "h": 20
+    },
+    {
+      "name": "PALIOS-TAEY Family Inquiry, pinned conversation",
+      "role": "link",
+      "x": 326,
+      "y": 619,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for PALIOS-TAEY Family Inquiry",
+      "role": "push button",
+      "x": 557,
+      "y": 607,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Audit of Taeys-Hands YAMLs",
+      "role": "link",
+      "x": 326,
+      "y": 655,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Audit of Taeys-Hands YAMLs",
+      "role": "push button",
+      "x": 320,
+      "y": 643,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Repo Audit Request, unread",
+      "role": "link",
+      "x": 326,
+      "y": 691,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Repo Audit Request",
+      "role": "push button",
+      "x": 549,
+      "y": 679,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit",
+      "role": "link",
+      "x": 326,
+      "y": 727,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 320,
+      "y": 715,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Retrospective, unread",
+      "role": "link",
+      "x": 326,
+      "y": 763,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Retrospective",
+      "role": "push button",
+      "x": 549,
+      "y": 751,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 799,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 549,
+      "y": 787,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Review, unread",
+      "role": "link",
+      "x": 326,
+      "y": 835,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Review",
+      "role": "push button",
+      "x": 549,
+      "y": 823,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 871,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 549,
+      "y": 859,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Re-audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 907,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Re-audit",
+      "role": "push button",
+      "x": 549,
+      "y": 895,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 943,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 549,
+      "y": 931,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Sprint-6 Consultation Dispatch, unread",
+      "role": "link",
+      "x": 326,
+      "y": 979,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Sprint-6 Consultation Dispatch",
+      "role": "push button",
+      "x": 549,
+      "y": 967,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 1015,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 549,
+      "y": 1003,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Update",
+      "role": "link",
+      "x": 326,
+      "y": 1051,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Update",
+      "role": "push button",
+      "x": 320,
+      "y": 1039,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor v1.3.0 Audit, unread",
+      "role": "link",
+      "x": 326,
+      "y": 1087,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor v1.3.0 Audit",
+      "role": "push button",
+      "x": 549,
+      "y": 1075,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "ISMA v0.1.3 audit",
+      "role": "link",
+      "x": 326,
+      "y": 1123,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for ISMA v0.1.3 audit",
+      "role": "push button",
+      "x": 320,
+      "y": 1111,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "ISMA v0.1.1 Audit",
+      "role": "link",
+      "x": 326,
+      "y": 1159,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for ISMA v0.1.1 Audit",
+      "role": "push button",
+      "x": 320,
+      "y": 1147,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Audit Validation Request",
+      "role": "link",
+      "x": 326,
+      "y": 1195,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Audit Validation Request",
+      "role": "push button",
+      "x": 320,
+      "y": 1183,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Task Execution with Horizon-Lens",
+      "role": "link",
+      "x": 326,
+      "y": 1231,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Task Execution with Horizon-Lens",
+      "role": "push button",
+      "x": 320,
+      "y": 1219,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Task Execution Instructions",
+      "role": "link",
+      "x": 326,
+      "y": 1267,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Task Execution Instructions",
+      "role": "push button",
+      "x": 320,
+      "y": 1255,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Security Research Task",
+      "role": "link",
+      "x": 326,
+      "y": 1303,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Security Research Task",
+      "role": "push button",
+      "x": 320,
+      "y": 1291,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conditional Sign-Off Clarification",
+      "role": "link",
+      "x": 326,
+      "y": 1339,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conditional Sign-Off Clarification",
+      "role": "push button",
+      "x": 320,
+      "y": 1327,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor Family Validation",
+      "role": "link",
+      "x": 326,
+      "y": 1375,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor Family Validation",
+      "role": "push button",
+      "x": 320,
+      "y": 1363,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor A/B/C Decision",
+      "role": "link",
+      "x": 326,
+      "y": 1411,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor A/B/C Decision",
+      "role": "push button",
+      "x": 320,
+      "y": 1399,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor TARGETED Condition-Check",
+      "role": "link",
+      "x": 326,
+      "y": 1447,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor TARGETED Condition-Check",
+      "role": "push button",
+      "x": 320,
+      "y": 1435,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor Family Architecture Review",
+      "role": "link",
+      "x": 326,
+      "y": 1483,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor Family Architecture Review",
+      "role": "push button",
+      "x": 320,
+      "y": 1471,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor Family Consultation",
+      "role": "link",
+      "x": 326,
+      "y": 1519,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor Family Consultation",
+      "role": "push button",
+      "x": 320,
+      "y": 1507,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor SUPPORT.md Decision",
+      "role": "link",
+      "x": 326,
+      "y": 1555,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor SUPPORT.md Decision",
+      "role": "push button",
+      "x": 320,
+      "y": 1543,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Conductor release decision",
+      "role": "link",
+      "x": 326,
+      "y": 1591,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Conductor release decision",
+      "role": "push button",
+      "x": 320,
+      "y": 1579,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Pitch for Adopter",
+      "role": "link",
+      "x": 326,
+      "y": 1627,
+      "w": 248,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options for Pitch for Adopter",
+      "role": "push button",
+      "x": 320,
+      "y": 1615,
+      "w": 38,
+      "h": 36
+    },
+    {
+      "name": "Jesse LaRose Pro, open profile menu",
+      "role": "push button",
+      "x": 328,
+      "y": 968,
+      "w": 246,
+      "h": 52
+    },
+    {
+      "name": "Download apps",
+      "role": "push button",
+      "x": 530,
+      "y": 975,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Share",
+      "role": "push button",
+      "x": 1469,
+      "y": 147,
+      "w": 87,
+      "h": 36
+    },
+    {
+      "name": "Open conversation options",
+      "role": "push button",
+      "x": 1556,
+      "y": 147,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "You said:",
+      "role": "heading",
+      "x": 579,
+      "y": -20097,
+      "w": 1,
+      "h": 1
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352.md",
+      "role": "push button",
+      "x": 1090,
+      "y": -20080,
+      "w": 320,
+      "h": 56
+    },
+    {
+      "name": "Copy message",
+      "role": "push button",
+      "x": 1346,
+      "y": -19848,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Edit message",
+      "role": "push button",
+      "x": 1378,
+      "y": -19848,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "ChatGPT said:",
+      "role": "heading",
+      "x": 579,
+      "y": -19813,
+      "w": 1,
+      "h": 1
+    },
+    {
+      "name": "Thought for 11m 23s",
+      "role": "push button",
+      "x": 770,
+      "y": -19638,
+      "w": 162,
+      "h": 24
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 973,
+      "y": -19494,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1180,
+      "y": -19494,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Register summary",
+      "role": "heading",
+      "x": 770,
+      "y": -19451,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 931,
+      "y": -19305,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1138,
+      "y": -19305,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -19278,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 940,
+      "y": -19002,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Q1 \u2014 YAML cleanup, primary platform: ChatGPT",
+      "role": "heading",
+      "x": 770,
+      "y": -18918,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 987,
+      "y": -18852,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Q1 register",
+      "role": "heading",
+      "x": 770,
+      "y": -18809,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1191,
+      "y": -18657,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -18630,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Complete rewritten ChatGPT YAML draft",
+      "role": "heading",
+      "x": 770,
+      "y": -18370,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -11538,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Q1 before \u2192 after diff for ChatGPT forbidden entries",
+      "role": "heading",
+      "x": 770,
+      "y": -11479,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -8116,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Q2 \u2014 Driver zero-knowledge audit",
+      "role": "heading",
+      "x": 770,
+      "y": -8016,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 830,
+      "y": -7866,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Proposed schema primitives",
+      "role": "heading",
+      "x": 770,
+      "y": -7600,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -7343,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -7051,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -6839,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -6618,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Q3 \u2014 Driver size review",
+      "role": "heading",
+      "x": 770,
+      "y": -6455,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 827,
+      "y": -6334,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Evidence needed for full Q3 closure",
+      "role": "heading",
+      "x": 770,
+      "y": -6126,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1366,
+      "y": -5992,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Q4 \u2014 Extraction integrity",
+      "role": "heading",
+      "x": 770,
+      "y": -5532,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -5379,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 989,
+      "y": -5149,
+      "w": 197,
+      "h": 25
+    },
+    {
+      "name": "Required resolver change",
+      "role": "heading",
+      "x": 770,
+      "y": -5103,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1281,
+      "y": -4646,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Run code",
+      "role": "push button",
+      "x": 1327,
+      "y": -4646,
+      "w": 76,
+      "h": 36
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1366,
+      "y": -4549,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Q5 \u2014 ChatGPT Git Connector workflow protocol",
+      "role": "heading",
+      "x": 770,
+      "y": -4287,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1099,
+      "y": -4166,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -4033,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 980,
+      "y": -4033,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "ChatGPT click-walk scan protocol",
+      "role": "heading",
+      "x": 770,
+      "y": -3922,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1366,
+      "y": -3811,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Proposed element additions after live scan",
+      "role": "heading",
+      "x": 770,
+      "y": -2793,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Copy",
+      "role": "push button",
+      "x": 1367,
+      "y": -2276,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "ChatGPT Git Connector failure modes to test",
+      "role": "heading",
+      "x": 770,
+      "y": -2217,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "Q6 \u2014 Other production-grade gaps",
+      "role": "heading",
+      "x": 770,
+      "y": -1807,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "BLOCKING",
+      "role": "heading",
+      "x": 770,
+      "y": -1759,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1066,
+      "y": -1642,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 858,
+      "y": -1544,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -1423,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 871,
+      "y": -1328,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "HIGH",
+      "role": "heading",
+      "x": 770,
+      "y": -1285,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 822,
+      "y": -1168,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 1117,
+      "y": -1041,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -894,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -773,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "MEDIUM",
+      "role": "heading",
+      "x": 770,
+      "y": -730,
+      "w": 640,
+      "h": 28
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 774,
+      "y": -581,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "taey_package_chatgpt_1780239352",
+      "role": "push button",
+      "x": 866,
+      "y": -480,
+      "w": 198,
+      "h": 25
+    },
+    {
+      "name": "Q7 \u2014 Verdict",
+      "role": "heading",
+      "x": 770,
+      "y": -302,
+      "w": 640,
+      "h": 32
+    },
+    {
+      "name": "Minimum fix set to flip from BLOCK to ENDORSE-WITH-AMENDMENTS",
+      "role": "heading",
+      "x": 770,
+      "y": -178,
+      "w": 640,
+      "h": 56
+    },
+    {
+      "name": "Copy response",
+      "role": "push button",
+      "x": 764,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Good response",
+      "role": "toggle button",
+      "x": 796,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Bad response",
+      "role": "toggle button",
+      "x": 828,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Pro feedback",
+      "role": "push button",
+      "x": 860,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Share",
+      "role": "push button",
+      "x": 892,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Switch model",
+      "role": "push button",
+      "x": 924,
+      "y": 846,
+      "w": 32,
+      "h": 30
+    },
+    {
+      "name": "More actions",
+      "role": "push button",
+      "x": 956,
+      "y": 845,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "name": "Sources",
+      "role": "push button",
+      "x": 988,
+      "y": 846,
+      "w": 94,
+      "h": 30
+    },
+    {
+      "name": "Add files and more",
+      "role": "push button",
+      "x": 780,
+      "y": 948,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Chat with ChatGPT",
+      "role": "entry",
+      "x": 822,
+      "y": 954,
+      "w": 355,
+      "h": 40
+    },
+    {
+      "name": "Extended Pro",
+      "role": "push button",
+      "x": 1187,
+      "y": 948,
+      "w": 129,
+      "h": 36
+    },
+    {
+      "name": "Start dictation",
+      "role": "push button",
+      "x": 1322,
+      "y": 948,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Start Voice",
+      "role": "push button",
+      "x": 1364,
+      "y": 948,
+      "w": 36,
+      "h": 36
+    },
+    {
+      "name": "Mozilla Firefox",
+      "role": "heading",
+      "x": 466,
+      "y": 413,
+      "w": 989,
+      "h": 64
+    },
+    {
+      "name": "Search with Google or enter address",
+      "role": "push button",
+      "x": 600,
+      "y": 509,
+      "w": 720,
+      "h": 52
+    },
+    {
+      "name": "Amazon",
+      "role": "link",
+      "x": 480,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Amazon",
+      "role": "push button",
+      "x": 576,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Expedia",
+      "role": "link",
+      "x": 600,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Expedia",
+      "role": "push button",
+      "x": 696,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Walmart",
+      "role": "link",
+      "x": 720,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Walmart",
+      "role": "push button",
+      "x": 816,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "ChatGPT",
+      "role": "link",
+      "x": 840,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for ChatGPT",
+      "role": "push button",
+      "x": 936,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Wikipedia",
+      "role": "link",
+      "x": 960,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Wikipedia",
+      "role": "push button",
+      "x": 1056,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "YouTube",
+      "role": "link",
+      "x": 1080,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for YouTube",
+      "role": "push button",
+      "x": 1176,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Reddit",
+      "role": "link",
+      "x": 1200,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    },
+    {
+      "name": "Open context menu for Reddit",
+      "role": "push button",
+      "x": 1296,
+      "y": 606,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "name": "Add-ons for Firefox",
+      "role": "link",
+      "x": 1320,
+      "y": 594,
+      "w": 120,
+      "h": 130
+    }
+  ]
+}
