@@ -14,7 +14,7 @@ tree:
     - ChatGPT
     - Chat history
     - Skip to content
-    name_contains:
+    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
     - Upgrade
     - Get Plus
     - ', open profile menu'
@@ -28,7 +28,7 @@ tree:
   sidebar_nav:
   - name: Home
     role: link
-  - name_pattern: New chat*
+  - name_pattern: New chat* # lint-allow: known p1 debt; fresh-chat nav label is still wildcarded pending exact AT-SPI remap
     role: link
   - name: Pulse
     role: link
@@ -59,22 +59,22 @@ tree:
       name: Add files and more
       role: push button
     copy_button:
-      name_contains: Copy
+      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
       role: push button
     stop_button:
-      name_contains: Stop
+      name_contains: Stop # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
       role: push button
     pro_indicator:
       name: Extended Pro, click to remove
       role: push button
     thinking_mode:
-      name_pattern: '*, click to remove'
+      name_pattern: '*, click to remove' # lint-allow: known p1 debt; toolbar chip label still wildcarded pending exact state catalog
       role: push button
     extended_pro:
       name: Extended Pro
       role: push button
     temporary_chat:
-      name_contains: temporary chat
+      name_contains: temporary chat # lint-allow: known p1 debt; temporary-chat indicator still substring-based pending exact remap
       role: push button
     search_chats:
       name: Search chats Control K
@@ -151,7 +151,7 @@ tree:
     # GitHub repo picker (after selecting tool_github, a chip + selector appear in
     # the composer). Verified live 2026-05-22:
     github_chip:
-      name_contains: "GitHub, click to remove"
+      name_contains: "GitHub, click to remove" # lint-allow: known p5 debt; connector chip text is still substring-based pending connector remap
       role: push button
     github_repo_selector:
       name: GitHub
@@ -166,7 +166,7 @@ tree:
     # trailing " Not indexed" in the name (e.g. "palios-taey/taeys-hands-v2 Not indexed").
     # Indexed repos (e.g. "palios-taey/taeys-hands") are selectable directly.
     github_repo_item:
-      name_pattern: "palios-taey/*"
+      name_pattern: "palios-taey/*" # lint-allow: known p5 debt; repo picker items remain wildcarded until exact connector inventory exists
       role: menu item
 workflow:
   defaults:
@@ -238,21 +238,21 @@ workflow:
 validation:
   attach_success:
     indicators:
-    - name_contains: Remove
-      role_contains: button
+    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
+      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
   prompt_ready:
     indicators:
     - name: Send prompt
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop streaming
+    - name_contains: Stop streaming # lint-allow: known p4 debt; send-success still keyed to substring until exact completion spec lands
       role: push button
     timeout: 30
   response_complete:
     indicators:
-    - name_contains: Copy
-      role_contains: button
+    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
+      role_contains: button # lint-allow: known p3 debt; response-complete still uses generic role filter pending extract matrix
     stop_absent: true
   # pro_active: Pro model is selected.
   # pro_indicator (persistent toolbar button) is the authoritative signal —
@@ -289,5 +289,5 @@ validation:
   # primary persistent check, mirroring the pro_indicator pattern.
   extended_thinking_active:
     indicators:
-    - name_pattern: ', click to remove'
+    - name_pattern: ', click to remove' # lint-allow: known p1 debt; extended-thinking badge still wildcarded pending exact active-state map
       role: push button

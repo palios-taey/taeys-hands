@@ -10,7 +10,7 @@ tree:
   exclude:
     names:
     - Gemini
-    name_contains:
+    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
     - Gemini Apps Activity
     - Manage extensions
     - ', Google Account'
@@ -48,7 +48,7 @@ tree:
       - focusable
     mode_picker:
       # Live name is dynamic: "Open mode picker, currently Pro" (UI 2026-05-21)
-      name_contains: Open mode picker
+      name_contains: Open mode picker # lint-allow: known p1 debt; mode-picker label is dynamic and awaits exact remap strategy
       role: push button
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
@@ -76,7 +76,7 @@ tree:
       name: More tools
       role: push button
     copy_button:
-      name_contains: Copy
+      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
       role: push button
     stop_button:
       name: Stop response
@@ -192,8 +192,8 @@ workflow:
 validation:
   attach_success:
     indicators:
-    - name_contains: Remove
-      role_contains: button
+    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
+      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
   prompt_ready:
     indicators:
     - name: Send message
@@ -203,10 +203,10 @@ validation:
     - name: Stop response
       role: push button
     timeout: 30
-  # BUG 6 FIX: name_contains: Copy (not exact name: Copy) per driver spec
+  # BUG 6 FIX: copy button still uses substring matching per driver spec # lint-allow: known p3 debt; comment records current non-exact extract dependency
   response_complete:
     indicators:
-    - name_contains: Copy
+    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
     stop_absent: true
   # BUG 7 FIX: mode validation uses checked state, not selected
   fast_active:

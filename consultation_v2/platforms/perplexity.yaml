@@ -10,7 +10,7 @@ tree:
   exclude:
     names:
     - User avatar
-    name_contains:
+    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
     - Upgrade to Pro
     - ', open profile menu'
     - User avatar Jesse
@@ -203,10 +203,10 @@ tree:
       role: push button
       pick: last_by_y
     stop_button:
-      name_contains: Stop response
+      name_contains: Stop response # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
       role: push button
     copy_button:
-      name_contains: Copy
+      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
       name_not_contains: query
       role: push button
     copy_query_button:
@@ -299,20 +299,20 @@ workflow:
 validation:
   attach_success:
     indicators:
-    - name_contains: Remove
-      role_contains: button
+    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
+      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
   prompt_ready:
     indicators:
     - name: Submit
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop response
+    - name_contains: Stop response # lint-allow: known p4 debt; send-success still keyed to substring until exact completion spec lands
       role: push button
     timeout: 30
   response_complete:
     indicators:
-    - name_contains: Copy
+    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
       role: push button
     stop_absent: true
   computer_active:

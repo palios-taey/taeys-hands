@@ -1,0 +1,26 @@
+name: YAML Integrity Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - consultation-v2-isolated-drivers
+      - 'agent/**'
+      - 'fix/**'
+      - 'feat/**'
+
+jobs:
+  consultation-v2-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run consultation_v2 integrity gate
+        run: python3 tools/lint_no_yaml_silent_fallbacks.py --all
