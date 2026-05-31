@@ -116,6 +116,28 @@ def allowed(line: str) -> bool:
     return bool(allow and allow.group(1).strip())
 
 
+def strip_trailing_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double:
+            return line[:idx].rstrip()
+    return line.rstrip()
+
+
 def scan_file(path: Path) -> list[Finding]:
     if path.resolve() == Path(__file__).resolve():
         return []
@@ -134,8 +156,9 @@ def scan_file(path: Path) -> list[Finding]:
         return findings
 
     for idx, line in enumerate(lines, start=1):
+        logical = strip_trailing_comment(line)
         for rule in rules:
-            if not rule.pattern.search(line):
+            if not rule.pattern.search(logical):
                 continue
             if allowed(line):
                 continue
@@ -149,19 +172,21 @@ def scan_file(path: Path) -> list[Finding]:
 def scan_finally_blocks(path: Path, lines: list[str]) -> list[Finding]:
     findings: list[Finding] = []
     for idx, line in enumerate(lines):
-        if not re.match(r"^\s*finally\s*:\s*$", line):
+        logical = strip_trailing_comment(line)
+        if not re.match(r"^\s*finally\s*:\s*$", logical):
             continue
         if allowed(line):
             continue
         indent = len(line) - len(line.lstrip(" "))
         body_line = None
         for probe in lines[idx + 1:]:
-            if not probe.strip():
+            logical_probe = strip_trailing_comment(probe)
+            if not logical_probe.strip():
                 continue
             probe_indent = len(probe) - len(probe.lstrip(" "))
             if probe_indent <= indent:
                 break
-            body_line = probe
+            body_line = logical_probe
             break
         if body_line and re.match(r"^\s*pass\s*$", body_line):
             findings.append(Finding(
