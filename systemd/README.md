@@ -10,12 +10,23 @@ debugging.
 # 1. Copy units to user systemd dir
 cp systemd/user/*.service ~/.config/systemd/user/
 
-# 2. Copy machine.env template and customize per-machine
+# 2. Optional: override the repo checkout path if it is not ~/taeys-hands
+mkdir -p ~/.config/systemd/user/taey-display-2.service.d
+cat > ~/.config/systemd/user/taey-display-2.service.d/repo.conf <<'UNIT'
+[Service]
+Environment=TAEY_REPO=%h/src/taeys-hands
+UNIT
+# Repeat the drop-in for each taey-display-*.service you enable, or use
+# `systemctl --user edit taey-display-<N>.service` interactively.
+#
+# Default if no override is present: TAEY_REPO=%h/taeys-hands
+
+# 3. Copy machine.env template and customize per-machine
 mkdir -p ~/.taey
 cp systemd/machine.env.template ~/.taey/machine.env
 $EDITOR ~/.taey/machine.env
 
-# 3. Reload systemd + enable + start
+# 4. Reload systemd + enable + start
 systemctl --user daemon-reload
 systemctl --user enable taey-display-{2..6}.service
 systemctl --user start taey-display-{2..6}.service
@@ -57,3 +68,6 @@ multi-display browser dispatch.
 Firefox profiles live at `~/.taey/profiles/<profile-name>/`. The `user.js`
 template at `systemd/user/firefox-user.js` is copied into each profile at
 display launch to set `accessibility.force_disabled = -1` (force AT-SPI on).
+The source path is `${TAEY_REPO}/systemd/user/firefox-user.js`, where
+`TAEY_REPO` defaults to `%h/taeys-hands` and may be overridden via a systemd
+drop-in.
