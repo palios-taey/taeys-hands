@@ -144,7 +144,7 @@ element_map:
     role: entry
     states_include: [editable]
   model_selector:
-    name: "Switch model"
+    name: "Extended Pro"  # was 'Switch model' (removed by ChatGPT 2026-06-01; selector moved into composer, profile-persisted)
     role: push button
   attach_trigger:
     name: "Add files and more"
