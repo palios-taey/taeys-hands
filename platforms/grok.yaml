@@ -118,11 +118,12 @@ element_map:
     name: "Edit"
     role: push button
   stop_button:
+    # Exact AT-SPI name verified live on :5 during generation 2026-06-01.
+    # Grok shows ONE stop button; prior names ["Stop","Stop generating",
+    # "Stop thinking","Stop response"] were stale guesses that matched nothing,
+    # which let the 30s copy-button fallback grab a prompt echo. Exact match only.
     names_any_of:
-      - "Stop"
-      - "Stop generating"
-      - "Stop thinking"
-      - "Stop response"
+      - "Stop model response"
     role: push button
   regenerate:
     name: "Regenerate"
