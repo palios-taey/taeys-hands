@@ -1576,7 +1576,20 @@ def main():
         result['attachment'] = pkg_path
 
         logger.info("Step 4b: Validating uploaded file chip/indicator")
-        attachment_validation = validate_attachment_visible(platform, pkg_path)
+        # Size-aware verify window: large attachments upload slowly, so the
+        # chip can render after the default ~10s. Scale attempts up (+10 per
+        # ~100KB, capped at 60) so big packets don't false-fail; small files
+        # keep the 10-attempt path and verify in 1-3 attempts.
+        try:
+            chip_attempts = max(
+                10,
+                min(60, int(os.path.getsize(pkg_path) / 100_000) * 10 + 10),
+            )
+        except OSError:
+            chip_attempts = 10
+        attachment_validation = validate_attachment_visible(
+            platform, pkg_path, attempts=chip_attempts
+        )
         result['attachment_validation'] = attachment_validation
         if not attachment_validation.get('verified'):
             logger.error("HARD STOP: attached file not visible in AT-SPI tree after upload")
