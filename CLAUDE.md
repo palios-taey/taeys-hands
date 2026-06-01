@@ -3,6 +3,8 @@
 ## What This Is
 MCP server for AT-SPI browser automation. Controls Firefox tabs running ChatGPT, Claude, Gemini, Grok, Perplexity via accessibility tree (no coordinates, no screenshots).
 
+> **READ `100_TIMES.md` FIRST.** The recurring non-negotiable rules (stop-button completion, scroll-to-bottom + copy-button + artifacts extract, EXACT-match YAML, validate-everything, one-tab-per-window, dispatch-sequentially-never-parallel, just-fix-don't-ask, :13=hunter-only). If something breaks, you almost certainly violated one of them.
+
 ---
 
 ## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
@@ -402,7 +404,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (1573 symbols, 4829 relationships, 127 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (5205 symbols, 9367 relationships, 288 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -414,44 +416,12 @@ This project is indexed by GitNexus as **taeys-hands** (1573 symbols, 4829 relat
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
 
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/taeys-hands/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
 ## Never Do
 
 - NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
 - NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
 
 ## Resources
 
@@ -461,32 +431,6 @@ This project is indexed by GitNexus as **taeys-hands** (1573 symbols, 4829 relat
 | `gitnexus://repo/taeys-hands/clusters` | All functional areas |
 | `gitnexus://repo/taeys-hands/processes` | All execution flows |
 | `gitnexus://repo/taeys-hands/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
-```
-
-If the index previously included embeddings, preserve them by adding `--embeddings`:
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
-
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
 
 ## CLI
 
@@ -516,3 +460,10 @@ curl -s -X POST http://localhost:8095/v2/search -H 'Content-Type: application/js
   -d '{"query":"<topic>","top_k":25,"scale":"full_4096"}'
 ```
 **Convenience (on PATH):** `isma-query "what do we know about <topic>" -k 40 --precision --our-prose --json`
+
+## Orchestration & release integrity (canonical)
+
+These conductor-owned canonical docs govern how every session uses the orchestration system and ships public work. If anything here conflicts with them, they win.
+
+- **`<OPERATOR_HOME>/the-conductor/ORCHESTRATION_INTEGRITY.md`** — use the orchestration system (`taey-plan`/`taey-task`/stop-engine) with integrity. Core rules: **"done" is evidence, never a self-report** (commit SHA + mechanical gate result + a real production observation — paste them; the tasks API rejects a `completed` with no evidence); **tests you author are a cheat — production is the oracle**; **bug → FULL STOP → 6SIGMA root-cause** (gitnexus impact + fix the upstream shape, never patch around); **audit gates are `depends:`-encoded** (downstream can't start until the audit task closes with a committed verdict); **stops are intentional** (`taey-stop-reason set ...`, use `blocked_on` while waiting). Honest-incomplete is always fine; a false "done" is the only real failure.
+- **`<OPERATOR_HOME>/the-conductor/PRIVATE_TO_PUBLIC.md`** — production-grade checklist for taking a private repo public (irreversible). Order: secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical (no hardcoded paths/IPs, fail-loud not silent-default) → installable + CI gate that blocks merge → open-mandate audit (full code, find-bugs-not-endorse) → dogfood from the public artifact → docs → **human-approved + consent-gated publish**. Upstream of `RELEASE_DISTRIBUTION_PLAYBOOK.md`.
