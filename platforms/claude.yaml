@@ -114,9 +114,12 @@ element_map:
   toggle_menu:
     name_contains: ["Add files", "Toggle menu"]
     role: push button
+  attach_trigger:
+    name: Add files, connectors, and more
+    role: push button
   upload_files_item:
-    name_contains: ["Add files", "Add content"]
-    role_contains: item
+    name: Add files or photos
+    role: menu item
   git_connector_item:
     name: "Add from GitHub"
     role_contains: item
