@@ -777,7 +777,8 @@ def _has_visible_stop_button(platform: str) -> bool:
     if not doc:
         return False
     stop_patterns = get_platform_config(platform).get('stop_patterns', ['stop'])
-    return _scan_stop_button(doc, stop_patterns)
+    exact_names = _stop_button_exact_names(platform)
+    return _scan_stop_button(doc, exact_names, stop_patterns)
 
 
 def _chatgpt_send_state(initial_url: str) -> dict:
@@ -1185,6 +1186,11 @@ def wait_for_response(platform: str, timeout: int = 3600) -> bool:
     """Wait for response via stop-button polling (same as hmm_bot)."""
     config = get_platform_config(platform)
     stop_patterns = config.get('stop_patterns', ['stop'])
+    exact_names = _stop_button_exact_names(platform)
+    if exact_names is None:
+        logger.warning(
+            "[%s] No exact element_map.stop_button names -- falling back to "
+            "substring stop_patterns %s", platform, stop_patterns)
 
     start = time.time()
     phase = 'waiting_for_start'
@@ -1197,7 +1203,7 @@ def wait_for_response(platform: str, timeout: int = 3600) -> bool:
             time.sleep(5)
             continue
 
-        has_stop = _scan_stop_button(doc, stop_patterns)
+        has_stop = _scan_stop_button(doc, exact_names, stop_patterns)
         poll_count += 1
 
         if phase == 'waiting_for_start':
@@ -1219,7 +1225,7 @@ def wait_for_response(platform: str, timeout: int = 3600) -> bool:
             if not has_stop:
                 time.sleep(2)
                 doc2 = get_doc(force_refresh=True)
-                if doc2 and not _scan_stop_button(doc2, stop_patterns):
+                if doc2 and not _scan_stop_button(doc2, exact_names, stop_patterns):
                     logger.info(f"Response complete ({elapsed:.0f}s)")
                     return True
                 else:
@@ -1232,16 +1238,60 @@ def wait_for_response(platform: str, timeout: int = 3600) -> bool:
     return False
 
 
-def _scan_stop_button(doc, stop_patterns: list) -> bool:
-    """Scan AT-SPI tree for stop button."""
+_STOP_BUTTON_ROLES = ('push button', 'button', 'toggle button')
+
+
+def _stop_button_exact_names(platform: str):
+    """Return the set of EXACT lowercased stop-button names from the platform's
+    element_map.stop_button, or None if the platform only provides a substring
+    spec (name_contains) and must fall back to stop_patterns.
+
+    Supports both element_map shapes the YAMLs use:
+      - {'names_any_of': [..], 'role': ..}
+      - {'name': '..', 'role': ..}
+    THE RULE: exact name match only -- never broaden a known exact name to substring.
+    """
+    spec = get_platform_config(platform).get('element_map', {}).get('stop_button')
+    if not isinstance(spec, dict):
+        return None
+    names = set()
+    any_of = spec.get('names_any_of')
+    if isinstance(any_of, (list, tuple)):
+        for n in any_of:
+            if isinstance(n, str) and n.strip():
+                names.add(n.strip().lower())
+    single = spec.get('name')
+    if isinstance(single, str) and single.strip():
+        names.add(single.strip().lower())
+    if names:
+        return names
+    # No exact name available (e.g. only name_contains). Signal substring fallback.
+    return None
+
+
+def _scan_stop_button(doc, exact_names, fallback_patterns) -> bool:
+    """Scan AT-SPI tree for the stop button.
+
+    If exact_names is a non-empty set, match by EXACT (case-insensitive)
+    name equality against the platform's known stop-button names (THE RULE).
+    Otherwise fall back to the legacy substring match over fallback_patterns
+    (only for platforms whose element_map has no exact stop_button name).
+    """
+    use_exact = bool(exact_names)
+    if not use_exact and not fallback_patterns:
+        return False
+
     def scan(obj, depth=0):
         if depth > 25:
             return False
         try:
             role = obj.get_role_name() or ''
             name = (obj.get_name() or '').strip().lower()
-            if role in ('push button', 'button', 'toggle button'):
-                if name and len(name) <= 50 and any(p in name for p in stop_patterns):
+            if role in _STOP_BUTTON_ROLES and name:
+                if use_exact:
+                    if name in exact_names:
+                        return True
+                elif len(name) <= 50 and any(p in name for p in fallback_patterns):
                     return True
             for i in range(obj.get_child_count()):
                 child = obj.get_child_at_index(i)
