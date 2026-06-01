@@ -26,3 +26,9 @@ Live AT-SPI scan on display :2, 2026-06-01. EXACT names+roles from the live tree
 - [ ] **stop button**: appears only while generating — exact name (`element_map.stop_button` currently lists Stop answering/response/streaming/generating; verify which is live).
 
 Sidebar/history elements (Close sidebar, Search chats, Open conversation options …) are EXCLUDED per element_filter — not part of the composer map.
+
+## [Observed] enumeration blocker (this pass)
+- `Switch model` was a PER-RESPONSE action (regenerate-with-different-model) on the assistant message row — NOT the composer model picker. It vanished when message state changed.
+- The composer model/mode control is `Extended Pro`. BUT on re-scan, both `Extended Pro` and `Switch model` returned NOT_FOUND from `get_platform_document` even though the first full scan found all 55 — i.e. the composer controls read INTERMITTENTLY from the AT-SPI tree depending on page/render state (100_TIMES §1: trees refresh at different rates).
+- CONSEQUENCE: clean model/mode/tool enumeration requires a SETTLED fresh-chat composer + a readiness check (single, not a poll) that the target control is present BEFORE the one click. Enumerate via exact AT-SPI extents (not guessed screenshot coords — scaled screenshots are unreliable for clicks).
+- NEXT (focused pass, fresh composer): readiness-confirm `Extended Pro` present → single click → app-root/menu scan reasoning levels; then the model picker; then `Add files and more` → tools/connectors. Single-attempt-then-manual per 100_TIMES §4a.
