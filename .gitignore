@@ -94,3 +94,6 @@ RELEASE_READINESS.md
 
 # Scheduled task locks (runtime state)
 .claude/scheduled_tasks.lock
+
+# Fleet peer doc (Codex CLI) — not part of taeys-hands repo; gitnexus hook auto-injects
+AGENTS.md
