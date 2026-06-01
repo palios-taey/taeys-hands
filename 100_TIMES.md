@@ -67,3 +67,10 @@ Read this FIRST every session. If something breaks, the fix is almost always "yo
 
 ---
 *If you are reading this and about to: launch in parallel, add a fallback, use name_contains, skip a screenshot, open a new tab, or ask permission to fix something broken — DON'T. You already know the answer. It's above.*
+
+## 11. ChatGPT SEND — the composer/send button is NOT in the AT-SPI tree
+- ChatGPT's ProseMirror composer + its send arrow do NOT reliably appear in the AT-SPI document (or app) tree — `find` by name/role returns nothing, and automated Return often doesn't submit. This is why "send_failed" happens with attach+type OK.
+- **Do NOT skip ChatGPT and do NOT guess the arrow Y.** The send arrow sits at the composer's **dynamic bottom row** — its Y MOVES DOWN as the staged message grows (a long paste expands the composer). A fixed offset / the message-text Y will click the TEXT, not the arrow (that was the repeated bug).
+- **Reliable manual send:** screenshot the display, CROP the composer bottom-row region and read it enlarged (`convert ss.png -crop WxH+X+Y +repage -resize ...`) to read the dark send-circle's exact pixels, then `xdotool mousemove X Y click 1`. Verify by URL change (chatgpt.com/ → chatgpt.com/c/<id>) + "Pro thinking"/Stop button. Confirmed 2026-06-01: arrow at ~y=869 on a 1290×982 window; my earlier y=690 clicks hit the message text.
+- Window may be windowed (e.g. 1290×982 @ 315,49), not fullscreen — get geometry (`xdotool getwindowgeometry`) so coords are right.
+- This is a single-attempt-per-method discipline: try, screenshot-verify; if it didn't send, re-locate the arrow from a fresh crop (observation), don't blind re-click. (The proper driver fix: locate send by screen-position from the composer bottom, not AT-SPI.)
