@@ -59,6 +59,17 @@ Read this FIRST every session. If something breaks, the fix is almost always "yo
 ## 8. ACCOUNTS / DISPLAYS
 - `:13` (CVP account) = **Hunter queries ONLY**. Everything else (conductor, weaver, treasurer) → `:3`.
 - Mira displays: `:2`=ChatGPT `:3`=Claude `:4`=Gemini `:5`=Grok `:6`=Perplexity `:13`=Claude-CVP.
+- **Claude thinking effort = `Extra`, NOT `High`.** (Jesse 2026-06-02.) For every Claude/Gaia dispatch set the effort selector to **Extra** (the max), not High. consultation.py / claude.yaml mode for `extended_thinking` must select **Extra**.
+
+## 8a. WAKE EVERY 5 MINUTES while ANY dispatch/monitor is in flight. (Jesse 2026-06-02)
+- The monitors are NOT yet reliable (the `Stop response`/stop-button completion poll has stalled — Claude "done for a long time" while my poll never converged; consultation.py send-gate false-negatives on Grok-Heavy/Gemini; `attach_failed` aborts on Claude). **Until they are 100% reliable you DO NOT just stop and trust a notification.**
+- **While waiting on a dispatch result or an extract: `ScheduleWakeup` ~5 min (≈270–300s) and actively re-check** (screenshot + tree). Do NOT go idle assuming the monitor/notification will fire — it may not, and then a REQUESTER (conductor/hunter) is left waiting on you. That is the failure mode Jesse keeps hitting.
+- **Turn the wake OFF only once there are 3 consecutively-working monitors for EACH platform.** Not before. (Builds toward #145.)
+- A waiting requester with no result is never acceptable: if a result is done and you haven't delivered it, you violated this.
+
+## 8b. MANUAL RECOVERY when consultation.py aborts (attach_failed / send_failure)
+- consultation.py `attach_failed` on Claude leaves a **stuck GTK file-upload dialog** open and aborts before send. Recover by hand (§4a manual path, screenshot-validated each step): the dialog is GTK → `Ctrl+L` location bar → `xdotool type` the path (Xvfb clipboard-paste is broken in dialogs) → Enter; verify the **file chip** rendered in the composer; then click the **text input BELOW the chip** (clicking the chip opens its preview modal — Escape closes it), paste the lens message, verify on screen, send. Validate the message bubble + generating state before reporting sent.
+- `send_failure` on **Grok-Heavy** ("Agents Working" UI) and **Gemini** is usually a FALSE NEGATIVE: the send actually worked and the same process self-recovers (waits + extracts + notifies). Screenshot-confirm it's generating; **do NOT re-send** (double-dispatch). The gate just doesn't recognize their non-standard streaming UI vs the standard stop button.
 
 ## 9. INFRA gotchas that recur
 - **Stale a11y bus**: "Couldn't connect to accessibility bus" or "Firefox not found" after a display restart → `/tmp/a11y_bus_:N` guid != live `xprop -display :N -root AT_SPI_BUS`. Rewrite the file from xprop; don't restart blindly.
