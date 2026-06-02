@@ -13,8 +13,10 @@ Read this FIRST every session. If something breaks, the fix is almost always "yo
 - Trees do NOT refresh at the same rate. Build a **debounce** in: stop-absent → wait → re-scan fresh tree → complete only if still absent; reappears → keep generating. Already exists for generating→complete; the bug was the `waiting_for_start` side.
 - **NO fallbacks** (no "after 30s if copy buttons exist, assume done"). That fallback grabbed a PROMPT ECHO. If the stop button never appears → **STOP and RAISE** (flag for YAML fix), do not extract.
 
-## 2. EXTRACT = scroll to bottom, then the copy button. Plus artifacts.
-- Before extracting: **scroll the thread to the BOTTOM** (End), so the last copy button is the final assistant turn — not an older turn, not the prompt echo.
+## 2. EXTRACT = scroll to bottom, then the copy button. 100% OF THE TIME. EVERY platform. Plus artifacts.
+- **ALWAYS, for ALL platforms, no exceptions: (1) scroll the thread to the BOTTOM (`ctrl+End` in the window), then (2) click the COPY BUTTON ELEMENT.** This is not situational — it is the one extract method, every time.
+- Scrolling to bottom makes the last copy button the FINAL assistant turn (not an older turn, not the prompt echo) AND brings the button into the viewport so its element is actionable.
+- **Click the copy button via its AT-SPI ELEMENT ACTION (`_click_and_read_clipboard(button, display, wait)` → `_click_button` doAction), NEVER by raw x/y coordinates.** The element's `y` extent is DOCUMENT-space, not viewport — coord-clicking a long thread lands off-screen and returns an EMPTY clipboard (LEN 0). That empty-clipboard failure = you coord-clicked instead of scrolling+element-action. (Confirmed 2026-06-02 on :13.)
 - Extract via the **copy button** (clipboard), not by reading the tree text.
 - **Artifacts**: Claude code/docs render as artifacts — preview/open then copy the artifact panel (handled by claude artifact extract). Don't grab the chat bubble when the real content is an artifact.
 - Always **validate the extract is real**: length >> the prompt length, content matches the lens — not a prompt echo.
