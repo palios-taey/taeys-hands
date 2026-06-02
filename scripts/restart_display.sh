@@ -232,7 +232,7 @@ start_firefox() {
     MOZ_DISABLE_RDD_SANDBOX=1 \
     MOZ_DISABLE_GPU_SANDBOXING=1 \
     GDK_BACKEND=x11 \
-    firefox --display="${DISPLAY_STR}" --no-remote --profile "/tmp/${PROFILE}" "${URL}" >"${FIREFOX_LOG_FILE}" 2>&1 &
+    "${FIREFOX_BIN:-/usr/lib/firefox/firefox}" --display="${DISPLAY_STR}" --no-remote --profile "/tmp/${PROFILE}" "${URL}" >"${FIREFOX_LOG_FILE}" 2>&1 &
     FIREFOX_PID=$!
     export FIREFOX_PID
     printf '%s\n' "${FIREFOX_PID}" > "${FIREFOX_PID_FILE}"
@@ -310,7 +310,7 @@ main() {
     trap rollback_partial_restart ERR
 
     require_cmd dbus-launch
-    require_cmd firefox
+    require_cmd "${FIREFOX_BIN:-/usr/lib/firefox/firefox}"
     require_cmd python3
     require_cmd tmux
     require_cmd xprop

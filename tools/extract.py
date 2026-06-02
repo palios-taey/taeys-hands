@@ -11,7 +11,7 @@ from core import atspi, input as inp, clipboard
 from core.config import get_platform_config
 from core.tree import find_elements, find_copy_buttons
 from core.interact import atspi_click
-from core.platforms import SCREEN_HEIGHT, get_platform_display
+from core.platforms import SCREEN_HEIGHT, get_display_bus, get_platform_display
 from core.ingest import auto_ingest
 from storage.redis_pool import node_key
 from storage import neo4j_client
@@ -27,15 +27,10 @@ def _setup_extract_display_env(platform: str, display: Optional[str] = None) -> 
 
     os.environ['DISPLAY'] = effective_display
 
-    bus_file = f'/tmp/a11y_bus_{effective_display}'
-    try:
-        with open(bus_file) as f:
-            bus = f.read().strip()
-        if bus:
-            os.environ['AT_SPI_BUS_ADDRESS'] = bus
-            os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
-    except FileNotFoundError:
-        pass
+    bus = get_display_bus(effective_display)
+    if bus:
+        os.environ['AT_SPI_BUS_ADDRESS'] = bus
+        os.environ['DBUS_SESSION_BUS_ADDRESS'] = bus
 
     return effective_display
 

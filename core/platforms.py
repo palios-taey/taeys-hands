@@ -129,17 +129,50 @@ def get_platform_display(platform: str) -> str | None:
     return _PLATFORM_DISPLAYS.get(platform)
 
 
+def get_display_bus(display: str) -> str | None:
+    """Resolve the AT-SPI bus for a display from cache, then live X root fallback."""
+    bus_file = f'/tmp/a11y_bus_{display}'
+    addr = None
+
+    try:
+        with open(bus_file) as f:
+            addr = f.read().strip() or None
+    except FileNotFoundError:
+        addr = None
+
+    if addr:
+        return addr
+
+    try:
+        result = subprocess.run(
+            ['xprop', '-display', display, '-root', 'AT_SPI_BUS'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={**os.environ},
+        )
+    except Exception:
+        return None
+
+    parts = result.stdout.split('"')
+    cand = parts[1].strip() if len(parts) >= 2 else ''
+    if not cand.startswith('unix:'):
+        return None
+
+    try:
+        with open(bus_file, 'w') as f:
+            f.write(cand + '\n')
+    except OSError:
+        pass
+    return cand
+
+
 def get_platform_bus(platform: str) -> str | None:
     """Read AT-SPI bus address for a platform's dedicated display."""
     display = get_platform_display(platform)
     if not display:
         return None
-    bus_file = f'/tmp/a11y_bus_{display}'
-    try:
-        with open(bus_file) as f:
-            return f.read().strip() or None
-    except FileNotFoundError:
-        return None
+    return get_display_bus(display)
 
 
 def get_platform_firefox_pid(platform: str) -> int | None:

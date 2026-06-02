@@ -73,7 +73,7 @@ USERJS
     MOZ_DISABLE_RDD_SANDBOX=1 \
     MOZ_DISABLE_GPU_SANDBOXING=1 \
     GDK_BACKEND=x11 \
-    firefox --no-remote --profile /tmp/${PROFILE} '${URL}' &
+    "${FIREFOX_BIN:-/usr/lib/firefox/firefox}" --no-remote --profile /tmp/${PROFILE} '${URL}' &
     FIREFOX_PID=\$!
     echo \"  Firefox PID: \${FIREFOX_PID}\"
     echo \"\${FIREFOX_PID}\" > /tmp/firefox_pid_:${DISPLAY_NUM}
