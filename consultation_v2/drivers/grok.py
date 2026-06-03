@@ -272,25 +272,43 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return True
 
     # ------------------------------------------------------------------
-    # Step 5 — send (re-focus composer + Enter; verify stop appeared + URL gate)
+    # Step 5 — send (re-focus composer + click Submit; verify stop + URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         input_key = self.cfg['workflow']['prompt']['input']
+        send_key = self.cfg['workflow']['send']['send_key']
         stop_key = self.cfg['workflow']['send']['stop_key']
         before = result.session_url_before
 
-        # Re-focus the composer immediately before Enter (attach/paste can steal
+        # Re-focus the composer immediately before send (attach/paste can steal
         # focus). This is focus, not a re-attempt of a failed action.
         snap = self.runtime.snapshot()
         input_el = self.find_first(snap, input_key)
         if input_el:
             self.runtime.click(input_el)
-        if not self.runtime.press('Return'):
-            result.add_step('send', False, 'Grok Return keypress failed')
+
+        # The composer is MULTI-LINE — Enter inserts a newline, it does NOT
+        # submit. Submit is the exact send_button. ONE bounded readiness wait
+        # (§E observation) for it to be present, then click it ONCE via its
+        # AT-SPI element action. No Enter-to-send, no fallback.
+        self.runtime.wait_until(
+            lambda: self.runtime.snapshot().has(send_key),
+            timeout=10,
+            interval=0.4,
+        )
+        send_snap = self.runtime.snapshot()
+        send_el = self.find_first(send_snap, send_key)
+        if not send_el:
+            result.add_step('send', False, 'Grok send button not found',
+                            snapshot=send_snap.serializable())
+            return False
+        if not self.runtime.click(send_el, strategy='atspi_only'):
+            result.add_step('send', False, 'Grok send button click failed',
+                            snapshot=send_snap.serializable())
             return False
 
         # Observe (re-scan) until the stop button appears — readiness wait, not a
-        # re-action. A single Enter was pressed; we only watch the tree.
+        # re-action. Submit was clicked ONCE; we only watch the tree.
         def _stop_present():
             return self.runtime.snapshot().has(stop_key)
 

@@ -47,6 +47,11 @@ tree:
     model_selector:
       name: Model select
       role: push button
+    # send button (LIVE-CONFIRMED :5 2026-06-03). The composer is MULTI-LINE, so
+    # Enter inserts a newline — submit is THIS exact push button, not a keystroke.
+    send_button:
+      name: "Submit"
+      role: push button
     copy_button:
       name: Copy
       role: push button
@@ -127,7 +132,8 @@ workflow:
   prompt:
     input: input
   send:
-    submit_via_return: true
+    # Multi-line composer: submit by clicking the exact send_button, NOT Enter.
+    send_key: send_button
     stop_key: stop_button
   monitor:
     stop_key: stop_button
