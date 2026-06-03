@@ -125,8 +125,30 @@ class ConsultationRuntime:
         return False
 
     def current_url(self) -> Optional[str]:
+        # Read FRESH. The AT-SPI document URL is cached and stays STALE for a few
+        # seconds after a page transition (e.g. grok.com/ -> /c/<thread> after
+        # send), causing false-negative URL gates. Clear the caches before
+        # reading — mirrors build_snapshot()'s pre-scan cache clear (desktop ->
+        # firefox -> doc). Guarded: gi may be unavailable / objects may be dead.
+        try:
+            import gi
+            gi.require_version("Atspi", "2.0")
+            from gi.repository import Atspi as _Atspi
+            _Atspi.get_desktop(0).clear_cache_single()
+        except Exception:
+            pass
         firefox = atspi.find_firefox_for_platform(self.platform)
+        if firefox is not None:
+            try:
+                firefox.clear_cache_single()
+            except Exception:
+                pass
         doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
+        if doc is not None:
+            try:
+                doc.clear_cache_single()
+            except Exception:
+                pass
         return atspi.get_document_url(doc) if doc else None
 
     def snapshot(self) -> Snapshot:

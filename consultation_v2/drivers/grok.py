@@ -307,22 +307,35 @@ class GrokConsultationDriver(BaseConsultationDriver):
                             snapshot=send_snap.serializable())
             return False
 
-        # Observe (re-scan) until the stop button appears — readiness wait, not a
-        # re-action. Submit was clicked ONCE; we only watch the tree.
-        def _stop_present():
-            return self.runtime.snapshot().has(stop_key)
+        # Confirm the send by observing EITHER signal over a bounded window
+        # (§E observation — Submit was clicked ONCE; we only watch). A fast reply
+        # (e.g. "OK.") can finish GENERATING before we look, so the stop button
+        # may already be gone — do NOT require it to still be visible. With the
+        # now-fresh current_url() (runtime cache-clear), a URL change to the new
+        # /c/<thread> is the reliable new-session signal. Sent = stop seen OR URL
+        # changed. No retries; neither after the window -> STOP.
+        def _sent_signal():
+            if self.runtime.snapshot().has(stop_key):
+                return 'stop'
+            if (self.runtime.current_url() or '') != (before or ''):
+                return 'url'
+            return None
 
-        stop_seen = bool(self.runtime.wait_until(_stop_present, timeout=60, interval=0.6))
+        signal = self.runtime.wait_until(_sent_signal, timeout=12, interval=0.5)
+        stop_seen = signal == 'stop'
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
 
         url_changed = bool(result.session_url_after and result.session_url_after != before)
         is_new_session = request.session_url is None
         if is_new_session:
-            verified = bool(stop_seen and url_changed)
+            # New thread must exist (URL moved off the home/before URL); the stop
+            # button is a bonus signal, not required (fast replies clear it early).
+            verified = bool(url_changed or stop_seen)
         else:
-            verified = bool(stop_seen)
-        result.add_step('send', verified, 'Grok send validated (stop button + URL gate)',
+            # Follow-up keeps the same URL — gate on the generating signal.
+            verified = bool(stop_seen or url_changed)
+        result.add_step('send', verified, 'Grok send validated (stop button OR fresh URL change)',
                         url_before=before, url_after=result.session_url_after,
                         stop_seen=stop_seen, url_changed=url_changed,
                         snapshot=verify_snap.serializable())
