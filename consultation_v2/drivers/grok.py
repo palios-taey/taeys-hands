@@ -249,66 +249,75 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return True
 
     # ------------------------------------------------------------------
-    # Step 4 — enter prompt
+    # Shared: focus the composer the PROVEN way (coord-click + grab_focus)
     # ------------------------------------------------------------------
-    def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+    def _focus_input(self):
+        """Focus the composer like the battle-tested scripts/consultation.py::
+        _focus_input_field: coordinate-click the input, then grab_focus() on its
+        AT-SPI component. A plain element click alone does NOT reliably land
+        keyboard focus on grok's composer (verify6: focus+Enter failed without
+        grab_focus). Returns the resolved input ElementRef, or None if absent."""
         input_key = self.cfg['workflow']['prompt']['input']
         snap = self.runtime.snapshot()
         input_el = self.find_first(snap, input_key)
         if not input_el:
+            return None
+        # 1) coordinate click on the input (xdotool), 2) grab_focus on its
+        # component interface — mirrors the proven path exactly.
+        self.runtime.click(input_el, strategy='coordinate_only')
+        time.sleep(0.3)
+        obj = input_el.atspi_obj
+        if obj is not None:
+            try:
+                comp = obj.get_component_iface()
+                if comp:
+                    comp.grab_focus()
+            except Exception:
+                pass
+        time.sleep(0.3)
+        return input_el
+
+    # ------------------------------------------------------------------
+    # Step 4 — enter prompt
+    # ------------------------------------------------------------------
+    def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        input_el = self._focus_input()
+        if not input_el:
             result.add_step('prompt', False, 'Grok input field not found',
-                            snapshot=snap.serializable())
-            return False
-        if not self.runtime.click(input_el):
-            result.add_step('prompt', False, 'Grok input focus click failed',
-                            snapshot=snap.serializable())
+                            snapshot=self.runtime.snapshot().serializable())
             return False
         if not self.runtime.paste(request.message):
             result.add_step('prompt', False, 'Grok prompt paste failed',
-                            snapshot=snap.serializable())
+                            snapshot=self.runtime.snapshot().serializable())
             return False
         result.add_step('prompt', True, 'Grok prompt entered',
                         snapshot=self.runtime.snapshot().serializable())
         return True
 
     # ------------------------------------------------------------------
-    # Step 5 — send (re-focus composer + click Submit; verify stop + URL gate)
+    # Step 5 — send (re-focus composer the proven way + Return; stop|URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        input_key = self.cfg['workflow']['prompt']['input']
-        send_key = self.cfg['workflow']['send']['send_key']
         stop_key = self.cfg['workflow']['send']['stop_key']
         before = result.session_url_before
 
-        # Re-focus the composer immediately before send (attach/paste can steal
-        # focus). This is focus, not a re-attempt of a failed action.
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, input_key)
-        if input_el:
-            self.runtime.click(input_el)
-
-        # The composer is MULTI-LINE — Enter inserts a newline, it does NOT
-        # submit. Submit is the exact send_button. ONE bounded readiness wait
-        # (§E observation) for it to be present, then click it ONCE via its
-        # AT-SPI element action. No Enter-to-send, no fallback.
-        self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has(send_key),
-            timeout=10,
-            interval=0.4,
-        )
-        send_snap = self.runtime.snapshot()
-        send_el = self.find_first(send_snap, send_key)
-        if not send_el:
-            result.add_step('send', False, 'Grok send button not found',
-                            snapshot=send_snap.serializable())
+        # Re-focus the composer immediately before send (attach/paste steals
+        # focus) the PROVEN way (coord-click + grab_focus), then submit with a
+        # single Return. This is the battle-tested scripts/consultation.py grok
+        # path. The Submit-button doAction was intermittent (worked verify7,
+        # failed verify9 leaving the message unsent) — Return on a grab_focus'd
+        # composer is the reliable submit. This is focus, not a re-attempt.
+        input_el = self._focus_input()
+        if not input_el:
+            result.add_step('send', False, 'Grok input field not found for send',
+                            snapshot=self.runtime.snapshot().serializable())
             return False
-        if not self.runtime.click(send_el, strategy='atspi_only'):
-            result.add_step('send', False, 'Grok send button click failed',
-                            snapshot=send_snap.serializable())
+        if not self.runtime.press('Return'):
+            result.add_step('send', False, 'Grok Return keypress failed')
             return False
 
         # Confirm the send by observing EITHER signal over a bounded window
-        # (§E observation — Submit was clicked ONCE; we only watch). A fast reply
+        # (§E observation — Return was pressed ONCE; we only watch). A fast reply
         # (e.g. "OK.") can finish GENERATING before we look, so the stop button
         # may already be gone — do NOT require it to still be visible. With the
         # now-fresh current_url() (runtime cache-clear), a URL change to the new
