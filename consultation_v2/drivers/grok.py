@@ -122,6 +122,19 @@ class GrokConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
 
+        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the dropdown's menu
+        # items ("Heavy Team of Experts" etc.) render a beat after the selector
+        # click, so menu_snapshot() can fire before they exist. Re-SNAPSHOT here
+        # is observation while the portal renders; the selector is NOT re-clicked.
+        # Ready = the target item is present OR the current-mode active indicator
+        # already shows (the dropdown rendered with this mode selected).
+        self.runtime.wait_until(
+            lambda: (self.runtime.menu_snapshot().has(item_key)
+                     or self.validation_passes(self.runtime.menu_snapshot(), active_validation_key)),
+            timeout=10,
+            interval=0.4,
+        )
+
         menu = self.runtime.menu_snapshot()
 
         # State check: if the requested item is already the active model, do NOT
@@ -178,6 +191,17 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
+
+            # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the attach
+            # dropdown's menu items ("Upload a file" etc.) render a beat after the
+            # Attach click, so menu_snapshot() can fire before they exist.
+            # Re-SNAPSHOT here is observation while the portal renders; the Attach
+            # trigger is NOT re-clicked.
+            self.runtime.wait_until(
+                lambda: self.runtime.menu_snapshot().has(upload_key),
+                timeout=10,
+                interval=0.4,
+            )
 
             # Read the dropdown via menu_snapshot (React portal). If the exact
             # Upload item is absent on this single read, that is a STOP/failure
@@ -322,6 +346,16 @@ class GrokConsultationDriver(BaseConsultationDriver):
         # Scroll the thread to the BOTTOM so the last Copy button is the final
         # assistant turn and is actionable.
         self.runtime.press('ctrl+End')
+
+        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the Copy button on the
+        # final assistant turn can render a beat after the stop button disappears
+        # / after the scroll settles. Re-SNAPSHOT here is observation; the Copy
+        # button is NOT clicked until found ONCE below.
+        self.runtime.wait_until(
+            lambda: self.runtime.snapshot().has(copy_key),
+            timeout=10,
+            interval=0.4,
+        )
 
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, copy_key)
