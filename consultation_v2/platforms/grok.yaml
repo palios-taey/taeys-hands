@@ -33,15 +33,13 @@ tree:
   - name: History
     role: push button
   element_map:
-    # --- composer / input (document snapshot) ---
-    # Grok composer is a contenteditable exposed as role "section" with an
-    # empty name; matched by exact role + exact persistent AT-SPI states.
+    # --- composer / input (document snapshot, LIVE-CONFIRMED :5 2026-06-03) ---
+    # The composer is exposed as role "entry" with name "Ask Grok anything"
+    # (states editable, focusable, focused, multi line). Prompt entry + send
+    # (focus this entry + Enter) both key off this. Matched EXACTLY.
     input:
-      name: ""
-      role: section
-      states_include:
-      - editable
-      - focusable
+      name: "Ask Grok anything"
+      role: entry
     # --- toolbar push buttons (document snapshot, EXACT from live scan :5 2026-06-03) ---
     attach_trigger:
       name: Attach

@@ -47,6 +47,7 @@ Every element below is an EXACT `name` + `role` — the isolated grok driver rea
 - stop_button: `Stop model response` (per 100_TIMES §1; appears only while generating — confirm on the production run).
 - send: grok composer is a contenteditable not exposed as an `entry` (only the Firefox address bar shows as entry). Send = focus composer + Enter; the send button is presence-verify only. Confirm exact composer/send element on the production run.
 - uploaded_file_chip / attach indicator (LIVE-CONFIRMED on :5): chip = list item 'Open attachment Remove this attachment'; static remove button = push button 'Remove this attachment' (doc scope). Verify attach via the exact remove button, NOT the filename.
+- composer input (LIVE-CONFIRMED :5): role=entry, name='Ask Grok anything' (editable, multi line). send = focus this entry + Enter. (Supersedes the line-48 "not exposed as an entry" note — it IS an entry.)
 
 ## Driver build spec (→ taeys-hands-codex, p1-grok step 2)
 Build `consultation_v2/drivers/grok.py` (isolated; imports only base/types/runtime) + finalize
