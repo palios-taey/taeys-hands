@@ -98,6 +98,18 @@ class GrokConsultationDriver(BaseConsultationDriver):
         item_key = mode_targets[requested]
         active_validation_key = f'{requested}_active'
 
+        # ONE bounded readiness wait (DRIVER_CONTRACT §E — allowed: a single
+        # readiness wait before a SINGLE action). A cold navigate to the grok.com
+        # home page renders the composer/toolbar slower than a warm thread, so the
+        # model_selector may not be in the tree the instant navigate() returns.
+        # Re-SNAPSHOT here is observation (waiting for the page to render), NOT a
+        # retry of any action. After the page is ready we open the dropdown ONCE.
+        self.runtime.wait_until(
+            lambda: self.runtime.snapshot().has('model_selector'),
+            timeout=12,
+            interval=0.5,
+        )
+
         # Open the model dropdown ONCE (a single, necessary action — not a retry).
         snap = self.runtime.snapshot()
         selector = self.find_first(snap, 'model_selector')
