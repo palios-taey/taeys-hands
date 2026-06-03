@@ -234,24 +234,49 @@ class ConsultationRuntime:
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         before = self.current_url()
+        # Close stale GTK file dialogs FIRST — they intercept the address-bar
+        # focus key (ctrl+l) and leave the composer focused, so the URL gets
+        # typed/pasted into the chat input and sent as a message. (Proven path:
+        # scripts/consultation.py::_navigate_browser_to_url.)
+        self.close_stale_dialogs()
         inp.focus_firefox()
-        time.sleep(0.2)
+        time.sleep(0.3)
         inp.press_key("Escape")
-        time.sleep(0.1)
+        time.sleep(0.2)
         # Use platform-configured address bar key (F6 for Claude which intercepts Ctrl+L)
         nav_key = str(self.cfg.get("navigation_key") or "ctrl+l")
         inp.press_key(nav_key)
-        time.sleep(0.2)
+        # Critical settle: on Xvfb the address bar is not focused the instant the
+        # nav_key returns; ctrl+a/paste/Return that follow MUST land in the
+        # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
+        time.sleep(0.3)
         inp.press_key("ctrl+a")
         time.sleep(0.1)
         if not self.paste(url):
             self.type_text(url, delay_ms=5)
-        time.sleep(0.2)
+        time.sleep(0.3)
         inp.press_key("Return")
         if not verify_change:
             time.sleep(2.0)
             return True
-        return bool(
-            self.wait_for_url_change(before, timeout=20.0, interval=1.0)
-            or self.current_url()
-        )
+        # Wait for the URL to actually change, then confirm it became the target.
+        self.wait_for_url_change(before, timeout=20.0, interval=1.0)
+        current = (self.current_url() or "").strip()
+        target = (url or "").strip()
+
+        def _norm(u: str) -> str:
+            return u.rstrip("/").lower()
+
+        # Defense: if the nav did not land on the target (still a stale thread,
+        # unchanged, or empty), return False so the driver STOPs instead of
+        # sending into a polluted composer. Single check — no retry.
+        if not current:
+            return False
+        cur_n, tgt_n = _norm(current), _norm(target)
+        if cur_n == tgt_n:
+            return True
+        # A bare-domain target (e.g. https://grok.com) must land EXACTLY there —
+        # a /c/<thread> URL shares the domain prefix but is NOT the home target,
+        # so prefix-matching is only allowed when the target carries a real path.
+        has_path = "/" in tgt_n.split("://", 1)[-1]
+        return has_path and any(cur_n.startswith(tgt_n + sep) for sep in ("/", "?", "#"))
