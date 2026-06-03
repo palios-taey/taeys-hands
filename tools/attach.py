@@ -25,6 +25,9 @@ from storage.redis_pool import node_key
 
 logger = logging.getLogger(__name__)
 
+_GROK_ATTACH_TRIGGER_ATTEMPTS = 5
+_GROK_ATTACH_TRIGGER_DELAY_S = 0.25
+
 
 def _scan_elements_for_platform(platform: str) -> List[Dict]:
     """Scan AT-SPI tree for platform, handling multi-display routing.
@@ -151,34 +154,14 @@ def _match_element(element: dict, criteria: dict) -> bool:
     return True
 
 
-# --- Button discovery (YAML-driven) ---
-
-def _find_attach_button(doc, platform: str = None):
-    """Find attach button via YAML element spec, checking cache first then AT-SPI DFS."""
-    # Get the element spec from YAML config
-    spec = None
-    if platform:
-        trigger_key = get_attach_trigger_key(platform)
-        if trigger_key:
-            spec = get_element_spec(platform, trigger_key)
-
-    # Check cache first
-    if platform and spec:
-        for e in _element_cache.get(platform, []):
-            if _match_element(e, spec) and 'button' in e.get('role', ''):
-                obj = e.get('atspi_obj')
-                if obj and not is_defunct(e):
-                    return obj
-
+def _search_attach_button_from_doc(doc, spec):
     def _spec_matches_obj(obj):
-        """Check if an AT-SPI object matches the spec."""
         if not spec:
             return False
         try:
             role = obj.get_role_name() or ''
             name = (obj.get_name() or '').strip()
             element = {'name': name, 'role': role, 'states': []}
-            # Get states
             ss = obj.get_state_set()
             if ss:
                 for st in [Atspi.StateType.ENABLED, Atspi.StateType.VISIBLE,
@@ -194,7 +177,6 @@ def _find_attach_button(doc, platform: str = None):
             return None
         try:
             role = obj.get_role_name() or ''
-            name = (obj.get_name() or '').strip()
             if 'button' in role and _spec_matches_obj(obj):
                 comp = obj.get_component_iface()
                 if comp:
@@ -204,14 +186,61 @@ def _find_attach_button(doc, platform: str = None):
             for i in range(min(obj.get_child_count(), 50)):
                 child = obj.get_child_at_index(i)
                 if child:
-                    r = search(child, depth + 1)
-                    if r:
-                        return r
+                    found = search(child, depth + 1)
+                    if found:
+                        return found
         except Exception:
             pass
         return None
 
-    return search(doc) if doc else None
+    return search(doc) if doc and spec else None
+
+
+def _find_live_attach_button(doc, platform: Optional[str], spec):
+    attempts = 1
+    delay_s = 0.0
+    if platform == 'grok':
+        attempts = _GROK_ATTACH_TRIGGER_ATTEMPTS
+        delay_s = _GROK_ATTACH_TRIGGER_DELAY_S
+
+    for attempt in range(attempts):
+        if doc and platform == 'grok':
+            try:
+                doc.clear_cache_single()
+            except Exception:
+                pass
+        btn = _search_attach_button_from_doc(doc, spec)
+        if btn:
+            return btn
+        if attempt < attempts - 1:
+            time.sleep(delay_s)
+    return None
+
+
+# --- Button discovery (YAML-driven) ---
+
+def _find_attach_button(doc, platform: str = None):
+    """Find attach button via YAML element spec, checking cache first then AT-SPI DFS."""
+    # Get the element spec from YAML config
+    spec = None
+    if platform:
+        trigger_key = get_attach_trigger_key(platform)
+        if trigger_key:
+            spec = get_element_spec(platform, trigger_key)
+
+    # Grok's attach trigger has shown stale cached objects live; force a short
+    # fresh re-read there instead of trusting the cached handle.
+    if platform == 'grok':
+        return _find_live_attach_button(doc, platform, spec)
+
+    # Check cache first
+    if platform and spec:
+        for e in _element_cache.get(platform, []):
+            if _match_element(e, spec) and 'button' in e.get('role', ''):
+                obj = e.get('atspi_obj')
+                if obj and not is_defunct(e):
+                    return obj
+    return _find_live_attach_button(doc, platform, spec)
 
 
 def _get_attach_button_coords(doc, platform: str = None) -> Optional[Dict]:
@@ -222,8 +251,9 @@ def _get_attach_button_coords(doc, platform: str = None) -> Optional[Dict]:
         if trigger_key:
             spec = get_element_spec(platform, trigger_key)
 
-    # Check cache first
-    if platform and spec:
+    # Grok's live attach failures came from stale cached trigger objects; bypass
+    # cache there and re-read the current button before clicking.
+    if platform != 'grok' and platform and spec:
         for e in _element_cache.get(platform, []):
             if _match_element(e, spec) and 'button' in e.get('role', ''):
                 obj = e.get('atspi_obj')
