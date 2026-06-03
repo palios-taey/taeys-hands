@@ -19,7 +19,7 @@ import os
 import time
 
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
+from consultation_v2.types import ConsultationRequest, ConsultationResult
 
 try:
     from storage import neo4j_client
@@ -189,9 +189,10 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 self.runtime.type_text(abs_path, delay_ms=5)
             self.runtime.press('Return')
 
-            # Validate the chip rendered (structural locator — presence, not text).
+            # Validate the chip rendered via the exact attach-present indicator
+            # (the static "Remove this attachment" button) in the DOCUMENT scope.
             verify_snap = self.runtime.snapshot()
-            verified = self._file_chip_present(verify_snap)
+            verified = self.validation_passes(verify_snap, 'attach_present')
             result.add_step('attach', verified,
                             f'Grok attached {os.path.basename(abs_path)}',
                             file=abs_path, snapshot=verify_snap.serializable())
@@ -349,71 +350,3 @@ class GrokConsultationDriver(BaseConsultationDriver):
         except Exception as exc:  # pragma: no cover - runtime dependent
             result.add_step('store', False, f'Grok Neo4j storage failed: {exc}')
             return False
-
-    # ------------------------------------------------------------------
-    # Structural file-chip validation (the YAML_SCHEMA §2 exception)
-    # ------------------------------------------------------------------
-    def _file_chip_present(self, snapshot: Snapshot) -> bool:
-        """Validate the uploaded-file chip by its STRUCTURAL position (exact role
-        + exact parent element_map key + ordinal), never by its dynamic text.
-
-        Reads the spec from ``validation.attach_present.file_chip`` ->
-        ``element_map[<key>].structural``. All names/roles/keys come from YAML.
-        """
-        validation = self.cfg.get('validation', {}).get('attach_present', {})
-        chip_key = validation.get('file_chip')
-        if not chip_key:
-            return False
-        element_map = self.cfg.get('tree', {}).get('element_map', {})
-        structural = (element_map.get(chip_key) or {}).get('structural')
-        if not structural:
-            return False
-
-        role = str(structural.get('role', '')).strip().lower()
-        parent_key = structural.get('parent')
-        require_nonempty = bool(structural.get('name_must_be_nonempty'))
-        ordinal = structural.get('ordinal')
-        index = structural.get('index')
-
-        parent_el = self.find_first(snapshot, parent_key) if parent_key else None
-        if parent_key and not parent_el:
-            return False
-
-        matches = self._structural_children(parent_el, role, require_nonempty)
-        if not matches:
-            return False
-
-        if ordinal == 'first':
-            return True
-        if ordinal == 'last':
-            return True
-        if isinstance(index, int):
-            return 0 <= index < len(matches)
-        return True
-
-    def _structural_children(self, parent_el: ElementRef | None, role: str,
-                             require_nonempty: bool) -> list:
-        """Walk the live AT-SPI subtree of ``parent_el`` collecting descendants of
-        exact ``role`` (optionally requiring a non-empty name). Pure structural
-        traversal — no text matching."""
-        if parent_el is None or parent_el.atspi_obj is None:
-            return []
-        found: list = []
-
-        def _walk(obj, depth=0):
-            if depth > 12:
-                return
-            try:
-                obj_role = (obj.get_role_name() or '').strip().lower()
-                obj_name = (obj.get_name() or '').strip()
-                if obj_role == role and (not require_nonempty or obj_name):
-                    found.append(obj)
-                for i in range(obj.get_child_count()):
-                    child = obj.get_child_at_index(i)
-                    if child is not None:
-                        _walk(child, depth + 1)
-            except Exception:
-                return
-
-        _walk(parent_el.atspi_obj)
-        return found

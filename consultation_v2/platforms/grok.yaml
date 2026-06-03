@@ -100,16 +100,18 @@ tree:
     upload_files_item:
       name: "Upload a file"
       role: menu item
-    # --- uploaded file chip (inherently-dynamic leaf: timestamped filename).
-    # Matched STRUCTURALLY (exact role + exact parent key + ordinal), never by
-    # its text. NEEDS LIVE CONFIRMATION on :5 — the live scan did not capture
-    # the chip container, so parent/role/ordinal are best-effort exact values.
+    # --- uploaded file chip (LIVE-CONFIRMED on :5 2026-06-03). The chip's
+    # accessible name is STATIC ("Open attachment Remove this attachment"), NOT
+    # the filename, so it is matched EXACTLY — no structural locator needed.
+    # Exposed in the DOCUMENT scope (not a React portal).
     uploaded_file_chip:
-      structural:
-        role: list item
-        parent: input
-        ordinal: last
-        name_must_be_nonempty: true
+      name: "Open attachment Remove this attachment"
+      role: list item
+    # Static remove button — persistent, exact, present iff a file is attached.
+    # This is the attach-present indicator (doc scope).
+    remove_attachment:
+      name: "Remove this attachment"
+      role: push button
 workflow:
   defaults:
     model: null
@@ -161,9 +163,13 @@ validation:
       role: menu item
       states_include:
       - selected
-  # attach_present: presence of the structural file chip (its text, not matched).
+  # attach_present: presence of the static remove button (doc scope). Its name
+  # is static (the filename is dynamic, the button name is not), so it is an
+  # EXACT indicator — no structural locator. LIVE-CONFIRMED on :5 2026-06-03.
   attach_present:
-    file_chip: uploaded_file_chip
+    indicators:
+    - name: "Remove this attachment"
+      role: push button
   # send_fired: the stop button is present (generating).
   send_fired:
     stop_present: stop_button
