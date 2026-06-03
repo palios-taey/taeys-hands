@@ -389,6 +389,17 @@ class GrokConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
 
+        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the copy button's
+        # clipboard write completes a beat after the element action returns;
+        # reading immediately yields 0 chars. Re-READING the clipboard is
+        # observation (the copy button is NOT re-clicked), so we poll until it
+        # populates, then read ONCE. Still empty after the wait -> real STOP.
+        self.runtime.wait_until(
+            lambda: bool(self.runtime.read_clipboard().strip()),
+            timeout=4,
+            interval=0.3,
+        )
+
         content = self.runtime.read_clipboard().strip()
         result.response_text = content
         # Validate the extract is real: non-empty, longer than the prompt, not an echo.
