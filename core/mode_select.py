@@ -99,6 +99,19 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     if not doc:
         return {'success': False, 'error': f'{platform} document not found'}
 
+    if platform == 'grok' and target_mode_lower == 'heavy':
+        logger.info("[grok] Requested mode '%s' matches the fresh-session default; skipping selector",
+                    target_mode_lower)
+        return {
+            'success': True,
+            'selected_mode': target_mode_lower,
+            'selected_item': target_mode_lower.title(),
+            'platform': platform,
+            'method': 'already_active',
+            'note': 'Grok active mode is AT-SPI-undetectable; fresh session defaults to Heavy',
+            'timeout': timeout,
+        }
+
     already_selected = _verify_selection(platform, target_mode_lower, firefox, doc)
     if already_selected.get('verified'):
         return {
@@ -128,6 +141,13 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
 
     # Find trigger button in AT-SPI tree
     trigger = _find_button_by_element_map(doc, trigger_key, platform)
+    if platform == 'grok' and not trigger:
+        for _ in range(5):
+            time.sleep(0.6)
+            doc = atspi.get_platform_document(firefox, platform) or doc
+            trigger = _find_button_by_element_map(doc, trigger_key, platform)
+            if trigger:
+                break
     if not trigger:
         return {'success': False, 'error': f'{platform} {trigger_key} button not found in AT-SPI tree'}
 
