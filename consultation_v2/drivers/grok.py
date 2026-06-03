@@ -201,6 +201,18 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 self.runtime.type_text(abs_path, delay_ms=5)
             self.runtime.press('Return')
 
+            # ONE bounded readiness wait (DRIVER_CONTRACT §E — a single readiness
+            # wait before a SINGLE action/check; NOT a retry of the upload). Grok
+            # renders the chip + its "Remove this attachment" button slightly after
+            # the file dialog closes, same render-race as mode-select; re-SNAPSHOT
+            # here is observation while the chip renders. The upload is NOT
+            # re-performed — we only wait for the indicator, then validate ONCE.
+            self.runtime.wait_until(
+                lambda: self.validation_passes(self.runtime.snapshot(), 'attach_present'),
+                timeout=15,
+                interval=0.5,
+            )
+
             # Validate the chip rendered via the exact attach-present indicator
             # (the static "Remove this attachment" button) in the DOCUMENT scope.
             verify_snap = self.runtime.snapshot()
