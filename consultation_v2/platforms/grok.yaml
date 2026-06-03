@@ -11,9 +11,6 @@ tree:
     - pfp
     - Web page favicon
     - Markdown
-    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
-    - Upgrade to
-    - SuperGrok
     roles:
     - separator
     - document web
@@ -36,50 +33,27 @@ tree:
   - name: History
     role: push button
   element_map:
+    # --- composer / input (document snapshot) ---
+    # Grok composer is a contenteditable exposed as role "section" with an
+    # empty name; matched by exact role + exact persistent AT-SPI states.
     input:
       name: ""
       role: section
       states_include:
       - editable
       - focusable
+    # --- toolbar push buttons (document snapshot, EXACT from live scan :5 2026-06-03) ---
     attach_trigger:
       name: Attach
       role: push button
-    upload_files_item:
-      name: "Upload a file"
-      role: menu item
-    model_auto:
-      name: "Auto Chooses Fast or Expert"
-      role: menu item
-    model_fast:
-      name: "Fast Quick responses"
-      role: menu item
-    model_expert:
-      name: "Expert Thinks hard"
-      role: menu item
-    model_heavy:
-      name: "Heavy Team of Experts"
-      role: menu item
     model_selector:
       name: Model select
       role: push button
     copy_button:
-      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
-      role: push button
-    edit_button:
-      name: Edit
-      role: push button
-    stop_button:
-      name: Stop model response
+      name: Copy
       role: push button
     regenerate:
       name: Regenerate
-      role: push button
-    read_aloud:
-      name: Read aloud
-      role: push button
-    start_thread:
-      name: Start thread
       role: push button
     like:
       name: Like
@@ -99,110 +73,100 @@ tree:
     history:
       name: History
       role: push button
-    thought_indicator:
-      name_contains: Thought for # lint-allow: known p3 debt; thought indicator remains substring-based pending output-type mapping
-      role: push button
-    scroll_down:
-      name: Scroll down
-      role: push button
     dictation:
       name: Dictation (Ctrl+D)
       role: push button
     voice_mode:
       name: Enter voice mode (Ctrl+⇧O)
       role: push button
-    sources_selector:
-      name: Sources selector
+    # --- generating-state stop button (EXACT per 100_TIMES §1) ---
+    stop_button:
+      name: Stop model response
       role: push button
-    connect_gmail:
-      name: Connect Gmail
+    # --- model/mode dropdown items (menu_snapshot after clicking Model select) ---
+    model_auto:
+      name: "Auto Chooses Fast or Expert"
       role: menu item
-    connect_calendar:
-      name: Connect Google Calendar
+    model_fast:
+      name: "Fast Powered by Grok 4.3"
       role: menu item
-    connectors:
-      name: Connectors
+    model_expert:
+      name: "Expert Powered by Grok 4.3"
       role: menu item
-    # GitHub connector (verified live 2026-05-22): attach_trigger -> connectors ->
-    # github_connector (check menu item TOGGLE; already authed on profile).
-    # Submenu also exposes: Recent, Skills, Add connector (one-time setup path).
-    github_connector:
-      name: GitHub
-      role: check menu item
-    add_connector:
-      name: Add connector
+    model_heavy:
+      name: "Heavy Team of Experts"
       role: menu item
+    # --- attach dropdown item (menu_snapshot after clicking Attach) ---
+    upload_files_item:
+      name: "Upload a file"
+      role: menu item
+    # --- uploaded file chip (inherently-dynamic leaf: timestamped filename).
+    # Matched STRUCTURALLY (exact role + exact parent key + ordinal), never by
+    # its text. NEEDS LIVE CONFIRMATION on :5 — the live scan did not capture
+    # the chip container, so parent/role/ordinal are best-effort exact values.
+    uploaded_file_chip:
+      structural:
+        role: list item
+        parent: input
+        ordinal: last
+        name_must_be_nonempty: true
 workflow:
   defaults:
     model: null
     mode: null
     tools: []
-  selection:
-    model_targets:
-      auto: model_auto
-      fast: model_fast
-      expert: model_expert
-      heavy: model_heavy
-  # Connector flow: open attach_trigger (COORDINATE click — React portal), click
-  # connectors menu item, then toggle github_connector. Verify via checked state.
-  connectors:
-    trigger: attach_trigger
-    menu: connectors
-    source_targets:
-      github: github_connector
+  # mode_targets: requested mode -> exact element_map key of the dropdown item.
+  mode_targets:
+    auto: model_auto
+    fast: model_fast
+    expert: model_expert
+    heavy: model_heavy
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    open_method: coordinate_menu
   prompt:
     input: input
   send:
-    trigger: null
     submit_via_return: true
-    require_new_url: false
     stop_key: stop_button
   monitor:
     stop_key: stop_button
-    complete_key: copy_button
   extract:
     primary_key: copy_button
-    strategy: last_by_y_atspi_only
-  extra_extract:
-    strategy: none
 validation:
-  attach_success:
-    indicators:
-    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
-      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
-  prompt_ready:
-    check_input_value: true
-  send_success:
-    indicators:
-    - name_contains: Stop # lint-allow: known p4 debt; send-success still keyed to substring until exact completion spec lands
-      role: push button
-    timeout: 30
-  response_complete:
-    indicators:
-    - name: Copy
-      role: push button
-    stop_absent: true
+  # mode_active: gate on the dropdown menu item carrying a selected/checked
+  # state. Read ONLY inside an opened model dropdown (menu_snapshot), since the
+  # persistent "Model select" button name does not expose the active model.
   auto_active:
-    best_effort: true
     indicators:
     - name: "Auto Chooses Fast or Expert"
       role: menu item
+      states_include:
+      - selected
   fast_active:
-    best_effort: true
     indicators:
-    - name: "Fast Quick responses"
+    - name: "Fast Powered by Grok 4.3"
       role: menu item
+      states_include:
+      - selected
   expert_active:
-    best_effort: true
     indicators:
-    - name: "Expert Thinks hard"
+    - name: "Expert Powered by Grok 4.3"
       role: menu item
+      states_include:
+      - selected
   heavy_active:
-    best_effort: true
     indicators:
     - name: "Heavy Team of Experts"
       role: menu item
+      states_include:
+      - selected
+  # attach_present: presence of the structural file chip (its text, not matched).
+  attach_present:
+    file_chip: uploaded_file_chip
+  # send_fired: the stop button is present (generating).
+  send_fired:
+    stop_present: stop_button
+  # response_complete: the stop button is GONE (persistent-element gate).
+  response_complete:
+    stop_absent: stop_button

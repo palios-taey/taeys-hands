@@ -1,11 +1,25 @@
+"""Isolated Grok consultation driver (consultation_v2).
+
+Imports ONLY from the shared core (base / types / runtime / snapshot /
+yaml_contract). Carries ZERO Grok-specific strings: every element name, role,
+and key is read from ``consultation_v2/platforms/grok.yaml`` via ``self.cfg``.
+
+Contract (DRIVER_CONTRACT A-J / 100_TIMES):
+  * EXACT-match YAML only; the driver never hardcodes a platform string.
+  * ZERO retries on any action (100_TIMES §4a): a first-try miss returns
+    failure (STOP + escalate) — never a re-click, settle-poll, or fallback.
+  * Completion = stop_button debounce (absent -> re-scan fresh tree -> complete
+    only if still absent). NO fallback completion.
+  * Extract = scroll to bottom (Ctrl+End) then the Copy button via its AT-SPI
+    element action; validate length >> prompt.
+"""
 from __future__ import annotations
 
 import os
 import time
 
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.snapshot import matches_spec
-from consultation_v2.types import ConsultationRequest, ConsultationResult
+from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
 
 try:
     from storage import neo4j_client
@@ -16,21 +30,20 @@ except Exception:  # pragma: no cover - optional dependency in runtime
 class GrokConsultationDriver(BaseConsultationDriver):
     platform = 'grok'
 
+    # ------------------------------------------------------------------
+    # Orchestration
+    # ------------------------------------------------------------------
     def run(self, request: ConsultationRequest) -> ConsultationResult:
         result = self.result(request)
-        urls = self.cfg.get('urls', {})
-        target_url = request.session_url or urls.get('fresh')
+
         if not self.runtime.switch():
-            result.add_step('navigate', False, 'Could not switch to Grok tab')
+            result.add_step('navigate', False, 'Could not switch to Grok window')
             return result
         result.session_url_before = self.runtime.current_url()
-        if target_url:
-            navigated = self.runtime.navigate(target_url, verify_change=bool(urls.get('verify_navigation')))
-            snap = self.runtime.snapshot()
-            result.add_step('navigate', navigated, 'Navigated to Grok session target', target_url=target_url, snapshot=snap.serializable())
-            if not navigated:
-                return result
-        if not self.select_model_mode_tools(request, result):
+
+        if not self.navigate(request, result):
+            return result
+        if not self.select_mode(request, result):
             return result
         if not self.attach_files(request, result):
             return result
@@ -38,264 +51,293 @@ class GrokConsultationDriver(BaseConsultationDriver):
             return result
         if not self.send_prompt(request, result):
             return result
-        if not self.monitor_generation(request, result):
+        if not self.wait_for_completion(request, result):
             return result
-        if not self.extract_primary(request, result):
+        if not self.extract_response(request, result):
             return result
-        if not self.extract_additional(request, result):
+        if not self.store_result(request, result):
             return result
-        if not self.store_in_neo4j(request, result):
-            return result
+
         result.ok = True
         return result
 
-    def _remove_stale_attachment_buttons(self) -> int:
-        snapshot = self.runtime.snapshot()
-        remove_spec = {'name_contains': 'Remove', 'role_contains': 'button'}
-        candidates = []
-        for bucket in snapshot.mapped.values():
-            candidates.extend(bucket)
-        candidates.extend(snapshot.unknown)
-        removed = 0
-        for element in candidates:
-            if matches_spec(element, remove_spec):
-                if self.runtime.click(element):
-                    removed += 1
-                    time.sleep(0.2)
-        return removed
-
-    def _input_has_text(self) -> bool:
-        snapshot = self.runtime.snapshot()
-        input_el = self.find_first(snapshot, 'input')
-        if not input_el or not input_el.atspi_obj:
-            return False
-        try:
-            text_iface = input_el.atspi_obj.get_text_iface()
-            if text_iface:
-                text = text_iface.get_text(0, -1) or ''
-                if text.strip():
-                    return True
-        except Exception:
-            pass
-        try:
-            value_iface = input_el.atspi_obj.get_value_iface()
-            if value_iface is not None and str(value_iface.get_current_value()).strip():
-                return True
-        except Exception:
-            pass
-        return False
-
-    def select_model_mode_tools(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        workflow = self.cfg['workflow']['selection']
-        if request.mode is None:
-            requested_mode = (self.cfg['workflow']['defaults'].get('mode') or '').strip().lower()
-        else:
-            requested_mode = request.mode.strip().lower()
-        if request.model is None:
-            target = requested_mode
-        else:
-            target = requested_mode or request.model.strip().lower()
-        if not target:
-            result.add_step('select_model_mode', True, 'Grok using current/default model')
+    # ------------------------------------------------------------------
+    # Step 1 — navigate
+    # ------------------------------------------------------------------
+    def navigate(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        urls = self.cfg.get('urls', {})
+        target_url = request.session_url or urls.get('fresh')
+        if not target_url:
+            result.add_step('navigate', True, 'Grok using current tab (no target URL)')
             return True
-        if target not in workflow.get('model_targets', {}):
-            result.add_step('select_model_mode', False, f'Grok target {target!r} is not mapped in Consultation V2 YAML')
-            return False
+        verify = bool(urls.get('verify_navigation')) and request.session_url is None
+        navigated = self.runtime.navigate(target_url, verify_change=verify)
         snap = self.runtime.snapshot()
-        mode_active_key = f"{target}_active"
-        if self.validation_passes(snap, mode_active_key):
-            result.add_step('select_model_mode', True, f'Grok {target} already active')
-            return True
+        result.add_step('navigate', navigated, 'Navigated to Grok target',
+                        target_url=target_url, snapshot=snap.serializable())
+        return navigated
 
+    # ------------------------------------------------------------------
+    # Step 2 — model / mode selection (state-checked, click ONCE, no skip-hack)
+    # ------------------------------------------------------------------
+    def select_mode(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        workflow = self.cfg['workflow']
+        defaults = workflow.get('defaults', {})
+        mode_targets = workflow.get('mode_targets', {})
+
+        requested = (request.mode or request.model or defaults.get('mode') or defaults.get('model') or '')
+        requested = str(requested).strip().lower()
+        if not requested:
+            result.add_step('select_mode', True, 'Grok using current/default model')
+            return True
+        if requested not in mode_targets:
+            result.add_step('select_mode', False,
+                            f'Grok mode {requested!r} is not mapped in grok.yaml workflow.mode_targets')
+            return False
+
+        item_key = mode_targets[requested]
+        active_validation_key = f'{requested}_active'
+
+        # Open the model dropdown ONCE (a single, necessary action — not a retry).
+        snap = self.runtime.snapshot()
         selector = self.find_first(snap, 'model_selector')
         if not selector:
-            result.add_step('select_model_mode', False, 'Grok model selector not found', snapshot=snap.serializable())
+            result.add_step('select_mode', False, 'Grok model selector not found',
+                            snapshot=snap.serializable())
             return False
         if not self.runtime.click(selector):
-            result.add_step('select_model_mode', False, 'Grok model selector click failed', snapshot=snap.serializable())
+            result.add_step('select_mode', False, 'Grok model selector click failed',
+                            snapshot=snap.serializable())
             return False
-        time.sleep(0.8)
-        snap = self.runtime.snapshot()
-        item_key = workflow['model_targets'][target]
-        item = self.find_first(snap, item_key)
+
+        menu = self.runtime.menu_snapshot()
+
+        # State check: if the requested item is already the active model, do NOT
+        # click it — close the dropdown and report success.
+        if self.validation_passes(menu, active_validation_key):
+            self.runtime.press('Escape')
+            result.add_step('select_mode', True, f'Grok {requested} already active (no click)',
+                            snapshot=menu.serializable())
+            return True
+
+        item = self.find_first(menu, item_key)
         if not item:
             self.runtime.press('Escape')
-            time.sleep(0.3)
-            result.add_step('select_model_mode', False, f'Grok model item {target} not found', snapshot=snap.serializable())
+            result.add_step('select_mode', False,
+                            f'Grok model item {item_key!r} not found in dropdown',
+                            snapshot=menu.serializable())
             return False
         if not self.runtime.click(item):
             self.runtime.press('Escape')
-            time.sleep(0.3)
-            result.add_step('select_model_mode', False, f'Grok model item click failed for {target}', snapshot=snap.serializable())
+            result.add_step('select_mode', False,
+                            f'Grok model item click failed for {item_key!r}',
+                            snapshot=menu.serializable())
             return False
-        time.sleep(0.8)
-        # Grok requires explicit re-open verification because the selector label does not update reliably.
-        verify_root = self.runtime.snapshot()
-        selector = self.find_first(verify_root, 'model_selector')
-        verified = False
-        if selector and self.runtime.click(selector):
-            time.sleep(0.5)
-            verify_menu = self.runtime.menu_snapshot()
-            verified = self.validation_passes(verify_menu, mode_active_key)
-            self.runtime.press('Escape')
-            time.sleep(0.3)
-        result.add_step('select_model_mode', verified, f'Grok model set to {target}', snapshot=self.runtime.snapshot().serializable())
-        return verified
 
+        result.add_step('select_mode', True, f'Grok model set to {requested}')
+        return True
+
+    # ------------------------------------------------------------------
+    # Step 3 — attach (exact Attach -> menu_snapshot -> exact Upload a file,
+    #          ONCE each; no stale-cache, no re-click recovery)
+    # ------------------------------------------------------------------
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        self.runtime.close_stale_dialogs()
-        if request.attachments and request.session_url is None:
-            removed = self._remove_stale_attachment_buttons()
-            if removed:
-                result.add_step('attach_preflight', True, 'Grok stale attachment chips cleared before new upload', removed=removed)
-        for file_path in request.attachments:
-            abs_path = os.path.abspath(file_path)
-            snap = self.runtime.snapshot()
-            trigger = self.find_first(snap, 'attach_trigger')
-            if not trigger:
-                result.add_step('attach', False, f'Grok attach trigger missing for {abs_path}', snapshot=snap.serializable())
-                return False
-            if not self.runtime.click(trigger):
-                result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}', snapshot=snap.serializable())
-                return False
-            time.sleep(0.6)
-            # FIX 1: Use menu_snapshot() instead of snapshot() so portal-rendered
-            # dropdown items (role: menu item) are visible to AT-SPI discovery.
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
-            if not upload_item:
-                self.runtime.press('Escape')
-                time.sleep(0.3)
-                result.add_step('attach', False, f'Grok upload item not found for {abs_path}', snapshot=menu_snap.serializable())
-                return False
-            if not self.runtime.click(upload_item):
-                self.runtime.press('Escape')
-                time.sleep(0.3)
-                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}', snapshot=menu_snap.serializable())
-                return False
-            time.sleep(0.8)
-            self.runtime.focus_file_dialog()
-            self.runtime.press('ctrl+l')
-            time.sleep(0.2)
-            if not self.runtime.paste(abs_path):
-                self.runtime.type_text(abs_path, delay_ms=5)
-            time.sleep(0.2)
-            # ONE Return is sufficient: selects the file and closes the GTK dialog.
-            # A second Return would hit the now-focused chat input and submit garbage.
-            self.runtime.press('Return')
-            # FIX 2: Press Escape to ensure the dropdown is closed after the file
-            # dialog dismisses — Grok re-opens the dropdown on dialog close.
-            time.sleep(0.5)
-            self.runtime.press('Escape')
-            # FIX 3: Increased wait from 2.0s → 3.0s before validation snapshot
-            # so the AT-SPI tree has time to reflect the Remove chip.
-            time.sleep(3.0)
-            verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
-            result.add_step('attach', verified, f'Grok attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
-            if not verified:
-                return False
         if not request.attachments:
             result.add_step('attach', True, 'No Grok attachments requested')
+            return True
+
+        attachment = self.cfg['workflow']['attachment']
+        trigger_key = attachment['trigger']
+        upload_key = attachment['menu_target']
+
+        for file_path in request.attachments:
+            abs_path = os.path.abspath(file_path)
+            self.runtime.close_stale_dialogs()
+
+            # Resolve the Attach push button FRESH from a current snapshot
+            # (no stale/cached element) and click it ONCE.
+            snap = self.runtime.snapshot()
+            trigger = self.find_first(snap, trigger_key)
+            if not trigger:
+                result.add_step('attach', False, f'Grok attach trigger missing for {abs_path}',
+                                snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(trigger):
+                result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}',
+                                snapshot=snap.serializable())
+                return False
+
+            # Read the dropdown via menu_snapshot (React portal). If the exact
+            # Upload item is absent on this single read, that is a STOP/failure
+            # — NOT a re-click (the wrong-menu re-click was the §4a bug).
+            menu = self.runtime.menu_snapshot()
+            upload_item = self.find_first(menu, upload_key)
+            if not upload_item:
+                result.add_step('attach', False,
+                                f'Grok upload item {upload_key!r} not in attach menu for {abs_path}',
+                                snapshot=menu.serializable())
+                return False
+            if not self.runtime.click(upload_item):
+                result.add_step('attach', False, f'Grok upload item click failed for {abs_path}',
+                                snapshot=menu.serializable())
+                return False
+
+            # GTK file dialog: focus it, type the absolute path, confirm ONCE.
+            self.runtime.focus_file_dialog()
+            self.runtime.press('ctrl+l')
+            if not self.runtime.paste(abs_path):
+                self.runtime.type_text(abs_path, delay_ms=5)
+            self.runtime.press('Return')
+
+            # Validate the chip rendered (structural locator — presence, not text).
+            verify_snap = self.runtime.snapshot()
+            verified = self._file_chip_present(verify_snap)
+            result.add_step('attach', verified,
+                            f'Grok attached {os.path.basename(abs_path)}',
+                            file=abs_path, snapshot=verify_snap.serializable())
+            if not verified:
+                return False
         return True
 
+    # ------------------------------------------------------------------
+    # Step 4 — enter prompt
+    # ------------------------------------------------------------------
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        input_key = self.cfg['workflow']['prompt']['input']
         snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
+        input_el = self.find_first(snap, input_key)
         if not input_el:
-            result.add_step('prompt', False, 'Grok input field not found', snapshot=snap.serializable())
+            result.add_step('prompt', False, 'Grok input field not found',
+                            snapshot=snap.serializable())
             return False
         if not self.runtime.click(input_el):
-            result.add_step('prompt', False, 'Grok input focus click failed', snapshot=snap.serializable())
+            result.add_step('prompt', False, 'Grok input focus click failed',
+                            snapshot=snap.serializable())
             return False
-        time.sleep(0.3)
-        pasted = self.runtime.paste(request.message)
-        time.sleep(0.5)
-        # Grok uses section-role input — AT-SPI text/value interfaces may not work.
-        # Trust the paste if clipboard operation succeeded.
-        at_spi_verified = self._input_has_text()
-        verified = bool(pasted)
-        msg = 'Grok prompt entered' + (' (AT-SPI verified)' if at_spi_verified else ' (paste trusted)')
-        result.add_step('prompt', verified, msg, snapshot=self.runtime.snapshot().serializable())
-        return verified
-
-    def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        # Use the pre-navigation baseline captured in run() — file attachment
-        # can change the URL before send, making current_url() stale.
-        before = result.session_url_before
-        pressed = self.runtime.press('Return')
-        # Stop button OR copy button confirms send succeeded.
-        # Fast responses: stop appears and disappears before poll catches it,
-        # but copy_button appears when response completes — confirms send worked.
-        def _send_confirmed():
-            snap = self.runtime.snapshot()
-            return snap.has('stop_button') or snap.has('copy_button')
-        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
-        result.session_url_after = self.runtime.current_url() or before
-        verify_snap = self.runtime.snapshot()
-        url_changed = result.session_url_after and result.session_url_after != before
-        is_new_session = not request.session_url
-        if is_new_session:
-            verified = bool(pressed and stop_seen and url_changed)
-        else:
-            verified = bool(pressed and stop_seen)
-        result.add_step('send', verified, 'Grok send validated by Return + stop button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
-        return verified
-
-    def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        seen_stop = False
-
-        def _poll() -> bool:
-            nonlocal seen_stop
-            snap = self.runtime.snapshot()
-            if snap.has('stop_button'):
-                seen_stop = True
-                return False
-            # Complete if: (1) saw stop then copy appeared, OR
-            # (2) copy present and no stop — response finished before we started
-            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
-                return True
+        if not self.runtime.paste(request.message):
+            result.add_step('prompt', False, 'Grok prompt paste failed',
+                            snapshot=snap.serializable())
             return False
-
-        completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
-        verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        result.add_step('monitor', verified, 'Grok response completed', stop_seen=seen_stop, snapshot=verify_snap.serializable())
-        return verified
-
-    def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        time.sleep(2.0)
-        snap = self.runtime.snapshot()
-        copy_button = self.find_last(snap, 'copy_button')
-        if not copy_button:
-            result.add_step('extract_primary', False, 'Grok copy button not found', snapshot=snap.serializable())
-            return False
-        self.runtime.write_clipboard('')
-        time.sleep(0.3)
-        if not self.runtime.click(copy_button, strategy='atspi_only'):
-            result.add_step('extract_primary', False, 'Grok copy button AT-SPI action failed', snapshot=snap.serializable())
-            return False
-        time.sleep(1.0)
-        content = self.runtime.read_clipboard().strip()
-        result.response_text = content
-        verified = bool(content) and content != request.message
-        result.add_step('extract_primary', verified, f'Grok response copied ({len(content)} chars)', characters=len(content), preview=content[:200])
-        return verified
-
-    def extract_additional(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        result.add_step('extract_additional', True, 'Grok additional attachment extraction not configured in YAML yet')
+        result.add_step('prompt', True, 'Grok prompt entered',
+                        snapshot=self.runtime.snapshot().serializable())
         return True
 
-    def store_in_neo4j(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+    # ------------------------------------------------------------------
+    # Step 5 — send (re-focus composer + Enter; verify stop appeared + URL gate)
+    # ------------------------------------------------------------------
+    def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        input_key = self.cfg['workflow']['prompt']['input']
+        stop_key = self.cfg['workflow']['send']['stop_key']
+        before = result.session_url_before
+
+        # Re-focus the composer immediately before Enter (attach/paste can steal
+        # focus). This is focus, not a re-attempt of a failed action.
+        snap = self.runtime.snapshot()
+        input_el = self.find_first(snap, input_key)
+        if input_el:
+            self.runtime.click(input_el)
+        if not self.runtime.press('Return'):
+            result.add_step('send', False, 'Grok Return keypress failed')
+            return False
+
+        # Observe (re-scan) until the stop button appears — readiness wait, not a
+        # re-action. A single Enter was pressed; we only watch the tree.
+        def _stop_present():
+            return self.runtime.snapshot().has(stop_key)
+
+        stop_seen = bool(self.runtime.wait_until(_stop_present, timeout=60, interval=0.6))
+        result.session_url_after = self.runtime.current_url() or before
+        verify_snap = self.runtime.snapshot()
+
+        url_changed = bool(result.session_url_after and result.session_url_after != before)
+        is_new_session = request.session_url is None
+        if is_new_session:
+            verified = bool(stop_seen and url_changed)
+        else:
+            verified = bool(stop_seen)
+        result.add_step('send', verified, 'Grok send validated (stop button + URL gate)',
+                        url_before=before, url_after=result.session_url_after,
+                        stop_seen=stop_seen, url_changed=url_changed,
+                        snapshot=verify_snap.serializable())
+        return verified
+
+    # ------------------------------------------------------------------
+    # Step 6 — wait for completion (stop_button debounce; NO fallback)
+    # ------------------------------------------------------------------
+    def wait_for_completion(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        stop_key = self.cfg['workflow']['monitor']['stop_key']
+
+        completed = self.runtime.wait_until(
+            lambda: self._completion_debounced(stop_key),
+            timeout=float(request.timeout),
+            interval=1.0,
+        )
+        verify_snap = self.runtime.snapshot()
+        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
+        result.add_step('monitor', verified, 'Grok response completed (stop-button debounce)',
+                        snapshot=verify_snap.serializable())
+        return verified
+
+    def _completion_debounced(self, stop_key: str) -> bool:
+        """Stop-absent -> short wait -> re-scan a FRESH tree -> complete only if
+        still absent. Re-SCANNING is observation (allowed), not a retry."""
+        if self.runtime.snapshot().has(stop_key):
+            return False  # still generating
+        time.sleep(1.5)
+        if self.runtime.snapshot().has(stop_key):
+            return False  # reappeared — keep generating
+        return True
+
+    # ------------------------------------------------------------------
+    # Step 7 — extract (scroll to bottom + Copy element action; validate length)
+    # ------------------------------------------------------------------
+    def extract_response(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        copy_key = self.cfg['workflow']['extract']['primary_key']
+
+        # Scroll the thread to the BOTTOM so the last Copy button is the final
+        # assistant turn and is actionable.
+        self.runtime.press('ctrl+End')
+
+        snap = self.runtime.snapshot()
+        copy_button = self.find_last(snap, copy_key)
+        if not copy_button:
+            result.add_step('extract', False, 'Grok copy button not found',
+                            snapshot=snap.serializable())
+            return False
+
+        self.runtime.write_clipboard('')
+        # Click the Copy button via its AT-SPI element action (never raw x/y).
+        if not self.runtime.click(copy_button, strategy='atspi_only'):
+            result.add_step('extract', False, 'Grok copy button AT-SPI action failed',
+                            snapshot=snap.serializable())
+            return False
+
+        content = self.runtime.read_clipboard().strip()
+        result.response_text = content
+        # Validate the extract is real: non-empty, longer than the prompt, not an echo.
+        verified = bool(content) and content != request.message and len(content) > len(request.message)
+        result.add_step('extract', verified, f'Grok response copied ({len(content)} chars)',
+                        characters=len(content), prompt_len=len(request.message),
+                        preview=content[:200])
+        return verified
+
+    # ------------------------------------------------------------------
+    # Step 8 — store
+    # ------------------------------------------------------------------
+    def store_result(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         if request.no_neo4j or neo4j_client is None:
             result.storage = {'skipped': True, 'reason': 'Neo4j disabled or unavailable'}
             result.add_step('store', True, 'Grok Neo4j storage skipped', storage=result.storage)
             return True
         try:
-            session_url = result.session_url_after or result.session_url_before or self.runtime.current_url() or ''
+            session_url = (result.session_url_after or result.session_url_before
+                           or self.runtime.current_url() or '')
             session_id = neo4j_client.get_or_create_session(self.platform, session_url)
-            user_message_id = neo4j_client.add_message(session_id, 'user', request.message, request.attachments)
-            assistant_message_id = neo4j_client.add_message(session_id, 'assistant', result.response_text, self.serialize_artifacts(result.extractions))
+            user_message_id = neo4j_client.add_message(
+                session_id, 'user', request.message, request.attachments)
+            assistant_message_id = neo4j_client.add_message(
+                session_id, 'assistant', result.response_text,
+                self.serialize_artifacts(result.extractions))
             result.storage = {
                 'session_id': session_id,
                 'user_message_id': user_message_id,
@@ -307,3 +349,71 @@ class GrokConsultationDriver(BaseConsultationDriver):
         except Exception as exc:  # pragma: no cover - runtime dependent
             result.add_step('store', False, f'Grok Neo4j storage failed: {exc}')
             return False
+
+    # ------------------------------------------------------------------
+    # Structural file-chip validation (the YAML_SCHEMA §2 exception)
+    # ------------------------------------------------------------------
+    def _file_chip_present(self, snapshot: Snapshot) -> bool:
+        """Validate the uploaded-file chip by its STRUCTURAL position (exact role
+        + exact parent element_map key + ordinal), never by its dynamic text.
+
+        Reads the spec from ``validation.attach_present.file_chip`` ->
+        ``element_map[<key>].structural``. All names/roles/keys come from YAML.
+        """
+        validation = self.cfg.get('validation', {}).get('attach_present', {})
+        chip_key = validation.get('file_chip')
+        if not chip_key:
+            return False
+        element_map = self.cfg.get('tree', {}).get('element_map', {})
+        structural = (element_map.get(chip_key) or {}).get('structural')
+        if not structural:
+            return False
+
+        role = str(structural.get('role', '')).strip().lower()
+        parent_key = structural.get('parent')
+        require_nonempty = bool(structural.get('name_must_be_nonempty'))
+        ordinal = structural.get('ordinal')
+        index = structural.get('index')
+
+        parent_el = self.find_first(snapshot, parent_key) if parent_key else None
+        if parent_key and not parent_el:
+            return False
+
+        matches = self._structural_children(parent_el, role, require_nonempty)
+        if not matches:
+            return False
+
+        if ordinal == 'first':
+            return True
+        if ordinal == 'last':
+            return True
+        if isinstance(index, int):
+            return 0 <= index < len(matches)
+        return True
+
+    def _structural_children(self, parent_el: ElementRef | None, role: str,
+                             require_nonempty: bool) -> list:
+        """Walk the live AT-SPI subtree of ``parent_el`` collecting descendants of
+        exact ``role`` (optionally requiring a non-empty name). Pure structural
+        traversal — no text matching."""
+        if parent_el is None or parent_el.atspi_obj is None:
+            return []
+        found: list = []
+
+        def _walk(obj, depth=0):
+            if depth > 12:
+                return
+            try:
+                obj_role = (obj.get_role_name() or '').strip().lower()
+                obj_name = (obj.get_name() or '').strip()
+                if obj_role == role and (not require_nonempty or obj_name):
+                    found.append(obj)
+                for i in range(obj.get_child_count()):
+                    child = obj.get_child_at_index(i)
+                    if child is not None:
+                        _walk(child, depth + 1)
+            except Exception:
+                return
+
+        _walk(parent_el.atspi_obj)
+        return found

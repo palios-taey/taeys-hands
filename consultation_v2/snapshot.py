@@ -24,6 +24,13 @@ def _listify(value: Any) -> List[Any]:
 def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> bool:
     if not spec:
         return False
+    # A `structural:` locator (YAML_SCHEMA §2) matches by POSITION (exact role +
+    # exact parent key + index/ordinal), which the flat element matcher cannot
+    # evaluate. It is resolved by the per-platform driver against the parent's
+    # subtree — never by this name/role pass. So a structural-only spec must NOT
+    # positively match arbitrary elements here (that would pollute classification).
+    if 'structural' in spec:
+        return False
     name = ((element.name if isinstance(element, ElementRef) else element.get('name')) or '').strip()
     role = (element.role if isinstance(element, ElementRef) else element.get('role')) or ''
     states = set(s.lower() for s in ((element.states if isinstance(element, ElementRef) else element.get('states')) or []))
