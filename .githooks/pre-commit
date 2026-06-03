@@ -2,3 +2,4 @@
 set -euo pipefail
 
 python3 tools/lint_no_yaml_silent_fallbacks.py --staged
+python3 tools/lint_exact_match.py --staged
