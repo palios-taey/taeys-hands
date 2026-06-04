@@ -62,6 +62,7 @@ require_cmd Xvfb
 require_cmd dbus-run-session
 require_cmd xprop
 require_cmd openbox
+require_cmd stdbuf
 $NO_VNC || require_cmd x11vnc
 
 # Firefox binary path — Mira ships it as deb at /usr/lib/firefox/firefox,
@@ -115,6 +116,25 @@ WantedBy=default.target
 EOF
 echo "[install] wrote ${SYSTEMD_USER_DIR}/taey-xvfb@.service"
 
+cat > "${SYSTEMD_USER_DIR}/taey-bus-watcher@.service" <<EOF
+[Unit]
+Description=Taey AT-SPI bus pointer watcher for display :%i
+Requires=taey-display-%i.service
+After=taey-display-%i.service
+PartOf=taey-display-%i.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:%i
+ExecStart=${REPO_ROOT}/scripts/bus_watcher.sh %i
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+echo "[install] wrote ${SYSTEMD_USER_DIR}/taey-bus-watcher@.service"
+
 # --- Per-display units from machine.env ---
 INSTALLED=()
 for var in $(compgen -v | grep -E '^TAEY_DISPLAY_[0-9]+$' | sort -V); do
@@ -153,7 +173,7 @@ Requires=taey-xvfb@${display_num}.service
 [Service]
 Type=simple
 Environment=DISPLAY=:${display_num}
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "\$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:${display_num}; /usr/libexec/at-spi-bus-launcher --launch-immediately & A11Y_ADDR=""; for i in \$(seq 1 20); do TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} && break ;; esac; sleep 1; done; if [[ -z "\$A11Y_ADDR" ]]; then TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} ;; esac; fi; AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" /usr/libexec/at-spi2-registryd & sleep 1; openbox & sleep 1; ${vnc_block}mkdir -p \$HOME/.taey/profiles/${profile}; cp ${FIREFOX_USER_JS_SRC} \$HOME/.taey/profiles/${profile}/user.js; echo "user_pref(\\"accessibility.force_disabled\\", -1);" >> \$HOME/.taey/profiles/${profile}/user.js; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" ${FIREFOX_BIN} --no-remote --profile \$HOME/.taey/profiles/${profile} "${url}" & FIREFOX_PID=\$!; ( L_ADDR="\$A11Y_ADDR"; S_CNT=0; for i in \$(seq 1 30); do C_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); if [[ "\$C_ADDR" == unix:* ]]; then if [[ "\$C_ADDR" != "\$L_ADDR" || ! -s /tmp/a11y_bus_:${display_num} ]]; then printf "%s\n" "\$C_ADDR" > /tmp/a11y_bus_:${display_num}.tmp && mv /tmp/a11y_bus_:${display_num}.tmp /tmp/a11y_bus_:${display_num}; L_ADDR="\$C_ADDR"; S_CNT=0; else S_CNT=\$((S_CNT + 1)); fi; fi; [[ \$S_CNT -ge 3 ]] && break; sleep 2; done ) & [ -s /tmp/a11y_bus_:${display_num} ] || echo "WARNING: AT-SPI bus capture failed for :${display_num}" >&2; echo "\${FIREFOX_PID}" > /tmp/firefox_pid_:${display_num}; wait \${FIREFOX_PID}'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "\$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:${display_num}; /usr/libexec/at-spi-bus-launcher --launch-immediately & A11Y_ADDR=""; for i in \$(seq 1 20); do TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} && break ;; esac; sleep 1; done; if [[ -z "\$A11Y_ADDR" ]]; then TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} ;; esac; fi; AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" /usr/libexec/at-spi2-registryd & sleep 1; openbox & sleep 1; ${vnc_block}mkdir -p \$HOME/.taey/profiles/${profile}; cp ${FIREFOX_USER_JS_SRC} \$HOME/.taey/profiles/${profile}/user.js; echo "user_pref(\\"accessibility.force_disabled\\", -1);" >> \$HOME/.taey/profiles/${profile}/user.js; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" ${FIREFOX_BIN} --no-remote --profile \$HOME/.taey/profiles/${profile} "${url}" & FIREFOX_PID=\$!; if [[ -z "\$FIREFOX_PID" ]]; then for _ in \$(seq 1 10); do FIREFOX_PID=\$(pgrep -P \$\$ -o -x firefox 2>/dev/null || true); [[ -n "\$FIREFOX_PID" ]] && break; sleep 1; done; fi; [ -s /tmp/a11y_bus_:${display_num} ] || echo "WARNING: AT-SPI bus capture failed for :${display_num}" >&2; echo "\${FIREFOX_PID}" > /tmp/firefox_pid_:${display_num}; if [[ -n "\${FIREFOX_PID}" ]]; then wait \${FIREFOX_PID}; else wait; fi'
 ExecStopPost=/usr/bin/bash -lc '${stop_kill}rm -f /tmp/dbus_session_bus_:${display_num} /tmp/firefox_pid_:${display_num}'
 Restart=always
 RestartSec=10
@@ -161,6 +181,18 @@ RestartSec=10
 [Install]
 WantedBy=default.target
 EOF
+    python3 - "${unit_path}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text().splitlines()
+for idx, line in enumerate(lines):
+    if line.startswith(("ExecStart=", "ExecStopPost=")):
+        lines[idx] = line.replace("$", "$$")
+        lines[idx] = lines[idx].replace('printf "%s\\n"', 'printf "%%s\\n"')
+path.write_text("\n".join(lines) + "\n")
+PY
     echo "[install] wrote ${unit_path}  (platform=${platform} profile=${profile} vnc=${vnc_port})"
     INSTALLED+=("taey-display-${display_num}.service")
 done
@@ -176,6 +208,9 @@ echo "[install] daemon-reload done"
 
 for unit in "${INSTALLED[@]}"; do
     systemctl --user enable "${unit}" >/dev/null
+    display_num="${unit#taey-display-}"
+    display_num="${display_num%.service}"
+    systemctl --user enable "taey-bus-watcher@${display_num}.service" >/dev/null
 done
 echo "[install] enabled: ${INSTALLED[*]}"
 
@@ -185,6 +220,11 @@ if $NO_START; then
 fi
 
 systemctl --user restart "${INSTALLED[@]}"
+for unit in "${INSTALLED[@]}"; do
+    display_num="${unit#taey-display-}"
+    display_num="${display_num%.service}"
+    systemctl --user restart "taey-bus-watcher@${display_num}.service"
+done
 echo "[install] started/restarted ${#INSTALLED[@]} display unit(s)"
 
 # --- Verify ---
@@ -194,6 +234,10 @@ echo "=== verification ==="
 for unit in "${INSTALLED[@]}"; do
     state=$(systemctl --user is-active "${unit}" 2>/dev/null || echo unknown)
     echo "  ${unit}: ${state}"
+    display_num="${unit#taey-display-}"
+    display_num="${display_num%.service}"
+    watcher_state=$(systemctl --user is-active "taey-bus-watcher@${display_num}.service" 2>/dev/null || echo unknown)
+    echo "  taey-bus-watcher@${display_num}.service: ${watcher_state}"
 done
 if ! $NO_VNC; then
     echo

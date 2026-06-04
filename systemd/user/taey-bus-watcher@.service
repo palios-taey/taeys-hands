@@ -1,0 +1,15 @@
+[Unit]
+Description=Taey AT-SPI bus pointer watcher for display :%i
+Requires=taey-display-%i.service
+After=taey-display-%i.service
+PartOf=taey-display-%i.service
+
+[Service]
+Type=simple
+Environment=DISPLAY=:%i
+ExecStart=%h/taeys-hands/scripts/bus_watcher.sh %i
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
