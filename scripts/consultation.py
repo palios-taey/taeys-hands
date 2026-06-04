@@ -957,6 +957,37 @@ def _normalize_mode_key(mode: str) -> str:
     return (mode or '').strip().lower().replace(' ', '_')
 
 
+def _find_post_send_button_inprocess(platform: str, criteria: dict,
+                                     timeout: float = 30.0) -> dict | None:
+    """Find a post-send button directly on the active display."""
+    deadline = time.time() + max(timeout, 0.0)
+    while True:
+        doc = _refresh_platform_tree(platform)
+        if doc:
+            for element in find_elements(doc):
+                role = str(element.get('role', '')).lower()
+                if 'button' not in role:
+                    continue
+                if _match_element_criteria(element, criteria):
+                    return element
+        if time.time() >= deadline:
+            return None
+        time.sleep(0.5)
+
+
+def _click_element_inprocess(platform: str, element: dict) -> bool:
+    """Click an AT-SPI element directly on the active display."""
+    if element.get('atspi_obj') and atspi_click(element):
+        return True
+
+    x = element.get('x')
+    y = element.get('y')
+    if x is None or y is None:
+        logger.error("No coordinates available for post-send click on %s", platform)
+        return False
+    return bool(inp.click_at(int(x), int(y)))
+
+
 def _execute_post_send_action(platform: str, mode: str = None) -> bool:
     """Run a configured post-send action for the selected mode, if any."""
     mode_key = _normalize_mode_key(mode)
@@ -979,52 +1010,33 @@ def _execute_post_send_action(platform: str, mode: str = None) -> bool:
         logger.info("Waiting %.1fs before post-send action", wait_before)
         time.sleep(wait_before)
 
-    name_contains = post_send_action.get('name_contains')
-    if isinstance(name_contains, str):
-        patterns = [name_contains]
-    else:
-        patterns = [str(part) for part in (name_contains or []) if str(part).strip()]
-    if not patterns:
-        logger.error("post_send_action missing name_contains for %s/%s", platform, mode_key)
-        return False
+    button_criteria = {}
+    for key in ('name', 'name_contains', 'name_pattern', 'names_any_of', 'role', 'role_contains'):
+        value = post_send_action.get(key)
+        if value not in (None, '', []):
+            button_criteria[key] = value
+    if 'role' not in button_criteria and 'role_contains' not in button_criteria:
+        button_criteria['role_contains'] = 'button'
 
+    if not any(key in button_criteria for key in ('name', 'name_contains', 'name_pattern', 'names_any_of')):
+        logger.error("post_send_action missing button selector for %s/%s", platform, mode_key)
+        return False
+    wait_timeout = float(post_send_action.get('wait_timeout', 30) or 30)
+
+    inp.focus_firefox()
     inp.press_key('ctrl+End')
     time.sleep(1)
-    inspect_result = send_to_worker(
-        platform,
-        {'cmd': 'inspect', 'scroll': 'bottom', 'fresh_session': False},
-        timeout=30.0,
-    )
-    if not inspect_result.get('success'):
-        logger.error("Post-send inspect failed for %s/%s: %s",
-                     platform, mode_key, inspect_result.get('error'))
-        return False
-
-    patterns_lower = [part.lower() for part in patterns]
-    controls = inspect_result.get('controls', [])
-    button = next(
-        (
-            control for control in controls
-            if 'button' in str(control.get('role', '')).lower()
-            and any(part in str(control.get('name', '')).lower() for part in patterns_lower)
-        ),
-        None,
-    )
+    button = _find_post_send_button_inprocess(platform, button_criteria, timeout=wait_timeout)
     if not button:
-        logger.error("Post-send button not found for %s/%s: %s", platform, mode_key, patterns)
+        logger.error("Post-send button not found for %s/%s: %s",
+                     platform, mode_key, button_criteria)
         return False
 
-    click_result = send_to_worker(
-        platform,
-        {'cmd': 'click', 'x': int(button['x']), 'y': int(button['y'])},
-        timeout=30.0,
-    )
-    if click_result.get('error'):
-        logger.error("Post-send click failed for %s/%s: %s",
-                     platform, mode_key, click_result.get('error'))
+    if not _click_element_inprocess(platform, button):
+        logger.error("Post-send click failed for %s/%s", platform, mode_key)
         return False
 
-    logger.info("Clicked Start research button for Gemini Deep Research")
+    logger.info("Clicked post-send action for %s/%s", platform, mode_key)
     return True
 
 
