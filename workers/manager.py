@@ -11,6 +11,8 @@ import socket
 import subprocess
 import sys
 import time
+import signal
+import ctypes
 from typing import Dict, Optional
 
 from core.platforms import _PLATFORM_DISPLAYS, get_platform_display, is_multi_display
@@ -24,6 +26,8 @@ _WORKER_SCRIPT = os.path.join(
 # Active worker processes: platform -> Popen
 _workers: Dict[str, subprocess.Popen] = {}
 
+_PR_SET_PDEATHSIG = 1
+
 
 class _JSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -36,6 +40,23 @@ class _JSONEncoder(json.JSONEncoder):
 
 def _socket_path(display: str) -> str:
     return f'/tmp/taey_worker_{display}.sock'
+
+
+def _set_parent_death_signal():
+    """Terminate the worker if its parent MCP server exits.
+
+    On Mira/Linux this prevents orphaned display workers from surviving after
+    a short-lived stdio server process is gone.
+    """
+    if sys.platform != 'linux':
+        return
+    try:
+        libc = ctypes.CDLL(None)
+        if libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0) != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+    except Exception as exc:
+        logger.warning("Could not set parent-death signal for worker: %s", exc)
 
 
 # ─── Spawn / restart ────────────────────────────────────────────────
@@ -72,6 +93,7 @@ def _spawn_worker(platform: str, display: str) -> bool:
             [sys.executable, _WORKER_SCRIPT, display, platform],
             stdout=log_fd, stderr=log_fd,
             close_fds=True,
+            preexec_fn=_set_parent_death_signal,
         )
     except Exception as e:
         logger.error("Failed to spawn %s worker: %s", platform, e)

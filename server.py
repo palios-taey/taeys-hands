@@ -38,6 +38,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger('taeys-hands')
 
+
+def _shutdown_signal(signum, _frame):
+    raise SystemExit(128 + signum)
+
 # Set DISPLAY before AT-SPI imports
 from core.atspi import detect_display
 DISPLAY = detect_display()
@@ -391,69 +395,78 @@ def run_server():
         sys.stdout.write(json.dumps(msg, cls=SafeJSONEncoder) + '\n')
         sys.stdout.flush()
 
-    # Spawn per-display workers on multi-display (Mira)
-    worker_status = spawn_workers()
-    if worker_status:
-        ready = sum(1 for v in worker_status.values() if v)
-        total = len(worker_status)
-        logger.info("Workers: %d/%d ready — %s", ready, total, worker_status)
+    old_sigterm = signal.signal(signal.SIGTERM, _shutdown_signal)
+    old_sigint = signal.signal(signal.SIGINT, _shutdown_signal)
+    try:
+        # Spawn per-display workers on multi-display (Mira)
+        worker_status = spawn_workers()
+        if worker_status:
+            ready = sum(1 for v in worker_status.values() if v)
+            total = len(worker_status)
+            logger.info("Workers: %d/%d ready — %s", ready, total, worker_status)
 
-    logger.info("Taey's Hands MCP server starting (display=%s)", DISPLAY)
+        logger.info("Taey's Hands MCP server starting (display=%s)", DISPLAY)
 
-    while True:
-        try:
-            msg = read_message()
-            if msg is None:
-                break
+        while True:
+            try:
+                msg = read_message()
+                if msg is None:
+                    break
 
-            method = msg.get('method')
-            params = msg.get('params', {})
-            msg_id = msg.get('id')
+                method = msg.get('method')
+                params = msg.get('params', {})
+                msg_id = msg.get('id')
 
-            if method == 'initialize':
-                write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "taeys-hands", "version": "8.2.0"},
-                    "capabilities": {"tools": {}},
-                }})
+                if method == 'initialize':
+                    write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
+                        "protocolVersion": "2024-11-05",
+                        "serverInfo": {"name": "taeys-hands", "version": "8.2.0"},
+                        "capabilities": {"tools": {}},
+                    }})
 
-            elif method == 'tools/list':
-                write_message({"jsonrpc": "2.0", "id": msg_id,
-                              "result": {"tools": get_tools()}})
+                elif method == 'tools/list':
+                    write_message({"jsonrpc": "2.0", "id": msg_id,
+                                  "result": {"tools": get_tools()}})
 
-            elif method == 'tools/call':
-                tool_name = params.get('name')
-                tool_args = params.get('arguments', {})
-                old_handler = signal.signal(signal.SIGALRM, _tool_timeout_handler)
-                signal.alarm(TOOL_TIMEOUT_SECONDS)
-                try:
-                    result = handle_tool(tool_name, tool_args, redis_client)
-                except ToolTimeoutError:
-                    result = {"error": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
-                finally:
-                    signal.alarm(0)
-                    signal.signal(signal.SIGALRM, old_handler)
-                is_error = isinstance(result, dict) and result.get('error') is not None
-                write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
-                    "content": [{"type": "text",
-                                 "text": json.dumps(result, indent=2, cls=SafeJSONEncoder)}],
-                    "isError": is_error,
-                }})
+                elif method == 'tools/call':
+                    tool_name = params.get('name')
+                    tool_args = params.get('arguments', {})
+                    old_handler = signal.signal(signal.SIGALRM, _tool_timeout_handler)
+                    signal.alarm(TOOL_TIMEOUT_SECONDS)
+                    try:
+                        result = handle_tool(tool_name, tool_args, redis_client)
+                    except ToolTimeoutError:
+                        result = {"error": f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT_SECONDS}s"}
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                    is_error = isinstance(result, dict) and result.get('error') is not None
+                    write_message({"jsonrpc": "2.0", "id": msg_id, "result": {
+                        "content": [{"type": "text",
+                                     "text": json.dumps(result, indent=2, cls=SafeJSONEncoder)}],
+                        "isError": is_error,
+                    }})
 
-            elif method == 'notifications/initialized':
-                pass
+                elif method == 'notifications/initialized':
+                    pass
 
-            else:
-                write_message({"jsonrpc": "2.0", "id": msg_id,
-                              "error": {"code": -32601, "message": f"Method not found: {method}"}})
+                else:
+                    write_message({"jsonrpc": "2.0", "id": msg_id,
+                                  "error": {"code": -32601, "message": f"Method not found: {method}"}})
 
-        except json.JSONDecodeError as e:
-            write_message({"jsonrpc": "2.0", "id": None,
-                          "error": {"code": -32700, "message": f"Parse error: {e}"}})
-        except Exception as e:
-            logger.error("Internal error: %s", traceback.format_exc())
-            write_message({"jsonrpc": "2.0", "id": None,
-                          "error": {"code": -32603, "message": f"Internal error: {e}"}})
+            except SystemExit:
+                raise
+            except json.JSONDecodeError as e:
+                write_message({"jsonrpc": "2.0", "id": None,
+                              "error": {"code": -32700, "message": f"Parse error: {e}"}})
+            except Exception as e:
+                logger.error("Internal error: %s", traceback.format_exc())
+                write_message({"jsonrpc": "2.0", "id": None,
+                              "error": {"code": -32603, "message": f"Internal error: {e}"}})
+    finally:
+        shutdown_workers()
+        signal.signal(signal.SIGTERM, old_sigterm)
+        signal.signal(signal.SIGINT, old_sigint)
 
 
 if __name__ == '__main__':

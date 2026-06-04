@@ -85,3 +85,18 @@ def test_safe_json_encoder_fallback():
     import pytest
     with pytest.raises(TypeError):
         encoder.default(set())  # Sets aren't JSON serializable
+
+
+def test_run_server_shuts_down_workers_on_stdio_eof():
+    fake_redis = MagicMock()
+    fake_stdin = MagicMock()
+    fake_stdin.readline.return_value = ""
+
+    with patch("server.get_redis", return_value=fake_redis), \
+         patch("server.spawn_workers", return_value={"chatgpt": True}), \
+         patch("server.shutdown_workers") as shutdown_workers, \
+         patch("server.sys.stdin", fake_stdin):
+        from server import run_server
+        run_server()
+
+    shutdown_workers.assert_called_once()
