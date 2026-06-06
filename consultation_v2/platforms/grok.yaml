@@ -180,3 +180,106 @@ validation:
   # response_complete: the stop button is GONE (persistent-element gate).
   response_complete:
     stop_absent: stop_button
+
+# ============================================================================
+# IMAGINE surface — separate flow from chat. URL = https://grok.com/imagine.
+# LIVE-CONFIRMED on :10 2026-06-04 (x-claude c64 quirk-post image generation).
+# ============================================================================
+imagine:
+  url: https://grok.com/imagine
+  # Top-level surface uses a "Type to imagine" prompt input at the bottom-center
+  # of the viewport. The input is NOT exposed as a clean role=entry via AT-SPI
+  # on :10 — Grok's contenteditable doesn't surface to web-AT-SPI cleanly.
+  # Coordinate fallback: click_at(960, 940) on 1920x1080 reliably focuses it.
+  input:
+    coordinate_fallback:
+      x: 960
+      y: 940
+    note: |
+      AT-SPI does not expose this input cleanly. Coordinate click is the
+      reliable target on a 1920x1080 Xvfb display. After click, paste prompt
+      and press Return to submit.
+
+  # Submitted prompts return a panel grid. Each panel has 3 elements:
+  #   - the IMAGE itself (the panel art) — top region of the card
+  #   - a SAVE button (saves to Grok project, NOT to disk) — below the image
+  #   - a like/heart icon overlay (top-right of image, only on hover)
+  # The image content occupies y < save_button_y. Right-clicking on the
+  # IMAGE (not the Save button, not page background between panels) opens the
+  # standard Firefox image context menu with "Save Image..." as the 2nd entry.
+  # Right-clicking on page background gives the generic page menu (no image
+  # options), which is the failure mode to avoid.
+  panel_grid:
+    image_role: image
+    # Top-row image centers on 1920x1080: approximately
+    # (887, 286), (1223, 286), (1559, 286) when displayed in default Discover
+    # layout (3 across). Save buttons sit BELOW at y=358. Image content body
+    # extends from approximately y=120 to y=340 — right-click in the y=180-300
+    # range to hit the image element rather than the Save button.
+    image_centers_top_row: [[887, 220], [1223, 220], [1559, 220]]
+    save_button_role: push button
+    save_button_name: Save
+    save_button_y_top_row: 358
+    save_button_note: |
+      Save button saves to Grok project (in-app library), NOT to disk. To
+      download an actual image file you must use the browser's "Save Image..."
+      flow via right-click on the panel image.
+
+  # ===== DOWNLOAD FLOW =====
+  download:
+    # 1) Right-click on the panel image (use a y-coordinate in the image body,
+    #    not on the Save button at y=358).
+    step_1_right_click:
+      action: right_click
+      target: panel_image_center
+      example_coord: [1223, 220]
+    # 2) Firefox image context menu opens. "Save Image..." is the second item.
+    #    AT-SPI role "menu item" does NOT expose this — it's a native browser
+    #    context menu. Use keyboard navigation: Down twice + Return.
+    step_2_select_save_image:
+      action: keyboard
+      sequence: ["Down", "Down", "Return"]
+      alt_method: |
+        Right-click the panel image, then press 'v' (Firefox accelerator key
+        for "Save Image..."). Less reliable across Firefox versions; arrow-key
+        navigation is preferred.
+    # 3) Save File dialog opens with filename "Untitled.jpeg" pre-selected.
+    #    Ctrl+A to select the field, type new name, Return to save.
+    step_3_save_dialog:
+      filename_field_focused: true
+      default_filename: "Untitled.jpeg"
+      action: keyboard
+      sequence:
+        - "ctrl+a"
+        - "type:{custom_filename}"
+        - "Return"
+      save_path: "~/Downloads/{custom_filename}"
+      file_extension_note: |
+        Default extension is .jpeg. If you provide a name WITHOUT extension,
+        Firefox saves with no extension (must rename after). Provide the
+        custom filename WITH ".jpg" / ".jpeg" extension explicitly to avoid.
+    # 4) Verify the file landed at ~/Downloads/{filename}. Typical sizes:
+    #    1024x768 -> 200-500 KB JPEG.
+    step_4_verify:
+      target_directory: "~/Downloads"
+      typical_size_bytes_min: 100000
+      typical_size_bytes_max: 800000
+
+  # ===== ANTI-PATTERNS (confirmed failures, captured 2026-06-04) =====
+  anti_patterns:
+    - id: "save_button_is_not_download"
+      symptom: "Clicking the panel's 'Save' button does nothing visible to disk."
+      explanation: "That button saves to Grok's in-app library, not to ~/Downloads."
+      fix: "Use the right-click → Save Image flow above."
+    - id: "right_click_on_page_background"
+      symptom: "Right-click context menu shows generic page options (View Page Source, etc.) — no 'Save Image...' entry."
+      explanation: "Click landed in the gap between panels or on the Save button row, not on the image element."
+      fix: "Aim for the IMAGE BODY (e.g., y=220 for top-row panels at 1920x1080). Re-screenshot to verify if uncertain."
+    - id: "screenshot_substitute"
+      symptom: "Cropping a screenshot of the panel and using that as the image."
+      explanation: "Results in a low-resolution, header-included, off-aspect crop. NOT the actual generated image."
+      fix: "Always use the download flow above. The actual generated image is ~784x1168 or similar full resolution."
+    - id: "ctrl_w_closes_imagine_tab"
+      symptom: "After view-source or other tab work, Ctrl+W closes the imagine tab and lands on a different page."
+      explanation: "Ctrl+W closes the active tab. If imagine was the active tab, it's gone."
+      fix: "Re-navigate to https://grok.com/imagine. The session is preserved (results in History sidebar)."

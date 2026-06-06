@@ -91,22 +91,26 @@ _taey_session() {
         AT_SPI_BUS_ADDRESS="$A" \
         "${FIREFOX_BIN}" --no-remote --profile "${TAEY_PROFILE_DIR}" "${TAEY_URL}" &
     FF=$!
+    if [[ -z "$FF" ]]; then
+        for _ in $(seq 1 10); do
+            FF=$(pgrep -P $$ -o -x firefox 2>/dev/null || true)
+            [[ -n "$FF" ]] && break
+            sleep 1
+        done
+    fi
     printf '%s\n' "$FF" > "/tmp/firefox_pid_:${TAEY_D}"
 
     # #164 background re-capture — AT_SPI_BUS can change once Firefox attaches
     (
-        L="$A"; S=0
-        for _ in $(seq 1 30); do
+        L="$A"
+        while kill -0 "$FF" >/dev/null 2>&1; do
             C=$(xprop -display "$D" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//; s/"$//')
             if [[ "$C" == unix:* ]]; then
-                if [[ "$C" != "$L" ]]; then
+                if [[ "$C" != "$L" || ! -s "/tmp/a11y_bus_:${TAEY_D}" ]]; then
                     printf '%s\n' "$C" > "/tmp/a11y_bus_:${TAEY_D}.tmp" && mv "/tmp/a11y_bus_:${TAEY_D}.tmp" "/tmp/a11y_bus_:${TAEY_D}"
-                    L="$C"; S=0
-                else
-                    S=$((S + 1))
+                    L="$C"
                 fi
             fi
-            [[ $S -ge 3 ]] && break
             sleep 2
         done
     ) &
