@@ -4,9 +4,10 @@
 Completion detection:
   1. Poll every 2s for stop-button visibility, send-button readiness, and content hash
   2. Persist sticky ever-seen-stop flag per monitor session in Redis
-  3. PRIMARY COMPLETE when stop was seen and is now gone
-  4. ENHANCED confidence when send is also ready at primary completion time
-  5. Fallback COMPLETE when content hash is stable for 2 ticks and send is ready
+  3. COMPLETE only when stop was seen and is now gone
+  4. Extended modes require two stop-gone cycles before completion
+  5. If stop remains visible while content stays frozen for a long time, emit
+     hang_suspected for operator review without auto-completing
 
 URL navigation: verifies session URL matches current tab, navigates if mismatched.
 NO fixed coordinates. Stop button found by AT-SPI name matching.
@@ -72,7 +73,7 @@ except ImportError:
     REDIS_AVAILABLE = False
 
 POLL_INTERVAL = 2.0
-STABLE_TICKS = 2
+HANG_TICKS = 30
 DEFAULT_WORKER_TIMEOUT = 5.0
 EXTRACT_HARD_TIMEOUT_SEC = 5
 PLATFORM_FAILURE_THRESHOLD = 3
@@ -302,11 +303,12 @@ class CentralMonitor:
             self._monitor_key(monitor_id, "stop_visible"),
             self._monitor_key(monitor_id, "stop_cycles"),
             self._monitor_key(monitor_id, "content_hash"),
-            self._monitor_key(monitor_id, "content_stable_ticks"),
+            self._monitor_key(monitor_id, "content_frozen_ticks"),
+            self._monitor_key(monitor_id, "hang_notified"),
         )
 
     def _detect_completion(self, session: Dict, worker_state: Dict) -> bool:
-        """Check session completion using sticky stop visibility and content stability."""
+        """Check session completion using sticky stop visibility only."""
         platform = session['platform']
         monitor_id = session['monitor_id']
         mode = (session.get('mode') or "").strip().lower()
@@ -323,21 +325,40 @@ class CentralMonitor:
         stop_visible_key = self._monitor_key(monitor_id, "stop_visible")
         stop_cycles_key = self._monitor_key(monitor_id, "stop_cycles")
         hash_key = self._monitor_key(monitor_id, "content_hash")
-        stable_key = self._monitor_key(monitor_id, "content_stable_ticks")
+        frozen_key = self._monitor_key(monitor_id, "content_frozen_ticks")
+        hang_notified_key = self._monitor_key(monitor_id, "hang_notified")
 
         ever_seen_stop = self.rc.get(ever_seen_key) == "1"
         stop_was_visible = self.rc.get(stop_visible_key) == "1"
         stop_cycles = int(self.rc.get(stop_cycles_key) or "0")
+        last_hash = self.rc.get(hash_key) or ""
+        frozen_ticks = int(self.rc.get(frozen_key) or "0")
+        hang_notified = self.rc.get(hang_notified_key) == "1"
 
         if stop_found:
             self.rc.setex(ever_seen_key, state_ttl, "1")
             self.rc.setex(stop_visible_key, state_ttl, "1")
+            if content_hash and content_hash == last_hash:
+                frozen_ticks += 1
+            else:
+                frozen_ticks = 0
+                hang_notified = False
             self.rc.setex(hash_key, state_ttl, content_hash)
-            self.rc.setex(stable_key, state_ttl, "0")
+            self.rc.setex(frozen_key, state_ttl, str(frozen_ticks))
+            self.rc.setex(hang_notified_key, state_ttl, "1" if hang_notified else "0")
             _log(
                 f"[{platform}/{monitor_id}] stop=YES send={'YES' if send_visible else 'NO'} "
-                f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} ({elapsed}s)"
+                f"mode={mode or 'default'} cycles={stop_cycles}/{required_stop_cycles} "
+                f"frozen_ticks={frozen_ticks}/{HANG_TICKS} ({elapsed}s)"
             )
+
+            if ever_seen_stop and content_hash and frozen_ticks >= HANG_TICKS and not hang_notified:
+                self.rc.setex(hang_notified_key, state_ttl, "1")
+                _log(
+                    f"[{platform}/{monitor_id}] stop=YES mode={mode or 'default'} "
+                    f"content frozen for {frozen_ticks} ticks → HANG SUSPECTED ({elapsed}s)"
+                )
+                self._notify(session, "hang_suspected", "stop_present_content_frozen")
             return False
 
         if ever_seen_stop and stop_was_visible:
@@ -386,43 +407,14 @@ class CentralMonitor:
             self._notify(session, "timeout", "timeout")
             return True
 
-        last_hash = self.rc.get(hash_key) or ""
-        stable_ticks = int(self.rc.get(stable_key) or "0")
-
-        if content_hash and content_hash == last_hash:
-            stable_ticks += 1
-        elif not content_hash and last_hash:
-            # Worker didn't return hash — don't reset, keep counting
-            stable_ticks += 1
-        else:
-            stable_ticks = 0
-
-        self.rc.setex(hash_key, state_ttl, content_hash or last_hash or "")
-        self.rc.setex(stable_key, state_ttl, str(stable_ticks))
-
-        # Fallback: content stable for STABLE_TICKS cycles — NO send_visible required
-        if stable_ticks >= STABLE_TICKS:
-            if mode in ("deep_research", "deep_think") and stop_cycles < required_stop_cycles:
-                _log(
-                    f"[{platform}/{monitor_id}] content stable but DR mode needs "
-                    f"{required_stop_cycles} stop cycles — waiting"
-                )
-                return False
-            _log(
-                f"[{platform}/{monitor_id}] stop=NO stable_ticks={stable_ticks} "
-                f"→ COMPLETE via content stability ({elapsed}s)"
-            )
-            self._notify(session, "response_complete", "content_stable")
-            return True
-
-        # No hard timeout — responses can take over an hour (ChatGPT Pro Extended,
-        # Perplexity Deep Research, Gemini Deep Research). The stop button detection
-        # is the only reliable completion signal. Content stability is the fallback.
+        self.rc.setex(hash_key, state_ttl, content_hash)
+        self.rc.setex(frozen_key, state_ttl, "0")
+        self.rc.setex(hang_notified_key, state_ttl, "0")
 
         _log(
             f"[{platform}/{monitor_id}] stop=NO send={'YES' if send_visible else 'NO'} "
             f"mode={mode or 'default'} ever_seen={'YES' if ever_seen_stop else 'NO'} "
-            f"cycles={stop_cycles}/{required_stop_cycles} stable_ticks={stable_ticks} ({elapsed}s)"
+            f"cycles={stop_cycles}/{required_stop_cycles} frozen_ticks=0/{HANG_TICKS} ({elapsed}s)"
         )
         return False
 
@@ -441,7 +433,7 @@ class CentralMonitor:
             "tmux_session": target_node,
             "url": session.get('url'),
             "elapsed_seconds": int(time.time() - session.get('started_ts', time.time())),
-            "requires_action": status in ("response_complete", "response_ready"),
+            "requires_action": status in ("response_complete", "response_ready", "hang_suspected"),
         }
         nj = json.dumps(notification)
         notify_key = f"taey:{target_node}:notifications"

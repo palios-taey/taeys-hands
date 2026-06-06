@@ -120,7 +120,7 @@ def test_detect_completion_deep_think_requires_full_stop_transition(mock_redis):
     notify.assert_not_called()
 
 
-def test_detect_completion_deep_research_ignores_content_stability_fallback(mock_redis):
+def test_detect_completion_never_completes_from_frozen_content_without_stop_transition(mock_redis):
     with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
         monitor = CentralMonitor()
 
@@ -161,8 +161,109 @@ def test_detect_completion_deep_research_ignores_content_stability_fallback(mock
     assert first_poll is False
     assert second_poll is False
     assert third_poll is False
-    assert mock_redis.get("taey:monitor:mon-stable:content_stable_ticks") == "2"
+    assert mock_redis.get("taey:monitor:mon-stable:content_frozen_ticks") == "0"
     assert mock_redis.get("taey:monitor:mon-stable:stop_cycles") is None
+    notify.assert_not_called()
+
+
+def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_freezes(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    session = {
+        "platform": "gemini",
+        "monitor_id": "mon-hang",
+        "mode": "deep_think",
+        "started_ts": time.time(),
+        "timeout": 7200,
+    }
+
+    with patch("monitor.central.HANG_TICKS", 3), patch.object(monitor, "_notify") as notify:
+        first_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "frozen-hash",
+            },
+        )
+        second_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "frozen-hash",
+            },
+        )
+        third_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "frozen-hash",
+            },
+        )
+        fourth_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "frozen-hash",
+            },
+        )
+
+    assert first_poll is False
+    assert second_poll is False
+    assert third_poll is False
+    assert fourth_poll is False
+    assert mock_redis.get("taey:monitor:mon-hang:content_frozen_ticks") == "3"
+    assert mock_redis.get("taey:monitor:mon-hang:hang_notified") == "1"
+    notify.assert_called_once_with(session, "hang_suspected", "stop_present_content_frozen")
+
+
+def test_detect_completion_missing_hash_does_not_count_toward_hang(mock_redis):
+    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
+        monitor = CentralMonitor()
+
+    session = {
+        "platform": "gemini",
+        "monitor_id": "mon-missing-hash",
+        "mode": "deep_think",
+        "started_ts": time.time(),
+        "timeout": 7200,
+    }
+
+    with patch("monitor.central.HANG_TICKS", 2), patch.object(monitor, "_notify") as notify:
+        first_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "hash-1",
+            },
+        )
+        second_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "",
+            },
+        )
+        third_poll = monitor._detect_completion(
+            session,
+            {
+                "stop_found": True,
+                "send_visible": False,
+                "content_hash": "",
+            },
+        )
+
+    assert first_poll is False
+    assert second_poll is False
+    assert third_poll is False
+    assert mock_redis.get("taey:monitor:mon-missing-hash:content_frozen_ticks") == "0"
+    assert mock_redis.get("taey:monitor:mon-missing-hash:hang_notified") == "0"
     notify.assert_not_called()
 
 
