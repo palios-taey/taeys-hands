@@ -31,3 +31,6 @@ user_pref("datareporting.policy.firstRunURL", "");
 // Disable crash reporter UI
 user_pref("browser.tabs.crashReporting.email", "");
 user_pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
+
+// Force accessibility on for AT-SPI-driven automation in isolated displays.
+user_pref("accessibility.force_disabled", -1);
