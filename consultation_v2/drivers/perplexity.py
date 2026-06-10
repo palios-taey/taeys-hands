@@ -3,8 +3,17 @@ from __future__ import annotations
 import os
 import time
 
+from core import input as inp
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
+
+try:
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+except Exception:  # pragma: no cover - optional dependency in runtime
+    Atspi = None
 
 try:
     from storage import neo4j_client
@@ -189,8 +198,21 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(0.8)
-        menu_snap = self.runtime.menu_snapshot()
-        item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
+        menu_key = self._mode_menu_item_key(requested_mode, workflow)
+        found = self.runtime.wait_until(
+            lambda: self._menu_item_probe(menu_key),
+            timeout=3.0,
+            interval=0.4,
+        )
+        if not found:
+            menu_snap = self.runtime.menu_snapshot()
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity mode item not found for {requested_mode}',
+                snapshot=menu_snap.serializable(),
+            )
+            return False
+        menu_snap, item = found
         if not item:
             result.add_step(
                 'select_mode', False,
@@ -209,24 +231,24 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=verify_snap.serializable(),
             )
             return verified
-        if not self.runtime.click(item):
+        if not self._click_menu_item_via_pointer(item):
             result.add_step(
                 'select_mode', False,
                 f'Perplexity mode click failed for {requested_mode}',
                 snapshot=menu_snap.serializable(),
             )
             return False
-        time.sleep(1.0)
-        self.runtime.press('Escape')
-        time.sleep(1.0)
-        verify_snap = self.runtime.snapshot()
-        verified = self.validation_passes(verify_snap, mode_active_key)
+        verify_snap = self.runtime.wait_until(
+            lambda: self._active_snapshot(mode_active_key),
+            timeout=3.0,
+            interval=0.4,
+        ) or self.runtime.snapshot()
         result.add_step(
-            'select_mode', verified,
+            'select_mode', self.validation_passes(verify_snap, mode_active_key),
             f'Perplexity mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
         )
-        return verified
+        return self.validation_passes(verify_snap, mode_active_key)
 
     def _select_mode_via_submenu(
         self,
@@ -263,8 +285,21 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(0.5)
-        submenu_snap = self.runtime.menu_snapshot()
-        item = self.find_first(submenu_snap, workflow['mode_targets'][requested_mode])
+        menu_key = self._mode_menu_item_key(requested_mode, workflow)
+        found = self.runtime.wait_until(
+            lambda: self._menu_item_probe(menu_key),
+            timeout=3.0,
+            interval=0.4,
+        )
+        if not found:
+            submenu_snap = self.runtime.menu_snapshot()
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity sub-menu item not found for {requested_mode}',
+                snapshot=submenu_snap.serializable(),
+            )
+            return False
+        submenu_snap, item = found
         if not item:
             result.add_step(
                 'select_mode', False,
@@ -283,22 +318,58 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=verify_snap.serializable(),
             )
             return verified
-        if not self.runtime.click(item):
+        if not self._click_menu_item_via_pointer(item):
             result.add_step(
                 'select_mode', False,
                 f'Perplexity sub-menu item click failed for {requested_mode}',
                 snapshot=submenu_snap.serializable(),
             )
             return False
-        time.sleep(1.0)
-        verify_snap = self.runtime.snapshot()
-        verified = self.validation_passes(verify_snap, mode_active_key)
+        verify_snap = self.runtime.wait_until(
+            lambda: self._active_snapshot(mode_active_key),
+            timeout=3.0,
+            interval=0.4,
+        ) or self.runtime.snapshot()
         result.add_step(
-            'select_mode', verified,
+            'select_mode', self.validation_passes(verify_snap, mode_active_key),
             f'Perplexity sub-menu mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
         )
-        return verified
+        return self.validation_passes(verify_snap, mode_active_key)
+
+    def _mode_menu_item_key(self, requested_mode: str, workflow: dict) -> str:
+        if requested_mode == 'deep_research':
+            return 'deep_research'
+        return workflow['mode_targets'][requested_mode]
+
+    def _menu_item_probe(self, item_key: str):
+        menu_snap = self.runtime.menu_snapshot()
+        item = self.find_first(menu_snap, item_key)
+        if not item:
+            return None
+        return menu_snap, item
+
+    def _active_snapshot(self, validation_key: str):
+        snap = self.runtime.snapshot()
+        if self.validation_passes(snap, validation_key):
+            return snap
+        return None
+
+    def _click_menu_item_via_pointer(self, item) -> bool:
+        atspi_obj = getattr(item, 'atspi_obj', None)
+        if not atspi_obj:
+            return False
+        try:
+            component = atspi_obj.get_component_iface()
+            if not component:
+                return False
+            coord_type = Atspi.CoordType.SCREEN if Atspi is not None else 0
+            ext = component.get_extents(coord_type)
+            x = int(ext.x + (ext.width / 2))
+            y = int(ext.y + (ext.height / 2))
+        except Exception:
+            return False
+        return bool(inp.click_at(x, y))
 
     # ------------------------------------------------------------------
     # Connector toggles

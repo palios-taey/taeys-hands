@@ -153,21 +153,31 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                     menu=menu_snap.serializable())
                     return False
                 time.sleep(0.8)
-                # Re-open Tools to verify checked state, then close
-                verify_root = self.runtime.snapshot()
-                tools_button = self.find_first(verify_root, 'tools_button')
-                verified = False
-                if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
-                    time.sleep(0.5)
-                    # BUG 8 FIX: menu_snapshot for portal
-                    verify_menu = self.runtime.menu_snapshot()
-                    verified = self.validation_passes(verify_menu, mode_active_key)
-                    # BUG 10 FIX: close the dropdown after verification
-                    self.runtime.press('Escape')
-                    time.sleep(0.3)
+                if requested_mode == 'deep_think':
+                    verify_snap = self.runtime.wait_until(
+                        lambda: self._active_snapshot(mode_active_key),
+                        timeout=3.0,
+                        interval=0.4,
+                    ) or self.runtime.snapshot()
+                    verified = self.validation_passes(verify_snap, mode_active_key)
+                    evidence_snap = verify_snap
+                else:
+                    # Re-open Tools to verify checked state, then close
+                    verify_root = self.runtime.snapshot()
+                    tools_button = self.find_first(verify_root, 'tools_button')
+                    verified = False
+                    if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
+                        time.sleep(0.5)
+                        # BUG 8 FIX: menu_snapshot for portal
+                        verify_menu = self.runtime.menu_snapshot()
+                        verified = self.validation_passes(verify_menu, mode_active_key)
+                        # BUG 10 FIX: close the dropdown after verification
+                        self.runtime.press('Escape')
+                        time.sleep(0.3)
+                    evidence_snap = self.runtime.snapshot()
                 result.add_step('select_mode', verified,
                                 f'Gemini mode/tool set to {requested_mode}',
-                                snapshot=self.runtime.snapshot().serializable())
+                                snapshot=evidence_snap.serializable())
                 if not verified:
                     return False
         else:
@@ -211,6 +221,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                             f'Gemini tool click executed for {tool_name}',
                             snapshot=self.runtime.snapshot().serializable())
         return True
+
+    def _active_snapshot(self, validation_key: str):
+        snap = self.runtime.snapshot()
+        if self.validation_passes(snap, validation_key):
+            return snap
+        return None
 
     def attach_files(
         self, request: ConsultationRequest, result: ConsultationResult
