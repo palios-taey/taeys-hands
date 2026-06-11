@@ -252,6 +252,23 @@ logger = logging.getLogger('consultation')
 DEFAULT_STEP_ORDER = ['navigate', 'model', 'mode', 'attach', 'message', 'send']
 _REQUESTER_ENV_KEYS = ('TAEY_SESSION', 'TAEY_REQUESTER', 'REQUESTER_SESSION', 'SESSION_NAME')
 
+# Binary/image files must NOT pass through _consolidate_attachments (it does
+# open().read() in text mode → UnicodeDecodeError on binary). They upload as
+# their own file-dialog attachment instead (the picker handles any file type),
+# so a screenshot rides alongside the consolidated text packet.
+_BINARY_ATTACH_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.heic'}
+
+
+def _split_binary_attachments(files):
+    """Return (text_files, binary_files) — binary/image files attach separately."""
+    text_files, binary_files = [], []
+    for f in files:
+        if os.path.splitext(f)[1].lower() in _BINARY_ATTACH_EXTS:
+            binary_files.append(f)
+        else:
+            text_files.append(f)
+    return text_files, binary_files
+
 
 def _resolve_requester(explicit_requester: str | None) -> str:
     """Resolve the requester session for completion notifications."""
@@ -1526,22 +1543,29 @@ def main():
         time.sleep(1)
 
     pkg_path = None
+    extra_attachments = []  # binary/image files (e.g. screenshots) attached separately
     if is_followup:
         if attachments:
-            logger.info(f"Step 4 prep: Packaging {len(attachments)} follow-up file(s) (no identity)")
-            if len(attachments) > 1:
-                pkg_path = _consolidate_attachments(attachments, platform)
-            else:
-                pkg_path = attachments[0]
+            text_files, extra_attachments = _split_binary_attachments(attachments)
+            logger.info("Step 4 prep: %d follow-up text file(s) + %d binary/image (no identity)",
+                        len(text_files), len(extra_attachments))
+            if len(text_files) > 1:
+                pkg_path = _consolidate_attachments(text_files, platform)
+            elif len(text_files) == 1:
+                pkg_path = text_files[0]
         else:
             logger.info("Step 4 prep: No attachments for follow-up (skipped)")
     else:
         logger.info("Step 4 prep: Build attachment package")
         all_files = _prepend_identity_files(attachments, platform)
-        if len(all_files) > 1:
-            pkg_path = _consolidate_attachments(all_files, platform)
-        elif len(all_files) == 1:
-            pkg_path = all_files[0]
+        text_files, extra_attachments = _split_binary_attachments(all_files)
+        if len(text_files) > 1:
+            pkg_path = _consolidate_attachments(text_files, platform)
+        elif len(text_files) == 1:
+            pkg_path = text_files[0]
+        if extra_attachments:
+            logger.info("Step 4 prep: %d binary/image file(s) to attach separately",
+                        len(extra_attachments))
     logger.info("Resolved universal step order for %s: %s",
                 platform, " -> ".join(DEFAULT_STEP_ORDER))
 
@@ -1611,6 +1635,28 @@ def main():
 
         logger.info("Attachment verification PASSED (%s)",
                     attachment_validation.get('method'))
+
+        # Attach binary/image files (e.g. screenshots) as their OWN file-dialog
+        # uploads — not text-consolidated. Re-inspect between attaches (the +
+        # button can shift after the first chip renders). NON-FATAL: a failed
+        # image must not kill a consult that already carries the full text packet.
+        for _img in extra_attachments:
+            if not os.path.isfile(_img):
+                logger.warning("Image attachment missing, skipping: %s", _img)
+                result.setdefault('image_attach_failures', []).append(_img)
+                continue
+            logger.info("Step 4-img: Attaching image %s", os.path.basename(_img))
+            invalidate_cache(platform)
+            handle_inspect(platform, rc, fresh_session=False)
+            if not attach_file(platform, _img):
+                logger.warning("Image attach failed (non-fatal): %s", _img)
+                result.setdefault('image_attach_failures', []).append(_img)
+                continue
+            _iv = validate_attachment_visible(platform, _img, attempts=20)
+            result.setdefault('image_attachments', []).append(
+                {'file': _img, 'verified': _iv.get('verified')})
+            if not _iv.get('verified'):
+                logger.warning("Image chip not verified (non-fatal): %s", _img)
 
         if platform == 'perplexity' and args.mode:
             target_mode = args.mode.replace('_', ' ').lower().strip()
