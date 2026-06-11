@@ -168,6 +168,7 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
 
     excl_names = set(n.lower() for n in exclude.get('names', []))
     excl_contains = [str(p).lower() for p in exclude.get('name_contains', [])]
+    excl_patterns = [str(p).lower() for p in exclude.get('name_pattern', [])]
     excl_roles = set(exclude.get('roles', []))
 
     _IMP_STATES = {'editable', 'checked', 'selected', 'pressed', 'focused'}
@@ -201,6 +202,8 @@ def _apply_element_filter(elements: list, config: dict) -> Tuple[list, list]:
         if role in excl_roles or name_lower in excl_names:
             continue
         if any(p in name_lower for p in excl_contains):
+            continue
+        if excl_patterns and any(fnmatch.fnmatch(name_lower, p) for p in excl_patterns):
             continue
         if not name and text and any(p in text for p in excl_contains):
             continue

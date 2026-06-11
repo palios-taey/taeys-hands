@@ -120,13 +120,15 @@ element_filter:
       - "Image attachment"          # decorative images
       - "Skip to content"           # accessibility skip link
       - "What's on the agenda today?"  # home page heading
-    # Substring matches — exclude if name contains any of these
-    name_contains:
-      - "Open conversation options"
-      - ", open profile menu"
-      - "Upgrade"
-      - "Get Plus"
-      - "Manage my account"
+    # Dynamic-suffix noise — full names vary by thread title / account, so these
+    # match by anchored glob (name_pattern), never substring. The exclude filter
+    # honors name_pattern the same way element_map does.
+    name_pattern:
+      - "open conversation options*"
+      - "*, open profile menu"
+      - "*upgrade*"
+      - "*get plus*"
+      - "*manage my account*"
     # Roles to always exclude
     roles:
       - separator
@@ -150,16 +152,12 @@ element_map:
     name: "Add files and more"
     role: push button
   copy_button:
-    name_contains: "Copy"
-    role_contains: button
-  stop_button:
-    names_any_of:
-      - "Stop answering"
-      - "Stop response"
-      - "Stop streaming"
-      - "Stop generating"
-      - "Stop"
+    name: "Copy response"   # live AT-SPI 2026-06-11; assistant-turn copy (NOT user-msg "Copy message")
     role: push button
+  stop_button:
+    name: "Stop answering"   # live AT-SPI 2026-06-11 while generating. ChatGPT is the
+    role: push button        # only platform that has ever changed this label; recapture
+                             # the single exact value here if/when it next drifts.
   pro_indicator:
     name_pattern: "Pro, click to remove"
     role: push button
@@ -170,10 +168,10 @@ element_map:
     name: "Extended Pro"
     role: push button
   temporary_chat:
-    name_contains: "Turn on temporary chat"
+    name: "Turn on temporary chat"
     role: push button
   search_chats:
-    name_contains: "Search chats"
+    name: "Search chats Control K"   # live AT-SPI 2026-06-11
     role: push button
   send_button:
     name: "Send prompt"
@@ -206,39 +204,39 @@ element_map:
     role: push button
   # Tools dropdown items (from "Add files and more" button)
   tool_upload:
-    name_contains: "Add photos"
-    role_contains: item  # AT-SPI role is 'menu item', not 'button'
+    name: "Add photos & files Control U"
+    role: menu item
   tool_google_drive:
     name: "Add from Google Drive"
-    role_contains: button
+    role: menu item
   tool_deep_research:
     name: "Deep research"
-    role_contains: item
+    role: menu item
   tool_web_search:
     name: "Web search"
-    role_contains: item
+    role: menu item
   tool_study:
     name: "Study and learn"
-    role_contains: item
+    role: menu item
   tool_more:
     name: "More"
-    role_contains: item
+    role: menu item
   tool_recent_files:
     name: "Recent files"
-    role_contains: item
+    role: menu item
   # More submenu items (hover over "More" to reveal)
   tool_github:
     name: "GitHub"
-    role_contains: item
+    role: menu item
   tool_agent_mode:
     name: "Agent mode"
-    role_contains: item
+    role: menu item
   tool_gmail:
     name: "Gmail"
-    role_contains: item
+    role: menu item
   tool_quizzes:
     name: "Quizzes"
-    role_contains: item
+    role: menu item
 
 # ─── Known Sidebar Navigation ───────────────────────────────────────
 # Whitelist of sidebar links/buttons. These always pass through.
