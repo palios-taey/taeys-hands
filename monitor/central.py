@@ -563,6 +563,15 @@ class CentralMonitor:
                     f"in {retry_after - now:.1f}s"
                 )
                 continue
+            # Repair stale Atspi bindings BEFORE polling: if this platform's display was
+            # restarted (new AT-SPI bus GUID), the long-running worker is orphaned on the
+            # dead bus and would report stop_found=False forever -> false send_failure.
+            # ensure_worker_fresh() respawns it so Atspi re-binds to the live bus.
+            try:
+                from workers.manager import ensure_worker_fresh
+                ensure_worker_fresh(platform)
+            except Exception as exc:
+                _log(f"[{platform}] ensure_worker_fresh error: {exc}")
             stop_result = self._call_worker(platform, {'cmd': 'check_stop'}, operation="poll")
             send_result = self._call_worker(platform, {'cmd': 'get_send_button_state'}, operation="poll")
             hash_result = self._call_worker(platform, {'cmd': 'get_content_hash'}, operation="poll")

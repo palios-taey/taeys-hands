@@ -26,7 +26,23 @@ _WORKER_SCRIPT = os.path.join(
 # Active worker processes: platform -> Popen
 _workers: Dict[str, subprocess.Popen] = {}
 
+# Bus string each worker bound to at spawn: platform -> "/tmp/a11y_bus_<display>" content.
+# gi.repository.Atspi binds AT_SPI_BUS_ADDRESS ONCE at worker import; a display/systemd
+# restart mints a new bus GUID, orphaning the long-running worker on the dead bus. We
+# track the bound bus so ensure_worker_fresh() can respawn on change (re-binds Atspi).
+_worker_bus: Dict[str, str] = {}
+
 _PR_SET_PDEATHSIG = 1
+
+
+def _current_bus(display: str) -> Optional[str]:
+    """Live AT-SPI bus string for a display from /tmp/a11y_bus_<display> (None if unreadable)."""
+    try:
+        with open(f'/tmp/a11y_bus_{display}') as f:
+            value = f.read().strip()
+        return value or None
+    except OSError:
+        return None
 
 
 class _JSONEncoder(json.JSONEncoder):
@@ -114,6 +130,8 @@ def _spawn_worker(platform: str, display: str) -> bool:
             try:
                 result = _ipc_call(sock_path, {'cmd': 'ping'}, timeout=5.0)
                 if result.get('status') == 'alive':
+                    # Record the bus this worker just bound Atspi to (for staleness detection).
+                    _worker_bus[platform] = _current_bus(display) or ''
                     logger.info("Worker %s ready (PID %d)", platform, proc.pid)
                     return True
             except Exception:
@@ -140,6 +158,38 @@ def _restart_worker(platform: str) -> bool:
 
     logger.warning("Restarting worker %s on %s", platform, display)
     return _spawn_worker(platform, display)
+
+
+def ensure_worker_fresh(platform: str) -> bool:
+    """Respawn the worker if its display's AT-SPI bus changed (or the worker died).
+
+    ROOT CAUSE this fixes: the worker imports gi.repository.Atspi ONCE at startup,
+    which binds a libatspi registry socket to AT_SPI_BUS_ADDRESS at that moment. When a
+    display is systemd-restarted the bus gets a new GUID/socket, but the long-running
+    worker stays connected to the dead bus — _reassert_worker_env() updates the env var
+    but cannot re-initialize the already-open GObject binding. So find_firefox() returns
+    None forever -> stop_found=False -> the monitor's 90s timeout fires a FALSE
+    send_failure. Detect the bus change here and kill+respawn so the new worker process
+    binds Atspi fresh to the live bus. EXACT-match stop detection is untouched — this only
+    repairs the connection the scan runs over. Called by the monitor before each poll.
+    Returns True if a live worker for `platform` is bound to the current bus.
+    """
+    display = get_platform_display(platform)
+    if not display:
+        return False
+    current = _current_bus(display)
+    if not current:
+        # Bus file unreadable — don't churn; report whether a worker exists.
+        return _workers.get(platform) is not None
+    proc = _workers.get(platform)
+    bound = _worker_bus.get(platform)
+    if proc is None or proc.poll() is not None or bound != current:
+        logger.warning(
+            "Worker %s stale (proc=%s bound_bus=%s current_bus=%s) — respawning for fresh Atspi bind",
+            platform, "dead" if (proc is not None and proc.poll() is not None) else proc, bound, current,
+        )
+        return _restart_worker(platform)
+    return True
 
 
 def shutdown_workers():
