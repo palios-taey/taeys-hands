@@ -1,0 +1,26 @@
+---
+name: taeys-hands-rules
+description: The non-negotiable taeys-hands operational rules ("the rules Jesse has said 100 times"). Use at the START of any taeys-hands session and BEFORE any browser/AT-SPI action — dispatch, model/mode select, attach, send, extract, or editing a platform YAML. Covers stop-button completion, exact-match YAML, validate-everything, single-failure→escalate (ZERO retries, ban-risk), one-tab-per-window, sequential-never-parallel dispatch, just-fix-don't-ask, account/display map (:13=Hunter-only), wake-every-5min while a dispatch is in flight, and the Claude :3 manual-recovery traps.
+disable-model-invocation: false
+---
+
+# Taeys-hands non-negotiable rules (index)
+
+These are the recurring rules. The **full canonical source is `100_TIMES.md` at the repo root** — read it for the detailed sub-rules and the dated trap logs. This skill exists so the rules auto-surface instead of relying on remembering to read the file. If something broke, you almost certainly violated one of these.
+
+1. **STOP BUTTON = completion.** Appears = generating; disappears = complete. Same on every platform. Stop-button name is an EXACT AT-SPI name in `element_map.stop_button`. Debounce (re-scan a fresh tree) before declaring complete. **No fallbacks** — if it never appears, STOP and raise (don't extract a prompt echo).
+2. **EXTRACT = scroll to bottom (`ctrl+End`), then the COPY BUTTON element** (`_click_and_read_clipboard` doAction, **never raw x/y** — element `y` is document-space; coord-click → empty clipboard). Every platform, every time. Claude code/docs → artifact extract. Validate the extract is real (length ≫ prompt, content matches the lens).
+3. **YAML = EXACT AT-SPI match.** No `name_contains` / `name_pattern` / `role_contains` / fuzzy / guess-lists in `platforms/*.yaml`. One YAML + one driver per platform; drivers carry ZERO platform knowledge. UI drift → FLAG → scan live tree → update YAML with the exact new name.
+4. **VALIDATE EVERYTHING (tree or screenshot) before reporting.** No "I think it sent." → see skill [[verify-real-end-state]] for the discipline (name the observed artifact, never a flag).
+   - **4a. SINGLE FAILURE → ESCALATE, ZERO RETRIES.** A failed action (click/type/send/navigate/attach/mode-select) is retried EXACTLY zero times — retry loops are bot-detection signal and **get Jesse's accounts BANNED**. One failure → STOP → it comes back to Claude to drive that step MANUALLY (screenshot-validated, human-paced) AND diagnose root cause. Re-*scanning* the tree is observation (allowed); re-*acting* is banned.
+5. **ONE TAB PER WINDOW.** Never `ctrl+t`. Navigate the existing tab in-place. Conversations persist in the platform history sidebar.
+6. **DISPATCH SEQUENTIALLY, never parallel.** One platform at a time, page settled. Firing 5 at once → crashed FF, raced AT-SPI buses, half-rendered pages. → see skill [[sequential-multi-lane-dispatch]] for the settled-fan-out + isolated-subprocess-per-display polling.
+7. **JUST FIX broken things — don't ask permission.** If it's broken and the fix is per these rules (exact-match YAML, root cause), fix it. No throwaway hardcoded-path scripts.
+8. **ACCOUNTS / DISPLAYS.** `:13` (CVP) = Hunter queries ONLY; everything else → `:3`. Mira: `:2`=ChatGPT `:3`=Claude `:4`=Gemini `:5`=Grok `:6`=Perplexity `:13`=Claude-CVP. **Claude thinking effort = `Extra`, NOT High.**
+   - **8a. WAKE EVERY ~5 MIN while any dispatch/monitor is in flight** (`ScheduleWakeup` ≈270–300s) and actively re-check (screenshot + tree). Monitors are NOT yet reliable — do not go idle trusting a notification; a waiting requester with no delivered result is the failure mode. Turn the wake off only after 3 consecutive working monitors per platform.
+   - **8b/8c. MANUAL RECOVERY (consultation.py abort / Claude :3):** `attach_failed`/`send_failure` are often false-negatives (Grok-Heavy, Gemini) — screenshot-confirm before re-sending (double-dispatch). Claude :3 traps: upload race (wait for the chip's solid type-badge, not the skeleton), don't double-attach, GTK location-bar typeahead can grab a STALE file (read the chip filename off the screenshot before send), send via the real AT-SPI input position. After ~2 failed manual sends, STOP and deliver the valid platforms + flag the one as blocked.
+9. **INFRA gotchas:** stale a11y bus (`/tmp/a11y_bus_:N` guid ≠ live `xprop -display :N -root AT_SPI_BUS` → rewrite from xprop, don't restart blindly); Gemini sign-out → re-login, don't auto-attempt 2FA.
+10. **TRACK EVERYTHING IN GIT.** Commit YAML fixes, this file, 100_TIMES.md. Stop losing work to "not tracked."
+11. **ChatGPT SEND** = focus composer + Enter (the `Send prompt` button is present in the tree for presence-verification but its React buttons expose no usable Component/Action — can't doAction/coord-click). A `send_failed` = composer lost focus → re-click the `input` entry, then Enter; verify URL change + Stop button.
+
+*If you are about to: launch in parallel, add a fallback, use name_contains, skip a screenshot, open a new tab, retry a failed action, or ask permission to fix something broken — DON'T. The answer is above. Full detail + dated trap logs: `100_TIMES.md`.*
