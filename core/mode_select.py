@@ -408,6 +408,11 @@ def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optiona
             logger.info("[claude] Discovered live model selector: %s", selected.get('name', ''))
             return selected
 
+    if platform == 'chatgpt' and element_key == 'model_selector':
+        selected = _discover_chatgpt_model_selector(elements)
+        if selected:
+            return selected
+
     if platform == 'gemini' and element_key == 'mode_picker':
         candidates = [
             e for e in elements
@@ -427,6 +432,62 @@ def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optiona
         if _match_element(e, spec):
             return e
     return None
+
+
+def _discover_chatgpt_model_selector(elements: list) -> Optional[Dict]:
+    """Discover the live ChatGPT model selector when its label drifts.
+
+    ChatGPT has a long-lived composer toolbar row. The exact button text can
+    rename with the active model label, so we treat exact YAML as the fast path
+    and fall back to a structural scan of the composer row.
+    """
+    from tools.inspect import _match_element
+
+    input_spec = get_element_spec('chatgpt', 'input')
+    input_ref = None
+    if input_spec:
+        for e in elements:
+            if _match_element(e, input_spec):
+                input_ref = e
+                break
+
+    input_x = input_ref.get('x') if input_ref else None
+    input_y = input_ref.get('y') if input_ref else None
+
+    def looks_modelish(name: str) -> bool:
+        lower = name.lower().strip()
+        if not lower:
+            return False
+        if lower.startswith('model:'):
+            return True
+        if 'pro' in lower and 'extended' in lower:
+            return True
+        if 'thinking' in lower and ('pro' in lower or 'model' in lower):
+            return True
+        return False
+
+    candidates = []
+    for e in elements:
+        if e.get('role') != 'push button':
+            continue
+        name = (e.get('name') or '').strip()
+        if not looks_modelish(name):
+            continue
+        x = e.get('x')
+        y = e.get('y')
+        if input_x is not None and x is not None and x < (input_x - 120):
+            continue
+        if input_y is not None and y is not None and abs(y - input_y) > 220:
+            continue
+        candidates.append(e)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda e: (e.get('y', 0), e.get('x', 0)))
+    selected = candidates[-1]
+    logger.info("[chatgpt] Discovered live model selector: %s", selected.get('name', ''))
+    return selected
 
 
 def _find_model_buttons_in_tree(platform: str, target_mode: str,
