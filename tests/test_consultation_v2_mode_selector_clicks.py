@@ -19,7 +19,7 @@ def _snapshot() -> MagicMock:
     return snap
 
 
-def test_perplexity_deep_research_uses_menu_item_pointer_click_and_pill_verify() -> None:
+def test_perplexity_deep_research_uses_search_toggle_dropdown_and_pill_verify() -> None:
     driver = PerplexityConsultationDriver()
     driver.runtime = MagicMock()
     initial_snap = _snapshot()
@@ -31,7 +31,7 @@ def test_perplexity_deep_research_uses_menu_item_pointer_click_and_pill_verify()
 
     trigger = MagicMock()
     trigger.states = []
-    trigger.serializable.return_value = {'name': 'attach'}
+    trigger.serializable.return_value = {'name': 'search_mode_trigger'}
     driver.find_first = MagicMock(side_effect=[trigger, None, None])
 
     extents = SimpleNamespace(x=100, y=200, width=40, height=20)
@@ -58,51 +58,14 @@ def test_perplexity_deep_research_uses_menu_item_pointer_click_and_pill_verify()
     result = driver.result(_request('perplexity', 'deep_research'))
 
     with patch('consultation_v2.drivers.perplexity.inp.click_at', return_value=True) as click_at:
-        assert driver._select_mode_direct('deep_research', 'deep_research_active', driver.cfg['workflow']['selection'], result) is True
+        assert driver._select_mode_via_search_toggle(
+            'deep_research',
+            'deep_research_active',
+            driver.cfg['workflow']['selection'],
+            result,
+        ) is True
 
     click_at.assert_called_once_with(120, 210)
-    assert result.steps[-1].success is True
-    assert result.steps[-1].step == 'select_mode'
-
-
-def test_perplexity_deep_research_uses_slash_menu_from_input_focus() -> None:
-    driver = PerplexityConsultationDriver()
-    driver.runtime = MagicMock()
-    initial_snap = _snapshot()
-    menu_snap = _snapshot()
-    verify_snap = _snapshot()
-    driver.runtime.snapshot.side_effect = [initial_snap, verify_snap]
-    driver.runtime.menu_snapshot.return_value = menu_snap
-    driver.runtime.click.return_value = True
-    driver.runtime.press.return_value = True
-    driver.runtime.wait_until.return_value = verify_snap
-
-    input_el = MagicMock()
-    input_el.serializable.return_value = {'name': 'input'}
-    menu_item = MagicMock()
-    menu_item.name = 'Deep research'
-    menu_item.role = 'menu item'
-    menu_item.atspi_obj = object()
-
-    def find_first(snapshot, key):
-        mapping = {
-            'input': input_el,
-            'deep_research_item': menu_item,
-        }
-        return mapping.get(key)
-
-    driver.find_first = MagicMock(side_effect=find_first)
-    driver.validation_passes = MagicMock(
-        side_effect=lambda snapshot, key, filename=None: snapshot is verify_snap and key == 'deep_research_active'
-    )
-
-    with patch('consultation_v2.drivers.perplexity.atspi_click', return_value=True) as atspi_click:
-        result = driver.result(_request('perplexity', 'deep_research'))
-        assert driver._select_mode_via_slash_menu('deep_research_active', result, 'deep_research') is True
-
-    driver.runtime.click.assert_called_once_with(input_el, strategy='atspi_first')
-    driver.runtime.press.assert_called_once_with('slash')
-    atspi_click.assert_called_once()
     assert result.steps[-1].success is True
     assert result.steps[-1].step == 'select_mode'
 

@@ -51,6 +51,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             if not navigated:
                 return result
+        if not self._wait_for_prompt_ready(result):
+            return result
         if not self.select_model_mode_tools(request, result):
             return result
         if request.connectors:
@@ -72,6 +74,26 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return result
         result.ok = True
         return result
+
+    def _wait_for_prompt_ready(self, result: ConsultationResult) -> bool:
+        for _ in range(10):
+            snap = self.runtime.snapshot()
+            if self.validation_passes(snap, 'prompt_ready'):
+                result.add_step(
+                    'prompt_ready', True,
+                    'Perplexity prompt ready before mode selection',
+                    snapshot=snap.serializable(),
+                )
+                return True
+            time.sleep(0.5)
+
+        snap = self.runtime.snapshot()
+        result.add_step(
+            'prompt_ready', False,
+            'Perplexity prompt not ready before mode selection',
+            snapshot=snap.serializable(),
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Model / mode / tool selection
@@ -147,12 +169,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             else:
                 submenu_keys = self.cfg['workflow']['selection'].get('mode_submenu_keys', [])
                 in_submenu = requested_mode in submenu_keys
+                search_toggle_modes = {'deep_research', 'model_council', 'learn_step_by_step'}
 
-                if requested_mode == 'deep_research':
-                    ok = self._select_mode_via_slash_menu(
-                        mode_active_key,
-                        result,
+                if requested_mode in search_toggle_modes:
+                    ok = self._select_mode_via_search_toggle(
                         requested_mode,
+                        mode_active_key,
+                        workflow,
+                        result,
                     )
                 elif in_submenu:
                     ok = self._select_mode_via_submenu(
@@ -293,50 +317,67 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         )
         return self.validation_passes(verify_snap, mode_active_key)
 
-    def _select_mode_via_slash_menu(
+    def _select_mode_via_search_toggle(
         self,
-        mode_active_key: str,
-        result: ConsultationResult,
         requested_mode: str,
+        mode_active_key: str,
+        workflow: dict,
+        result: ConsultationResult,
     ) -> bool:
         snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
-        if not input_el:
+        trigger = self.find_first(snap, 'search_mode_trigger')
+        if not trigger:
             result.add_step(
                 'select_mode', False,
-                f'Perplexity input field not found for {requested_mode}',
+                f'Perplexity search mode trigger not found for {requested_mode}',
                 snapshot=snap.serializable(),
             )
             return False
-        if not self.runtime.click(input_el, strategy='atspi_first'):
+        if not self.runtime.click(trigger, strategy='atspi_first'):
             result.add_step(
                 'select_mode', False,
-                f'Perplexity input focus click failed for {requested_mode}',
-                snapshot=snap.serializable(),
-            )
-            return False
-        time.sleep(0.2)
-        if not self.runtime.press('slash'):
-            result.add_step(
-                'select_mode', False,
-                f'Perplexity slash menu key failed for {requested_mode}',
+                f'Perplexity search mode trigger click failed for {requested_mode}',
                 snapshot=snap.serializable(),
             )
             return False
         time.sleep(0.8)
-        menu_snap = self.runtime.menu_snapshot()
-        item = self.find_first(menu_snap, 'deep_research_item')
-        if not item:
+        menu_key = self._mode_menu_item_key(requested_mode, workflow)
+        found = self.runtime.wait_until(
+            lambda: self._menu_item_probe(menu_key),
+            timeout=3.0,
+            interval=0.4,
+        )
+        if not found:
+            menu_snap = self.runtime.menu_snapshot()
             result.add_step(
                 'select_mode', False,
-                f'Perplexity Deep research menu item not found for {requested_mode}',
+                f'Perplexity mode item not found for {requested_mode}',
                 snapshot=menu_snap.serializable(),
             )
             return False
-        if not atspi_click({'atspi_obj': getattr(item, 'atspi_obj', None), 'name': item.name, 'role': item.role}):
+        menu_snap, item = found
+        if not item:
             result.add_step(
                 'select_mode', False,
-                f'Perplexity Deep research menu item click failed for {requested_mode}',
+                f'Perplexity mode item not found for {requested_mode}',
+                snapshot=menu_snap.serializable(),
+            )
+            return False
+        if item.states and 'checked' in [s.lower() for s in item.states]:
+            self.runtime.press('Escape')
+            time.sleep(0.5)
+            verify_snap = self.runtime.snapshot()
+            verified = self.validation_passes(verify_snap, mode_active_key)
+            result.add_step(
+                'select_mode', verified,
+                f'Perplexity {requested_mode} already checked in search menu',
+                snapshot=verify_snap.serializable(),
+            )
+            return verified
+        if not self._click_menu_item_via_pointer(item):
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity mode item click failed for {requested_mode}',
                 snapshot=menu_snap.serializable(),
             )
             return False
@@ -813,7 +854,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             s = self.runtime.snapshot()
             return s.has('stop_button') or s.has('copy_button')
 
-        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=60, interval=0.6)
+        send_timeout = float(self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 60))
+        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=send_timeout, interval=0.6)
         settled_url = self.runtime.current_url() or before
         for _ in range(8):
             time.sleep(1.0)

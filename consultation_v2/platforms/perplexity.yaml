@@ -86,6 +86,10 @@ tree:
       role: toggle button
       states_include:
       - pressed
+    search_mode_trigger:
+      role: toggle button
+      states_include:
+      - pressed
     computer_mode:
       name: Computer
       role: push button
@@ -113,9 +117,6 @@ tree:
     deep_research:
       name: Deep research
       role: radio menu item
-    deep_research_item:
-      name: Deep research
-      role: menu item
     tool_model_council:
       name: "Model council Max"
       role: radio menu item
@@ -268,7 +269,6 @@ workflow:
     # The driver must click attach_more_trigger before these items are visible.
     mode_submenu_keys:
     - create_files_and_apps
-    - learn_step_by_step
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
@@ -325,7 +325,7 @@ validation:
       - Stop response (Esc)
       - Stop response
       role: push button
-    timeout: 30
+    timeout: 120
   response_complete:
     stop_absent: stop_button
   computer_active:

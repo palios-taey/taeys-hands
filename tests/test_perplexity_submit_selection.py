@@ -83,8 +83,10 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     assert element_map['upload_files_item']['name'] == 'Upload files or images'
     assert element_map['git_connector_item']['name'] == 'Connectors'
     assert element_map['spaces_item']['name'] == 'Spaces'
-    assert element_map['deep_research_item']['name'] == 'Deep research'
-    assert element_map['deep_research_item']['role'] == 'menu item'
+    assert element_map['search_mode_trigger'] == {
+        'role': 'toggle button',
+        'states_include': ['pressed'],
+    }
     assert element_map['deep_research_toggle'] == {
         'name': 'Deep research',
         'role': 'toggle button',
@@ -100,6 +102,7 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     assert element_map['submit_button']['name'] == 'Submit'
     assert element_map['copy_button']['name'] == 'Copy'
     assert workflow['mode_targets']['deep_research'] == 'deep_research_toggle'
+    assert workflow['mode_submenu_keys'] == ['create_files_and_apps']
     assert validation['deep_research_active']['indicators'] == [
         {'name': 'Deep research', 'role': 'toggle button', 'states_include': ['pressed']},
     ]
@@ -110,6 +113,7 @@ def test_consultation_v2_perplexity_exact_map() -> None:
         ],
         'role': 'push button',
     }
+    assert validation['send_success']['timeout'] == 120
 
 
 def test_perplexity_extract_primary_uses_copy_button_only() -> None:
