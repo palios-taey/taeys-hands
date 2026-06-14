@@ -147,7 +147,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 submenu_keys = self.cfg['workflow']['selection'].get('mode_submenu_keys', [])
                 in_submenu = requested_mode in submenu_keys
 
-                if in_submenu:
+                if requested_mode == 'deep_research':
+                    ok = self._toggle_mode_button(
+                        workflow['mode_targets'][requested_mode],
+                        mode_active_key,
+                        result,
+                        requested_mode,
+                    )
+                elif in_submenu:
                     ok = self._select_mode_via_submenu(
                         requested_mode, mode_active_key, workflow, result,
                     )
@@ -245,6 +252,42 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         ) or self.runtime.snapshot()
         result.add_step(
             'select_mode', self.validation_passes(verify_snap, mode_active_key),
+            f'Perplexity mode set to {requested_mode}',
+            snapshot=verify_snap.serializable(),
+        )
+        return self.validation_passes(verify_snap, mode_active_key)
+
+    def _toggle_mode_button(
+        self,
+        toggle_key: str,
+        mode_active_key: str,
+        result: ConsultationResult,
+        requested_mode: str,
+    ) -> bool:
+        snap = self.runtime.snapshot()
+        toggle = self.find_first(snap, toggle_key)
+        if not toggle:
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity toggle button {toggle_key} not found for {requested_mode}',
+                snapshot=snap.serializable(),
+            )
+            return False
+        if not self.runtime.click(toggle, strategy='atspi_first'):
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity toggle button click failed for {requested_mode}',
+                snapshot=snap.serializable(),
+            )
+            return False
+        verify_snap = self.runtime.wait_until(
+            lambda: self._active_snapshot(mode_active_key),
+            timeout=3.0,
+            interval=0.4,
+        ) or self.runtime.snapshot()
+        result.add_step(
+            'select_mode',
+            self.validation_passes(verify_snap, mode_active_key),
             f'Perplexity mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
         )

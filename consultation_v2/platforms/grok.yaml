@@ -103,6 +103,15 @@ tree:
     upload_files_item:
       name: "Upload a file"
       role: menu item
+    recent_item:
+      name: Recent
+      role: menu item
+    skills_item:
+      name: Skills
+      role: menu item
+    connectors_item:
+      name: Connectors
+      role: menu item
     # --- uploaded file chip (LIVE-CONFIRMED on :5 2026-06-03). The chip's
     # accessible name is STATIC ("Open attachment Remove this attachment"), NOT
     # the filename, so it is matched EXACTLY — no structural locator needed.

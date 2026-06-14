@@ -47,8 +47,7 @@ tree:
       - editable
       - focusable
     mode_picker:
-      # Live name is dynamic: "Open mode picker, currently Pro" (UI 2026-05-21)
-      name_contains: Open mode picker # lint-allow: known p1 debt; mode-picker label is dynamic and awaits exact remap strategy
+      name: Open mode picker, currently Pro
       role: push button
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
@@ -77,7 +76,7 @@ tree:
       role: push button
       trigger_type: hover
     copy_button:
-      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
+      name: Copy
       role: push button
     stop_button:
       name: Stop response
@@ -112,14 +111,14 @@ tree:
       name: NotebookLM
       role: menu item
     mode_fast:
-      name: Fast Answers quickly
+      name: 3.5 Flash
       role: menu item
     mode_thinking:
-      name: Thinking Solves complex problems
+      name: 3.5 Thinking
       role: menu item
     # BUG 1 FIX: exact AT-SPI name for Pro mode
     mode_pro:
-      name: "Pro Advanced math and code with 3.1 Pro"
+      name: "Selected 3.1 Pro Advanced math and code"
       role: menu item
     # BUG 2 FIX: all tool items are check menu item, not menu item
     # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
@@ -140,7 +139,7 @@ tree:
       name: "Create music New"
       role: check menu item
     tool_guided_learning:
-      name: Learn
+      name: Guided learning
       role: check menu item
     tool_deep_think:
       name: Deep think
@@ -217,15 +216,15 @@ validation:
   # BUG 7 FIX: mode validation uses checked state, not selected
   fast_active:
     indicators:
-    - name: Fast Answers quickly
+    - name: 3.5 Flash
       states_include: [checked]
   thinking_active:
     indicators:
-    - name: Thinking Solves complex problems
+    - name: 3.5 Thinking
       states_include: [checked]
   pro_active:
     indicators:
-    - name: "Pro Advanced math and code with 3.1 Pro"
+    - name: "Selected 3.1 Pro Advanced math and code"
       states_include: [checked]
   deep_think_active:
     indicators:

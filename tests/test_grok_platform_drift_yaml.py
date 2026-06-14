@@ -15,7 +15,12 @@ def test_grok_live_model_menu_names() -> None:
     validation = data['validation']
 
     assert defaults['mode'] is None
-    assert element_map['model_fast']['name'] == 'Fast Quick responses'
-    assert element_map['model_expert']['name'] == 'Expert Thinks hard'
+    assert element_map['model_auto']['name'] == 'Auto Chooses Fast or Expert'
+    assert element_map['model_fast']['name'] == 'Fast Powered by Grok 4.3'
+    assert element_map['model_expert']['name'] == 'Expert Powered by Grok 4.3'
     assert element_map['model_heavy']['name'] == 'Heavy Team of Experts'
+    assert element_map['upload_files_item']['name'] == 'Upload a file'
+    assert element_map['recent_item']['name'] == 'Recent'
+    assert element_map['skills_item']['name'] == 'Skills'
+    assert element_map['connectors_item']['name'] == 'Connectors'
     assert validation['heavy_active']['indicators'][0]['name'] == 'Heavy Team of Experts'

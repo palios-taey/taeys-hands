@@ -99,7 +99,10 @@ tree:
       name: "Upload files or images"
       role: menu item
     git_connector_item:
-      name: "Connectors and sources"
+      name: Connectors
+      role: menu item
+    spaces_item:
+      name: Spaces
       role: menu item
     # radio menu items — mode selection (main attach dropdown level)
     computer_dropdown:
@@ -206,8 +209,7 @@ tree:
       name_contains: Stop response # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
       role: push button
     copy_button:
-      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
-      name_not_contains: query # lint-allow: known p1 debt; exact output chip map still pending
+      name: Copy
       role: push button
     copy_query_button:
       name: Copy query
@@ -312,23 +314,21 @@ validation:
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop response # lint-allow: known p4 debt; send-success still keyed to substring until exact completion spec lands
+    - name: Stop response
       role: push button
     timeout: 30
   response_complete:
     indicators:
-    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
+    - name: Copy
       role: push button
     stop_absent: true
   computer_active:
     url_contains: /computer/ # lint-allow: known p1 debt; URL gate still reflects the live /computer/ area until exact route key lands
   deep_research_active:
-    # Presence-only check: the "Deep research" push button appears in the
-    # toolbar when active and disappears when inactive.  It has NO checked
-    # state — states are only [showing, focusable, enabled].
     indicators:
     - name: Deep research
-      role: push button
+      role: toggle button
+      states_include: [pressed]
   model_council_active:
     indicators:
     - name: "Model council"

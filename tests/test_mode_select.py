@@ -3,7 +3,10 @@
 import importlib
 import os
 import sys
+from pathlib import Path
+
 import pytest
+import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -84,17 +87,14 @@ def test_chatgpt_mode_guidance():
     mg = config['mode_guidance']
 
     assert 'auto' in mg
+    assert 'instant' in mg
     assert 'thinking' in mg
     assert 'pro' in mg
-    assert 'extended' in mg
+    assert 'pro_extended' in mg
+    assert 'extended_thinking' in mg
     assert mg['pro_extended']['steps'] == [
-        {'trigger': 'model_selector', 'select': 'pro'},
-        {'trigger': 'thinking_mode', 'select': 'extended'},
+        {'trigger': 'model_selector', 'select': 'model_pro'},
     ]
-    assert mg['pro_extended']['verification'] == {
-        'check': 'completed_steps',
-        'expected_steps': 2,
-    }
     assert mg['pro']['timeout'] == 7200
 
 
@@ -102,8 +102,33 @@ def test_chatgpt_consultation_defaults():
     from core.config import get_platform_config
 
     defaults = get_platform_config('chatgpt', reload=True)['consultation_defaults']
-    assert defaults['model'] == 'pro'
-    assert defaults['mode'] == 'pro_extended'
+    assert defaults['model'] is None
+    assert defaults['mode'] == 'pro'
+
+
+def test_consultation_v2_chatgpt_exact_map() -> None:
+    data = yaml.safe_load((Path(__file__).resolve().parents[1] / 'consultation_v2' / 'platforms' / 'chatgpt.yaml').read_text())
+    element_map = data['tree']['element_map']
+    workflow = data['workflow']['selection']
+
+    assert element_map['model_selector']['name'] == 'Pro Extended'
+    assert element_map['copy_button']['name'] == 'Copy response'
+    assert element_map['model_instant']['name'] == 'Instant'
+    assert element_map['model_thinking']['name'] == 'Medium'
+    assert element_map['model_medium']['name'] == 'Medium'
+    assert element_map['model_high']['name'] == 'High'
+    assert element_map['model_extra_high']['name'] == 'Extra High'
+    assert element_map['model_pro']['name'] == 'Pro Extended'
+    assert element_map['tool_upload']['name'] == 'Add photos & files Control U'
+    assert element_map['tool_more']['name'] == 'More'
+    assert workflow['model_targets'] == {
+        'instant': 'model_instant',
+        'thinking': 'model_thinking',
+        'pro': 'model_pro',
+        'medium': 'model_medium',
+        'high': 'model_high',
+        'extra_high': 'model_extra_high',
+    }
 
 
 def test_consultation_uses_yaml_defaults_for_fresh_sessions():
@@ -140,7 +165,7 @@ def test_chatgpt_pro_extended_verifies_by_completed_steps():
         'pro_extended',
         {
             'success': True,
-            'selected_item': 'Extended Pro',
+            'selected_item': 'Pro Extended',
             'completed_steps': [
                 {'step': 1, 'verified': True},
                 {'step': 2, 'verified': True},
@@ -149,7 +174,7 @@ def test_chatgpt_pro_extended_verifies_by_completed_steps():
     )
 
     assert result['verified'] is True
-    assert result['method'] == 'completed_steps'
+    assert result['method'] == 'all_steps_verified'
 
 
 def test_chatgpt_pro_extended_rejects_unverified_completed_step():
@@ -163,7 +188,7 @@ def test_chatgpt_pro_extended_rejects_unverified_completed_step():
         'pro_extended',
         {
             'success': True,
-            'selected_item': 'Extended Pro',
+            'selected_item': 'Thinking',
             'completed_steps': [
                 {'step': 1, 'verified': True},
                 {'step': 2, 'verified': False},
@@ -184,7 +209,7 @@ def test_multi_step_select_requires_verified_steps(monkeypatch):
     })
     monkeypatch.setattr('core.mode_select._click_element', lambda *args, **kwargs: True)
     monkeypatch.setattr('core.mode_select.find_menu_items', lambda *args, **kwargs: [
-        {'name': 'Pro Research-grade intelligence', 'role': 'push button'}
+        {'name': 'Pro Extended', 'role': 'push button'}
     ])
     monkeypatch.setattr('core.mode_select.find_elements', lambda *args, **kwargs: [])
     monkeypatch.setattr('core.mode_select._match_and_click', lambda items, target, platform: {
