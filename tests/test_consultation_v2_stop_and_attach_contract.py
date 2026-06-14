@@ -119,10 +119,13 @@ def test_monitor_generation_completes_without_copy_button(driver_cls, platform: 
     assert result.steps[-1][1] is True
 
 
-def test_gemini_and_perplexity_attach_success_use_file_chip() -> None:
-    for platform in ('gemini', 'perplexity'):
-        validation = _load_platform(platform)['validation']['attach_success']
-        assert validation == {'file_chip': {'roles': ['push button']}}
+def test_gemini_attach_success_is_action_only() -> None:
+    assert _load_platform('gemini')['validation']['attach_success'] == {}
+
+
+def test_perplexity_attach_success_uses_file_chip() -> None:
+    validation = _load_platform('perplexity')['validation']['attach_success']
+    assert validation == {'file_chip': {'roles': ['push button']}}
 
 
 def test_response_complete_is_stop_absent_only() -> None:

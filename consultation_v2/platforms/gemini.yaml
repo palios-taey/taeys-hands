@@ -195,10 +195,9 @@ settle:
   attach_ms: 3000
   rescan_attempts: 1
 validation:
-  attach_success:
-    file_chip:
-      roles:
-      - push button
+  attach_success: {}
+    # Gemini's uploaded file chip is not AT-SPI filename-addressable in live scans.
+    # Success is the completed upload action itself; no chip validation.
   prompt_ready:
     indicators:
     - name: Send message
