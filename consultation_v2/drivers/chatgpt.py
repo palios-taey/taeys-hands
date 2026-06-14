@@ -350,14 +350,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            # Complete when copy button present and stop button absent
-            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
+            # Complete only after stop disappears on a fresh scan.
+            if seen_stop and not snap.has('stop_button'):
                 return True
             return False
 
         completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.runtime.snapshot()
-        # response_complete uses name_contains: Copy in YAML (not exact name match)
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
         result.add_step('monitor', verified, 'ChatGPT response completed', stop_seen=seen_stop, snapshot=verify_snap.serializable())
         return verified

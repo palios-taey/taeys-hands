@@ -856,7 +856,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            if seen_stop and snap.has('copy_button') and not snap.has('stop_button'):
+            if seen_stop and not snap.has('stop_button'):
                 return True
             return False
 

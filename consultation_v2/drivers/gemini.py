@@ -376,14 +376,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             if snap.has('stop_button'):
                 seen_stop = True
                 return False
-            # BUG 6 FIX: copy_button uses name_contains: Copy — has() resolves via element_map
-            return seen_stop and snap.has('copy_button')
+            return seen_stop and not snap.has('stop_button')
 
         completed = self.runtime.wait_until(
             _poll, timeout=float(request.timeout), interval=1.0
         )
         verify_snap = self.runtime.snapshot()
-        # BUG 6 FIX: response_complete indicator is name_contains: Copy (set in YAML)
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
         result.add_step('monitor', verified, 'Gemini response completed',
                         stop_seen=seen_stop, snapshot=verify_snap.serializable())

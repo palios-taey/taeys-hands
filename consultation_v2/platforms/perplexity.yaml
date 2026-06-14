@@ -308,9 +308,9 @@ settle:
 
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
-      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
+    file_chip:
+      roles:
+      - push button
   prompt_ready:
     indicators:
     - name: Submit
@@ -321,10 +321,7 @@ validation:
       role: push button
     timeout: 30
   response_complete:
-    indicators:
-    - name: Copy
-      role: push button
-    stop_absent: true
+    stop_absent: stop_button
   computer_active:
     url_contains: /computer/ # lint-allow: known p1 debt; URL gate still reflects the live /computer/ area until exact route key lands
   deep_research_active:

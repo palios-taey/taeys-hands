@@ -196,9 +196,9 @@ settle:
   rescan_attempts: 1
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
-      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
+    file_chip:
+      roles:
+      - push button
   prompt_ready:
     indicators:
     - name: Send message
@@ -208,11 +208,9 @@ validation:
     - name: Stop response
       role: push button
     timeout: 30
-  # BUG 6 FIX: copy button still uses substring matching per driver spec # lint-allow: known p3 debt; comment records current non-exact extract dependency
+  # response_complete: the stop button is GONE (persistent-element gate).
   response_complete:
-    indicators:
-    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
-    stop_absent: true
+    stop_absent: stop_button
   # BUG 7 FIX: mode validation uses checked state, not selected
   fast_active:
     indicators:

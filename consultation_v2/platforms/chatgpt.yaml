@@ -268,10 +268,7 @@ validation:
       role: push button
     timeout: 30
   response_complete:
-    indicators:
-    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
-      role_contains: button # lint-allow: known p3 debt; response-complete still uses generic role filter pending extract matrix
-    stop_absent: true
+    stop_absent: stop_button
   # pro_active: Pro model is selected.
   # pro_indicator (persistent toolbar button) is the authoritative signal —
   # it appears as soon as Pro is active and does NOT vanish on dropdown close.

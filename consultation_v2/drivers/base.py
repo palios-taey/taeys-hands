@@ -60,6 +60,9 @@ class BaseConsultationDriver(ABC):
             probes.append(base.lower())
             stem = base.rsplit('.', 1)[0].lower() if '.' in base else base.lower()
             probes.append(stem)
+            if stem.startswith('taey_package_'):
+                probes.append(stem.rsplit('_', 1)[0])
+                probes.append('taey_package_')
             
             all_elements: List[ElementRef] = []
             for items in snapshot.mapped.values():
