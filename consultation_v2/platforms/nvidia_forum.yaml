@@ -67,9 +67,9 @@ tree:
     - "New replies are no longer allowed"
     - "Closed on "
 settle:
-  default_ms: 1000
-  navigate_ms: 1000
-  attach_ms: 1000
+  default_ms: 1500
+  navigate_ms: 2500
+  attach_ms: 1500
   rescan_attempts: 1
 workflow:
   actions:

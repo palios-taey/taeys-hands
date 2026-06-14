@@ -188,9 +188,9 @@ workflow:
     strategy: none
 
 settle:
-  default_ms: 1000
-  navigate_ms: 1000
-  attach_ms: 1000
+  default_ms: 1500
+  navigate_ms: 3500
+  attach_ms: 2500
   rescan_attempts: 1
 validation:
   attach_success:

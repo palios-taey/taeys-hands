@@ -237,9 +237,9 @@ workflow:
   extra_extract:
     strategy: none
 settle:
-  default_ms: 1000
-  navigate_ms: 1000
-  attach_ms: 1000
+  default_ms: 2000
+  navigate_ms: 4000
+  attach_ms: 3500
   rescan_attempts: 1
 validation:
   attach_success:
