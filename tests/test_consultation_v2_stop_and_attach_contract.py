@@ -20,6 +20,9 @@ class FakeElement:
         self.name = name
         self.role = role
 
+    def get(self, key: str, default: object | None = None) -> object | None:
+        return getattr(self, key, default)
+
 
 class FakeSnapshot:
     def __init__(self, elements: list[FakeElement] | None = None, present: set[str] | None = None) -> None:
@@ -95,6 +98,29 @@ def test_file_chip_matches_truncated_taey_package_prefix() -> None:
     )
 
 
+def test_validation_passes_supports_names_any_of_exact_alternatives() -> None:
+    driver = SimpleNamespace(cfg={
+        'validation': {
+            'send_success': {
+                'indicators': [
+                    {
+                        'names_any_of': ['Stop streaming', 'Stop answering'],
+                        'role': 'push button',
+                    },
+                ],
+            },
+        },
+    })
+
+    snapshot = FakeSnapshot(
+        elements=[
+            FakeElement('Stop answering', 'push button'),
+        ],
+    )
+
+    assert BaseConsultationDriver.validation_passes(driver, snapshot, 'send_success') is True
+
+
 @pytest.mark.parametrize(
     ('driver_cls', 'platform'),
     [
@@ -121,6 +147,11 @@ def test_monitor_generation_completes_without_copy_button(driver_cls, platform: 
 
 def test_gemini_attach_success_is_action_only() -> None:
     assert _load_platform('gemini')['validation']['attach_success'] == {}
+
+
+def test_chatgpt_attach_success_uses_file_chip() -> None:
+    validation = _load_platform('chatgpt')['validation']['attach_success']
+    assert validation == {'file_chip': {'roles': ['push button']}}
 
 
 def test_perplexity_attach_success_uses_file_chip() -> None:

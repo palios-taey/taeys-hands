@@ -54,3 +54,37 @@ def test_contract_lint_rejects_forbidden_yaml_and_python(tmp_path: Path) -> None
     assert 'yaml-forbidden-name_pattern' in proc.stdout
     assert 'py-platform-branch' in proc.stdout
     assert 'py-validator-element-ref' in proc.stdout
+
+
+def test_contract_lint_allows_names_any_of_exact_alternatives(tmp_path: Path) -> None:
+    yaml_path = tmp_path / 'consultation_v2' / 'platforms' / 'demo.yaml'
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_path.write_text(
+        '\n'.join([
+            'platform: demo',
+            'urls: {fresh: https://example.com}',
+            'tree:',
+            '  element_map:',
+            '    stop_button:',
+            '      names_any_of: [Stop streaming, Stop answering]',
+            '      role: push button',
+            'workflow: {}',
+            'validation: {}',
+            'settle:',
+            '  default_ms: 1000',
+            '  navigate_ms: 1000',
+            '  attach_ms: 1000',
+            '  rescan_attempts: 1',
+        ]),
+        encoding='utf-8',
+    )
+
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), str(yaml_path.relative_to(tmp_path))],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert proc.returncode == 0, proc.stdout
+    assert 'yaml-forbidden-names_any_of' not in proc.stdout

@@ -23,7 +23,6 @@ FORBIDDEN_YAML_KEYS = {
     'name_not_contains',
     'name_contains_all',
     'name_pattern',
-    'names_any_of',
     'role_contains',
     'url_contains',
     'title_contains',

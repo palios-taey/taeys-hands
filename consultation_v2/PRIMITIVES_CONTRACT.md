@@ -86,7 +86,7 @@ isolated drivers must read ONE tree (`consultation_v2/platforms/`); the root tre
 
 The "isolated" matcher itself invites loose matchers, so the YAMLs filled with them:
 - `consultation_v2/snapshot.py:35-54` `matches_spec()` accepts `name_contains`, `name_not_contains`,
-  `name_contains_all`, `name_pattern` (fnmatch **wildcards**), `role_contains`.
+  `name_contains_all`, `name_pattern` (fnmatch **wildcards**), `names_any_of`, `role_contains`.
 - `consultation_v2/snapshot.py:75` `_is_excluded` accepts `name_contains` for the exclude set.
 - `consultation_v2/drivers/base.py:35` `validation_passes` matches via `url_contains`; `:56-79`
   file-chip via substring `probe in name` (a contains, not a structural locator).

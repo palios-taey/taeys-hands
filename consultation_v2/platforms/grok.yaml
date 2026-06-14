@@ -201,18 +201,11 @@ settle:
 # ============================================================================
 imagine:
   url: https://grok.com/imagine
-  # Top-level surface uses a "Type to imagine" prompt input at the bottom-center
-  # of the viewport. The input is NOT exposed as a clean role=entry via AT-SPI
-  # on :10 — Grok's contenteditable doesn't surface to web-AT-SPI cleanly.
-  # Coordinate fallback: click_at(960, 940) on 1920x1080 reliably focuses it.
   input:
-    coordinate_fallback:
-      x: 960
-      y: 940
     note: |
-      AT-SPI does not expose this input cleanly. Coordinate click is the
-      reliable target on a 1920x1080 Xvfb display. After click, paste prompt
-      and press Return to submit.
+      Imagine is out of scope for consultation_v2 chat runs. No coordinate
+      fallback is defined here; consult flows must not try to drive this
+      surface.
 
   # Submitted prompts return a panel grid. Each panel has 3 elements:
   #   - the IMAGE itself (the panel art) — top region of the card

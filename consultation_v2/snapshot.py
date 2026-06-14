@@ -39,6 +39,12 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
 
     if 'name' in spec and name_lower != str(spec['name']).strip().lower():
         return False
+    if 'names_any_of' in spec:
+        candidates = spec['names_any_of']
+        if isinstance(candidates, str):
+            candidates = [candidates]
+        if not any(name_lower == str(candidate).strip().lower() for candidate in _listify(candidates)):
+            return False
     if 'name_contains' in spec:
         probes = [str(item).lower() for item in _listify(spec['name_contains'])]
         if not any(probe in name_lower for probe in probes):

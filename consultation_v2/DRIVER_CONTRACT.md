@@ -24,7 +24,8 @@
   not a prompt echo. (This is the harvest false-positive guard.)
 
 ## C. Exact-match YAML, zero platform knowledge in driver (100_TIMES §3 → [[YAML_SCHEMA]])
-- Every element = exact name+role from a live scan. NO name_contains/name_pattern/role_contains/fuzzy.
+- Every element = exact name+role from a live scan. NO name_contains/name_pattern/role_contains/fuzzy;
+  `names_any_of` is reserved for exact alternative labels only.
 - One YAML + one driver per platform, no overlap, no centralizing. Driver carries ZERO platform
   strings — all names/roles/keys come from its YAML.
 - UI drift → FLAG → live-scan → update YAML with the exact new name. That is the whole maintenance loop.

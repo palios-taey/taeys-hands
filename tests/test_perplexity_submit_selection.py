@@ -85,9 +85,47 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     assert element_map['spaces_item']['name'] == 'Spaces'
     assert element_map['deep_research_item']['name'] == 'Deep research'
     assert element_map['deep_research_item']['role'] == 'menu item'
+    assert element_map['deep_research_toggle'] == {
+        'name': 'Deep research',
+        'role': 'toggle button',
+        'states_include': ['pressed'],
+    }
+    assert element_map['stop_button'] == {
+        'names_any_of': [
+            'Stop response (Esc)',
+            'Stop response',
+        ],
+        'role': 'push button',
+    }
     assert element_map['submit_button']['name'] == 'Submit'
     assert element_map['copy_button']['name'] == 'Copy'
     assert workflow['mode_targets']['deep_research'] == 'deep_research_toggle'
     assert validation['deep_research_active']['indicators'] == [
         {'name': 'Deep research', 'role': 'toggle button', 'states_include': ['pressed']},
     ]
+    assert validation['send_success']['indicators'][0] == {
+        'names_any_of': [
+            'Stop response (Esc)',
+            'Stop response',
+        ],
+        'role': 'push button',
+    }
+
+
+def test_perplexity_extract_primary_uses_copy_button_only() -> None:
+    driver = PerplexityConsultationDriver()
+    driver.runtime = MagicMock()
+    driver.runtime.write_clipboard = MagicMock()
+    driver.runtime.click = MagicMock()
+    driver.runtime.read_clipboard = MagicMock(return_value='copied text')
+    driver.runtime.snapshot.return_value = _snapshot()
+    driver.find_first = MagicMock(side_effect=AssertionError('response_body lookup is forbidden'))
+    copy_button = MagicMock()
+    driver.find_last = MagicMock(return_value=copy_button)
+
+    result = driver.result(_request())
+
+    assert driver._dr_select_all_copy(result) == 'copied text'
+    driver.find_first.assert_not_called()
+    driver.find_last.assert_called_once_with(driver.runtime.snapshot.return_value, 'copy_button')
+    driver.runtime.click.assert_called_once_with(copy_button)

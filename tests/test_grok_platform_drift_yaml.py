@@ -24,3 +24,4 @@ def test_grok_live_model_menu_names() -> None:
     assert element_map['skills_item']['name'] == 'Skills'
     assert element_map['connectors_item']['name'] == 'Connectors'
     assert validation['heavy_active']['indicators'][0]['name'] == 'Heavy Team of Experts'
+    assert 'coordinate_fallback' not in data['imagine']['input']

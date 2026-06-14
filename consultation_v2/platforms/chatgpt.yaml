@@ -62,13 +62,15 @@ tree:
       name: Copy response
       role: push button
     stop_button:
-      name_contains: Stop # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
+      names_any_of:
+      - Stop streaming
+      - Stop answering
       role: push button
     pro_indicator:
       name: Pro Extended
       role: push button
     thinking_mode:
-      name_pattern: '*, click to remove' # lint-allow: known p1 debt; toolbar chip label still wildcarded pending exact state catalog
+      name: Pro Extended
       role: push button
     extended_pro:
       name: Pro Extended
@@ -88,22 +90,22 @@ tree:
     # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
     model_instant:
       name: Instant
-      role: menu item
+      role: radio menu item
     model_thinking:
       name: Medium
-      role: menu item
+      role: radio menu item
     model_medium:
       name: Medium
-      role: menu item
+      role: radio menu item
     model_high:
       name: High
-      role: menu item
+      role: radio menu item
     model_extra_high:
       name: Extra High
-      role: menu item
+      role: radio menu item
     model_pro:
       name: Pro Extended
-      role: menu item
+      role: radio menu item
     # Bug 4 fixed: "Configure..." was present in live scan, missing from YAML
     model_configure:
       name: "Configure..."
@@ -255,16 +257,18 @@ settle:
   rescan_attempts: 1
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
-      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
+    file_chip:
+      roles:
+      - push button
   prompt_ready:
     indicators:
     - name: Send prompt
       role: push button
   send_success:
     indicators:
-    - name_contains: Stop streaming # lint-allow: known p4 debt; send-success still keyed to substring until exact completion spec lands
+    - names_any_of:
+      - Stop streaming
+      - Stop answering
       role: push button
     timeout: 30
   response_complete:
@@ -296,10 +300,9 @@ validation:
     indicators:
     - name: Medium
       role: menu item
-  # extended_thinking_active: The thinking_mode element (, click to remove)
-  # appears in the toolbar when Extended Thinking is active — use it as the
-  # primary persistent check, mirroring the pro_indicator pattern.
+  # extended_thinking_active: The live model selector itself is the persistent
+  # signal for Extended Thinking on this surface; mirror pro_indicator.
   extended_thinking_active:
     indicators:
-    - name_pattern: ', click to remove' # lint-allow: known p1 debt; extended-thinking badge still wildcarded pending exact active-state map
+    - name: Pro Extended
       role: push button

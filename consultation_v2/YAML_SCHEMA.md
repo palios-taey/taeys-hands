@@ -25,9 +25,10 @@ Optional refinement (still exact, never loosening):
 - `states_include: [checked]` — element must currently expose ALL listed AT-SPI states (exact tokens).
 
 **FORBIDDEN keys (lint + runtime reject):** `name_contains`, `name_not_contains`, `name_contains_all`,
-`name_pattern`, `names_any_of`, `role_contains`, `url_contains`, `title_contains`, `contains`,
-`regex`, `matches`, `fuzzy`. If the real name is known, the YAML states it exactly. If an element
-"isn't found", the fix is a LIVE AT-SPI scan to get the real name+role — never a broadened matcher.
+`name_pattern`, `role_contains`, `url_contains`, `title_contains`, `contains`, `regex`, `matches`,
+`fuzzy`. If the real name is known, the YAML states it exactly. If an element needs a short list of
+exact labels, `names_any_of` is allowed. If an element "isn't found", the fix is a LIVE AT-SPI scan
+to get the real name+role — never a broadened matcher.
 
 ## 2. The ONE exception — `structural:` locator for inherently-dynamic leaves
 

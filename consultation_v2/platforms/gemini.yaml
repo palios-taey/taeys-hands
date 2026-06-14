@@ -111,10 +111,10 @@ tree:
       name: NotebookLM
       role: menu item
     mode_fast:
-      name: 3.5 Flash
+      name: 3.5 Flash All-around help New
       role: menu item
     mode_thinking:
-      name: 3.5 Thinking
+      name: 3.5 Thinking Solves complex problems
       role: menu item
     # BUG 1 FIX: exact AT-SPI name for Pro mode
     mode_pro:

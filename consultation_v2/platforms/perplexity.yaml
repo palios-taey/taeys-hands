@@ -83,7 +83,9 @@ tree:
     # NOT the toolbar tiles. do_action(0) on the radio menu item works.
     deep_research_toggle:
       name: Deep research
-      role: push button
+      role: toggle button
+      states_include:
+      - pressed
     computer_mode:
       name: Computer
       role: push button
@@ -209,7 +211,9 @@ tree:
       role: push button
       pick: last_by_y
     stop_button:
-      name_contains: Stop response # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
+      names_any_of:
+      - Stop response (Esc)
+      - Stop response
       role: push button
     copy_button:
       name: Copy
@@ -317,7 +321,9 @@ validation:
       role: push button
   send_success:
     indicators:
-    - name: Stop response
+    - names_any_of:
+      - Stop response (Esc)
+      - Stop response
       role: push button
     timeout: 30
   response_complete:

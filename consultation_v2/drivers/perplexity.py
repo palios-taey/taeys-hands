@@ -909,34 +909,24 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         self.runtime.write_clipboard('')
         time.sleep(0.2)
 
-        # Step 2 — focus the response body.
-        # We look for the document body element that wraps the DR report.
-        # Perplexity renders the DR answer inside a scroll container identified
-        # by a "document" or "section" role, or we fall back to clicking the
-        # last "Copy" push button's parent area which is always in-viewport.
+        # Step 2 — focus the response area.
+        # V2 only maps the stable Copy button, so we use that as the focus
+        # anchor before selecting all rendered text.
         snap = self.runtime.snapshot()
 
-        # Primary target: the response prose area (identified as a section/article
-        # accessible element that contains the DR report text).
-        response_body = self.find_first(snap, 'response_body')
-        if response_body:
-            self.runtime.click(response_body)
+        # Focus the response area via the last visible Copy button; V2 does not
+        # map a stable response_body key, so the mapped copy_button is the only
+        # approved focus anchor here.
+        copy_btn = self.find_last(snap, 'copy_button')
+        if copy_btn:
+            self.runtime.click(copy_btn)
         else:
-            # Fallback: click the last visible Copy button location to put
-            # keyboard focus into the response container, then move focus
-            # into the document body by pressing Tab once or using the
-            # copy_button's parent region.
-            copy_btn = self.find_last(snap, 'copy_button')
-            if copy_btn:
-                # Click near the copy button to focus the response area.
-                self.runtime.click(copy_btn)
-            else:
-                result.add_step(
-                    'extract_primary', False,
-                    'Perplexity DR: cannot locate response body or copy_button for focus',
-                    snapshot=snap.serializable(),
-                )
-                return None
+            result.add_step(
+                'extract_primary', False,
+                'Perplexity DR: cannot locate copy_button for focus',
+                snapshot=snap.serializable(),
+            )
+            return None
 
         time.sleep(0.4)
 
