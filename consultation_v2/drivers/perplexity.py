@@ -742,7 +742,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if send_button:
             clicked = self.runtime.click(send_button)
         else:
-            clicked = self.runtime.press('Return')
+            result.add_step(
+                'send', False,
+                'Perplexity submit button not found',
+                snapshot=snap.serializable(),
+            )
+            return False
 
         def _send_confirmed() -> bool:
             s = self.runtime.snapshot()

@@ -43,6 +43,29 @@ def test_perplexity_send_prompt_uses_last_submit_button() -> None:
     driver.runtime.click.assert_called_once_with(send_button)
 
 
+def test_perplexity_send_prompt_halts_when_submit_button_missing() -> None:
+    driver = PerplexityConsultationDriver()
+    driver.runtime = MagicMock()
+    snap = _snapshot()
+    driver.runtime.snapshot.return_value = snap
+    driver.runtime.press = MagicMock()
+    driver.runtime.click = MagicMock()
+    driver.runtime.wait_until = MagicMock()
+    driver.runtime.current_url.return_value = 'https://example.test/thread'
+    driver.find_last = MagicMock(return_value=None)
+
+    result = driver.result(_request())
+    result.session_url_before = 'https://example.test/new'
+
+    assert driver.send_prompt(result.request, result) is False
+    result.steps[-1].step == 'send'
+    assert result.steps[-1].success is False
+    assert result.steps[-1].message == 'Perplexity submit button not found'
+    driver.runtime.press.assert_not_called()
+    driver.runtime.click.assert_not_called()
+    driver.runtime.wait_until.assert_not_called()
+
+
 def test_perplexity_yaml_submit_button_uses_last_by_y_pick() -> None:
     data = yaml.safe_load((ROOT / 'consultation_v2' / 'platforms' / 'perplexity.yaml').read_text())
     submit = data['tree']['element_map']['submit_button']
