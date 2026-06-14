@@ -1,0 +1,1 @@
+GATEKEEPER R5 PASS @035b3e2 — 3-platform scope (perplexity+gemini+grok). chatgpt+claude deferred. lint 23/23, no-silent-fallbacks 23/23, 13 contract tests, override-1 intact all 3 drivers, doc consistent, grok attested. Oracle: live runs routed to taeys-hands. PASS row appended, chain intact.

@@ -97,3 +97,13 @@ RELEASE_READINESS.md
 
 # Fleet peer doc (Codex CLI) — not part of taeys-hands repo; gitnexus hook auto-injects
 AGENTS.md
+
+# Non-production cruft (hardened 2026-06-14 — keep remote clean)
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+*.tmp
+/tmp_*/
+/scratch/

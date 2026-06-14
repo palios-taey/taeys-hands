@@ -92,7 +92,8 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 - **Verify before reporting.** NEVER say "sent" or "running" without confirming output files exist and contain expected content.
 - **First error = full stop.** Do not retry. Do not patch. Diagnose root cause.
 - **Look at the screen.** When any UI op fails: `DISPLAY=:X scrot /tmp/screenshot.png` then read the image. BEFORE debugging code.
-- **Know your branch.** V2 code is on `consultation-v2-isolated-drivers`, NOT main.
+- **Know your branch — consultation_v2 LIVES ON `main` now.** The driver-architecture V2 engine is the production code on `main` (reconciled 2026-06-14; the old primitive-runner `origin/main` and the `consultation-v2-isolated-drivers` session branch are archived as `archived/*` tags).
+- **NEVER build on a stale base (git-master).** Before committing substantial work to ANY feature branch: `git fetch origin && git rev-list --count HEAD..origin/main`. If non-trivial → STOP, rebase onto current `origin/main` FIRST. And NEVER assume which line is canonical — `origin/main` can be stale/divergent; verify tip dates + which line the fleet actually runs before trusting it (this exact assumption caused the 2026-06-14 mess). Invoke the git-master skill before any branch/worktree/merge/cleanup op.
 - **Use production scripts.** Never launch Firefox/bots/tests manually.
 - **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
 - **Screenshot before AND after EVERY action.** When debugging, take a screenshot before and after each click/keypress. Then scan AT-SPI and compare against the screenshot. If they don't match, the AT-SPI tree needs refreshing. This is how you determine if the issue is code, timing, or tree staleness.
@@ -102,9 +103,9 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 
 ## Consultation V2 — Isolated Driver Architecture
 
-**Branch:** `consultation-v2-isolated-drivers` (NOT merged to main)
+**Branch:** `main` — this driver-architecture V2 engine IS the production code (reconciled onto `main` 2026-06-14).
 **Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
-**Status:** Under repair — audit findings being addressed (2026-04-07)
+**Status:** Production. perplexity/gemini/grok e2e-attested + gatekeeper R5 PASS @035b3e2; chatgpt F7 send-path e2e confirmed. See `consultations/p1_production_prove_design.md` for the findings record and `CONSULTATION_CONTRACT.md` for the governing contract.
 
 ### Structure
 ```
