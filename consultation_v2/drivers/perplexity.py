@@ -4,6 +4,7 @@ import os
 import time
 
 from core import input as inp
+from core.interact import atspi_click
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
 
@@ -148,8 +149,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 in_submenu = requested_mode in submenu_keys
 
                 if requested_mode == 'deep_research':
-                    ok = self._toggle_mode_button(
-                        workflow['mode_targets'][requested_mode],
+                    ok = self._select_mode_via_slash_menu(
                         mode_active_key,
                         result,
                         requested_mode,
@@ -278,6 +278,66 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 'select_mode', False,
                 f'Perplexity toggle button click failed for {requested_mode}',
                 snapshot=snap.serializable(),
+            )
+            return False
+        verify_snap = self.runtime.wait_until(
+            lambda: self._active_snapshot(mode_active_key),
+            timeout=3.0,
+            interval=0.4,
+        ) or self.runtime.snapshot()
+        result.add_step(
+            'select_mode',
+            self.validation_passes(verify_snap, mode_active_key),
+            f'Perplexity mode set to {requested_mode}',
+            snapshot=verify_snap.serializable(),
+        )
+        return self.validation_passes(verify_snap, mode_active_key)
+
+    def _select_mode_via_slash_menu(
+        self,
+        mode_active_key: str,
+        result: ConsultationResult,
+        requested_mode: str,
+    ) -> bool:
+        snap = self.runtime.snapshot()
+        input_el = self.find_first(snap, 'input')
+        if not input_el:
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity input field not found for {requested_mode}',
+                snapshot=snap.serializable(),
+            )
+            return False
+        if not self.runtime.click(input_el, strategy='atspi_first'):
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity input focus click failed for {requested_mode}',
+                snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(0.2)
+        if not self.runtime.press('slash'):
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity slash menu key failed for {requested_mode}',
+                snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(0.8)
+        menu_snap = self.runtime.menu_snapshot()
+        item = self.find_first(menu_snap, 'deep_research_item')
+        if not item:
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity Deep research menu item not found for {requested_mode}',
+                snapshot=menu_snap.serializable(),
+            )
+            return False
+        if not atspi_click({'atspi_obj': getattr(item, 'atspi_obj', None), 'name': item.name, 'role': item.role}):
+            result.add_step(
+                'select_mode', False,
+                f'Perplexity Deep research menu item click failed for {requested_mode}',
+                snapshot=menu_snap.serializable(),
             )
             return False
         verify_snap = self.runtime.wait_until(

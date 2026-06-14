@@ -111,6 +111,9 @@ tree:
     deep_research:
       name: Deep research
       role: radio menu item
+    deep_research_item:
+      name: Deep research
+      role: menu item
     tool_model_council:
       name: "Model council Max"
       role: radio menu item
