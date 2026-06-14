@@ -65,7 +65,7 @@ tree:
       name_contains: Stop # lint-allow: known p4 debt; stop-state labels still vary and await exact completion map
       role: push button
     pro_indicator:
-      name: Pro Extended, click to remove
+      name: Pro Extended
       role: push button
     thinking_mode:
       name_pattern: '*, click to remove' # lint-allow: known p1 debt; toolbar chip label still wildcarded pending exact state catalog
@@ -270,18 +270,15 @@ validation:
   response_complete:
     stop_absent: stop_button
   # pro_active: Pro model is selected.
-  # pro_indicator (persistent toolbar button) is the authoritative signal —
-  # it appears as soon as Pro is active and does NOT vanish on dropdown close.
+  # The live signal is the composer model_selector button itself.
   pro_active:
     indicators:
-    - name: Pro Extended, click to remove
+    - name: Pro Extended
       role: push button
-  # pro_extended_active: Pro + Pro Extended are both active.
-  # Same persistent toolbar indicator as pro_active — when Pro Extended is
-  # engaged the pro_indicator element IS present in the toolbar snapshot.
+  # pro_extended_active: Pro Extended is active.
   pro_extended_active:
     indicators:
-    - name: Pro Extended, click to remove
+    - name: Pro Extended
       role: push button
   # instant_active: No persistent toolbar badge exists for Instant.
   # Use best_effort + dropdown item check (open selector, verify item present).
