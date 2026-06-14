@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_MULTI_STEP_SETTLE_DELAY = 0.75
 
 
+def _normalize_match_text(text: str) -> str:
+    """Normalize labels for exact equality checks across UI punctuation drift."""
+    cleaned = (text or '').lower().strip()
+    for ch in ['•', ',', '(', ')', '[', ']', ':', '/', '\\']:
+        cleaned = cleaned.replace(ch, ' ')
+    cleaned = ' '.join(cleaned.split())
+    return cleaned
+
+
 def select_mode_model(platform: str, mode: str = None, model: str = None,
                       doc=None, firefox=None,
                       our_pid: int = None) -> Dict:
@@ -141,13 +150,6 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
 
     # Find trigger button in AT-SPI tree
     trigger = _find_button_by_element_map(doc, trigger_key, platform)
-    if platform == 'grok' and not trigger:
-        for _ in range(5):
-            time.sleep(0.6)
-            doc = atspi.get_platform_document(firefox, platform) or doc
-            trigger = _find_button_by_element_map(doc, trigger_key, platform)
-            if trigger:
-                break
     if not trigger:
         return {'success': False, 'error': f'{platform} {trigger_key} button not found in AT-SPI tree'}
 
@@ -160,45 +162,16 @@ def select_mode_model(platform: str, mode: str = None, model: str = None,
     menu_items = find_menu_items(firefox, doc)
     if not menu_items:
         time.sleep(1.5)
-        menu_items = find_menu_items(firefox, doc)
-    if not menu_items:
-        time.sleep(2.0)  # Third retry for slow React portal mounts (firefox-esr)
+        doc = atspi.get_platform_document(firefox, platform) or doc
         menu_items = find_menu_items(firefox, doc)
 
     if not menu_items:
-        # Keyboard navigation fallback FIRST — same approach as hmm_bot.py on Thor.
-        # React portal dropdowns on Xvfb don't expose items to AT-SPI tree.
-        # Use Down+Enter based on known dropdown position from YAML keyboard_nav.
-        keyboard_nav = guidance.get('keyboard_nav')
-        if keyboard_nav and isinstance(keyboard_nav, int):
-            logger.info(f"[{platform}] AT-SPI menu scan empty — keyboard nav "
-                        f"fallback: Down×{keyboard_nav} + Enter")
-            for _ in range(keyboard_nav):
-                inp.press_key('Down')
-                time.sleep(0.3)
-            inp.press_key('Return')
-            time.sleep(1.0)
-            result = {
-                'success': True,
-                'selected_mode': target_mode_lower,
-                'selected_item': target_mode_lower,
-                'platform': platform,
-                'method': 'keyboard_nav',
-            }
-            return result
-
-        # Last resort: scan tree for element_map model buttons (ChatGPT)
-        fences = get_fence_after(platform)
-        all_elements = find_elements(doc, fence_after=fences)
-        menu_items = _find_model_buttons_in_tree(platform, target_mode_lower, all_elements)
-
-        if not menu_items:
-            inp.press_key('Escape')
-            return {
-                'success': False,
-                'error': f'No menu items found after opening {platform} {trigger_key}',
-                'platform': platform,
-            }
+        inp.press_key('Escape')
+        return {
+            'success': False,
+            'error': f'No menu items found after opening {platform} {trigger_key}',
+            'platform': platform,
+        }
 
     # Match and click target
     result = _match_and_click(menu_items, target_mode_lower, platform)
@@ -278,26 +251,6 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
             menu_items = find_menu_items(firefox, doc, allowed_roles=allowed_roles)
 
         if not menu_items:
-            # Fallback: scan full tree for element_map buttons AND any matching elements
-            fences = get_fence_after(platform)
-            all_elements = find_elements(doc, fence_after=fences)
-            menu_items = _find_model_buttons_in_tree(platform, match_target, all_elements)
-
-        if not menu_items:
-            # Last resort: find ANY visible button/element matching the select target
-            # This catches tiles in the input area (ChatGPT Extended/Standard)
-            fences = get_fence_after(platform)
-            all_elements = find_elements(doc, fence_after=fences)
-            for e in all_elements:
-                ename = (e.get('name') or '').strip().lower()
-                erole = e.get('role', '')
-                if erole in ('push button', 'toggle button', 'button', 'radio button') and \
-                   match_target in ename:
-                    menu_items = [e]
-                    logger.info(f"[{platform}] Found '{e.get('name')}' ({erole}) via tree scan")
-                    break
-
-        if not menu_items:
             inp.press_key('Escape')
             return {
                 'success': False,
@@ -316,16 +269,15 @@ def _multi_step_select(platform: str, steps: list, target_mode: str,
         doc = atspi.get_platform_document(firefox, platform) or doc
 
         step_verification = _verify_multi_step_selection(
-            platform, select_target, firefox, doc
+            platform, match_target, firefox, doc
         )
         if not step_verification.get('verified'):
-            # Some platforms (ChatGPT) don't expose selection state in AT-SPI
-            # after dropdown closes. Trust the click if _match_and_click succeeded.
-            logger.warning(
-                "[%s] Step %d: '%s' click succeeded but verification could not confirm. "
-                "Proceeding (platform may not expose post-click state).",
-                platform, i + 1, select_target,
-            )
+            return {
+                'success': False,
+                'error': f"Step {i + 1}: selection could not be verified for '{select_target}'",
+                'completed_steps': completed_steps,
+                'verify_method': step_verification.get('method', 'none'),
+            }
 
         completed_steps.append({
             'step': i + 1,
@@ -408,11 +360,6 @@ def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optiona
             logger.info("[claude] Discovered live model selector: %s", selected.get('name', ''))
             return selected
 
-    if platform == 'chatgpt' and element_key == 'model_selector':
-        selected = _discover_chatgpt_model_selector(elements)
-        if selected:
-            return selected
-
     if platform == 'gemini' and element_key == 'mode_picker':
         candidates = [
             e for e in elements
@@ -432,62 +379,6 @@ def _find_button_by_element_map(doc, element_key: str, platform: str) -> Optiona
         if _match_element(e, spec):
             return e
     return None
-
-
-def _discover_chatgpt_model_selector(elements: list) -> Optional[Dict]:
-    """Discover the live ChatGPT model selector when its label drifts.
-
-    ChatGPT has a long-lived composer toolbar row. The exact button text can
-    rename with the active model label, so we treat exact YAML as the fast path
-    and fall back to a structural scan of the composer row.
-    """
-    from tools.inspect import _match_element
-
-    input_spec = get_element_spec('chatgpt', 'input')
-    input_ref = None
-    if input_spec:
-        for e in elements:
-            if _match_element(e, input_spec):
-                input_ref = e
-                break
-
-    input_x = input_ref.get('x') if input_ref else None
-    input_y = input_ref.get('y') if input_ref else None
-
-    def looks_modelish(name: str) -> bool:
-        lower = name.lower().strip()
-        if not lower:
-            return False
-        if lower.startswith('model:'):
-            return True
-        if 'pro' in lower and 'extended' in lower:
-            return True
-        if 'thinking' in lower and ('pro' in lower or 'model' in lower):
-            return True
-        return False
-
-    candidates = []
-    for e in elements:
-        if e.get('role') != 'push button':
-            continue
-        name = (e.get('name') or '').strip()
-        if not looks_modelish(name):
-            continue
-        x = e.get('x')
-        y = e.get('y')
-        if input_x is not None and x is not None and x < (input_x - 120):
-            continue
-        if input_y is not None and y is not None and abs(y - input_y) > 220:
-            continue
-        candidates.append(e)
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda e: (e.get('y', 0), e.get('x', 0)))
-    selected = candidates[-1]
-    logger.info("[chatgpt] Discovered live model selector: %s", selected.get('name', ''))
-    return selected
 
 
 def _find_model_buttons_in_tree(platform: str, target_mode: str,
@@ -560,12 +451,26 @@ def _selection_terms(mode_key: str) -> List[str]:
     aliases = {
         'deep_think': ['deep think'],
         'deep_research': ['deep research'],
-        'extended_thinking': ['extended thinking', 'extended'],
+        'extended_thinking': [
+            'extended thinking',
+            'extended',
+            'high',
+            'model: opus 4.8 high',
+            'model: opus 4.8 extra',
+            'opus 4.8 high',
+            'opus 4.8 extra',
+            'effort extra',
+        ],
         'extended': ['extended'],
         'expert': ['expert'],
         'heavy': ['heavy'],
         'thinking': ['thinking'],
-        'pro': ['pro'],
+        'pro': [
+            'pro',
+            'pro extended',
+            'extended pro',
+            'pro research-grade intelligence',
+        ],
         'fast': ['fast'],
         'normal': ['fast', 'auto'],
         'web_search': ['web search'],
@@ -621,15 +526,15 @@ def _match_and_click(items: list, mode_key: str, platform: str) -> Dict:
     """Find matching item by name and click it."""
     from core.interact import atspi_click
 
-    search_terms = _selection_terms(mode_key)
+    search_terms = [_normalize_match_text(term) for term in _selection_terms(mode_key)]
 
     for item in items:
-        item_name = (item.get('name') or '').strip().lower()
+        item_name = _normalize_match_text(item.get('name') or '')
         if not item_name:
             continue
 
         for term in search_terms:
-            if term in item_name or item_name.startswith(term):
+            if item_name == term:
                 logger.info(f"[{platform}] Menu match: '{item.get('name')}' for mode '{mode_key}'")
 
                 if _is_selected_item(item):
@@ -714,24 +619,32 @@ def _verify_selection(platform: str, mode_key: str,
 
     for e in elements:
         if _match_element(e, spec):
-            button_name = (e.get('name') or '').lower()
-            mode_lower = mode_key.lower()
+            button_name = _normalize_match_text(e.get('name') or '')
+            mode_lower = _normalize_match_text(mode_key)
 
-            # Check if button name contains the mode/model key
             _VERIFY_TERMS = {
                 'auto': ['auto'],
                 'instant': ['instant'],
                 'thinking': ['thinking'],
-                'pro': ['pro'],
+                'pro': ['pro', 'pro extended', 'extended pro', 'pro research-grade intelligence'],
                 'expert': ['expert'],
                 'heavy': ['heavy'],
                 'fast': ['fast'],
                 'deep_think': ['deep think'],
                 'deep_research': ['deep research'],
-                'extended_thinking': ['extended', 'adaptive', 'high'],
+                'extended_thinking': [
+                    'extended',
+                    'adaptive',
+                    'high',
+                    'model: opus 4.8 high',
+                    'model: opus 4.8 extra',
+                    'opus 4.8 high',
+                    'opus 4.8 extra',
+                    'effort extra',
+                ],
             }
-            terms = _VERIFY_TERMS.get(mode_lower, [mode_lower])
-            if any(t in button_name for t in terms):
+            terms = [_normalize_match_text(t) for t in _VERIFY_TERMS.get(mode_lower, [mode_lower])]
+            if any(button_name == t for t in terms):
                 return {'verified': True, 'button_name': e.get('name', '')}
 
             # If reopen_to_verify is set (Grok), we can't easily verify
@@ -740,7 +653,7 @@ def _verify_selection(platform: str, mode_key: str,
 
             return {
                 'verified': False,
-                'note': f"Button name '{e.get('name')}' doesn't contain '{mode_key}'",
+                'note': f"Button name '{e.get('name')}' does not match '{mode_key}'",
                 'button_name': e.get('name', ''),
             }
 

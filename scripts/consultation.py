@@ -207,6 +207,8 @@ _PLATFORM_DISPLAYS.clear()
 
 from core import atspi, input as inp, clipboard
 from core.config import get_platform_config, get_attach_method
+from core.drift import check_structure_drift
+from core.halt import halt_platform
 from core.tree import find_elements, find_copy_buttons, find_menu_items
 from core.interact import atspi_click
 from tools.attach import handle_attach, _close_stale_file_dialogs, _verify_attach_success
@@ -352,6 +354,22 @@ def _select_mode_inprocess(platform: str, mode: str = None, model: str = None) -
         platform, mode=mode, model=model,
         doc=doc, firefox=ff,
     )
+
+
+def _halt_on_mode_drift(platform: str, reason: str) -> dict | None:
+    """Record structure drift and halt the platform on an unresolved selection miss."""
+    redis = get_redis()
+    doc = get_doc(force_refresh=True)
+    drift = None
+    if doc and redis:
+        try:
+            elements = find_elements(doc)
+            drift = check_structure_drift(platform, elements, redis)
+        except Exception as exc:
+            logger.warning("Drift check failed for %s: %s", platform, exc)
+
+    halt_platform(platform, reason, redis, drift_data=drift)
+    return drift
 
 
 # ---- Core functions (adapted from hmm_bot proven patterns) ----
@@ -1155,6 +1173,10 @@ def _run_selection_step(platform: str, *, step_name: str, value: str,
         logger.error("Available modes: %s", sel_result.get('available_modes', 'unknown'))
         result['error'] = f"{step_name}_selection_failed: {sel_result.get('error')}"
         result[f'{step_name}_selection'] = sel_result
+        result['drift'] = _halt_on_mode_drift(
+            platform,
+            f"{step_name} selection failed: {sel_result.get('error')}",
+        )
         return False, timeout
 
     logger.info(
@@ -1174,6 +1196,10 @@ def _run_selection_step(platform: str, *, step_name: str, value: str,
         logger.error("HARD STOP: %s '%s' NOT verified in AT-SPI tree.", step_name, value)
         result['error'] = f"{step_name}_not_verified: '{value}' not confirmed in AT-SPI tree"
         result['verify_method'] = selection_verification.get('method')
+        result['drift'] = _halt_on_mode_drift(
+            platform,
+            f"{step_name} verification failed: '{value}' not confirmed in AT-SPI tree",
+        )
         return False, timeout
 
     logger.info("%s verification PASSED (%s)",

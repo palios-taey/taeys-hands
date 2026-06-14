@@ -84,17 +84,17 @@ mode_guidance:
   # the model button then reads "Extended Pro"). No second tile step.
   pro_extended:
     when: "Research-grade intelligence with extended thinking (max)"
-    how: "Single step: click model selector, select 'Pro' (= Pro • Extended)."
+    how: "Single step: click model selector, select 'Pro Research-grade intelligence'."
     steps:
       - trigger: model_selector
-        select: pro
+        select: model_pro
     timeout: 14400
   extended_thinking:
     when: "Alias for pro_extended (max reasoning)"
-    how: "Single step: click model selector, select 'Pro' (= Pro • Extended)."
+    how: "Single step: click model selector, select 'Pro Research-grade intelligence'."
     steps:
       - trigger: model_selector
-        select: pro
+        select: model_pro
     timeout: 14400
 
 # ─── Element Filtering ───────────────────────────────────────────────
@@ -146,7 +146,7 @@ element_map:
     role: entry
     states_include: [editable]
   model_selector:
-    name: "Extended Pro"  # was 'Switch model' (removed by ChatGPT 2026-06-01; selector moved into composer, profile-persisted)
+    name: "Pro Extended"  # live AT-SPI button label on the current Pro-session composer
     role: push button
   attach_trigger:
     name: "Add files and more"
@@ -187,7 +187,7 @@ element_map:
     name: "Thinking For complex questions"
     role: push button
   model_pro:
-    name: "Pro Research-grade intelligence"
+    name: "Pro Extended"
     role: push button
   model_configure:
     name: "Configure..."
