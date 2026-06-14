@@ -87,6 +87,7 @@ tree:
       states_include:
       - pressed
     search_mode_trigger:
+      name: Search
       role: toggle button
       states_include:
       - pressed

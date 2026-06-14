@@ -333,7 +333,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        if not self.runtime.click(trigger, strategy='atspi_first'):
+        if not self.runtime.click(trigger):
             result.add_step(
                 'select_mode', False,
                 f'Perplexity search mode trigger click failed for {requested_mode}',

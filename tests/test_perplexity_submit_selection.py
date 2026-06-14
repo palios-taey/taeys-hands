@@ -84,6 +84,7 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     assert element_map['git_connector_item']['name'] == 'Connectors'
     assert element_map['spaces_item']['name'] == 'Spaces'
     assert element_map['search_mode_trigger'] == {
+        'name': 'Search',
         'role': 'toggle button',
         'states_include': ['pressed'],
     }
