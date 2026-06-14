@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 
 from core import atspi, clipboard, input as inp
 from core.interact import atspi_click
+from core.platforms import get_platform_display
 from .snapshot import build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
@@ -24,6 +25,14 @@ class ConsultationRuntime:
             or self.cfg.get("workflow", {}).get("click_strategy")
             or "xdotool_first"
         )
+
+    def _dialog_env(self) -> dict:
+        env = dict(os.environ)
+        env.setdefault(
+            "DISPLAY",
+            get_platform_display(self.platform) or os.environ.get("DISPLAY", ":0"),
+        )
+        return env
 
     # ------------------------------------------------------------------
     # Stale file dialog cleanup
@@ -45,8 +54,7 @@ class ConsultationRuntime:
             Do **not** close the ``xdg-desktop-portal-gtk`` *process* —
             only its named dialog windows are targeted here.
         """
-        env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        env = self._dialog_env()
 
         closed = 0
         for title in ("File Upload", "Open", "Open File"):
@@ -82,8 +90,7 @@ class ConsultationRuntime:
         the dialog's location bar.  Mirrors V1's _handle_gtk_dialog
         approach (tools/attach.py).
         """
-        env = dict(os.environ)
-        env.setdefault("DISPLAY", os.environ.get("DISPLAY", ":0"))
+        env = self._dialog_env()
 
         for title in ("File Upload", "Open", "Open File"):
             try:
@@ -199,6 +206,11 @@ class ConsultationRuntime:
                 {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
             )
         )
+
+    def hover(self, element: ElementRef, timeout: int = 5) -> bool:
+        if element.x is None or element.y is None:
+            return False
+        return bool(inp.hover(int(element.x), int(element.y), timeout=timeout))
 
     def press(self, key: str) -> bool:
         return bool(inp.press_key(key))

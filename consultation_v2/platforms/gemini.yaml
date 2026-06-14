@@ -75,6 +75,7 @@ tree:
     more_tools:
       name: More tools
       role: push button
+      trigger_type: hover
     copy_button:
       name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
       role: push button
@@ -189,6 +190,11 @@ workflow:
     strategy: share_export_copy_content
     share_export_key: share_export
     copy_content_key: copy_content_item
+settle:
+  default_ms: 1000
+  navigate_ms: 1000
+  attach_ms: 1000
+  rescan_attempts: 1
 validation:
   attach_success:
     indicators:

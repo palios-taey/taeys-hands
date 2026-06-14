@@ -24,3 +24,6 @@ jobs:
 
       - name: Run consultation_v2 integrity gate
         run: python3 tools/lint_no_yaml_silent_fallbacks.py --all
+
+      - name: Run consultation_v2 contract gate
+        run: python3 tools/lint_consultation_v2_contract.py --all

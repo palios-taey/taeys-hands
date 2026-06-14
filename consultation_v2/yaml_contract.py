@@ -54,3 +54,7 @@ def get_validation(platform: str, key: str | None = None) -> Dict[str, Any]:
     if key is None:
         return validation
     return dict(validation.get(key, {}))
+
+
+def get_settle(platform: str) -> Dict[str, Any]:
+    return dict(load_platform_yaml(platform).get('settle', {}))

@@ -180,6 +180,11 @@ validation:
   # response_complete: the stop button is GONE (persistent-element gate).
   response_complete:
     stop_absent: stop_button
+settle:
+  default_ms: 1000
+  navigate_ms: 1000
+  attach_ms: 1000
+  rescan_attempts: 1
 
 # ============================================================================
 # IMAGINE surface — separate flow from chat. URL = https://grok.com/imagine.

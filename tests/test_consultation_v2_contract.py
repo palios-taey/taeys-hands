@@ -14,12 +14,15 @@ REQUIRED_ELEMENT_KEYS = {
     'gemini': {'input', 'mode_picker', 'tools_button', 'upload_menu', 'send_button', 'stop_button', 'copy_button'},
     'grok': {'input', 'attach_trigger', 'model_selector', 'stop_button', 'copy_button'},
     'perplexity': {'input', 'attach_trigger', 'model_selector', 'submit_button', 'stop_button', 'copy_button'},
+    'reddit': {'comment_compose', 'post_comment_button', 'reply_button', 'upvote_button', 'downvote_button'},
+    'nvidia_forum': {'open_reply_composer', 'compose_textarea', 'submit_reply_button', 'discard_button', 'save_and_close_draft', 'quote_reply_per_post'},
 }
+REQUIRED_SETTLE_KEYS = {'default_ms', 'navigate_ms', 'attach_ms', 'rescan_attempts'}
 
 
 def test_platform_yaml_files_exist() -> None:
     names = {path.stem for path in PLATFORM_DIR.glob('*.yaml')}
-    assert names == {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
+    assert names == {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity', 'reddit', 'nvidia_forum'}
 
 
 def test_platform_yaml_contract() -> None:
@@ -29,10 +32,25 @@ def test_platform_yaml_contract() -> None:
         tree = data.get('tree') or {}
         workflow = data.get('workflow') or {}
         assert 'element_map' in tree, f'{path.name} missing tree.element_map'
-        assert 'selection' in workflow, f'{path.name} missing workflow.selection'
-        assert 'attachment' in workflow, f'{path.name} missing workflow.attachment'
-        assert 'prompt' in workflow, f'{path.name} missing workflow.prompt'
-        assert 'send' in workflow, f'{path.name} missing workflow.send'
-        assert 'monitor' in workflow, f'{path.name} missing workflow.monitor'
-        assert 'extract' in workflow, f'{path.name} missing workflow.extract'
+        if path.stem in {'reddit', 'nvidia_forum'}:
+            assert 'actions' in workflow, f'{path.name} missing workflow.actions'
+        elif path.stem == 'grok':
+            assert 'mode_targets' in workflow, f'{path.name} missing workflow.mode_targets'
+            assert 'attachment' in workflow, f'{path.name} missing workflow.attachment'
+            assert 'prompt' in workflow, f'{path.name} missing workflow.prompt'
+            assert 'send' in workflow, f'{path.name} missing workflow.send'
+            assert 'monitor' in workflow, f'{path.name} missing workflow.monitor'
+            assert 'extract' in workflow, f'{path.name} missing workflow.extract'
+        else:
+            assert 'selection' in workflow, f'{path.name} missing workflow.selection'
+            assert 'attachment' in workflow, f'{path.name} missing workflow.attachment'
+            assert 'prompt' in workflow, f'{path.name} missing workflow.prompt'
+            assert 'send' in workflow, f'{path.name} missing workflow.send'
+            assert 'monitor' in workflow, f'{path.name} missing workflow.monitor'
+            assert 'extract' in workflow, f'{path.name} missing workflow.extract'
         assert REQUIRED_ELEMENT_KEYS[path.stem].issubset(set((tree.get('element_map') or {}).keys()))
+        settle = data.get('settle') or {}
+        assert REQUIRED_SETTLE_KEYS.issubset(set(settle)), f'{path.name} missing settle keys'
+        for key in ('default_ms', 'navigate_ms', 'attach_ms'):
+            assert int(settle[key]) <= 8000, f'{path.name} settle.{key} exceeds MAX_GLOBAL_SETTLE_MS'
+        assert int(settle['rescan_attempts']) >= 1, f'{path.name} settle.rescan_attempts must be >= 1'

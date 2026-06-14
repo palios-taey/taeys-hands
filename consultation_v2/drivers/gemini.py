@@ -54,6 +54,16 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         result.ok = True
         return result
 
+    def _activate_element(self, snapshot, key: str, step: str, reason_prefix: str):
+        element = self.find_first(snapshot, key)
+        if not element:
+            return False
+        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
+        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
+        if trigger_type == 'hover':
+            return self.runtime.hover(element)
+        return self.runtime.click(element, strategy='atspi_first')
+
     def select_model_mode_tools(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
@@ -137,8 +147,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     # "Deep think" / "Guided learning" live behind a "More tools"
                     # expander inside the Upload & tools menu (UI 2026-05-21).
                     # Expand it before declaring the tool missing.
-                    more = self.find_first(menu_snap, 'more_tools')
-                    if more and self.runtime.click(more, strategy='atspi_first'):
+                    if self._activate_element(menu_snap, 'more_tools', 'select_mode', 'Gemini more tools expander'):
                         time.sleep(0.6)
                         menu_snap = self.runtime.menu_snapshot()
                         item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])

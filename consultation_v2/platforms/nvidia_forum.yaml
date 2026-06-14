@@ -66,6 +66,11 @@ tree:
     - "This topic was automatically closed"
     - "New replies are no longer allowed"
     - "Closed on "
+settle:
+  default_ms: 1000
+  navigate_ms: 1000
+  attach_ms: 1000
+  rescan_attempts: 1
 workflow:
   actions:
     reply:

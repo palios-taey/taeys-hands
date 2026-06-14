@@ -63,6 +63,23 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         strategy = self._click_strategy()
         return self.runtime.click(element, strategy=strategy)
 
+    def _activate_element(self, snapshot, key: str, result: ConsultationResult, step: str, reason_prefix: str) -> bool:
+        element = self.find_first(snapshot, key)
+        if not element:
+            result.add_step(step, False, f'{reason_prefix} {key} not found', snapshot=snapshot.serializable())
+            return False
+        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
+        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
+        if trigger_type == 'hover':
+            if not self.runtime.hover(element):
+                result.add_step(step, False, f'{reason_prefix} {key} hover failed', snapshot=snapshot.serializable())
+                return False
+            return True
+        if not self._click(element):
+            result.add_step(step, False, f'{reason_prefix} {key} click failed', snapshot=snapshot.serializable())
+            return False
+        return True
+
     # ------------------------------------------------------------------
     # Model / mode / tool selection
     # ------------------------------------------------------------------
@@ -188,7 +205,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def _apply_tool(self, tool_name: str, workflow: dict, result: ConsultationResult) -> bool:
         """Open attach dropdown (React portal) and toggle a tool item."""
         normalized = tool_name.strip().lower().replace(' ', '_')
-        target_key = workflow.get('tool_targets', {}).get(normalized)
+        target_spec = workflow.get('tool_targets', {}).get(normalized)
+        via_key = None
+        if isinstance(target_spec, dict):
+            target_key = target_spec.get('target')
+            via_key = target_spec.get('via')
+        else:
+            target_key = target_spec
         if not target_key:
             result.add_step('select_tool', False, f'ChatGPT tool {tool_name!r} is not mapped in Consultation V2 YAML')
             return False
@@ -199,6 +222,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('select_tool', False, f'ChatGPT failed to open tools dropdown for {tool_name}', snapshot=snap.serializable())
             return False
         time.sleep(1.0)
+
+        if via_key:
+            via_snap = self.runtime.menu_snapshot()
+            if not self._activate_element(via_snap, via_key, result, 'select_tool',
+                                         f'ChatGPT submenu trigger for {tool_name}'):
+                return False
+            time.sleep(0.6)
 
         # Attach dropdown is a React portal — must use menu_snapshot()
         dropdown_snap = self.runtime.menu_snapshot()

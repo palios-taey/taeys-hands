@@ -80,6 +80,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 from core.config import get_platform_config
+from consultation_v2.yaml_contract import get_settle
 
 
 # ---- Display setup BEFORE any AT-SPI imports ----
@@ -254,6 +255,7 @@ logging.basicConfig(
 logger = logging.getLogger('consultation')
 
 DEFAULT_STEP_ORDER = ['navigate', 'model', 'mode', 'attach', 'message', 'send']
+MAX_GLOBAL_SETTLE_MS = 8000
 _REQUESTER_ENV_KEYS = ('TAEY_SESSION', 'TAEY_REQUESTER', 'REQUESTER_SESSION', 'SESSION_NAME')
 
 # Binary/image files must NOT pass through _consolidate_attachments (it does
@@ -388,18 +390,44 @@ def _step_match_result(step: str, matched: bool, disposition: str,
     return result
 
 
-def _validate_with_retry(platform: str, step: str, validator, settle_seconds: float = 1.0) -> dict:
+def _step_settle_seconds(platform: str, step: str) -> float:
+    settle = get_settle(platform)
+    settle_key = 'default_ms'
+    if step == 'navigate':
+        settle_key = 'navigate_ms'
+    elif step == 'attach':
+        settle_key = 'attach_ms'
+    raw_ms = settle.get(settle_key, settle.get('default_ms', 1000))
+    try:
+        ms = int(raw_ms)
+    except (TypeError, ValueError):
+        ms = 1000
+    return max(0.0, min(ms, MAX_GLOBAL_SETTLE_MS) / 1000.0)
+
+
+def _validate_with_retry(platform: str, step: str, validator, settle_seconds: float | None = None) -> dict:
     """Run a binary validator once, settle+rescan once, then halt on miss."""
+    if settle_seconds is None:
+        settle_seconds = _step_settle_seconds(platform, step)
     result = validator()
     if result.get('matched'):
         return result
 
-    time.sleep(settle_seconds)
-    _refresh_platform_tree(platform)
-    retry = validator()
-    if retry.get('matched'):
-        retry.setdefault('retry', True)
-        return retry
+    raw_attempts = get_settle(platform).get('rescan_attempts', 1)
+    try:
+        attempts = max(1, int(raw_attempts))
+    except (TypeError, ValueError):
+        attempts = 1
+
+    retry = result
+    for attempt in range(1, attempts + 1):
+        time.sleep(settle_seconds)
+        _refresh_platform_tree(platform)
+        retry = validator()
+        if retry.get('matched'):
+            retry.setdefault('retry', True)
+            retry.setdefault('rescan_attempt', attempt)
+            return retry
 
     retry['drift'] = _halt_on_dispatch_drift(
         platform,
