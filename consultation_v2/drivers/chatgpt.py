@@ -317,11 +317,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
         snap = self.runtime.snapshot()
-        send_button = self.find_first(snap, 'send_button')
-        if not send_button:
-            result.add_step('send', False, 'ChatGPT send button not found', snapshot=snap.serializable())
+        input_el = self.find_first(snap, 'input')
+        if not input_el:
+            result.add_step('send', False, 'ChatGPT input field not found for submit', snapshot=snap.serializable())
             return False
-        clicked = self._click(send_button)
+        if not self._click(input_el):
+            result.add_step('send', False, 'ChatGPT input refocus failed', snapshot=snap.serializable())
+            return False
+        time.sleep(0.2)
+        self.runtime.press('Return')
+        clicked = True
         def _send_confirmed():
             snap = self.runtime.snapshot()
             return snap.has('stop_button') or snap.has('copy_button')
