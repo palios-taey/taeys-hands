@@ -106,6 +106,9 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     assert validation['deep_research_active']['indicators'] == [
         {'name': 'Deep research', 'role': 'toggle button', 'states_include': ['pressed']},
     ]
+    assert validation['prompt_ready']['indicators'] == [
+        {'name': '', 'role': 'entry', 'states_include': ['editable']},
+    ]
     assert validation['send_success']['indicators'][0] == {
         'names_any_of': [
             'Stop response (Esc)',

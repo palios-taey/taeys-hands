@@ -70,6 +70,20 @@ def test_perplexity_deep_research_uses_search_toggle_dropdown_and_pill_verify() 
     assert result.steps[-1].step == 'select_mode'
 
 
+def test_perplexity_prompt_ready_gates_on_input_entry_not_submit_button() -> None:
+    driver = PerplexityConsultationDriver()
+    driver.runtime = MagicMock()
+    ready_snap = _snapshot()
+    driver.runtime.snapshot.side_effect = [ready_snap]
+    driver.validation_passes = MagicMock(side_effect=lambda snapshot, key, filename=None: snapshot is ready_snap and key == 'prompt_ready')
+    result = driver.result(_request('perplexity', 'deep_research'))
+
+    assert driver._wait_for_prompt_ready(result) is True
+    driver.validation_passes.assert_called_once_with(ready_snap, 'prompt_ready')
+    assert result.steps[-1].step == 'prompt_ready'
+    assert result.steps[-1].success is True
+
+
 def test_gemini_deep_think_verifies_active_pill_from_document_snapshot() -> None:
     driver = GeminiConsultationDriver()
     driver.runtime = MagicMock()

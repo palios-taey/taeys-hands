@@ -317,8 +317,9 @@ validation:
       - push button
   prompt_ready:
     indicators:
-    - name: Submit
-      role: push button
+    - name: ""
+      role: entry
+      states_include: [editable]
   send_success:
     indicators:
     - names_any_of:
