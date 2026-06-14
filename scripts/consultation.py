@@ -206,7 +206,9 @@ from core.platforms import _PLATFORM_DISPLAYS
 _PLATFORM_DISPLAYS.clear()
 
 from core import atspi, input as inp, clipboard
-from core.config import get_platform_config, get_attach_method
+from core.config import (
+    get_platform_config, get_attach_method, get_validation, get_element_spec,
+)
 from core.drift import check_structure_drift
 from core.halt import halt_platform
 from core.tree import find_elements, find_copy_buttons, find_menu_items
@@ -356,8 +358,8 @@ def _select_mode_inprocess(platform: str, mode: str = None, model: str = None) -
     )
 
 
-def _halt_on_mode_drift(platform: str, reason: str) -> dict | None:
-    """Record structure drift and halt the platform on an unresolved selection miss."""
+def _halt_on_dispatch_drift(platform: str, reason: str) -> dict | None:
+    """Record structure drift and halt the platform on an unresolved dispatch miss."""
     redis = get_redis()
     doc = get_doc(force_refresh=True)
     drift = None
@@ -370,6 +372,40 @@ def _halt_on_mode_drift(platform: str, reason: str) -> dict | None:
 
     halt_platform(platform, reason, redis, drift_data=drift)
     return drift
+
+
+def _step_match_result(step: str, matched: bool, disposition: str,
+                       reason: str = '', **extra) -> dict:
+    """Return a binary step validation result."""
+    result = {
+        'step': step,
+        'matched': matched,
+        'disposition': disposition,
+    }
+    if reason:
+        result['reason'] = reason
+    result.update(extra)
+    return result
+
+
+def _validate_with_retry(platform: str, step: str, validator, settle_seconds: float = 1.0) -> dict:
+    """Run a binary validator once, settle+rescan once, then halt on miss."""
+    result = validator()
+    if result.get('matched'):
+        return result
+
+    time.sleep(settle_seconds)
+    _refresh_platform_tree(platform)
+    retry = validator()
+    if retry.get('matched'):
+        retry.setdefault('retry', True)
+        return retry
+
+    retry['drift'] = _halt_on_dispatch_drift(
+        platform,
+        f"{step} validation failed: {retry.get('reason') or result.get('reason') or 'no match'}",
+    )
+    return retry
 
 
 # ---- Core functions (adapted from hmm_bot proven patterns) ----
@@ -460,6 +496,27 @@ def navigate_to_session_url(platform: str, url: str) -> bool:
     if not doc:
         logger.warning("AT-SPI doc not found after navigation -- continuing anyway")
     return True
+
+
+def _validate_navigation_ready(platform: str, url: str = '') -> dict:
+    """Validate that navigation landed on a live document and expected URL."""
+    current_url = _get_current_url()
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return _step_match_result('navigate', False, 'none', 'Document not available after navigation', url=current_url)
+
+    if url:
+        expected = _expected_url_fragments(url)
+        normalized = current_url.lower().rstrip('/')
+        if expected and any(fragment in normalized for fragment in expected):
+            return _step_match_result('navigate', True, 'url_match', 'Navigation URL matched', url=current_url)
+        return _step_match_result(
+            'navigate', False, 'none',
+            f'Navigation URL did not match expected fragments for {url}',
+            url=current_url,
+        )
+
+    return _step_match_result('navigate', True, 'doc_loaded', 'Document loaded after navigation', url=current_url)
 
 
 def connect_git_repo(platform: str, repo_url: str) -> bool:
@@ -1173,7 +1230,7 @@ def _run_selection_step(platform: str, *, step_name: str, value: str,
         logger.error("Available modes: %s", sel_result.get('available_modes', 'unknown'))
         result['error'] = f"{step_name}_selection_failed: {sel_result.get('error')}"
         result[f'{step_name}_selection'] = sel_result
-        result['drift'] = _halt_on_mode_drift(
+        result['drift'] = _halt_on_dispatch_drift(
             platform,
             f"{step_name} selection failed: {sel_result.get('error')}",
         )
@@ -1196,7 +1253,7 @@ def _run_selection_step(platform: str, *, step_name: str, value: str,
         logger.error("HARD STOP: %s '%s' NOT verified in AT-SPI tree.", step_name, value)
         result['error'] = f"{step_name}_not_verified: '{value}' not confirmed in AT-SPI tree"
         result['verify_method'] = selection_verification.get('method')
-        result['drift'] = _halt_on_mode_drift(
+        result['drift'] = _halt_on_dispatch_drift(
             platform,
             f"{step_name} verification failed: '{value}' not confirmed in AT-SPI tree",
         )
@@ -1222,19 +1279,112 @@ def validate_attachment_visible(platform: str, file_path: str,
                 if basename and basename in name:
                     return {
                         'verified': True,
+                        'matched': True,
+                        'disposition': 'file_name',
                         'method': 'file_name',
                         'name': element.get('name'),
                     }
         if _verify_attach_success(platform):
             return {
                 'verified': True,
+                'matched': True,
+                'disposition': 'attach_indicator',
                 'method': 'attach_indicator',
                 'name': basename,
             }
         if attempt < attempts - 1:
             time.sleep(delay)
 
-    return {'verified': False, 'method': 'none', 'name': basename}
+    return {
+        'verified': False,
+        'matched': False,
+        'disposition': 'none',
+        'method': 'none',
+        'name': basename,
+        'reason': f'Attachment chip for {basename} not visible',
+    }
+
+
+def _validate_prompt_ready(platform: str) -> dict:
+    """Validate that the input field matches the YAML input spec."""
+    input_el = find_input_field()
+    if not input_el:
+        return _step_match_result('prompt', False, 'none', 'Input field not found')
+
+    spec = get_platform_config(platform).get('element_map', {}).get('input')
+    if not isinstance(spec, dict):
+        return _step_match_result('prompt', True, 'input_ready', 'No input spec configured')
+
+    if _match_element_criteria(input_el, spec):
+        return _step_match_result('prompt', True, 'input_ready', 'Input field matched YAML')
+
+    return _step_match_result(
+        'prompt', False, 'none',
+        f"Input field did not match YAML spec for {platform}",
+        element_name=input_el.get('name', ''),
+    )
+
+
+def _validate_send_ready(platform: str) -> dict:
+    """Validate that the platform has entered a send/generating state."""
+    current_url = _get_current_url()
+    validation = get_validation(platform)
+    send_val = validation.get('send_success', {})
+    indicators = send_val.get('indicators', [])
+    if not indicators:
+        return _step_match_result('send', False, 'none', 'No send_success indicators in YAML', url=current_url)
+
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return _step_match_result('send', False, 'none', 'Document not available', url=current_url)
+
+    elements = find_elements(doc)
+    for indicator in indicators:
+        spec = indicator if isinstance(indicator, dict) else get_element_spec(platform, str(indicator))
+        if not isinstance(spec, dict):
+            continue
+        for element in elements:
+            if _match_element_criteria(element, spec):
+                return _step_match_result(
+                    'send', True, str(indicator), 'Send indicator matched YAML',
+                    url=current_url, element_name=element.get('name', ''),
+                )
+
+    if platform == 'chatgpt' and _is_chatgpt_conversation_url(current_url):
+        return _step_match_result('send', True, 'conversation_url', 'ChatGPT conversation URL observed', url=current_url)
+
+    return _step_match_result('send', False, 'none', 'No YAML send_success indicator visible', url=current_url)
+
+
+def _validate_response_ready(platform: str) -> dict:
+    """Validate that response extraction is ready."""
+    validation = get_validation(platform)
+    resp_val = validation.get('response_complete', {})
+    indicators = resp_val.get('indicators', [])
+    stop_absent = bool(resp_val.get('stop_absent', False))
+    if not indicators and not stop_absent:
+        return _step_match_result('extract', False, 'none', 'No response_complete validation in YAML')
+
+    doc = get_doc(force_refresh=True)
+    if not doc:
+        return _step_match_result('extract', False, 'none', 'Document not available')
+
+    elements = find_elements(doc)
+    if stop_absent and _has_visible_stop_button(platform):
+        return _step_match_result('extract', False, 'none', 'Stop button still visible')
+
+    for indicator in indicators:
+        spec = indicator if isinstance(indicator, dict) else get_element_spec(platform, str(indicator))
+        if not isinstance(spec, dict):
+            continue
+        for element in elements:
+            if _match_element_criteria(element, spec):
+                return _step_match_result(
+                    'extract', True, str(indicator), 'Response completion indicator matched YAML',
+                    element_name=element.get('name', ''),
+                )
+
+    return _step_match_result('extract', False, 'none', 'No YAML response_complete indicator visible')
 
 
 def wait_for_response(platform: str, timeout: int = 3600) -> bool:
@@ -1548,6 +1698,17 @@ def main():
             print(json.dumps(result, indent=2))
             sys.exit(1)
 
+    nav_validation = _validate_with_retry(
+        platform,
+        'navigate',
+        lambda: _validate_navigation_ready(platform, args.session_url if is_followup else ''),
+    )
+    result['navigation_validation'] = nav_validation
+    if not nav_validation.get('matched'):
+        result['error'] = 'navigation_not_verified'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
     # Step 1b: Clear stale cache and do fresh inspect.
     logger.info("Step 1b: Clear cache + fresh inspect after navigation")
     from core.interact import invalidate_cache
@@ -1638,29 +1799,20 @@ def main():
         result['attachment'] = pkg_path
 
         logger.info("Step 4b: Validating uploaded file chip/indicator")
-        # Size-aware verify window: large attachments upload slowly, so the
-        # chip can render after the default ~10s. Scale attempts up (+10 per
-        # ~100KB, capped at 60) so big packets don't false-fail; small files
-        # keep the 10-attempt path and verify in 1-3 attempts.
-        try:
-            chip_attempts = max(
-                10,
-                min(60, int(os.path.getsize(pkg_path) / 100_000) * 10 + 10),
-            )
-        except OSError:
-            chip_attempts = 10
-        attachment_validation = validate_attachment_visible(
-            platform, pkg_path, attempts=chip_attempts
+        attachment_validation = _validate_with_retry(
+            platform,
+            'attach',
+            lambda: validate_attachment_visible(platform, pkg_path, attempts=1, delay=0),
         )
         result['attachment_validation'] = attachment_validation
-        if not attachment_validation.get('verified'):
+        if not attachment_validation.get('matched'):
             logger.error("HARD STOP: attached file not visible in AT-SPI tree after upload")
             result['error'] = 'attachment_not_verified'
             print(json.dumps(result, indent=2))
             sys.exit(1)
 
         logger.info("Attachment verification PASSED (%s)",
-                    attachment_validation.get('method'))
+                    attachment_validation.get('disposition'))
 
         # Attach binary/image files (e.g. screenshots) as their OWN file-dialog
         # uploads — not text-consolidated. Re-inspect between attaches (the +
@@ -1719,9 +1871,31 @@ def main():
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
+    prompt_validation = _validate_with_retry(
+        platform,
+        'prompt',
+        lambda: _validate_prompt_ready(platform),
+    )
+    result['prompt_validation'] = prompt_validation
+    if not prompt_validation.get('matched'):
+        result['error'] = 'prompt_not_verified'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
     logger.info("Step 6: Send prompt")
     if not submit_prompt(platform):
         result['error'] = 'send_failed'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
+    send_validation = _validate_with_retry(
+        platform,
+        'send',
+        lambda: _validate_send_ready(platform),
+    )
+    result['send_validation'] = send_validation
+    if not send_validation.get('matched'):
+        result['error'] = 'send_not_verified'
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
@@ -1784,6 +1958,17 @@ def main():
     logger.info("Step 7: Waiting for response...")
     if not wait_for_response(platform, timeout=timeout):
         result['error'] = 'response_timeout'
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+
+    response_validation = _validate_with_retry(
+        platform,
+        'extract',
+        lambda: _validate_response_ready(platform),
+    )
+    result['response_validation'] = response_validation
+    if not response_validation.get('matched'):
+        result['error'] = 'response_not_verified'
         print(json.dumps(result, indent=2))
         sys.exit(1)
 
