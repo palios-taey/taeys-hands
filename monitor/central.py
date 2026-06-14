@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -78,6 +79,7 @@ DEFAULT_WORKER_TIMEOUT = 5.0
 EXTRACT_HARD_TIMEOUT_SEC = 5
 PLATFORM_FAILURE_THRESHOLD = 3
 PLATFORM_RETRY_DELAY_SEC = 60.0
+DELIVERY_LOG_PATH = "/tmp/taey_monitor_delivery.jsonl"
 
 
 class ExtractTimeout(Exception):
@@ -419,7 +421,12 @@ class CentralMonitor:
         return False
 
     def _notify(self, session: Dict, status: str, detection: str):
-        """Send notification via Redis for the orchestrator daemon to pick up."""
+        """Send notification via the shared fleet-notify transport.
+
+        Primary path: taey-notify into the target node inbox.
+        Secondary path: Redis notifications queue + parked state when transport
+        delivery is unacked or unavailable.
+        """
         target_node = session.get('tmux_session', NODE_ID)
         notification = {
             "monitor_id": session.get('monitor_id'),
@@ -435,17 +442,127 @@ class CentralMonitor:
             "elapsed_seconds": int(time.time() - session.get('started_ts', time.time())),
             "requires_action": status in ("response_complete", "response_ready", "hang_suspected"),
         }
-        nj = json.dumps(notification)
         notify_key = f"taey:{target_node}:notifications"
-        if self.rc:
+        receipt_key = f"taey:{target_node}:monitor_delivery_receipts"
+        parked_key = f"taey:{target_node}:needs_attention"
+        msg_type = "response_ready" if status == "response_complete" else (
+            "escalation" if status in ("send_failure", "timeout", "hang_suspected") else "notification"
+        )
+        priority = "high" if msg_type == "escalation" else "normal"
+        message = f"{status} on {session.get('platform')} ({detection})"
+        delivery_id = f"{session.get('monitor_id')}:{status}:{int(time.time())}"
+        receipt = {
+            "delivery_id": delivery_id,
+            "monitor_id": session.get('monitor_id'),
+            "platform": session.get('platform'),
+            "target_node": target_node,
+            "status": status,
+            "detection": detection,
+            "transport": "taey-notify",
+            "timestamp": datetime.now().isoformat(),
+            "requires_action": notification["requires_action"],
+        }
+
+        def _append_durable_log(record: Dict):
             try:
-                self.rc.rpush(notify_key, nj)
-                _log(f"[{session.get('platform')}/{session.get('monitor_id')}] "
-                     f"Notified {target_node}: {status}")
+                with open(DELIVERY_LOG_PATH, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
             except Exception as e:
-                _log(f"Redis notification error: {e}")
-        else:
-            _log(f"No Redis — notification for {session.get('monitor_id')} dropped")
+                _log(f"Durable delivery log write failed: {e}")
+
+        def _park(reason: str, attempt: int):
+            parked = dict(notification)
+            parked.update({
+                "delivery_id": delivery_id,
+                "delivery_state": "parked",
+                "delivery_reason": reason,
+                "delivery_attempt": attempt,
+                "timestamp": datetime.now().isoformat(),
+            })
+            if self.rc:
+                try:
+                    self.rc.rpush(parked_key, json.dumps(parked))
+                    self.rc.set(f"taey:{target_node}:monitor_delivery_state", json.dumps(parked))
+                except Exception as e:
+                    _log(f"Parked-state write failed: {e}")
+            _append_durable_log(parked)
+
+        def _record_receipt(transport: str, attempt: int, ok: bool, detail: str):
+            record = dict(receipt)
+            record.update({
+                "transport": transport,
+                "attempt": attempt,
+                "ok": ok,
+                "detail": detail,
+            })
+            _append_durable_log(record)
+            if self.rc and ok:
+                try:
+                    self.rc.rpush(receipt_key, json.dumps(record))
+                    self.rc.set(f"taey:{target_node}:monitor_delivery_last", json.dumps(record))
+                except Exception as e:
+                    _log(f"Receipt write failed: {e}")
+
+        def _send_once(attempt: int) -> bool:
+            try:
+                proc = subprocess.run(
+                    [
+                        "/usr/local/bin/taey-notify",
+                        target_node,
+                        message,
+                        "--type",
+                        msg_type,
+                        "--priority",
+                        priority,
+                        "--from",
+                        NODE_ID,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+            except Exception as e:
+                _record_receipt("taey-notify", attempt, False, str(e))
+                return False
+
+            detail = (proc.stderr or proc.stdout or "").strip()
+            ok = proc.returncode == 0
+            _record_receipt("taey-notify", attempt, ok, detail)
+            if ok:
+                _log(
+                    f"[{session.get('platform')}/{session.get('monitor_id')}] "
+                    f"Fleet-notify ACKed {target_node}: {status}"
+                )
+            else:
+                _log(
+                    f"[{session.get('platform')}/{session.get('monitor_id')}] "
+                    f"Fleet-notify unacked for {target_node} on attempt {attempt}: {detail}"
+                )
+            return ok
+
+        delivered = _send_once(1)
+        if not delivered:
+            time.sleep(0.5)
+            delivered = _send_once(2)
+
+        if not delivered:
+            if self.rc:
+                try:
+                    self.rc.rpush(notify_key, json.dumps(notification))
+                except Exception as e:
+                    _log(f"Redis notification fallback failed: {e}")
+            _park("fleet_notify_unacked", 2)
+        elif self.rc:
+            try:
+                self.rc.set(f"taey:{target_node}:monitor_delivery_ack:{delivery_id}", json.dumps(receipt))
+            except Exception as e:
+                _log(f"ACK marker write failed: {e}")
+
+        _log(
+            f"[{session.get('platform')}/{session.get('monitor_id')}] "
+            f"Notification routed via fleet transport to {target_node}: {status}"
+        )
 
         if status == "response_complete":
             self._extract_and_store(session)
