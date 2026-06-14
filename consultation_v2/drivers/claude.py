@@ -48,6 +48,38 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         prefix_matches = not normalized_message or normalized_live.startswith(normalized_message[:30])
         return landed_chars, landed_chars >= min_chars and prefix_matches
 
+    def _activate_element(self, snapshot, key: str) -> bool:
+        element = self.find_first(snapshot, key)
+        if not element:
+            return False
+        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
+        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
+        if trigger_type == 'hover':
+            return self.runtime.hover(element)
+        return self.runtime.click(element)
+
+    def _find_claude_model_selector(self, snapshot):
+        toggle_menu = self.find_first(snapshot, 'toggle_menu')
+        if not toggle_menu or toggle_menu.x is None or toggle_menu.y is None:
+            return None
+        candidates = []
+        for items in snapshot.mapped.values():
+            for element in items:
+                if element.role.lower() != 'push button':
+                    continue
+                if element.name == toggle_menu.name:
+                    continue
+                if element.x is None or element.y is None:
+                    continue
+                if abs(int(element.y) - int(toggle_menu.y)) > 24:
+                    continue
+                if int(element.x) <= int(toggle_menu.x):
+                    continue
+                candidates.append(element)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda element: int(element.x or 0))
+
     def run(self, request: ConsultationRequest) -> ConsultationResult:
         result = self.result(request)
         urls = self.cfg.get('urls', {})
@@ -103,7 +135,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         # -- model --
         if requested_model and requested_model in workflow.get('model_targets', {}):
             snap = self.runtime.snapshot()
-            selector = self.find_first(snap, 'model_selector')
+            selector = self._find_claude_model_selector(snap)
             if not selector:
                 result.add_step('select_model', False, 'Claude model selector not found',
                                 snapshot=snap.serializable())
@@ -140,7 +172,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', True, f'Claude {requested_mode} already active')
                 return True
 
-            selector = self.find_first(snap, 'model_selector')
+            selector = self._find_claude_model_selector(snap)
             if not selector:
                 result.add_step('select_mode', False,
                                 'Claude model selector unavailable for mode toggle',
@@ -158,38 +190,30 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude mode item {requested_mode} not found',
                                 snapshot=menu_snap.serializable())
                 return False
+            clicked = self.runtime.click(item)
+            time.sleep(0.8)
 
-            # Extended thinking is a toggle button INSIDE the menu item, not
-            # a plain menu-item click.  Find the toggle child and flip it.
+            # Claude max-mode is a two-stage path: choose the base model, then
+            # hover the Effort flyout and click Extra.
             if requested_mode == 'extended_thinking':
-                toggle = self.find_first(menu_snap, 'toggle_extended_thinking')
-                if not toggle:
+                if not self._activate_element(menu_snap, 'effort_menu'):
                     result.add_step('select_mode', False,
-                                    'Claude ET toggle button not found in model dropdown',
+                                    'Claude effort submenu hover failed',
                                     snapshot=menu_snap.serializable())
+                    return False
+                time.sleep(0.5)
+                submenu_snap = self.runtime.menu_snapshot()
+                extra = self.find_first(submenu_snap, 'effort_extra')
+                if not extra:
+                    result.add_step('select_mode', False,
+                                    'Claude effort Extra item not found',
+                                    snapshot=submenu_snap.serializable())
                     self.runtime.press('Escape')
                     return False
-                already_on = bool(
-                    toggle.states
-                    and 'checked' in [s.lower() for s in toggle.states]
-                )
-                if already_on:
-                    # Already enabled — dismiss dropdown and confirm
-                    self.runtime.press('Escape')
-                    time.sleep(0.4)
-                    verify_snap = self.runtime.snapshot()
-                    result.add_step('select_mode', True,
-                                    'Claude extended_thinking toggle already ON',
-                                    snapshot=verify_snap.serializable())
-                    return True
-                clicked = self.runtime.click(toggle)
+                clicked = clicked and self.runtime.click(extra)
                 time.sleep(0.5)
-                # Dismiss dropdown after toggling
                 self.runtime.press('Escape')
                 time.sleep(0.4)
-            else:
-                clicked = self.runtime.click(item)
-                time.sleep(0.8)
 
             verify_snap = self.runtime.snapshot()
             verified = clicked and self.validation_passes(verify_snap, mode_active_key)

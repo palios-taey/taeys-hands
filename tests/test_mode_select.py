@@ -131,6 +131,32 @@ def test_consultation_v2_chatgpt_exact_map() -> None:
     }
 
 
+def test_consultation_v2_claude_exact_map() -> None:
+    data = yaml.safe_load((Path(__file__).resolve().parents[1] / 'consultation_v2' / 'platforms' / 'claude.yaml').read_text())
+    element_map = data['tree']['element_map']
+    workflow = data['workflow']['selection']
+
+    assert element_map['model_selector']['name'] == 'Model: Opus 4.8 Max'
+    assert element_map['model_opus']['name'] == 'Opus 4.8 For complex tasks'
+    assert element_map['model_sonnet']['name'] == 'Sonnet 4.6 Most efficient for everyday tasks'
+    assert element_map['model_haiku']['name'] == 'Haiku 4.5 Fastest for quick answers'
+    assert element_map['model_fable']['name'] == 'Fable 5Currently unavailable For your toughest challenges'
+    assert element_map['effort_menu']['name'] == 'Effort Max'
+    assert element_map['effort_menu']['trigger_type'] == 'hover'
+    assert element_map['effort_low']['name'] == 'Low'
+    assert element_map['effort_medium']['name'] == 'Medium'
+    assert element_map['effort_high_default']['name'] == 'High Default'
+    assert element_map['effort_extra']['name'] == 'Extra'
+    assert element_map['effort_max']['name'] == 'Max'
+    assert element_map['thinking_toggle']['name'] == 'Thinking Can think for more complex tasks Thinking'
+    assert workflow['mode_targets'] == {
+        'extended_thinking': 'model_opus',
+    }
+    assert data['validation']['extended_thinking_active']['indicators'] == [
+        {'name': 'Model: Opus 4.8 Extra', 'role': 'push button'},
+    ]
+
+
 def test_consultation_uses_yaml_defaults_for_fresh_sessions():
     sys.argv = ['consultation.py', '--platform', 'chatgpt', '--message', 'x']
     consultation = importlib.import_module('scripts.consultation')

@@ -120,30 +120,46 @@ tree:
       name: Use style
       role: menu item
 
-    # -- Model selector (label changes with active model) --
+    # -- Model selector (label changes with active model; validation only) --
     model_selector:
-      name: "Model: Opus 4.7 Adaptive"
+      name: "Model: Opus 4.8 Max"
       role: push button
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --
     model_opus:
-      name: Opus 4.7 Most capable for ambitious work
+      name: Opus 4.8 For complex tasks
       role: radio menu item
     model_sonnet:
-      name: Sonnet 4.6 Responsive everyday work
+      name: Sonnet 4.6 Most efficient for everyday tasks
       role: radio menu item
     model_haiku:
-      name: Haiku 4.5 Fastest, most efficient
+      name: Haiku 4.5 Fastest for quick answers
       role: radio menu item
-    # Platform renamed "Extended thinking" -> "Adaptive thinking" (Opus 4.7).
-    # Logical mode key stays extended_thinking (driver-aligned); name/role
-    # below match the live AT-SPI tree exactly.
-    model_extended_thinking:
-      name: "Adaptive thinking Thinks for more complex tasks Adaptive thinking"
+    model_fable:
+      name: Fable 5Currently unavailable For your toughest challenges
+      role: radio menu item
+    effort_menu:
+      name: Effort Max
       role: menu item
-    toggle_extended_thinking:
-      name: Adaptive thinking
-      role: toggle button
+      trigger_type: hover
+    effort_low:
+      name: Low
+      role: radio menu item
+    effort_medium:
+      name: Medium
+      role: radio menu item
+    effort_high_default:
+      name: High Default
+      role: radio menu item
+    effort_extra:
+      name: Extra
+      role: radio menu item
+    effort_max:
+      name: Max
+      role: radio menu item
+    thinking_toggle:
+      name: Thinking Can think for more complex tasks Thinking
+      role: menu item
     model_more:
       name: More models
       role: menu item
@@ -159,7 +175,7 @@ workflow:
       sonnet: model_sonnet
       haiku: model_haiku
     mode_targets:
-      extended_thinking: model_extended_thinking
+      extended_thinking: model_opus
     tool_targets:
       research: tool_research
       web_search: tool_web_search
@@ -217,7 +233,7 @@ validation:
       role: push button
   opus_active:
     indicators:
-    - name_contains: Opus 4.7 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
+    - name_contains: Opus 4.8 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
       role: push button
   haiku_active:
     indicators:
@@ -225,5 +241,5 @@ validation:
       role: push button
   extended_thinking_active:
     indicators:
-    - name_contains: Adaptive # lint-allow: known p1 debt; extended-thinking verification still substring-based pending exact selector remap
+    - name: "Model: Opus 4.8 Extra"
       role: push button
