@@ -31,6 +31,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not navigated:
                 return result
 
+        if not self.clean_composer(request, result):
+            return result
         if not self.select_model_mode_tools(request, result):
             return result
         if not self.attach_files(request, result):
@@ -78,6 +80,89 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not self._click(element):
             result.add_step(step, False, f'{reason_prefix} {key} click failed', snapshot=snapshot.serializable())
             return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Clean composer (D1) — FORCE a fresh chat before doing any work
+    # ------------------------------------------------------------------
+
+    def clean_composer(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        """FORCE a clean fresh chat so a restored stale draft / old file
+        attachment / reopened temporary-or-old thread can NEVER be sent.
+
+        ROOT CAUSE (D1): ChatGPT reopens the composer with the previous turn's
+        draft text + the previous file attachment + an old/temporary thread, so
+        navigate->attach->enter->send operate on contaminated state and ship the
+        WRONG content (PROD 2026-06-15: a sorter dispatch fired an old
+        CPT-packing packet). Clicking the sidebar 'New chat' link discards the
+        draft, the stale attachment, and the old thread in one action — a fresh
+        chat is empty with NO attachment, so there is nothing stale to remove.
+        The ctrl+a/Delete is a belt-and-suspenders clear of any draft the fresh
+        chat still restores. We then VERIFY the composer is empty (no leftover
+        Send button presence from restored text) before proceeding.
+
+        For a follow-up session (request.session_url set) we must NOT start a new
+        chat — that would abandon the thread. Skip in that case.
+        """
+        from core import input as _inp
+
+        if request.session_url:
+            result.add_step('clean_composer', True,
+                            'ChatGPT follow-up session — keeping existing thread (no New chat)')
+            return True
+
+        snap = self.runtime.snapshot()
+        new_chat = self.find_first(snap, 'new_chat')
+        if not new_chat:
+            result.add_step('clean_composer', False,
+                            'ChatGPT New chat link not found — cannot force a clean fresh chat',
+                            snapshot=snap.serializable())
+            return False
+        if not self._click(new_chat):
+            result.add_step('clean_composer', False,
+                            'ChatGPT New chat click failed',
+                            snapshot=snap.serializable())
+            return False
+        time.sleep(1.2)
+
+        # Belt-and-suspenders: focus the composer and clear any draft the fresh
+        # chat restored, then verify it is empty.
+        snap = self.runtime.snapshot()
+        input_el = self.find_first(snap, 'input')
+        if not input_el:
+            result.add_step('clean_composer', False,
+                            'ChatGPT input not found after New chat',
+                            snapshot=snap.serializable())
+            return False
+        if not self._click(input_el):
+            result.add_step('clean_composer', False,
+                            'ChatGPT composer focus click failed after New chat',
+                            snapshot=snap.serializable())
+            return False
+        time.sleep(0.3)
+        _inp.press_key('ctrl+a')
+        time.sleep(0.15)
+        _inp.press_key('Delete')
+        time.sleep(0.3)
+
+        # VERIFY the composer is empty: the 'Send prompt' button only renders
+        # once the composer holds content, so prompt_ready being TRUE here means
+        # a draft survived the clear — fail loud rather than send contaminated
+        # state. (TODO: if a stale file-attachment chip can survive a fresh New
+        # chat, map its exact remove-control name from a live scan and remove it
+        # here. The current live map — consultations/p2_map_chatgpt_exact.md —
+        # has no exact name for a ChatGPT attachment-remove control; a fresh New
+        # chat carries no attachment, so none is expected.)
+        verify_snap = self.runtime.snapshot()
+        draft_present = self.validation_passes(verify_snap, 'prompt_ready')
+        if draft_present:
+            result.add_step('clean_composer', False,
+                            'ChatGPT composer still holds a draft after New chat + clear',
+                            snapshot=verify_snap.serializable())
+            return False
+        result.add_step('clean_composer', True,
+                        'ChatGPT forced clean fresh chat (no draft / attachment / stale thread)',
+                        snapshot=verify_snap.serializable())
         return True
 
     # ------------------------------------------------------------------
@@ -321,11 +406,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('prompt', False, 'ChatGPT input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)
-        # CLEAR any restored stale draft FIRST — ChatGPT reopens the composer
-        # with the previous turn's text, so a bare paste appends to / sends the
-        # WRONG content (production 2026-06-15: a sorter dispatch fired an old
-        # CPT-packing packet). Select-all + delete guarantees the composer holds
-        # ONLY request.message before send.
+        # Final-guard clear immediately before paste. The authoritative
+        # stale-state purge is clean_composer() (D1: forces a fresh New chat,
+        # discarding any restored draft / attachment / old thread). This ctrl+a
+        # + Delete is the belt-and-suspenders clear right before the intended
+        # paste, so even if attach left odd composer state the message replaces
+        # it cleanly rather than appending to leftover text.
         from core import input as _inp
         _inp.press_key('ctrl+a')
         time.sleep(0.15)
@@ -333,6 +419,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         time.sleep(0.2)
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
+        # VERIFY the composer holds the intended content before send: the 'Send
+        # prompt' button only renders once the composer has text, so prompt_ready
+        # is the available "content landed" signal (ChatGPT's ProseMirror does
+        # not expose composer text reliably over AT-SPI, so a char-read cannot be
+        # trusted here).
         verify_snap = self.runtime.snapshot()
         verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
         result.add_step('prompt', verified, 'ChatGPT prompt entered', snapshot=verify_snap.serializable())
@@ -380,24 +471,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        seen_stop = False
-
-        def _poll() -> bool:
-            nonlocal seen_stop
-            snap = self.runtime.snapshot()
-            if snap.has('stop_button'):
-                seen_stop = True
-                return False
-            # Complete only after stop disappears on a fresh scan.
-            if seen_stop and not snap.has('stop_button'):
-                return True
-            return False
-
-        completed = self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
-        verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        result.add_step('monitor', verified, 'ChatGPT response completed', stop_seen=seen_stop, snapshot=verify_snap.serializable())
-        return verified
+        # Shared stop-transition detector (consultation_v2.completion). ChatGPT
+        # send_prompt already gates on the Stop button appearing, so ever_seen is
+        # seeded — a fast reply whose Stop button only showed during send still
+        # completes. pro_extended is a deep mode (2 stop-gone cycles).
+        return super().monitor_generation(request, result, seed_stop_seen=True)
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         time.sleep(2.0)

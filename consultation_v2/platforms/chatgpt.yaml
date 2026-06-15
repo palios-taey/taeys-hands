@@ -97,6 +97,14 @@ tree:
     send_button:
       name: Send prompt
       role: push button
+    # New-chat link in the sidebar — clicking it FORCES a clean fresh chat so a
+    # restored stale draft / old file attachment / reopened temporary thread can
+    # never be sent (D1 clean-composer). Exact name+role from the live :2 scan
+    # (consultations/p2_map_chatgpt_exact.md line 40: sidebar links 'New chat'
+    # and 'New chat Control Shift O'). Map the plain 'New chat' link.
+    new_chat:
+      name: New chat
+      role: link
     # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
     model_instant:
       name: Instant
