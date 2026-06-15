@@ -321,6 +321,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('prompt', False, 'ChatGPT input focus click failed', snapshot=snap.serializable())
             return False
         time.sleep(0.3)
+        # CLEAR any restored stale draft FIRST — ChatGPT reopens the composer
+        # with the previous turn's text, so a bare paste appends to / sends the
+        # WRONG content (production 2026-06-15: a sorter dispatch fired an old
+        # CPT-packing packet). Select-all + delete guarantees the composer holds
+        # ONLY request.message before send.
+        from core import input as _inp
+        _inp.press_key('ctrl+a')
+        time.sleep(0.15)
+        _inp.press_key('Delete')
+        time.sleep(0.2)
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
         verify_snap = self.runtime.snapshot()
