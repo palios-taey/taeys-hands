@@ -181,6 +181,16 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
             # Resolve the Attach push button FRESH from a current snapshot
             # (no stale/cached element) and click it ONCE.
+            # Settle + rescan FIRST (DRIVER_CONTRACT §E): the persistent Attach
+            # trigger can be absent from a *premature* snapshot — a scan fired
+            # before the page finished rendering (right after navigate). Poll for
+            # it (observation only, no re-click) before declaring it missing, the
+            # same readiness pattern the model-select + upload-item steps use.
+            self.runtime.wait_until(
+                lambda: self.runtime.snapshot().has(trigger_key),
+                timeout=10,
+                interval=0.4,
+            )
             snap = self.runtime.snapshot()
             trigger = self.find_first(snap, trigger_key)
             if not trigger:
