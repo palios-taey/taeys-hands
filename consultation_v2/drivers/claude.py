@@ -447,9 +447,23 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         from core.interact import atspi_click
         from core import clipboard
 
-        # Retry: response Copy button appears after AT-SPI tree updates
+        from core import input as _inp
+        # Retry: scroll the conversation to the BOTTOM each pass, THEN scan.
+        # The response's Copy button only enters the AT-SPI tree when on-screen;
+        # on a long Claude answer it sits below the fold and is never found
+        # (this is why extract intermittently saw <2 Copy buttons). ctrl+End is
+        # WRONG here — it focuses the empty composer and was measured to HIDE a
+        # copy button (2->1). Scroll the wheel over the conversation column;
+        # the hover point is DERIVED from the composer input (bottom-centre),
+        # never a magic coordinate.
         for attempt in range(5):
-            time.sleep(3.0)
+            time.sleep(2.0)
+            snap = self.runtime.snapshot()
+            inp_el = self.find_first(snap, 'input')
+            if inp_el is not None and inp_el.x is not None and inp_el.y is not None:
+                _inp.scroll_wheel('down', clicks=25,
+                                  hover_point=(int(inp_el.x), max(0, int(inp_el.y) - 200)))
+                time.sleep(0.8)
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
                 continue
