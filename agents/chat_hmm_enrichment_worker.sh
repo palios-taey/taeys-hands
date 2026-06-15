@@ -13,10 +13,10 @@
 #   PLATFORM        chatgpt | claude | gemini | grok
 #                   (perplexity excluded — Jesse 2026-04-30: can't do HMM)
 #   TAEY_NODE_ID    Logger ID (default: "${HOSTNAME}-${PLATFORM}")
-#   WEAVIATE_URL    Default: http://REDACTED_LAN_IP:8088 (Mira)
-#   REDIS_HOST      Default: REDACTED_LAN_IP
+#   WEAVIATE_URL    Default: http://127.0.0.1:8088 (Mira)
+#   REDIS_HOST      Default: 127.0.0.1
 #   REDIS_PORT      Default: 6379
-#   NEO4J_URI       Default: bolt://REDACTED_LAN_IP:7689
+#   NEO4J_URI       Default: bolt://127.0.0.1:7689
 #   PYTHONPATH      Must include the embedding-server checkout
 #   CONSULT_MODE    Optional override mode for consult.py (e.g. "instant" for chatgpt)
 #
@@ -45,11 +45,11 @@ COOLDOWN_LONG=300
 MONITOR_TIMEOUT=900   # 15 min hard cap per consultation
 
 # DB endpoints — Thor 2 reaches Mira's stores
-export WEAVIATE_URL="${WEAVIATE_URL:-http://REDACTED_LAN_IP:8088}"
-export REDIS_HOST="${REDIS_HOST:-REDACTED_LAN_IP}"
+export WEAVIATE_URL="${WEAVIATE_URL:-http://127.0.0.1:8088}"
+export REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 export REDIS_PORT="${REDIS_PORT:-6379}"
-export NEO4J_URI="${NEO4J_URI:-bolt://REDACTED_LAN_IP:7689}"
-export EMBEDDING_URL="${EMBEDDING_URL:-http://REDACTED_LAN_IP:8089/v1/embeddings}"
+export NEO4J_URI="${NEO4J_URI:-bolt://127.0.0.1:7689}"
+export EMBEDDING_URL="${EMBEDDING_URL:-http://127.0.0.1:8089/v1/embeddings}"
 export PYTHONPATH="${EMBEDDING_REPO}:${PYTHONPATH:-}"
 
 mkdir -p "${LOG_DIR}" /tmp/hmm_packages /tmp/hmm_responses /tmp/hmm_prompts

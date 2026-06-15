@@ -165,7 +165,7 @@ USERJS
         sleep 2
         echo "  Starting SFT bot ($ROUND)..."
         tmux send-keys -t "$tmux_session" \
-            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' REDIS_HOST=$REDIS_HOST WEAVIATE_URL=http://REDACTED_LAN_IP:8088 PYTHONPATH=$EMBEDDING_PATH python3 agents/sft_gen_bot.py --round $ROUND --platforms $platform 2>&1 | tee /tmp/sft_${platform}.log" Enter
+            "cd $TAEY_PATH && DISPLAY=:$display DBUS_SESSION_BUS_ADDRESS='$DISPLAY_DBUS' REDIS_HOST=$REDIS_HOST WEAVIATE_URL=http://127.0.0.1:8088 PYTHONPATH=$EMBEDDING_PATH python3 agents/sft_gen_bot.py --round $ROUND --platforms $platform 2>&1 | tee /tmp/sft_${platform}.log" Enter
         echo "  Bot started in tmux: $tmux_session"
     fi
 done

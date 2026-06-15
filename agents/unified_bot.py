@@ -103,7 +103,7 @@ def _get_redis():
     if _redis_client is None:
         try:
             import redis
-            redis_url = os.environ.get('REDIS_URL', 'redis://REDACTED_LAN_IP:6379')
+            redis_url = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379')
             _redis_client = redis.from_url(redis_url, decode_responses=True)
             _redis_client.ping()
             logger.info(f"Redis connected: {redis_url}")

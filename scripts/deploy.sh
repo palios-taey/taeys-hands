@@ -39,7 +39,7 @@ deploy_local() {
     local daemon_path="<OPERATOR_HOME>/orchestrator/notifications/daemon.py"
     if [ -f "$daemon_path" ]; then
         nohup python3 "$daemon_path" \
-            --redis-host "${REDIS_HOST:-REDACTED_LAN_IP}" \
+            --redis-host "${REDIS_HOST:-127.0.0.1}" \
             > "/tmp/notify-daemon.log" 2>&1 &
         echo "[local] Notify daemon started (PID $!)"
     fi
@@ -56,9 +56,9 @@ deploy_remote() {
     local host="$1"
     local home="${MACHINES[$host]}"
     local repo_path="${home}/${REPO_DIR}"
-    local redis_host="REDACTED_LAN_IP"
+    local redis_host="127.0.0.1"
     case "$host" in
-        mira|thor|jetson) redis_host="REDACTED_LAN_IP" ;;
+        mira|thor|jetson) redis_host="127.0.0.1" ;;
     esac
 
     echo "[${host}] Deploying..."

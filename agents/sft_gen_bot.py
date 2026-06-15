@@ -36,7 +36,7 @@ def _notify_death(display, reason):
     """
     try:
         import redis as _r
-        r = _r.Redis(host=os.environ.get('REDIS_HOST', 'REDACTED_LAN_IP'),
+        r = _r.Redis(host=os.environ.get('REDIS_HOST', '127.0.0.1'),
                      port=6379, decode_responses=True, socket_timeout=5)
         import json as _json, socket
         target = os.environ.get('TAEY_NOTIFY_NODE', 'taeys-hands')
@@ -923,7 +923,7 @@ def process_platform_v2(platform, topic, output_dir):
 
     # Sync to Mira — training pipeline reads from Mira's /var/spark/isma/training/sft/
     try:
-        mira_dir = f"mira@REDACTED_LAN_IP:{output_dir}/"
+        mira_dir = os.environ.get("TAEY_SFT_SYNC_TARGET", f"localhost:{output_dir}/")
         subprocess.run(['scp', output_path, mira_dir], capture_output=True, timeout=30)
         log.info(f"[{platform}] Synced to Mira")
     except Exception as e:

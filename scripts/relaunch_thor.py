@@ -188,7 +188,7 @@ for d, (plat, url, prof) in DISPLAYS.items():
     cmd = (
         f"cd ~/taeys-hands && DISPLAY=:{d} "
         f"DBUS_SESSION_BUS_ADDRESS={dbus} "
-        f"TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=REDACTED_LAN_IP "
+        f"TAEY_NOTIFY_NODE=taeys-hands REDIS_HOST=127.0.0.1 "
         f"PYTHONPATH=~/embedding-server "
         f"python3 agents/sft_gen_bot.py --round all --platforms {plat} "
         f"2>&1 | tee /tmp/{session}.log"
