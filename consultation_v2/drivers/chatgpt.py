@@ -123,16 +123,26 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                             'ChatGPT New chat click failed',
                             snapshot=snap.serializable())
             return False
-        time.sleep(1.2)
-
         # Belt-and-suspenders: focus the composer and clear any draft the fresh
         # chat restored, then verify it is empty.
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
+        #
+        # SCAN-BEFORE-RENDER: after New chat the toolbar (attach_trigger /
+        # model_selector / extended_pro) renders a beat BEFORE the composer
+        # `input` (ProseMirror), so a single snapshot finds the toolbar but not
+        # the input yet (PROD 2026-06-15: clean_composer aborted "input not found
+        # after New chat" while the toolbar was already at y=796). Poll for the
+        # input to render before scanning it — observation, not a retry — the
+        # same wait-until-render pattern the Claude/Gemini drivers use for the
+        # model selector. No blind sleep bump, no fallback.
+        input_el = self.runtime.wait_until(
+            lambda: self.find_first(self.runtime.snapshot(), 'input'),
+            timeout=10,
+            interval=0.4,
+        )
         if not input_el:
             result.add_step('clean_composer', False,
                             'ChatGPT input not found after New chat',
-                            snapshot=snap.serializable())
+                            snapshot=self.runtime.snapshot().serializable())
             return False
         if not self._click(input_el):
             result.add_step('clean_composer', False,
