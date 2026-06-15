@@ -171,10 +171,16 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                     menu=menu_snap.serializable())
                     return False
                 time.sleep(0.8)
-                if requested_mode == 'deep_think':
+                if requested_mode in ('deep_think', 'deep_research'):
+                    # Both expose a COMPOSER toggle ("Deselect Deep think" /
+                    # "Deselect Deep research") that renders a beat after the
+                    # tool click — poll a normal snapshot for it. Do NOT re-open
+                    # the Tools menu to verify these: the indicator lives in the
+                    # composer, not the tools portal, so a menu re-check never
+                    # finds it and aborts a genuinely-engaged Deep Research.
                     verify_snap = self.runtime.wait_until(
                         lambda: self._active_snapshot(mode_active_key),
-                        timeout=3.0,
+                        timeout=6.0,
                         interval=0.4,
                     ) or self.runtime.snapshot()
                     verified = self.validation_passes(verify_snap, mode_active_key)
@@ -335,26 +341,43 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button, strategy='atspi_first')
+        post_send_clicked = False
+        # Deep Research is a TWO-STEP flow: the submit first generates a research
+        # PLAN (a stop_button shows during plan generation), THEN renders a plan
+        # card with a "Start research" button that MUST be clicked to execute the
+        # actual research. The button only appears AFTER the plan finishes, so we
+        # wait for start_research itself (not merely the plan's stop_button) before
+        # clicking — otherwise we extract the ~80-char plan echo instead of the
+        # report. Generous timeout: plan generation can take ~1 min. Gated on the
+        # deep_research mode so single-step modes (deep_think/normal/…) are
+        # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
+        if (request.mode or '').strip().lower() == 'deep_research':
+            start_button = self.runtime.wait_until(
+                lambda: self.find_first(self.runtime.snapshot(), 'start_research'),
+                timeout=180,
+                interval=1.5,
+            )
+            if not start_button:
+                result.add_step(
+                    'send', False,
+                    'Gemini Deep Research "Start research" never appeared after submit',
+                    snapshot=self.runtime.snapshot().serializable(),
+                )
+                return False
+            post_send_clicked = self.runtime.click(start_button, strategy='atspi_first')
+            if not post_send_clicked:
+                result.add_step(
+                    'send', False, 'Gemini "Start research" click failed',
+                    snapshot=self.runtime.snapshot().serializable(),
+                )
+                return False
+            time.sleep(1.5)
+        # Confirm the generation (the research run, for DR) actually started.
         stop_seen = self.runtime.wait_until(
-            lambda: (
-                self.runtime.snapshot().has('stop_button')
-                or self.runtime.snapshot().has('start_research')
-            ),
+            lambda: self.runtime.snapshot().has('stop_button'),
             timeout=30,
             interval=0.6,
         )
-        # Deep Research plan card requires explicit Start research confirmation
-        start_snap = self.runtime.snapshot()
-        start_button = self.find_first(start_snap, 'start_research')
-        post_send_clicked = False
-        if start_button:
-            post_send_clicked = self.runtime.click(start_button, strategy='atspi_first')
-            time.sleep(1.0)
-            stop_seen = self.runtime.wait_until(
-                lambda: self.runtime.snapshot().has('stop_button'),
-                timeout=30,
-                interval=0.8,
-            )
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
@@ -399,6 +422,35 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        # Deep Research renders its report in a CANVAS/immersive panel — the chat
+        # bubble holds only a ~89-char "I've completed your research" stub. The
+        # full report is copied via the panel's "Share & Export" -> "Copy" (a
+        # menu item in the popover), NOT the chat-bubble Copy push button.
+        # Proven 2026-06-15: 36KB report via this path vs 89 chars via the bubble.
+        if (request.mode or '').strip().lower() == 'deep_research':
+            snap = self.runtime.snapshot()
+            share = self.find_first(snap, 'share_export')
+            if not share or not self.runtime.click(share, strategy='atspi_first'):
+                result.add_step('extract_primary', False,
+                                'Gemini Deep Research "Share & Export" not found/clickable',
+                                snapshot=snap.serializable())
+                return False
+            time.sleep(1.2)
+            menu = self.runtime.menu_snapshot()
+            copy_item = self.find_first(menu, 'copy_content_item')
+            if not copy_item or not self.runtime.click(copy_item, strategy='atspi_first'):
+                result.add_step('extract_primary', False,
+                                'Gemini Deep Research Share & Export -> Copy item not found',
+                                menu=menu.serializable())
+                return False
+            time.sleep(0.8)
+            content = self.runtime.read_clipboard().strip()
+            result.response_text = content
+            verified = bool(content)
+            result.add_step('extract_primary', verified,
+                            'Gemini Deep Research report copied via Share & Export -> Copy',
+                            characters=len(content), preview=content[:200])
+            return verified
         # RULE: scroll to bottom before extract — a long response's Copy button
         # sits below the fold and is not in the AT-SPI tree until on-screen.
         self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'input'))
@@ -426,6 +478,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        # For Deep Research, extract_primary already captured the full report via
+        # Share & Export -> Copy; re-running that path here would only duplicate it.
+        if (request.mode or '').strip().lower() == 'deep_research':
+            result.add_step('extract_additional', True,
+                            'Gemini Deep Research report already captured by extract_primary')
+            return True
         snap = self.runtime.snapshot()
         share_export = self.find_first(snap, 'share_export')
         if not share_export:

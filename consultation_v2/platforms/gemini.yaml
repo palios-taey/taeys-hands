@@ -85,8 +85,15 @@ tree:
       name: Send message
       role: push button
     share_export:
-      name: Share & export
+      name: Share & Export
       role: push button
+    # The Deep Research report renders in a canvas/immersive panel; the FULL
+    # report is copied via Share & Export -> "Copy" (a menu item in the popover,
+    # NOT the chat-bubble Copy push button which only yields the ~89-char "I've
+    # completed your research" stub). Verified live 2026-06-15.
+    copy_content_item:
+      name: Copy
+      role: menu item
     start_research:
       name: Start research
       role: push button
