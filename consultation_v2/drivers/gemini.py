@@ -73,6 +73,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             self.cfg['workflow']['defaults'].get('mode') or ''
         ).strip().lower() if request.mode is None else request.mode.strip().lower()
 
+        # Gemini Deep Think REQUIRES the 3.1 Pro model selected FIRST. Toggling
+        # the Deep Think *tool* on the account default (3.5 Flash) silently runs
+        # the consult on FLASH (per this YAML's own note + Jesse 2026-06-15: a
+        # Family consult ran on Flash because select_model left the model on
+        # default). So if deep_think is requested with no explicit model, force
+        # Pro — otherwise the consult is degraded to a fast model.
+        if requested_mode == 'deep_think' and not requested_model:
+            requested_model = 'pro'
+
         # ── Model selection via mode picker ──────────────────────────────────
         if requested_model and requested_model in workflow.get('model_targets', {}):
             snap = self.runtime.snapshot()

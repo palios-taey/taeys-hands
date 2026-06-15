@@ -116,9 +116,14 @@ tree:
     mode_thinking:
       name: 3.5 Thinking Solves complex problems
       role: menu item
-    # BUG 1 FIX: exact AT-SPI name for Pro mode
+    # The model menu prefixes "Selected " onto the ACTIVE model, so a single
+    # exact name can't click Pro FROM Flash (when Flash is active the Pro item
+    # is "3.1 Pro Advanced math and code", NO "Selected"). names_any_of matches
+    # Pro in either state (enumerated-exact, contract-allowed).
     mode_pro:
-      name: "Selected 3.1 Pro Advanced math and code"
+      names_any_of:
+        - "3.1 Pro Advanced math and code"
+        - "Selected 3.1 Pro Advanced math and code"
       role: menu item
     # BUG 2 FIX: all tool items are check menu item, not menu item
     # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
@@ -219,10 +224,16 @@ validation:
     indicators:
     - name: 3.5 Thinking
       states_include: [checked]
+  # The PERSISTENT Pro indicator is the mode-picker BUTTON, whose name encodes
+  # the active model ("Open mode picker, currently Pro") and is present whether
+  # the menu is open or CLOSED. The old "Selected 3.1 Pro..." menu item only
+  # exists while the menu is OPEN, so it false-negatived Pro once the menu
+  # closed — making select_model fail verification on a genuinely-Pro session
+  # (and masking that deep_think was toggled on Flash). Jesse 2026-06-15.
   pro_active:
     indicators:
-    - name: "Selected 3.1 Pro Advanced math and code"
-      states_include: [checked]
+    - name: "Open mode picker, currently Pro"
+      role: push button
   deep_think_active:
     indicators:
     - name: Deselect Deep think
