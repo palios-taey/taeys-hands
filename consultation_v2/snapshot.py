@@ -12,6 +12,15 @@ from .yaml_contract import load_platform_yaml
 
 _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
 
+# Firefox browser-chrome container roles. When build_snapshot scans from the app
+# root (ChatGPT portals / doc-not-found fallback), these subtrees are the nav
+# toolbar, menu bar, and tab strip — never page content (which lives under the
+# content panel/document). Pruning their subtrees keeps UNKNOWN to real page
+# elements. NOTE: 'menu'/'radio menu item' are deliberately NOT here — React
+# portal dropdowns use them and are read via build_menu_snapshot (which does not
+# prune), so portals are never affected by this.
+_CHROME_SUBTREE_ROLES = ['tool bar', 'menu bar', 'page tab list']
+
 
 def _listify(value: Any) -> List[Any]:
     if value is None:
@@ -177,9 +186,19 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
     fence = tree_cfg.get('fence_after') or []
     if scan_root == 'app' or (scan_root == 'auto' and not fence):
         scope = firefox
+        # App-root scope walks the whole Firefox frame, which includes the
+        # browser chrome (nav/tab/menu bars) — prune those container subtrees
+        # so UNKNOWN holds only real page elements + React portals. When scoped
+        # to the document instead, there is no chrome to prune.
+        prune_roles = _CHROME_SUBTREE_ROLES
     else:
         scope = doc
-    elements = find_elements(scope, fence_after=tree_cfg.get('fence_after') or [])
+        prune_roles = None
+    elements = find_elements(
+        scope,
+        fence_after=tree_cfg.get('fence_after') or [],
+        prune_subtree_roles=prune_roles,
+    )
     snapshot = _classify_elements(platform, elements)
     snapshot.url = url
     return firefox, doc, snapshot

@@ -67,7 +67,8 @@ def _collect_child_text(obj, max_children=_TEXT_EXTRACT_MAX_CHILDREN,
 
 def find_elements(scope, max_depth: int = 25,
                   exclude_landmarks: Optional[List[str]] = None,
-                  fence_after: Optional[List[Dict]] = None) -> List[Dict]:
+                  fence_after: Optional[List[Dict]] = None,
+                  prune_subtree_roles: Optional[List[str]] = None) -> List[Dict]:
     """Find all visible elements in an AT-SPI subtree.
 
     fence_after: list of {name, role} dicts. When an element matches,
@@ -75,9 +76,17 @@ def find_elements(scope, max_depth: int = 25,
     parent. Used to exclude sidebar history (siblings after a known trigger).
     The fence propagates one level: the parent stops iterating, but the
     grandparent continues normally.
+
+    prune_subtree_roles: list of AT-SPI role names whose ENTIRE subtree is
+    skipped (not collected, not descended). Used when scanning from the Firefox
+    app root to drop browser chrome (tool bar / menu bar / page tab list) so it
+    never floods the snapshot — page content lives under the content panel /
+    document, never under these chrome containers. Default None = no pruning,
+    so every existing caller is unchanged.
     """
     results = []
     exclude_lower = [n.lower() for n in (exclude_landmarks or [])]
+    prune_lower = {r.lower() for r in (prune_subtree_roles or [])}
     fence_set = set()
     if fence_after:
         for item in fence_after:
@@ -90,6 +99,13 @@ def find_elements(scope, max_depth: int = 25,
         try:
             name = obj.get_name() or ''
             role = obj.get_role_name() or ''
+
+            # Chrome prune: skip browser-chrome container subtrees entirely
+            # (no collect, no descend). Returns False so the parent keeps
+            # iterating its remaining siblings (this is not a fence).
+            if prune_lower and role.lower() in prune_lower:
+                return False
+
             state_set = obj.get_state_set()
 
             if role == 'landmark' and name and exclude_lower:
