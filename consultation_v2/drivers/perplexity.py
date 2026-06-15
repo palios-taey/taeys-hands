@@ -750,7 +750,17 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                     snapshot=snap.serializable(),
                 )
                 return False
-            time.sleep(0.7)
+            # Settle + rescan (DRIVER_CONTRACT §E): the attach dropdown's
+            # "Upload files or images" item renders a beat after the trigger
+            # click. A fixed time.sleep(0.7) + one-shot read flaked ("upload
+            # item not found") when the menu was slow to render — the item was
+            # present moments later. Poll for it (observation only, no re-click)
+            # before declaring it missing, same readiness pattern as mode-select.
+            self.runtime.wait_until(
+                lambda: self.runtime.menu_snapshot().has('upload_files_item'),
+                timeout=10,
+                interval=0.4,
+            )
             menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
