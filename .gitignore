@@ -107,3 +107,6 @@ AGENTS.md
 *.tmp
 /tmp_*/
 /scratch/
+
+# Per-machine local config — live source is ~/.taey/machine.env (never commit real hosts)
+configs/*.machine.env
