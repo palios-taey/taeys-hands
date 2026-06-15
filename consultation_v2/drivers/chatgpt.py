@@ -123,32 +123,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                             'ChatGPT New chat click failed',
                             snapshot=snap.serializable())
             return False
-        # Belt-and-suspenders: focus the composer and clear any draft the fresh
-        # chat restored, then verify it is empty.
+        # Belt-and-suspenders: clear any draft the fresh chat restored, then
+        # verify it is empty.
         #
-        # SCAN-BEFORE-RENDER: after New chat the toolbar (attach_trigger /
-        # model_selector / extended_pro) renders a beat BEFORE the composer
-        # `input` (ProseMirror), so a single snapshot finds the toolbar but not
-        # the input yet (PROD 2026-06-15: clean_composer aborted "input not found
-        # after New chat" while the toolbar was already at y=796). Poll for the
-        # input to render before scanning it — observation, not a retry — the
-        # same wait-until-render pattern the Claude/Gemini drivers use for the
-        # model selector. No blind sleep bump, no fallback.
-        input_el = self.runtime.wait_until(
-            lambda: self.find_first(self.runtime.snapshot(), 'input'),
-            timeout=10,
-            interval=0.4,
-        )
-        if not input_el:
-            result.add_step('clean_composer', False,
-                            'ChatGPT input not found after New chat',
-                            snapshot=self.runtime.snapshot().serializable())
-            return False
-        if not self._click(input_el):
-            result.add_step('clean_composer', False,
-                            'ChatGPT composer focus click failed after New chat',
-                            snapshot=snap.serializable())
-            return False
+        # FOCUS-BASED, NOT find_first('input'): ChatGPT's composer is NAMELESS
+        # ProseMirror `[paragraph]` nodes (state 'editable'), NOT a findable
+        # `entry`/`input` element (live-verified on :2 2026-06-15:
+        # find_first('input') == None, the composer is 13 nameless paragraphs).
+        # Nameless nodes CANNOT be exact-matched (contract forbids fuzzy/nameless
+        # matching), so there is nothing to find_first/click — the contract-clean
+        # primitive is keyboard-to-focused-composer. A fresh New chat composer
+        # already holds keyboard focus; activate the Firefox window so the keys
+        # land, then ctrl+a + Delete clears any restored draft text. This is the
+        # documented working ChatGPT method (100_TIMES / memory: "ProseMirror not
+        # in AT-SPI; paste directly into the focused composer"), NOT a fallback.
+        self.runtime.focus_firefox()
         time.sleep(0.3)
         _inp.press_key('ctrl+a')
         time.sleep(0.15)
@@ -407,14 +396,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
 
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
-        if not input_el:
-            result.add_step('prompt', False, 'ChatGPT input field not found', snapshot=snap.serializable())
-            return False
-        if not self._click(input_el):
-            result.add_step('prompt', False, 'ChatGPT input focus click failed', snapshot=snap.serializable())
-            return False
+        # FOCUS-BASED, NOT find_first('input'): ChatGPT's composer is nameless
+        # ProseMirror paragraphs, not a findable entry (live-verified :2
+        # 2026-06-15). The contract-clean primitive is keyboard-to-focused-
+        # composer — activate Firefox (the composer holds focus after attach /
+        # clean_composer), clear any leftover text, then paste. (100_TIMES /
+        # memory: "ProseMirror not in AT-SPI; paste directly into the focused
+        # composer.") NOT a fallback — the correct composer primitive.
+        from core import input as _inp
+        self.runtime.focus_firefox()
         time.sleep(0.3)
         # Final-guard clear immediately before paste. The authoritative
         # stale-state purge is clean_composer() (D1: forces a fresh New chat,
@@ -422,7 +412,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # + Delete is the belt-and-suspenders clear right before the intended
         # paste, so even if attach left odd composer state the message replaces
         # it cleanly rather than appending to leftover text.
-        from core import input as _inp
         _inp.press_key('ctrl+a')
         time.sleep(0.15)
         _inp.press_key('Delete')
@@ -448,18 +437,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # `xdotool key Return` lands nowhere and the message sits unsent in the
         # composer (PRODUCTION-OBSERVED: select_model+attach+prompt all OK,
         # composer focused per screenshot, yet Return did not send). Activate
-        # the Firefox window FIRST, then refocus the composer and Enter.
+        # the Firefox window FIRST so keyboard input reaches the focused
+        # composer, then submit with Enter. FOCUS-BASED, NOT find_first('input'):
+        # ChatGPT's composer is nameless ProseMirror paragraphs (live-verified
+        # :2 2026-06-15), so there is no entry element to find/click — the fresh
+        # composer already holds focus after enter_prompt's paste; activating
+        # Firefox is what makes the Enter land.
         self.runtime.focus_firefox()
         time.sleep(0.3)
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
-        if not input_el:
-            result.add_step('send', False, 'ChatGPT input field not found for submit', snapshot=snap.serializable())
-            return False
-        if not self._click(input_el):
-            result.add_step('send', False, 'ChatGPT input refocus failed', snapshot=snap.serializable())
-            return False
-        time.sleep(0.2)
         self.runtime.press('Return')
         clicked = True
         # Send confirmation = the STOP button appears (generation actually
@@ -491,7 +476,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         time.sleep(2.0)
         # RULE: scroll to bottom before extract — a long response's Copy button
         # sits below the fold and is not in the AT-SPI tree until on-screen.
-        self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'input'))
+        # Anchor the scroll on the composer's `attach_trigger` push button
+        # ("Add files and more"): ChatGPT's composer is nameless ProseMirror
+        # paragraphs with NO findable `input` element (live-verified :2
+        # 2026-06-15), so find_first('input') returned None and scroll_to_bottom
+        # silently no-op'd (None anchor → no scroll → the long-response Copy
+        # stayed below the fold). attach_trigger is an EXACT-matched,
+        # bottom-anchored composer control — the correct hover anchor.
+        self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'attach_trigger'))
         time.sleep(0.6)
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, 'copy_button')
