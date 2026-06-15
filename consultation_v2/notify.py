@@ -24,16 +24,20 @@ def push_notification(
     plan_id: str,
     preview: str,
     purpose: Optional[str] = None,
+    recipient: Optional[str] = None,
 ) -> bool:
-    """Push consultation-complete notification to requester's Redis queue.
+    """Push a consultation notification to a session's Redis queue.
 
-    Key: taey:{requester}:notifications
-    The payload self-describes its routing — `requester` and `purpose` are
-    stamped INTO it (not only used as the queue key) so a completion can be
-    matched to its dispatch and can never silently orphan (the GAIA->tutor
-    orphan: a result delivered with no way to tell who it was for).
+    Key: taey:{recipient}:notifications  (defaults to `requester`).
+    `requester` and `purpose` are always stamped INTO the payload (provenance —
+    WHO the consultation was for), independent of WHO receives it (`recipient`).
+    This separation lets the orchestrator route FAILURES to the operator
+    (taeys-hands) while still recording the original requester in the payload,
+    and route SUCCESSES to the requester — without ever losing provenance or
+    silently orphaning a result (the GAIA->tutor orphan).
     Returns True on success, False on failure (never raises).
     """
+    target = recipient or requester
     try:
         import redis
         r = redis.Redis(host=_REDIS_HOST, port=_REDIS_PORT, decode_responses=True)
@@ -47,7 +51,7 @@ def push_notification(
             'preview': preview[:200],
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
-        key = f'taey:{requester}:notifications'
+        key = f'taey:{target}:notifications'
         r.rpush(key, payload)
         logger.info("Notification pushed to %s (plan=%s, status=%s)", key, plan_id, status)
         return True

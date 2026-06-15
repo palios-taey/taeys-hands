@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import replace
 
 from consultation_v2.identity import consolidate_attachments
@@ -89,29 +90,55 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         except Exception as exc:
             logger.error("Plan completion failed: %s", exc)
 
-    # Notify requester. A missing requester is NOT a silent skip — that is how
-    # a completion orphans (the GAIA->tutor orphan: result ready, nobody told).
-    # Stamp requester + purpose into the notification so routing is auditable;
-    # if no requester was supplied, surface it LOUDLY rather than dropping.
-    if request.requester:
+    # Notify — recipient routed by outcome (Jesse standing directive: requesters
+    # receive ONLY successful deliverables; the DRIVER/operator (taeys-hands)
+    # receives FAILURES). A success is a real deliverable: result.ok AND a
+    # non-empty response_text. Anything else (not ok, or empty response) is a
+    # failure and goes to the operator inbox, NEVER the requester — so a failed
+    # run / fix-iteration registered with --requester X can never spam X.
+    #
+    # The original requester + purpose are always stamped INTO the payload
+    # (provenance), independent of who RECEIVES it (recipient), so a
+    # operator-routed failure still records who the consult was for.
+    delivered = bool(result.ok and result.response_text)
+    operator = os.environ.get('TAEY_NODE_ID') or 'taeys-hands'
+    if delivered:
+        # Success → deliver to the requester. With no requester, surface LOUDLY
+        # rather than dropping (the GAIA->tutor orphan: result ready, nobody told).
+        if request.requester:
+            try:
+                push_notification(
+                    requester=request.requester,
+                    platform=request.platform,
+                    status='completed',
+                    plan_id=plan_id or 'unknown',
+                    preview=(result.response_text or '')[:200],
+                    purpose=request.purpose,
+                )
+            except Exception as exc:
+                logger.error("Notification failed: %s", exc)
+        else:
+            logger.warning(
+                "ORPHAN RISK: %s consultation (purpose=%r) completed with a result but NO "
+                "requester — result will not be routed to any session. Pass --requester.",
+                request.platform, request.purpose,
+            )
+    else:
+        # Failure → notify the operator (taeys-hands), NEVER the requester. The
+        # original requester (or 'unknown') is stamped into the payload for
+        # audit; the queue is the operator's so the driver sees the failure.
         try:
             push_notification(
-                requester=request.requester,
+                requester=request.requester or 'unknown',
                 platform=request.platform,
-                status='completed' if result.ok else 'failed',
+                status='failed',
                 plan_id=plan_id or 'unknown',
                 preview=(result.response_text or '')[:200],
                 purpose=request.purpose,
+                recipient=operator,
             )
         except Exception as exc:
-            logger.error("Notification failed: %s", exc)
-    else:
-        logger.warning(
-            "ORPHAN RISK: %s consultation (purpose=%r) completed status=%s with NO "
-            "requester — result will not be routed to any session. Pass --requester.",
-            request.platform, request.purpose,
-            'completed' if result.ok else 'failed',
-        )
+            logger.error("Failure notification to operator failed: %s", exc)
 
     # ISMA ingestion (non-blocking)
     if result.ok and result.response_text:
