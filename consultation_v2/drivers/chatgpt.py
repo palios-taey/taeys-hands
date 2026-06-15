@@ -83,17 +83,30 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
         Activate the Firefox window first (the window must be active for the
         click + keys to land), then click the editable paragraph node.
+
+        SCAN-BEFORE-RENDER: after attach (the file chip renders) + paste, the
+        editable-paragraph composer node can be transiently ABSENT from the
+        AT-SPI tree at the instant of a single scan, so a one-shot read returned
+        None and send failed loud intermittently (PROD 2026-06-15: "editable
+        composer paragraph not found for send focus"). POLL for it (observation
+        while the tree settles, not a retry) before clicking — same wait-until-
+        render pattern clean_composer uses. Only fail (return None) if the poll
+        times out with no editable paragraph.
         """
         self.runtime.focus_firefox()
         time.sleep(0.2)
-        snap = self.runtime.snapshot()
-        # Editable composer paragraphs are nameless, so they land in `unknown`.
-        node = None
-        for element in snap.unknown:
-            if element.role.lower() == 'paragraph' and \
-                    'editable' in {s.lower() for s in (element.states or [])}:
-                node = element
-                break
+
+        def _find_editable_paragraph():
+            # Editable composer paragraphs are nameless, so they land in
+            # `unknown`. STRUCTURAL selector (role + editable state), never a
+            # name match — contract-clean.
+            for element in self.runtime.snapshot().unknown:
+                if element.role.lower() == 'paragraph' and \
+                        'editable' in {s.lower() for s in (element.states or [])}:
+                    return element
+            return None
+
+        node = self.runtime.wait_until(_find_editable_paragraph, timeout=10, interval=0.4)
         if node is None:
             return None
         if not self.runtime.click(node, strategy='atspi_only'):
