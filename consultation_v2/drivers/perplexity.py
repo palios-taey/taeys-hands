@@ -1024,12 +1024,28 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
 
+        # Perplexity's DR Copy / "Copy contents" returns an EMPTY clipboard if
+        # action-clicked while OFF-SCREEN — scroll the button itself into view
+        # first (Component.scroll_to ANYWHERE). This is the report special-
+        # handling: scroll the CONTROL, not the page. (Production-observed:
+        # without this the copy click landed empty; with it, 23.7k extracted.)
+        self.runtime.scroll_element_into_view(target)
+        time.sleep(0.5)
         # Clear clipboard, click via AT-SPI action, read clipboard
         self.runtime.write_clipboard('')
         time.sleep(0.3)
         clicked = self.runtime.click(target, strategy='atspi_only')
         time.sleep(1.0)
         content = self.runtime.read_clipboard().strip()
+        if not content:
+            # Empty clipboard → the button likely wasn't in view yet. Re-scroll
+            # the control + re-click ONCE (a local copy action, not a send/nav
+            # retry — extraction retries are allowed, cf. claude extract).
+            self.runtime.scroll_element_into_view(target)
+            time.sleep(0.6)
+            self.runtime.click(target, strategy='atspi_only')
+            time.sleep(1.2)
+            content = self.runtime.read_clipboard().strip()
 
         if content:
             result.response_text = content

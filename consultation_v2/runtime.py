@@ -234,6 +234,27 @@ class ConsultationRuntime:
             hover_point=(int(anchor.x), max(0, int(anchor.y) - 200)),
         ))
 
+    def scroll_element_into_view(self, element: Optional[Any] = None) -> bool:
+        """Scroll a SPECIFIC element into view via its AT-SPI Component
+        (ScrollType.ANYWHERE). Required before action-clicking a copy button
+        that may be off-screen — Perplexity's DR 'Copy contents' / Copy returns
+        an EMPTY clipboard when clicked while not scrolled into view. Unlike
+        scroll_to_bottom (which scrolls the page), this targets the button
+        itself, so it is safe for report-level controls that are not bottom-
+        anchored."""
+        if element is None or getattr(element, 'atspi_obj', None) is None:
+            return False
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+            comp = element.atspi_obj.get_component_iface()
+            if comp is None:
+                return False
+            return bool(comp.scroll_to(_Atspi.ScrollType.ANYWHERE))
+        except Exception:
+            return False
+
     def focus_firefox(self) -> bool:
         """Activate the main Firefox window so subsequent keyboard input
         (paste / Return) reaches the page. After a GTK file dialog closes
