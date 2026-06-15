@@ -327,19 +327,18 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         time.sleep(0.2)
         self.runtime.press('Return')
         clicked = True
+        # Send confirmation = the STOP button appears (generation actually
+        # started). copy_button is NOT a valid send signal — it persists from a
+        # PRIOR turn when navigate lands on an existing /c/ thread, which
+        # false-passed a send that never left the composer. A real send always
+        # raises Stop (no sub-second replies in production — thinking models).
         def _send_confirmed():
-            snap = self.runtime.snapshot()
-            return snap.has('stop_button') or snap.has('copy_button')
+            return self.runtime.snapshot().has('stop_button')
         stop_seen = self.runtime.wait_until(_send_confirmed, timeout=120, interval=0.6)
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        url_changed = result.session_url_after and result.session_url_after != before
-        is_new_session = not request.session_url
-        if is_new_session:
-            verified = bool(clicked and (stop_seen or url_changed))
-        else:
-            verified = bool(clicked and stop_seen)
-        result.add_step('send', verified, 'ChatGPT send validated by stop/copy button', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        verified = bool(clicked and stop_seen)
+        result.add_step('send', verified, 'ChatGPT send validated by Stop button (generation started)', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
         return verified
 
     # ------------------------------------------------------------------

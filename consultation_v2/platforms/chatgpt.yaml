@@ -1,7 +1,10 @@
 platform: chatgpt
 click_strategy: xdotool_first
 urls:
-  fresh: https://chatgpt.com/
+  # ?temporary-chat=true forces a FRESH chat every dispatch. Bare chatgpt.com/
+  # redirects to the user's last conversation, so a new-session send landed on a
+  # stale /c/ thread (pre-existing copy_button there false-passed send validation).
+  fresh: https://chatgpt.com/?temporary-chat=true
   verify_navigation: false
 tree:
   fence_after: []
