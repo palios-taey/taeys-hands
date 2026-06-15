@@ -166,6 +166,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         # -- mode --
         if requested_mode and requested_mode in workflow.get('mode_targets', {}):
+            # Settle: after navigate, the composer + model selector render into
+            # the AT-SPI tree a beat late. Poll for the selector BEFORE checking
+            # mode-active or looking it up, so select_mode doesn't scan before
+            # render — that race was failing 'model selector unavailable' AND
+            # missing the already-active state on a slow :3 (reproducible).
+            self.runtime.wait_until(
+                lambda: self._find_claude_model_selector(self.runtime.snapshot()) is not None,
+                timeout=12, interval=0.5,
+            )
             snap = self.runtime.snapshot()
             mode_active_key = f'{requested_mode}_active'
             if self.validation_passes(snap, mode_active_key):
@@ -295,7 +304,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude toggle menu click failed for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
-            time.sleep(1.0)
+            # Settle: the toggle menu's items render a beat after the click —
+            # poll for the upload item instead of one fixed-sleep snapshot.
+            # Without this, the SECOND attachment intermittently failed 'upload
+            # item not found' (scan-before-render on the re-opened menu).
+            self.runtime.wait_until(
+                lambda: self.runtime.menu_snapshot().has('upload_files_item'),
+                timeout=8, interval=0.4,
+            )
             menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
