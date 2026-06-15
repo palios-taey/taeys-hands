@@ -475,9 +475,17 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             copy_btns = [e for e in all_el
                          if (e.get('name') or '').strip() == 'Copy'
                          and 'button' in (e.get('role') or '')]
-            if len(copy_btns) < 2:
-                continue  # Need at least 2: prompt Copy + response Copy
-            target = copy_btns[-1]
+            # The response's Copy button is the LOWEST on the page (the latest
+            # turn). Do NOT require >=2 (prompt Copy + response Copy): Claude
+            # often renders only ONE Copy — the response's — because the user
+            # prompt's Copy is hover-only / absent. Requiring 2 made extract
+            # fail outright on a long verdict whose only Copy sat far below the
+            # fold (production-observed: 21k-char audit, 1 Copy at doc-y 9762).
+            # The content != request.message guard below rejects a prompt echo,
+            # so taking the lowest Copy when >=1 is safe.
+            if not copy_btns:
+                continue
+            target = max(copy_btns, key=lambda e: e.get('y') or 0)
             clipboard.write('')
             time.sleep(0.3)
             atspi_click(target)
