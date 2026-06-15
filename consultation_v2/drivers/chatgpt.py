@@ -65,6 +65,42 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         strategy = self._click_strategy()
         return self.runtime.click(element, strategy=strategy)
 
+    def _focus_composer(self):
+        """Put KEYBOARD focus on the ChatGPT composer and return the clicked
+        node, or None if no editable composer node is present.
+
+        ChatGPT's composer is NAMELESS ProseMirror ``[paragraph]`` nodes with
+        state 'editable' — there is no findable ``entry``/``input`` element, and
+        nameless nodes cannot be exact-matched (contract bans fuzzy/nameless
+        name matching). focus_firefox() activates the WINDOW but does NOT land
+        keyboard focus on the contenteditable, so a bare Enter submits nothing
+        (PROD 2026-06-15: message+attachment staged unsent, url stayed at /).
+        The contract-clean primitive is a STRUCTURAL selector: pick an editable
+        paragraph node (role == 'paragraph' AND 'editable' in states — selected
+        by role + state + composer position, NOT by name) and click it via its
+        AT-SPI action. Proven live on :2: click editable paragraph -> Enter ->
+        SENT (stop_button appeared, url -> /c/...).
+
+        Activate the Firefox window first (the window must be active for the
+        click + keys to land), then click the editable paragraph node.
+        """
+        self.runtime.focus_firefox()
+        time.sleep(0.2)
+        snap = self.runtime.snapshot()
+        # Editable composer paragraphs are nameless, so they land in `unknown`.
+        node = None
+        for element in snap.unknown:
+            if element.role.lower() == 'paragraph' and \
+                    'editable' in {s.lower() for s in (element.states or [])}:
+                node = element
+                break
+        if node is None:
+            return None
+        if not self.runtime.click(node, strategy='atspi_only'):
+            return None
+        time.sleep(0.2)
+        return node
+
     def _activate_element(self, snapshot, key: str, result: ConsultationResult, step: str, reason_prefix: str) -> bool:
         element = self.find_first(snapshot, key)
         if not element:
@@ -432,19 +468,22 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
-        # After attach the GTK file dialog closed; on bare Xvfb the X input
-        # focus does not reliably return to the Firefox window, so a bare
-        # `xdotool key Return` lands nowhere and the message sits unsent in the
-        # composer (PRODUCTION-OBSERVED: select_model+attach+prompt all OK,
-        # composer focused per screenshot, yet Return did not send). Activate
-        # the Firefox window FIRST so keyboard input reaches the focused
-        # composer, then submit with Enter. FOCUS-BASED, NOT find_first('input'):
-        # ChatGPT's composer is nameless ProseMirror paragraphs (live-verified
-        # :2 2026-06-15), so there is no entry element to find/click — the fresh
-        # composer already holds focus after enter_prompt's paste; activating
-        # Firefox is what makes the Enter land.
-        self.runtime.focus_firefox()
-        time.sleep(0.3)
+        # SEND = focus the composer, then Enter. focus_firefox() alone activates
+        # the WINDOW but does NOT put keyboard focus on the ProseMirror
+        # contenteditable, so a bare Enter submits nothing (PROD 2026-06-15:
+        # select_model+attach+prompt all OK, yet Return did not send, message
+        # staged unsent, url stayed at chatgpt.com/). Click an editable composer
+        # paragraph node FIRST (structural role+editable selector — the composer
+        # is nameless ProseMirror, no findable entry), THEN Enter. Proven live
+        # on :2: click editable paragraph -> Enter -> SENT (stop appeared, url ->
+        # /c/...). We do NOT click the 'Send prompt' React button (no usable
+        # AT-SPI action per 100_TIMES §11) — Enter on the focused composer is the
+        # submit.
+        if self._focus_composer() is None:
+            result.add_step('send', False,
+                            'ChatGPT editable composer paragraph not found for send focus',
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
         self.runtime.press('Return')
         clicked = True
         # Send confirmation = the STOP button appears (generation actually
