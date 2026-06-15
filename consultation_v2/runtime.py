@@ -215,6 +215,25 @@ class ConsultationRuntime:
     def press(self, key: str) -> bool:
         return bool(inp.press_key(key))
 
+    def scroll_to_bottom(self, anchor: Optional[Any] = None, clicks: int = 25) -> bool:
+        """Scroll the conversation to the BOTTOM so the latest turn's Copy
+        button + full response are rendered into the AT-SPI tree before extract.
+
+        RULE (Jesse): ALWAYS scroll to bottom before extracting a response —
+        AT-SPI only reports on-screen elements, so a long answer's Copy button
+        sits below the fold and is never found otherwise. Uses the mouse wheel
+        over the conversation column (hover point derived from the `anchor`
+        element — typically the composer input at bottom-centre — never a magic
+        coordinate). ctrl+End is deliberately NOT used: on some platforms it
+        focuses the empty composer and was measured to HIDE a Copy button.
+        """
+        if anchor is None or anchor.x is None or anchor.y is None:
+            return False
+        return bool(inp.scroll_wheel(
+            'down', clicks=clicks,
+            hover_point=(int(anchor.x), max(0, int(anchor.y) - 200)),
+        ))
+
     def focus_firefox(self) -> bool:
         """Activate the main Firefox window so subsequent keyboard input
         (paste / Return) reaches the page. After a GTK file dialog closes

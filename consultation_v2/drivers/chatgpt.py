@@ -391,6 +391,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         time.sleep(2.0)
+        # RULE: scroll to bottom before extract — a long response's Copy button
+        # sits below the fold and is not in the AT-SPI tree until on-screen.
+        self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'input'))
+        time.sleep(0.6)
         snap = self.runtime.snapshot()
         copy_button = self.find_last(snap, 'copy_button')
         if not copy_button:

@@ -1002,6 +1002,16 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # Wait for response to fully render.
         time.sleep(2.0)
 
+        # NOTE: Perplexity DR is a REPORT (Jesse's rule: "reports require
+        # special handling"). The full-report "Copy contents" control is a
+        # report-level button, NOT bottom-anchored like a chat-bubble Copy, so
+        # the blanket scroll-to-bottom used on the chat platforms does NOT apply
+        # cleanly here (it could scroll past the report controls). This path was
+        # already extracting full reports in place (copy_contents_button first,
+        # then plain copy_button), so it is left as-is rather than risking the
+        # report grab with a blanket scroll. If a long plain-answer ever needs
+        # scroll, gate it to the copy_button fallback only, never copy_contents.
+
         # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
         # copy buttons. Raw find_elements bypasses cache clearing and misses
         # elements after the long monitor polling phase.
