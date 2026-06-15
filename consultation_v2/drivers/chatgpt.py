@@ -129,6 +129,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         steps = workflow['composite_modes'][target]
         for index, step in enumerate(steps, start=1):
             # --- open the trigger ---
+            # Settle + rescan first: the trigger can be absent from a premature
+            # snapshot (scan before render, esp. fresh ?temporary-chat= page).
+            self.runtime.wait_until(
+                lambda: self.runtime.snapshot().has(step['trigger']),
+                timeout=10,
+                interval=0.4,
+            )
             snap = self.runtime.snapshot()
             trigger = self.find_first(snap, step['trigger'])
             if not trigger:
@@ -178,6 +185,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def _apply_model_target(self, target: str, workflow: dict, result: ConsultationResult) -> bool:
         """Open model selector portal and click the target model item."""
+        # Settle + rescan FIRST: the persistent model selector can be absent from
+        # a premature snapshot — scan fired before the page rendered (esp. on a
+        # fresh ?temporary-chat= page). Poll before declaring missing (same
+        # readiness pattern as the attach steps).
+        self.runtime.wait_until(
+            lambda: self.runtime.snapshot().has('model_selector'),
+            timeout=10,
+            interval=0.4,
+        )
         snap = self.runtime.snapshot()
         selector = self.find_first(snap, 'model_selector')
         if not selector:

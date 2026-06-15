@@ -1,10 +1,12 @@
 platform: chatgpt
 click_strategy: xdotool_first
 urls:
-  # ?temporary-chat=true forces a FRESH chat every dispatch. Bare chatgpt.com/
-  # redirects to the user's last conversation, so a new-session send landed on a
-  # stale /c/ thread (pre-existing copy_button there false-passed send validation).
-  fresh: https://chatgpt.com/?temporary-chat=true
+  # Bare chatgpt.com/ opens a new chat AND carries the real model selector
+  # ('Pro Extended'). NOTE: ?temporary-chat=true was tried and REVERTED — the
+  # temporary-chat page REMOVES the model selector (shows only a 'High' effort
+  # dropdown) so select_model fails. The stale-thread send false-positive is
+  # fixed by Stop-button send validation (16d4f67), not by the URL.
+  fresh: https://chatgpt.com/
   verify_navigation: false
 tree:
   fence_after: []
@@ -56,7 +58,12 @@ tree:
       states_include:
       - editable
     model_selector:
-      name: Pro Extended
+      # The effort/model trigger button is named after the CURRENTLY-selected
+      # effort — it drifted from a fixed 'Pro Extended' label. It is always
+      # exactly one of these (enumerated-exact set, contract-allowed names_any_of),
+      # so it matches regardless of current effort. Clicking it opens the radio
+      # menu (Instant/Medium/High/Extra High/Pro Extended → model_* targets).
+      names_any_of: [Instant, Medium, High, Extra High, Pro Extended]
       role: push button
     attach_trigger:
       name: Add files and more
