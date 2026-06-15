@@ -194,19 +194,37 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             time.sleep(0.8)
 
             # Claude max-mode is a two-stage path: choose the base model, then
-            # hover the Effort flyout and click Extra.
+            # set the Effort flyout to Extra. Selecting the model radio item
+            # above CLOSES the selector menu (empirically verified: effort_menu
+            # absent after the model click), so the Effort flyout is no longer
+            # reachable. Re-open the selector before hovering Effort Max.
             if requested_mode == 'extended_thinking':
-                if not self._activate_element(menu_snap, 'effort_menu'):
+                reopen = self._find_claude_model_selector(self.runtime.snapshot())
+                if not reopen or not self.runtime.click(reopen):
+                    result.add_step('select_mode', False,
+                                    'Claude selector re-open for effort failed',
+                                    snapshot=self.runtime.snapshot().serializable())
+                    return False
+                time.sleep(0.8)
+                effort_snap = self.runtime.menu_snapshot()
+                if not self._activate_element(effort_snap, 'effort_menu'):
                     result.add_step('select_mode', False,
                                     'Claude effort submenu hover failed',
-                                    snapshot=menu_snap.serializable())
+                                    snapshot=effort_snap.serializable())
                     return False
-                time.sleep(0.5)
+                # The Effort flyout renders ~0.4s after the hover; poll instead
+                # of a fixed sleep (scan-before-render — same class as grok /
+                # perplexity attach). menu_snapshot is an AT-SPI read (no mouse
+                # move), so the hover-submenu stays open while polling.
+                self.runtime.wait_until(
+                    lambda: self.runtime.menu_snapshot().has('effort_max'),
+                    timeout=8, interval=0.4,
+                )
                 submenu_snap = self.runtime.menu_snapshot()
-                extra = self.find_first(submenu_snap, 'effort_extra')
+                extra = self.find_first(submenu_snap, 'effort_max')
                 if not extra:
                     result.add_step('select_mode', False,
-                                    'Claude effort Extra item not found',
+                                    'Claude effort Max item not found',
                                     snapshot=submenu_snap.serializable())
                     self.runtime.press('Escape')
                     return False
@@ -331,19 +349,16 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         pasted = self.runtime.paste(request.message)
         time.sleep(0.5)
         verify_snap = self.runtime.snapshot()
-        landed_chars, landed_ok = self._prompt_text_status(request.message)
+        # The "Send message" button only appears once the composer holds content,
+        # so prompt_ready is the reliable "text landed" signal. Do NOT gate on a
+        # char-count read of the composer: Claude's React contenteditable does
+        # not report its text reliably over AT-SPI, which false-negatived a paste
+        # that DID land and triggered a type_text fallback that DOUBLED the prompt
+        # (production-observed). One paste + Send-button-present is the contract.
         prompt_ready = self.validation_passes(verify_snap, 'prompt_ready')
-        verified = bool(pasted and prompt_ready and landed_ok)
-        message = 'Claude prompt entered'
-        if pasted and prompt_ready and not landed_ok:
-            self.runtime.type_text(request.message, delay_ms=5)
-            time.sleep(0.5)
-            verify_snap = self.runtime.snapshot()
-            landed_chars, landed_ok = self._prompt_text_status(request.message)
-            prompt_ready = self.validation_passes(verify_snap, 'prompt_ready')
-            verified = bool(prompt_ready and landed_ok)
-            message = 'Claude prompt entered via type_text fallback'
-        result.add_step('prompt', verified, message,
+        landed_chars, _ = self._prompt_text_status(request.message)
+        verified = bool(pasted and prompt_ready)
+        result.add_step('prompt', verified, 'Claude prompt entered',
                         landed_chars=landed_chars, expected_chars=len(request.message),
                         snapshot=verify_snap.serializable())
         return verified

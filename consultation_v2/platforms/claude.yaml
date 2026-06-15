@@ -239,7 +239,14 @@ validation:
     indicators:
     - name_contains: Haiku 4.5 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
       role: push button
+  # Effort UI drifted to Low/Medium/Extra/Max; "Max" is the highest tier
+  # (above the old "Extra") and is the account default. extended_thinking ==
+  # maximum reasoning effort == "Max". The composer selector reads exactly
+  # "Model: Opus 4.8 Max" at max effort, so this both verifies the applied
+  # state AND lets select_mode early-skip when already at max (the common
+  # case) — avoiding the effort flyout, whose submenu renders off-screen
+  # (x=2343 on a 1920-wide display) and cannot be reliably clicked.
   extended_thinking_active:
     indicators:
-    - name: "Model: Opus 4.8 Extra"
+    - name: "Model: Opus 4.8 Max"
       role: push button
