@@ -69,51 +69,44 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         """Put KEYBOARD focus on the ChatGPT composer and return the clicked
         node, or None if no editable composer node is present.
 
-        ChatGPT's composer is NAMELESS ProseMirror ``[paragraph]`` nodes with
-        state 'editable' — there is no findable ``entry``/``input`` element, and
-        nameless nodes cannot be exact-matched (contract bans fuzzy/nameless
-        name matching). focus_firefox() activates the WINDOW but does NOT land
-        keyboard focus on the contenteditable, so a bare Enter submits nothing
-        (PROD 2026-06-15: message+attachment staged unsent, url stayed at /).
-        The contract-clean primitive is a STRUCTURAL selector: pick an editable
-        paragraph node (role == 'paragraph' AND 'editable' in states — selected
-        by role + state + composer position, NOT by name) and click it via its
-        AT-SPI action. Proven live on :2: click editable paragraph -> Enter ->
-        SENT (stop_button appeared, url -> /c/...).
+        ChatGPT's composer changes AT-SPI ROLE depending on state: an EMPTY
+        (fresh chat) composer exposes NAMELESS role=='paragraph' editable nodes;
+        AFTER paste / once classified it is a role=='entry' editable node named
+        "Chat with ChatGPT". Either way it has no STABLE exact name+role to
+        target, so the contract-clean primitive is a STRUCTURAL selector:
+        'editable' in states AND role in the composer role-set, matched across
+        the FULL snapshot regardless of name. focus_firefox() activates the
+        WINDOW but does NOT land keyboard focus on the contenteditable, so a
+        bare Enter submits nothing (PROD 2026-06-15: message+attachment staged
+        unsent, url stayed at /). Clicking the editable composer node DOES focus
+        it. Proven live on :2 in BOTH forms: the empty 'paragraph' form (fresh
+        chat) and the post-paste 'entry' "Chat with ChatGPT" form (send time) —
+        click + Enter -> SENT (stop button + url change).
 
         Activate the Firefox window first (the window must be active for the
-        click + keys to land), then click the editable paragraph node.
-
-        SCAN THE WHOLE SNAPSHOT, not just `unknown`: on an EMPTY composer the
-        editable paragraph is nameless and lands in `unknown`, but at SEND time
-        (after enter_prompt pasted the message) the editable paragraph nodes
-        carry the PASTED TEXT as their `name` — so they get classified/named and
-        LEAVE `unknown` (PROD 2026-06-15: send failed "editable composer
-        paragraph not found for send focus" because the scan only looked at
-        `unknown`, which is empty once the composer holds text; clean_composer's
-        `unknown`-only scan works only because there the composer is empty).
-        Match across mapped + unknown + sidebar by the STRUCTURAL selector
-        (role == 'paragraph' AND 'editable' in states), regardless of name — no
-        name/fuzzy match, contract-clean. POLL (the tree may still be settling
-        after attach+paste); only fail (None) if the poll times out.
+        click + keys to land), poll for the editable composer node (the tree may
+        still be settling after attach+paste), then click it.
         """
         self.runtime.focus_firefox()
         time.sleep(0.2)
 
-        def _find_editable_paragraph():
-            # Scan the FULL snapshot: a named (text-bearing) editable paragraph
-            # is in `mapped`/`sidebar`; an empty (nameless) one is in `unknown`.
-            # STRUCTURAL selector (role + editable state), never a name match.
+        composer_roles = {'entry', 'paragraph', 'text', 'section'}
+
+        def _find_editable_composer():
+            # Scan the FULL snapshot (the composer node may be classified into
+            # `mapped` as the 'entry' form, or sit in `unknown`/`sidebar` as the
+            # nameless 'paragraph' form). STRUCTURAL selector: editable state +
+            # any composer role — never a name match.
             snap = self.runtime.snapshot()
             buckets = list(snap.mapped.values()) + [snap.unknown, snap.sidebar]
             for items in buckets:
                 for element in items:
-                    if element.role.lower() == 'paragraph' and \
+                    if element.role.lower() in composer_roles and \
                             'editable' in {s.lower() for s in (element.states or [])}:
                         return element
             return None
 
-        node = self.runtime.wait_until(_find_editable_paragraph, timeout=10, interval=0.4)
+        node = self.runtime.wait_until(_find_editable_composer, timeout=10, interval=0.4)
         if node is None:
             return None
         if not self.runtime.click(node, strategy='atspi_only'):
@@ -501,7 +494,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # submit.
         if self._focus_composer() is None:
             result.add_step('send', False,
-                            'ChatGPT editable composer paragraph not found for send focus',
+                            'ChatGPT editable composer node not found for send focus',
                             snapshot=self.runtime.snapshot().serializable())
             return False
         self.runtime.press('Return')
