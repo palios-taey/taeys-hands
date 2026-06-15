@@ -332,6 +332,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
+        # After attach the GTK file dialog closed; on bare Xvfb the X input
+        # focus does not reliably return to the Firefox window, so a bare
+        # `xdotool key Return` lands nowhere and the message sits unsent in the
+        # composer (PRODUCTION-OBSERVED: select_model+attach+prompt all OK,
+        # composer focused per screenshot, yet Return did not send). Activate
+        # the Firefox window FIRST, then refocus the composer and Enter.
+        self.runtime.focus_firefox()
+        time.sleep(0.3)
         snap = self.runtime.snapshot()
         input_el = self.find_first(snap, 'input')
         if not input_el:

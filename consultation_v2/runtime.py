@@ -215,6 +215,13 @@ class ConsultationRuntime:
     def press(self, key: str) -> bool:
         return bool(inp.press_key(key))
 
+    def focus_firefox(self) -> bool:
+        """Activate the main Firefox window so subsequent keyboard input
+        (paste / Return) reaches the page. After a GTK file dialog closes
+        (attach), X input focus does not reliably return to Firefox on bare
+        Xvfb, so a bare ``xdotool key`` lands nowhere — call this first."""
+        return bool(inp.focus_firefox())
+
     def paste(self, text: str) -> bool:
         return bool(inp.clipboard_paste(text))
 
