@@ -89,7 +89,10 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         except Exception as exc:
             logger.error("Plan completion failed: %s", exc)
 
-    # Notify requester
+    # Notify requester. A missing requester is NOT a silent skip — that is how
+    # a completion orphans (the GAIA->tutor orphan: result ready, nobody told).
+    # Stamp requester + purpose into the notification so routing is auditable;
+    # if no requester was supplied, surface it LOUDLY rather than dropping.
     if request.requester:
         try:
             push_notification(
@@ -98,9 +101,17 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 status='completed' if result.ok else 'failed',
                 plan_id=plan_id or 'unknown',
                 preview=(result.response_text or '')[:200],
+                purpose=request.purpose,
             )
         except Exception as exc:
             logger.error("Notification failed: %s", exc)
+    else:
+        logger.warning(
+            "ORPHAN RISK: %s consultation (purpose=%r) completed status=%s with NO "
+            "requester — result will not be routed to any session. Pass --requester.",
+            request.platform, request.purpose,
+            'completed' if result.ok else 'failed',
+        )
 
     # ISMA ingestion (non-blocking)
     if result.ok and result.response_text:

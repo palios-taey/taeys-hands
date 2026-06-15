@@ -23,10 +23,15 @@ def push_notification(
     status: str,
     plan_id: str,
     preview: str,
+    purpose: Optional[str] = None,
 ) -> bool:
     """Push consultation-complete notification to requester's Redis queue.
 
     Key: taey:{requester}:notifications
+    The payload self-describes its routing — `requester` and `purpose` are
+    stamped INTO it (not only used as the queue key) so a completion can be
+    matched to its dispatch and can never silently orphan (the GAIA->tutor
+    orphan: a result delivered with no way to tell who it was for).
     Returns True on success, False on failure (never raises).
     """
     try:
@@ -37,6 +42,8 @@ def push_notification(
             'platform': platform,
             'status': status,
             'plan_id': plan_id,
+            'requester': requester,
+            'purpose': purpose,
             'preview': preview[:200],
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
