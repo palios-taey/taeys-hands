@@ -84,26 +84,33 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         Activate the Firefox window first (the window must be active for the
         click + keys to land), then click the editable paragraph node.
 
-        SCAN-BEFORE-RENDER: after attach (the file chip renders) + paste, the
-        editable-paragraph composer node can be transiently ABSENT from the
-        AT-SPI tree at the instant of a single scan, so a one-shot read returned
-        None and send failed loud intermittently (PROD 2026-06-15: "editable
-        composer paragraph not found for send focus"). POLL for it (observation
-        while the tree settles, not a retry) before clicking — same wait-until-
-        render pattern clean_composer uses. Only fail (return None) if the poll
-        times out with no editable paragraph.
+        SCAN THE WHOLE SNAPSHOT, not just `unknown`: on an EMPTY composer the
+        editable paragraph is nameless and lands in `unknown`, but at SEND time
+        (after enter_prompt pasted the message) the editable paragraph nodes
+        carry the PASTED TEXT as their `name` — so they get classified/named and
+        LEAVE `unknown` (PROD 2026-06-15: send failed "editable composer
+        paragraph not found for send focus" because the scan only looked at
+        `unknown`, which is empty once the composer holds text; clean_composer's
+        `unknown`-only scan works only because there the composer is empty).
+        Match across mapped + unknown + sidebar by the STRUCTURAL selector
+        (role == 'paragraph' AND 'editable' in states), regardless of name — no
+        name/fuzzy match, contract-clean. POLL (the tree may still be settling
+        after attach+paste); only fail (None) if the poll times out.
         """
         self.runtime.focus_firefox()
         time.sleep(0.2)
 
         def _find_editable_paragraph():
-            # Editable composer paragraphs are nameless, so they land in
-            # `unknown`. STRUCTURAL selector (role + editable state), never a
-            # name match — contract-clean.
-            for element in self.runtime.snapshot().unknown:
-                if element.role.lower() == 'paragraph' and \
-                        'editable' in {s.lower() for s in (element.states or [])}:
-                    return element
+            # Scan the FULL snapshot: a named (text-bearing) editable paragraph
+            # is in `mapped`/`sidebar`; an empty (nameless) one is in `unknown`.
+            # STRUCTURAL selector (role + editable state), never a name match.
+            snap = self.runtime.snapshot()
+            buckets = list(snap.mapped.values()) + [snap.unknown, snap.sidebar]
+            for items in buckets:
+                for element in items:
+                    if element.role.lower() == 'paragraph' and \
+                            'editable' in {s.lower() for s in (element.states or [])}:
+                        return element
             return None
 
         node = self.runtime.wait_until(_find_editable_paragraph, timeout=10, interval=0.4)
