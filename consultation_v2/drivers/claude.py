@@ -400,6 +400,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             lambda: self.runtime.snapshot().has('stop_button'),
             timeout=30, interval=0.6,
         )
+        # Carry the send-phase stop observation into the shared completion
+        # detector: a sub-second Extended Thinking reply may only show the stop
+        # button during send, so seeding ever_seen_stop lets it complete on the
+        # stop-gone transition without a content/copy-button fallback.
+        self._send_stop_seen = bool(stop_seen)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
@@ -417,39 +422,18 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         return verified
 
     # ------------------------------------------------------------------
-    # Monitor generation
+    # Monitor generation — shared stop-transition detector
+    # (consultation_v2.completion). extended_thinking is a deep mode (2
+    # stop-gone cycles). The send-phase stop observation is seeded so a
+    # sub-second reply completes on the stop-gone transition.
     # ------------------------------------------------------------------
 
     def monitor_generation(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        seen_stop = False
-        url_changed = bool(
-            result.session_url_after
-            and result.session_url_before
-            and result.session_url_after != result.session_url_before
+        return super().monitor_generation(
+            request, result, seed_stop_seen=getattr(self, '_send_stop_seen', False)
         )
-
-        def _poll() -> bool:
-            nonlocal seen_stop
-            snap = self.runtime.snapshot()
-            if snap.has('stop_button'):
-                seen_stop = True
-                return False
-            # Accept copy_button if stop was seen OR URL already changed
-            # (Extended Thinking on short prompts can complete in < 1s)
-            if (seen_stop or url_changed) and snap.has('copy_button'):
-                return True
-            return False
-
-        completed = self.runtime.wait_until(
-            _poll, timeout=float(request.timeout), interval=0.5,
-        )
-        verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        result.add_step('monitor', verified, 'Claude response completed',
-                        stop_seen=seen_stop, snapshot=verify_snap.serializable())
-        return verified
 
     # ------------------------------------------------------------------
     # Extract primary (copy-button strategy)

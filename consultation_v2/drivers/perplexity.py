@@ -892,42 +892,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         return verified
 
     # ------------------------------------------------------------------
-    # Monitor generation
+    # Monitor generation — inherited from BaseConsultationDriver (the shared
+    # stop-transition detector, consultation_v2.completion). deep_research is a
+    # deep mode (2 stop-gone cycles) so a transient stop-drop mid-research never
+    # false-completes.
     # ------------------------------------------------------------------
-
-    def monitor_generation(
-        self,
-        request: ConsultationRequest,
-        result: ConsultationResult,
-    ) -> bool:
-        seen_stop = False
-
-        def _poll() -> bool:
-            nonlocal seen_stop
-            snap = self.runtime.snapshot()
-            if snap.has('stop_button'):
-                seen_stop = True
-                return False
-            if seen_stop and not snap.has('stop_button'):
-                return True
-            return False
-
-        completed = self.runtime.wait_until(
-            _poll,
-            timeout=float(request.timeout),
-            interval=1.0,
-        )
-        verify_snap = self.runtime.snapshot()
-        verified = bool(
-            completed and self.validation_passes(verify_snap, 'response_complete')
-        )
-        result.add_step(
-            'monitor', verified,
-            'Perplexity response completed',
-            stop_seen=seen_stop,
-            snapshot=verify_snap.serializable(),
-        )
-        return verified
 
     # ------------------------------------------------------------------
     # Extraction

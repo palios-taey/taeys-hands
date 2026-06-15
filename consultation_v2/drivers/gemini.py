@@ -397,27 +397,9 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         )
         return verified
 
-    def monitor_generation(
-        self, request: ConsultationRequest, result: ConsultationResult
-    ) -> bool:
-        seen_stop = False
-
-        def _poll() -> bool:
-            nonlocal seen_stop
-            snap = self.runtime.snapshot()
-            if snap.has('stop_button'):
-                seen_stop = True
-                return False
-            return seen_stop and not snap.has('stop_button')
-
-        completed = self.runtime.wait_until(
-            _poll, timeout=float(request.timeout), interval=1.0
-        )
-        verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        result.add_step('monitor', verified, 'Gemini response completed',
-                        stop_seen=seen_stop, snapshot=verify_snap.serializable())
-        return verified
+    # monitor_generation is inherited from BaseConsultationDriver — the shared
+    # stop-transition detector (consultation_v2.completion). deep_think /
+    # deep_research are deep modes (2 stop-gone cycles).
 
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult

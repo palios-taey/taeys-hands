@@ -342,6 +342,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
         signal = self.runtime.wait_until(_sent_signal, timeout=12, interval=0.5)
         stop_seen = signal == 'stop'
+        # Carry the send-phase stop observation into the shared completion
+        # detector (a fast reply can clear the stop button before monitor runs).
+        self._send_stop_seen = bool(stop_seen)
         result.session_url_after = self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
 
@@ -361,31 +364,21 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return verified
 
     # ------------------------------------------------------------------
-    # Step 6 — wait for completion (stop_button debounce; NO fallback)
+    # Step 6 — wait for completion — shared stop-transition detector
+    # (consultation_v2.completion via BaseConsultationDriver.monitor_generation).
+    # 'heavy' is a deep mode (2 stop-gone cycles) — the prior bespoke 1.5s
+    # debounce was a single re-scan; the shared 2-cycle gate is the stronger,
+    # canonical form. The send-phase stop observation is seeded.
     # ------------------------------------------------------------------
     def wait_for_completion(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        stop_key = self.cfg['workflow']['monitor']['stop_key']
-
-        completed = self.runtime.wait_until(
-            lambda: self._completion_debounced(stop_key),
-            timeout=float(request.timeout),
-            interval=1.0,
+        defaults = self.cfg['workflow'].get('defaults', {})
+        resolved_mode = (
+            request.mode or request.model or defaults.get('mode') or defaults.get('model') or ''
         )
-        verify_snap = self.runtime.snapshot()
-        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        result.add_step('monitor', verified, 'Grok response completed (stop-button debounce)',
-                        snapshot=verify_snap.serializable())
-        return verified
-
-    def _completion_debounced(self, stop_key: str) -> bool:
-        """Stop-absent -> short wait -> re-scan a FRESH tree -> complete only if
-        still absent. Re-SCANNING is observation (allowed), not a retry."""
-        if self.runtime.snapshot().has(stop_key):
-            return False  # still generating
-        time.sleep(1.5)
-        if self.runtime.snapshot().has(stop_key):
-            return False  # reappeared — keep generating
-        return True
+        return self.monitor_generation(
+            request, result, mode=str(resolved_mode),
+            seed_stop_seen=getattr(self, '_send_stop_seen', False),
+        )
 
     # ------------------------------------------------------------------
     # Step 7 — extract (scroll to bottom + Copy element action; validate length)

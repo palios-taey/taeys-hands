@@ -4,6 +4,11 @@ import json
 from abc import ABC, abstractmethod
 from typing import Iterable, List, Optional
 
+from consultation_v2.completion import (
+    COMPLETE,
+    HANG_SUSPECTED,
+    CompletionDetector,
+)
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
@@ -89,6 +94,82 @@ class BaseConsultationDriver(ABC):
 
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
+
+    # ------------------------------------------------------------------
+    # Shared completion detection (single source of truth)
+    # ------------------------------------------------------------------
+
+    def _stop_key(self) -> str:
+        """YAML-declared stop-button element key (default 'stop_button')."""
+        return self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
+
+    @staticmethod
+    def _snapshot_content_count(snapshot: Snapshot) -> int:
+        """Rendered-element count, mirroring runtime.scroll_to_bottom's metric.
+        Used by the shared completion detector for hang detection."""
+        return sum(len(v) for v in snapshot.mapped.values()) + len(snapshot.unknown)
+
+    def monitor_generation(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        mode: Optional[str] = None,
+        seed_stop_seen: bool = False,
+    ) -> bool:
+        """Poll until the response completes, using the SHARED stop-transition
+        detector (consultation_v2.completion.CompletionDetector) — the single
+        source of truth that mirrors monitor/central.py::_detect_completion.
+
+        Completion = the stop button was SEEN and is now GONE for the required
+        number of cycles (2 for deep modes, 1 otherwise). No content-guess
+        fallback (100_TIMES §1). Hang (stop present + content frozen) is logged
+        as evidence but never auto-completes.
+
+        ``seed_stop_seen`` lets a driver whose send step already observed the
+        stop button mark ever_seen_stop up front, so a sub-second generation
+        whose stop button was only visible during send still completes (it is an
+        OBSERVATION carried forward, not a content fallback).
+        """
+        detector_mode = (
+            (mode if mode is not None else request.mode) or ''
+        ).strip().lower()
+        detector = CompletionDetector(mode=detector_mode)
+        if seed_stop_seen:
+            detector.ever_seen_stop = True
+            detector.stop_was_visible = True
+        stop_key = self._stop_key()
+        hang_logged = False
+        completed = False
+
+        def _poll() -> bool:
+            nonlocal completed, hang_logged
+            snap = self.runtime.snapshot()
+            verdict = detector.observe(
+                stop_present=snap.has(stop_key),
+                content_count=self._snapshot_content_count(snap),
+            )
+            if verdict == COMPLETE:
+                completed = True
+                return True
+            if verdict == HANG_SUSPECTED and not hang_logged:
+                hang_logged = True
+                result.add_step(
+                    'monitor_hang', False,
+                    f'{self.platform} generation SUSPECTED hung '
+                    f'(stop present, content frozen >= {detector.frozen_ticks} ticks)',
+                    frozen_ticks=detector.frozen_ticks,
+                )
+            return False
+
+        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        verify_snap = self.runtime.snapshot()
+        verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
+        result.add_step(
+            'monitor', verified, f'{self.platform} response completed',
+            stop_seen=detector.ever_seen_stop, mode=detector_mode or 'default',
+            snapshot=verify_snap.serializable(),
+        )
+        return verified
 
     @abstractmethod
     def run(self, request: ConsultationRequest) -> ConsultationResult:
