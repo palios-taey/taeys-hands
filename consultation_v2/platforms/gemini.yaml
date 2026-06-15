@@ -238,11 +238,15 @@ validation:
     indicators:
     - name: Deselect Deep think
       role: push button
+  # PRE-SEND indicator that Deep Research is engaged: the composer shows a
+  # "Deselect Deep research" toggle button (mirrors "Deselect Deep think").
+  # The old "Start research"/"Share & export" buttons only appear on the
+  # RESULTS page AFTER the DR query is sent, so validating them at select-mode
+  # time (pre-send) always failed and ABORTED the run before it could send
+  # (Jesse-corrected: code audits run in Deep Research; this gate blocked it).
   deep_research_active:
     indicators:
-    - name: Start research
-      role: push button
-    - name: Share & export
+    - name: Deselect Deep research
       role: push button
   canvas_active:
     indicators:
