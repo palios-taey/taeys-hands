@@ -215,24 +215,52 @@ class ConsultationRuntime:
     def press(self, key: str) -> bool:
         return bool(inp.press_key(key))
 
-    def scroll_to_bottom(self, anchor: Optional[Any] = None, clicks: int = 25) -> bool:
-        """Scroll the conversation to the BOTTOM so the latest turn's Copy
-        button + full response are rendered into the AT-SPI tree before extract.
+    def scroll_to_bottom(
+        self,
+        anchor: Optional[Any] = None,
+        clicks: int = 15,
+        max_rounds: int = 12,
+        settle: float = 0.4,
+    ) -> bool:
+        """Scroll the conversation to the ABSOLUTE BOTTOM so the latest turn's
+        Copy button + full response are rendered into the AT-SPI tree before
+        extract.
 
-        RULE (Jesse): ALWAYS scroll to bottom before extracting a response —
+        RULE (Jesse, EVERY TIME): ALWAYS scroll to bottom before extracting —
         AT-SPI only reports on-screen elements, so a long answer's Copy button
-        sits below the fold and is never found otherwise. Uses the mouse wheel
-        over the conversation column (hover point derived from the `anchor`
-        element — typically the composer input at bottom-centre — never a magic
-        coordinate). ctrl+End is deliberately NOT used: on some platforms it
-        focuses the empty composer and was measured to HIDE a Copy button.
+        sits below the fold and is never found otherwise. A SINGLE fixed-size
+        scroll burst is NOT enough for a long response (e.g. a 22k-char audit):
+        the response's Copy stays below the fold, only the PROMPT's Copy is in
+        the tree, and extract grabs the prompt echo. So scroll in repeated
+        bursts until the rendered content stops growing (bottom reached), capped
+        at `max_rounds`. Uses the mouse wheel over the conversation column
+        (hover point derived from the `anchor` element — typically the composer
+        input at bottom-centre — never a magic coordinate). ctrl+End is
+        deliberately NOT used: on some platforms it focuses the empty composer
+        and was measured to HIDE a Copy button.
         """
         if anchor is None or anchor.x is None or anchor.y is None:
             return False
-        return bool(inp.scroll_wheel(
-            'down', clicks=clicks,
-            hover_point=(int(anchor.x), max(0, int(anchor.y) - 200)),
-        ))
+        hover = (int(anchor.x), max(0, int(anchor.y) - 200))
+        last_count = -1
+        stable = 0
+        ok = False
+        for _ in range(max_rounds):
+            ok = bool(inp.scroll_wheel('down', clicks=clicks, hover_point=hover))
+            time.sleep(settle)
+            try:
+                snap = self.snapshot()
+                count = sum(len(v) for v in snap.mapped.values()) + len(snap.unknown)
+            except Exception:
+                count = last_count  # snapshot hiccup — treat as no-change, keep scrolling
+            if count == last_count:
+                stable += 1
+                if stable >= 2:  # content unchanged twice in a row = bottom reached
+                    break
+            else:
+                stable = 0
+                last_count = count
+        return ok
 
     def scroll_element_into_view(self, element: Optional[Any] = None) -> bool:
         """Scroll a SPECIFIC element into view via its AT-SPI Component

@@ -477,9 +477,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             snap = self.runtime.snapshot()
             inp_el = self.find_first(snap, 'input')
             if inp_el is not None and inp_el.x is not None and inp_el.y is not None:
-                _inp.scroll_wheel('down', clicks=25,
-                                  hover_point=(int(inp_el.x), max(0, int(inp_el.y) - 200)))
-                time.sleep(0.8)
+                # SCROLL TO BOTTOM, EVERY TIME — robust loop-until-bottom, not a
+                # single 25-click burst. A long verdict's Copy sits far below the
+                # fold; one burst leaves only the PROMPT's Copy in the tree and
+                # extract grabs the packet echo (production 2026-06-15: 22k-char
+                # audit, the response Copy rendered only after ~120 clicks).
+                self.runtime.scroll_to_bottom(inp_el)
+                time.sleep(0.5)
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
                 continue
@@ -507,7 +511,16 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             atspi_click(target)
             time.sleep(1.5)
             content = (clipboard.read() or '').strip()
-            if content and content != request.message:
+            # Reject the PROMPT echo, not just an exact match: the rendered
+            # prompt bubble equals the dispatched packet but differs in
+            # whitespace, so a bare `!= request.message` let a 1977-char packet
+            # echo through as if it were the verdict (2026-06-15). Compare on
+            # whitespace-normalized openings.
+            def _norm(s: str) -> str:
+                return ' '.join((s or '').split())
+            nc, nm = _norm(content), _norm(request.message)
+            is_echo = bool(nc) and (nc == nm or (len(nm) >= 60 and nc[:60] == nm[:60]))
+            if content and not is_echo:
                 result.response_text = content
                 result.add_step('extract_primary', True,
                                 f'Claude response copied ({len(content)} chars, attempt {attempt+1})',
