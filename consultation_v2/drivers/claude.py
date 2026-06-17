@@ -4,7 +4,8 @@ import os
 import time
 
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult
+from consultation_v2.snapshot import matches_spec
+from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
 
 try:
     from storage import neo4j_client
@@ -576,6 +577,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             is_echo = bool(nc) and (nc == nm or (len(nm) >= 60 and nc[:60] == nm[:60]))
             if content and not is_echo:
                 result.response_text = content
+                if not self.extract_thinking_notes(
+                    request,
+                    result,
+                    response_text=content,
+                    response_copy_y=target.get('y'),
+                ):
+                    return False
                 result.add_step('extract_primary', True,
                                 f'Claude response copied ({len(content)} chars, attempt {attempt+1})',
                                 characters=len(content), preview=content[:200])
@@ -585,6 +593,166 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                         f'Claude extraction failed after 5 attempts',
                         elements=len(all_el) if all_el else 0)
         return False
+
+    def extract_thinking_notes(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        response_text: str,
+        response_copy_y: int | None,
+    ) -> bool:
+        """Capture Claude's separately-rendered thinking block when the UI
+        exposes the mapped Show/Hide thinking control.
+
+        Absence of the toggle is recorded as evidence and is not treated as a
+        failure: non-thinking replies and accounts without visible thinking notes
+        have nothing to capture. Once the toggle is present, every subsequent
+        step is tree/clipboard validated and failures abort extraction.
+        """
+        from core.atspi import find_firefox_for_platform
+        from core.tree import find_elements as raw_find_elements
+        from core.interact import atspi_click
+        from core import clipboard
+
+        snap = self.runtime.snapshot()
+        show_toggle = self.find_last(snap, 'show_thinking')
+        hide_toggle = self.find_last(snap, 'hide_thinking')
+        if not show_toggle and not hide_toggle:
+            result.add_step(
+                'extract_thinking',
+                True,
+                'Claude thinking toggle not visible; assistant response has no separate thinking block',
+                snapshot=snap.serializable(),
+            )
+            return True
+
+        if show_toggle:
+            if not self.runtime.click(show_toggle):
+                result.add_step(
+                    'extract_thinking',
+                    False,
+                    'Claude Show thinking toggle click failed',
+                    snapshot=snap.serializable(),
+                )
+                return False
+            expanded_snap = self.wait_for_key('hide_thinking', timeout=6.0, interval=0.4)
+            hide_toggle = self.find_last(expanded_snap, 'hide_thinking')
+            if not hide_toggle:
+                result.add_step(
+                    'extract_thinking',
+                    False,
+                    'Claude thinking block did not expand to Hide thinking',
+                    snapshot=expanded_snap.serializable(),
+                )
+                return False
+
+        firefox = find_firefox_for_platform(self.platform)
+        if not firefox:
+            result.add_step('extract_thinking', False, 'Claude Firefox window not found for thinking extraction')
+            return False
+        try:
+            firefox.clear_cache_single()
+        except Exception:
+            pass
+
+        all_el = raw_find_elements(firefox, fence_after=[])
+        thinking_copy = self._thinking_copy_button(
+            all_el,
+            toggle_y=hide_toggle.y,
+            response_copy_y=response_copy_y,
+        )
+        if not thinking_copy:
+            result.add_step(
+                'extract_thinking',
+                False,
+                'Claude thinking Copy button not found between thinking toggle and response Copy',
+                toggle=hide_toggle.serializable(),
+                response_copy_y=response_copy_y,
+            )
+            return False
+
+        clipboard.write('')
+        time.sleep(0.3)
+        if not atspi_click(thinking_copy):
+            result.add_step(
+                'extract_thinking',
+                False,
+                'Claude thinking Copy button action failed',
+                copy_button={k: thinking_copy.get(k) for k in ('name', 'role', 'x', 'y')},
+            )
+            return False
+        time.sleep(1.0)
+        thinking_text = (clipboard.read() or '').strip()
+        if not self._valid_thinking_text(thinking_text, response_text, request.message):
+            result.add_step(
+                'extract_thinking',
+                False,
+                'Claude thinking clipboard did not contain distinct thinking text',
+                characters=len(thinking_text),
+                preview=thinking_text[:200],
+            )
+            return False
+
+        result.extractions.append(ExtractedArtifact(
+            name='claude_thinking.md',
+            content=thinking_text,
+            kind='thinking_notes',
+            metadata={'source': 'show_thinking_copy_button'},
+        ))
+        result.response_text = f'<thinking>\n{thinking_text}\n</thinking>\n\n{response_text}'
+        result.add_step(
+            'extract_thinking',
+            True,
+            f'Claude thinking notes copied ({len(thinking_text)} chars)',
+            characters=len(thinking_text),
+            preview=thinking_text[:200],
+        )
+        return True
+
+    def _thinking_copy_button(
+        self,
+        elements: list[dict],
+        toggle_y: int | None,
+        response_copy_y: int | None,
+    ) -> dict | None:
+        if toggle_y is None:
+            return None
+        copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        candidates = [
+            element for element in elements
+            if matches_spec(element, copy_spec)
+            and element.get('y') is not None
+        ]
+        if response_copy_y is not None:
+            candidates = [
+                element for element in candidates
+                if int(element.get('y') or 0) >= int(toggle_y)
+                and int(element.get('y') or 0) < int(response_copy_y)
+            ]
+        else:
+            candidates = [
+                element for element in candidates
+                if int(element.get('y') or 0) >= int(toggle_y)
+            ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda element: int(element.get('y') or 0) - int(toggle_y))
+
+    def _valid_thinking_text(self, text: str, response_text: str, prompt_text: str) -> bool:
+        if not text:
+            return False
+        normalized = ' '.join(text.split())
+        normalized_response = ' '.join((response_text or '').split())
+        normalized_prompt = ' '.join((prompt_text or '').split())
+        if normalized == normalized_response:
+            return False
+        if normalized == normalized_prompt:
+            return False
+        if len(normalized_prompt) >= 60 and normalized.startswith(normalized_prompt[:60]):
+            return False
+        if len(normalized_response) >= 60 and normalized.startswith(normalized_response[:60]):
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Extract additional artifacts
