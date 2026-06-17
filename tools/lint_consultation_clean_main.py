@@ -140,9 +140,9 @@ REQUIRED_STOP_CONDITION_IDS = {
 }
 
 BASELINE_PY_DEBT = {
-    ("consultation_v2/drivers/base.py", 40, "py-forbidden-key-url_contains"),
     ("consultation_v2/drivers/base.py", 41, "py-forbidden-key-url_contains"),
-    ("consultation_v2/drivers/base.py", 83, "py-file-chip-substring"),
+    ("consultation_v2/drivers/base.py", 42, "py-forbidden-key-url_contains"),
+    ("consultation_v2/drivers/base.py", 84, "py-file-chip-substring"),
     ("consultation_v2/snapshot.py", 57, "py-forbidden-key-name_contains"),
     ("consultation_v2/snapshot.py", 58, "py-forbidden-key-name_contains"),
     ("consultation_v2/snapshot.py", 59, "py-file-chip-substring"),

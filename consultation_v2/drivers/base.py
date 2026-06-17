@@ -9,6 +9,7 @@ from consultation_v2.completion import (
     HANG_SUSPECTED,
     CompletionDetector,
 )
+from consultation_v2 import primitives
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
@@ -94,6 +95,51 @@ class BaseConsultationDriver(ABC):
 
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
+
+    # ------------------------------------------------------------------
+    # Shared state primitives (FLOW §7) — locks / run-state / monitor
+    # registration / storage. These delegate to consultation_v2.primitives,
+    # the single shared-primitive surface, so a driver never imports the
+    # legacy platform-driving modules (tools/send.py, monitor/central.py) for
+    # state. They carry NO platform knowledge: the driver passes its own
+    # ``self.platform`` (opaque data), request ids, and monitor ids.
+    # ------------------------------------------------------------------
+
+    def acquire_display_lock(self, payload: Optional[dict] = None, ttl: int = 3600) -> bool:
+        return primitives.acquire_display_lock(payload=payload, ttl=ttl)
+
+    def release_display_lock(self) -> bool:
+        return primitives.release_display_lock()
+
+    def write_run_state(self, request_id: str, state: dict, ttl: int = 7200) -> bool:
+        return primitives.write_run_state(request_id, state, ttl=ttl)
+
+    def read_run_state(self, request_id: str) -> Optional[dict]:
+        return primitives.read_run_state(request_id)
+
+    def clear_run_state(self, request_id: str) -> bool:
+        return primitives.clear_run_state(request_id)
+
+    def register_monitor_session(self, monitor_id: str, session: dict) -> bool:
+        return primitives.register_monitor_session(monitor_id, session)
+
+    def deregister_monitor_session(self, monitor_id: str) -> bool:
+        return primitives.deregister_monitor_session(monitor_id)
+
+    def store_consultation(
+        self,
+        url: str,
+        user_prompt: str,
+        response_text: str,
+        attachments: Optional[List[str]] = None,
+    ) -> dict:
+        return primitives.store_consultation(
+            platform=self.platform,
+            url=url,
+            user_prompt=user_prompt,
+            response_text=response_text,
+            attachments=attachments,
+        )
 
     # ------------------------------------------------------------------
     # Shared completion detection (single source of truth)
