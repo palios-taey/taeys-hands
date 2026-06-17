@@ -126,6 +126,242 @@ class BaseConsultationDriver(ABC):
     def deregister_monitor_session(self, monitor_id: str) -> bool:
         return primitives.deregister_monitor_session(monitor_id)
 
+    # ------------------------------------------------------------------
+    # Run-state idempotency (FLOW §8, CONSULTATION_CONTRACT §10)
+    # ------------------------------------------------------------------
+    #
+    # The send is the single IRREVERSIBLE action. A re-run after a landed send
+    # (drift hit post-send, process crashed, operator re-dispatched) must NEVER
+    # replay it. The durable run-state record keyed by the request's STABLE
+    # request_id is the duplicate-send guard: as the lifecycle progresses we
+    # checkpoint the load-bearing milestones into it, and at the send seam we
+    # READ it first — if a prior run already captured a submitted-URL, we RESUME
+    # (re-attach to the existing chat URL) instead of sending again.
+    #
+    # This lives in the base driver, called from ONE seam in each platform
+    # driver's run() (``guarded_send`` replaces the direct ``send_prompt`` call),
+    # so the guard is identical for all five platforms and cannot drift per
+    # driver. ``self.platform`` is opaque DATA stamped into the record, never a
+    # control-flow branch.
+
+    # Checkpoint milestone STATUS values written to run-state['status'].
+    RUN_STATE_SETUP_COMPLETE = 'setup_complete'
+    RUN_STATE_SUBMITTED = 'submitted'
+    RUN_STATE_COMPLETION_OBSERVED = 'completion_observed'
+    RUN_STATE_EXTRACTION_DONE = 'extraction_done'
+
+    def _monitor_id(self, request: ConsultationRequest) -> str:
+        """Deterministic monitor/session id for this consultation. Derived from
+        the same stable request_id so a resumed run re-registers/looks up the
+        SAME monitor session rather than spawning a duplicate."""
+        return f'{self.platform}:{request.request_id()}'
+
+    def checkpoint_run_state(
+        self,
+        request: ConsultationRequest,
+        status: str,
+        result: Optional[ConsultationResult] = None,
+        **fields: object,
+    ) -> None:
+        """Merge a milestone checkpoint into the durable run-state record for
+        this consultation (FLOW §8). ``status`` is the milestone reached;
+        ``fields`` are the milestone-specific values (e.g. ``url=...``,
+        ``monitor_id=...``) that are PERSISTED into the run-state record.
+
+        ``result`` is an OUT-OF-BAND handle used only to record a failed-step
+        audit entry if the checkpoint cannot be written — it is a named
+        parameter, NOT part of ``fields``, so it is never serialized into the
+        record. (Root cause: previously the result was smuggled through
+        ``fields['_result']`` and then spread via ``**fields`` into the
+        json.dumps'd state, which raised "Object of type ConsultationResult is
+        not JSON serializable" on EVERY checkpoint — silently defeating the
+        duplicate-send guard because no ``submitted`` record ever persisted.)
+
+        Run-state is a durable idempotency CONVENIENCE, not the system of record
+        (that is the Neo4j plan/message rows on success). If Redis is
+        unreachable the checkpoint write raises out of the primitive; we do NOT
+        let that abort a consultation whose irreversible work may already be in
+        flight — we surface it loudly via the step audit and continue. This is
+        NOT a silent swallow: the failure is recorded as a visible failed step,
+        and the send guard below treats an unreadable run-state as
+        "cannot prove a prior send" (it still gates on the live URL/Stop tree)."""
+        try:
+            self.write_run_state(
+                request.request_id(),
+                {
+                    'status': status,
+                    'platform': self.platform,
+                    'prompt_hash': request.prompt_hash(),
+                    'session_target': request.session_url or 'new',
+                    **fields,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced loudly, never swallowed
+            if result is not None:
+                result.add_step(
+                    'run_state_checkpoint', False,
+                    f'{self.platform} run-state checkpoint {status!r} failed: {exc}',
+                    status=status,
+                )
+
+    def guarded_send(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        """Idempotent send seam (FLOW §8). Replaces a driver's direct
+        ``self.send_prompt(...)`` call in run().
+
+        1. READ durable run-state for this consultation's stable request_id.
+        2. If a prior run reached ``submitted`` (the send landed) AND captured a
+           chat URL, RESUME: do NOT re-send. Re-attach to the captured URL,
+           seed the result's session URL, register the monitor against it, and
+           return True so run() proceeds to monitor/extract the EXISTING turn.
+        3. Otherwise perform the real (irreversible) send via the platform
+           driver's ``send_prompt``. On success, checkpoint
+           ``submitted`` + URL + prompt-hash + monitor-id and register the
+           monitor session so the run is observably in-flight.
+
+        A send that the driver could not prove succeeded (``send_prompt``
+        returns False) is NOT checkpointed as submitted and NOT registered — per
+        FLOW §8 an unproven send must not be treated as monitored."""
+        # READ prior run-state FIRST — before writing any checkpoint — so a
+        # landed-send record from an earlier run is detected, never clobbered.
+        prior = None
+        try:
+            prior = self.read_run_state(request.request_id())
+        except Exception as exc:  # noqa: BLE001 - cannot prove prior, gate on live tree
+            result.add_step(
+                'run_state_read', False,
+                f'{self.platform} run-state read failed ({exc}); '
+                f'treating as no prior send and gating on the live URL/Stop tree',
+            )
+
+        if self._is_landed_send(prior, request):
+            return self._resume_landed_send(prior, request, result)
+
+        # setup_complete milestone: this run reached the pre-send boundary
+        # (navigate + model/mode/tools + attach + prompt entry all validated)
+        # with no proven prior send. Written AFTER the landed-send check so it
+        # never overwrites a prior submitted record.
+        self.checkpoint_run_state(
+            request, self.RUN_STATE_SETUP_COMPLETE, result=result,
+        )
+
+        # No proven prior send → perform the real irreversible send.
+        sent = self.send_prompt(request, result)
+        if not sent:
+            # Unproven send: do not checkpoint submitted, do not register a
+            # monitor. run() will return on the False send step.
+            return False
+
+        captured_url = (
+            result.session_url_after
+            or self.runtime.current_url()
+            or result.session_url_before
+            or ''
+        )
+        monitor_id = self._monitor_id(request)
+        self.checkpoint_run_state(
+            request,
+            self.RUN_STATE_SUBMITTED,
+            result=result,
+            url=captured_url,
+            monitor_id=monitor_id,
+        )
+        self._register_monitor(request, result, monitor_id, captured_url)
+        return True
+
+    def _is_landed_send(
+        self,
+        prior: Optional[dict],
+        request: ConsultationRequest,
+    ) -> bool:
+        """True iff the run-state record proves a send for THIS prompt already
+        landed (status at/after ``submitted`` AND a captured chat URL).
+
+        The prompt-hash match is required: a stale record whose prompt differs
+        (request_id collision is cryptographically improbable, but the field is
+        checked anyway) is NOT treated as a landed send for this prompt."""
+        if not prior:
+            return False
+        if prior.get('prompt_hash') != request.prompt_hash():
+            return False
+        landed_statuses = {
+            self.RUN_STATE_SUBMITTED,
+            self.RUN_STATE_COMPLETION_OBSERVED,
+            self.RUN_STATE_EXTRACTION_DONE,
+        }
+        if prior.get('status') not in landed_statuses:
+            return False
+        return bool(prior.get('url'))
+
+    def _resume_landed_send(
+        self,
+        prior: dict,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        """RESUME a consultation whose send already landed: re-attach to the
+        captured chat URL WITHOUT re-sending, re-register the monitor, and let
+        run() proceed to monitor/extract the existing turn."""
+        captured_url = str(prior.get('url') or '')
+        monitor_id = str(prior.get('monitor_id') or self._monitor_id(request))
+        # Navigate the existing tab to the captured chat URL so monitor/extract
+        # operate on the real in-flight/completed turn. This is navigation, not a
+        # send — it produces no new irreversible turn.
+        navigated = self.runtime.navigate(captured_url) if captured_url else False
+        result.session_url_after = captured_url
+        self._register_monitor(request, result, monitor_id, captured_url)
+        result.add_step(
+            'send', True,
+            f'{self.platform} send RESUMED from durable run-state — prior send '
+            f'already landed at {captured_url!r}; NOT re-sending (duplicate-send '
+            f'guard, FLOW §8 / CONTRACT §10)',
+            resumed=True,
+            url_after=captured_url,
+            prior_status=prior.get('status'),
+            navigated=navigated,
+        )
+        return True
+
+    def _register_monitor(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        monitor_id: str,
+        url: str,
+    ) -> None:
+        """Register (idempotently) the in-flight monitor session for this
+        consultation. Registration failure is a loud step (FLOW §8: a dispatch
+        that cannot be registered must not be silently treated as monitored),
+        but it does not undo a landed send — the run continues so the response
+        is still observed/extracted in-process."""
+        session = {
+            'platform': self.platform,
+            'url': url,
+            'requester': request.requester or 'unknown',
+            'mode': request.mode or '',
+            'timeout': request.timeout,
+            'request_id': request.request_id(),
+            'prompt_hash': request.prompt_hash(),
+            'purpose': request.purpose or '',
+        }
+        try:
+            self.register_monitor_session(monitor_id, session)
+            result.add_step(
+                'monitor_register', True,
+                f'{self.platform} monitor session {monitor_id!r} registered',
+                monitor_id=monitor_id, url=url,
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced loudly, never swallowed
+            result.add_step(
+                'monitor_register', False,
+                f'{self.platform} monitor session registration FAILED: {exc} '
+                f'(send landed; run continues in-process)',
+                monitor_id=monitor_id,
+            )
+
     def store_consultation(
         self,
         url: str,
@@ -215,6 +451,16 @@ class BaseConsultationDriver(ABC):
             stop_seen=detector.ever_seen_stop, mode=detector_mode or 'default',
             snapshot=verify_snap.serializable(),
         )
+        if verified:
+            # completion_observed milestone: the Stop button was seen then gone
+            # for the required cycles (FLOW §9). Checkpointed so a re-run after a
+            # crash between completion and extraction resumes at the captured URL
+            # and re-extracts rather than re-sending.
+            self.checkpoint_run_state(
+                request, self.RUN_STATE_COMPLETION_OBSERVED,
+                result=result,
+                url=result.session_url_after or self.runtime.current_url() or '',
+            )
         return verified
 
     @abstractmethod

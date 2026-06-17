@@ -39,7 +39,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return result
         if not self.enter_prompt(request, result):
             return result
-        if not self.send_prompt(request, result):
+        # Idempotent send seam (FLOW §8): guarded_send reads durable run-state
+        # first and RESUMES a landed send instead of re-sending; otherwise it
+        # performs the real send via self.send_prompt and checkpoints submitted.
+        if not self.guarded_send(request, result):
             return result
         if not self.monitor_generation(request, result):
             return result

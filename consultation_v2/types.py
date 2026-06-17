@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -52,6 +53,33 @@ class ConsultationRequest:
     # The browser receives only the merged package, but this records the
     # original caller files + their content hashes so provenance survives.
     caller_attachment_provenance: List[AttachmentProvenance] = field(default_factory=list)
+
+    def prompt_hash(self) -> str:
+        """Stable hex digest of the prompt text actually sent to the platform.
+
+        This is the prompt-hash checkpoint field (FLOW §8): it lets a re-run
+        confirm the run-state it found corresponds to THIS prompt, and a monitor
+        confirm what was generated. It hashes ``message`` only (the prompt/lens),
+        not the consolidated package path (which is a per-run timestamped temp
+        file and is therefore unstable across re-runs)."""
+        return hashlib.sha256(self.message.encode('utf-8')).hexdigest()
+
+    def request_id(self) -> str:
+        """Stable identity of THIS consultation for durable run-state keying
+        (FLOW §8 / CONSULTATION_CONTRACT §10).
+
+        The id MUST be identical across re-runs of the same consultation so a
+        re-run maps to the same ``taey:{node}:run_state:{request_id}`` record and
+        can detect a landed send instead of replaying it. It is derived from the
+        invariant identity of the request: the platform, the session target
+        (``session_url`` for a follow-up, or the literal ``'new'`` for a fresh
+        chat), and the prompt hash. It deliberately does NOT include the
+        consolidated-package path (unstable per run) or volatile metadata
+        (timeout, purpose, requester) — those vary run-to-run without changing
+        which irreversible turn this is."""
+        session_target = self.session_url or 'new'
+        seed = f'{self.platform}\x1f{session_target}\x1f{self.prompt_hash()}'
+        return hashlib.sha256(seed.encode('utf-8')).hexdigest()[:32]
 
 
 @dataclass(slots=True)

@@ -60,10 +60,18 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     )
     if package.caller_provenance:
         try:
+            # Key by the STABLE request_id (FLOW §8), NOT the consolidated-package
+            # path: the package path is a per-run timestamped temp file, so keying
+            # run-state on it would mint a fresh record every re-run and defeat the
+            # duplicate-send guard. The driver's send/monitor checkpoints write to
+            # this same key, so the attachment hashes merge into the one durable
+            # record the resume logic reads.
             primitives.write_run_state(
-                request_id=consolidated_path,
+                request_id=request.request_id(),
                 state={
                     'platform': request.platform,
+                    'prompt_hash': request.prompt_hash(),
+                    'session_target': request.session_url or 'new',
                     'attachment_hashes': [
                         prov.serializable() for prov in package.caller_provenance
                     ],
@@ -99,6 +107,27 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # --- Phase 3: Run driver ---
     driver = _REGISTRY[request.platform]()
     result = driver.run(request)
+
+    # extraction_done milestone (FLOW §8): the driver returned a real extracted
+    # response. Checkpointed so a re-run that crashes between extraction and
+    # delivery still sees the send as landed (and resumes/re-extracts rather than
+    # re-sending). Written from the orchestrator because extraction success is
+    # the per-platform driver's terminal ok-state, surfaced here as result.ok +
+    # response_text.
+    if result.ok and result.response_text:
+        try:
+            primitives.write_run_state(
+                request_id=request.request_id(),
+                state={
+                    'status': 'extraction_done',
+                    'platform': request.platform,
+                    'prompt_hash': request.prompt_hash(),
+                    'url': result.session_url_after or '',
+                    'response_chars': len(result.response_text),
+                },
+            )
+        except Exception as exc:
+            logger.error("Run-state extraction_done checkpoint failed: %s", exc)
 
     # --- Phase 4: Complete Plan + notify + ingest ---
     if plan_id and not request.no_neo4j:
@@ -144,6 +173,21 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     preview=(result.response_text or '')[:200],
                     purpose=request.purpose,
                 )
+                # notification_evidence milestone (FLOW §8): the requester was
+                # notified of the delivered result.
+                try:
+                    primitives.write_run_state(
+                        request_id=request.request_id(),
+                        state={
+                            'status': 'notification_sent',
+                            'notification_evidence': {
+                                'requester': request.requester,
+                                'plan_id': plan_id or 'unknown',
+                            },
+                        },
+                    )
+                except Exception as exc:
+                    logger.error("Run-state notification checkpoint failed: %s", exc)
             except Exception as exc:
                 logger.error("Notification failed: %s", exc)
         else:
@@ -184,6 +228,25 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 neo4j_client.mark_plan_ingested(plan_id)
         except Exception as exc:
             logger.error("ISMA ingestion failed: %s", exc)
+
+    # --- Teardown (FLOW §8): a fully-delivered consultation is DONE. Clear the
+    # durable run-state and deregister the monitor session so the request_id is
+    # free and a later, genuinely-new consultation with the same prompt is not
+    # mistaken for the landed one. We clear ONLY on a real delivery (ok +
+    # response): a FAILED run KEEPS its run-state so a re-run can RESUME the
+    # landed send (resume + re-extract) instead of re-sending the irreversible
+    # turn. monitor_id is derived from the same stable request_id the driver
+    # used to register, so deregistration targets the right session.
+    if delivered:
+        monitor_id = f'{request.platform}:{request.request_id()}'
+        try:
+            primitives.deregister_monitor_session(monitor_id)
+        except Exception as exc:
+            logger.error("Monitor deregistration failed: %s", exc)
+        try:
+            primitives.clear_run_state(request.request_id())
+        except Exception as exc:
+            logger.error("Run-state clear failed: %s", exc)
 
     return result
 
