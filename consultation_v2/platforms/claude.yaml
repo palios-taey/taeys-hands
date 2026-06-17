@@ -58,25 +58,25 @@ tree:
       name: Stop
       role: push button
     copy_button:
-      name_contains: Copy # lint-allow: known p3 debt; extract still keyed by substring until output-type matrix is implemented
+      name: Copy
       role: push button
     open_sidebar:
       name: Open sidebar
       role: push button
     incognito:
-      name_contains: Use incognito # lint-allow: known p1 debt; incognito control still substring-based pending exact remap
+      name: Use incognito
       role: push button
     prompt_categories:
       name: Prompt categories
       role: page tab list
     prompt_tab:
-      name_contains: # lint-allow: known p1 debt; prompt-tab labels are a bounded substring set pending exact tab inventory
+      names_any_of:
       - Write
       - Learn
       - Code
       - Life stuff
-      - "Claude's choice"
-      role: page tab
+      - "Claude’s choice"
+      role: push button
 
     # -- Toggle-menu portal items (require menu_snapshot) --
     upload_files_item:
@@ -210,9 +210,9 @@ settle:
   rescan_attempts: 1
 validation:
   attach_success:
-    indicators:
-    - name_contains: Remove # lint-allow: known p1 debt; attach-success still uses generic remove chip until exact indicator is mapped
-      role_contains: button # lint-allow: known p1 debt; attach-success still uses generic role filter until exact indicator is mapped
+    file_chip:
+      roles:
+      - push button
   prompt_ready:
     indicators:
     - name: Send message
@@ -224,21 +224,22 @@ validation:
     timeout: 30
   response_complete:
     indicators:
-    - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
+    - name: Copy
       role: push button
-    stop_absent: true # lint-allow: known p5 debt; stop_absent must name the stop_button key
-  sonnet_active:
-    indicators:
-    - name_contains: Sonnet 4.6 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
-      role: push button
+    stop_absent: stop_button
+  sonnet_active: {}
+    # Persistent Sonnet active-state is not mapped in the current live tree.
+    # If requested, validation_passes returns false and select_model fails loud.
   opus_active:
     indicators:
-    - name_contains: Opus 4.8 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
+    - names_any_of:
+      - "Model: Opus 4.8 Max"
+      - "Model: Opus 4.8 Extra"
+      - "Model: Opus 4.8 High"
       role: push button
-  haiku_active:
-    indicators:
-    - name_contains: Haiku 4.5 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
-      role: push button
+  haiku_active: {}
+    # Persistent Haiku active-state is not mapped in the current live tree.
+    # If requested, validation_passes returns false and select_model fails loud.
   # Effort UI drifted to Low/Medium/Extra/Max; "Max" is the highest tier
   # (above the old "Extra") and is the account default. extended_thinking ==
   # maximum reasoning effort == "Max". The composer selector reads exactly

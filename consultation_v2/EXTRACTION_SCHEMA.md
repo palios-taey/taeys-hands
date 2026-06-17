@@ -31,6 +31,7 @@ extraction:
       - { action: scroll_into_view, element: copy_contents_button }
       - { action: copy_element, element: copy_contents_button }
       - { action: read_clipboard }
+      - { action: read_tree_text, validation: response_complete }
     validate_markers: ["#"]
 ```
 
@@ -78,13 +79,14 @@ driver invokes; no platform strings, no fuzzy discovery:
 | `click` | activate a mapped trigger/menu element via AT-SPI element action (e.g. open a Share/Export popover) | required |
 | `copy_element` | activate a mapped copy control (the clipboard-producing button) | required |
 | `read_clipboard` | read the clipboard the prior `copy_element` populated | forbidden |
+| `read_tree_text` | collect report text from bounded AT-SPI tree text nodes when a mapped copy control is absent or empty | forbidden |
 | `open_panel` | open an artifact/canvas/report panel via a mapped control | required |
 | `download` | invoke a mapped export/download control producing a file | required |
 | `verify_against_source` | verify extracted content against a source attachment hash | forbidden |
 
 Actions in the "required" column MUST name an exact `element_map` key via
-`element:`. `read_clipboard` and `verify_against_source` MUST NOT carry
-`element:`.
+`element:`. `read_clipboard`, `read_tree_text`, and `verify_against_source`
+MUST NOT carry `element:`.
 
 ### `element` (conditionally required)
 Exact `element_map` KEY of the control the step touches. Validated against the

@@ -41,6 +41,7 @@ MATCH_SPEC_KEYS = frozenset({
 VALIDATION_KEYS = frozenset({
     'indicators',
     'file_chip',
+    'absent',
     'stop_absent',
     'stop_present',
     'timeout',
@@ -66,6 +67,7 @@ EXTRACTION_STEP_ACTIONS = frozenset({
     'click',                  # activate a mapped trigger/menu element via AT-SPI element action
     'copy_element',           # activate a mapped copy control (the clipboard-producing button)
     'read_clipboard',         # read the clipboard the prior copy_element populated
+    'read_tree_text',         # collect report text from AT-SPI tree nodes when copy control is absent
     'open_panel',             # open an artifact/canvas/report panel via a mapped control
     'download',               # invoke a mapped export/download control producing a file
     'verify_against_source',  # verify extracted content against a source attachment hash
@@ -82,6 +84,7 @@ EXTRACTION_ELEMENT_REQUIRED_ACTIONS = frozenset({
 # Actions that MUST NOT carry an `element:` key.
 EXTRACTION_ELEMENT_FORBIDDEN_ACTIONS = frozenset({
     'read_clipboard',
+    'read_tree_text',
     'verify_against_source',
 })
 # 'select' picks among >1 matching elements for an exact element_map key. Exact
@@ -395,6 +398,15 @@ def _validate_validation_specs(
             if not isinstance(value, str) or value not in element_map:
                 _add(findings, lines, validation_path + (stop_key_name,), stop_key_name,
                      f'{stop_key_name} must name an element_map key')
+        absent = spec.get('absent')
+        if absent is not None:
+            absent_keys = absent if isinstance(absent, list) else [absent]
+            if (
+                not absent_keys
+                or not all(isinstance(key, str) and key in element_map for key in absent_keys)
+            ):
+                _add(findings, lines, validation_path + ('absent',), 'absent',
+                     'absent must name one or more element_map keys')
         indicators = spec.get('indicators')
         if indicators is not None:
             if not isinstance(indicators, list):

@@ -33,7 +33,9 @@ tree:
   sidebar_nav:
   - name: Home
     role: link
-  - name_pattern: New chat* # lint-allow: known p1 debt; fresh-chat nav label is still wildcarded pending exact AT-SPI remap
+  - names_any_of:
+    - New chat
+    - New chat Control Shift O
     role: link
   - name: Pulse
     role: link
@@ -84,9 +86,6 @@ tree:
       role: push button
     extended_pro:
       name: Pro Extended
-      role: push button
-    temporary_chat:
-      name_contains: temporary chat # lint-allow: known p1 debt; temporary-chat indicator still substring-based pending exact remap
       role: push button
     search_chats:
       name: Search chats Control K
@@ -181,7 +180,7 @@ tree:
     # GitHub repo picker (after selecting tool_github, a chip + selector appear in
     # the composer). Verified live 2026-05-22:
     github_chip:
-      name_contains: "GitHub, click to remove" # lint-allow: known p5 debt; connector chip text is still substring-based pending connector remap
+      name: "GitHub, click to remove"
       role: push button
     github_repo_selector:
       name: GitHub
@@ -192,12 +191,8 @@ tree:
     github_configure_repos:
       name: Configure Repositories
       role: menu item
-    # Repo menu items render as: name="palios-taey/<repo>"; UN-INDEXED repos carry a
-    # trailing " Not indexed" in the name (e.g. "palios-taey/taeys-hands-v2 Not indexed").
-    # Indexed repos (e.g. "palios-taey/taeys-hands") are selectable directly.
-    github_repo_item:
-      name_pattern: "palios-taey/*" # lint-allow: known p5 debt; repo picker items remain wildcarded until exact connector inventory exists
-      role: menu item
+    # Repo menu items are dynamic and must be mapped from a live exact inventory
+    # before connector repo selection is enabled in the clean driver.
 workflow:
   defaults:
     model: pro

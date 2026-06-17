@@ -77,8 +77,38 @@ class BaseConsultationDriver(ABC):
                 chip_key = file_chip.get('element') or file_chip.get('key')
             else:
                 chip_key = None
-            if not chip_key or not snapshot.has(str(chip_key)):
+            if chip_key:
+                if not snapshot.has(str(chip_key)):
+                    return False
+            elif isinstance(file_chip, dict):
+                roles = file_chip.get('roles')
+                if not isinstance(roles, list) or not roles:
+                    return False
+                expected_name = os.path.basename(filename)
+                allowed_roles = {str(role) for role in roles if isinstance(role, str) and role}
+                all_elements: List[ElementRef] = []
+                for items in snapshot.mapped.values():
+                    all_elements.extend(items)
+                all_elements.extend(snapshot.unknown)
+                all_elements.extend(snapshot.sidebar)
+                all_elements.extend(snapshot.menu_items)
+                if not any(
+                    element.name == expected_name and element.role in allowed_roles
+                    for element in all_elements
+                ):
+                    return False
+            else:
                 return False
+
+        absent = validation.get('absent') or []
+        if absent:
+            checked_tree = True
+            absent_keys = absent if isinstance(absent, list) else [absent]
+            for absent_key in absent_keys:
+                if not isinstance(absent_key, str) or absent_key not in self.cfg.get('tree', {}).get('element_map', {}):
+                    return False
+                if snapshot.has(absent_key):
+                    return False
 
         if validation.get('stop_present'):
             checked_tree = True

@@ -337,6 +337,8 @@ validation:
     - name: Deep research
       role: toggle button
       states_include: [pressed]
+    absent:
+    - search_mode_trigger
   model_council_active:
     indicators:
     - name: "Model council"
@@ -378,4 +380,6 @@ extraction:
       - action: copy_element
         element: copy_contents_button
       - action: read_clipboard
+        validation: response_complete
+      - action: read_tree_text
         validation: response_complete

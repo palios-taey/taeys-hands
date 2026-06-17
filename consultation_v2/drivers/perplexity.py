@@ -1010,6 +1010,136 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         content = self.runtime.read_clipboard()
         return content
 
+    def _is_report_tree_text_value(
+        self,
+        text: str,
+        role: str,
+        x: int | None,
+    ) -> bool:
+        text = (text or '').strip()
+        if not text:
+            return False
+        if role not in {'heading', 'list item', 'table cell'}:
+            return False
+        if x is None or x < 600:
+            return False
+        lowered = text.lower()
+        rejected = {
+            'answer',
+            'links',
+            'images',
+            'prepared by deep research',
+            'run as a separate task in computer for better results',
+            'computer produces a richer output using more tools and context.',
+        }
+        if lowered in rejected:
+            return False
+        if text.endswith('.md') or text.startswith('Family consultation —'):
+            return False
+        if lowered.startswith('add files') or lowered.startswith('mozilla firefox'):
+            return False
+        if lowered.startswith('search with google') or lowered.startswith('open context menu'):
+            return False
+        return True
+
+    def _is_report_tree_text(self, element: ElementRef) -> bool:
+        return self._is_report_tree_text_value(element.name, element.role, element.x)
+
+    def _collect_report_tree_text(self) -> tuple[str, dict[str, object]]:
+        """Collect Perplexity DR report text from the live AT-SPI tree.
+
+        Current Perplexity DR occasionally exposes only the bottom `Copy` button,
+        which copies an empty clipboard. When the report-level `Copy contents`
+        control is absent, the answer body is still present as main-column
+        AT-SPI text nodes. This fallback reads those nodes directly, bounded by
+        scroll rounds and minimum extracted length.
+        """
+        first_snap = self.runtime.snapshot()
+        anchor = self.find_first(first_snap, 'input')
+        chunks: list[str] = []
+        seen: set[str] = set()
+        rounds = 0
+
+        def collect(snapshot: Snapshot) -> int:
+            added = 0
+            try:
+                from core import atspi
+                from core.tree import find_elements as raw_find_elements
+                firefox = atspi.find_firefox_for_platform(self.platform)
+                doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
+                raw_elements = raw_find_elements(doc or firefox, max_depth=30, fence_after=[])
+                raw_elements = sorted(
+                    raw_elements,
+                    key=lambda item: (item.get('y') or 0, item.get('x') or 0),
+                )
+            except Exception:
+                raw_elements = []
+
+            for raw in raw_elements:
+                text = ' '.join(((raw.get('name') or '')).split())
+                role = raw.get('role') or ''
+                x = raw.get('x')
+                if not self._is_report_tree_text_value(text, role, x):
+                    continue
+                if text in seen:
+                    continue
+                seen.add(text)
+                chunks.append(text)
+                added += 1
+
+            if added:
+                return added
+
+            buckets = list(snapshot.mapped.values()) + [
+                snapshot.unknown,
+                snapshot.sidebar,
+                snapshot.menu_items,
+            ]
+            for items in buckets:
+                for element in items:
+                    if not self._is_report_tree_text(element):
+                        continue
+                    text = ' '.join((element.name or '').split())
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    chunks.append(text)
+                    added += 1
+            return added
+
+        self.runtime.press('ctrl+Home')
+        time.sleep(0.2)
+        self.runtime.press('Home')
+        time.sleep(0.8)
+        stable_rounds = 0
+        last_count = 0
+        for _ in range(14):
+            rounds += 1
+            snap = self.runtime.menu_snapshot()
+            collect(snap)
+            if len(chunks) == last_count:
+                stable_rounds += 1
+            else:
+                stable_rounds = 0
+                last_count = len(chunks)
+            if stable_rounds >= 2 and rounds >= 3:
+                break
+            if anchor and anchor.x is not None and anchor.y is not None:
+                self.runtime.scroll_to_bottom(anchor, clicks=8, max_rounds=1, settle=0.5)
+            else:
+                self.runtime.press('Page_Down')
+                time.sleep(0.5)
+
+        content = '\n\n'.join(chunks).strip()
+        metadata = {
+            'tree_items': len(chunks),
+            'scroll_rounds': rounds,
+            'characters': len(content),
+        }
+        if len(content) < 1000 or len(chunks) < 3:
+            return '', metadata
+        return content, metadata
+
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -1033,11 +1163,31 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # elements after the long monitor polling phase.
         snap = self.runtime.snapshot()
 
-        # Prefer "Copy contents" for DR, fall back to "Copy"
-        target = self.find_last(snap, 'copy_contents_button') or self.find_last(snap, 'copy_button')
+        # Prefer "Copy contents" for DR. Do NOT fall back to the visible bottom
+        # `Copy` button for DR: production 2026-06-17 showed that button can
+        # return an empty clipboard on a completed report.
+        is_deep_research = self._is_deep_research(request)
+        target = self.find_last(snap, 'copy_contents_button')
+        if not is_deep_research and target is None:
+            target = self.find_last(snap, 'copy_button')
         if not target:
-            result.add_step('extract_primary', False, 'Perplexity no copy button found',
-                            snapshot=snap.serializable())
+            if is_deep_research:
+                content, metadata = self._collect_report_tree_text()
+                if content:
+                    result.response_text = content
+                    result.add_step(
+                        'extract_primary', True,
+                        'Perplexity DR extracted via AT-SPI report tree text '
+                        '(copy_contents_button absent)',
+                        preview=content[:200],
+                        **metadata,
+                    )
+                    return True
+            result.add_step(
+                'extract_primary', False,
+                'Perplexity no usable copy target found',
+                snapshot=snap.serializable(),
+            )
             return False
 
         # Perplexity's DR Copy / "Copy contents" returns an EMPTY clipboard if
@@ -1073,9 +1223,22 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return True
 
+        if is_deep_research:
+            content, metadata = self._collect_report_tree_text()
+            if content:
+                result.response_text = content
+                result.add_step(
+                    'extract_primary', True,
+                    'Perplexity DR extracted via AT-SPI report tree text '
+                    f'after empty clipboard from {target.name!r}',
+                    preview=content[:200],
+                    **metadata,
+                )
+                return True
+
         result.add_step(
             'extract_primary', False,
-            f'Perplexity copy button clicked but clipboard empty (button: {target.name!r})',
+            f'Perplexity copy target clicked but clipboard empty (button: {target.name!r})',
         )
         return False
 

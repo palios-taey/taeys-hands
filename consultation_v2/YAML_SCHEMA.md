@@ -68,9 +68,20 @@ validation:
   response_complete:
     stop_absent: stop_button     # exact key that must be GONE (persists-check: gate on a persistent
                                  # element, never on a dropdown item that vanishes on close)
+  deep_research_active:
+    indicators:
+      - { name: "Deep research", role: toggle button, states_include: [pressed] }
+    absent:
+      - search_mode_trigger       # exact key that must NOT remain in the fresh tree
   attach_present:
     file_chip: uploaded_file_chip # the structural locator from §2 — presence of the chip, not its text
 ```
+
+Until every dynamic chip has a structural locator, `file_chip.roles` is allowed
+only when the driver supplies the uploaded file path. Runtime validation then
+requires a live tree element whose `name` equals `basename(path)` exactly and
+whose `role` is one of the listed exact roles. Truncation, prefix matching, and
+extension-only matching fail loud.
 
 **Banned in validation too:** `url_contains` and any substring matcher. A URL gate, when needed,
 matches the platform's exact `url` / `url_match` field (per [[PRIMITIVES_CONTRACT]] §2.D) — exact,
