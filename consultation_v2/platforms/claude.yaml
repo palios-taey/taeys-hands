@@ -139,7 +139,7 @@ tree:
       name: Fable 5Currently unavailable For your toughest challenges
       role: radio menu item
     effort_menu:
-      name: Effort Max # lint-allow: known p5 debt; dynamic-name effort menu needs structural/stable locator remap
+      names_any_of: [Effort Low, Effort Medium, Effort High, Effort Extra, Effort Max] # lint-allow: known p5 debt; dynamic-name effort menu needs structural/stable locator remap
       role: menu item
       trigger_type: hover
     effort_low:
@@ -174,8 +174,18 @@ workflow:
       opus: model_opus
       sonnet: model_sonnet
       haiku: model_haiku
+      fable: model_fable
+    effort_targets:
+      low: effort_low
+      medium: effort_medium
+      high: effort_high_default
+      extra: effort_extra
+      max: effort_max
     mode_targets:
-      extended_thinking: model_opus
+      extended_thinking:
+        model: model_opus
+        effort: extra
+        validation: extended_thinking_active
     tool_targets:
       research: tool_research
       web_search: tool_web_search
@@ -236,20 +246,21 @@ validation:
       - "Model: Opus 4.8 Max"
       - "Model: Opus 4.8 Extra"
       - "Model: Opus 4.8 High"
+      - "Model: Opus 4.8 Medium"
+      - "Model: Opus 4.8 Low"
       role: push button
   haiku_active: {}
     # Persistent Haiku active-state is not mapped in the current live tree.
     # If requested, validation_passes returns false and select_model fails loud.
-  # Effort UI drifted to Low/Medium/Extra/Max; "Max" is the highest tier
-  # (above the old "Extra") and is the account default. extended_thinking ==
-  # maximum reasoning effort == "Max". The composer selector reads exactly
-  # "Model: Opus 4.8 Max" at max effort, so this both verifies the applied
-  # state AND lets select_mode early-skip when already at max (the common
-  # case) — avoiding the effort flyout, whose submenu renders off-screen
-  # (x=2343 on a 1920-wide display) and cannot be reliably clicked.
+  fable_active: {}
+    # Live scan 2026-06-14 exposed Fable 5 as "Currently unavailable"; selecting
+    # it must fail loud until a live enabled-state validation exists.
+  # Jesse/task #170: Claude consultation extended_thinking means Opus 4.8 plus
+  # Effort Extra, not High and not Max. Live map:
+  # consultations/p2_map_claude_exact.md lines 31-45.
   extended_thinking_active:
     indicators:
-    - name: "Model: Opus 4.8 Max" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
+    - name: "Model: Opus 4.8 Extra" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
       role: push button
 
 # ============================================================================

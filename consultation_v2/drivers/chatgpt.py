@@ -530,27 +530,83 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # /c/...). We do NOT click the 'Send prompt' React button (no usable
         # AT-SPI action per 100_TIMES §11) — Enter on the focused composer is the
         # submit.
-        if self._focus_composer() is None:
-            result.add_step('send', False,
-                            'ChatGPT editable composer node not found for send focus',
-                            snapshot=self.runtime.snapshot().serializable())
-            return False
-        pressed = self.runtime.press('Return')
-        clicked = True
-        # Send confirmation = the STOP button appears (generation actually
-        # started). copy_button is NOT a valid send signal — it persists from a
-        # PRIOR turn when navigate lands on an existing /c/ thread, which
-        # false-passed a send that never left the composer. A real send always
-        # raises Stop (no sub-second replies in production — thinking models).
-        send_snap = self.wait_for_validation('send_success', timeout=120, interval=0.6)
-        stop_seen = self.validation_passes(send_snap, 'send_success')
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url() or before
+        attempts = []
+        configured_timeout = float(
+            self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 120) or 120
+        )
+        full_timeout = max(120.0, configured_timeout)
+        first_probe_timeout = min(12.0, full_timeout)
+
+        for attempt in (1, 2):
+            focus_node = self._focus_composer()
+            if focus_node is None:
+                attempts.append({'attempt': attempt, 'focused': False, 'pressed': False})
+                if attempt == 2:
+                    break
+                continue
+
+            pressed = self.runtime.press('Return')
+            if not pressed:
+                attempts.append({'attempt': attempt, 'focused': True, 'pressed': False})
+                if attempt == 2:
+                    break
+                continue
+
+            timeout = first_probe_timeout if attempt == 1 else full_timeout
+            send_snap = self.wait_for_validation('send_success', timeout=timeout, interval=0.6)
+            stop_seen = self.validation_passes(send_snap, 'send_success')
+            after = self.runtime.wait_for_url_change(
+                before,
+                timeout=30.0 if stop_seen else 5.0,
+                interval=1.0,
+            )
+            result.session_url_after = after or self.runtime.current_url() or before
+            url_changed = bool(result.session_url_after and result.session_url_after != before)
+            prompt_still_staged = self.validation_passes(
+                self.runtime.snapshot(),
+                'prompt_ready',
+            )
+            verified = bool(pressed and stop_seen and (request.session_url or url_changed))
+            attempts.append({
+                'attempt': attempt,
+                'focused': True,
+                'pressed': True,
+                'stop_seen': stop_seen,
+                'url_changed': url_changed,
+                'prompt_still_staged': prompt_still_staged,
+            })
+            if verified:
+                verify_snap = self.runtime.snapshot()
+                result.add_step(
+                    'send', True,
+                    'ChatGPT send validated by Stop button and URL capture',
+                    url_before=before,
+                    url_after=result.session_url_after,
+                    stop_seen=stop_seen,
+                    url_changed=url_changed,
+                    attempts=attempts,
+                    snapshot=verify_snap.serializable(),
+                )
+                return True
+
+            # The only retry Jesse authorized here is the focus+Enter path when
+            # the first Enter clearly did not land: no Stop, no URL movement, and
+            # the prompt is still staged in the composer. If any send evidence
+            # appears, do not press Enter again.
+            if attempt == 1 and not stop_seen and not url_changed and prompt_still_staged:
+                continue
+            break
+
         verify_snap = self.runtime.snapshot()
-        url_changed = bool(result.session_url_after and result.session_url_after != before)
-        verified = bool(pressed and clicked and stop_seen and (request.session_url or url_changed))
-        result.add_step('send', verified, 'ChatGPT send validated by Stop button and URL capture', url_before=before, url_after=result.session_url_after, stop_seen=stop_seen, url_changed=url_changed, snapshot=verify_snap.serializable())
-        return verified
+        result.add_step(
+            'send', False,
+            'ChatGPT send failed validation after focus+Enter retry gate',
+            url_before=before,
+            url_after=result.session_url_after or self.runtime.current_url() or before,
+            attempts=attempts,
+            snapshot=verify_snap.serializable(),
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Generation monitoring and extraction

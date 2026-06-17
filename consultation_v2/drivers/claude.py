@@ -139,6 +139,50 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     # Model / mode / tool selection
     # ------------------------------------------------------------------
 
+    def _select_effort_target(
+        self,
+        workflow: dict,
+        effort_name: str,
+        result: ConsultationResult,
+    ) -> bool:
+        effort_targets = workflow.get('effort_targets', {})
+        effort_key = effort_targets.get(effort_name)
+        if not effort_key:
+            result.add_step('select_mode', False,
+                            f'Claude effort {effort_name!r} is not mapped in YAML')
+            return False
+
+        selector = self._find_claude_model_selector(self.runtime.snapshot())
+        if not selector or not self.runtime.click(selector):
+            result.add_step('select_mode', False,
+                            'Claude selector re-open for effort failed',
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
+        time.sleep(0.8)
+        effort_snap = self.runtime.menu_snapshot()
+        if not self._activate_element(effort_snap, 'effort_menu'):
+            result.add_step('select_mode', False,
+                            'Claude effort submenu hover failed',
+                            snapshot=effort_snap.serializable())
+            return False
+        self.runtime.wait_until(
+            lambda: self.runtime.menu_snapshot().has(effort_key),
+            timeout=8, interval=0.4,
+        )
+        submenu_snap = self.runtime.menu_snapshot()
+        effort_item = self.find_first(submenu_snap, effort_key)
+        if not effort_item:
+            result.add_step('select_mode', False,
+                            f'Claude effort item {effort_key!r} not found',
+                            snapshot=submenu_snap.serializable())
+            self.runtime.press('Escape')
+            return False
+        clicked = self.runtime.click(effort_item)
+        time.sleep(0.5)
+        self.runtime.press('Escape')
+        time.sleep(0.4)
+        return bool(clicked)
+
     def select_model_mode_tools(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
@@ -212,7 +256,20 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
             time.sleep(0.8)
             menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['mode_targets'][requested_mode])
+            mode_spec = workflow['mode_targets'][requested_mode]
+            if isinstance(mode_spec, dict):
+                model_target = mode_spec.get('model') or mode_spec.get('target')
+                effort_name = mode_spec.get('effort')
+                verification_key = mode_spec.get('validation') or mode_active_key
+            else:
+                model_target = mode_spec
+                effort_name = None
+                verification_key = mode_active_key
+            if not model_target:
+                result.add_step('select_mode', False,
+                                f'Claude mode {requested_mode!r} has no model target')
+                return False
+            item = self.find_first(menu_snap, model_target)
             if not item:
                 result.add_step('select_mode', False,
                                 f'Claude mode item {requested_mode} not found',
@@ -220,53 +277,27 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
             clicked = self.runtime.click(item)
             time.sleep(0.8)
+            if not clicked:
+                result.add_step('select_mode', False,
+                                f'Claude mode model target {model_target!r} click failed',
+                                snapshot=menu_snap.serializable())
+                return False
 
-            # Claude max-mode is a two-stage path: choose the base model, then
-            # set the Effort flyout to Extra. Selecting the model radio item
-            # above CLOSES the selector menu (empirically verified: effort_menu
-            # absent after the model click), so the Effort flyout is no longer
-            # reachable. Re-open the selector before hovering Effort Max.
-            if requested_mode == 'extended_thinking':
-                reopen = self._find_claude_model_selector(self.runtime.snapshot())
-                if not reopen or not self.runtime.click(reopen):
-                    result.add_step('select_mode', False,
-                                    'Claude selector re-open for effort failed',
-                                    snapshot=self.runtime.snapshot().serializable())
-                    return False
-                time.sleep(0.8)
-                effort_snap = self.runtime.menu_snapshot()
-                if not self._activate_element(effort_snap, 'effort_menu'):
-                    result.add_step('select_mode', False,
-                                    'Claude effort submenu hover failed',
-                                    snapshot=effort_snap.serializable())
-                    return False
-                # The Effort flyout renders ~0.4s after the hover; poll instead
-                # of a fixed sleep (scan-before-render — same class as grok /
-                # perplexity attach). menu_snapshot is an AT-SPI read (no mouse
-                # move), so the hover-submenu stays open while polling.
-                self.runtime.wait_until(
-                    lambda: self.runtime.menu_snapshot().has('effort_max'),
-                    timeout=8, interval=0.4,
+            if effort_name:
+                clicked = self._select_effort_target(
+                    workflow,
+                    str(effort_name),
+                    result,
                 )
-                submenu_snap = self.runtime.menu_snapshot()
-                extra = self.find_first(submenu_snap, 'effort_max')
-                if not extra:
-                    result.add_step('select_mode', False,
-                                    'Claude effort Max item not found',
-                                    snapshot=submenu_snap.serializable())
-                    self.runtime.press('Escape')
+                if not clicked:
                     return False
-                clicked = clicked and self.runtime.click(extra)
-                time.sleep(0.5)
-                self.runtime.press('Escape')
-                time.sleep(0.4)
 
             verify_snap = self.wait_for_validation(
-                mode_active_key,
+                str(verification_key),
                 timeout=6.0,
                 interval=0.4,
             )
-            verified = clicked and self.validation_passes(verify_snap, mode_active_key)
+            verified = clicked and self.validation_passes(verify_snap, str(verification_key))
             result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}',
                             snapshot=verify_snap.serializable())
             if not verified:

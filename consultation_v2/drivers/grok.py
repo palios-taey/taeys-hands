@@ -98,19 +98,25 @@ class GrokConsultationDriver(BaseConsultationDriver):
     def select_mode(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         workflow = self.cfg['workflow']
         defaults = workflow.get('defaults', {})
-        mode_targets = workflow.get('mode_targets', {})
+        selection = workflow.get('selection', {})
+        mode_targets = selection.get('mode_targets', {})
+        model_targets = selection.get('model_targets', {})
 
-        requested = (request.mode or request.model or defaults.get('mode') or defaults.get('model') or '')
+        requested_mode = request.mode or defaults.get('mode') or ''
+        requested_model = request.model or defaults.get('model') or ''
+        requested = requested_mode or requested_model
         requested = str(requested).strip().lower()
         if not requested:
             result.add_step('select_mode', True, 'Grok using current/default model')
             return True
-        if requested not in mode_targets:
+        target_map = mode_targets if requested_mode else model_targets
+        target_kind = 'mode' if requested_mode else 'model'
+        if requested not in target_map:
             result.add_step('select_mode', False,
-                            f'Grok mode {requested!r} is not mapped in grok.yaml workflow.mode_targets')
+                            f'Grok {target_kind} {requested!r} is not mapped in grok.yaml workflow.selection.{target_kind}_targets')
             return False
 
-        item_key = mode_targets[requested]
+        item_key = target_map[requested]
         active_validation_key = f'{requested}_active'
 
         # ONE bounded readiness wait (DRIVER_CONTRACT §E — allowed: a single

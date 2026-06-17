@@ -129,12 +129,19 @@ workflow:
     model: null
     mode: null
     tools: []
-  # mode_targets: requested mode -> exact element_map key of the dropdown item.
-  mode_targets:
-    auto: model_auto
-    fast: model_fast
-    expert: model_expert
-    heavy: model_heavy
+  selection:
+    # Grok exposes one model selector; model_targets and mode_targets intentionally
+    # point to the same exact dropdown items so callers can request either field.
+    model_targets:
+      auto: model_auto
+      fast: model_fast
+      expert: model_expert
+      heavy: model_heavy
+    mode_targets:
+      auto: model_auto
+      fast: model_fast
+      expert: model_expert
+      heavy: model_heavy
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
