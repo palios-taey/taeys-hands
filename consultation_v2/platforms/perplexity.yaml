@@ -337,8 +337,6 @@ validation:
     - name: Deep research
       role: toggle button
       states_include: [pressed]
-    absent:
-    - search_mode_trigger
   model_council_active:
     indicators:
     - name: "Model council"

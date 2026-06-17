@@ -231,6 +231,8 @@ validation:
     file_chip:
       roles:
       - push button
+      - list item
+      - heading
   prompt_ready:
     indicators:
     - name: Send message

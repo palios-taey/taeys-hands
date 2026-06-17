@@ -246,8 +246,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         menu_key = self._mode_menu_item_key(requested_mode, workflow)
         found = self.runtime.wait_until(
             lambda: self._menu_item_probe(menu_key),
-            timeout=3.0,
-            interval=0.4,
+            timeout=8.0,
+            interval=0.5,
         )
         if not found:
             menu_snap = self.runtime.menu_snapshot()
@@ -285,8 +285,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         verify_snap = self.runtime.wait_until(
             lambda: self._active_snapshot(mode_active_key),
-            timeout=3.0,
-            interval=0.4,
+            timeout=8.0,
+            interval=0.5,
         ) or self.runtime.snapshot()
         result.add_step(
             'select_mode', self.validation_passes(verify_snap, mode_active_key),
@@ -320,8 +320,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         verify_snap = self.runtime.wait_until(
             lambda: self._active_snapshot(mode_active_key),
-            timeout=3.0,
-            interval=0.4,
+            timeout=8.0,
+            interval=0.5,
         ) or self.runtime.snapshot()
         result.add_step(
             'select_mode',
@@ -358,8 +358,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         menu_key = self._mode_menu_item_key(requested_mode, workflow)
         found = self.runtime.wait_until(
             lambda: self._menu_item_probe(menu_key),
-            timeout=3.0,
-            interval=0.4,
+            timeout=8.0,
+            interval=0.5,
         )
         if not found:
             menu_snap = self.runtime.menu_snapshot()

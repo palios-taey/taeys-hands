@@ -486,12 +486,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 self.runtime.type_text(abs_path, delay_ms=5)
             time.sleep(0.3)
             self.runtime.press('Return')
-            verify_snap = self.wait_for_validation(
-                'attach_success',
-                filename=abs_path,
-                timeout=20.0,
-                interval=0.5,
-            )
+            verify_snap = self._wait_for_attach_success(abs_path)
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,
                             f'Claude attached {os.path.basename(abs_path)}',
@@ -501,6 +496,26 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         if not request.attachments:
             result.add_step('attach', True, 'No Claude attachments requested')
         return True
+
+    def _wait_for_attach_success(self, abs_path: str):
+        last_snapshot = None
+
+        def _probe():
+            nonlocal last_snapshot
+            for snapshot in (self.runtime.snapshot(), self.runtime.menu_snapshot()):
+                last_snapshot = snapshot
+                if self.validation_passes(
+                    snapshot,
+                    'attach_success',
+                    filename=abs_path,
+                ):
+                    return snapshot
+            return None
+
+        matched = self.runtime.wait_until(_probe, timeout=20.0, interval=0.5)
+        if isinstance(matched, Snapshot):
+            return matched
+        return last_snapshot or self.runtime.snapshot()
 
     # ------------------------------------------------------------------
     # Enter prompt
