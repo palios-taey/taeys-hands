@@ -123,6 +123,11 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     validation = data['validation']
 
     assert element_map['input']['name'] == ''
+    assert element_map['input_message'] == {
+        'name': 'Message',
+        'role': 'entry',
+        'states_include': ['editable'],
+    }
     assert element_map['attach_trigger']['name'] == 'Add files or tools'
     assert element_map['upload_files_item']['name'] == 'Upload files or images'
     assert element_map['git_connector_item']['name'] == 'Connectors'
@@ -146,6 +151,7 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     }
     assert element_map['submit_button']['name'] == 'Submit'
     assert element_map['copy_button']['name'] == 'Copy'
+    assert data['workflow']['prompt']['input_candidates'] == ['input', 'input_message']
     assert workflow['mode_targets']['deep_research'] == 'deep_research_toggle'
     assert workflow['mode_submenu_keys'] == ['create_files_and_apps']
     assert validation['deep_research_active']['indicators'] == [
@@ -153,6 +159,7 @@ def test_consultation_v2_perplexity_exact_map() -> None:
     ]
     assert validation['prompt_ready']['indicators'] == [
         {'name': '', 'role': 'entry', 'states_include': ['editable']},
+        {'name': 'Message', 'role': 'entry', 'states_include': ['editable']},
     ]
     assert validation['send_success']['indicators'][0] == {
         'names_any_of': [

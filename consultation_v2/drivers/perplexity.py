@@ -828,20 +828,53 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
+        prompt_cfg = self.cfg['workflow']['prompt']
+        input_keys = prompt_cfg.get('input_candidates') or [prompt_cfg['input']]
+        input_keys = [str(key) for key in input_keys if isinstance(key, str) and key]
+        last_snap: Snapshot | None = None
+
+        def _input_probe() -> tuple[str, ElementRef] | None:
+            nonlocal last_snap
+            last_snap = self.runtime.snapshot()
+            for candidate_key in input_keys:
+                candidate = self.find_first(last_snap, candidate_key)
+                if candidate:
+                    return candidate_key, candidate
+            return None
+
+        found = self.runtime.wait_until(_input_probe, timeout=12.0, interval=0.5)
+        snap = last_snap or self.runtime.snapshot()
+        input_key, input_el = found if found else ('', None)
         if not input_el:
             result.add_step(
                 'prompt', False,
                 'Perplexity input field not found',
                 snapshot=snap.serializable(),
+                input_candidates=input_keys,
             )
             return False
-        if not self.runtime.click(input_el):
+        if not self.runtime.focus_firefox():
             result.add_step(
                 'prompt', False,
-                'Perplexity input focus click failed',
+                'Perplexity Firefox window focus failed before prompt entry',
                 snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(0.2)
+        focus_clicked = self.runtime.click(input_el, strategy='coordinate_only')
+        focus_grabbed = False
+        try:
+            comp = input_el.atspi_obj.get_component_iface() if input_el.atspi_obj else None
+            focus_grabbed = bool(comp and comp.grab_focus())
+        except Exception:
+            focus_grabbed = False
+        if not (focus_clicked or focus_grabbed):
+            result.add_step(
+                'prompt', False,
+                'Perplexity input focus failed',
+                snapshot=snap.serializable(),
+                focus_clicked=focus_clicked,
+                focus_grabbed=focus_grabbed,
             )
             return False
         time.sleep(0.3)
@@ -862,6 +895,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 'Perplexity prompt entry failed validation: Submit button did not appear'
             ),
             snapshot=verify_snap.serializable(),
+            focus_clicked=focus_clicked,
+            focus_grabbed=focus_grabbed,
+            input_key=input_key,
         )
         return verified
 

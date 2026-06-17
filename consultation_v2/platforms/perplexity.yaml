@@ -43,6 +43,11 @@ tree:
       role: entry
       states_include:
       - editable
+    input_message:
+      name: Message
+      role: entry
+      states_include:
+      - editable
     attach_trigger:
       name: Add files or tools
       role: push button
@@ -290,6 +295,9 @@ workflow:
       github: source_github
   prompt:
     input: input
+    input_candidates:
+    - input
+    - input_message
     send_button: submit_button
   send:
     trigger: submit_button
@@ -322,6 +330,9 @@ validation:
   prompt_ready:
     indicators:
     - name: ""
+      role: entry
+      states_include: [editable]
+    - name: Message
       role: entry
       states_include: [editable]
   send_success:
