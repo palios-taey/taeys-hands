@@ -250,3 +250,25 @@ validation:
     indicators:
     - name: "Model: Opus 4.8 Max" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
       role: push button
+
+# ============================================================================
+# extraction — output-type -> ordered exact-matched workflow.
+# Schema + load-time validation: consultation_v2/yaml_contract.py;
+# grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
+# assistant_text is production-proven on :3 (scroll, lowest visible Copy by y,
+# AT-SPI activate, clipboard, reject prompt echo). Claude ARTIFACT panel
+# extraction is NOT enabled in V2 (driver records it as not configured) and is
+# deliberately NOT declared here — the downstream p4-artifact task maps the
+# artifact-panel copy path. No downgrade: an artifact request with no mapped
+# workflow stops/notifies, it does not fall back to the chat bubble.
+# ============================================================================
+extraction:
+  assistant_text:
+    steps:
+      - action: scroll_to_bottom
+        element: copy_button
+      - action: copy_element
+        element: copy_button
+        select: last
+      - action: read_clipboard
+        validation: response_complete

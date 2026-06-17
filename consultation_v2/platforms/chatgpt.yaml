@@ -324,3 +324,31 @@ validation:
     indicators:
     - name: Pro Extended
       role: push button
+
+# ============================================================================
+# extraction — output-type -> ordered exact-matched workflow.
+# Schema + load-time validation: consultation_v2/yaml_contract.py
+# (EXTRACTION_OUTPUT_TYPES / EXTRACTION_STEP_ACTIONS); grammar doc:
+# consultation_v2/EXTRACTION_SCHEMA.md. Each step's `element` is an exact
+# element_map key; the strict loader rejects unknown output types, unknown step
+# actions, loose matchers, and missing element/validation keys, fail-loud at
+# load. Drivers consume this via get_extraction(); they are NOT rewritten here
+# (p4-assistant-text wires the runtime executor).
+#
+# Only assistant_text is mapped: production-proven on :2 (lowest response Copy
+# after scroll-to-bottom anchored on attach_trigger). ChatGPT Deep Research
+# Canvas / Download (artifact / downloaded_file) is documented in
+# EXTRACTION_PATTERNS.md but NOT wired in V2 — deliberately NOT declared here so
+# the engine stops rather than silently extracting the wrong surface. Mapping it
+# is the downstream p4-artifact task.
+# ============================================================================
+extraction:
+  assistant_text:
+    steps:
+      - action: scroll_to_bottom
+        element: attach_trigger
+      - action: copy_element
+        element: copy_button
+        select: last
+      - action: read_clipboard
+        validation: response_complete

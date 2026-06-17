@@ -45,6 +45,61 @@ VALIDATION_KEYS = frozenset({
     'stop_present',
     'timeout',
 })
+# Extraction-by-output-type schema (FLOW_CONSULTATION_ENGINE.md §2/§11,
+# consultation_v2/EXTRACTION_SCHEMA.md). The enumerated set of output types a
+# request may declare/derive. A platform's `extraction:` section maps each
+# SUPPORTED output type to an ordered workflow of exact-matched steps. An output
+# type the platform cannot serve is simply NOT listed (cannot-lie); the engine
+# never downgrades an unsupported type to another and never falls back.
+EXTRACTION_OUTPUT_TYPES = frozenset({
+    'assistant_text',
+    'research_report',
+    'artifact',
+    'downloaded_file',
+    'attachment_echo',
+})
+# Enumerated step action verbs. Each maps to a shared runtime primitive the
+# driver invokes; no platform strings, no fuzzy discovery.
+EXTRACTION_STEP_ACTIONS = frozenset({
+    'scroll_to_bottom',       # scroll the conversation to the final answer (anchor on element)
+    'scroll_into_view',       # bring a specific report/artifact control on-screen
+    'click',                  # activate a mapped trigger/menu element via AT-SPI element action
+    'copy_element',           # activate a mapped copy control (the clipboard-producing button)
+    'read_clipboard',         # read the clipboard the prior copy_element populated
+    'open_panel',             # open an artifact/canvas/report panel via a mapped control
+    'download',               # invoke a mapped export/download control producing a file
+    'verify_against_source',  # verify extracted content against a source attachment hash
+})
+# Actions that MUST name an exact element_map control via `element:`.
+EXTRACTION_ELEMENT_REQUIRED_ACTIONS = frozenset({
+    'scroll_to_bottom',
+    'scroll_into_view',
+    'click',
+    'copy_element',
+    'open_panel',
+    'download',
+})
+# Actions that MUST NOT carry an `element:` key.
+EXTRACTION_ELEMENT_FORBIDDEN_ACTIONS = frozenset({
+    'read_clipboard',
+    'verify_against_source',
+})
+# 'select' picks among >1 matching elements for an exact element_map key. Exact
+# enum only — never an index expression, never a fuzzy ranker. Mirrors
+# Snapshot.first / Snapshot.last.
+EXTRACTION_SELECT_VALUES = frozenset({'first', 'last'})
+# Keys legal inside one extraction step. Unknown keys are rejected at load.
+EXTRACTION_STEP_KEYS = frozenset({
+    'action',      # required: one of EXTRACTION_STEP_ACTIONS
+    'element',     # exact element_map key the step touches (required/forbidden per action)
+    'select',      # optional: one of EXTRACTION_SELECT_VALUES (default last)
+    'validation',  # optional: exact validation: key gating the step result
+})
+# Keys legal inside one output-type workflow.
+EXTRACTION_WORKFLOW_KEYS = frozenset({
+    'steps',             # required: ordered list of step mappings
+    'validate_markers',  # optional: list of exact markers the result must carry
+})
 DYNAMIC_CONTROL_KEY_PARTS = ('model_selector', 'mode_selector', 'model_picker', 'mode_picker', 'effort_menu')
 DYNAMIC_NAME_PREFIXES = ('Model:', 'Effort ')
 DYNAMIC_NAME_SNIPPETS = (' currently ', ', currently ', ' currently')
@@ -59,6 +114,34 @@ class ContractFinding:
 
     def render(self, path: Path) -> str:
         return f'{path}:{self.line}: {self.message} (key={self.key})'
+
+
+@dataclass(frozen=True)
+class ExtractionStep:
+    """One exact-matched step of an extraction workflow.
+
+    `element` is an exact element_map key (never a fuzzy matcher). `select`
+    disambiguates among >1 matching elements for that key (Snapshot.first /
+    Snapshot.last). `validation` is an exact validation: key that gates the
+    step's result. Only the action-relevant fields are populated.
+    """
+    action: str
+    element: str | None = None
+    select: str = 'last'
+    validation: str | None = None
+
+
+@dataclass(frozen=True)
+class ExtractionWorkflow:
+    """The ordered, exact-matched workflow for one output type on one platform.
+
+    `validate_markers` are exact substrings the extracted content must carry for
+    this output type (used by research_report/artifact to reject summary-only
+    grabs); empty when the output type declares none.
+    """
+    output_type: str
+    steps: tuple[ExtractionStep, ...]
+    validate_markers: tuple[str, ...] = ()
 
 
 def _repo_root() -> Path:
@@ -341,6 +424,100 @@ def _validate_validation_specs(
                      'file_chip.roles must be a non-empty list of exact roles')
 
 
+def _validate_extraction_step(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    step: object,
+    step_path: tuple[str, ...],
+    element_map: dict[str, Any],
+    validation: dict[str, Any],
+) -> None:
+    if not isinstance(step, dict):
+        _add(findings, lines, step_path, 'step', 'extraction step must be a mapping')
+        return
+    for key in step:
+        key_name = str(key)
+        if key_name not in EXTRACTION_STEP_KEYS:
+            _add(findings, lines, step_path + (key_name,), key_name,
+                 'unsupported extraction step key; use action/element/select/validation')
+    action = step.get('action')
+    if not isinstance(action, str) or action not in EXTRACTION_STEP_ACTIONS:
+        _add(findings, lines, step_path + ('action',), 'action',
+             f'extraction step action must be one of {sorted(EXTRACTION_STEP_ACTIONS)}')
+        action = None
+    element = step.get('element')
+    if 'element' in step:
+        if not isinstance(element, str) or element not in element_map:
+            _add(findings, lines, step_path + ('element',), 'element',
+                 'extraction step element must name an exact element_map key')
+        if action in EXTRACTION_ELEMENT_FORBIDDEN_ACTIONS:
+            _add(findings, lines, step_path + ('element',), 'element',
+                 f'extraction step action {action!r} must not carry an element key')
+    if action in EXTRACTION_ELEMENT_REQUIRED_ACTIONS and 'element' not in step:
+        _add(findings, lines, step_path + ('action',), 'action',
+             f'extraction step action {action!r} requires an exact element_map key')
+    select = step.get('select')
+    if 'select' in step and select not in EXTRACTION_SELECT_VALUES:
+        _add(findings, lines, step_path + ('select',), 'select',
+             f'extraction step select must be one of {sorted(EXTRACTION_SELECT_VALUES)}')
+    validation_key = step.get('validation')
+    if 'validation' in step:
+        if not isinstance(validation_key, str) or validation_key not in validation:
+            _add(findings, lines, step_path + ('validation',), 'validation',
+                 'extraction step validation must name an exact validation: key')
+
+
+def _validate_extraction_specs(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    data: dict[str, Any],
+) -> None:
+    if 'extraction' not in data:
+        return
+    extraction = data.get('extraction')
+    element_map = ((data.get('tree') or {}).get('element_map') or {})
+    validation = data.get('validation') or {}
+    if not isinstance(extraction, dict) or not extraction:
+        _add(findings, lines, ('extraction',), 'extraction',
+             'extraction must be a non-empty mapping of output-type -> workflow')
+        return
+    for output_type, workflow in extraction.items():
+        output_name = str(output_type)
+        extraction_path = ('extraction', output_name)
+        if output_name not in EXTRACTION_OUTPUT_TYPES:
+            _add(findings, lines, extraction_path, output_name,
+                 f'unknown extraction output type; use one of {sorted(EXTRACTION_OUTPUT_TYPES)}')
+            continue
+        if not isinstance(workflow, dict):
+            _add(findings, lines, extraction_path, output_name,
+                 'extraction workflow must be a mapping with a steps list')
+            continue
+        for key in workflow:
+            key_name = str(key)
+            if key_name not in EXTRACTION_WORKFLOW_KEYS:
+                _add(findings, lines, extraction_path + (key_name,), key_name,
+                     'unsupported extraction workflow key; use steps/validate_markers')
+        steps = workflow.get('steps')
+        if not isinstance(steps, list) or not steps:
+            _add(findings, lines, extraction_path + ('steps',), 'steps',
+                 'extraction workflow steps must be a non-empty ordered list')
+        else:
+            for idx, step in enumerate(steps):
+                _validate_extraction_step(
+                    findings, lines, step,
+                    extraction_path + ('steps', str(idx)),
+                    element_map, validation,
+                )
+        markers = workflow.get('validate_markers')
+        if markers is not None and (
+            not isinstance(markers, list)
+            or not markers
+            or not all(isinstance(item, str) and item for item in markers)
+        ):
+            _add(findings, lines, extraction_path + ('validate_markers',), 'validate_markers',
+                 'validate_markers must be a non-empty list of exact marker strings')
+
+
 def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source: str) -> None:
     if platform not in CHAT_PLATFORMS:
         return
@@ -361,6 +538,7 @@ def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source:
                 element_map,
             )
     _validate_validation_specs(findings, lines, data)
+    _validate_extraction_specs(findings, lines, data)
     findings = [finding for finding in findings if finding.line not in allowed_debt_lines]
 
     if findings:
@@ -403,6 +581,39 @@ def get_validation(platform: str, key: str | None = None) -> Dict[str, Any]:
     if key is None:
         return validation
     return dict(validation.get(key, {}))
+
+
+def _build_extraction_workflow(output_type: str, raw: Dict[str, Any]) -> ExtractionWorkflow:
+    steps: list[ExtractionStep] = []
+    for step in (raw.get('steps') or []):
+        steps.append(ExtractionStep(
+            action=str(step.get('action')),
+            element=step.get('element'),
+            select=str(step.get('select', 'last')),
+            validation=step.get('validation'),
+        ))
+    markers = tuple(str(m) for m in (raw.get('validate_markers') or []))
+    return ExtractionWorkflow(output_type=output_type, steps=tuple(steps), validate_markers=markers)
+
+
+def get_extraction(
+    platform: str, output_type: str | None = None
+) -> Dict[str, ExtractionWorkflow] | ExtractionWorkflow | None:
+    """Return the validated extraction workflow(s) for a platform.
+
+    With no `output_type`: a dict of output_type -> ExtractionWorkflow for every
+    output type the platform's `extraction:` section maps (empty when absent).
+    With an `output_type`: the ExtractionWorkflow for that type, or None when the
+    platform does not declare it (the caller fails loud — never downgrades).
+    """
+    extraction = dict(load_platform_yaml(platform).get('extraction') or {})
+    workflows: Dict[str, ExtractionWorkflow] = {
+        str(name): _build_extraction_workflow(str(name), dict(raw or {}))
+        for name, raw in extraction.items()
+    }
+    if output_type is None:
+        return workflows
+    return workflows.get(output_type)
 
 
 def get_settle(platform: str) -> Dict[str, Any]:

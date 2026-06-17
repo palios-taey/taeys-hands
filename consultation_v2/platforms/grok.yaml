@@ -290,3 +290,26 @@ imagine:
       symptom: "After view-source or other tab work, Ctrl+W closes the imagine tab and lands on a different page."
       explanation: "Ctrl+W closes the active tab. If imagine was the active tab, it's gone."
       fix: "Re-navigate to https://grok.com/imagine. The session is preserved (results in History sidebar)."
+
+# ============================================================================
+# extraction — output-type -> ordered exact-matched workflow.
+# Schema + load-time validation: consultation_v2/yaml_contract.py;
+# grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
+# assistant_text via the mapped `copy_button` after scroll-to-bottom (wired in
+# V2; clipboard length > prompt validates). Grok generated-image download
+# (downloaded_file) lives only on the out-of-scope `imagine:` surface and is
+# NOT executed by V2 — deliberately NOT declared here. NOTE for downstream:
+# Grok's response text + chip are AT-SPI-blind in some states; the runtime
+# executor (p4-assistant-text) must keep Stop-button + screenshot verification,
+# not AT-SPI-absence, when wiring this workflow.
+# ============================================================================
+extraction:
+  assistant_text:
+    steps:
+      - action: scroll_to_bottom
+        element: copy_button
+      - action: copy_element
+        element: copy_button
+        select: last
+      - action: read_clipboard
+        validation: response_complete

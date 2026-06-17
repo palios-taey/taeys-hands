@@ -259,3 +259,31 @@ validation:
     indicators:
     - name: Canvas
       states_include: [checked]
+
+# ============================================================================
+# extraction — output-type -> ordered exact-matched workflow.
+# Schema + load-time validation: consultation_v2/yaml_contract.py;
+# grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
+#  - assistant_text: normal chat response via the mapped `copy_button`.
+#  - research_report: Deep Research renders the full report in a canvas panel
+#    whose body the chat-bubble Copy MISSES (yields the ~89-char "I've completed
+#    your research" stub). The full report is `share_export` (push button) ->
+#    `copy_content_item` (Copy menu item). Production-proven on :4 (36KB report
+#    vs 89 chars); share_export is clicked first to open the popover.
+# ============================================================================
+extraction:
+  assistant_text:
+    steps:
+      - action: copy_element
+        element: copy_button
+        select: last
+      - action: read_clipboard
+        validation: response_complete
+  research_report:
+    steps:
+      - action: click
+        element: share_export
+      - action: copy_element
+        element: copy_content_item
+      - action: read_clipboard
+        validation: response_complete
