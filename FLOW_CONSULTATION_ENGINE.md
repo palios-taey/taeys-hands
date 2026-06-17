@@ -410,8 +410,18 @@ Element matching is exact:
 - exact `role`
 - optional exact `states_include`
 - `names_any_of` only for an enumerated list of exact alternative labels
-- structural locators only for inherently dynamic leaves, such as file chips or
-  generated IDs, and only when the structural locator itself is exact
+- **STABLE-LOCATOR rule (REQUIRED, per CONSULTATION_CONTRACT.md:12):** a control
+  must be located by a STABLE key — an attribute/testid or an exact
+  role+container-path — and NEVER by an intrinsically-dynamic visible `name`, i.e.
+  a name that reflects current selection/count/locale. The canonical trap is the
+  model/mode picker, whose visible name IS the currently-selected model (so an
+  exact `name: "Claude Opus 4.6 Extended"` locator silently breaks the instant the
+  selection changes, producing false drift or a stale match on the
+  no-downgrade model/mode step). Such dynamic-name controls MUST be located
+  structurally (exact role+container-path), never by their dynamic name.
+- structural locators are used both for the above dynamic-name controls AND for
+  inherently dynamic leaves (file chips, generated IDs), and only when the
+  structural locator itself is exact
 
 Forbidden in active consultation YAML and active matchers:
 
@@ -520,7 +530,13 @@ elapsed time, copy buttons, or response-looking content.
 Notification:
 
 - monitor completion/failure uses fleet-notify/taey-notify transport
-- notification delivery must be recorded or parked loudly
+- **delivery-ACK is REQUIRED (per CONSULTATION_CONTRACT.md:17):** notification is
+  not complete until the notify is ACKed as received by the driving session. An
+  unacked notify is itself an ERROR, not a satisfied surface — it must trigger a
+  durable local log + retry + a secondary channel, and surface a queryable
+  parked/needs-attention state. A notify into the void at this single chokepoint is
+  a silently-swallowed miss and is forbidden.
+- notification delivery (and its ACK or parked-state) must be recorded loudly
 - failures notify the operator/driver session, not the requester as a deliverable
 - successful completed responses notify the original requester
 
