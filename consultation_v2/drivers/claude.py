@@ -5,7 +5,13 @@ import time
 
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.snapshot import matches_spec
-from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
+from consultation_v2.types import (
+    ConsultationRequest,
+    ConsultationResult,
+    ElementRef,
+    ExtractedArtifact,
+    Snapshot,
+)
 
 try:
     from storage import neo4j_client
@@ -59,27 +65,116 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return self.runtime.hover(element)
         return self.runtime.click(element)
 
-    def _find_claude_model_selector(self, snapshot):
-        toggle_menu = self.find_first(snapshot, 'toggle_menu')
-        if not toggle_menu or toggle_menu.x is None or toggle_menu.y is None:
+    def _all_snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
+        elements: list[ElementRef] = []
+        for items in snapshot.mapped.values():
+            elements.extend(items)
+        elements.extend(snapshot.unknown)
+        elements.extend(snapshot.sidebar)
+        elements.extend(snapshot.menu_items)
+        return elements
+
+    def _find_claude_model_selector(self, snapshot: Snapshot) -> ElementRef | None:
+        selector_spec = (
+            self.cfg.get('tree', {})
+            .get('element_map', {})
+            .get('model_selector', {})
+        )
+        structural = selector_spec.get('structural') if isinstance(selector_spec, dict) else None
+        structural = structural if isinstance(structural, dict) else {}
+        parent_key = str(structural.get('parent') or 'toggle_menu')
+        expected_role = str(structural.get('role') or 'push button').strip().lower()
+        ordinal = str(structural.get('ordinal') or 'first').strip().lower()
+        index = structural.get('index')
+
+        parent = self.find_first(snapshot, parent_key)
+        if not parent or parent.x is None or parent.y is None:
             return None
         candidates = []
-        for items in snapshot.mapped.values():
-            for element in items:
-                if element.role.lower() != 'push button':
-                    continue
-                if element.name == toggle_menu.name:
-                    continue
-                if element.x is None or element.y is None:
-                    continue
-                if abs(int(element.y) - int(toggle_menu.y)) > 24:
-                    continue
-                if int(element.x) <= int(toggle_menu.x):
-                    continue
-                candidates.append(element)
+        for element in self._all_snapshot_elements(snapshot):
+            if element.role.lower() != expected_role:
+                continue
+            if element.name == parent.name:
+                continue
+            if element.x is None or element.y is None:
+                continue
+            if abs(int(element.y) - int(parent.y)) > 24:
+                continue
+            if int(element.x) <= int(parent.x):
+                continue
+            states = {state.lower() for state in element.states}
+            if states and 'enabled' not in states:
+                continue
+            candidates.append(element)
         if not candidates:
             return None
-        return max(candidates, key=lambda element: int(element.x or 0))
+        candidates.sort(key=lambda element: int(element.x or 0))
+        if isinstance(index, int) and 0 <= index < len(candidates):
+            return candidates[index]
+        if ordinal == 'last':
+            return candidates[-1]
+        return candidates[0]
+
+    def _claude_model_menu_keys(self, workflow: dict) -> list[str]:
+        keys = []
+        for target in workflow.get('model_targets', {}).values():
+            if isinstance(target, str) and target:
+                keys.append(target)
+        for key in ('effort_menu', 'model_more'):
+            if key not in keys:
+                keys.append(key)
+        return keys
+
+    def _open_claude_model_selector(
+        self,
+        workflow: dict,
+        result: ConsultationResult,
+        step: str,
+        reason: str,
+    ) -> Snapshot | None:
+        snap = self.runtime.snapshot()
+        selector = self._find_claude_model_selector(snap)
+        if not selector:
+            result.add_step(
+                step,
+                False,
+                f'Claude model selector not found for {reason}',
+                snapshot=snap.serializable(),
+            )
+            return None
+        if not self.runtime.click(selector, strategy='coordinate_only'):
+            result.add_step(
+                step,
+                False,
+                f'Claude model selector coordinate click failed for {reason}',
+                selector=selector.serializable(),
+                snapshot=snap.serializable(),
+            )
+            return None
+
+        expected_keys = self._claude_model_menu_keys(workflow)
+        last_snapshot: Snapshot | None = None
+
+        def _menu_opened() -> Snapshot | None:
+            nonlocal last_snapshot
+            last_snapshot = self.runtime.menu_snapshot()
+            if any(last_snapshot.has(key) for key in expected_keys):
+                return last_snapshot
+            return None
+
+        matched = self.runtime.wait_until(_menu_opened, timeout=8, interval=0.4)
+        if isinstance(matched, Snapshot):
+            return matched
+        menu_snap = last_snapshot or self.runtime.menu_snapshot()
+        result.add_step(
+            step,
+            False,
+            f'Claude model selector opened no configured menu targets for {reason}',
+            selector=selector.serializable(),
+            expected_keys=expected_keys,
+            snapshot=menu_snap.serializable(),
+        )
+        return None
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -153,14 +248,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             f'Claude effort {effort_name!r} is not mapped in YAML')
             return False
 
-        selector = self._find_claude_model_selector(self.runtime.snapshot())
-        if not selector or not self.runtime.click(selector):
-            result.add_step('select_mode', False,
-                            'Claude selector re-open for effort failed',
-                            snapshot=self.runtime.snapshot().serializable())
+        effort_snap = self._open_claude_model_selector(
+            workflow,
+            result,
+            'select_mode',
+            f'effort {effort_name}',
+        )
+        if not effort_snap:
             return False
-        time.sleep(0.8)
-        effort_snap = self.runtime.menu_snapshot()
         if not self._activate_element(effort_snap, 'effort_menu'):
             result.add_step('select_mode', False,
                             'Claude effort submenu hover failed',
@@ -178,7 +273,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             snapshot=submenu_snap.serializable())
             self.runtime.press('Escape')
             return False
-        clicked = self.runtime.click(effort_item)
+        # Claude renders this submenu outside the visible X display extents on
+        # :3; coordinate clicks can report success without selecting the item.
+        clicked = self.runtime.click(effort_item, strategy='atspi_only')
         time.sleep(0.5)
         self.runtime.press('Escape')
         time.sleep(0.4)
@@ -195,18 +292,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         # -- model --
         if requested_model and requested_model in workflow.get('model_targets', {}):
-            snap = self.runtime.snapshot()
-            selector = self._find_claude_model_selector(snap)
-            if not selector:
-                result.add_step('select_model', False, 'Claude model selector not found',
-                                snapshot=snap.serializable())
+            menu_snap = self._open_claude_model_selector(
+                workflow,
+                result,
+                'select_model',
+                f'model {requested_model}',
+            )
+            if not menu_snap:
                 return False
-            if not self.runtime.click(selector):
-                result.add_step('select_model', False, 'Claude model selector click failed',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
             item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
             if not item:
                 result.add_step('select_model', False,
@@ -245,18 +338,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 result.add_step('select_mode', True, f'Claude {requested_mode} already active')
                 return True
 
-            selector = self._find_claude_model_selector(snap)
-            if not selector:
-                result.add_step('select_mode', False,
-                                'Claude model selector unavailable for mode toggle',
-                                snapshot=snap.serializable())
+            menu_snap = self._open_claude_model_selector(
+                workflow,
+                result,
+                'select_mode',
+                f'mode {requested_mode}',
+            )
+            if not menu_snap:
                 return False
-            if not self.runtime.click(selector):
-                result.add_step('select_mode', False, 'Claude mode dropdown click failed',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
             mode_spec = workflow['mode_targets'][requested_mode]
             if isinstance(mode_spec, dict):
                 model_target = mode_spec.get('model') or mode_spec.get('target')

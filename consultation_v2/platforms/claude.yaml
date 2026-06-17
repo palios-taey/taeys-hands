@@ -126,10 +126,12 @@ tree:
       name: Use style
       role: menu item
 
-    # -- Model selector (label changes with active model; validation only) --
+    # -- Model selector trigger (structural; label changes with active model) --
     model_selector:
-      name: "Model: Opus 4.8 Max" # lint-allow: known p5 debt; dynamic-name model picker needs structural/stable locator remap
-      role: push button
+      structural:
+        parent: toggle_menu
+        role: push button
+        ordinal: first
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --
     model_opus:
