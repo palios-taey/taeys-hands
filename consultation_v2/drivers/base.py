@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterable, Iterator, List, Optional
+from typing import Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.completion import (
     COMPLETE,
@@ -36,18 +36,24 @@ class BaseConsultationDriver(ABC):
         return snapshot.last(key)
 
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
-        validation = dict(self.cfg.get('validation', {}).get(validation_key, {}))
-        if not validation and not filename:
-            # If the validation key is missing, we assume it's NOT active
+        validations = self.cfg.get('validation', {})
+        if validation_key not in validations:
+            return False
+        raw_validation = validations.get(validation_key)
+        if not isinstance(raw_validation, dict) or not raw_validation:
+            return False
+        validation = dict(raw_validation)
+
+        if validation.get('best_effort'):
             return False
 
-        if validation.get('url_contains'):
-            probe = str(validation['url_contains']).lower()
-            if probe not in (snapshot.url or '').lower():
-                return False
+        if 'url_contains' in validation:  # lint-allow: fail-loud rejection; URL substrings are not tree validation
+            return False
 
+        checked_tree = False
         indicators = validation.get('indicators') or []
         if indicators:
+            checked_tree = True
             all_elements: List[ElementRef] = []
             for items in snapshot.mapped.values():
                 all_elements.extend(items)
@@ -62,39 +68,107 @@ class BaseConsultationDriver(ABC):
             if not found:
                 return False
 
-        file_chip = dict(validation.get('file_chip', {}))
+        file_chip = validation.get('file_chip')
         if filename and file_chip:
-            probes = []
-            base = filename.split('/')[-1]
-            probes.append(base.lower())
-            stem = base.rsplit('.', 1)[0].lower() if '.' in base else base.lower()
-            probes.append(stem)
-            if stem.startswith('taey_package_'):
-                probes.append(stem.rsplit('_', 1)[0])
-                probes.append('taey_package_')
-            
-            all_elements: List[ElementRef] = []
-            for items in snapshot.mapped.values():
-                all_elements.extend(items)
-            all_elements.extend(snapshot.unknown)
-            
-            role_set = {str(role).lower() for role in file_chip.get('roles', [])}
-            matched_chip = False
-            for element in all_elements:
-                if role_set and element.role.lower() not in role_set:
-                    continue
-                name = element.name.lower()
-                if any(probe and probe in name for probe in probes):
-                    matched_chip = True
-                    break
-            if not matched_chip:
+            checked_tree = True
+            if isinstance(file_chip, str):
+                chip_key = file_chip
+            elif isinstance(file_chip, dict):
+                chip_key = file_chip.get('element') or file_chip.get('key')
+            else:
+                chip_key = None
+            if not chip_key or not snapshot.has(str(chip_key)):
+                return False
+
+        if validation.get('stop_present'):
+            checked_tree = True
+            stop_present = validation.get('stop_present')
+            stop_key = (
+                stop_present
+                if isinstance(stop_present, str)
+                else self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
+            )
+            if not snapshot.has(stop_key):
                 return False
 
         if validation.get('stop_absent'):
-            stop_key = self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
+            checked_tree = True
+            stop_absent = validation.get('stop_absent')
+            stop_key = (
+                stop_absent
+                if isinstance(stop_absent, str)
+                else self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
+            )
             if snapshot.has(stop_key):
                 return False
+        if not checked_tree:
+            return False
         return True
+
+    def _scoped_snapshot(self, scope: str) -> Snapshot:
+        normalized = (scope or 'document').strip().lower()
+        if normalized == 'document':
+            return self.runtime.snapshot()
+        if normalized == 'menu':
+            return self.runtime.menu_snapshot()
+        raise ValueError(f'Unknown AT-SPI snapshot scope {scope!r}')
+
+    def wait_for_validation(
+        self,
+        validation_key: str,
+        *,
+        filename: str | None = None,
+        timeout: float = 5.0,
+        interval: float = 0.4,
+        scope: str = 'document',
+    ) -> Snapshot:
+        """Return a fresh tree snapshot after bounded AT-SPI settle.
+
+        This is observation-only: it repeatedly refreshes the requested AT-SPI
+        tree scope until the YAML validation passes or the timeout expires. It
+        never repeats the action that preceded it.
+        """
+        last_snapshot: Snapshot | None = None
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot
+            last_snapshot = self._scoped_snapshot(scope)
+            if self.validation_passes(last_snapshot, validation_key, filename=filename):
+                return last_snapshot
+            return None
+
+        matched = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
+        if isinstance(matched, Snapshot):
+            return matched
+        return last_snapshot or self._scoped_snapshot(scope)
+
+    def wait_for_key(
+        self,
+        key: str,
+        *,
+        timeout: float = 5.0,
+        interval: float = 0.4,
+        scope: str = 'document',
+        select: str = 'first',
+    ) -> Tuple[Snapshot, Optional[ElementRef]]:
+        """Return a fresh tree snapshot and mapped element after bounded settle.
+
+        The action itself is still single-shot; this helper only gives AT-SPI
+        time to expose the expected element after the UI changes.
+        """
+        last_snapshot: Snapshot | None = None
+
+        def _probe() -> ElementRef | None:
+            nonlocal last_snapshot
+            last_snapshot = self._scoped_snapshot(scope)
+            if select == 'last':
+                return last_snapshot.last(key)
+            return last_snapshot.first(key)
+
+        element = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
+        if isinstance(element, ElementRef):
+            return last_snapshot or self._scoped_snapshot(scope), element
+        return last_snapshot or self._scoped_snapshot(scope), None
 
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
@@ -519,7 +593,11 @@ class BaseConsultationDriver(ABC):
             return False
 
         self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
-        verify_snap = self.runtime.snapshot()
+        verify_snap = self.wait_for_validation(
+            'response_complete',
+            timeout=5.0,
+            interval=0.5,
+        )
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
         result.add_step(
             'monitor', verified, f'{self.platform} response completed',

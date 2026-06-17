@@ -256,15 +256,13 @@ class GrokConsultationDriver(BaseConsultationDriver):
             # the file dialog closes, same render-race as mode-select; re-SNAPSHOT
             # here is observation while the chip renders. The upload is NOT
             # re-performed — we only wait for the indicator, then validate ONCE.
-            self.runtime.wait_until(
-                lambda: self.validation_passes(self.runtime.snapshot(), 'attach_present'),
-                timeout=15,
-                interval=0.5,
-            )
-
             # Validate the chip rendered via the exact attach-present indicator
             # (the static "Remove this attachment" button) in the DOCUMENT scope.
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                'attach_present',
+                timeout=15.0,
+                interval=0.5,
+            )
             verified = self.validation_passes(verify_snap, 'attach_present')
             result.add_step('attach', verified,
                             f'Grok attached {os.path.basename(abs_path)}',
@@ -323,7 +321,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
     # Step 5 — send (re-focus composer the proven way + Return; stop|URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        stop_key = self.cfg['workflow']['send']['stop_key']
         before = result.session_url_before
 
         # Re-focus the composer immediately before send (attach/paste steals
@@ -341,38 +338,22 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('send', False, 'Grok Return keypress failed')
             return False
 
-        # Confirm the send by observing EITHER signal over a bounded window
-        # (§E observation — Return was pressed ONCE; we only watch). A fast reply
-        # (e.g. "OK.") can finish GENERATING before we look, so the stop button
-        # may already be gone — do NOT require it to still be visible. With the
-        # now-fresh current_url() (runtime cache-clear), a URL change to the new
-        # /c/<thread> is the reliable new-session signal. Sent = stop seen OR URL
-        # changed. No retries; neither after the window -> STOP.
-        def _sent_signal():
-            if self.runtime.snapshot().has(stop_key):
-                return 'stop'
-            if (self.runtime.current_url() or '') != (before or ''):
-                return 'url'
-            return None
-
-        signal = self.runtime.wait_until(_sent_signal, timeout=12, interval=0.5)
-        stop_seen = signal == 'stop'
+        send_snap = self.wait_for_validation('send_fired', timeout=12.0, interval=0.5)
+        stop_seen = self.validation_passes(send_snap, 'send_fired')
         # Carry the send-phase stop observation into the shared completion
         # detector (a fast reply can clear the stop button before monitor runs).
         self._send_stop_seen = bool(stop_seen)
-        result.session_url_after = self.runtime.current_url() or before
+        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
+        result.session_url_after = after or self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
 
         url_changed = bool(result.session_url_after and result.session_url_after != before)
         is_new_session = request.session_url is None
         if is_new_session:
-            # New thread must exist (URL moved off the home/before URL); the stop
-            # button is a bonus signal, not required (fast replies clear it early).
-            verified = bool(url_changed or stop_seen)
+            verified = bool(stop_seen and url_changed)
         else:
-            # Follow-up keeps the same URL — gate on the generating signal.
-            verified = bool(stop_seen or url_changed)
-        result.add_step('send', verified, 'Grok send validated (stop button OR fresh URL change)',
+            verified = bool(stop_seen and result.session_url_after)
+        result.add_step('send', verified, 'Grok send validated by Stop button and URL capture',
                         url_before=before, url_after=result.session_url_after,
                         stop_seen=stop_seen, url_changed=url_changed,
                         snapshot=verify_snap.serializable())

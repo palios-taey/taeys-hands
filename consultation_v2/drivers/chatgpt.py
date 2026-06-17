@@ -319,8 +319,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return False
 
             clicked = self._click(tile)
-            time.sleep(0.8)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                step['verification'],
+                timeout=6.0,
+                interval=0.4,
+            )
             verified = clicked and self.validation_passes(verify_snap, step['verification'])
             result.add_step(
                 f'select_{index}', verified,
@@ -361,8 +364,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
             return False
         clicked = self._click(item)
-        time.sleep(1.0)
-        verify_snap = self.runtime.snapshot()
+        verify_snap = self.wait_for_validation(
+            f"{target}_active",
+            timeout=6.0,
+            interval=0.4,
+        )
         verified = clicked and self.validation_passes(verify_snap, f"{target}_active")
         result.add_step('select_model', verified, f'ChatGPT model set to {target}', snapshot=verify_snap.serializable())
         return verified
@@ -402,10 +408,19 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=dropdown_snap.serializable())
             return False
         clicked = self._click(item)
-        time.sleep(0.6)
-        verify_snap = self.runtime.snapshot()
-        verified = bool(clicked)
-        result.add_step('select_tool', verified, f'ChatGPT tool click executed for {tool_name}', snapshot=verify_snap.serializable())
+        validation_key = f'{normalized}_active'
+        if validation_key not in self.cfg.get('validation', {}):
+            verify_snap = self.runtime.snapshot()
+            result.add_step(
+                'select_tool',
+                False,
+                f'ChatGPT tool {tool_name!r} has no tree validation key {validation_key!r}',
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
+        verified = bool(clicked and self.validation_passes(verify_snap, validation_key))
+        result.add_step('select_tool', verified, f'ChatGPT tool click validated for {tool_name}', snapshot=verify_snap.serializable())
         return verified
 
     # ------------------------------------------------------------------
@@ -446,8 +461,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
-            time.sleep(1.2)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                'attach_success',
+                filename=abs_path,
+                timeout=15.0,
+                interval=0.5,
+            )
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified, f'ChatGPT attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
             if not verified:
@@ -482,13 +501,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         _inp.press_key('Delete')
         time.sleep(0.2)
         pasted = self.runtime.paste(request.message)
-        time.sleep(0.5)
         # VERIFY the composer holds the intended content before send: the 'Send
         # prompt' button only renders once the composer has text, so prompt_ready
         # is the available "content landed" signal (ChatGPT's ProseMirror does
         # not expose composer text reliably over AT-SPI, so a char-read cannot be
         # trusted here).
-        verify_snap = self.runtime.snapshot()
+        verify_snap = self.wait_for_validation(
+            'prompt_ready',
+            timeout=8.0,
+            interval=0.4,
+        )
         verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
         result.add_step('prompt', verified, 'ChatGPT prompt entered', snapshot=verify_snap.serializable())
         return verified
@@ -513,20 +535,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                             'ChatGPT editable composer node not found for send focus',
                             snapshot=self.runtime.snapshot().serializable())
             return False
-        self.runtime.press('Return')
+        pressed = self.runtime.press('Return')
         clicked = True
         # Send confirmation = the STOP button appears (generation actually
         # started). copy_button is NOT a valid send signal — it persists from a
         # PRIOR turn when navigate lands on an existing /c/ thread, which
         # false-passed a send that never left the composer. A real send always
         # raises Stop (no sub-second replies in production — thinking models).
-        def _send_confirmed():
-            return self.runtime.snapshot().has('stop_button')
-        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=120, interval=0.6)
-        result.session_url_after = self.runtime.current_url() or before
+        send_snap = self.wait_for_validation('send_success', timeout=120, interval=0.6)
+        stop_seen = self.validation_passes(send_snap, 'send_success')
+        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
+        result.session_url_after = after or self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
-        verified = bool(clicked and stop_seen)
-        result.add_step('send', verified, 'ChatGPT send validated by Stop button (generation started)', url_before=before, url_after=result.session_url_after, snapshot=verify_snap.serializable())
+        url_changed = bool(result.session_url_after and result.session_url_after != before)
+        verified = bool(pressed and clicked and stop_seen and (request.session_url or url_changed))
+        result.add_step('send', verified, 'ChatGPT send validated by Stop button and URL capture', url_before=before, url_after=result.session_url_after, stop_seen=stop_seen, url_changed=url_changed, snapshot=verify_snap.serializable())
         return verified
 
     # ------------------------------------------------------------------

@@ -92,24 +92,18 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.ok = True
 
     def _wait_for_prompt_ready(self, result: ConsultationResult) -> bool:
-        for _ in range(10):
-            snap = self.runtime.snapshot()
-            if self.validation_passes(snap, 'prompt_ready'):
-                result.add_step(
-                    'prompt_ready', True,
-                    'Perplexity prompt ready before mode selection',
-                    snapshot=snap.serializable(),
-                )
-                return True
-            time.sleep(0.5)
-
-        snap = self.runtime.snapshot()
+        snap = self.wait_for_validation('prompt_ready', timeout=5.0, interval=0.5)
+        verified = self.validation_passes(snap, 'prompt_ready')
         result.add_step(
-            'prompt_ready', False,
-            'Perplexity prompt not ready before mode selection',
+            'prompt_ready', verified,
+            (
+                'Perplexity prompt ready before mode selection'
+                if verified else
+                'Perplexity prompt not ready before mode selection'
+            ),
             snapshot=snap.serializable(),
         )
-        return False
+        return verified
 
     # ------------------------------------------------------------------
     # Model / mode / tool selection
@@ -156,8 +150,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             clicked = self.runtime.click(item)
-            time.sleep(0.8)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                f'{requested_model}_active',
+                timeout=5.0,
+                interval=0.4,
+            )
             verified = clicked and self.validation_passes(verify_snap, f'{requested_model}_active')
             result.add_step(
                 'select_model', verified,
@@ -222,9 +219,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 )
             else:
                 result.add_step(
-                    'select_tool', True,
-                    f'Unknown tool {tool_name!r} ignored; Perplexity does not support individual tool toggles',
+                    'select_tool', False,
+                    f'Perplexity tool {tool_name!r} is not mapped in workflow.mode_targets',
                 )
+                return False
         return True
 
     def _select_mode_direct(
@@ -802,7 +800,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             time.sleep(0.2)
             self.runtime.press('Return')
             time.sleep(1.2)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                'attach_success',
+                filename=abs_path,
+                timeout=15.0,
+                interval=0.5,
+            )
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step(
                 'attach', verified,
@@ -843,16 +846,24 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
-        time.sleep(1.0)
-        verify_snap = self.runtime.snapshot()
-        submit_visible = self.find_last(verify_snap, 'submit_button')
-        msg = 'Perplexity prompt entered'
-        if submit_visible:
-            msg += ' (Submit button appeared)'
-        elif pasted:
-            msg += ' (paste ok but Submit not visible — may need focus)'
-        result.add_step('prompt', bool(pasted), msg, snapshot=verify_snap.serializable())
-        return bool(pasted)
+        verify_snap, submit_visible = self.wait_for_key(
+            'submit_button',
+            timeout=8.0,
+            interval=0.4,
+            select='last',
+        )
+        verified = bool(pasted and submit_visible)
+        result.add_step(
+            'prompt',
+            verified,
+            (
+                'Perplexity prompt entered and Submit button appeared'
+                if verified else
+                'Perplexity prompt entry failed validation: Submit button did not appear'
+            ),
+            snapshot=verify_snap.serializable(),
+        )
+        return verified
 
     # ------------------------------------------------------------------
     # Send
@@ -876,12 +887,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
 
-        def _send_confirmed() -> bool:
-            s = self.runtime.snapshot()
-            return s.has('stop_button')
-
         send_timeout = float(self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 60))
-        stop_seen = self.runtime.wait_until(_send_confirmed, timeout=send_timeout, interval=0.6)
+        send_snap = self.wait_for_validation(
+            'send_success',
+            timeout=send_timeout,
+            interval=0.6,
+        )
+        stop_seen = self.validation_passes(send_snap, 'send_success')
         settled_url = self.runtime.current_url() or before
         for _ in range(8):
             time.sleep(1.0)
@@ -895,9 +907,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         url_changed = settled_url and settled_url != before
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(stop_seen and url_changed)
+            verified = bool(click_returned and stop_seen and url_changed)
         else:
-            verified = bool(stop_seen and settled_url)
+            verified = bool(click_returned and stop_seen and settled_url)
         msg = (
             'Perplexity send validated by Stop button appearance and URL capture'
             if verified else

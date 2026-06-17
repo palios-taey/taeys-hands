@@ -132,7 +132,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             if picker and self.runtime.click(picker, strategy='atspi_first'):
                 time.sleep(0.5)
                 # BUG 8 FIX: menu_snapshot for portal
-                verify_menu = self.runtime.menu_snapshot()
+                verify_menu = self.wait_for_validation(
+                    f'{requested_model}_active',
+                    timeout=6.0,
+                    interval=0.4,
+                    scope='menu',
+                )
                 verified = self.validation_passes(verify_menu, f'{requested_model}_active')
                 # BUG 10 FIX: close the dropdown after verification
                 self.runtime.press('Escape')
@@ -194,11 +199,11 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     # the Tools menu to verify these: the indicator lives in the
                     # composer, not the tools portal, so a menu re-check never
                     # finds it and aborts a genuinely-engaged Deep Research.
-                    verify_snap = self.runtime.wait_until(
-                        lambda: self._active_snapshot(mode_active_key),
+                    verify_snap = self.wait_for_validation(
+                        mode_active_key,
                         timeout=6.0,
                         interval=0.4,
-                    ) or self.runtime.snapshot()
+                    )
                     verified = self.validation_passes(verify_snap, mode_active_key)
                     evidence_snap = verify_snap
                 else:
@@ -209,7 +214,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
                         time.sleep(0.5)
                         # BUG 8 FIX: menu_snapshot for portal
-                        verify_menu = self.runtime.menu_snapshot()
+                        verify_menu = self.wait_for_validation(
+                            mode_active_key,
+                            timeout=6.0,
+                            interval=0.4,
+                            scope='menu',
+                        )
                         verified = self.validation_passes(verify_menu, mode_active_key)
                         # BUG 10 FIX: close the dropdown after verification
                         self.runtime.press('Escape')
@@ -253,13 +263,23 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                 f'Gemini failed to click tool {tool_name}',
                                 menu=menu_snap.serializable())
                 return False
-            # BUG 10 FIX: close the Tools dropdown after click (no re-verify loop here,
-            # final state is confirmed in the per-tool _active validation below)
+            validation_key = f'{normalized}_active'
             self.runtime.press('Escape')
-            time.sleep(0.3)
-            result.add_step('select_tool', True,
-                            f'Gemini tool click executed for {tool_name}',
-                            snapshot=self.runtime.snapshot().serializable())
+            if validation_key not in self.cfg.get('validation', {}):
+                result.add_step(
+                    'select_tool',
+                    False,
+                    f'Gemini tool {tool_name!r} has no tree validation key {validation_key!r}',
+                    snapshot=self.runtime.snapshot().serializable(),
+                )
+                return False
+            verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
+            verified = self.validation_passes(verify_snap, validation_key)
+            result.add_step('select_tool', verified,
+                            f'Gemini tool click validated for {tool_name}',
+                            snapshot=verify_snap.serializable())
+            if not verified:
+                return False
         return True
 
     def _active_snapshot(self, validation_key: str):
@@ -310,8 +330,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
-            time.sleep(1.2)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                'attach_success',
+                filename=abs_path,
+                timeout=15.0,
+                interval=0.5,
+            )
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,
                             f'Gemini attached {os.path.basename(abs_path)}',
@@ -337,8 +361,11 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
-        time.sleep(0.5)
-        verify_snap = self.runtime.snapshot()
+        verify_snap = self.wait_for_validation(
+            'prompt_ready',
+            timeout=8.0,
+            interval=0.4,
+        )
         verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
         result.add_step('prompt', verified, 'Gemini prompt entered',
                         snapshot=verify_snap.serializable())
@@ -357,6 +384,12 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button, strategy='atspi_first')
+        if not clicked:
+            result.add_step(
+                'send', False, 'Gemini send button click failed',
+                snapshot=snap.serializable(),
+            )
+            return False
         post_send_clicked = False
         # Deep Research is a TWO-STEP flow: the submit first generates a research
         # PLAN (a stop_button shows during plan generation), THEN renders a plan
@@ -389,11 +422,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 return False
             time.sleep(1.5)
         # Confirm the generation (the research run, for DR) actually started.
-        stop_seen = self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('stop_button'),
-            timeout=30,
-            interval=0.6,
-        )
+        send_snap = self.wait_for_validation('send_success', timeout=30, interval=0.6)
+        stop_seen = self.validation_passes(send_snap, 'send_success')
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
@@ -402,13 +432,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         if is_new_session:
             verified = bool(clicked and stop_seen and url_changed)
         else:
-            verified = bool(clicked and stop_seen)
+            verified = bool(clicked and stop_seen and result.session_url_after)
         result.add_step(
             'send', verified,
-            'Gemini send validated by stop/start-research detection',
+            'Gemini send validated by Stop button and URL capture',
             url_before=before,
             url_after=result.session_url_after,
             start_research_clicked=post_send_clicked,
+            stop_seen=stop_seen,
+            url_changed=bool(url_changed),
             snapshot=verify_snap.serializable(),
         )
         return verified

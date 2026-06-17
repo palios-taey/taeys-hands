@@ -169,8 +169,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 snapshot=menu_snap.serializable())
                 return False
             clicked = self.runtime.click(item)
-            time.sleep(0.8)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                f'{requested_model}_active',
+                timeout=6.0,
+                interval=0.4,
+            )
             verified = clicked and self.validation_passes(verify_snap, f'{requested_model}_active')
             result.add_step('select_model', verified, f'Claude model set to {requested_model}',
                             snapshot=verify_snap.serializable())
@@ -258,7 +261,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 self.runtime.press('Escape')
                 time.sleep(0.4)
 
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                mode_active_key,
+                timeout=6.0,
+                interval=0.4,
+            )
             verified = clicked and self.validation_passes(verify_snap, mode_active_key)
             result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}',
                             snapshot=verify_snap.serializable())
@@ -289,12 +296,22 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 snapshot=menu_snap.serializable())
                 return False
             clicked = self.runtime.click(item)
-            time.sleep(0.6)
-            verify_snap = self.runtime.snapshot()
-            result.add_step('select_tool', bool(clicked),
-                            f'Claude tool click executed for {tool_name}',
+            validation_key = f'{normalized}_active'
+            if validation_key not in self.cfg.get('validation', {}):
+                verify_snap = self.runtime.snapshot()
+                result.add_step(
+                    'select_tool',
+                    False,
+                    f'Claude tool {tool_name!r} has no tree validation key {validation_key!r}',
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
+            verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
+            verified = bool(clicked and self.validation_passes(verify_snap, validation_key))
+            result.add_step('select_tool', verified,
+                            f'Claude tool click validated for {tool_name}',
                             snapshot=verify_snap.serializable())
-            if not clicked:
+            if not verified:
                 return False
         return True
 
@@ -348,8 +365,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 self.runtime.type_text(abs_path, delay_ms=5)
             time.sleep(0.3)
             self.runtime.press('Return')
-            time.sleep(4.0)
-            verify_snap = self.runtime.snapshot()
+            verify_snap = self.wait_for_validation(
+                'attach_success',
+                filename=abs_path,
+                timeout=20.0,
+                interval=0.5,
+            )
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,
                             f'Claude attached {os.path.basename(abs_path)}',
@@ -379,8 +400,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
-        time.sleep(0.5)
-        verify_snap = self.runtime.snapshot()
+        verify_snap = self.wait_for_validation(
+            'prompt_ready',
+            timeout=8.0,
+            interval=0.4,
+        )
         # The "Send message" button only appears once the composer holds content,
         # so prompt_ready is the reliable "text landed" signal. Do NOT gate on a
         # char-count read of the composer: Claude's React contenteditable does
@@ -412,10 +436,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button)
-        stop_seen = self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('stop_button'),
-            timeout=30, interval=0.6,
-        )
+        send_snap = self.wait_for_validation('send_success', timeout=30, interval=0.6)
+        stop_seen = self.validation_passes(send_snap, 'send_success')
         # Carry the send-phase stop observation into the shared completion
         # detector: a sub-second Extended Thinking reply may only show the stop
         # button during send, so seeding ever_seen_stop lets it complete on the
@@ -427,12 +449,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         url_changed = result.session_url_after and result.session_url_after != before
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(clicked and (stop_seen or url_changed))
+            verified = bool(clicked and stop_seen and url_changed)
         else:
-            verified = bool(clicked and (stop_seen or url_changed))
+            verified = bool(clicked and stop_seen and result.session_url_after)
         result.add_step(
-            'send', verified, 'Claude send validated by stop button',
+            'send', verified, 'Claude send validated by Stop button and URL capture',
             url_before=before, url_after=result.session_url_after,
+            stop_seen=stop_seen, url_changed=bool(url_changed),
             snapshot=verify_snap.serializable(),
         )
         return verified
