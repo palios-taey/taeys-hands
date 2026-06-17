@@ -6,7 +6,7 @@ import time
 from core import input as inp
 from core.interact import atspi_click
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
+from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
 
 try:
     import gi
@@ -864,21 +864,21 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         before = result.session_url_before
-        snap = self.runtime.snapshot()
-        send_button = self.find_last(snap, 'submit_button')
+        snap, send_button, submit_scope = self._find_submit_button_for_send()
         if send_button:
-            clicked = self.runtime.click(send_button)
+            click_returned = self.runtime.click(send_button)
         else:
             result.add_step(
                 'send', False,
                 'Perplexity submit button not found',
+                submit_scope=submit_scope,
                 snapshot=snap.serializable(),
             )
             return False
 
         def _send_confirmed() -> bool:
             s = self.runtime.snapshot()
-            return s.has('stop_button') or s.has('copy_button')
+            return s.has('stop_button')
 
         send_timeout = float(self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 60))
         stop_seen = self.runtime.wait_until(_send_confirmed, timeout=send_timeout, interval=0.6)
@@ -895,17 +895,36 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         url_changed = settled_url and settled_url != before
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(clicked and stop_seen and url_changed)
+            verified = bool(stop_seen and url_changed)
         else:
-            verified = bool(clicked and stop_seen)
+            verified = bool(stop_seen and settled_url)
+        msg = (
+            'Perplexity send validated by Stop button appearance and URL capture'
+            if verified else
+            'Perplexity send failed validation: Stop button did not appear or URL was not captured'
+        )
         result.add_step(
             'send', verified,
-            'Perplexity send validated by stop/copy button',
+            msg,
             url_before=before,
             url_after=settled_url,
+            submit_scope=submit_scope,
+            click_returned=click_returned,
+            stop_seen=bool(stop_seen),
             snapshot=verify_snap.serializable(),
         )
         return verified
+
+    def _find_submit_button_for_send(self) -> tuple[Snapshot, ElementRef | None, str]:
+        snap = self.runtime.snapshot()
+        send_button = self.find_last(snap, 'submit_button')
+        if send_button:
+            return snap, send_button, 'document'
+        app_root_snap = self.runtime.menu_snapshot()
+        send_button = self.find_last(app_root_snap, 'submit_button')
+        if send_button:
+            return app_root_snap, send_button, 'app_root'
+        return app_root_snap, None, 'not_found'
 
     # ------------------------------------------------------------------
     # Monitor generation — inherited from BaseConsultationDriver (the shared
