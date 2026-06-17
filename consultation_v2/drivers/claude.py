@@ -67,11 +67,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
     def _all_snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
         elements: list[ElementRef] = []
-        for items in snapshot.mapped.values():
+        for items in getattr(snapshot, 'mapped', {}).values():
             elements.extend(items)
-        elements.extend(snapshot.unknown)
-        elements.extend(snapshot.sidebar)
-        elements.extend(snapshot.menu_items)
+        elements.extend(getattr(snapshot, 'unknown', []) or [])
+        elements.extend(getattr(snapshot, 'sidebar', []) or [])
+        elements.extend(getattr(snapshot, 'menu_items', []) or [])
         return elements
 
     def _find_claude_model_selector(self, snapshot: Snapshot) -> ElementRef | None:
@@ -88,21 +88,27 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         index = structural.get('index')
 
         parent = self.find_first(snapshot, parent_key)
-        if not parent or parent.x is None or parent.y is None:
+        parent_x = getattr(parent, 'x', None)
+        parent_y = getattr(parent, 'y', None)
+        parent_name = getattr(parent, 'name', None)
+        if not parent or parent_x is None or parent_y is None:
             return None
         candidates = []
         for element in self._all_snapshot_elements(snapshot):
-            if element.role.lower() != expected_role:
+            role = str(getattr(element, 'role', '') or '').strip().lower()
+            if role != expected_role:
                 continue
-            if element.name == parent.name:
+            if getattr(element, 'name', None) == parent_name:
                 continue
-            if element.x is None or element.y is None:
+            element_x = getattr(element, 'x', None)
+            element_y = getattr(element, 'y', None)
+            if element_x is None or element_y is None:
                 continue
-            if abs(int(element.y) - int(parent.y)) > 24:
+            if abs(int(element_y) - int(parent_y)) > 24:
                 continue
-            if int(element.x) <= int(parent.x):
+            if int(element_x) <= int(parent_x):
                 continue
-            states = {state.lower() for state in element.states}
+            states = {str(state).lower() for state in (getattr(element, 'states', None) or [])}
             if states and 'enabled' not in states:
                 continue
             candidates.append(element)
@@ -163,7 +169,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return None
 
         matched = self.runtime.wait_until(_menu_opened, timeout=8, interval=0.4)
-        if isinstance(matched, Snapshot):
+        if matched:
             return matched
         menu_snap = last_snapshot or self.runtime.menu_snapshot()
         result.add_step(

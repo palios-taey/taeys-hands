@@ -9,8 +9,8 @@ from consultation_v2.drivers.perplexity import PerplexityConsultationDriver
 from consultation_v2.types import ConsultationRequest
 
 
-def _request(platform: str, mode: str) -> ConsultationRequest:
-    return ConsultationRequest(platform=platform, message='hello', mode=mode)
+def _request(platform: str, mode: str, model: str | None = None) -> ConsultationRequest:
+    return ConsultationRequest(platform=platform, message='hello', mode=mode, model=model)
 
 
 def _snapshot() -> MagicMock:
@@ -87,18 +87,32 @@ def test_perplexity_prompt_ready_gates_on_input_entry_not_submit_button() -> Non
 def test_gemini_deep_think_verifies_active_pill_from_document_snapshot() -> None:
     driver = GeminiConsultationDriver()
     driver.runtime = MagicMock()
-    initial_snap = _snapshot()
+    initial_model_snap = _snapshot()
+    verify_model_root = _snapshot()
+    model_evidence_snap = _snapshot()
+    mode_snap = _snapshot()
     menu_snap = _snapshot()
     verify_snap = _snapshot()
-    driver.runtime.snapshot.side_effect = [initial_snap, verify_snap, verify_snap]
+    driver.runtime.snapshot.side_effect = [
+        initial_model_snap,
+        verify_model_root,
+        model_evidence_snap,
+        mode_snap,
+        verify_snap,
+    ]
 
+    mode_picker = MagicMock()
     tools_button = MagicMock()
     tools_button.serializable.return_value = {'name': 'tools'}
+    model_item = MagicMock()
+    model_item.serializable.return_value = {'name': 'Pro'}
     item = MagicMock()
     item.serializable.return_value = {'name': 'Deep think'}
 
     def find_first(snapshot, key):
         mapping = {
+            'mode_picker': mode_picker,
+            'mode_pro': model_item,
             'tools_button': tools_button,
             'tool_deep_think': item,
             'more_tools': None,
@@ -110,12 +124,14 @@ def test_gemini_deep_think_verifies_active_pill_from_document_snapshot() -> None
     driver.runtime.menu_snapshot.return_value = menu_snap
 
     def wait_until(predicate, timeout, interval):
-        return verify_snap
+        return predicate()
 
     driver.runtime.wait_until.side_effect = wait_until
 
     def validation(snapshot, key, filename=None):
-        if snapshot is initial_snap and key == 'deep_think_active':
+        if snapshot is menu_snap and key == 'pro_active':
+            return True
+        if snapshot is mode_snap and key == 'deep_think_active':
             return False
         return snapshot is verify_snap and key == 'deep_think_active'
 
@@ -123,7 +139,7 @@ def test_gemini_deep_think_verifies_active_pill_from_document_snapshot() -> None
     result = driver.result(_request('gemini', 'deep_think'))
 
     assert driver.select_model_mode_tools(result.request, result) is True
-    driver.runtime.menu_snapshot.assert_called_once()
+    assert driver.runtime.menu_snapshot.call_count == 3
     assert result.steps[-1].success is True
     assert result.steps[-1].step == 'select_mode'
 
@@ -132,10 +148,21 @@ def test_claude_extended_thinking_hovers_effort_menu_and_selects_extra() -> None
     driver = ClaudeConsultationDriver()
     driver.runtime = MagicMock()
     initial_snap = _snapshot()
+    ready_snap = _snapshot()
+    open_snap = _snapshot()
+    effort_open_snap = _snapshot()
     menu_snap = _snapshot()
     submenu_snap = _snapshot()
     verify_snap = _snapshot()
-    driver.runtime.snapshot.side_effect = [initial_snap, verify_snap]
+    driver.runtime.snapshot.side_effect = [
+        initial_snap,
+        ready_snap,
+        open_snap,
+        effort_open_snap,
+        verify_snap,
+    ]
+    menu_snap.has.side_effect = lambda key: key in {'model_opus', 'effort_menu'}
+    submenu_snap.has.side_effect = lambda key: key == 'effort_extra'
     driver.runtime.menu_snapshot.side_effect = [menu_snap, submenu_snap]
 
     selector = MagicMock()
@@ -148,9 +175,15 @@ def test_claude_extended_thinking_hovers_effort_menu_and_selects_extra() -> None
         'effort_menu': effort_menu,
         'effort_extra': extra,
     }.get(key))
-    driver.runtime.click.side_effect = [True, True, True]
+    driver.runtime.click.side_effect = [True, True, True, True]
     driver.runtime.hover.return_value = True
     driver.runtime.press.return_value = True
+    driver.runtime.menu_snapshot.side_effect = [menu_snap, menu_snap, submenu_snap, submenu_snap]
+
+    def wait_until(predicate, timeout, interval):
+        return predicate()
+
+    driver.runtime.wait_until.side_effect = wait_until
 
     def validation(snapshot, key, filename=None):
         return snapshot is verify_snap and key == 'extended_thinking_active'
@@ -160,7 +193,7 @@ def test_claude_extended_thinking_hovers_effort_menu_and_selects_extra() -> None
 
     assert driver.select_model_mode_tools(result.request, result) is True
     driver.runtime.hover.assert_called_once_with(effort_menu)
-    assert driver.runtime.click.call_count == 3
+    assert driver.runtime.click.call_count == 4
     assert result.steps[-1].success is True
     assert result.steps[-1].step == 'select_mode'
 

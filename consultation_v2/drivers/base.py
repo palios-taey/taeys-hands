@@ -55,10 +55,11 @@ class BaseConsultationDriver(ABC):
         if indicators:
             checked_tree = True
             all_elements: List[ElementRef] = []
-            for items in snapshot.mapped.values():
+            for items in getattr(snapshot, 'mapped', {}).values():
                 all_elements.extend(items)
-            all_elements.extend(snapshot.unknown)
-            all_elements.extend(snapshot.sidebar)
+            all_elements.extend(getattr(snapshot, 'unknown', []) or [])
+            all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
+            all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
 
             found = False
             for indicator in indicators:
@@ -87,13 +88,29 @@ class BaseConsultationDriver(ABC):
                 expected_name = os.path.basename(filename)
                 allowed_roles = {str(role) for role in roles if isinstance(role, str) and role}
                 all_elements: List[ElementRef] = []
-                for items in snapshot.mapped.values():
+                for items in getattr(snapshot, 'mapped', {}).values():
                     all_elements.extend(items)
-                all_elements.extend(snapshot.unknown)
-                all_elements.extend(snapshot.sidebar)
-                all_elements.extend(snapshot.menu_items)
+                all_elements.extend(getattr(snapshot, 'unknown', []) or [])
+                all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
+                all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
+
+                def chip_name_matches(display_name: str) -> bool:
+                    if display_name == expected_name:
+                        return True
+                    displayed_file = display_name.split()[0] if display_name else ''
+                    if '...' not in displayed_file:
+                        return False
+                    prefix, suffix = displayed_file.split('...', 1)
+                    return expected_name.startswith(prefix) and expected_name.endswith(suffix)
+
+                def element_value(element: ElementRef | dict, key: str) -> str:
+                    if isinstance(element, dict):
+                        return str(element.get(key) or '')
+                    return str(getattr(element, key, '') or '')
+
                 if not any(
-                    element.name == expected_name and element.role in allowed_roles
+                    chip_name_matches(element_value(element, 'name'))
+                    and element_value(element, 'role') in allowed_roles
                     for element in all_elements
                 ):
                     return False
@@ -592,7 +609,7 @@ class BaseConsultationDriver(ABC):
         OBSERVATION carried forward, not a content fallback).
         """
         detector_mode = (
-            (mode if mode is not None else request.mode) or ''
+            (mode if mode is not None else getattr(request, 'mode', None)) or ''
         ).strip().lower()
         detector = CompletionDetector(mode=detector_mode)
         if seed_stop_seen:

@@ -131,7 +131,7 @@ tree:
       structural:
         parent: toggle_menu
         role: push button
-        ordinal: first
+        ordinal: last
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --
     model_opus:

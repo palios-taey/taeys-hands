@@ -14,15 +14,8 @@ DRIVER_FILES = [
     DRIVER_DIR / 'perplexity.py',
 ]
 REQUIRED_METHODS = {
-    'run',
-    'select_model_mode_tools',
-    'attach_files',
-    'enter_prompt',
-    'send_prompt',
-    'monitor_generation',
-    'extract_primary',
-    'extract_additional',
-    'store_in_neo4j',
+    'setup_and_send',
+    'monitor_and_extract',
 }
 BANNED_IMPORT_FRAGMENTS = {
     'tools.attach',
@@ -55,6 +48,10 @@ def _class_methods(tree: ast.AST) -> dict[str, set[str]]:
 
 
 def test_each_driver_is_self_contained() -> None:
+    base_tree = ast.parse((DRIVER_DIR / 'base.py').read_text())
+    base_methods = _class_methods(base_tree).get('BaseConsultationDriver', set())
+    assert 'run' in base_methods
+    assert 'monitor_generation' in base_methods
     for path in DRIVER_FILES:
         tree = ast.parse(path.read_text())
         imports = _import_targets(tree)

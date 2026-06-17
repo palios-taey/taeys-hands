@@ -16,17 +16,25 @@ def _request(message: str = 'hello world') -> ConsultationRequest:
     return ConsultationRequest(platform='perplexity', message=message)
 
 
-def _snapshot() -> MagicMock:
+def _snapshot(elements: list[object] | None = None) -> MagicMock:
     snap = MagicMock()
+    snap.mapped = {'main': list(elements or [])}
+    snap.unknown = []
+    snap.sidebar = []
+    snap.menu_items = []
     snap.serializable.return_value = {'ok': True}
     return snap
+
+
+def _stop_button() -> dict[str, object]:
+    return {'name': 'Stop response', 'role': 'push button', 'states': []}
 
 
 def test_perplexity_send_prompt_uses_last_submit_button() -> None:
     driver = PerplexityConsultationDriver()
     driver.runtime = MagicMock()
     first_snap = _snapshot()
-    confirm_snap = _snapshot()
+    confirm_snap = _snapshot([_stop_button()])
     driver.runtime.snapshot.side_effect = [first_snap, confirm_snap]
     driver.runtime.wait_until.return_value = True
     driver.runtime.current_url.return_value = 'https://example.test/thread'
@@ -50,7 +58,7 @@ def test_perplexity_send_prompt_uses_app_root_submit_when_document_scope_misses(
     driver.runtime = MagicMock()
     document_snap = _snapshot()
     app_root_snap = _snapshot()
-    confirm_snap = _snapshot()
+    confirm_snap = _snapshot([_stop_button()])
     driver.runtime.snapshot.side_effect = [document_snap, confirm_snap]
     driver.runtime.menu_snapshot.return_value = app_root_snap
     driver.runtime.wait_until.return_value = True

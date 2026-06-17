@@ -903,7 +903,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             else:
                 break
         result.session_url_after = settled_url
-        verify_snap = self.runtime.snapshot()
+        verify_snap = send_snap
         url_changed = settled_url and settled_url != before
         is_new_session = not request.session_url
         if is_new_session:

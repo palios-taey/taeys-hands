@@ -10,6 +10,7 @@ from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
 from consultation_v2.drivers.gemini import GeminiConsultationDriver
 from consultation_v2.drivers.perplexity import PerplexityConsultationDriver
+from consultation_v2.types import ConsultationRequest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,9 @@ class FakeRuntime:
     def snapshot(self) -> FakeSnapshot:
         return self.snapshots[self.index]
 
+    def current_url(self) -> str:
+        return 'https://example.test/thread'
+
     def wait_until(self, poll, timeout: float, interval: float) -> bool:  # noqa: ANN001, ARG002, ARG003
         for idx in range(len(self.snapshots)):
             self.index = idx
@@ -64,6 +68,7 @@ class FakeRuntime:
 class FakeResult:
     def __init__(self) -> None:
         self.steps: list[tuple[str, bool, str, dict[str, object]]] = []
+        self.session_url_after: str | None = None
 
     def add_step(self, name: str, verified: bool, message: str, **payload: object) -> None:
         self.steps.append((name, verified, message, payload))
@@ -138,7 +143,7 @@ def test_monitor_generation_completes_without_copy_button(driver_cls, platform: 
     ])
 
     result = FakeResult()
-    request = SimpleNamespace(timeout=3)
+    request = ConsultationRequest(platform=platform, message='hello', timeout=3)
 
     assert driver.monitor_generation(request, result) is True
     assert result.steps[-1][0] == 'monitor'

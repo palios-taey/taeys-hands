@@ -14,7 +14,7 @@ def test_consultation_v2_chatgpt_pro_extended_uses_live_model_selector_signal() 
     validation = data['validation']
 
     assert element_map['model_selector'] == {
-        'name': 'Pro Extended',
+        'names_any_of': ['Instant', 'Medium', 'High', 'Extra High', 'Pro Extended'],
         'role': 'push button',
     }
     assert element_map['pro_indicator'] == {

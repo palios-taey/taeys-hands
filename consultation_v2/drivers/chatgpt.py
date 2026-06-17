@@ -538,6 +538,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         first_probe_timeout = min(12.0, full_timeout)
 
         for attempt in (1, 2):
+            send_snap = None
             focus_node = self._focus_composer()
             if focus_node is None:
                 attempts.append({'attempt': attempt, 'focused': False, 'pressed': False})
@@ -562,10 +563,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             )
             result.session_url_after = after or self.runtime.current_url() or before
             url_changed = bool(result.session_url_after and result.session_url_after != before)
-            prompt_still_staged = self.validation_passes(
-                self.runtime.snapshot(),
-                'prompt_ready',
-            )
+            prompt_still_staged = False
+            if attempt == 1 and not stop_seen and not url_changed:
+                prompt_still_staged = self.validation_passes(
+                    self.runtime.snapshot(),
+                    'prompt_ready',
+                )
             verified = bool(pressed and stop_seen and (request.session_url or url_changed))
             attempts.append({
                 'attempt': attempt,
@@ -576,7 +579,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'prompt_still_staged': prompt_still_staged,
             })
             if verified:
-                verify_snap = self.runtime.snapshot()
+                verify_snap = send_snap
                 result.add_step(
                     'send', True,
                     'ChatGPT send validated by Stop button and URL capture',
@@ -597,7 +600,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 continue
             break
 
-        verify_snap = self.runtime.snapshot()
+        verify_snap = send_snap or self.runtime.snapshot()
         result.add_step(
             'send', False,
             'ChatGPT send failed validation after focus+Enter retry gate',
