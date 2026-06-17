@@ -33,36 +33,48 @@ class GrokConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
     # Orchestration
     # ------------------------------------------------------------------
-    def run(self, request: ConsultationRequest) -> ConsultationResult:
-        result = self.result(request)
+    # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
+    # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
+    # releases it before monitor_and_extract so monitoring runs concurrently.
 
+    def setup_and_send(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> bool:
+        """LOCKED phase (FLOW §10): navigate → mode → attach → prompt →
+        guarded send + monitor registration."""
         if not self.runtime.switch():
             result.add_step('navigate', False, 'Could not switch to Grok window')
-            return result
+            return False
         result.session_url_before = self.runtime.current_url()
 
         if not self.navigate(request, result):
-            return result
+            return False
         if not self.select_mode(request, result):
-            return result
+            return False
         if not self.attach_files(request, result):
-            return result
+            return False
         if not self.enter_prompt(request, result):
-            return result
+            return False
         # Idempotent send seam (FLOW §8): guarded_send reads durable run-state
         # first and RESUMES a landed send instead of re-sending; otherwise it
         # performs the real send via self.send_prompt and checkpoints submitted.
         if not self.guarded_send(request, result):
-            return result
-        if not self.wait_for_completion(request, result):
-            return result
-        if not self.extract_response(request, result):
-            return result
-        if not self.store_result(request, result):
-            return result
+            return False
+        return True
 
+    def monitor_and_extract(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> None:
+        """UNLOCKED phase (FLOW §10): wait for completion → extract → store.
+        Display lock is already released so a concurrent consultation can set
+        up/send here."""
+        if not self.wait_for_completion(request, result):
+            return
+        if not self.extract_response(request, result):
+            return
+        if not self.store_result(request, result):
+            return
         result.ok = True
-        return result
 
     # ------------------------------------------------------------------
     # Step 1 — navigate

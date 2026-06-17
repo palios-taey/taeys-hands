@@ -140,9 +140,15 @@ REQUIRED_STOP_CONDITION_IDS = {
 }
 
 BASELINE_PY_DEBT = {
-    ("consultation_v2/drivers/base.py", 41, "py-forbidden-key-url_contains"),
-    ("consultation_v2/drivers/base.py", 42, "py-forbidden-key-url_contains"),
-    ("consultation_v2/drivers/base.py", 84, "py-file-chip-substring"),
+    # base.py debt shifted +3 lines by p2-dispatch-lock (3 added imports +
+    # the _display_dispatch_lock block precede validation_passes). The debt
+    # itself is UNCHANGED — same url_contains/file-chip lines in
+    # validation_passes, still p1 baseline (slated for p5 platform migration);
+    # only its line numbers moved. Re-pinned to the new true lines so the gate
+    # keeps recognizing it as known debt rather than NEW.
+    ("consultation_v2/drivers/base.py", 44, "py-forbidden-key-url_contains"),
+    ("consultation_v2/drivers/base.py", 45, "py-forbidden-key-url_contains"),
+    ("consultation_v2/drivers/base.py", 87, "py-file-chip-substring"),
     ("consultation_v2/snapshot.py", 57, "py-forbidden-key-name_contains"),
     ("consultation_v2/snapshot.py", 58, "py-forbidden-key-name_contains"),
     ("consultation_v2/snapshot.py", 59, "py-file-chip-substring"),

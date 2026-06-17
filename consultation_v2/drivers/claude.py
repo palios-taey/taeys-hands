@@ -80,13 +80,20 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return None
         return max(candidates, key=lambda element: int(element.x or 0))
 
-    def run(self, request: ConsultationRequest) -> ConsultationResult:
-        result = self.result(request)
+    # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
+    # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
+    # releases it before monitor_and_extract so monitoring runs concurrently.
+
+    def setup_and_send(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> bool:
+        """LOCKED phase (FLOW §10): navigate → mode → attach → prompt →
+        guarded send + monitor registration."""
         urls = self.cfg.get('urls', {})
         target_url = request.session_url or urls.get('fresh')
         if not self.runtime.switch():
             result.add_step('navigate', False, 'Could not switch to Claude tab')
-            return result
+            return False
         result.session_url_before = self.runtime.current_url()
         if target_url:
             navigated = self.runtime.navigate(
@@ -99,28 +106,34 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 target_url=target_url, snapshot=snap.serializable(),
             )
             if not navigated:
-                return result
+                return False
         if not self.select_model_mode_tools(request, result):
-            return result
+            return False
         if not self.attach_files(request, result):
-            return result
+            return False
         if not self.enter_prompt(request, result):
-            return result
+            return False
         # Idempotent send seam (FLOW §8): guarded_send reads durable run-state
         # first and RESUMES a landed send instead of re-sending; otherwise it
         # performs the real send via self.send_prompt and checkpoints submitted.
         if not self.guarded_send(request, result):
-            return result
+            return False
+        return True
+
+    def monitor_and_extract(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> None:
+        """UNLOCKED phase (FLOW §10): monitor → extract → store. Display lock is
+        already released so a concurrent consultation can set up/send here."""
         if not self.monitor_generation(request, result):
-            return result
+            return
         if not self.extract_primary(request, result):
-            return result
+            return
         if not self.extract_additional(request, result):
-            return result
+            return
         if not self.store_in_neo4j(request, result):
-            return result
+            return
         result.ok = True
-        return result
 
     # ------------------------------------------------------------------
     # Model / mode / tool selection

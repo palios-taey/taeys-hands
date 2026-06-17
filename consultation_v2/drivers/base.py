@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from abc import ABC, abstractmethod
-from typing import Iterable, List, Optional
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Iterable, Iterator, List, Optional
 
 from consultation_v2.completion import (
     COMPLETE,
@@ -125,6 +128,78 @@ class BaseConsultationDriver(ABC):
 
     def deregister_monitor_session(self, monitor_id: str) -> bool:
         return primitives.deregister_monitor_session(monitor_id)
+
+    # ------------------------------------------------------------------
+    # Per-display setup/send SERIALIZATION (FLOW §10 concurrency model)
+    # ------------------------------------------------------------------
+    #
+    # FLOW §10 splits the lifecycle into a SEQUENTIAL region and a CONCURRENT
+    # region on a per-display basis:
+    #
+    #   Sequential (one consultation at a time PER DISPLAY): navigate, select
+    #     model/mode/tools/connectors, attach, paste prompt, send + register.
+    #     Two dispatches racing the same Firefox/AT-SPI bus would interleave
+    #     clicks/menus on one browser window and corrupt each other's setup.
+    #   Concurrent (overlapping across consultations): registered monitor
+    #     sessions, stop-button polling, completion notification, extraction.
+    #     Monitoring is passive observation; holding the display lock through it
+    #     would needlessly serialize generations and defeat the contract's
+    #     "later sends proceed while earlier responses are monitored" invariant.
+    #
+    # The serialization unit is the DISPLAY (one physical Firefox window), so the
+    # mutex is the EXISTING DISPLAY-scoped plan lock primitive
+    # (primitives.acquire/release_display_lock, key taey:plan_active:{DISPLAY} —
+    # the exact key monitor/central.py::_plan_active reads to decide whether it
+    # may cycle a tab). No new key scheme; no platform string (the lock is keyed
+    # by DISPLAY, never by platform).
+    #
+    # The template run() below acquires the lock for the WHOLE setup+send+register
+    # phase and RELEASES it the instant guarded_send hands the monitor off (or
+    # any setup/send step fails), so monitor/extract run UNLOCKED.
+
+    def _display(self) -> str:
+        return os.environ.get('DISPLAY', ':0')
+
+    @contextmanager
+    def _display_dispatch_lock(self, request: ConsultationRequest) -> Iterator[bool]:
+        """Hold the DISPLAY-scoped dispatch lock for the duration of the
+        ``with`` block (the setup+send+register region, FLOW §10).
+
+        Yields ``True`` if the lock was acquired (this dispatch owns the display
+        and may drive the browser), ``False`` if another consultation already
+        holds it (the caller must NOT proceed — a busy display is a loud failure,
+        not a silent shared-browser race).
+
+        RELEASE-SAFE: the release runs in a ``finally`` so a failed/halted/raising
+        setup or send still frees the display — no deadlock can leave a DISPLAY
+        permanently locked. The lock is released ONLY if THIS context acquired it,
+        so a False (already-held-by-another) exit never deletes the other
+        dispatch's lock.
+
+        This is correct resource discipline, NOT an error swallow: when the
+        locked block raises, the lock is released in ``finally`` and the
+        exception propagates out of the ``with`` (first-error full-stop)."""
+        payload = {
+            'platform': self.platform,
+            'display': self._display(),
+            'request_id': request.request_id(),
+            'locked_at': datetime.now(timezone.utc).isoformat(),
+        }
+        # setex with no NX is last-writer-wins, so guard against an already-held
+        # lock explicitly: if another consultation owns this display, do NOT
+        # acquire (and do NOT clobber its payload) — yield False so the caller
+        # stops. A stale lock would mean a prior dispatch crashed mid-setup
+        # without releasing; that is a loud halt condition for the operator to
+        # clear, never an auto-steal.
+        if primitives.display_lock_held():
+            yield False
+            return
+        acquired = primitives.acquire_display_lock(payload=payload)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                primitives.release_display_lock()
 
     # ------------------------------------------------------------------
     # Run-state idempotency (FLOW §8, CONSULTATION_CONTRACT §10)
@@ -463,6 +538,72 @@ class BaseConsultationDriver(ABC):
             )
         return verified
 
-    @abstractmethod
+    # ------------------------------------------------------------------
+    # Lifecycle template (FLOW §10) — the lock seam lives HERE, once, so it
+    # is identical for all five drivers and cannot drift per-platform.
+    # ------------------------------------------------------------------
+
     def run(self, request: ConsultationRequest) -> ConsultationResult:
+        """Two-phase consultation lifecycle with per-display serialization.
+
+        Phase A (LOCKED, sequential per display): ``setup_and_send`` — switch,
+        navigate, select model/mode/tools/connectors, attach, enter prompt, and
+        the guarded (idempotent) send + monitor registration. Held under the
+        DISPLAY-scoped dispatch lock so two consultations never drive the same
+        Firefox/AT-SPI bus at once.
+
+        Phase B (UNLOCKED, concurrent): ``monitor_and_extract`` — poll for the
+        Stop-gone completion, extract, store. Runs with the display lock ALREADY
+        RELEASED so the next consultation can set up/send on this display while
+        this one's response is monitored concurrently (FLOW §10 invariant).
+
+        The lock is released at the EXACT moment setup_and_send returns (the
+        send-registered handoff) AND on any setup/send failure or exception
+        (release-safe ``finally`` in ``_display_dispatch_lock``)."""
+        result = self.result(request)
+        with self._display_dispatch_lock(request) as owns_display:
+            if not owns_display:
+                # Another consultation holds this display's dispatch lock. Per
+                # FLOW §10 setup/send is sequential per display — do NOT race the
+                # shared browser. Loud failure, not a silent skip or a wait-loop.
+                result.add_step(
+                    'dispatch_lock', False,
+                    f'{self.platform} display {self._display()} dispatch lock is '
+                    f'already held by another consultation — setup/send is '
+                    f'sequential per display (FLOW §10); not racing the shared '
+                    f'browser/AT-SPI bus',
+                    display=self._display(),
+                )
+                return result
+            # --- LOCKED region: setup + send + monitor registration ----------
+            if not self.setup_and_send(request, result):
+                # Setup/send failed; lock released by the context manager's
+                # finally as the with-block exits. No monitor handoff happened.
+                return result
+        # --- UNLOCKED region: monitor + extract + store ----------------------
+        # Reached only when setup_and_send returned True (send registered, monitor
+        # handed off). The display lock is now RELEASED (with-block exited), so a
+        # concurrent consultation may set up/send on this display while we monitor.
+        self.monitor_and_extract(request, result)
+        return result
+
+    @abstractmethod
+    def setup_and_send(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> bool:
+        """LOCKED phase (FLOW §10): switch/navigate/select/attach/prompt then the
+        guarded send + monitor registration. Return True iff the send is proven
+        and the monitor session is registered (the handoff point); False on any
+        setup/send failure (the step audit records why). Runs while THIS driver
+        holds the DISPLAY-scoped dispatch lock — must not block on monitoring."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def monitor_and_extract(
+        self, request: ConsultationRequest, result: ConsultationResult,
+    ) -> None:
+        """UNLOCKED phase (FLOW §10): poll for completion, extract, store, set
+        result.ok. Runs AFTER the display lock is released so other consultations
+        can set up/send on this display concurrently. Sets result.ok on success;
+        leaves it False (with a recorded step) on any monitor/extract failure."""
         raise NotImplementedError
