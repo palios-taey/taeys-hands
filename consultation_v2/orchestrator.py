@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import replace
 
+from consultation_v2 import primitives
 from consultation_v2.identity import consolidate_attachments
 from consultation_v2.notify import push_notification
 from consultation_v2.types import ConsultationRequest, ConsultationResult
@@ -37,17 +38,45 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         raise ValueError(f'Unsupported platform: {request.platform}')
 
     # --- Phase 1: Identity consolidation ---
-    consolidated_path = None
-    try:
-        consolidated_path = consolidate_attachments(
-            platform=request.platform,
-            caller_attachments=list(request.attachments),
-        )
-    except Exception as exc:
-        logger.error("Identity consolidation failed: %s", exc)
-
-    if consolidated_path:
-        request = replace(request, attachments=[consolidated_path])
+    # FAIL-LOUD (FLOW §4 / CONSULTATION_CONTRACT): a missing/unreadable
+    # FAMILY_KERNEL.md or the required platform IDENTITY file raises
+    # IdentityError out of consolidate_attachments. We do NOT catch it — a
+    # consultation without complete identity must HALT, never proceed on a
+    # partial/empty packet. consolidate_attachments now returns a
+    # ConsolidatedPackage (always complete) or raises; there is no None case.
+    package = consolidate_attachments(
+        platform=request.platform,
+        caller_attachments=list(request.attachments),
+    )
+    consolidated_path = package.path
+    # Provenance survives consolidation: stamp the caller-attachment path+hashes
+    # onto the request (FLOW §3) and write them to durable run-state via the
+    # shared-primitive surface so the audit trail records what the caller sent
+    # even though the browser only receives the single merged package.
+    request = replace(
+        request,
+        attachments=[consolidated_path],
+        caller_attachment_provenance=list(package.caller_provenance),
+    )
+    if package.caller_provenance:
+        try:
+            primitives.write_run_state(
+                request_id=consolidated_path,
+                state={
+                    'platform': request.platform,
+                    'attachment_hashes': [
+                        prov.serializable() for prov in package.caller_provenance
+                    ],
+                },
+            )
+        except Exception as exc:
+            # Run-state is a durable convenience checkpoint here, not the
+            # provenance system of record (that lives on the request +, on
+            # success, the Neo4j plan/message records). Redis being down must
+            # not abort a consultation whose identity packet is already valid —
+            # log loudly and continue. This is NOT a swallow of the fail-loud
+            # identity check above; that path already raised if it had to.
+            logger.error("Run-state attachment-hash checkpoint failed: %s", exc)
 
     # --- Phase 2: Create Plan in Neo4j ---
     plan_id = None

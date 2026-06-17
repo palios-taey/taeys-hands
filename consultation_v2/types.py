@@ -5,6 +5,34 @@ from typing import Any, Dict, List, Optional
 
 
 @dataclass(slots=True)
+class AttachmentProvenance:
+    """Provenance of one caller-supplied attachment, captured BEFORE the file is
+    merged into the consolidated identity package (FLOW §3 / §8).
+
+    ``path`` is the original caller source path; ``sha256`` is the hex digest of
+    that file's bytes at consolidation time. This survives consolidation so the
+    durable run-state / storage layer can record what the caller actually sent
+    even though the browser only ever receives the single merged package."""
+    path: str
+    sha256: str
+
+    def serializable(self) -> Dict[str, Any]:
+        return {'path': self.path, 'sha256': self.sha256}
+
+
+@dataclass(slots=True)
+class ConsolidatedPackage:
+    """Result of identity+attachment consolidation (FLOW §3, §4).
+
+    ``path`` is the single merged package the browser is sent.
+    ``caller_provenance`` is the per-caller-attachment path+hash list captured
+    before the merge. consolidate_attachments either returns a complete one of
+    these or raises loudly — it never returns a partial/None packet."""
+    path: str
+    caller_provenance: List[AttachmentProvenance] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ConsultationRequest:
     platform: str
     message: str
@@ -20,6 +48,10 @@ class ConsultationRequest:
     session_type: Optional[str] = None
     purpose: Optional[str] = None
     requester: Optional[str] = None
+    # Provenance of caller attachments, captured before consolidation (FLOW §3).
+    # The browser receives only the merged package, but this records the
+    # original caller files + their content hashes so provenance survives.
+    caller_attachment_provenance: List[AttachmentProvenance] = field(default_factory=list)
 
 
 @dataclass(slots=True)
