@@ -17,9 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeElement:
-    def __init__(self, name: str, role: str) -> None:
+    def __init__(self, name: str, role: str, description: str | None = None, text: str | None = None) -> None:
         self.name = name
         self.role = role
+        self.description = description
+        self.text = text
 
     def get(self, key: str, default: object | None = None) -> object | None:
         return getattr(self, key, default)
@@ -103,6 +105,56 @@ def test_file_chip_matches_truncated_taey_package_prefix() -> None:
     )
 
 
+def test_file_chip_matches_full_path_label() -> None:
+    driver = SimpleNamespace(cfg={
+        'validation': {
+            'attach_success': {
+                'file_chip': {
+                    'roles': ['push button'],
+                },
+            },
+        },
+    })
+
+    snapshot = FakeSnapshot(
+        elements=[
+            FakeElement('/tmp/taey_package_perplexity_1760000000.md 49.8 KB', 'push button'),
+        ],
+    )
+
+    assert BaseConsultationDriver.validation_passes(
+        driver,
+        snapshot,
+        'attach_success',
+        filename='/tmp/taey_package_perplexity_1760000000.md',
+    )
+
+
+def test_file_chip_matches_description_backed_section() -> None:
+    driver = SimpleNamespace(cfg={
+        'validation': {
+            'attach_success': {
+                'file_chip': {
+                    'roles': ['section'],
+                },
+            },
+        },
+    })
+
+    snapshot = FakeSnapshot(
+        elements=[
+            FakeElement('', 'section', description='taey_package_gemini_1760000000.md'),
+        ],
+    )
+
+    assert BaseConsultationDriver.validation_passes(
+        driver,
+        snapshot,
+        'attach_success',
+        filename='/tmp/taey_package_gemini_1760000000.md',
+    )
+
+
 def test_validation_passes_supports_names_any_of_exact_alternatives() -> None:
     driver = SimpleNamespace(cfg={
         'validation': {
@@ -150,8 +202,8 @@ def test_monitor_generation_completes_without_copy_button(driver_cls, platform: 
     assert result.steps[-1][1] is True
 
 
-def test_gemini_attach_success_is_action_only() -> None:
-    assert _load_platform('gemini')['validation']['attach_success'] == {}
+def test_gemini_attach_success_uses_description_section_chip() -> None:
+    assert _load_platform('gemini')['validation']['attach_success'] == {'file_chip': {'roles': ['section']}}
 
 
 def test_chatgpt_attach_success_uses_file_chip() -> None:
@@ -161,7 +213,7 @@ def test_chatgpt_attach_success_uses_file_chip() -> None:
 
 def test_perplexity_attach_success_uses_file_chip() -> None:
     validation = _load_platform('perplexity')['validation']['attach_success']
-    assert validation == {'file_chip': {'roles': ['push button']}}
+    assert validation == {'file_chip': {'roles': ['push button', 'section', 'link', 'heading']}}
 
 
 def test_response_complete_is_stop_absent_only() -> None:

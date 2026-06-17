@@ -301,18 +301,40 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                 f'Gemini upload menu trigger missing for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger, strategy='atspi_first'):
-                result.add_step('attach', False,
-                                f'Gemini upload menu trigger click failed for {abs_path}',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.7)
-            # BUG 8 FIX: menu_snapshot for upload portal
+            open_attempts = []
             menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
+            trigger_states = {str(state).lower() for state in (getattr(trigger, 'states', None) or [])}
+            if not upload_item and 'expanded' not in trigger_states:
+                clicked = self.runtime.click(trigger, strategy='atspi_first')
+                open_attempts.append({'strategy': 'atspi_first', 'clicked': bool(clicked)})
+                if not clicked:
+                    result.add_step('attach', False,
+                                    f'Gemini upload menu trigger click failed for {abs_path}',
+                                    snapshot=snap.serializable())
+                    return False
+                menu_snap, upload_item = self.wait_for_key(
+                    'upload_files_item',
+                    timeout=5.0,
+                    interval=0.4,
+                    scope='menu',
+                )
+            if not upload_item and 'expanded' not in trigger_states:
+                retry_snap = self.runtime.snapshot()
+                retry_trigger = self.find_first(retry_snap, 'upload_menu') or trigger
+                clicked = self.runtime.click(retry_trigger, strategy='coordinate_only')
+                open_attempts.append({'strategy': 'coordinate_only', 'clicked': bool(clicked)})
+                if clicked:
+                    menu_snap, upload_item = self.wait_for_key(
+                        'upload_files_item',
+                        timeout=5.0,
+                        interval=0.4,
+                        scope='menu',
+                    )
             if not upload_item:
                 result.add_step('attach', False,
                                 f'Gemini upload item not found for {abs_path}',
+                                open_attempts=open_attempts,
                                 menu=menu_snap.serializable())
                 return False
             if not self.runtime.click(upload_item, strategy='atspi_first'):
@@ -339,7 +361,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
             result.add_step('attach', verified,
                             f'Gemini attached {os.path.basename(abs_path)}',
-                            file=abs_path, snapshot=verify_snap.serializable())
+                            file=abs_path, open_attempts=open_attempts,
+                            snapshot=verify_snap.serializable())
             if not verified:
                 return False
         if not request.attachments:

@@ -85,6 +85,7 @@ class BaseConsultationDriver(ABC):
                 roles = file_chip.get('roles')
                 if not isinstance(roles, list) or not roles:
                     return False
+                expected_path = os.path.abspath(filename)
                 expected_name = os.path.basename(filename)
                 allowed_roles = {str(role) for role in roles if isinstance(role, str) and role}
                 all_elements: List[ElementRef] = []
@@ -95,13 +96,15 @@ class BaseConsultationDriver(ABC):
                 all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
 
                 def chip_name_matches(display_name: str) -> bool:
-                    if display_name == expected_name:
-                        return True
                     displayed_file = display_name.split()[0] if display_name else ''
-                    if '...' not in displayed_file:
-                        return False
-                    prefix, suffix = displayed_file.split('...', 1)
-                    return expected_name.startswith(prefix) and expected_name.endswith(suffix)
+                    for expected in (expected_path, expected_name):
+                        if display_name == expected or displayed_file == expected:
+                            return True
+                        if '...' in displayed_file:
+                            prefix, suffix = displayed_file.split('...', 1)
+                            if expected.startswith(prefix) and expected.endswith(suffix):
+                                return True
+                    return False
 
                 def element_value(element: ElementRef | dict, key: str) -> str:
                     if isinstance(element, dict):
@@ -109,7 +112,10 @@ class BaseConsultationDriver(ABC):
                     return str(getattr(element, key, '') or '')
 
                 if not any(
-                    chip_name_matches(element_value(element, 'name'))
+                    any(
+                        chip_name_matches(element_value(element, field))
+                        for field in ('name', 'description', 'text')
+                    )
                     and element_value(element, 'role') in allowed_roles
                     for element in all_elements
                 ):

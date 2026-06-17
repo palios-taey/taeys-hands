@@ -316,6 +316,9 @@ validation:
     file_chip:
       roles:
       - push button
+      - section
+      - link
+      - heading
   prompt_ready:
     indicators:
     - name: ""
