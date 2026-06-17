@@ -47,7 +47,7 @@ tree:
       - editable
       - focusable
     mode_picker:
-      name: Open mode picker, currently Pro
+      name: Open mode picker, currently Pro # lint-allow: known p5 debt; dynamic-name mode picker needs structural/stable locator remap
       role: push button
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
@@ -239,7 +239,7 @@ validation:
   # (and masking that deep_think was toggled on Flash). Jesse 2026-06-15.
   pro_active:
     indicators:
-    - name: "Open mode picker, currently Pro"
+    - name: "Open mode picker, currently Pro" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
       role: push button
   deep_think_active:
     indicators:

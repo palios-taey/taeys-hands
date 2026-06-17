@@ -122,7 +122,7 @@ tree:
 
     # -- Model selector (label changes with active model; validation only) --
     model_selector:
-      name: "Model: Opus 4.8 Max"
+      name: "Model: Opus 4.8 Max" # lint-allow: known p5 debt; dynamic-name model picker needs structural/stable locator remap
       role: push button
 
     # -- Model / mode menu items (require menu_snapshot after clicking selector) --
@@ -139,7 +139,7 @@ tree:
       name: Fable 5Currently unavailable For your toughest challenges
       role: radio menu item
     effort_menu:
-      name: Effort Max
+      name: Effort Max # lint-allow: known p5 debt; dynamic-name effort menu needs structural/stable locator remap
       role: menu item
       trigger_type: hover
     effort_low:
@@ -226,7 +226,7 @@ validation:
     indicators:
     - name_contains: Copy # lint-allow: known p3 debt; response-complete still uses generic copy indicator pending extract matrix
       role: push button
-    stop_absent: true
+    stop_absent: true # lint-allow: known p5 debt; stop_absent must name the stop_button key
   sonnet_active:
     indicators:
     - name_contains: Sonnet 4.6 # lint-allow: known p1 debt; model-active verification still substring-based pending exact selector remap
@@ -248,5 +248,5 @@ validation:
   # (x=2343 on a 1920-wide display) and cannot be reliably clicked.
   extended_thinking_active:
     indicators:
-    - name: "Model: Opus 4.8 Max"
+    - name: "Model: Opus 4.8 Max" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
       role: push button

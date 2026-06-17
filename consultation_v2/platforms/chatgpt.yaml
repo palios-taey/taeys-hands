@@ -63,7 +63,7 @@ tree:
       # exactly one of these (enumerated-exact set, contract-allowed names_any_of),
       # so it matches regardless of current effort. Clicking it opens the radio
       # menu (Instant/Medium/High/Extra High/Pro Extended → model_* targets).
-      names_any_of: [Instant, Medium, High, Extra High, Pro Extended]
+      names_any_of: [Instant, Medium, High, Extra High, Pro Extended] # lint-allow: known p5 debt; dynamic-name model picker needs structural/stable locator remap
       role: push button
     attach_trigger:
       name: Add files and more
@@ -307,14 +307,14 @@ validation:
   # Driver opens the dropdown, finds the item, then closes — acceptable because
   # best_effort: true means a miss here does not abort the run.
   instant_active:
-    best_effort: true
+    best_effort: true # lint-allow: known p5 debt; model active validation needs mapped persistent exact state
     indicators:
     - name: Instant
       role: menu item
   # thinking_active: No persistent toolbar badge exists for Thinking.
   # Same best_effort + dropdown item approach as instant_active.
   thinking_active:
-    best_effort: true
+    best_effort: true # lint-allow: known p5 debt; mode active validation needs mapped persistent exact state
     indicators:
     - name: Medium
       role: menu item

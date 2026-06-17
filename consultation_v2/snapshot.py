@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 from typing import Any, Dict, Iterable, List, Tuple
 
 from core import atspi
@@ -11,6 +10,20 @@ from .yaml_contract import load_platform_yaml
 
 
 _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
+_FORBIDDEN_MATCHER_KEYS = {
+    'name_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'name_not_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'name_contains_all',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'name_pattern',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'role_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'url_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'title_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'regex',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'matches',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'fuzzy',  # lint-allow: exact-only matcher rejects legacy matcher grammar
+    'substring',
+}
 
 # Firefox browser-chrome container roles. When build_snapshot scans from the app
 # root (ChatGPT portals / doc-not-found fallback), these subtrees are the nav
@@ -30,9 +43,26 @@ def _listify(value: Any) -> List[Any]:
     return [value]
 
 
+def _element_raw(element: Dict[str, Any] | ElementRef) -> Dict[str, Any]:
+    return element.raw if isinstance(element, ElementRef) else element
+
+
+def _element_attributes(element: Dict[str, Any] | ElementRef) -> Dict[str, Any]:
+    raw = _element_raw(element)
+    attributes = raw.get('attributes') or {}
+    return attributes if isinstance(attributes, dict) else {}
+
+
+def _reject_forbidden_matcher_keys(spec: Dict[str, Any]) -> None:
+    found = sorted(key for key in spec if key in _FORBIDDEN_MATCHER_KEYS)
+    if found:
+        raise ValueError(f'Forbidden consultation_v2 matcher key(s): {found}')
+
+
 def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> bool:
     if not spec:
         return False
+    _reject_forbidden_matcher_keys(spec)
     # A `structural:` locator (YAML_SCHEMA §2) matches by POSITION (exact role +
     # exact parent key + index/ordinal), which the flat element matcher cannot
     # evaluate. It is resolved by the per-platform driver against the parent's
@@ -40,45 +70,44 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
     # positively match arbitrary elements here (that would pollute classification).
     if 'structural' in spec:
         return False
-    name = ((element.name if isinstance(element, ElementRef) else element.get('name')) or '').strip()
+    name = (element.name if isinstance(element, ElementRef) else element.get('name')) or ''
     role = (element.role if isinstance(element, ElementRef) else element.get('role')) or ''
     states = set(s.lower() for s in ((element.states if isinstance(element, ElementRef) else element.get('states')) or []))
-    name_lower = name.lower()
-    role_lower = role.lower()
 
-    if 'name' in spec and name_lower != str(spec['name']).strip().lower():
+    if not any(key in spec for key in ('name', 'names_any_of', 'role', 'states_include', 'attributes', 'testid')):
+        return False
+    if 'name' in spec and name != str(spec['name']):
         return False
     if 'names_any_of' in spec:
         candidates = spec['names_any_of']
-        if isinstance(candidates, str):
-            candidates = [candidates]
-        if not any(name_lower == str(candidate).strip().lower() for candidate in _listify(candidates)):
+        if not isinstance(candidates, list):
+            raise ValueError('names_any_of must be a list of exact labels')
+        if not any(name == str(candidate) for candidate in candidates):
             return False
-    if 'name_contains' in spec:
-        probes = [str(item).lower() for item in _listify(spec['name_contains'])]
-        if not any(probe in name_lower for probe in probes):
-            return False
-    if 'name_not_contains' in spec:
-        excluded = [str(item).lower() for item in _listify(spec['name_not_contains'])]
-        if any(probe in name_lower for probe in excluded):
-            return False
-    if 'name_contains_all' in spec:
-        probes = [str(item).lower() for item in _listify(spec['name_contains_all'])]
-        if not all(probe in name_lower for probe in probes):
-            return False
-    if 'name_pattern' in spec:
-        patterns = [str(item).lower() for item in _listify(spec['name_pattern'])]
-        if not any(fnmatch.fnmatch(name_lower, pattern) for pattern in patterns):
-            return False
-    if 'role' in spec and role_lower != str(spec['role']).strip().lower():
+    if 'role' in spec and role != str(spec['role']):
         return False
-    if 'role_contains' in spec:
-        probes = [str(item).lower() for item in _listify(spec['role_contains'])]
-        if not any(probe in role_lower for probe in probes):
-            return False
     if 'states_include' in spec:
         needed = {str(item).lower() for item in _listify(spec['states_include'])}
         if not needed.issubset(states):
+            return False
+    if 'attributes' in spec:
+        expected = spec['attributes']
+        if not isinstance(expected, dict):
+            raise ValueError('attributes matcher must be an exact key/value mapping')
+        attrs = _element_attributes(element)
+        if any(str(attrs.get(key, '')) != str(value) for key, value in expected.items()):
+            return False
+    if 'testid' in spec:
+        raw = _element_raw(element)
+        attrs = _element_attributes(element)
+        expected = str(spec['testid'])
+        candidates = [
+            raw.get('testid'),
+            raw.get('data-testid'),
+            attrs.get('testid'),
+            attrs.get('data-testid'),
+        ]
+        if not any(str(candidate) == expected for candidate in candidates if candidate is not None):
             return False
     return True
 
@@ -87,16 +116,12 @@ def _is_excluded(element: Dict[str, Any], tree_cfg: Dict[str, Any]) -> bool:
     exclude = dict(tree_cfg.get('exclude', {}))
     name = (element.get('name') or '').strip()
     role = (element.get('role') or '').strip()
-    name_lower = name.lower()
     role_lower = role.lower()
 
     if name and name in set(_listify(exclude.get('names'))):
         return True
     if role and role_lower in {str(item).lower() for item in _listify(exclude.get('roles'))}:
         return True
-    for probe in [str(item).lower() for item in _listify(exclude.get('name_contains'))]:
-        if probe and probe in name_lower:
-            return True
     return False
 
 
