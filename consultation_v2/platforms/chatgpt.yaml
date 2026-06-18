@@ -333,8 +333,8 @@ validation:
 # (p4-assistant-text wires the runtime executor).
 #
 # Only assistant_text is mapped: production-proven path is captured answer-thread
-# URL reassertion, absolute bottom scroll, hover-mounted `Copy response`, then
-# lowest response Copy by y.
+# URL reassertion, absolute bottom scroll, assistant-message lower-body hover to
+# mount `Copy response`, then lowest response Copy by y.
 # ChatGPT Deep Research Canvas / Download (artifact / downloaded_file) is documented in
 # EXTRACTION_PATTERNS.md but NOT wired in V2 — deliberately NOT declared here so
 # the engine stops rather than silently extracting the wrong surface. Mapping it

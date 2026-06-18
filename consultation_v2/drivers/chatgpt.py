@@ -607,7 +607,95 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/c/' in (url or '')
 
-    def _hover_response_bottom(self) -> dict:
+    @staticmethod
+    def _iter_accessible_children(obj):
+        try:
+            count = obj.get_child_count()
+        except Exception:
+            return
+        for index in range(count):
+            try:
+                child = obj.get_child_at_index(index)
+            except Exception:
+                child = None
+            if child is not None:
+                yield child
+
+    def _walk_accessible(self, obj, depth: int = 0, max_depth: int = 22):
+        if obj is None or depth > max_depth:
+            return
+        yield obj, depth
+        for child in self._iter_accessible_children(obj):
+            yield from self._walk_accessible(child, depth + 1, max_depth=max_depth)
+
+    @staticmethod
+    def _object_attributes(obj) -> dict[str, str]:
+        raw = None
+        for getter_name in ('get_attributes', 'get_attribute_set'):
+            getter = getattr(obj, getter_name, None)
+            if getter is None:
+                continue
+            try:
+                raw = getter()
+                if raw is not None:
+                    break
+            except Exception:
+                continue
+        if isinstance(raw, dict):
+            return {str(k).lower(): str(v).lower() for k, v in raw.items()}
+        attrs: dict[str, str] = {}
+        for item in raw or []:
+            text = str(item)
+            if ':' in text:
+                key, value = text.split(':', 1)
+            elif '=' in text:
+                key, value = text.split('=', 1)
+            else:
+                continue
+            attrs[key.strip().lower()] = value.strip().lower()
+        return attrs
+
+    @staticmethod
+    def _role_markers(obj) -> str:
+        try:
+            role = obj.get_role_name() or ''
+        except Exception:
+            role = ''
+        parts = [role.lower()]
+        for key, value in ChatGPTConsultationDriver._object_attributes(obj).items():
+            if 'role' in key:
+                parts.append(value)
+        return ' '.join(part for part in parts if part)
+
+    @staticmethod
+    def _screen_rect(obj):
+        if obj is None:
+            return None
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+
+            comp = obj.get_component_iface()
+            rect = comp.get_extents(_Atspi.CoordType.SCREEN) if comp is not None else None
+            if rect and rect.width > 0 and rect.height > 0 and rect.x >= 0 and rect.y >= 0:
+                return {
+                    'x': int(rect.x),
+                    'y': int(rect.y),
+                    'width': int(rect.width),
+                    'height': int(rect.height),
+                }
+        except Exception:
+            return None
+        return None
+
+    def _chatgpt_document(self):
+        from core import atspi as _atspi
+
+        firefox = _atspi.find_firefox_for_platform(self.platform)
+        return _atspi.get_platform_document(firefox, self.platform) if firefox else None
+
+    def _scroll_chatgpt_thread_to_bottom(self) -> dict:
         from core import input as _inp
 
         evidence = {
@@ -615,34 +703,90 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'source': 'document_extents',
         }
         for _ in range(8):
-            try:
-                import gi
-                gi.require_version('Atspi', '2.0')
-                from gi.repository import Atspi as _Atspi
-                from core import atspi as _atspi
+            doc = self._chatgpt_document()
+            rect = self._screen_rect(doc)
+            if rect:
+                x = int(rect['x'] + rect['width'] // 2)
+                y_offset = min(max(120, rect['height'] // 2), max(0, rect['height'] - 180))
+                y = int(rect['y'] + y_offset)
+                clicked = bool(_inp.click_at(x, y))
+                time.sleep(0.2)
+                end_presses = 0
+                for _press in range(12):
+                    if _inp.press_key('End'):
+                        end_presses += 1
+                    time.sleep(0.08)
+                wheel_ok = bool(_inp.scroll_wheel('down', clicks=12, hover_point=(x, y)))
+                evidence.update({
+                    'ok': bool(clicked and end_presses >= 10 and wheel_ok),
+                    'x': x,
+                    'y': y,
+                    'clicked': clicked,
+                    'end_presses': end_presses,
+                    'wheel_ok': wheel_ok,
+                    'document_rect': rect,
+                })
+                return evidence
+            time.sleep(0.25)
+        return evidence
 
-                firefox = _atspi.find_firefox_for_platform(self.platform)
-                doc = _atspi.get_platform_document(firefox, self.platform) if firefox else None
-                comp = doc.get_component_iface() if doc is not None else None
-                rect = comp.get_extents(_Atspi.CoordType.SCREEN) if comp is not None else None
-                if rect and rect.width > 0 and rect.height > 0:
-                    x = int(rect.x + rect.width // 2)
-                    y_offset = min(max(80, rect.height - 90), max(0, rect.height - 20))
-                    y = int(rect.y + y_offset)
-                    evidence.update({
-                        'x': x,
-                        'y': y,
-                        'document_rect': {
-                            'x': int(rect.x),
-                            'y': int(rect.y),
-                            'width': int(rect.width),
-                            'height': int(rect.height),
-                        },
-                    })
-                    evidence['ok'] = bool(_inp.hover(x, y))
-                    return evidence
-            except Exception as exc:
-                evidence['error'] = str(exc)
+    def _latest_assistant_message(self, doc):
+        candidates = []
+        for obj, depth in self._walk_accessible(doc, max_depth=24):
+            markers = self._role_markers(obj)
+            if 'assistant' not in markers:
+                continue
+            rect = self._screen_rect(obj)
+            if not rect:
+                continue
+            try:
+                name = obj.get_name() or ''
+                role = obj.get_role_name() or ''
+            except Exception:
+                name = ''
+                role = ''
+            candidates.append({
+                'obj': obj,
+                'depth': depth,
+                'name': name,
+                'role': role,
+                'rect': rect,
+                'bottom': rect['y'] + rect['height'],
+            })
+        candidates.sort(
+            key=lambda item: (
+                item['bottom'],
+                item['rect']['height'],
+                -item['depth'],
+            )
+        )
+        return candidates[-1] if candidates else None
+
+    def _hover_latest_assistant_message(self) -> dict:
+        from core import input as _inp
+
+        evidence = {
+            'ok': False,
+            'source': 'assistant_message_extents',
+        }
+        for _ in range(8):
+            doc = self._chatgpt_document()
+            latest = self._latest_assistant_message(doc) if doc is not None else None
+            if latest:
+                rect = latest['rect']
+                x = int(rect['x'] + rect['width'] // 2)
+                y_offset = min(max(40, int(rect['height'] * 0.84)), max(0, rect['height'] - 20))
+                y = int(rect['y'] + y_offset)
+                evidence.update({
+                    'x': x,
+                    'y': y,
+                    'assistant_name': latest['name'],
+                    'assistant_role': latest['role'],
+                    'assistant_depth': latest['depth'],
+                    'assistant_rect': rect,
+                })
+                evidence['ok'] = bool(_inp.hover(x, y))
+                return evidence
             time.sleep(0.25)
         return evidence
 
@@ -661,16 +805,27 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
         last_snapshot = None
         all_elements: list[dict] = []
+        scroll_evidence = {}
         hover_evidence = {}
         for attempt in range(5):
             time.sleep(2.0)
-            scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
-            hover_evidence = self._hover_response_bottom()
+            scroll_evidence = self._scroll_chatgpt_thread_to_bottom()
+            if not scroll_evidence.get('ok'):
+                result.add_step(
+                    'extract_primary', False,
+                    'ChatGPT thread scroll-to-bottom failed before Copy response hover',
+                    attempt=attempt + 1,
+                    scroll=scroll_evidence,
+                    snapshot=last_snapshot.serializable() if last_snapshot else {},
+                )
+                return False
+            hover_evidence = self._hover_latest_assistant_message()
             if not hover_evidence.get('ok'):
                 result.add_step(
                     'extract_primary', False,
-                    'ChatGPT response-bottom hover failed before Copy response scan',
+                    'ChatGPT assistant-message hover failed before Copy response scan',
                     attempt=attempt + 1,
+                    scroll=scroll_evidence,
                     hover=hover_evidence,
                     snapshot=last_snapshot.serializable() if last_snapshot else {},
                 )
@@ -709,7 +864,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     f'ChatGPT response copied ({len(content)} chars, attempt {attempt + 1})',
                     characters=len(content),
                     preview=content[:200],
-                    scroll_ok=scroll_ok,
+                    scroll=scroll_evidence,
                     hover=hover_evidence,
                     copy_buttons_found=len(copy_buttons),
                     copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
@@ -722,6 +877,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     characters=len(content),
                     preview=content[:200],
                     attempt=attempt + 1,
+                    scroll=scroll_evidence,
                     hover=hover_evidence,
                     copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
                 )
@@ -730,6 +886,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'extract_primary', False,
             'ChatGPT response copy button not found or only prompt echo copied',
             elements=len(all_elements),
+            last_scroll=scroll_evidence,
             last_hover=hover_evidence,
             snapshot=last_snapshot.serializable() if last_snapshot else {},
         )
