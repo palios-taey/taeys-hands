@@ -1028,6 +1028,9 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/search/' in (url or '')
 
+    def is_resumable_session_url(self, url: str | None) -> bool:
+        return self._is_answer_thread_url(url)
+
     def _wait_for_answer_thread_url(self, *, timeout: float = 8.0) -> str | None:
         def _probe() -> str | None:
             current = self.runtime.current_url()

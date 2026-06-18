@@ -55,7 +55,9 @@ tree:
     role: push button
   element_map:
     input:
-      name: Chat with ChatGPT
+      names_any_of:
+      - Chat with ChatGPT
+      - Ask anything
       role: entry
       states_include:
       - editable
@@ -263,6 +265,8 @@ workflow:
   extract:
     primary_key: copy_button
     strategy: last_by_y
+    hover_anchor_key: input
+    hover_offset_y: 60
   extra_extract:
     strategy: none
 settle:

@@ -666,6 +666,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/c/' in (url or '')
 
+    def is_resumable_session_url(self, url: str | None) -> bool:
+        return self._is_answer_thread_url(url)
+
     def _wait_for_answer_thread_url(self, *, timeout: float = 12.0) -> str | None:
         def _current_answer_url() -> str | None:
             current = (self.runtime.current_url() or '').strip()
@@ -843,49 +846,76 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         ]
         return latest
 
-    def _hover_latest_assistant_message(self) -> dict:
+    def _hover_above_composer_for_copy_button(self) -> dict:
         from core import input as _inp
 
+        extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
+        anchor_key = str(extract_cfg.get('hover_anchor_key') or 'input')
+        try:
+            offset_y = int(extract_cfg.get('hover_offset_y') or 60)
+        except (TypeError, ValueError):
+            offset_y = 60
         evidence = {
             'ok': False,
-            'source': 'assistant_message_extents',
+            'source': 'composer_relative',
+            'anchor_key': anchor_key,
+            'hover_offset_y': offset_y,
         }
         for _ in range(8):
-            doc = self._chatgpt_document()
-            latest = self._latest_assistant_message(doc) if doc is not None else None
-            if latest:
-                rect = latest['rect']
-                x = int(rect['x'] + rect['width'] // 2)
-                y_offset = min(max(40, int(rect['height'] * 0.84)), max(0, rect['height'] - 20))
-                y = int(rect['y'] + y_offset)
+            snap = self.runtime.snapshot()
+            anchor = self.find_last(snap, anchor_key) or self.find_first(snap, anchor_key)
+            if anchor:
+                rect = self._screen_rect(anchor.atspi_obj)
+                if rect:
+                    x = int(rect['x'] + rect['width'] // 2)
+                    y = max(0, int(rect['y']) - offset_y)
+                elif anchor.x is not None and anchor.y is not None:
+                    x = int(anchor.x)
+                    y = max(0, int(anchor.y) - offset_y)
+                else:
+                    time.sleep(0.25)
+                    continue
+                hover_ok = bool(_inp.hover(x, y))
+                time.sleep(0.4)
+
+                def _copy_button_visible():
+                    copy_snap = self.runtime.snapshot()
+                    return copy_snap if (copy_snap.mapped.get('copy_button') or []) else None
+
+                copy_snap = self.runtime.wait_until(
+                    _copy_button_visible,
+                    timeout=4.0,
+                    interval=0.4,
+                )
+                copy_buttons = (copy_snap.mapped.get('copy_button') or []) if copy_snap else []
                 evidence.update({
                     'x': x,
                     'y': y,
-                    'assistant_name': latest['name'],
-                    'assistant_role': latest['role'],
-                    'assistant_depth': latest['depth'],
-                    'assistant_markers': latest['markers'],
-                    'assistant_rect': rect,
-                    'assistant_candidates_found': latest.get('candidate_count', 0),
-                    'assistant_candidate_summaries': latest.get('candidate_summaries', []),
+                    'anchor_name': anchor.name,
+                    'anchor_role': anchor.role,
+                    'anchor_rect': rect,
+                    'anchor': anchor.serializable(),
+                    'hover_ok': hover_ok,
+                    'copy_buttons_found': len(copy_buttons),
+                    'copy_buttons': [button.serializable() for button in copy_buttons[-3:]],
                 })
-                evidence['ok'] = bool(_inp.hover(x, y))
+                evidence['ok'] = bool(hover_ok and copy_buttons)
                 logger.warning(
                     'ChatGPT extract hover probe: x=%s y=%s ok=%s '
-                    'assistant_name=%r assistant_role=%r depth=%s rect=%s '
-                    'candidates=%s',
+                    'anchor_key=%r anchor_name=%r anchor_role=%r rect=%s '
+                    'copy_buttons=%s',
                     x,
                     y,
                     evidence['ok'],
-                    latest['name'],
-                    latest['role'],
-                    latest['depth'],
+                    anchor_key,
+                    anchor.name,
+                    anchor.role,
                     rect,
-                    latest.get('candidate_count', 0),
+                    len(copy_buttons),
                 )
                 return evidence
             time.sleep(0.25)
-        logger.warning('ChatGPT extract hover probe: no assistant-marked message found')
+        logger.warning('ChatGPT extract hover probe: no mapped composer anchor found')
         return evidence
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -917,11 +947,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     snapshot=last_snapshot.serializable() if last_snapshot else {},
                 )
                 return False
-            hover_evidence = self._hover_latest_assistant_message()
+            hover_evidence = self._hover_above_composer_for_copy_button()
             result.add_step(
                 'extract_hover_probe',
                 bool(hover_evidence.get('ok')),
-                'ChatGPT assistant-message hover probe before Copy response scan',
+                'ChatGPT composer-relative hover probe before Copy response scan',
                 attempt=attempt + 1,
                 scroll=scroll_evidence,
                 hover=hover_evidence,
@@ -929,7 +959,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not hover_evidence.get('ok'):
                 result.add_step(
                     'extract_primary', False,
-                    'ChatGPT assistant-message hover failed before Copy response scan',
+                    'ChatGPT composer-relative hover failed to mount Copy response',
                     attempt=attempt + 1,
                     scroll=scroll_evidence,
                     hover=hover_evidence,

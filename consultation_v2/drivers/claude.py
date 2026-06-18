@@ -619,6 +619,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/chat/' in (url or '')
 
+    def is_resumable_session_url(self, url: str | None) -> bool:
+        return self._is_answer_thread_url(url)
+
     # ------------------------------------------------------------------
     # Extract primary (copy-button strategy)
     # ------------------------------------------------------------------

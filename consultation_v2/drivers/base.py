@@ -440,6 +440,9 @@ class BaseConsultationDriver(ABC):
 
         if self._is_landed_send(prior, request):
             return self._resume_landed_send(prior, request, result)
+        if self._is_unresumable_landed_send(prior, request):
+            if not self._invalidate_unresumable_landed_send(prior, request, result):
+                return False
 
         # setup_complete milestone: this run reached the pre-send boundary
         # (navigate + model/mode/tools + attach + prompt entry all validated)
@@ -462,6 +465,15 @@ class BaseConsultationDriver(ABC):
             or result.session_url_before
             or ''
         )
+        if not self.is_resumable_session_url(captured_url):
+            result.add_step(
+                'send_checkpoint',
+                False,
+                f'{self.platform} send produced no valid resumable answer-thread URL; '
+                f'not checkpointing or registering monitor',
+                captured_url=captured_url,
+            )
+            return False
         monitor_id = self._monitor_id(request)
         self.checkpoint_run_state(
             request,
@@ -472,6 +484,16 @@ class BaseConsultationDriver(ABC):
         )
         self._register_monitor(request, result, monitor_id, captured_url)
         return True
+
+    def is_resumable_session_url(self, url: str | None) -> bool:
+        return bool((url or '').strip())
+
+    def _landed_run_state_statuses(self) -> set[str]:
+        return {
+            self.RUN_STATE_SUBMITTED,
+            self.RUN_STATE_COMPLETION_OBSERVED,
+            self.RUN_STATE_EXTRACTION_DONE,
+        }
 
     def _is_landed_send(
         self,
@@ -488,14 +510,52 @@ class BaseConsultationDriver(ABC):
             return False
         if prior.get('prompt_hash') != request.prompt_hash():
             return False
-        landed_statuses = {
-            self.RUN_STATE_SUBMITTED,
-            self.RUN_STATE_COMPLETION_OBSERVED,
-            self.RUN_STATE_EXTRACTION_DONE,
-        }
-        if prior.get('status') not in landed_statuses:
+        if prior.get('status') not in self._landed_run_state_statuses():
             return False
-        return bool(prior.get('url'))
+        return self.is_resumable_session_url(str(prior.get('url') or ''))
+
+    def _is_unresumable_landed_send(
+        self,
+        prior: Optional[dict],
+        request: ConsultationRequest,
+    ) -> bool:
+        if not prior:
+            return False
+        if prior.get('prompt_hash') != request.prompt_hash():
+            return False
+        if prior.get('status') not in self._landed_run_state_statuses():
+            return False
+        return not self.is_resumable_session_url(str(prior.get('url') or ''))
+
+    def _invalidate_unresumable_landed_send(
+        self,
+        prior: dict,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        captured_url = str(prior.get('url') or '')
+        try:
+            cleared = self.clear_run_state(request.request_id())
+        except Exception as exc:  # noqa: BLE001 - stale idempotency must fail loudly
+            result.add_step(
+                'run_state_resume_rejected',
+                False,
+                f'{self.platform} prior send checkpoint is not resumable, and clearing '
+                f'the stale durable run-state failed: {exc}',
+                prior_status=prior.get('status'),
+                captured_url=captured_url,
+            )
+            return False
+        result.add_step(
+            'run_state_resume_rejected',
+            True,
+            f'{self.platform} rejected stale prior send checkpoint; captured URL is not '
+            f'a valid resumable answer thread',
+            prior_status=prior.get('status'),
+            captured_url=captured_url,
+            run_state_cleared=bool(cleared),
+        )
+        return True
 
     def _resume_landed_send(
         self,
