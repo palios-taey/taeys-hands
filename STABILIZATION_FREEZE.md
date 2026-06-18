@@ -1,0 +1,101 @@
+# STABILIZATION FREEZE — known-good state + change discipline
+**Purpose:** stop the destroy-by-changing cycle. Each capability below has a KNOWN-GOOD reference. Frozen = do NOT change without proving the change doesn't regress it. Recover from history; never re-derive.
+
+## The 5 discipline rules (hold me to these)
+1. **Recover, don't re-derive.** Before "fixing" anything, find the last-known-WORKING version (git history, this file, memory, recaps) and use THAT. Re-deriving is how things get destroyed.
+2. **One change, proven in isolation, then freeze.** Never stack multiple plumbing changes. Make one, prove it alone, lock it here, then the next. Destruction happens when changes pile up and interact.
+3. **Prove in isolation BEFORE running real consults.** A capability is "working" only after one clean automated single-platform cycle. No real backlog runs through an unproven path.
+4. **Never touch a FROZEN capability** to fix an adjacent one. If a fix requires touching frozen code, STOP and surface it — that's the high-risk moment.
+5. **No process self-sabotage:** no parallel dispatch (one lane at a time), no `pkill -f` matching my own command, file-attach never inline-paste for large packets, screenshot+scroll-to-bottom before judging.
+
+## Capability ledger (status: FROZEN-good / PROVING / BROKEN)
+| Capability | Known-good reference | Status |
+|---|---|---|
+| Perplexity DR select | `--mode deep_research` via cli | **FROZEN-good** (isma lane fetched+verified 28KB today) |
+| ChatGPT send (clean composer) | focus `input` entry + Enter | **FROZEN-good** (#4218 design lane sent+extracted 26KB today) |
+| Large-packet attach | FILE-attach (`--attach`), NEVER inline-paste | **FROZEN-good** (inline broke Claude → "prompt empty") |
+| Extract | scroll-to-bottom + exact-match copy button (`extract_primary`) | **FROZEN-good** for Claude/Gemini/Grok/Perplexity; ChatGPT hover-gated = fragile |
+| Identity-strip a lane | driver-direct: `driver.run(req)` with `message=<ask>`, `attachments=[file]` (bypasses orchestrator identity) | **FROZEN-good** (Claude/Grok/Gemini/Perplexity audit lanes today) |
+| Monitor completion | V1 `monitor/daemon.py` TIME-BASED SETTLING window, ported to V2 in **b64d128** | **PROVING** (needs 1 clean automated deep-think cycle) |
+| Send-cleanup + fail-loud | **4037605** (Gemini clean-send guard + cli stderr logging) | **PROVING** |
+| ChatGPT stale-draft clear | — (clean_composer doesn't clear persisted draft) | **BROKEN** (distinct rework, with Codex) |
+| Tree: Firefox-chrome filter (global) | `firefox_chrome.yaml` + scope app-root to doc+portals | **VERIFIED** (87a809e — chrome=0 on :2; awaiting lock+merge) |
+| Tree: ChatGPT history subtree-prune | structural prune of mutable conv-list under `landmark "Chat history"` (keeps New chat) | **VERIFIED** (e847b326 — history=0, controls+portals intact; awaiting lock+merge) |
+| Tree: active-tab document only | scope to the single `document web` matching foreground/url, exclude background tabs | **PROVING** (task-7df6b007 — found 'New Tab' shortcut tiles Amazon/Temu/etc. polluting from a stray 2nd tab; ~14 unknowns) |
+| Tree: UNKNOWN=0 coverage (per platform) | every element mapped OR filtered-by-exact-spec → drift auto-detects | **IN PROGRESS** (ChatGPT 6 mapped / 30 unknown; after active-doc fix, map controls + filter remaining real-window noise) |
+
+## The plan — per-platform target flow + phases
+**Target flow per consult:** (0) tree 100%-accounted → (1) DETERMINE params model/mode/tools from the request + YAML options [no router yet → derive manually] → (2) navigate fresh → (3) clean composer → (4) SELECT model/mode/tools BEFORE launch → (5) attach → (6) enter prompt → (7) send+verify → (8) monitor (settle-window) → (9) extract (scroll+copy) → (10) store.
+Two steps were missing and are now explicit: **(1) pre-launch parameter determination** and **(4) set all parameters before launching**.
+**Phases:** P1 tree foundation per platform = **UNKNOWN must be 0** (every element mapped OR filtered → drift auto-detects; ChatGPT currently 6 mapped / 30 unknown). P2 parameters = YAML has ALL selectable model/mode/tool options + request→params mapping + selection proven. P3 per-step flow each verified+FROZEN. P4 one clean automated cycle per platform = deployable.
+**Drift-detection invariant:** in steady state UNKNOWN=0; any UNKNOWN>0 = a UI change = STOP and investigate (update map or filter).
+
+## Session model — new vs follow-up (Phase 1 now; resolver = Phase 2)
+**Plan field:** every consult plan declares either a NEW session or a FOLLOW-UP to an existing session URL. Both paths exist in the engine today: NEW = fresh nav + full identity attach; FOLLOW-UP = `--session-url <url>`, no identity re-attach, mode still selectable (lets an audit go deeper / revise in the SAME thread instead of a fresh one).
+**Tracker (already live, verified 2026-06-18):** Neo4j `ChatSession` nodes (1805; all 5 platforms) carry `platform` + the real chat `url` + `session_id`; every driver writes one on success via `get_or_create_session(url)` + `add_message` x2; `Plan-[:RAN_IN]->ChatSession` links them. Redis is NOT the session store (transient monitor state only).
+**PHASE 2 ENHANCEMENT (not built yet):** a session RESOLVER — given a topic / purpose / requester / prior plan, return the session URL to follow up in. Today only `get_active_sessions(platform)` exists (lists by platform, not by topic), and `Plan-[:RAN_IN]->ChatSession` linking is sparse (16/138). The follow-up *mechanism* works if you already know the URL; what's missing is *finding which session* to reopen. Phase 2 = strengthen the Plan↔ChatSession↔purpose write trail + build `find_session(...)` + a small CLI surface. Mirror this into FLOW_CONSULTATION_ENGINE.md when built.
+
+## Per-step build notes (verified live, ChatGPT first — 2026-06-18)
+**Step (2) NAVIGATE — always go to the session URL and refresh, every consult.** Don't trust prior page state: models/UI change, threads go stale. NEW session → navigate to the platform's `urls.fresh`; FOLLOW-UP → navigate to the `--session-url`. Navigating to a URL is itself a fresh load (verified: `chatgpt.com/c/<old>` → `chatgpt.com/` reloaded clean, tree=179). **ChatGPT `urls.fresh` = bare `https://chatgpt.com/`** — it carries the real **Pro Extended** model selector; `?temporary-chat=true` was tried+REVERTED (it strips the model selector). Use the engine's `runtime.navigate()` (focus→address-bar key→paste→Return) — NEVER per-keystroke type a URL (awesome-bar autocomplete lands on the wrong site). ChatGPT/Claude/Gemini/Grok = enter the URL; **Perplexity = keyboard-shortcut new session** (per Jesse; confirm method when we reach Perplexity). Claude's address-bar key is F6 (it intercepts Ctrl+L) — per-platform `navigation_key` in YAML.
+
+## YAML structural integrity — match-strategy taxonomy (agreed 2026-06-18: YAML-with-teeth, NOT Neo4j)
+**Decision:** keep element maps in YAML (git diff/review/revert; engine reads at load; no runtime DB dep). Integrity = {strict schema + live-tree validator + NO escape hatch}, not the storage engine. Neo4j would just relocate the problem (you can store fuzzy in a DB too) + add a dependency. Revisit only if multiple services write the maps at runtime.
+**The teeth:** (1) KILL `# lint-allow` — no per-line opt-out; fuzzy/`best_effort`/`name_contains` = build FAILS. (2) Comments = provenance only ("verified <date>"), NEVER behavior — behavior-in-a-comment is a bug. (3) the live-tree validator is the merge gate — un-verifiable entry = FAIL; live UI is the oracle.
+**Current debt inventory (2026-06-18, 5 YAMLs):** 12 `lint-allow`, 5 `best_effort`, 4 `name_contains`, 5 `contains:`, 2 `fallback`. These are the "excuses written into the file" — all must convert to a real strategy below.
+**Every element entry declares EXACTLY ONE explicit match strategy (schema-enforced):**
+1. **`exact`** — name+role+required-states+uniqueness+window-scope. Static controls (input, send, stop, copy, attach trigger).
+2. **`enumerated_set`** — role + the FULL exact option list. Known-finite dropdowns (model picker Instant/Medium/High/Extra High/Pro Extended; effort/mode menus; tool list; connector list). RULE: every listed option must be present; an option present that is NOT in the set = **EXCEPTION → investigate (dropdown changed)**. Replaces `names_any_of` (which silently ignored extras). "Dynamic" name ≠ unknowable when the set is small + known — enumerate it.
+3. **`stable_locator`** — role + parent + index/stable-attribute; name NOT used. State-dependent trigger names (e.g. "Open mode picker, currently Pro"). Locate structurally; never match the changing name or a substring of it.
+4. **`name_agnostic_structural`** — role + stable container; name explicitly NOT asserted, with a REQUIRED in-schema reason. ONLY for truly-unknowable content (attachment filename, chat title). The single sanctioned "we don't know the name" case.
+**Validator (Codex build, Gatekeeper-gated, exceptions surface to me — no auto-fix):** per screen + per dropdown — (a) every element-def resolves to exactly one live element under its declared strategy; (b) every live element is mapped or explicitly excluded; (c) for `enumerated_set`, an unknown member present = exception. Mirror into FLOW_CONSULTATION_ENGINE.md + yaml_contract.py schema when built.
+
+## Build-on-main + the accounting invariant (Jesse 2026-06-18)
+**BUILD ON MAIN, incrementally, in production.** No long-lived side branch. **[LANDED 2026-06-18: the cutover FF-merged to main — main IS `5505849`, pushed to origin, the single self-contained `consultation_v2` is in production. Gatekeeper CONTROL, ledger 220/221.]** After that, every piece (exclusions, validator, per-platform production proofs) is a small Gatekeeper-gated increment onto main, each production-verified as it lands. Goal: main always = the production truth.
+**Standing gated obligations (Gatekeeper ledger 220/221):** (a) live production proofs ON MAIN for Claude, Gemini, Grok, Perplexity (per platform: ok + real response + URL/turn change + stored extract + fleet-notify); (b) chrome-filter 87a809e + history-prune e847b326 for the 170 unmapped; (c) re-author the stashed ChatGPT readiness hook coherently with display_readiness.py — and per Jesse, UNIVERSAL (see readiness notes above).
+**THE ACCOUNTING INVARIANT:** every live element MUST be either **MAPPED** (matches an element-def) or **EXCLUDED** (matches an exclusion rule) — *excluded counts as accounted, "a match."* Anything in NEITHER set, in EITHER direction (live-element-not-in-YAML, OR YAML-def-not-found-live), is **SURFACED as an exception**. This is the validator's core rule (= UNKNOWN=0). First application: the chrome-filter (87a809e) + history-prune (e847b326) move the 170 chrome/sidebar elements from unmapped → EXCLUDED, leaving only genuinely-unmapped elements to surface.
+**Tree-hygiene ledger correction:** 87a809e (chrome) + e847b326 (history) are NOT in main/cutover (were "verified, awaiting lock+merge", never merged) — first build-on-main increment, cherry-pick + rehome e847b326's core/tree.py → consultation_v2/tree.py.
+
+## Display readiness check — design notes (co-designed with Jesse 2026-06-18, IN PROGRESS)
+**PRINCIPLE: before anything happens on a display, ensure it is ready and not polluted.**
+- **Invariant: EXACTLY one window + EXACTLY one tab (the correct Chat). NEVER multiple windows or tabs — ever.**
+- **Extra windows/tabs = FULL STOP. They should not be there at all. If detected, the process STOPS — nothing else proceeds — until the display is cleaned up (close strays or fresh-start) and re-verified pristine. Only a pristine display (1 window / 1 tab / correct Chat) is allowed to continue.**
+- **Eliminate strays, do NOT filter them.** Extra windows/tabs are CLOSED (or fresh-started), not filtered around. The tree scoping filter is not the answer for windows/tabs — the display must be physically clean.
+- **Fix order:** (1) close strays SYSTEMATICALLY — two PROVEN methods (2026-06-18 full cycle on :2):
+  - **Orphan WINDOW** (real-sized non-Chat window, e.g. a `New Tab — Mozilla Firefox`): `xdotool windowclose <id>`. Keep the window whose title is the Chat.
+  - **In-window orphan TAB** (extra `page tab` inside the keeper window): the tab has a child `push button "Close tab"` with a `click` action → AT-SPI `Atspi.Accessible.get_action(btn).do_action(0)`. **xdotool keyboard (ctrl+w / ctrl+Tab) does NOT work on Xvfb** — the AT-SPI Close-tab button IS the reliable method.
+  - (2) If strays can't be closed systematically → **FRESH START: relaunch the display/Firefox properly and get rid of ALL orphans.**
+- **Exceptions are SURFACED, not auto-resolved (Jesse 2026-06-18).** The gate kicks the exception back to the driving session with what's wrong (+ resolution if known); the session resolves it (close strays via the proven methods, or relaunch). A wired auto-resolver is a FUTURE process, not yet built.
+- **Readiness is UNIVERSAL, not Chat-specific (Jesse 2026-06-18).** Same logic for every platform: 1 real window + 1 tab whose URL matches the expected prefix + bus live + tree readable. VERIFIED the code is already platform-agnostic (`check(platform)`/`_viewable_windows(display)`/`_showing_tabs_and_url(platform)` are generic). The ONLY platform-specific bits: the hardcoded `PLATFORM_DISPLAY` + `EXPECTED_HOST` dicts, and the stashed orchestrator hook was gated ChatGPT-only. **Readiness re-author increment = drop the platform gate (run for ALL five) + source display from `machine.env` and the URL-prefix from each platform YAML's `urls` (no hardcoded dicts).**
+- Verify the one tab IS the correct Chat by URL (needs an expected-URL field per platform YAML — currently missing).
+- **TWO LAYERS — infra layer must pass BEFORE the window/tab layer:**
+  - **(L1) Production-format / can-I-interact-at-all (infra):** Xvfb up on :N; AT-SPI bus LIVE and `AT_SPI_BUS_ADDRESS` matches the live `xprop -display :N -root AT_SPI_BUS` (stale `/tmp/a11y_bus_:N` → "Couldn't connect to accessibility bus"); Firefox running + AT-SPI-registered (takes ~25-30s after launch); accessibility enabled (`accessibility.force_disabled=0`) so the tree is FULLY readable, not partial/empty; tree element-count sane (a near-empty tree on a rich page = accessibility/registration broken). **Known symptom: :6 (and sometimes others) have DBUS/bus/registration issues → partial or unreadable tree.** Fix: refresh the bus env from xprop / wait for registration / restart the display unit; if unrecoverable → escalate. [Pin the exact :6 issue when we test :6.]
+  - **(L2) Browser state — count the VISIBLE TRUTH (corrected 2026-06-18, the old method was BROKEN):** exactly 1 real window + exactly 1 tab = the correct Chat by URL.
+    - **TABS = count `page tab` nodes in the chrome tab-strip.** NOT `SHOWING` document-web: only the *foreground* tab's doc is SHOWING, and even that reads `SHOWING=False` when the FF window isn't X-focused (verified on :3) — so SHOWING-counting is blind to background tabs AND misreports the active one. The preloaded hidden "New Tab" doc has NO page tab, so page-tab counting auto-excludes it while surfacing every real tab (incl. a real "New Tab"). Do NOT count tab-list *children* (= tabs + the `+` button = N+1).
+    - **WINDOWS = count `IsViewable` AND real-sized (both dims > 100px).** `IsViewable` ALONE over-counts: FF keeps a 1×1 `IsViewable` window (verified on :2) plus tiny `IsUnMapped` 1×1/10×10 windows — all invisible. Requiring real geometry counts only operator-visible windows.
+    - Verified 2026-06-18 full cycle: dirty :2 (2 windows / 3 tabs) → resolve → clean (1 window / 1 tab / on the Chat) = READY, matching the human VNC view.
+  - **Real strays do happen (uncontrollable launch):** Firefox sometimes opens a genuine 2nd SHOWING tab. The check counts SHOWING tabs so it catches that; the FIX is to close the real extra tab via its close-button element (AT-SPI do_action — xdotool keystrokes don't work on Xvfb), or fresh-start. A perfectly-clean launch isn't always possible, so the close path must exist.
+- Observed facts: display can have 3 windows / 2 tabs; `windowclose` closes windows; keyboard tab-switch unreliable on Xvfb.
+- **Runs once per CONSULT** — on receiving a request, before interacting with the display. (Displays are fragile/accumulate pollution, so verify good-state at the start of each consult.)
+- **DETECTION script written + VERIFIED:** `scripts/display_readiness_check.py <platform>` → L1+L2 verdict (exit 0 ready / 2 not-ready). Live test 2026-06-18: correctly flagged ChatGPT :2 (1 win / 2 tabs) and Perplexity :6 (3 win / 3 tabs); L1 passed both this run, so :6's DBUS issue is INTERMITTENT (L1 catches it when it recurs). TODO before wiring: source display map from machine.env + EXPECTED_HOST into platform YAMLs (currently hardcoded).
+- [PENDING with Jesse → then Codex builds FIX + wiring: (a) stray tab = surgical-close vs fresh-start; (b) canonical fresh-start procedure + orphan kill; (c) wire as pre-every-interaction gate.]
+
+## Tree-hygiene process (run per platform, in order) — derived from the ChatGPT walkthrough 2026-06-18
+**Prime directive: the AT-SPI tree is the source of truth; screenshots are a crutch.** If I need a screenshot, the tree is wrong/over-broad — that's the bug to fix, not work around.
+1. Navigate to fresh chat; read the document-scope tree (`snapshot()`), not a screenshot.
+2. Categorize: role distribution + counts. Bloated = noise present.
+3. Detect noise by class: chrome (frame/address bar/toolbars/tabs/add-ons) must be ABSENT; sidebar/history must be ABSENT; the controls I use (input, model/mode, attach, send, stop, copy, new-chat) must be PRESENT.
+4. For noise, find the stable STRUCTURAL container — walk the live AT-SPI ancestor chain (`o.get_parent()` loop, print role+name+xml-roles) up to the landmark/region that wraps the section. Item names change; the container's ARIA label doesn't.
+5. Scope the fix: GLOBAL (Firefox chrome — fix once in `firefox_chrome.yaml`+`snapshot.py`, all platforms) vs PER-PLATFORM (history sidebar — that platform's container).
+6. Fix by SUBTREE-PRUNE on the container `{role[+name]}`, never a name deny-list (excluding a container element leaves its descendants — must prune the subtree, mirror `_CHROME_SUBTREE_ROLES`). Keep everything outside it.
+7. Verify by RE-SCAN (tree, not screenshot): noise=0, every needed control resolves, React portals (`menu_snapshot`) unaffected.
+8. Route to Codex (root-cause shape) → Gatekeeper merges → lock FROZEN above.
+
+**Per-platform history container:** ChatGPT = `landmark "Chat history"` (done, task-baf0387e). Claude/Gemini/Grok/Perplexity = TBD (find each via step 4).
+
+**Working mode (watching, not stopping):** once the pattern is set, run investigate→find-container→scope→dispatch-Codex→verify autonomously; surface the VERIFIED result for the gate (chrome=0 / history=0 / controls intact), not every micro-step. Jesse watches VNC; gate is at lock points.
+
+## How Jesse gates (the high-leverage help — NOT all-day babysitting)
+- At a change/decision point, ask: **"did this work before? are you using that version?"** and **"is this touching something FROZEN?"**
+- Confirm each PROVING→FROZEN lock: I show the clean automated cycle result; you sanity-check it's actually clean.
+- That's it. You don't read code all day. You hold the line at the lock-points.
+</content>
