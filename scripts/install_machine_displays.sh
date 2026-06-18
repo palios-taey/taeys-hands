@@ -62,7 +62,6 @@ require_cmd Xvfb
 require_cmd dbus-run-session
 require_cmd xprop
 require_cmd openbox
-require_cmd stdbuf
 $NO_VNC || require_cmd x11vnc
 
 # Firefox binary path — Mira ships it as deb at /usr/lib/firefox/firefox,
