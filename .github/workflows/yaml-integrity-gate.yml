@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Run consultation_v2 integrity gate
-        run: python3 tools/lint_no_yaml_silent_fallbacks.py --all
+        run: python3 consultation_v2/validators/lint_no_yaml_silent_fallbacks.py --all
 
       - name: Run consultation_v2 contract gate
-        run: python3 tools/lint_consultation_v2_contract.py --all
+        run: python3 consultation_v2/validators/lint_consultation_v2_contract.py --all

@@ -203,7 +203,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         For a follow-up session (request.session_url set) we must NOT start a new
         chat — that would abandon the thread. Skip in that case.
         """
-        from core import input as _inp
+        from consultation_v2 import input as _inp
 
         if request.session_url:
             result.add_step('clean_composer', True,
@@ -521,7 +521,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # clean_composer), clear any leftover text, then paste. (100_TIMES /
         # memory: "ProseMirror not in AT-SPI; paste directly into the focused
         # composer.") NOT a fallback — the correct composer primitive.
-        from core import input as _inp
+        from consultation_v2 import input as _inp
         self.runtime.focus_firefox()
         time.sleep(0.3)
         # Final-guard clear immediately before paste. The authoritative
@@ -699,13 +699,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return None
 
     def _chatgpt_document(self):
-        from core import atspi as _atspi
+        from consultation_v2 import atspi as _atspi
 
         firefox = _atspi.find_firefox_for_platform(self.platform)
         return _atspi.get_platform_document(firefox, self.platform) if firefox else None
 
     def _scroll_chatgpt_thread_to_bottom(self) -> dict:
-        from core import input as _inp
+        from consultation_v2 import input as _inp
 
         evidence = {
             'ok': False,
@@ -740,7 +740,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return evidence
 
     def _hover_above_composer_for_copy_button(self) -> dict:
-        from core import input as _inp
+        from consultation_v2 import input as _inp
 
         extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
         anchor_key = str(extract_cfg.get('hover_anchor_key') or 'input')
@@ -812,10 +812,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return evidence
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        from core import clipboard
-        from core.atspi import find_firefox_for_platform
-        from core.interact import atspi_click
-        from core.tree import find_elements as raw_find_elements
+        from consultation_v2 import clipboard
+        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.interact import atspi_click
+        from consultation_v2.tree import find_elements as raw_find_elements
 
         if not self.reassert_captured_session_url(
             result,

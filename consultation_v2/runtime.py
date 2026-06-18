@@ -6,9 +6,9 @@ import subprocess
 import time
 from typing import Any, Callable, Optional
 
-from core import atspi, clipboard, input as inp
-from core.interact import atspi_click
-from core.platforms import get_platform_display
+from consultation_v2 import atspi, clipboard, input as inp
+from consultation_v2.interact import atspi_click
+from consultation_v2.platforms_runtime import get_platform_display
 from .snapshot import build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
@@ -301,7 +301,7 @@ class ConsultationRuntime:
         except Exception:
             pass
         try:
-            from core.platforms import get_screen_size
+            from consultation_v2.platforms_runtime import get_screen_size
             width, height = get_screen_size()
             return int(width // 2), int(height // 2)
         except Exception:

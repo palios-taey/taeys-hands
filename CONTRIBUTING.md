@@ -35,7 +35,8 @@ Types: `fix`, `feat`, `refactor`, `docs`, `test`
 ## Pull request checklist
 
 - Branch is up to date with `main`
-- Code tested manually (run `python3 server.py` and verify with Claude Code MCP)
+- V2 entrypoint/gates pass (`python3 scripts/run_consultation_v2.py --help`, validators under `consultation_v2/validators/`)
+- UI-affecting changes are verified by a real production consultation smoke on the target display
 - PR description explains what changed and why
 - No private IPs, credentials, or personal config committed
 

@@ -216,7 +216,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # ISMA ingestion (non-blocking)
     if result.ok and result.response_text:
         try:
-            from core.ingest import auto_ingest
+            from consultation_v2.ingest import auto_ingest
             auto_ingest(
                 platform=request.platform,
                 content=result.response_text,

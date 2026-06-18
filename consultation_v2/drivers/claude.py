@@ -629,10 +629,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        from core.atspi import find_firefox_for_platform
-        from core.tree import find_elements as raw_find_elements
-        from core.interact import atspi_click
-        from core import clipboard
+        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.tree import find_elements as raw_find_elements
+        from consultation_v2.interact import atspi_click
+        from consultation_v2 import clipboard
 
         if not self.reassert_captured_session_url(
             result,
@@ -723,10 +723,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         have nothing to capture. Once the toggle is present, every subsequent
         step is tree/clipboard validated and failures abort extraction.
         """
-        from core.atspi import find_firefox_for_platform
-        from core.tree import find_elements as raw_find_elements
-        from core.interact import atspi_click
-        from core import clipboard
+        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.tree import find_elements as raw_find_elements
+        from consultation_v2.interact import atspi_click
+        from consultation_v2 import clipboard
 
         snap = self.runtime.snapshot()
         show_toggle = self.find_last(snap, 'show_thinking')

@@ -1188,8 +1188,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         def collect(snapshot: Snapshot) -> int:
             added = 0
             try:
-                from core import atspi
-                from core.tree import find_elements as raw_find_elements
+                from consultation_v2 import atspi
+                from consultation_v2.tree import find_elements as raw_find_elements
                 firefox = atspi.find_firefox_for_platform(self.platform)
                 doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
                 raw_elements = raw_find_elements(doc or firefox, max_depth=30, fence_after=[])

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 tools/lint_no_yaml_silent_fallbacks.py --staged
-python3 tools/lint_consultation_v2_contract.py --staged
+python3 consultation_v2/validators/lint_no_yaml_silent_fallbacks.py --staged
+python3 consultation_v2/validators/lint_consultation_v2_contract.py --staged

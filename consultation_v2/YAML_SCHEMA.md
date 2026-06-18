@@ -1,7 +1,7 @@
 # EXACT-MATCH-ONLY YAML Schema — consultation_v2 (p0-yaml-schema, the contract codex implements)
 
 > Defines the ONLY legal element/validation grammar for `consultation_v2/platforms/*.yaml`.
-> Enforced two ways: **lint** (`tools/lint_exact_match.py` + `.githooks/pre-commit`, already wired)
+> Enforced two ways: **lint** (`consultation_v2/validators/lint_exact_match.py` + `.githooks/pre-commit`, already wired)
 > blocks the commit; **runtime assert** (in the matcher, p1-grok landing) rejects any non-exact
 > key at load so the rule cannot regress silently. Builds on [[PRIMITIVES_CONTRACT]] §3.
 

@@ -30,12 +30,12 @@ All operate on an `ElementRef`, a raw key/text, or a predicate — none branch o
 - `close_stale_dialogs()`, `focus_file_dialog()` — GTK dialog titles (`File Upload`/`Open`/`Open File`) are **toolkit-universal**, not platform-specific ✓
 - `switch()` — delegates to `inp.switch_to_platform` + `atspi.find_firefox_for_platform` (see §2.D: the *mechanism* is primitive, the *datum* must move to YAML)
 
-### `core/` low-level primitives (genuinely agnostic)
-- `core/clipboard.py` — `read()`, `write()` ✓
-- `core/input.py` — `press_key`, `type_text`, `click_at`, `clipboard_paste`, `focus_firefox` ✓ (`switch_to_platform` is the registry exception, §2.D)
-- `core/interact.py` — `atspi_click(element_dict)` ✓
-- `core/tree.py` — `find_elements`, `find_menu_items` — pure tree walkers ✓
-- `core/atspi.py` — `find_firefox_for_platform`, `get_platform_document`, `get_document_url`: the **walk-windows / match-document / read-url MECHANISM** is primitive; the platform→URL **datum** it consumes is not (§2.D)
+### `consultation_v2/` low-level primitives (genuinely agnostic)
+- `consultation_v2/clipboard.py` — `read()`, `write()` ✓
+- `consultation_v2/input.py` — `press_key`, `type_text`, `click_at`, `clipboard_paste`, `focus_firefox` ✓ (`switch_to_platform` is the registry exception, §2.D)
+- `consultation_v2/interact.py` — `atspi_click(element_dict)` ✓
+- `consultation_v2/tree.py` — `find_elements`, `find_menu_items` — pure tree walkers ✓
+- `consultation_v2/atspi.py` — `find_firefox_for_platform`, `get_platform_document`, `get_document_url`: the **walk-windows / match-document / read-url MECHANISM** is primitive; the platform→URL **datum** it consumes is not (§2.D)
 
 ### `consultation_v2/snapshot.py` — classify mechanics
 - `build_snapshot`, `build_menu_snapshot`, `_classify_elements`, `_to_ref`, `_is_excluded` — agnostic mechanics ✓
@@ -46,10 +46,10 @@ All operate on an `ElementRef`, a raw key/text, or a predicate — none branch o
 
 ---
 
-## 2. PLATFORM KNOWLEDGE THAT MUST LEAVE SHARED CODE (the leak inventory — real file:line)
+## 2. ARCHIVED PLATFORM-KNOWLEDGE LEAK INVENTORY (historical file:line)
 
-> Each item is platform data or a platform branch sitting in a shared module. Per THE RULE
-> it must move into the per-platform **YAML** (data) or the per-platform **driver** (behavior).
+> These files now live under `archive/task-6a956ac0/main_archive_first/`. The inventory
+> remains as provenance for why the V1 surfaces were removed; it is not live guidance.
 
 ### A. `core/mode_select.py` (686 lines) — the shared-branch anti-pattern, dissolve entirely into drivers
 - `:102` `if platform == 'grok' and target_mode_lower == 'heavy':` (skip-selector)
@@ -65,7 +65,7 @@ All operate on an `ElementRef`, a raw key/text, or a predicate — none branch o
 - `:104-108` upload-item key per platform
 → **DESTINATION:** each YAML names its own attach/upload keys; driver reads them. No cross-platform dict.
 
-### C. `scripts/consultation.py` — live-path platform branches (the path currently in production)
+### C. `scripts/consultation.py` — archived V1 platform branches
 - `:439` `if platform == 'grok':` · `:568/:571` perplexity/gemini · `:918` chatgpt · `:926/:935` claude send · `:1603` perplexity mode
 → **DESTINATION:** dissolve into per-platform drivers; the live entrypoint dispatches to the driver (p2-make-live).
 
@@ -77,8 +77,8 @@ All operate on an `ElementRef`, a raw key/text, or a predicate — none branch o
 ### E. `core/ax_browser.py:423-425` — platform→search-token map (same class as D; legacy/MCP path)
 
 ### F. Two-config-tree trap (task #171) — `core/config.py:20` `PLATFORMS_DIR = <repo>/platforms`
-Live path reads **root** `platforms/*.yaml`; v2 reads `consultation_v2/platforms/*.yaml`. The
-isolated drivers must read ONE tree (`consultation_v2/platforms/`); the root tree is deleted at p2-make-live.
+The live path reads `consultation_v2/platforms/*.yaml`. The archived root `platforms/*.yaml` tree is historical evidence only. The
+isolated drivers read ONE tree (`consultation_v2/platforms/`).
 
 ---
 
@@ -97,7 +97,7 @@ The "isolated" matcher itself invites loose matchers, so the YAMLs filled with t
   key + integer `index`/`ordinal` — for inherently-dynamic leaves (file chips with timestamped
   names, response text, generated ids). Only the leaf text varies; the locator is itself exact.
 - Every other key (`name_contains`/`name_pattern`/`role_contains`/`url_contains`/`fuzzy`/…) is
-  REJECTED at load (runtime assert) AND blocked at commit (`tools/lint_exact_match.py`, already
+  REJECTED at load (runtime assert) AND blocked at commit (`consultation_v2/validators/lint_exact_match.py`, already
   wired into `.githooks/pre-commit`). The rule cannot regress.
 - Validation is read from the live AT-SPI tree for an exact element+state — never a screenshot-as-truth,
   never a substring.

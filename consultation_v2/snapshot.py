@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Tuple
 
-from core import atspi
-from core.tree import find_elements, find_menu_items
+from consultation_v2 import atspi
+from consultation_v2.tree import find_elements, find_menu_items
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
