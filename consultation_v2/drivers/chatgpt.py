@@ -677,66 +677,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
 
     @staticmethod
-    def _iter_accessible_children(obj):
-        try:
-            count = obj.get_child_count()
-        except Exception:
-            return
-        for index in range(count):
-            try:
-                child = obj.get_child_at_index(index)
-            except Exception:
-                child = None
-            if child is not None:
-                yield child
-
-    def _walk_accessible(self, obj, depth: int = 0, max_depth: int = 22):
-        if obj is None or depth > max_depth:
-            return
-        yield obj, depth
-        for child in self._iter_accessible_children(obj):
-            yield from self._walk_accessible(child, depth + 1, max_depth=max_depth)
-
-    @staticmethod
-    def _object_attributes(obj) -> dict[str, str]:
-        raw = None
-        for getter_name in ('get_attributes', 'get_attribute_set'):
-            getter = getattr(obj, getter_name, None)
-            if getter is None:
-                continue
-            try:
-                raw = getter()
-                if raw is not None:
-                    break
-            except Exception:
-                continue
-        if isinstance(raw, dict):
-            return {str(k).lower(): str(v).lower() for k, v in raw.items()}
-        attrs: dict[str, str] = {}
-        for item in raw or []:
-            text = str(item)
-            if ':' in text:
-                key, value = text.split(':', 1)
-            elif '=' in text:
-                key, value = text.split('=', 1)
-            else:
-                continue
-            attrs[key.strip().lower()] = value.strip().lower()
-        return attrs
-
-    @staticmethod
-    def _role_markers(obj) -> str:
-        try:
-            role = obj.get_role_name() or ''
-        except Exception:
-            role = ''
-        parts = [role.lower()]
-        for key, value in ChatGPTConsultationDriver._object_attributes(obj).items():
-            if 'role' in key:
-                parts.append(value)
-        return ' '.join(part for part in parts if part)
-
-    @staticmethod
     def _screen_rect(obj):
         if obj is None:
             return None
@@ -798,53 +738,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return evidence
             time.sleep(0.25)
         return evidence
-
-    def _latest_assistant_message(self, doc):
-        candidates = []
-        for obj, depth in self._walk_accessible(doc, max_depth=24):
-            markers = self._role_markers(obj)
-            if 'assistant' not in markers:
-                continue
-            rect = self._screen_rect(obj)
-            if not rect:
-                continue
-            try:
-                name = obj.get_name() or ''
-                role = obj.get_role_name() or ''
-            except Exception:
-                name = ''
-                role = ''
-            candidates.append({
-                'obj': obj,
-                'depth': depth,
-                'name': name,
-                'role': role,
-                'markers': markers,
-                'rect': rect,
-                'bottom': rect['y'] + rect['height'],
-            })
-        candidates.sort(
-            key=lambda item: (
-                item['bottom'],
-                item['rect']['height'],
-                -item['depth'],
-            )
-        )
-        if not candidates:
-            return None
-        latest = candidates[-1]
-        latest['candidate_count'] = len(candidates)
-        latest['candidate_summaries'] = [
-            {
-                'name': item['name'],
-                'role': item['role'],
-                'depth': item['depth'],
-                'markers': item['markers'],
-                'rect': item['rect'],
-            }
-            for item in candidates[-5:]
-        ]
-        return latest
 
     def _hover_above_composer_for_copy_button(self) -> dict:
         from core import input as _inp
