@@ -86,6 +86,33 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         strategy = self._click_strategy()
         return self.runtime.click(element, strategy=strategy)
 
+    @staticmethod
+    def _element_evidence(element):
+        if element is None:
+            return None
+        return {
+            'name': element.name,
+            'role': element.role,
+            'x': element.x,
+            'y': element.y,
+            'states': list(element.states or []),
+        }
+
+    @staticmethod
+    def _bottommost_input(snapshot):
+        inputs = list((snapshot.mapped or {}).get('input') or [])
+        if not inputs:
+            return None
+        with_coords = [item for item in inputs if item.x is not None and item.y is not None]
+        candidates = with_coords or inputs
+        return max(
+            candidates,
+            key=lambda item: (
+                item.y if item.y is not None else -1,
+                item.x if item.x is not None else -1,
+            ),
+        )
+
     def _focus_composer(self):
         """Focus the YAML-mapped ChatGPT input and return it after tree proof.
 
@@ -99,22 +126,43 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
         def _find_input_entry():
             snap = self.runtime.snapshot()
-            return self.find_first(snap, 'input')
+            return self._bottommost_input(snap)
 
         node = self.runtime.wait_until(_find_input_entry, timeout=10, interval=0.4)
         if node is None:
             return None
-        if not self.runtime.click(node):
-            return None
 
-        def _focused_input_entry():
-            snap = self.runtime.snapshot()
-            focused = self.find_first(snap, 'input')
-            if focused and 'focused' in {s.lower() for s in (focused.states or [])}:
+        for click_attempt in (1, 2):
+            if not self.runtime.click(node):
+                if click_attempt == 2:
+                    return None
+                continue
+            time.sleep(0.25)
+
+            consecutive_focused = 0
+
+            def _focused_input_entry():
+                nonlocal consecutive_focused
+                snap = self.runtime.snapshot()
+                focused = self._bottommost_input(snap)
+                states = {s.lower() for s in (focused.states or [])} if focused else set()
+                if focused and 'focused' in states:
+                    consecutive_focused += 1
+                    if consecutive_focused >= 2:
+                        return focused
+                else:
+                    consecutive_focused = 0
+                return None
+
+            focused = self.runtime.wait_until(_focused_input_entry, timeout=5.0, interval=0.25)
+            if focused is not None:
                 return focused
-            return None
 
-        return self.runtime.wait_until(_focused_input_entry, timeout=4.0, interval=0.3)
+            refreshed = self._bottommost_input(self.runtime.snapshot())
+            if refreshed is not None:
+                node = refreshed
+
+        return None
 
     def _activate_element(self, snapshot, key: str, result: ConsultationResult, step: str, reason_prefix: str) -> bool:
         element = self.find_first(snapshot, key)
@@ -505,17 +553,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
-        # SEND = focus the composer, then Enter. focus_firefox() alone activates
-        # the WINDOW but does NOT put keyboard focus on the ProseMirror
-        # contenteditable, so a bare Enter submits nothing (PROD 2026-06-15:
-        # select_model+attach+prompt all OK, yet Return did not send, message
-        # staged unsent, url stayed at chatgpt.com/). Click an editable composer
-        # paragraph node FIRST (structural role+editable selector — the composer
-        # is nameless ProseMirror, no findable entry), THEN Enter. Proven live
-        # on :2: click editable paragraph -> Enter -> SENT (stop appeared, url ->
-        # /c/...). We do NOT click the 'Send prompt' React button (no usable
-        # AT-SPI action per 100_TIMES §11) — Enter on the focused composer is the
-        # submit.
+        # SEND = exact mapped input focus -> Return. Each attempt clicks the
+        # YAML-declared input entry, waits for focused state in two fresh AT-SPI
+        # scans, then presses Return. If post-send Stop/URL validation fails and
+        # the prompt is still staged, the loop re-clicks the input and retries
+        # once. We do NOT click the 'Send prompt' React button (no usable AT-SPI
+        # action per 100_TIMES §11).
         attempts = []
         configured_timeout = float(
             self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 120) or 120
@@ -526,6 +569,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         for attempt in (1, 2):
             send_snap = None
             focus_node = self._focus_composer()
+            focus_evidence = self._element_evidence(focus_node)
             if focus_node is None:
                 attempts.append({'attempt': attempt, 'focused': False, 'pressed': False})
                 if attempt == 2:
@@ -534,7 +578,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
             pressed = self.runtime.press('Return')
             if not pressed:
-                attempts.append({'attempt': attempt, 'focused': True, 'pressed': False})
+                attempts.append({
+                    'attempt': attempt,
+                    'focused': True,
+                    'pressed': False,
+                    'focus_node': focus_evidence,
+                })
                 if attempt == 2:
                     break
                 continue
@@ -559,6 +608,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             attempts.append({
                 'attempt': attempt,
                 'focused': True,
+                'focus_node': focus_evidence,
                 'pressed': True,
                 'stop_seen': stop_seen,
                 'url_changed': url_changed,
