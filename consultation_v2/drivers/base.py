@@ -34,6 +34,32 @@ class BaseConsultationDriver(ABC):
     def find_last(self, snapshot: Snapshot, key: str) -> Optional[ElementRef]:
         return snapshot.last(key)
 
+    def tree_conformance_gate(
+        self,
+        result: ConsultationResult,
+        snapshot: Snapshot | None = None,
+    ) -> bool:
+        snap = snapshot or self.runtime.snapshot()
+        discrepancies = [
+            {'role': item.role, 'name': item.name}
+            for item in (snap.unknown or [])
+        ]
+        if not discrepancies:
+            return True
+        by_role: dict[str, int] = {}
+        for item in discrepancies:
+            role = item['role'] or ''
+            by_role[role] = by_role.get(role, 0) + 1
+        result.add_step(
+            'tree_conformance',
+            False,
+            f'{self.platform} tree conformance failed: {len(discrepancies)} unknown live element(s)',
+            unknown=discrepancies,
+            by_role=by_role,
+            snapshot=snap.serializable(),
+        )
+        return False
+
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
         validations = self.cfg.get('validation', {})
         if validation_key not in validations:

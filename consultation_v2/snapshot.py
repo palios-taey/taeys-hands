@@ -92,6 +92,47 @@ def _element_attributes(element: Dict[str, Any] | ElementRef) -> Dict[str, Any]:
     return attributes if isinstance(attributes, dict) else {}
 
 
+def _element_identity(element: Dict[str, Any]) -> Any:
+    obj = element.get('atspi_obj')
+    if obj is not None:
+        return id(obj)
+    return (
+        element.get('name'),
+        element.get('role'),
+        element.get('x'),
+        element.get('y'),
+    )
+
+
+def _atspi_ancestor_objects(obj: Any | None) -> List[Any]:
+    ancestors: List[Any] = []
+    current = obj
+    for _ in range(50):
+        if current is None:
+            break
+        try:
+            parent = current.get_parent()
+        except Exception:
+            break
+        if parent is None:
+            break
+        ancestors.append(parent)
+        current = parent
+    return ancestors
+
+
+def _obj_matches_spec(obj: Any, spec: Dict[str, Any]) -> bool:
+    try:
+        element = {
+            'name': obj.get_name() or '',
+            'role': obj.get_role_name() or '',
+            'atspi_obj': obj,
+        }
+    except Exception:
+        return False
+    return matches_spec(element, spec)
+
+
 def _reject_forbidden_matcher_keys(spec: Dict[str, Any]) -> None:
     found = sorted(key for key in spec if key in _FORBIDDEN_MATCHER_KEYS)
     if found:
@@ -155,6 +196,7 @@ def _is_excluded(
     element: Dict[str, Any],
     tree_cfg: Dict[str, Any],
     chrome_cfg: Dict[str, Any] | None = None,
+    structural_exclude_roots: List[tuple[Dict[str, Any], Any]] | None = None,
 ) -> bool:
     chrome = chrome_cfg or {}
     for spec in chrome.get('exact_elements') or []:
@@ -162,6 +204,10 @@ def _is_excluded(
             return True
 
     exclude = dict(tree_cfg.get('exclude', {}))
+    for spec, root in structural_exclude_roots or []:
+        if _matches_structural_exclude(element, spec, root):
+            return True
+
     name = (element.get('name') or '').strip()
     role = (element.get('role') or '').strip()
     role_lower = role.lower()
@@ -171,6 +217,89 @@ def _is_excluded(
     if role and role_lower in {str(item).lower() for item in _listify(exclude.get('roles'))}:
         return True
     return False
+
+
+def _structural_exclude_specs(tree_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    exclude = dict(tree_cfg.get('exclude') or {})
+    specs = exclude.get('structural') or []
+    if isinstance(specs, dict):
+        specs = [specs]
+    if not isinstance(specs, list):
+        raise ValueError('tree.exclude.structural must be a list of structural exclude specs')
+    normalized: List[Dict[str, Any]] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            raise ValueError('tree.exclude.structural entries must be mappings')
+        _reject_forbidden_matcher_keys(spec)
+        ancestor = spec.get('ancestor')
+        if ancestor is not None:
+            if not isinstance(ancestor, dict):
+                raise ValueError('tree.exclude.structural ancestor must be a mapping')
+            _reject_forbidden_matcher_keys(ancestor)
+        normalized.append(dict(spec))
+    return normalized
+
+
+def _structural_exclude_roots(
+    elements: Iterable[Dict[str, Any]],
+    specs: List[Dict[str, Any]],
+) -> List[tuple[Dict[str, Any], Any]]:
+    roots: List[tuple[Dict[str, Any], Any]] = []
+    for spec in specs:
+        ancestor_spec = spec.get('ancestor')
+        if not isinstance(ancestor_spec, dict):
+            roots.append((spec, None))
+            continue
+        matches = [
+            element.get('atspi_obj')
+            for element in elements
+            if element.get('atspi_obj') is not None and matches_spec(element, ancestor_spec)
+        ]
+        ordinal = str(spec.get('ancestor_ordinal') or '').strip().lower()
+        index = spec.get('ancestor_index')
+        if isinstance(index, int):
+            selected = matches[index:index + 1] if 0 <= index < len(matches) else []
+        elif ordinal == 'first':
+            selected = matches[:1]
+        elif ordinal == 'last':
+            selected = matches[-1:]
+        else:
+            selected = matches
+        for root in selected:
+            roots.append((spec, root))
+    return roots
+
+
+def _matches_structural_exclude(
+    element: Dict[str, Any],
+    spec: Dict[str, Any],
+    root: Any | None,
+) -> bool:
+    if 'role' in spec and (element.get('role') or '') != str(spec['role']):
+        return False
+    if 'name' in spec and (element.get('name') or '') != str(spec['name']):
+        return False
+    if 'names_any_of' in spec:
+        candidates = spec['names_any_of']
+        if not isinstance(candidates, list):
+            raise ValueError('tree.exclude.structural names_any_of must be a list')
+        if (element.get('name') or '') not in {str(candidate) for candidate in candidates}:
+            return False
+    min_child_count = spec.get('min_child_count')
+    if min_child_count is not None:
+        obj = element.get('atspi_obj')
+        try:
+            if obj is None or obj.get_child_count() < int(min_child_count):
+                return False
+        except Exception:
+            return False
+    ancestor_spec = spec.get('ancestor')
+    if isinstance(ancestor_spec, dict):
+        ancestors = _atspi_ancestor_objects(element.get('atspi_obj'))
+        if root is not None:
+            return any(ancestor == root for ancestor in ancestors)
+        return any(_obj_matches_spec(ancestor, ancestor_spec) for ancestor in ancestors)
+    return True
 
 
 def _to_ref(key: str | None, element: Dict[str, Any]) -> ElementRef:
@@ -198,26 +327,55 @@ def _classify_elements(
     tree_cfg = dict(cfg.get('tree') or {})
     element_map = dict(tree_cfg.get('element_map') or {})
     sidebar_nav = _listify(tree_cfg.get('sidebar_nav'))
+    elements = list(elements)
+    structural_excludes = _structural_exclude_roots(
+        elements,
+        _structural_exclude_specs(tree_cfg),
+    )
     snapshot = Snapshot(platform=platform, url=None, raw_count=0)
     mapped: Dict[str, List[ElementRef]] = {key: [] for key in element_map}
-    unknown: List[ElementRef] = []
     sidebar: List[ElementRef] = []
+    exact_accounted: Set[Any] = set()
+    sidebar_accounted: Set[Any] = set()
+    candidates: List[Dict[str, Any]] = []
 
     for element in elements:
         snapshot.raw_count += 1
-        if _is_excluded(element, tree_cfg, chrome_cfg=chrome_cfg):
+        if _is_excluded(
+            element,
+            tree_cfg,
+            chrome_cfg=chrome_cfg,
+            structural_exclude_roots=structural_excludes,
+        ):
             continue
         matched = False
         for key, spec in element_map.items():
+            if 'structural' in spec:
+                continue
             if matches_spec(element, spec):
                 mapped.setdefault(key, []).append(_to_ref(key, element))
+                exact_accounted.add(_element_identity(element))
                 matched = True
         if matched:
             continue
         if any(matches_spec(element, spec) for spec in sidebar_nav if isinstance(spec, dict)):
             sidebar.append(_to_ref(None, element))
+            sidebar_accounted.add(_element_identity(element))
             continue
-        unknown.append(_to_ref(None, element))
+        candidates.append(element)
+
+    structural_accounted = _resolve_structural_mappings(
+        element_map,
+        elements,
+        mapped,
+        exact_accounted | sidebar_accounted,
+    )
+    accounted = exact_accounted | sidebar_accounted | structural_accounted
+    unknown = [
+        _to_ref(None, element)
+        for element in candidates
+        if _element_identity(element) not in accounted
+    ]
 
     snapshot.mapped = mapped
     snapshot.unknown = unknown
@@ -225,6 +383,59 @@ def _classify_elements(
     if menu_items:
         snapshot.menu_items = [_to_ref(None, item) for item in menu_items]
     return snapshot
+
+
+def _resolve_structural_mappings(
+    element_map: Dict[str, Any],
+    elements: List[Dict[str, Any]],
+    mapped: Dict[str, List[ElementRef]],
+    accounted: Set[Any],
+) -> Set[Any]:
+    structural_accounted: Set[Any] = set()
+    for key, spec in element_map.items():
+        structural = spec.get('structural') if isinstance(spec, dict) else None
+        if not isinstance(structural, dict):
+            continue
+        parent_key = structural.get('parent')
+        if not isinstance(parent_key, str):
+            continue
+        parent_refs = mapped.get(parent_key) or []
+        parent_objects = [ref.atspi_obj for ref in parent_refs if ref.atspi_obj is not None]
+        if not parent_objects:
+            continue
+        expected_role = str(structural.get('role') or spec.get('role') or '').strip()
+        if not expected_role:
+            continue
+        candidates = []
+        for element in elements:
+            identity = _element_identity(element)
+            if identity in accounted or identity in structural_accounted:
+                continue
+            if (element.get('role') or '') != expected_role:
+                continue
+            if structural.get('name_must_be_nonempty') and not (element.get('name') or '').strip():
+                continue
+            obj = element.get('atspi_obj')
+            ancestors = _atspi_ancestor_objects(obj)
+            if not any(parent in ancestors for parent in parent_objects):
+                continue
+            candidates.append(element)
+        candidates.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
+        index = structural.get('index')
+        ordinal = str(structural.get('ordinal') or '').strip().lower()
+        selected = None
+        if isinstance(index, int):
+            if 0 <= index < len(candidates):
+                selected = candidates[index]
+        elif ordinal == 'last' and candidates:
+            selected = candidates[-1]
+        elif candidates:
+            selected = candidates[0]
+        if selected is None:
+            continue
+        mapped.setdefault(key, []).append(_to_ref(key, selected))
+        structural_accounted.add(_element_identity(selected))
+    return structural_accounted
 
 
 def _element_extent_is_onscreen(obj: Any) -> bool:

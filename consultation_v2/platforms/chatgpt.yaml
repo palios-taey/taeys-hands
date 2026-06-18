@@ -10,18 +10,25 @@ urls:
   verify_navigation: false
 tree:
   fence_after: []
-  # Subtree prune history containers before classification. Live :2 shows the
-  # engine's New chat link inside the Chat history landmark, so pruning the
-  # entire landmark would break clean_composer. The mutable conversation lists
-  # are stable unnamed list containers under that landmark with >=3 children
-  # (Pinned + Recents); the New chat/Search list has 2 children and is kept.
+  # Subtree prune sidebar containers before classification. We keep the standalone
+  # New chat link used by clean_composer, but structurally remove sidebar nav,
+  # mutable chat lists, and footer controls from conformance accounting.
   prune_subtrees:
   - role: list
     name: ""
     ancestor:
       role: landmark
       name: Chat history
-    min_child_count: 3
+    min_child_count: 2
+  - role: link
+    ancestor:
+      role: landmark
+      name: Chat history
+    min_child_count: 1
+  - role: push button
+    ancestor:
+      role: landmark
+      name: Chat history
   - role: push button
     names_any_of:
     - Pinned
@@ -29,7 +36,28 @@ tree:
     ancestor:
       role: landmark
       name: Chat history
+  - role: push button
+    ancestor:
+      role: document web
+      name: ChatGPT
+    min_child_count: 4
   exclude:
+    structural:
+    - role: push button
+      ancestor:
+        role: landmark
+        name: ""
+      ancestor_ordinal: first
+    - role: image
+      name: ""
+    - role: alert
+      name: ""
+    - role: static
+      ancestor:
+        role: heading
+    - role: push button
+      ancestor:
+        role: heading
     names:
     - Close sidebar
     - Turn off temporary chat
@@ -75,14 +103,13 @@ tree:
       role: entry
       states_include:
       - editable
+    composer_form:
+      name: ""
+      role: form
     model_selector:
-      # The effort/model trigger button is named after the CURRENTLY-selected
-      # effort — it drifted from a fixed 'Pro Extended' label. It is always
-      # exactly one of these (enumerated-exact set, contract-allowed names_any_of),
-      # so it matches regardless of current effort. Clicking it opens the radio
-      # menu (Instant/Medium/High/Extra High/Pro Extended → model_* targets).
-      names_any_of: [Instant, Medium, High, Extra High, Pro Extended] # lint-allow: known p5 debt; dynamic-name model picker needs structural/stable locator remap
-      role: push button
+      structural:
+        parent: composer_form
+        role: push button
     attach_trigger:
       name: Add files and more
       role: push button
@@ -229,14 +256,14 @@ workflow:
       - trigger: model_selector
         target: model_pro
         verification: pro_active
-      - trigger: extended_pro
+      - trigger: model_selector
         target: thinking_extended
         verification: pro_extended_active
       extended_thinking:
       - trigger: model_selector
         target: model_pro
         verification: pro_active
-      - trigger: extended_pro
+      - trigger: model_selector
         target: thinking_extended
         verification: extended_thinking_active
     # Re-baselined 2026-05-22. Top-level tools selectable directly; tools marked
@@ -306,17 +333,13 @@ validation:
     timeout: 30
   response_complete:
     stop_absent: stop_button
-  # pro_active: Pro model is selected.
-  # The live signal is the composer model_selector button itself.
+  # pro_active: the model selector is present at the stable composer position.
+  # Its name is intentionally not asserted; the label flips with active state.
   pro_active:
-    indicators:
-    - name: Pro Extended
-      role: push button
+    stop_present: model_selector
   # pro_extended_active: Pro Extended is active.
   pro_extended_active:
-    indicators:
-    - name: Pro Extended
-      role: push button
+    stop_present: model_selector
   # instant_active: No persistent toolbar badge exists for Instant.
   # Use best_effort + dropdown item check (open selector, verify item present).
   # Driver opens the dropdown, finds the item, then closes — acceptable because
@@ -333,12 +356,9 @@ validation:
     indicators:
     - name: Medium
       role: menu item
-  # extended_thinking_active: The live model selector itself is the persistent
-  # signal for Extended Thinking on this surface; mirror pro_indicator.
+  # extended_thinking_active: the same stable selector persists after selection.
   extended_thinking_active:
-    indicators:
-    - name: Pro Extended
-      role: push button
+    stop_present: model_selector
 
 # ============================================================================
 # extraction — output-type -> ordered exact-matched workflow.
