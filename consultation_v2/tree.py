@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import gi
 gi.require_version('Atspi', '2.0')
@@ -33,6 +33,70 @@ _TEXT_EXTRACT_MAX_CHARS = 300
 _TEXT_EXTRACT_MAX_CHILDREN = 8
 
 FIREFOX_CHROME_Y = 100
+
+
+def _validate_prune_subtree_specs(specs: Optional[List[Dict]]) -> List[Dict[str, Any]]:
+    normalized = []
+    for spec in specs or []:
+        if not isinstance(spec, dict):
+            raise ValueError('prune_subtree_specs entries must be mappings')
+        for key in spec:
+            if key not in {'role', 'name', 'names_any_of', 'ancestor', 'min_child_count'}:
+                raise ValueError(f'unsupported prune_subtree_specs key {key!r}')
+        if not any(key in spec for key in ('role', 'name', 'names_any_of')):
+            raise ValueError('prune_subtree_specs entries must declare role, name, or names_any_of')
+        if 'role' in spec and not isinstance(spec['role'], str):
+            raise ValueError('prune_subtree_specs role must be an exact string')
+        if 'name' in spec and not isinstance(spec['name'], str):
+            raise ValueError('prune_subtree_specs name must be an exact string')
+        if 'names_any_of' in spec:
+            candidates = spec['names_any_of']
+            if (
+                not isinstance(candidates, list)
+                or not all(isinstance(item, str) for item in candidates)
+            ):
+                raise ValueError('prune_subtree_specs names_any_of must be a list of exact strings')
+        if 'ancestor' in spec:
+            ancestor = spec['ancestor']
+            if not isinstance(ancestor, dict):
+                raise ValueError('prune_subtree_specs ancestor must be a mapping')
+            for key in ancestor:
+                if key not in {'role', 'name', 'names_any_of'}:
+                    raise ValueError(f'unsupported prune_subtree_specs ancestor key {key!r}')
+            if not any(key in ancestor for key in ('role', 'name', 'names_any_of')):
+                raise ValueError('prune_subtree_specs ancestor must declare role, name, or names_any_of')
+            if 'role' in ancestor and not isinstance(ancestor['role'], str):
+                raise ValueError('prune_subtree_specs ancestor role must be an exact string')
+            if 'name' in ancestor and not isinstance(ancestor['name'], str):
+                raise ValueError('prune_subtree_specs ancestor name must be an exact string')
+            if 'names_any_of' in ancestor:
+                candidates = ancestor['names_any_of']
+                if (
+                    not isinstance(candidates, list)
+                    or not all(isinstance(item, str) for item in candidates)
+                ):
+                    raise ValueError('prune_subtree_specs ancestor names_any_of must be a list of exact strings')
+        if 'min_child_count' in spec and not isinstance(spec['min_child_count'], int):
+            raise ValueError('prune_subtree_specs min_child_count must be an integer')
+        normalized.append(dict(spec))
+    return normalized
+
+
+def _node_matches_prune_spec(name: str, role: str, spec: Dict[str, Any]) -> bool:
+    if 'role' in spec and role != spec['role']:
+        return False
+    if 'name' in spec and name != spec['name']:
+        return False
+    if 'names_any_of' in spec and name not in set(spec['names_any_of']):
+        return False
+    return True
+
+
+def _has_matching_ancestor(ancestors: List[tuple[str, str]], spec: Dict[str, Any]) -> bool:
+    return any(
+        _node_matches_prune_spec(ancestor_name, ancestor_role, spec)
+        for ancestor_name, ancestor_role in ancestors
+    )
 
 
 def _collect_child_text(obj, max_children=_TEXT_EXTRACT_MAX_CHILDREN,
@@ -68,7 +132,8 @@ def _collect_child_text(obj, max_children=_TEXT_EXTRACT_MAX_CHILDREN,
 def find_elements(scope, max_depth: int = 25,
                   exclude_landmarks: Optional[List[str]] = None,
                   fence_after: Optional[List[Dict]] = None,
-                  prune_subtree_roles: Optional[List[str]] = None) -> List[Dict]:
+                  prune_subtree_roles: Optional[List[str]] = None,
+                  prune_subtree_specs: Optional[List[Dict]] = None) -> List[Dict]:
     """Find all visible elements in an AT-SPI subtree.
 
     fence_after: list of {name, role} dicts. When an element matches,
@@ -83,17 +148,35 @@ def find_elements(scope, max_depth: int = 25,
     never floods the snapshot — page content lives under the content panel /
     document, never under these chrome containers. Default None = no pruning,
     so every existing caller is unchanged.
+
+    prune_subtree_specs: exact structural container specs whose ENTIRE subtree
+    is skipped (not collected, not descended). Supports exact role/name,
+    names_any_of, optional exact ancestor, and optional min_child_count.
     """
     results = []
     exclude_lower = [n.lower() for n in (exclude_landmarks or [])]
     prune_lower = {r.lower() for r in (prune_subtree_roles or [])}
+    subtree_specs = _validate_prune_subtree_specs(prune_subtree_specs)
     fence_set = set()
     if fence_after:
         for item in fence_after:
             fence_set.add((str(item.get('name', '')).lower(), item.get('role', '')))
 
-    def traverse(obj, depth=0):
+    def should_prune_by_spec(obj, name: str, role: str, ancestors: List[tuple[str, str]]) -> bool:
+        for spec in subtree_specs:
+            if not _node_matches_prune_spec(name, role, spec):
+                continue
+            if obj.get_child_count() < int(spec.get('min_child_count', 0)):
+                continue
+            ancestor = spec.get('ancestor')
+            if ancestor and not _has_matching_ancestor(ancestors, ancestor):
+                continue
+            return True
+        return False
+
+    def traverse(obj, depth=0, ancestors=None):
         """Returns True if a fence element was found (signals parent to stop siblings)."""
+        ancestor_stack = list(ancestors or [])
         if depth > max_depth:
             return False
         try:
@@ -104,6 +187,8 @@ def find_elements(scope, max_depth: int = 25,
             # (no collect, no descend). Returns False so the parent keeps
             # iterating its remaining siblings (this is not a fence).
             if prune_lower and role.lower() in prune_lower:
+                return False
+            if subtree_specs and should_prune_by_spec(obj, name, role, ancestor_stack):
                 return False
 
             state_set = obj.get_state_set()
@@ -143,7 +228,7 @@ def find_elements(scope, max_depth: int = 25,
             for i in range(obj.get_child_count()):
                 child = obj.get_child_at_index(i)
                 if child:
-                    if traverse(child, depth + 1):
+                    if traverse(child, depth + 1, ancestor_stack + [(name, role)]):
                         break  # Fence found in child — stop remaining siblings
         except Exception as e:
             logger.debug(f"Traversal error at depth {depth}: {e}")

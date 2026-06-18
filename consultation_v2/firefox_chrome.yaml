@@ -1,0 +1,43 @@
+firefox_chrome:
+  # Browser chrome subtrees are Firefox UI, never chat-page content. These are
+  # used only when build_snapshot must fall back to a whole-Firefox scan because
+  # no platform document is available.
+  subtree_roles:
+    - tool bar
+    - menu bar
+    - page tab list
+    - status bar
+
+  # Exact chrome elements observed leaking from Firefox app-root scans. This is
+  # applied before per-platform tree.exclude and is intentionally exact-only.
+  exact_elements:
+    - name: Mozilla Firefox
+      role: image
+    - name: Search with Google or enter address
+      role: push button
+    - name: Add-ons for Firefox
+      role: link
+    - name: Open context menu for Add-ons for Firefox
+      role: push button
+    - name: ""
+      role: status bar
+    - names_any_of:
+        - ChatGPT — Mozilla Firefox
+        - Claude — Mozilla Firefox
+        - Gemini — Mozilla Firefox
+        - Grok — Mozilla Firefox
+        - Perplexity — Mozilla Firefox
+      role: frame
+
+  # External portal containers may sit outside the document subtree. App-root
+  # build_snapshot scans these on-screen roots in addition to the document, but
+  # never returns the Firefox frame/toolbars themselves.
+  portal_container_roles:
+    - menu
+    - popup menu
+    - listbox
+    - list box
+    - panel
+    - dialog
+    - alert
+    - window

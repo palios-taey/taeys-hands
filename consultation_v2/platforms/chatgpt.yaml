@@ -10,6 +10,25 @@ urls:
   verify_navigation: false
 tree:
   fence_after: []
+  # Subtree prune history containers before classification. Live :2 shows the
+  # engine's New chat link inside the Chat history landmark, so pruning the
+  # entire landmark would break clean_composer. The mutable conversation lists
+  # are stable unnamed list containers under that landmark with >=3 children
+  # (Pinned + Recents); the New chat/Search list has 2 children and is kept.
+  prune_subtrees:
+  - role: list
+    name: ""
+    ancestor:
+      role: landmark
+      name: Chat history
+    min_child_count: 3
+  - role: push button
+    names_any_of:
+    - Pinned
+    - Recents
+    ancestor:
+      role: landmark
+      name: Chat history
   exclude:
     names:
     - Close sidebar
@@ -19,11 +38,6 @@ tree:
     - ChatGPT
     - Chat history
     - Skip to content
-    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
-    - Upgrade
-    - Get Plus
-    - ', open profile menu'
-    - Manage my account
     roles:
     - separator
     - document web
