@@ -40,7 +40,8 @@ Observed:
   `monitor/central.py:181-258`, and
   `consultations/inventory/p1_orchestrator_surface_audit.md:104-121`.
 - The current monitor completion signal shape is sticky stop seen, then stop
-  gone, with deep-mode cycles, timeout, and hang suspicion. Evidence:
+  gone, with deep-mode stop-gone debounce and timeout backstops. It has no
+  rendered-content freeze heuristic. Evidence:
   `monitor/central.py:312-421` and `consultation_v2/completion.py:1-135`.
 - Monitor notification must use fleet-notify/taey-notify with recorded delivery
   or parked failure behavior. Evidence: `CONSULTATION_CONTRACT.md:41-42`,
@@ -518,11 +519,12 @@ Completion logic:
 
 - stop button visible means generating
 - stop button was seen, then disappears, means complete
-- deep/extended modes may require an additional stop-gone cycle
-- stop present with frozen content beyond the hang threshold is a loud
-  `hang_suspected`, not completion
+- deep/extended modes require the configured stop-gone debounce cycle count
+- stop present means generating regardless of rendered text; there is no
+  rendered-content freeze heuristic
 - stop never seen within the generation-start window is `send_failure`
-- overall timeout is loud failure
+- a genuinely stuck visible-stop run is bounded by the request timeout, which is
+  loud failure
 
 There is no copy-button fallback for completion. Completion is not inferred from
 elapsed time, copy buttons, or response-looking content.
