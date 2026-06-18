@@ -52,8 +52,8 @@ def test_chatgpt_send_prompt_refocuses_input_and_submits_with_return() -> None:
     verify_snap = _snapshot('stop_button', [_stop_button()])
     driver.runtime.snapshot.side_effect = [snap, focused_snap, focused_snap, verify_snap]
     driver.runtime.wait_until.side_effect = _poll_until
-    driver.runtime.current_url.return_value = 'https://example.test/thread'
-    driver.runtime.wait_for_url_change.return_value = 'https://example.test/thread'
+    driver.runtime.current_url.return_value = 'https://chatgpt.com/c/thread'
+    driver.runtime.wait_for_url_change.return_value = 'https://chatgpt.com/c/thread'
     driver.runtime.click.return_value = True
     driver.runtime.press = MagicMock()
 
@@ -63,6 +63,7 @@ def test_chatgpt_send_prompt_refocuses_input_and_submits_with_return() -> None:
     assert driver.send_prompt(result.request, result) is True
     driver.runtime.click.assert_called_once_with(composer)
     driver.runtime.press.assert_called_once_with('Return')
+    assert result.session_url_after == 'https://chatgpt.com/c/thread'
 
 
 def test_chatgpt_send_prompt_reclicks_input_when_first_enter_leaves_prompt_staged() -> None:
@@ -86,10 +87,14 @@ def test_chatgpt_send_prompt_reclicks_input_when_first_enter_leaves_prompt_stage
     ]
     driver.wait_for_validation = MagicMock(side_effect=[no_stop_snap, stop_snap])
     driver.runtime.wait_until.side_effect = _poll_until
-    driver.runtime.current_url.return_value = 'https://example.test/new'
+    driver._wait_for_answer_thread_url = MagicMock(side_effect=[
+        None,
+        'https://chatgpt.com/c/thread',
+    ])
+    driver.runtime.current_url.return_value = 'https://chatgpt.com/'
     driver.runtime.wait_for_url_change.side_effect = [
-        'https://example.test/new',
-        'https://example.test/thread',
+        'https://chatgpt.com/',
+        'https://chatgpt.com/',
     ]
     driver.runtime.click.return_value = True
     driver.runtime.press = MagicMock(return_value=True)
@@ -103,4 +108,48 @@ def test_chatgpt_send_prompt_reclicks_input_when_first_enter_leaves_prompt_stage
     attempts = result.steps[-1].evidence['attempts']
     assert attempts[0]['prompt_still_staged'] is True
     assert attempts[1]['stop_seen'] is True
-    assert attempts[1]['url_changed'] is True
+    assert attempts[1]['answer_thread'] is True
+    assert result.session_url_after == 'https://chatgpt.com/c/thread'
+
+
+def test_chatgpt_send_prompt_waits_for_answer_thread_url_after_stop() -> None:
+    driver = ChatGPTConsultationDriver()
+    driver.runtime = MagicMock()
+    composer = _composer_node()
+    focused_composer = _composer_node(['editable', 'focused'])
+    snap = _snapshot('input', [composer])
+    focused_snap = _snapshot('input', [focused_composer])
+    verify_snap = _snapshot('stop_button', [_stop_button()])
+    driver.runtime.snapshot.side_effect = [snap, focused_snap, focused_snap, verify_snap]
+    driver.runtime.wait_until.side_effect = _poll_until
+    driver.runtime.current_url.return_value = 'https://chatgpt.com/c/thread'
+    driver.runtime.wait_for_url_change.return_value = 'https://chatgpt.com/'
+    driver.runtime.click.return_value = True
+    driver.runtime.press = MagicMock(return_value=True)
+
+    result = driver.result(_request())
+    result.session_url_before = 'https://old.example/thread'
+
+    assert driver.send_prompt(result.request, result) is True
+    assert result.session_url_after == 'https://chatgpt.com/c/thread'
+    driver.runtime.wait_for_url_change.assert_not_called()
+    attempts = result.steps[-1].evidence['attempts']
+    assert attempts[-1]['answer_thread'] is True
+
+
+def test_chatgpt_answer_thread_reassert_adopts_current_thread_when_capture_is_home() -> None:
+    driver = ChatGPTConsultationDriver.__new__(ChatGPTConsultationDriver)
+    driver.runtime = MagicMock()
+    driver.runtime.current_url.return_value = 'https://chatgpt.com/c/live-thread'
+    request = ConsultationRequest(platform='chatgpt', message='hello')
+    result = driver.result(request)
+    result.session_url_after = 'https://chatgpt.com/'
+
+    assert driver.reassert_captured_session_url(
+        result,
+        answer_url_predicate=driver._is_answer_thread_url,
+    ) is True
+    assert result.session_url_after == 'https://chatgpt.com/c/live-thread'
+    assert result.steps[-1].step == 'answer_thread'
+    assert result.steps[-1].success is True
+    assert result.steps[-1].evidence['adopted_current'] is True

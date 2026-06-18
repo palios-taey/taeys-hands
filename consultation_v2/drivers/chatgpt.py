@@ -591,20 +591,24 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             timeout = first_probe_timeout if attempt == 1 else full_timeout
             send_snap = self.wait_for_validation('send_success', timeout=timeout, interval=0.6)
             stop_seen = self.validation_passes(send_snap, 'send_success')
-            after = self.runtime.wait_for_url_change(
-                before,
+            answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
+            )
+            after = answer_url or self.runtime.wait_for_url_change(
+                before,
+                timeout=5.0,
                 interval=1.0,
             )
             result.session_url_after = after or self.runtime.current_url() or before
             url_changed = bool(result.session_url_after and result.session_url_after != before)
+            answer_thread = bool(self._is_answer_thread_url(result.session_url_after))
             prompt_still_staged = False
-            if attempt == 1 and not stop_seen and not url_changed:
+            if attempt == 1 and not stop_seen and not answer_thread:
                 prompt_still_staged = self.validation_passes(
                     self.runtime.snapshot(),
                     'prompt_ready',
                 )
-            verified = bool(pressed and stop_seen and (request.session_url or url_changed))
+            verified = bool(pressed and stop_seen and answer_thread)
             attempts.append({
                 'attempt': attempt,
                 'focused': True,
@@ -612,6 +616,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'pressed': True,
                 'stop_seen': stop_seen,
                 'url_changed': url_changed,
+                'answer_thread': answer_thread,
                 'prompt_still_staged': prompt_still_staged,
             })
             if verified:
@@ -629,10 +634,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return True
 
             # The only retry Jesse authorized here is the focus+Enter path when
-            # the first Enter clearly did not land: no Stop, no URL movement, and
+            # the first Enter clearly did not land: no Stop, no answer-thread URL, and
             # the prompt is still staged in the composer. If any send evidence
             # appears, do not press Enter again.
-            if attempt == 1 and not stop_seen and not url_changed and prompt_still_staged:
+            if attempt == 1 and not stop_seen and not answer_thread and prompt_still_staged:
                 continue
             break
 
@@ -660,6 +665,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/c/' in (url or '')
+
+    def _wait_for_answer_thread_url(self, *, timeout: float = 12.0) -> str | None:
+        def _current_answer_url() -> str | None:
+            current = (self.runtime.current_url() or '').strip()
+            return current if self._is_answer_thread_url(current) else None
+
+        return self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
 
     @staticmethod
     def _iter_accessible_children(obj):

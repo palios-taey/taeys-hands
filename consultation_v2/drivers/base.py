@@ -619,6 +619,17 @@ class BaseConsultationDriver(ABC):
         captured = (result.session_url_after or '').strip()
         current_before = (self.runtime.current_url() or '').strip()
         if not captured:
+            if answer_url_predicate is not None and answer_url_predicate(current_before):
+                result.session_url_after = current_before
+                result.add_step(
+                    'answer_thread',
+                    True,
+                    f'{self.platform} adopted current answer thread URL',
+                    url=current_before,
+                    captured_url=captured,
+                    adopted_current=True,
+                )
+                return True
             result.add_step(
                 'answer_thread',
                 False,
@@ -627,6 +638,17 @@ class BaseConsultationDriver(ABC):
             )
             return False
         if answer_url_predicate is not None and not answer_url_predicate(captured):
+            if answer_url_predicate(current_before):
+                result.session_url_after = current_before
+                result.add_step(
+                    'answer_thread',
+                    True,
+                    f'{self.platform} adopted current answer thread URL',
+                    current_url=current_before,
+                    captured_url=captured,
+                    adopted_current=True,
+                )
+                return True
             result.add_step(
                 'answer_thread',
                 False,
