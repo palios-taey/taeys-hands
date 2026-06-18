@@ -607,6 +607,45 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/c/' in (url or '')
 
+    def _hover_response_bottom(self) -> dict:
+        from core import input as _inp
+
+        evidence = {
+            'ok': False,
+            'source': 'document_extents',
+        }
+        for _ in range(8):
+            try:
+                import gi
+                gi.require_version('Atspi', '2.0')
+                from gi.repository import Atspi as _Atspi
+                from core import atspi as _atspi
+
+                firefox = _atspi.find_firefox_for_platform(self.platform)
+                doc = _atspi.get_platform_document(firefox, self.platform) if firefox else None
+                comp = doc.get_component_iface() if doc is not None else None
+                rect = comp.get_extents(_Atspi.CoordType.SCREEN) if comp is not None else None
+                if rect and rect.width > 0 and rect.height > 0:
+                    x = int(rect.x + rect.width // 2)
+                    y_offset = min(max(80, rect.height - 90), max(0, rect.height - 20))
+                    y = int(rect.y + y_offset)
+                    evidence.update({
+                        'x': x,
+                        'y': y,
+                        'document_rect': {
+                            'x': int(rect.x),
+                            'y': int(rect.y),
+                            'width': int(rect.width),
+                            'height': int(rect.height),
+                        },
+                    })
+                    evidence['ok'] = bool(_inp.hover(x, y))
+                    return evidence
+            except Exception as exc:
+                evidence['error'] = str(exc)
+            time.sleep(0.25)
+        return evidence
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from core import clipboard
         from core.atspi import find_firefox_for_platform
@@ -622,9 +661,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
         last_snapshot = None
         all_elements: list[dict] = []
+        hover_evidence = {}
         for attempt in range(5):
             time.sleep(2.0)
             scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
+            hover_evidence = self._hover_response_bottom()
+            if not hover_evidence.get('ok'):
+                result.add_step(
+                    'extract_primary', False,
+                    'ChatGPT response-bottom hover failed before Copy response scan',
+                    attempt=attempt + 1,
+                    hover=hover_evidence,
+                    snapshot=last_snapshot.serializable() if last_snapshot else {},
+                )
+                return False
+            time.sleep(0.5)
             last_snapshot = self.runtime.snapshot()
             time.sleep(0.8)
 
@@ -659,6 +710,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     characters=len(content),
                     preview=content[:200],
                     scroll_ok=scroll_ok,
+                    hover=hover_evidence,
                     copy_buttons_found=len(copy_buttons),
                     copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
                 )
@@ -670,6 +722,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     characters=len(content),
                     preview=content[:200],
                     attempt=attempt + 1,
+                    hover=hover_evidence,
                     copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
                 )
 
@@ -677,6 +730,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'extract_primary', False,
             'ChatGPT response copy button not found or only prompt echo copied',
             elements=len(all_elements),
+            last_hover=hover_evidence,
             snapshot=last_snapshot.serializable() if last_snapshot else {},
         )
         return False
