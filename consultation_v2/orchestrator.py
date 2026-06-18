@@ -37,6 +37,37 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
 
+    # --- Phase 0: Display readiness gate (all chat platforms; validation-only) ---
+    # Before ANY interaction, verify the production display is readable and in
+    # one-window/one-tab/right-host shape. Not-ready returns a failed result with
+    # evidence; checker exceptions are intentionally not caught.
+    from consultation_v2 import display_readiness
+    readiness = display_readiness.check(request.platform)
+    if not readiness['ready']:
+        result = ConsultationResult(platform=request.platform, request=request)
+        details = '; '.join(readiness.get('issues') or [])
+        resolutions = '; '.join(readiness.get('resolutions') or [])
+        message = f"display {readiness.get('display')} NOT ready: {details}"
+        if resolutions:
+            message += f" | resolution: {resolutions}"
+        result.add_step('display_readiness', False, message, readiness=readiness)
+        logger.error(
+            'DISPLAY READINESS GATE FAILED %s %s: issues=%s resolutions=%s',
+            request.platform,
+            readiness.get('display'),
+            readiness.get('issues'),
+            readiness.get('resolutions'),
+        )
+        return result
+    logger.info(
+        'display readiness OK %s %s (windows=%s tabs=%s url=%s)',
+        request.platform,
+        readiness.get('display'),
+        readiness.get('windows'),
+        readiness.get('tabs'),
+        readiness.get('url'),
+    )
+
     # --- Phase 1: Identity consolidation ---
     # FAIL-LOUD (FLOW §4 / CONSULTATION_CONTRACT): a missing/unreadable
     # FAMILY_KERNEL.md or the required platform IDENTITY file raises
