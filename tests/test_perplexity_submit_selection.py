@@ -30,14 +30,18 @@ def _stop_button() -> dict[str, object]:
     return {'name': 'Stop response', 'role': 'push button', 'states': []}
 
 
+def _run_wait(predicate, timeout, interval=0.5):
+    return predicate()
+
+
 def test_perplexity_send_prompt_uses_last_submit_button() -> None:
     driver = PerplexityConsultationDriver()
     driver.runtime = MagicMock()
     first_snap = _snapshot()
     confirm_snap = _snapshot([_stop_button()])
     driver.runtime.snapshot.side_effect = [first_snap, confirm_snap]
-    driver.runtime.wait_until.return_value = True
-    driver.runtime.current_url.return_value = 'https://example.test/thread'
+    driver.runtime.wait_until.side_effect = _run_wait
+    driver.runtime.current_url.return_value = 'https://www.perplexity.ai/search/thread'
     driver.runtime.click.return_value = True
     driver.runtime.menu_snapshot = MagicMock()
 
@@ -45,7 +49,7 @@ def test_perplexity_send_prompt_uses_last_submit_button() -> None:
     driver.find_last = MagicMock(return_value=send_button)
 
     result = driver.result(_request())
-    result.session_url_before = 'https://example.test/new'
+    result.session_url_before = 'https://www.perplexity.ai/'
 
     assert driver.send_prompt(result.request, result) is True
     driver.find_last.assert_called_once_with(first_snap, 'submit_button')
@@ -61,15 +65,15 @@ def test_perplexity_send_prompt_uses_app_root_submit_when_document_scope_misses(
     confirm_snap = _snapshot([_stop_button()])
     driver.runtime.snapshot.side_effect = [document_snap, confirm_snap]
     driver.runtime.menu_snapshot.return_value = app_root_snap
-    driver.runtime.wait_until.return_value = True
-    driver.runtime.current_url.return_value = 'https://example.test/thread'
+    driver.runtime.wait_until.side_effect = _run_wait
+    driver.runtime.current_url.return_value = 'https://www.perplexity.ai/search/thread'
     driver.runtime.click.return_value = True
 
     send_button = MagicMock()
     driver.find_last = MagicMock(side_effect=[None, send_button])
 
     result = driver.result(_request())
-    result.session_url_before = 'https://example.test/new'
+    result.session_url_before = 'https://www.perplexity.ai/'
 
     assert driver.send_prompt(result.request, result) is True
     assert driver.find_last.call_args_list[:2] == [
@@ -87,8 +91,8 @@ def test_perplexity_send_prompt_halts_when_submit_button_missing() -> None:
     driver.runtime.snapshot.return_value = snap
     driver.runtime.press = MagicMock()
     driver.runtime.click = MagicMock()
-    driver.runtime.wait_until = MagicMock()
-    driver.runtime.current_url.return_value = 'https://example.test/thread'
+    driver.runtime.wait_until = MagicMock(side_effect=_run_wait)
+    driver.runtime.current_url.return_value = 'https://www.perplexity.ai/'
     menu_snap = _snapshot()
     driver.runtime.menu_snapshot.return_value = menu_snap
     driver.find_last = MagicMock(return_value=None)
@@ -107,7 +111,7 @@ def test_perplexity_send_prompt_halts_when_submit_button_missing() -> None:
     ]
     driver.runtime.press.assert_not_called()
     driver.runtime.click.assert_not_called()
-    driver.runtime.wait_until.assert_not_called()
+    driver.runtime.wait_until.assert_called_once()
 
 
 def test_perplexity_yaml_submit_button_uses_last_by_y_pick() -> None:

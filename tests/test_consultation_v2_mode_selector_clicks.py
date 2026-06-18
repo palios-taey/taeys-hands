@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call
 
 from consultation_v2.drivers.claude import ClaudeConsultationDriver
 from consultation_v2.drivers.gemini import GeminiConsultationDriver
 from consultation_v2.drivers.perplexity import PerplexityConsultationDriver
-from consultation_v2.types import ConsultationRequest
+from consultation_v2.types import ConsultationRequest, ElementRef, Snapshot
 
 
 def _request(platform: str, mode: str, model: str | None = None) -> ConsultationRequest:
@@ -22,33 +22,52 @@ def _snapshot() -> MagicMock:
 def test_perplexity_deep_research_uses_search_toggle_dropdown_and_pill_verify() -> None:
     driver = PerplexityConsultationDriver()
     driver.runtime = MagicMock()
-    initial_snap = _snapshot()
-    menu_snap_missing = _snapshot()
-    menu_snap_missing.first.return_value = None
-    menu_snap_found = _snapshot()
-    verify_snap = _snapshot()
-    driver.runtime.snapshot.side_effect = [initial_snap, verify_snap]
+    initial_snap = Snapshot('perplexity', 'https://www.perplexity.ai/')
+    doc_probe_missing = Snapshot('perplexity', 'https://www.perplexity.ai/')
+    verify_snap = Snapshot('perplexity', 'https://www.perplexity.ai/')
+    driver.runtime.snapshot.side_effect = [initial_snap, doc_probe_missing, verify_snap]
 
     trigger = MagicMock()
     trigger.states = []
     trigger.serializable.return_value = {'name': 'search_mode_trigger'}
-    driver.find_first = MagicMock(side_effect=[trigger, None, None])
 
-    extents = SimpleNamespace(x=100, y=200, width=40, height=20)
-    component = MagicMock()
-    component.get_extents.return_value = extents
     atspi_obj = MagicMock()
-    atspi_obj.get_component_iface.return_value = component
-    item = SimpleNamespace(atspi_obj=atspi_obj, states=[])
+    item = ElementRef(
+        key='deep_research',
+        name='Deep research',
+        role='toggle button',
+        x=100,
+        y=100,
+        states=[],
+        atspi_obj=atspi_obj,
+    )
 
-    menu_snap_found.first.side_effect = lambda key: item if key == 'deep_research' else None
+    menu_snap_missing = Snapshot('perplexity', 'https://www.perplexity.ai/')
+    menu_snap_found = Snapshot(
+        'perplexity',
+        'https://www.perplexity.ai/',
+        mapped={'deep_research': [item]},
+    )
+    menu_snap_closed = Snapshot('perplexity', 'https://www.perplexity.ai/')
 
-    menu_iter = iter([menu_snap_missing, menu_snap_found])
+    def find_first(snapshot, key):
+        if key == 'search_mode_trigger':
+            return trigger
+        return snapshot.first(key)
+
+    driver.find_first = MagicMock(side_effect=find_first)
+    menu_iter = iter([menu_snap_missing, menu_snap_found, menu_snap_closed])
     driver.runtime.menu_snapshot.side_effect = lambda: next(menu_iter)
-    driver.runtime.wait_until.side_effect = [
-        (menu_snap_found, item),
-        verify_snap,
-    ]
+
+    wait_calls = []
+
+    def wait_until(predicate, timeout, interval):
+        wait_calls.append((timeout, interval))
+        if len(wait_calls) == 1:
+            assert predicate() is None
+        return predicate()
+
+    driver.runtime.wait_until.side_effect = wait_until
     driver.runtime.click.return_value = True
 
     def validation(snapshot, key, filename=None):
@@ -57,17 +76,27 @@ def test_perplexity_deep_research_uses_search_toggle_dropdown_and_pill_verify() 
     driver.validation_passes = MagicMock(side_effect=validation)
     result = driver.result(_request('perplexity', 'deep_research'))
 
-    with patch('consultation_v2.drivers.perplexity.inp.click_at', return_value=True) as click_at:
-        assert driver._select_mode_via_search_toggle(
-            'deep_research',
-            'deep_research_active',
-            driver.cfg['workflow']['selection'],
-            result,
-        ) is True
+    assert driver._select_mode_via_search_toggle(
+        'deep_research',
+        'deep_research_active',
+        driver.cfg['workflow']['selection'],
+        result,
+    ) is True
 
-    click_at.assert_called_once_with(120, 210)
+    assert driver.runtime.click.call_args_list == [
+        call(trigger, strategy='coordinate_only'),
+        call(item, strategy='atspi_only'),
+    ]
     assert result.steps[-1].success is True
     assert result.steps[-1].step == 'select_mode'
+    assert result.steps[-1].evidence['activation_attempts'] == [
+        {
+            'strategy': 'atspi_only',
+            'clicked': True,
+            'validated': True,
+            'menu_open_after': False,
+        },
+    ]
 
 
 def test_perplexity_prompt_ready_gates_on_input_entry_not_submit_button() -> None:

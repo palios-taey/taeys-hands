@@ -82,53 +82,34 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return self.runtime.click(element, strategy=strategy)
 
     def _focus_composer(self):
-        """Put KEYBOARD focus on the ChatGPT composer and return the clicked
-        node, or None if no editable composer node is present.
+        """Focus the YAML-mapped ChatGPT input and return it after tree proof.
 
-        ChatGPT's composer changes AT-SPI ROLE depending on state: an EMPTY
-        (fresh chat) composer exposes NAMELESS role=='paragraph' editable nodes;
-        AFTER paste / once classified it is a role=='entry' editable node named
-        "Chat with ChatGPT". Either way it has no STABLE exact name+role to
-        target, so the contract-clean primitive is a STRUCTURAL selector:
-        'editable' in states AND role in the composer role-set, matched across
-        the FULL snapshot regardless of name. focus_firefox() activates the
-        WINDOW but does NOT land keyboard focus on the contenteditable, so a
-        bare Enter submits nothing (PROD 2026-06-15: message+attachment staged
-        unsent, url stayed at /). Clicking the editable composer node DOES focus
-        it. Proven live on :2 in BOTH forms: the empty 'paragraph' form (fresh
-        chat) and the post-paste 'entry' "Chat with ChatGPT" form (send time) —
-        click + Enter -> SENT (stop button + url change).
-
-        Activate the Firefox window first (the window must be active for the
-        click + keys to land), poll for the editable composer node (the tree may
-        still be settling after attach+paste), then click it.
+        The send contract is input-entry focus -> Return. focus_firefox() only
+        activates the window; it does not prove keyboard focus is in the
+        composer. Live recovery for issue #154 used the exact mapped entry
+        (name="Chat with ChatGPT", role=entry), then Return.
         """
         self.runtime.focus_firefox()
         time.sleep(0.2)
 
-        composer_roles = {'entry', 'paragraph', 'text', 'section'}
-
-        def _find_editable_composer():
-            # Scan the FULL snapshot (the composer node may be classified into
-            # `mapped` as the 'entry' form, or sit in `unknown`/`sidebar` as the
-            # nameless 'paragraph' form). STRUCTURAL selector: editable state +
-            # any composer role — never a name match.
+        def _find_input_entry():
             snap = self.runtime.snapshot()
-            buckets = list(snap.mapped.values()) + [snap.unknown, snap.sidebar]
-            for items in buckets:
-                for element in items:
-                    if element.role.lower() in composer_roles and \
-                            'editable' in {s.lower() for s in (element.states or [])}:
-                        return element
-            return None
+            return self.find_first(snap, 'input')
 
-        node = self.runtime.wait_until(_find_editable_composer, timeout=10, interval=0.4)
+        node = self.runtime.wait_until(_find_input_entry, timeout=10, interval=0.4)
         if node is None:
             return None
-        if not self.runtime.click(node, strategy='atspi_only'):
+        if not self.runtime.click(node):
             return None
-        time.sleep(0.2)
-        return node
+
+        def _focused_input_entry():
+            snap = self.runtime.snapshot()
+            focused = self.find_first(snap, 'input')
+            if focused and 'focused' in {s.lower() for s in (focused.states or [])}:
+                return focused
+            return None
+
+        return self.runtime.wait_until(_focused_input_entry, timeout=4.0, interval=0.3)
 
     def _activate_element(self, snapshot, key: str, result: ConsultationResult, step: str, reason_prefix: str) -> bool:
         element = self.find_first(snapshot, key)

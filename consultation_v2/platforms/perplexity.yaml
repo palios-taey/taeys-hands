@@ -314,7 +314,7 @@ workflow:
     strategy: copy_contents_button
     copy_contents_key: copy_contents_button
 settle:
-  default_ms: 1500
+  default_ms: 8000
   navigate_ms: 3500
   attach_ms: 2500
   rescan_attempts: 1

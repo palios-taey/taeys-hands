@@ -2,19 +2,8 @@ from __future__ import annotations
 
 import os
 import time
-
-from core import input as inp
-from core.interact import atspi_click
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
-
-try:
-    import gi
-
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi
-except Exception:  # pragma: no cover - optional dependency in runtime
-    Atspi = None
 
 try:
     from storage import neo4j_client
@@ -81,7 +70,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     ) -> None:
         """UNLOCKED phase (FLOW §10): monitor → extract → store. Display lock is
         already released so a concurrent consultation can set up/send here."""
-        if not self.monitor_generation(request, result):
+        if not self._ensure_answer_thread(result):
+            return
+        # send_prompt already proves Stop appeared before URL handoff. Carry
+        # that observed Stop into the shared detector so fast completions whose
+        # Stop button disappears before monitor starts still require the same
+        # Stop-gone completion cycles rather than timing out as "never seen".
+        if not self.monitor_generation(request, result, seed_stop_seen=True):
+            return
+        if not self._ensure_answer_thread(result):
             return
         if not self.extract_primary(request, result):
             return
@@ -267,33 +264,27 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         if item.states and 'checked' in [s.lower() for s in item.states]:
             self.runtime.press('Escape')
-            time.sleep(0.5)
-            verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, mode_active_key)
+            verify_snap, verified, menu_open = self._wait_for_mode_settled(mode_active_key, menu_key)
             result.add_step(
                 'select_mode', verified,
                 f'Perplexity {requested_mode} already checked in dropdown',
                 snapshot=verify_snap.serializable(),
+                mode_menu_closed=not menu_open,
             )
             return verified
-        if not self._click_menu_item_via_pointer(item):
-            result.add_step(
-                'select_mode', False,
-                f'Perplexity mode click failed for {requested_mode}',
-                snapshot=menu_snap.serializable(),
-            )
-            return False
-        verify_snap = self.runtime.wait_until(
-            lambda: self._active_snapshot(mode_active_key),
-            timeout=8.0,
-            interval=0.5,
-        ) or self.runtime.snapshot()
+        verify_snap, verified, menu_open, attempts = self._activate_menu_item_and_wait(
+            item,
+            mode_active_key,
+            menu_key,
+        )
         result.add_step(
-            'select_mode', self.validation_passes(verify_snap, mode_active_key),
+            'select_mode', verified,
             f'Perplexity mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
+            mode_menu_closed=not menu_open,
+            activation_attempts=attempts,
         )
-        return self.validation_passes(verify_snap, mode_active_key)
+        return verified
 
     def _toggle_mode_button(
         self,
@@ -347,7 +338,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        if not self.runtime.click(trigger):
+        if not self.runtime.click(trigger, strategy='coordinate_only'):
             result.add_step(
                 'select_mode', False,
                 f'Perplexity search mode trigger click failed for {requested_mode}',
@@ -379,34 +370,28 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         if item.states and 'checked' in [s.lower() for s in item.states]:
             self.runtime.press('Escape')
-            time.sleep(0.5)
-            verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, mode_active_key)
+            verify_snap, verified, menu_open = self._wait_for_mode_settled(mode_active_key, menu_key)
             result.add_step(
                 'select_mode', verified,
                 f'Perplexity {requested_mode} already checked in search menu',
                 snapshot=verify_snap.serializable(),
+                mode_menu_closed=not menu_open,
             )
             return verified
-        if not self._click_menu_item_via_pointer(item):
-            result.add_step(
-                'select_mode', False,
-                f'Perplexity mode item click failed for {requested_mode}',
-                snapshot=menu_snap.serializable(),
-            )
-            return False
-        verify_snap = self.runtime.wait_until(
-            lambda: self._active_snapshot(mode_active_key),
-            timeout=3.0,
-            interval=0.4,
-        ) or self.runtime.snapshot()
+        verify_snap, verified, menu_open, attempts = self._activate_menu_item_and_wait(
+            item,
+            mode_active_key,
+            menu_key,
+        )
         result.add_step(
             'select_mode',
-            self.validation_passes(verify_snap, mode_active_key),
+            verified,
             f'Perplexity mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
+            mode_menu_closed=not menu_open,
+            activation_attempts=attempts,
         )
-        return self.validation_passes(verify_snap, mode_active_key)
+        return verified
 
     def _select_mode_via_submenu(
         self,
@@ -467,33 +452,27 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         if item.states and 'checked' in [s.lower() for s in item.states]:
             self.runtime.press('Escape')
-            time.sleep(0.5)
-            verify_snap = self.runtime.snapshot()
-            verified = self.validation_passes(verify_snap, mode_active_key)
+            verify_snap, verified, menu_open = self._wait_for_mode_settled(mode_active_key, menu_key)
             result.add_step(
                 'select_mode', verified,
                 f'Perplexity {requested_mode} already checked in sub-menu',
                 snapshot=verify_snap.serializable(),
+                mode_menu_closed=not menu_open,
             )
             return verified
-        if not self._click_menu_item_via_pointer(item):
-            result.add_step(
-                'select_mode', False,
-                f'Perplexity sub-menu item click failed for {requested_mode}',
-                snapshot=submenu_snap.serializable(),
-            )
-            return False
-        verify_snap = self.runtime.wait_until(
-            lambda: self._active_snapshot(mode_active_key),
-            timeout=3.0,
-            interval=0.4,
-        ) or self.runtime.snapshot()
+        verify_snap, verified, menu_open, attempts = self._activate_menu_item_and_wait(
+            item,
+            mode_active_key,
+            menu_key,
+        )
         result.add_step(
-            'select_mode', self.validation_passes(verify_snap, mode_active_key),
+            'select_mode', verified,
             f'Perplexity sub-menu mode set to {requested_mode}',
             snapshot=verify_snap.serializable(),
+            mode_menu_closed=not menu_open,
+            activation_attempts=attempts,
         )
-        return self.validation_passes(verify_snap, mode_active_key)
+        return verified
 
     def _mode_menu_item_key(self, requested_mode: str, workflow: dict) -> str:
         if requested_mode == 'deep_research':
@@ -503,9 +482,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     def _menu_item_probe(self, item_key: str):
         menu_snap = self.runtime.menu_snapshot()
         item = self.find_first(menu_snap, item_key)
-        if not item:
-            return None
-        return menu_snap, item
+        if item:
+            return menu_snap, item
+        doc_snap = self.runtime.snapshot()
+        item = self.find_first(doc_snap, item_key)
+        if item:
+            return doc_snap, item
+        return None
 
     def _active_snapshot(self, validation_key: str):
         snap = self.runtime.snapshot()
@@ -513,21 +496,73 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return snap
         return None
 
-    def _click_menu_item_via_pointer(self, item) -> bool:
-        atspi_obj = getattr(item, 'atspi_obj', None)
-        if not atspi_obj:
-            return False
+    def _mode_settle_timeout(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        if 'default_ms' not in settle:
+            raise ValueError('Perplexity YAML settle.default_ms is required for mode validation')
         try:
-            component = atspi_obj.get_component_iface()
-            if not component:
-                return False
-            coord_type = Atspi.CoordType.SCREEN if Atspi is not None else 0
-            ext = component.get_extents(coord_type)
-            x = int(ext.x + (ext.width / 2))
-            y = int(ext.y + (ext.height / 2))
-        except Exception:
-            return False
-        return bool(inp.click_at(x, y))
+            return max(float(int(settle['default_ms'])) / 1000.0, 0.1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Perplexity YAML settle.default_ms must be integer milliseconds') from exc
+
+    def _wait_for_mode_settled(self, validation_key: str, menu_key: str) -> tuple[Snapshot, bool, bool]:
+        last_snapshot: Snapshot | None = None
+        menu_open = True
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot, menu_open
+            last_snapshot = self.runtime.snapshot()
+            menu_snap = self.runtime.menu_snapshot()
+            menu_open = (
+                self.find_first(menu_snap, menu_key) is not None
+                or self.find_first(last_snapshot, menu_key) is not None
+            )
+            if self.validation_passes(last_snapshot, validation_key) and not menu_open:
+                return last_snapshot
+            return None
+
+        matched = self.runtime.wait_until(
+            _probe,
+            timeout=self._mode_settle_timeout(),
+            interval=0.4,
+        )
+        if isinstance(matched, Snapshot):
+            return matched, True, False
+        final_snapshot = last_snapshot or self.runtime.snapshot()
+        return final_snapshot, False, menu_open
+
+    def _activate_menu_item_and_wait(
+        self,
+        item,
+        validation_key: str,
+        menu_key: str,
+    ) -> tuple[Snapshot, bool, bool, list[dict]]:
+        attempts: list[dict] = []
+        verify_snap: Snapshot | None = None
+        menu_open = True
+        for strategy in ('atspi_only', 'coordinate_only'):
+            clicked = self.runtime.click(item, strategy=strategy)
+            if clicked:
+                verify_snap, verified, menu_open = self._wait_for_mode_settled(
+                    validation_key,
+                    menu_key,
+                )
+            else:
+                verify_snap = self.runtime.snapshot()
+                menu_snap = self.runtime.menu_snapshot()
+                menu_open = self.find_first(menu_snap, menu_key) is not None
+                verified = False
+            attempts.append({
+                'strategy': strategy,
+                'clicked': bool(clicked),
+                'validated': bool(verified),
+                'menu_open_after': bool(menu_open),
+            })
+            if verified:
+                return verify_snap, True, menu_open, attempts
+            if not menu_open:
+                break
+        return verify_snap or self.runtime.snapshot(), False, menu_open, attempts
 
     # ------------------------------------------------------------------
     # Connector toggles
@@ -911,7 +946,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         before = result.session_url_before
-        snap, send_button, submit_scope = self._find_submit_button_for_send()
+        snap, send_button, submit_scope = self._wait_for_submit_button_for_send()
         if send_button:
             click_returned = self.runtime.click(send_button)
         else:
@@ -930,22 +965,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             interval=0.6,
         )
         stop_seen = self.validation_passes(send_snap, 'send_success')
-        settled_url = self.runtime.current_url() or before
-        for _ in range(8):
-            time.sleep(1.0)
-            current = self.runtime.current_url() or settled_url
-            if current and current != settled_url:
-                settled_url = current
-            else:
-                break
+        settled_url = self._wait_for_answer_thread_url(timeout=12.0) or self.runtime.current_url() or before
         result.session_url_after = settled_url
         verify_snap = send_snap
         url_changed = settled_url and settled_url != before
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(click_returned and stop_seen and url_changed)
+            verified = bool(click_returned and stop_seen and url_changed and self._is_answer_thread_url(settled_url))
         else:
-            verified = bool(click_returned and stop_seen and settled_url)
+            verified = bool(click_returned and stop_seen and self._is_answer_thread_url(settled_url))
         msg = (
             'Perplexity send validated by Stop button appearance and URL capture'
             if verified else
@@ -959,9 +987,32 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             submit_scope=submit_scope,
             click_returned=click_returned,
             stop_seen=bool(stop_seen),
+            answer_thread=bool(self._is_answer_thread_url(settled_url)),
             snapshot=verify_snap.serializable(),
         )
         return verified
+
+    def _wait_for_submit_button_for_send(self) -> tuple[Snapshot, ElementRef | None, str]:
+        last_snapshot: Snapshot | None = None
+        last_scope = 'not_found'
+
+        def _probe() -> tuple[Snapshot, ElementRef, str] | None:
+            nonlocal last_snapshot, last_scope
+            snap, send_button, scope = self._find_submit_button_for_send()
+            last_snapshot = snap
+            last_scope = scope
+            if send_button:
+                return snap, send_button, scope
+            return None
+
+        found = self.runtime.wait_until(
+            _probe,
+            timeout=self._mode_settle_timeout(),
+            interval=0.4,
+        )
+        if found:
+            return found
+        return last_snapshot or self.runtime.snapshot(), None, last_scope
 
     def _find_submit_button_for_send(self) -> tuple[Snapshot, ElementRef | None, str]:
         snap = self.runtime.snapshot()
@@ -973,6 +1024,41 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if send_button:
             return app_root_snap, send_button, 'app_root'
         return app_root_snap, None, 'not_found'
+
+    def _is_answer_thread_url(self, url: str | None) -> bool:
+        return '/search/' in (url or '')
+
+    def _wait_for_answer_thread_url(self, *, timeout: float = 8.0) -> str | None:
+        def _probe() -> str | None:
+            current = self.runtime.current_url()
+            return current if self._is_answer_thread_url(current) else None
+
+        found = self.runtime.wait_until(_probe, timeout=timeout, interval=0.5)
+        return str(found) if found else None
+
+    def _ensure_answer_thread(self, result: ConsultationResult) -> bool:
+        current = self.runtime.current_url()
+        if self._is_answer_thread_url(current):
+            result.session_url_after = current
+            return True
+        if self._is_answer_thread_url(result.session_url_after):
+            self.runtime.navigate(result.session_url_after, verify_change=False)
+            current = self._wait_for_answer_thread_url(timeout=8.0)
+            if self._is_answer_thread_url(current):
+                result.session_url_after = current
+                result.add_step(
+                    'answer_thread', True,
+                    'Perplexity navigated back to captured answer thread',
+                    url=current,
+                )
+                return True
+        result.add_step(
+            'answer_thread', False,
+            'Perplexity is not on an answer thread; refusing monitor/extract from home',
+            current_url=current,
+            captured_url=result.session_url_after,
+        )
+        return False
 
     # ------------------------------------------------------------------
     # Monitor generation — inherited from BaseConsultationDriver (the shared
@@ -1176,6 +1262,46 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return '', metadata
         return content, metadata
 
+    def _is_prompt_echo(self, content: str, request: ConsultationRequest) -> bool:
+        content_norm = ' '.join((content or '').split())
+        prompt_norm = ' '.join((request.message or '').split())
+        if len(content_norm) < 80 or not prompt_norm:
+            return False
+        if content_norm == prompt_norm:
+            return True
+        if content_norm in prompt_norm and len(content_norm) >= 160:
+            return True
+        if prompt_norm in content_norm and len(content_norm) <= int(len(prompt_norm) * 1.25):
+            return True
+        return False
+
+    def _accept_extracted_content(
+        self,
+        content: str,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        message: str,
+        **evidence: object,
+    ) -> bool:
+        if self._is_prompt_echo(content, request):
+            result.add_step(
+                'extract_primary', False,
+                'Perplexity extraction matched the submitted prompt; refusing prompt echo',
+                characters=len(content),
+                preview=content[:200],
+                **evidence,
+            )
+            return False
+        result.response_text = content
+        result.add_step(
+            'extract_primary', True,
+            message,
+            characters=len(content),
+            preview=content[:200],
+            **evidence,
+        )
+        return True
+
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -1183,42 +1309,37 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         # Wait for response to fully render.
         time.sleep(2.0)
+        if not self._ensure_answer_thread(result):
+            return False
 
-        # NOTE: Perplexity DR is a REPORT (Jesse's rule: "reports require
-        # special handling"). The full-report "Copy contents" control is a
-        # report-level button, NOT bottom-anchored like a chat-bubble Copy, so
-        # the blanket scroll-to-bottom used on the chat platforms does NOT apply
-        # cleanly here (it could scroll past the report controls). This path was
-        # already extracting full reports in place (copy_contents_button first,
-        # then plain copy_button), so it is left as-is rather than risking the
-        # report grab with a blanket scroll. If a long plain-answer ever needs
-        # scroll, gate it to the copy_button fallback only, never copy_contents.
+        # NOTE: Perplexity DR can render as either a report or a short answer.
+        # Reports need special handling: prefer report-level Copy contents, then
+        # AT-SPI report text. Short DR answers may expose only the normal mapped
+        # Copy button, which is accepted only after the report surfaces are absent
+        # or empty and the copied text passes the non-empty/non-prompt guards.
 
         # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
         # copy buttons. Raw find_elements bypasses cache clearing and misses
         # elements after the long monitor polling phase.
         snap = self.runtime.snapshot()
 
-        # Prefer "Copy contents" for DR. Do NOT fall back to the visible bottom
-        # `Copy` button for DR: production 2026-06-17 showed that button can
-        # return an empty clipboard on a completed report.
         is_deep_research = self._is_deep_research(request)
         target = self.find_last(snap, 'copy_contents_button')
-        if not is_deep_research and target is None:
+        if is_deep_research and target is None:
+            content, metadata = self._collect_report_tree_text()
+            if content:
+                return self._accept_extracted_content(
+                    content,
+                    request,
+                    result,
+                    'Perplexity DR extracted via AT-SPI report tree text '
+                    '(copy_contents_button absent)',
+                    **metadata,
+                )
+            target = self.find_last(snap, 'copy_button')
+        elif target is None:
             target = self.find_last(snap, 'copy_button')
         if not target:
-            if is_deep_research:
-                content, metadata = self._collect_report_tree_text()
-                if content:
-                    result.response_text = content
-                    result.add_step(
-                        'extract_primary', True,
-                        'Perplexity DR extracted via AT-SPI report tree text '
-                        '(copy_contents_button absent)',
-                        preview=content[:200],
-                        **metadata,
-                    )
-                    return True
             result.add_step(
                 'extract_primary', False,
                 'Perplexity no usable copy target found',
@@ -1250,27 +1371,24 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             content = self.runtime.read_clipboard().strip()
 
         if content:
-            result.response_text = content
-            result.add_step(
-                'extract_primary', True,
+            return self._accept_extracted_content(
+                content,
+                request,
+                result,
                 f'Perplexity response extracted via {target.name!r} ({len(content)} chars)',
-                characters=len(content),
-                preview=content[:200],
             )
-            return True
 
         if is_deep_research:
             content, metadata = self._collect_report_tree_text()
             if content:
-                result.response_text = content
-                result.add_step(
-                    'extract_primary', True,
+                return self._accept_extracted_content(
+                    content,
+                    request,
+                    result,
                     'Perplexity DR extracted via AT-SPI report tree text '
                     f'after empty clipboard from {target.name!r}',
-                    preview=content[:200],
                     **metadata,
                 )
-                return True
 
         result.add_step(
             'extract_primary', False,
