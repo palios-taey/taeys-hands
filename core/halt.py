@@ -19,6 +19,7 @@ Clearing halts:
 import json
 import logging
 import os
+import subprocess
 import time
 from typing import Optional
 
@@ -30,7 +31,22 @@ logger = logging.getLogger(__name__)
 NODE_ID = os.environ.get('NODE_ID', 'unknown')
 ORCH_URL = os.environ.get('ORCH_URL', 'https://orch-api.taey.ai')
 ORCH_KEY = os.environ.get('ORCH_KEY', '')
-NOTIFY_TARGET = os.environ.get('NOTIFY_TARGET', 'weaver')
+
+
+def _operator_notify_target() -> str:
+    """Resolve halt escalations to the driving operator, never another peer by default."""
+    explicit_target = os.environ.get('NOTIFY_TARGET', '').strip()
+    if explicit_target:
+        return explicit_target
+
+    node_id = os.environ.get('TAEY_NODE_ID', '').strip()
+    if node_id:
+        prefix, marker, suffix = node_id.rpartition('-d')
+        if marker and suffix.isdigit() and prefix:
+            return prefix
+        return node_id
+
+    return 'taeys-hands'
 
 
 def halt_global(reason: str, redis_client, source_platform: str = '') -> bool:
@@ -147,6 +163,9 @@ def clear_platform_halt(platform: str, redis_client) -> bool:
 
 def _escalate(message: str, redis_client):
     """Send escalation via orchestrator /api/notify."""
+    notify_target = _operator_notify_target()
+    notify_from = f'taeys-hands-{NODE_ID}'
+
     # Try orchestrator API first
     if ORCH_URL and ORCH_KEY:
         try:
@@ -154,24 +173,37 @@ def _escalate(message: str, redis_client):
                 f'{ORCH_URL}/api/notify',
                 headers={'X-API-Key': ORCH_KEY, 'Content-Type': 'application/json'},
                 json={
-                    'target': NOTIFY_TARGET,
-                    'from': f'taeys-hands-{NODE_ID}',
+                    'target': notify_target,
+                    'from': notify_from,
                     'body': message,
                 },
                 timeout=10,
             )
             if resp.status_code == 200:
-                logger.info(f"Escalation sent to {NOTIFY_TARGET}: {message[:100]}")
+                logger.info(f"Escalation sent to {notify_target}: {message[:100]}")
                 return
+            logger.warning(
+                f"Orchestrator notify returned {resp.status_code}; "
+                f"falling back to taey-notify for {notify_target}"
+            )
         except Exception as e:
             logger.warning(f"Orchestrator notify failed: {e}")
 
     # Fallback: taey-notify CLI
     try:
-        import subprocess
-        subprocess.run(
-            ['taey-notify', NOTIFY_TARGET, message, '--type', 'escalation'],
+        result = subprocess.run(
+            [
+                'taey-notify', notify_target, message, '--type', 'escalation',
+                '--from', notify_from,
+            ],
             capture_output=True, timeout=5,
         )
-    except Exception:
+        if result.returncode != 0:
+            stderr = getattr(result, 'stderr', b'') or b''
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode(errors='replace')
+            raise RuntimeError(f"taey-notify failed with code {result.returncode}: {stderr[:200]}")
+        logger.info(f"Escalation sent to {notify_target} via taey-notify: {message[:100]}")
+    except Exception as e:
         logger.error(f"All escalation methods failed for: {message[:100]}")
+        raise RuntimeError(f"All escalation methods failed for: {message[:100]} ({e})") from e
