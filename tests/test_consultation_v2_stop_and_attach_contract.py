@@ -10,7 +10,7 @@ from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
 from consultation_v2.drivers.gemini import GeminiConsultationDriver
 from consultation_v2.drivers.perplexity import PerplexityConsultationDriver
-from consultation_v2.types import ConsultationRequest
+from consultation_v2.types import ConsultationRequest, ConsultationResult
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,6 +214,31 @@ def test_chatgpt_attach_success_uses_file_chip() -> None:
 def test_perplexity_attach_success_uses_file_chip() -> None:
     validation = _load_platform('perplexity')['validation']['attach_success']
     assert validation == {'file_chip': {'roles': ['push button', 'section', 'link', 'heading']}}
+
+
+def test_perplexity_accept_extracted_content_dedupes_caller_characters_metadata() -> None:
+    driver = PerplexityConsultationDriver.__new__(PerplexityConsultationDriver)
+    content = 'Perplexity report content. ' * 20
+    request = ConsultationRequest(platform='perplexity', message='audit the target')
+    result = ConsultationResult(platform='perplexity', request=request)
+
+    assert driver._accept_extracted_content(
+        content,
+        request,
+        result,
+        'Perplexity DR extracted via AT-SPI report tree text',
+        characters=12,
+        preview='stale caller preview',
+        source='report_tree',
+    ) is True
+
+    step = result.steps[-1]
+    assert step.step == 'extract_primary'
+    assert step.success is True
+    assert step.evidence['characters'] == len(content)
+    assert step.evidence['preview'] == content[:200]
+    assert step.evidence['source'] == 'report_tree'
+    assert result.response_text == content
 
 
 def test_response_complete_is_stop_absent_only() -> None:

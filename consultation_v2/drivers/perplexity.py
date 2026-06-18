@@ -1283,22 +1283,23 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         message: str,
         **evidence: object,
     ) -> bool:
+        step_evidence = dict(evidence)
+        step_evidence.update(
+            characters=len(content),
+            preview=content[:200],
+        )
         if self._is_prompt_echo(content, request):
             result.add_step(
                 'extract_primary', False,
                 'Perplexity extraction matched the submitted prompt; refusing prompt echo',
-                characters=len(content),
-                preview=content[:200],
-                **evidence,
+                **step_evidence,
             )
             return False
         result.response_text = content
         result.add_step(
             'extract_primary', True,
             message,
-            characters=len(content),
-            preview=content[:200],
-            **evidence,
+            **step_evidence,
         )
         return True
 
