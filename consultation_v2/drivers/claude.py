@@ -616,11 +616,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             request, result, seed_stop_seen=getattr(self, '_send_stop_seen', False)
         )
 
-    def _monitor_timeout(self, request: ConsultationRequest, detector_mode: str) -> float:
-        timeout = float(request.timeout)
-        if detector_mode == 'extended_thinking':
-            return max(timeout, 1800.0)
-        return timeout
+    def _is_answer_thread_url(self, url: str | None) -> bool:
+        return '/chat/' in (url or '')
 
     # ------------------------------------------------------------------
     # Extract primary (copy-button strategy)
@@ -634,28 +631,21 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         from core.interact import atspi_click
         from core import clipboard
 
-        from core import input as _inp
+        if not self.reassert_captured_session_url(
+            result,
+            answer_url_predicate=self._is_answer_thread_url,
+        ):
+            return False
+
         # Retry: scroll the conversation to the BOTTOM each pass, THEN scan.
         # The response's Copy button only enters the AT-SPI tree when on-screen;
-        # on a long Claude answer it sits below the fold and is never found
-        # (this is why extract intermittently saw <2 Copy buttons). ctrl+End is
-        # WRONG here — it focuses the empty composer and was measured to HIDE a
-        # copy button (2->1). Scroll the wheel over the conversation column;
-        # the hover point is DERIVED from the composer input (bottom-centre),
-        # never a magic coordinate.
+        # on a long Claude answer it sits below the fold and is never found.
+        # Scroll the document surface itself before every tree scan; do not use
+        # the composer as the scroll anchor.
+        all_el = []
         for attempt in range(5):
             time.sleep(2.0)
-            snap = self.runtime.snapshot()
-            inp_el = self.find_first(snap, 'input')
-            if inp_el is not None and inp_el.x is not None and inp_el.y is not None:
-                # SCROLL TO BOTTOM, EVERY TIME — robust loop-until-bottom, not a
-                # single 25-click burst. A long verdict's Copy sits far below the
-                # fold; one burst leaves only the PROMPT's Copy in the tree and
-                # extract grabs the packet echo (production 2026-06-15: 22k-char
-                # audit, the response Copy rendered only after ~120 clicks).
-                self.runtime.scroll_to_bottom(inp_el)
-                _inp.hover(int(inp_el.x), max(0, int(inp_el.y) - 250))
-                time.sleep(0.5)
+            scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
                 continue
@@ -680,7 +670,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             target = max(copy_btns, key=lambda e: e.get('y') or 0)
             clipboard.write('')
             time.sleep(0.3)
-            atspi_click(target)
+            if not atspi_click(target):
+                continue
             time.sleep(1.5)
             content = (clipboard.read() or '').strip()
             if content and not self._is_prompt_echo(content, request):
@@ -694,7 +685,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                     return False
                 result.add_step('extract_primary', True,
                                 f'Claude response copied ({len(content)} chars, attempt {attempt+1})',
-                                characters=len(content), preview=content[:200])
+                                characters=len(content), preview=content[:200],
+                                scroll_ok=scroll_ok,
+                                copy_buttons_found=len(copy_btns),
+                                copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')})
                 return True
             if content:
                 result.add_step(

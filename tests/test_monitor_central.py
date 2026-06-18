@@ -22,7 +22,6 @@ def test_detect_completion_allows_primary_gate_without_send_visible(mock_redis):
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "hash-1",
             },
         )
         completed = monitor._detect_completion(
@@ -30,7 +29,6 @@ def test_detect_completion_allows_primary_gate_without_send_visible(mock_redis):
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "hash-2",
             },
         )
 
@@ -57,7 +55,6 @@ def test_detect_completion_deep_research_waits_for_second_stop_cycle(mock_redis)
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "hash-1",
             },
         )
         plan_transition = monitor._detect_completion(
@@ -65,7 +62,6 @@ def test_detect_completion_deep_research_waits_for_second_stop_cycle(mock_redis)
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "hash-2",
             },
         )
         second_generating = monitor._detect_completion(
@@ -73,7 +69,6 @@ def test_detect_completion_deep_research_waits_for_second_stop_cycle(mock_redis)
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "hash-3",
             },
         )
         completed = monitor._detect_completion(
@@ -81,7 +76,6 @@ def test_detect_completion_deep_research_waits_for_second_stop_cycle(mock_redis)
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "hash-4",
             },
         )
 
@@ -111,7 +105,6 @@ def test_detect_completion_deep_think_requires_full_stop_transition(mock_redis):
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "",
             },
         )
 
@@ -120,7 +113,7 @@ def test_detect_completion_deep_think_requires_full_stop_transition(mock_redis):
     notify.assert_not_called()
 
 
-def test_detect_completion_never_completes_from_frozen_content_without_stop_transition(mock_redis):
+def test_detect_completion_never_completes_without_stop_transition(mock_redis):
     with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
         monitor = CentralMonitor()
 
@@ -138,7 +131,6 @@ def test_detect_completion_never_completes_from_frozen_content_without_stop_tran
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "stable-hash",
             },
         )
         second_poll = monitor._detect_completion(
@@ -146,7 +138,6 @@ def test_detect_completion_never_completes_from_frozen_content_without_stop_tran
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "stable-hash",
             },
         )
         third_poll = monitor._detect_completion(
@@ -154,37 +145,34 @@ def test_detect_completion_never_completes_from_frozen_content_without_stop_tran
             {
                 "stop_found": False,
                 "send_visible": False,
-                "content_hash": "stable-hash",
             },
         )
 
     assert first_poll is False
     assert second_poll is False
     assert third_poll is False
-    assert mock_redis.get("taey:monitor:mon-stable:content_frozen_ticks") == "0"
     assert mock_redis.get("taey:monitor:mon-stable:stop_cycles") is None
     notify.assert_not_called()
 
 
-def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_freezes(mock_redis):
+def test_detect_completion_stop_present_never_completes_or_notifies(mock_redis):
     with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
         monitor = CentralMonitor()
 
     session = {
         "platform": "gemini",
-        "monitor_id": "mon-hang",
+        "monitor_id": "mon-stop-present",
         "mode": "deep_think",
         "started_ts": time.time(),
         "timeout": 7200,
     }
 
-    with patch("monitor.central.HANG_TICKS", 3), patch.object(monitor, "_notify") as notify:
+    with patch.object(monitor, "_notify") as notify:
         first_poll = monitor._detect_completion(
             session,
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "frozen-hash",
             },
         )
         second_poll = monitor._detect_completion(
@@ -192,7 +180,6 @@ def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_f
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "frozen-hash",
             },
         )
         third_poll = monitor._detect_completion(
@@ -200,7 +187,6 @@ def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_f
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "frozen-hash",
             },
         )
         fourth_poll = monitor._detect_completion(
@@ -208,7 +194,6 @@ def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_f
             {
                 "stop_found": True,
                 "send_visible": False,
-                "content_hash": "frozen-hash",
             },
         )
 
@@ -216,54 +201,8 @@ def test_detect_completion_emits_hang_suspected_when_stop_persists_and_content_f
     assert second_poll is False
     assert third_poll is False
     assert fourth_poll is False
-    assert mock_redis.get("taey:monitor:mon-hang:content_frozen_ticks") == "3"
-    assert mock_redis.get("taey:monitor:mon-hang:hang_notified") == "1"
-    notify.assert_called_once_with(session, "hang_suspected", "stop_present_content_frozen")
-
-
-def test_detect_completion_missing_hash_does_not_count_toward_hang(mock_redis):
-    with patch.object(CentralMonitor, "_connect_redis", return_value=mock_redis):
-        monitor = CentralMonitor()
-
-    session = {
-        "platform": "gemini",
-        "monitor_id": "mon-missing-hash",
-        "mode": "deep_think",
-        "started_ts": time.time(),
-        "timeout": 7200,
-    }
-
-    with patch("monitor.central.HANG_TICKS", 2), patch.object(monitor, "_notify") as notify:
-        first_poll = monitor._detect_completion(
-            session,
-            {
-                "stop_found": True,
-                "send_visible": False,
-                "content_hash": "hash-1",
-            },
-        )
-        second_poll = monitor._detect_completion(
-            session,
-            {
-                "stop_found": True,
-                "send_visible": False,
-                "content_hash": "",
-            },
-        )
-        third_poll = monitor._detect_completion(
-            session,
-            {
-                "stop_found": True,
-                "send_visible": False,
-                "content_hash": "",
-            },
-        )
-
-    assert first_poll is False
-    assert second_poll is False
-    assert third_poll is False
-    assert mock_redis.get("taey:monitor:mon-missing-hash:content_frozen_ticks") == "0"
-    assert mock_redis.get("taey:monitor:mon-missing-hash:hang_notified") == "0"
+    assert mock_redis.get("taey:monitor:mon-stop-present:ever_seen_stop") == "1"
+    assert mock_redis.get("taey:monitor:mon-stop-present:stop_cycles") is None
     notify.assert_not_called()
 
 
@@ -421,7 +360,7 @@ def test_cycle_skips_platform_when_worker_call_times_out(mock_redis):
 
     with patch.object(monitor, "_get_sessions", return_value=sessions), \
          patch("core.platforms.get_platform_display", return_value=":2"), \
-         patch.object(monitor, "_call_worker", side_effect=[None, {"send_visible": True}, {"content_hash": "hash"}]), \
+         patch.object(monitor, "_call_worker", side_effect=[None, {"send_visible": True}]), \
          patch.object(monitor, "_detect_completion") as detect_completion, \
          patch.object(monitor, "_remove_session") as remove_session:
         monitor._cycle()

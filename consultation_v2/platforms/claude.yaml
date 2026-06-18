@@ -281,13 +281,11 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-# assistant_text is production-proven on :3 (scroll, lowest visible Copy by y,
-# AT-SPI activate, clipboard, reject prompt echo). When Claude exposes a mapped
-# Show/Hide thinking toggle, the driver expands it and copies the distinct
-# thinking block before concatenating it above the assistant response. Claude
-# ARTIFACT panel extraction is NOT enabled in V2 (driver records it as not
-# configured) and is deliberately NOT declared here — the downstream
-# p4-artifact task maps the artifact-panel copy path. No downgrade: an artifact
+# assistant_text is production-proven on the captured answer-thread URL after
+# absolute bottom scroll, lowest visible Copy by y, AT-SPI activate, clipboard,
+# reject prompt echo. Claude ARTIFACT panel extraction is NOT enabled in V2
+# (driver records it as not configured) and is deliberately NOT declared here —
+# the downstream p4-artifact task maps the artifact-panel copy path. No downgrade: an artifact
 # request with no mapped workflow stops/notifies, it does not fall back to the
 # chat bubble.
 # ============================================================================

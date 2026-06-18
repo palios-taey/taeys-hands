@@ -9,7 +9,6 @@ from typing import Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.completion import (
     COMPLETE,
-    HANG_SUSPECTED,
     CompletionDetector,
 )
 from consultation_v2 import primitives
@@ -588,12 +587,6 @@ class BaseConsultationDriver(ABC):
         return self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
 
     @staticmethod
-    def _snapshot_content_count(snapshot: Snapshot) -> int:
-        """Rendered-element count, mirroring runtime.scroll_to_bottom's metric.
-        Used by the shared completion detector for hang detection."""
-        return sum(len(v) for v in snapshot.mapped.values()) + len(snapshot.unknown)
-
-    @staticmethod
     def _normalized_text(text: str) -> str:
         return ' '.join((text or '').split())
 
@@ -612,11 +605,69 @@ class BaseConsultationDriver(ABC):
             return True
         return False
 
-    def _monitor_timeout(self, request: ConsultationRequest, detector_mode: str) -> float:
-        return float(request.timeout)
+    @staticmethod
+    def _urls_equivalent(left: str | None, right: str | None) -> bool:
+        return (left or '').strip().rstrip('/') == (right or '').strip().rstrip('/')
 
-    def _monitor_hang_step_success(self, detector_mode: str) -> bool:
-        return detector_mode in {'deep_research', 'deep_think', 'pro_extended', 'extended_thinking', 'heavy'}
+    def reassert_captured_session_url(
+        self,
+        result: ConsultationResult,
+        *,
+        answer_url_predicate=None,
+        timeout: float = 8.0,
+    ) -> bool:
+        captured = (result.session_url_after or '').strip()
+        current_before = (self.runtime.current_url() or '').strip()
+        if not captured:
+            result.add_step(
+                'answer_thread',
+                False,
+                f'{self.platform} has no captured answer-thread URL before extraction',
+                current_url=current_before,
+            )
+            return False
+        if answer_url_predicate is not None and not answer_url_predicate(captured):
+            result.add_step(
+                'answer_thread',
+                False,
+                f'{self.platform} captured URL is not an answer thread',
+                current_url=current_before,
+                captured_url=captured,
+            )
+            return False
+        if self._urls_equivalent(current_before, captured):
+            result.add_step(
+                'answer_thread',
+                True,
+                f'{self.platform} already on captured answer thread',
+                url=current_before,
+            )
+            return True
+
+        navigated = self.runtime.navigate(captured, verify_change=False)
+
+        def _arrived() -> str | None:
+            current = (self.runtime.current_url() or '').strip()
+            if self._urls_equivalent(current, captured):
+                return current
+            return None
+
+        arrived = self.runtime.wait_until(_arrived, timeout=timeout, interval=0.5)
+        ok = bool(arrived)
+        result.add_step(
+            'answer_thread',
+            ok,
+            (
+                f'{self.platform} navigated back to captured answer thread'
+                if ok else
+                f'{self.platform} could not reassert captured answer thread'
+            ),
+            current_url=current_before,
+            captured_url=captured,
+            after_url=arrived or self.runtime.current_url(),
+            navigated=navigated,
+        )
+        return ok
 
     def monitor_generation(
         self,
@@ -631,8 +682,7 @@ class BaseConsultationDriver(ABC):
 
         Completion = the stop button was SEEN and is now GONE for the required
         number of cycles (2 for deep modes, 1 otherwise). No content-guess
-        fallback (100_TIMES §1). Hang (stop present + content frozen) is logged
-        as evidence but never auto-completes.
+        fallback (100_TIMES §1); the stop button is the only completion oracle.
 
         ``seed_stop_seen`` lets a driver whose send step already observed the
         stop button mark ever_seen_stop up front, so a sub-second generation
@@ -647,32 +697,18 @@ class BaseConsultationDriver(ABC):
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
         stop_key = self._stop_key()
-        hang_logged = False
         completed = False
 
         def _poll() -> bool:
-            nonlocal completed, hang_logged
+            nonlocal completed
             snap = self.runtime.snapshot()
-            verdict = detector.observe(
-                stop_present=snap.has(stop_key),
-                content_count=self._snapshot_content_count(snap),
-            )
+            verdict = detector.observe(stop_present=snap.has(stop_key))
             if verdict == COMPLETE:
                 completed = True
                 return True
-            if verdict == HANG_SUSPECTED and not hang_logged:
-                hang_logged = True
-                hang_step_success = self._monitor_hang_step_success(detector_mode)
-                result.add_step(
-                    'monitor_hang', hang_step_success,
-                    f'{self.platform} generation SUSPECTED hung '
-                    f'(stop present, content frozen >= {detector.frozen_ticks} ticks)',
-                    frozen_ticks=detector.frozen_ticks,
-                    deep_quiet_mode=hang_step_success,
-                )
             return False
 
-        self.runtime.wait_until(_poll, timeout=self._monitor_timeout(request, detector_mode), interval=1.0)
+        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = self.wait_for_validation(
             'response_complete',
             timeout=5.0,

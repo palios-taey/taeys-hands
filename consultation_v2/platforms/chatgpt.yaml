@@ -100,9 +100,11 @@ tree:
     # restored stale draft / old file attachment / reopened temporary thread can
     # never be sent (D1 clean-composer). Exact name+role from the live :2 scan
     # (consultations/p2_map_chatgpt_exact.md line 40: sidebar links 'New chat'
-    # and 'New chat Control Shift O'). Map the plain 'New chat' link.
+    # and 'New chat Control Shift O'). Both exact labels are valid live states.
     new_chat:
-      name: New chat
+      names_any_of:
+      - New chat
+      - New chat Control Shift O
       role: link
     # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
     model_instant:
@@ -330,9 +332,9 @@ validation:
 # load. Drivers consume this via get_extraction(); they are NOT rewritten here
 # (p4-assistant-text wires the runtime executor).
 #
-# Only assistant_text is mapped: production-proven on :2 (lowest response Copy
-# after scroll-to-bottom anchored on attach_trigger). ChatGPT Deep Research
-# Canvas / Download (artifact / downloaded_file) is documented in
+# Only assistant_text is mapped: production-proven path is captured answer-thread
+# URL reassertion, absolute bottom scroll, then lowest response Copy by y.
+# ChatGPT Deep Research Canvas / Download (artifact / downloaded_file) is documented in
 # EXTRACTION_PATTERNS.md but NOT wired in V2 — deliberately NOT declared here so
 # the engine stops rather than silently extracting the wrong surface. Mapping it
 # is the downstream p4-artifact task.

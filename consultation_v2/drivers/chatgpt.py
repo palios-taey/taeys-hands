@@ -604,24 +604,28 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # completes. pro_extended is a deep mode (2 stop-gone cycles).
         return super().monitor_generation(request, result, seed_stop_seen=True)
 
+    def _is_answer_thread_url(self, url: str | None) -> bool:
+        return '/c/' in (url or '')
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from core import clipboard
-        from core import input as _inp
         from core.atspi import find_firefox_for_platform
         from core.interact import atspi_click
         from core.tree import find_elements as raw_find_elements
+
+        if not self.reassert_captured_session_url(
+            result,
+            answer_url_predicate=self._is_answer_thread_url,
+        ):
+            return False
 
         copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
         last_snapshot = None
         all_elements: list[dict] = []
         for attempt in range(5):
             time.sleep(2.0)
-            snap = self.runtime.snapshot()
-            last_snapshot = snap
-            anchor = self.find_first(snap, 'attach_trigger')
-            self.runtime.scroll_to_bottom(anchor)
-            if anchor is not None and anchor.x is not None and anchor.y is not None:
-                _inp.hover(int(anchor.x), max(0, int(anchor.y) - 250))
+            scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
+            last_snapshot = self.runtime.snapshot()
             time.sleep(0.8)
 
             firefox = find_firefox_for_platform(self.platform)
@@ -654,6 +658,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     f'ChatGPT response copied ({len(content)} chars, attempt {attempt + 1})',
                     characters=len(content),
                     preview=content[:200],
+                    scroll_ok=scroll_ok,
+                    copy_buttons_found=len(copy_buttons),
+                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
                 )
                 return True
             if content:

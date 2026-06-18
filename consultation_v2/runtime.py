@@ -262,6 +262,51 @@ class ConsultationRuntime:
                 last_count = count
         return ok
 
+    def scroll_document_to_bottom(
+        self,
+        *,
+        clicks: int = 12,
+        rounds: int = 3,
+        settle: float = 0.5,
+    ) -> bool:
+        """Scroll the document/conversation surface, not the composer widget."""
+        hover = self._document_scroll_point()
+        self.focus_firefox()
+        time.sleep(0.2)
+        inp.press_key('Escape')
+        time.sleep(0.1)
+        inp.press_key('End')
+        time.sleep(settle)
+        ok = True
+        for _ in range(max(1, rounds)):
+            ok = bool(inp.scroll_wheel('down', clicks=clicks, hover_point=hover)) and ok
+            time.sleep(settle)
+        return ok
+
+    def _document_scroll_point(self) -> tuple[int, int]:
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+
+            firefox = atspi.find_firefox_for_platform(self.platform)
+            doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
+            comp = doc.get_component_iface() if doc is not None else None
+            rect = comp.get_extents(_Atspi.CoordType.SCREEN) if comp is not None else None
+            if rect and rect.width > 0 and rect.height > 0:
+                return (
+                    int(rect.x + rect.width // 2),
+                    int(rect.y + max(80, rect.height // 2)),
+                )
+        except Exception:
+            pass
+        try:
+            from core.platforms import get_screen_size
+            width, height = get_screen_size()
+            return int(width // 2), int(height // 2)
+        except Exception:
+            return 960, 540
+
     def scroll_element_into_view(self, element: Optional[Any] = None) -> bool:
         """Scroll a SPECIFIC element into view via its AT-SPI Component
         (ScrollType.ANYWHERE). Required before action-clicking a copy button

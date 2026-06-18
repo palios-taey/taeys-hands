@@ -1063,8 +1063,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
     # Monitor generation — inherited from BaseConsultationDriver (the shared
     # stop-transition detector, consultation_v2.completion). deep_research is a
-    # deep mode (2 stop-gone cycles) so a transient stop-drop mid-research never
-    # false-completes.
+    # deep mode (2 stop-gone scans) so AT-SPI refresh is debounced before
+    # completion is declared.
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
@@ -1262,19 +1262,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return '', metadata
         return content, metadata
 
-    def _is_prompt_echo(self, content: str, request: ConsultationRequest) -> bool:
-        content_norm = ' '.join((content or '').split())
-        prompt_norm = ' '.join((request.message or '').split())
-        if len(content_norm) < 80 or not prompt_norm:
-            return False
-        if content_norm == prompt_norm:
-            return True
-        if content_norm in prompt_norm and len(content_norm) >= 160:
-            return True
-        if prompt_norm in content_norm and len(content_norm) <= int(len(prompt_norm) * 1.25):
-            return True
-        return False
-
     def _accept_extracted_content(
         self,
         content: str,
@@ -1319,12 +1306,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # Copy button, which is accepted only after the report surfaces are absent
         # or empty and the copied text passes the non-empty/non-prompt guards.
 
+        is_deep_research = self._is_deep_research(request)
+        if not is_deep_research:
+            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+
         # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
         # copy buttons. Raw find_elements bypasses cache clearing and misses
         # elements after the long monitor polling phase.
         snap = self.runtime.snapshot()
 
-        is_deep_research = self._is_deep_research(request)
         target = self.find_last(snap, 'copy_contents_button')
         if is_deep_research and target is None:
             content, metadata = self._collect_report_tree_text()
