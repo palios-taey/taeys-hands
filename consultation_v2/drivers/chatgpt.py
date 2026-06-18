@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Optional
@@ -12,6 +13,9 @@ try:
     from storage import neo4j_client
 except Exception:  # pragma: no cover - optional dependency in runtime
     neo4j_client = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatGPTConsultationDriver(BaseConsultationDriver):
@@ -750,6 +754,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'depth': depth,
                 'name': name,
                 'role': role,
+                'markers': markers,
                 'rect': rect,
                 'bottom': rect['y'] + rect['height'],
             })
@@ -760,7 +765,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 -item['depth'],
             )
         )
-        return candidates[-1] if candidates else None
+        if not candidates:
+            return None
+        latest = candidates[-1]
+        latest['candidate_count'] = len(candidates)
+        latest['candidate_summaries'] = [
+            {
+                'name': item['name'],
+                'role': item['role'],
+                'depth': item['depth'],
+                'markers': item['markers'],
+                'rect': item['rect'],
+            }
+            for item in candidates[-5:]
+        ]
+        return latest
 
     def _hover_latest_assistant_message(self) -> dict:
         from core import input as _inp
@@ -783,11 +802,28 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     'assistant_name': latest['name'],
                     'assistant_role': latest['role'],
                     'assistant_depth': latest['depth'],
+                    'assistant_markers': latest['markers'],
                     'assistant_rect': rect,
+                    'assistant_candidates_found': latest.get('candidate_count', 0),
+                    'assistant_candidate_summaries': latest.get('candidate_summaries', []),
                 })
                 evidence['ok'] = bool(_inp.hover(x, y))
+                logger.warning(
+                    'ChatGPT extract hover probe: x=%s y=%s ok=%s '
+                    'assistant_name=%r assistant_role=%r depth=%s rect=%s '
+                    'candidates=%s',
+                    x,
+                    y,
+                    evidence['ok'],
+                    latest['name'],
+                    latest['role'],
+                    latest['depth'],
+                    rect,
+                    latest.get('candidate_count', 0),
+                )
                 return evidence
             time.sleep(0.25)
+        logger.warning('ChatGPT extract hover probe: no assistant-marked message found')
         return evidence
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
@@ -820,6 +856,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             hover_evidence = self._hover_latest_assistant_message()
+            result.add_step(
+                'extract_hover_probe',
+                bool(hover_evidence.get('ok')),
+                'ChatGPT assistant-message hover probe before Copy response scan',
+                attempt=attempt + 1,
+                scroll=scroll_evidence,
+                hover=hover_evidence,
+            )
             if not hover_evidence.get('ok'):
                 result.add_step(
                     'extract_primary', False,
