@@ -616,6 +616,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             request, result, seed_stop_seen=getattr(self, '_send_stop_seen', False)
         )
 
+    def _monitor_timeout(self, request: ConsultationRequest, detector_mode: str) -> float:
+        timeout = float(request.timeout)
+        if detector_mode == 'extended_thinking':
+            return max(timeout, 1800.0)
+        return timeout
+
     # ------------------------------------------------------------------
     # Extract primary (copy-button strategy)
     # ------------------------------------------------------------------
@@ -648,6 +654,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 # extract grabs the packet echo (production 2026-06-15: 22k-char
                 # audit, the response Copy rendered only after ~120 clicks).
                 self.runtime.scroll_to_bottom(inp_el)
+                _inp.hover(int(inp_el.x), max(0, int(inp_el.y) - 250))
                 time.sleep(0.5)
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
@@ -676,16 +683,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             atspi_click(target)
             time.sleep(1.5)
             content = (clipboard.read() or '').strip()
-            # Reject the PROMPT echo, not just an exact match: the rendered
-            # prompt bubble equals the dispatched packet but differs in
-            # whitespace, so a bare `!= request.message` let a 1977-char packet
-            # echo through as if it were the verdict (2026-06-15). Compare on
-            # whitespace-normalized openings.
-            def _norm(s: str) -> str:
-                return ' '.join((s or '').split())
-            nc, nm = _norm(content), _norm(request.message)
-            is_echo = bool(nc) and (nc == nm or (len(nm) >= 60 and nc[:60] == nm[:60]))
-            if content and not is_echo:
+            if content and not self._is_prompt_echo(content, request):
                 result.response_text = content
                 if not self.extract_thinking_notes(
                     request,
@@ -698,6 +696,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude response copied ({len(content)} chars, attempt {attempt+1})',
                                 characters=len(content), preview=content[:200])
                 return True
+            if content:
+                result.add_step(
+                    'extract_primary_echo_rejected', True,
+                    'Claude copied prompt echo; continuing response-copy search',
+                    characters=len(content),
+                    preview=content[:200],
+                    attempt=attempt + 1,
+                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                )
 
         result.add_step('extract_primary', False,
                         f'Claude extraction failed after 5 attempts',

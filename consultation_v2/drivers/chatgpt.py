@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 from consultation_v2.drivers.base import BaseConsultationDriver
+from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
 
 try:
@@ -604,34 +605,74 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return super().monitor_generation(request, result, seed_stop_seen=True)
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        time.sleep(2.0)
-        # RULE: scroll to bottom before extract — a long response's Copy button
-        # sits below the fold and is not in the AT-SPI tree until on-screen.
-        # Anchor the scroll on the composer's `attach_trigger` push button
-        # ("Add files and more"): ChatGPT's composer is nameless ProseMirror
-        # paragraphs with NO findable `input` element (live-verified :2
-        # 2026-06-15), so find_first('input') returned None and scroll_to_bottom
-        # silently no-op'd (None anchor → no scroll → the long-response Copy
-        # stayed below the fold). attach_trigger is an EXACT-matched,
-        # bottom-anchored composer control — the correct hover anchor.
-        self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'attach_trigger'))
-        time.sleep(0.6)
-        snap = self.runtime.snapshot()
-        copy_button = self.find_last(snap, 'copy_button')
-        if not copy_button:
-            result.add_step('extract_primary', False, 'ChatGPT copy button not found', snapshot=snap.serializable())
-            return False
-        self.runtime.write_clipboard('')
-        time.sleep(0.3)
-        if not self.runtime.click(copy_button, strategy='atspi_only'):
-            result.add_step('extract_primary', False, 'ChatGPT copy button click failed', snapshot=snap.serializable())
-            return False
-        time.sleep(1.0)
-        content = self.runtime.read_clipboard().strip()
-        result.response_text = content
-        verified = bool(content) and content != request.message
-        result.add_step('extract_primary', verified, f'ChatGPT response copied ({len(content)} chars)', characters=len(content), preview=content[:200])
-        return verified
+        from core import clipboard
+        from core import input as _inp
+        from core.atspi import find_firefox_for_platform
+        from core.interact import atspi_click
+        from core.tree import find_elements as raw_find_elements
+
+        copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        last_snapshot = None
+        all_elements: list[dict] = []
+        for attempt in range(5):
+            time.sleep(2.0)
+            snap = self.runtime.snapshot()
+            last_snapshot = snap
+            anchor = self.find_first(snap, 'attach_trigger')
+            self.runtime.scroll_to_bottom(anchor)
+            if anchor is not None and anchor.x is not None and anchor.y is not None:
+                _inp.hover(int(anchor.x), max(0, int(anchor.y) - 250))
+            time.sleep(0.8)
+
+            firefox = find_firefox_for_platform(self.platform)
+            if not firefox:
+                continue
+            try:
+                firefox.clear_cache_single()
+            except Exception:
+                pass
+            all_elements = raw_find_elements(firefox, fence_after=[])
+            copy_buttons = [
+                element for element in all_elements
+                if matches_spec(element, copy_spec)
+                and element.get('y') is not None
+            ]
+            if not copy_buttons:
+                continue
+
+            target = max(copy_buttons, key=lambda element: int(element.get('y') or 0))
+            clipboard.write('')
+            time.sleep(0.3)
+            if not atspi_click(target):
+                continue
+            time.sleep(1.2)
+            content = (clipboard.read() or '').strip()
+            if content and not self._is_prompt_echo(content, request):
+                result.response_text = content
+                result.add_step(
+                    'extract_primary', True,
+                    f'ChatGPT response copied ({len(content)} chars, attempt {attempt + 1})',
+                    characters=len(content),
+                    preview=content[:200],
+                )
+                return True
+            if content:
+                result.add_step(
+                    'extract_primary_echo_rejected', True,
+                    'ChatGPT copied prompt echo; continuing response-copy search',
+                    characters=len(content),
+                    preview=content[:200],
+                    attempt=attempt + 1,
+                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                )
+
+        result.add_step(
+            'extract_primary', False,
+            'ChatGPT response copy button not found or only prompt echo copied',
+            elements=len(all_elements),
+            snapshot=last_snapshot.serializable() if last_snapshot else {},
+        )
+        return False
 
     def extract_additional(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         result.add_step('extract_additional', True, 'ChatGPT additional attachment extraction not configured in YAML yet', artifacts=[])

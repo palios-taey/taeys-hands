@@ -8,6 +8,7 @@ import yaml
 
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
+from consultation_v2.drivers.claude import ClaudeConsultationDriver
 from consultation_v2.drivers.gemini import GeminiConsultationDriver
 from consultation_v2.drivers.perplexity import PerplexityConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult
@@ -200,6 +201,58 @@ def test_monitor_generation_completes_without_copy_button(driver_cls, platform: 
     assert driver.monitor_generation(request, result) is True
     assert result.steps[-1][0] == 'monitor'
     assert result.steps[-1][1] is True
+
+
+def test_monitor_generation_records_deep_quiet_hang_as_nonfailing_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+    import consultation_v2.completion as completion
+
+    monkeypatch.setattr(completion, 'HANG_TICKS', 2)
+    driver = ChatGPTConsultationDriver.__new__(ChatGPTConsultationDriver)
+    driver.cfg = _load_platform('chatgpt')
+    driver.runtime = FakeRuntime([
+        FakeSnapshot(present={'stop_button'}),
+        FakeSnapshot(present={'stop_button'}),
+        FakeSnapshot(present={'stop_button'}),
+        FakeSnapshot(present=set()),
+        FakeSnapshot(present=set()),
+    ])
+
+    result = FakeResult()
+    request = ConsultationRequest(
+        platform='chatgpt',
+        message='hello',
+        mode='pro_extended',
+        timeout=5,
+    )
+
+    assert driver.monitor_generation(request, result) is True
+    hang_steps = [step for step in result.steps if step[0] == 'monitor_hang']
+    assert hang_steps
+    assert hang_steps[-1][1] is True
+    assert hang_steps[-1][3]['deep_quiet_mode'] is True
+    assert result.steps[-1][0] == 'monitor'
+    assert result.steps[-1][1] is True
+
+
+def test_shared_prompt_echo_guard_rejects_prompt_substrings() -> None:
+    driver = ChatGPTConsultationDriver.__new__(ChatGPTConsultationDriver)
+    prompt = 'Audit this repository for correctness. ' * 8
+    request = ConsultationRequest(platform='chatgpt', message=prompt)
+
+    assert driver._is_prompt_echo(prompt, request) is True
+    assert driver._is_prompt_echo(prompt[:220], request) is True
+    assert driver._is_prompt_echo(
+        'Observed: the submitted patch changes the parser and the fix is valid.',
+        request,
+    ) is False
+
+
+def test_claude_extended_thinking_monitor_timeout_floor() -> None:
+    driver = ClaudeConsultationDriver.__new__(ClaudeConsultationDriver)
+    request = ConsultationRequest(platform='claude', message='hello', timeout=30)
+
+    assert driver._monitor_timeout(request, 'extended_thinking') == 1800.0
+    assert driver._monitor_timeout(request, 'default') == 30.0
 
 
 def test_gemini_attach_success_uses_description_section_chip() -> None:

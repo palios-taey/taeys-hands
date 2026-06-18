@@ -593,6 +593,31 @@ class BaseConsultationDriver(ABC):
         Used by the shared completion detector for hang detection."""
         return sum(len(v) for v in snapshot.mapped.values()) + len(snapshot.unknown)
 
+    @staticmethod
+    def _normalized_text(text: str) -> str:
+        return ' '.join((text or '').split())
+
+    def _is_prompt_echo(self, content: str, request: ConsultationRequest) -> bool:
+        content_norm = self._normalized_text(content)
+        prompt_norm = self._normalized_text(request.message)
+        if len(content_norm) < 80 or not prompt_norm:
+            return False
+        if content_norm == prompt_norm:
+            return True
+        if content_norm in prompt_norm and len(content_norm) >= 160:
+            return True
+        if prompt_norm in content_norm and len(content_norm) <= int(len(prompt_norm) * 1.25):
+            return True
+        if len(prompt_norm) >= 120 and content_norm.startswith(prompt_norm[:120]):
+            return True
+        return False
+
+    def _monitor_timeout(self, request: ConsultationRequest, detector_mode: str) -> float:
+        return float(request.timeout)
+
+    def _monitor_hang_step_success(self, detector_mode: str) -> bool:
+        return detector_mode in {'deep_research', 'deep_think', 'pro_extended', 'extended_thinking', 'heavy'}
+
     def monitor_generation(
         self,
         request: ConsultationRequest,
@@ -637,15 +662,17 @@ class BaseConsultationDriver(ABC):
                 return True
             if verdict == HANG_SUSPECTED and not hang_logged:
                 hang_logged = True
+                hang_step_success = self._monitor_hang_step_success(detector_mode)
                 result.add_step(
-                    'monitor_hang', False,
+                    'monitor_hang', hang_step_success,
                     f'{self.platform} generation SUSPECTED hung '
                     f'(stop present, content frozen >= {detector.frozen_ticks} ticks)',
                     frozen_ticks=detector.frozen_ticks,
+                    deep_quiet_mode=hang_step_success,
                 )
             return False
 
-        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        self.runtime.wait_until(_poll, timeout=self._monitor_timeout(request, detector_mode), interval=1.0)
         verify_snap = self.wait_for_validation(
             'response_complete',
             timeout=5.0,
