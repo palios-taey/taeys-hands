@@ -396,6 +396,24 @@ def _resolve_structural_mappings(
         structural = spec.get('structural') if isinstance(spec, dict) else None
         if not isinstance(structural, dict):
             continue
+        if spec.get('match_strategy') == 'name_agnostic_structural':
+            expected_role = str(spec.get('role') or '').strip()
+            if not expected_role:
+                continue
+            candidates = []
+            for element in elements:
+                identity = _element_identity(element)
+                if identity in accounted or identity in structural_accounted:
+                    continue
+                if (element.get('role') or '') != expected_role:
+                    continue
+                candidates.append(element)
+            selected = _select_structural_between(candidates, structural, mapped)
+            if selected is None:
+                continue
+            mapped.setdefault(key, []).append(_to_ref(key, selected))
+            structural_accounted.add(_element_identity(selected))
+            continue
         parent_key = structural.get('parent')
         if not isinstance(parent_key, str):
             continue
@@ -436,6 +454,66 @@ def _resolve_structural_mappings(
         mapped.setdefault(key, []).append(_to_ref(key, selected))
         structural_accounted.add(_element_identity(selected))
     return structural_accounted
+
+
+def _position_key(item: Dict[str, Any] | ElementRef) -> tuple[int, int]:
+    if isinstance(item, ElementRef):
+        y = item.y
+        x = item.x
+    else:
+        y = item.get('y')
+        x = item.get('x')
+    return (int(y) if y is not None else 0, int(x) if x is not None else 0)
+
+
+def _anchor_ref(mapped: Dict[str, List[ElementRef]], key: Any, *, last: bool) -> ElementRef | None:
+    if not isinstance(key, str):
+        return None
+    refs = mapped.get(key) or []
+    if not refs:
+        return None
+    refs = sorted(refs, key=_position_key)
+    return refs[-1] if last else refs[0]
+
+
+def _select_structural_between(
+    candidates: List[Dict[str, Any]],
+    structural: Dict[str, Any],
+    mapped: Dict[str, List[ElementRef]],
+) -> Dict[str, Any] | None:
+    if not candidates:
+        return None
+    after_ref = _anchor_ref(mapped, structural.get('after'), last=True)
+    before_ref = _anchor_ref(mapped, structural.get('before'), last=False)
+    after_pos = _position_key(after_ref) if after_ref is not None else None
+    before_pos = _position_key(before_ref) if before_ref is not None else None
+
+    bounded: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        pos = _position_key(candidate)
+        if after_pos is not None and pos <= after_pos:
+            continue
+        if before_pos is not None and pos >= before_pos:
+            continue
+        bounded.append(candidate)
+    if not bounded:
+        return None
+    bounded.sort(key=_position_key)
+    if after_pos is not None and before_pos is not None:
+        midpoint_y = (after_pos[0] + before_pos[0]) / 2
+        midpoint_x = (after_pos[1] + before_pos[1]) / 2
+        return min(
+            bounded,
+            key=lambda item: (
+                abs(_position_key(item)[1] - midpoint_x),
+                abs(_position_key(item)[0] - midpoint_y),
+            ),
+        )
+    if after_pos is not None:
+        return bounded[0]
+    if before_pos is not None:
+        return bounded[-1]
+    return None
 
 
 def _element_extent_is_onscreen(obj: Any) -> bool:

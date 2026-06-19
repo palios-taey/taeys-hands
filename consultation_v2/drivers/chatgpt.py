@@ -211,6 +211,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step(step, False, f'{reason_prefix} {key} hover failed', snapshot=snapshot.serializable())
                 return False
             return True
+        if trigger_type == 'press':
+            if not self.runtime.click(element, strategy='atspi_only'):
+                result.add_step(step, False, f'{reason_prefix} {key} press failed', snapshot=snapshot.serializable())
+                return False
+            return True
         if not self._click(element):
             result.add_step(step, False, f'{reason_prefix} {key} click failed', snapshot=snapshot.serializable())
             return False
@@ -388,29 +393,159 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return True
 
     def _apply_model_target(self, target: str, workflow: dict, result: ConsultationResult) -> bool:
-        """Open model selector portal and click the target model item."""
-        # Settle + rescan FIRST: the persistent model selector can be absent from
-        # a premature snapshot — scan fired before the page rendered (esp. on a
-        # fresh ?temporary-chat= page). Poll before declaring missing (same
-        # readiness pattern as the attach steps).
+        target_key = workflow['model_targets'][target]
+        nested_name, nested_cfg = self._nested_model_target(target_key, workflow)
+        if nested_name == 'pro_effort' and nested_cfg is not None:
+            return self._apply_pro_effort_target(target, target_key, nested_cfg, result)
+        if nested_cfg is not None:
+            return self._apply_nested_model_target(target, target_key, nested_name, nested_cfg, result)
+        return self._apply_top_level_model_target(target, target_key, workflow, result)
+
+    def _model_menu_cfg(self, workflow: dict) -> dict:
+        return ((workflow.get('driver_operations') or {}).get('model_menu') or {})
+
+    def _model_menu_trigger(self, workflow: dict) -> str:
+        return str(self._model_menu_cfg(workflow).get('trigger') or 'model_selector')
+
+    def _nested_model_target(self, target_key: str, workflow: dict) -> tuple[str | None, dict | None]:
+        nested = (self._model_menu_cfg(workflow).get('nested') or {})
+        if not isinstance(nested, dict):
+            return None, None
+        for nested_name, nested_cfg in nested.items():
+            if not isinstance(nested_cfg, dict):
+                continue
+            options = nested_cfg.get('options') or {}
+            if isinstance(options, dict) and target_key in {str(value) for value in options.values()}:
+                return str(nested_name), nested_cfg
+        return None, None
+
+    def _open_model_menu(self, workflow: dict, result: ConsultationResult):
+        trigger_key = self._model_menu_trigger(workflow)
         self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('model_selector'),
+            lambda: self.runtime.snapshot().has(trigger_key),
             timeout=10,
             interval=0.4,
         )
         snap = self.runtime.snapshot()
-        selector = self.find_first(snap, 'model_selector')
+        selector = self.find_first(snap, trigger_key)
         if not selector:
             result.add_step('select_model', False, 'ChatGPT model selector not found', snapshot=snap.serializable())
-            return False
+            return None
         if not self._click(selector):
             result.add_step('select_model', False, 'ChatGPT model selector click failed', snapshot=snap.serializable())
-            return False
-        time.sleep(1.0)
+            return None
+        menu_snap, _ = self.wait_for_key('model_pro', timeout=3.0, interval=0.25, scope='menu')
+        if not self.tree_conformance_gate(result, menu_snap, surface='model_menu'):
+            return None
+        return menu_snap
 
-        # Model selector is a React portal — must use menu_snapshot()
-        dropdown_snap = self.runtime.menu_snapshot()
-        target_key = workflow['model_targets'][target]
+    def _wait_for_menu_key(self, key: str, *, timeout: float = 3.0):
+        return self.wait_for_key(key, timeout=timeout, interval=0.25, scope='menu')
+
+    def _open_pro_effort_menu(self, workflow: dict, result: ConsultationResult, menu_snap=None):
+        menu_snap = menu_snap or self._open_model_menu(workflow, result)
+        if menu_snap is None:
+            return None
+        nested_cfg = ((self._model_menu_cfg(workflow).get('nested') or {}).get('pro_effort') or {})
+        parent_key = str(nested_cfg.get('parent') or 'model_pro')
+        trigger_key = str(nested_cfg.get('trigger') or 'model_pro_effort_options')
+        reveal_action = str(nested_cfg.get('reveal_action') or 'hover')
+        open_action = str(nested_cfg.get('open_action') or 'press')
+        if not self._activate_element(
+            menu_snap,
+            parent_key,
+            result,
+            'select_model',
+            'ChatGPT Pro effort parent',
+            trigger_type=reveal_action,
+        ):
+            return None
+        hover_snap, trigger = self._wait_for_menu_key(trigger_key)
+        if not trigger:
+            result.add_step('select_model', False, f'ChatGPT nested trigger {trigger_key} not found', snapshot=hover_snap.serializable())
+            return None
+        if not self.tree_conformance_gate(result, hover_snap, surface='model_menu.pro_hover'):
+            return None
+        if not self._activate_element(
+            hover_snap,
+            trigger_key,
+            result,
+            'select_model',
+            'ChatGPT Pro effort trigger',
+            trigger_type=open_action,
+        ):
+            return None
+        effort_snap, _ = self._wait_for_menu_key('model_pro_extended')
+        if not self.tree_conformance_gate(result, effort_snap, surface='model_menu.pro_effort'):
+            return None
+        return effort_snap
+
+    def _open_legacy_model_menu(self, workflow: dict, nested_name: str, nested_cfg: dict, result: ConsultationResult, menu_snap=None):
+        menu_snap = menu_snap or self._open_model_menu(workflow, result)
+        if menu_snap is None:
+            return None
+        parent_key = str(nested_cfg.get('parent') or '')
+        reveal_action = str(nested_cfg.get('reveal_action') or 'hover')
+        if not parent_key:
+            result.add_step('select_model', False, f'ChatGPT nested model operation {nested_name} has no parent')
+            return None
+        if not self._activate_element(
+            menu_snap,
+            parent_key,
+            result,
+            'select_model',
+            'ChatGPT nested model parent',
+            trigger_type=reveal_action,
+        ):
+            return None
+        options = nested_cfg.get('options') or {}
+        first_option = next((str(value) for value in options.values() if isinstance(value, str)), '')
+        legacy_snap, _ = self._wait_for_menu_key(first_option or parent_key)
+        if not self.tree_conformance_gate(result, legacy_snap, surface=f'model_menu.{nested_name}'):
+            return None
+        return legacy_snap
+
+    def _ensure_top_level_model_active(self, active_key: str, workflow: dict, result: ConsultationResult):
+        menu_snap = self._open_model_menu(workflow, result)
+        if menu_snap is None:
+            return None
+        if self.element_is_active(menu_snap, active_key):
+            return menu_snap
+        item = self.find_first(menu_snap, active_key)
+        if not item:
+            result.add_step('select_model', False, f'ChatGPT menu item {active_key} not found', snapshot=menu_snap.serializable())
+            return None
+        if not self._click(item):
+            result.add_step('select_model', False, f'ChatGPT model {active_key} click failed', snapshot=menu_snap.serializable())
+            return None
+        time.sleep(0.8)
+        self.runtime.press('Escape')
+        time.sleep(0.2)
+        verify_snap = self._open_model_menu(workflow, result)
+        if verify_snap is None:
+            return None
+        if not self.element_is_active(verify_snap, active_key):
+            result.add_step(
+                'select_model',
+                False,
+                f'ChatGPT model {active_key} did not become active',
+                active_key=self.active_element_key(verify_snap, [active_key]),
+                expected_key=active_key,
+                snapshot=verify_snap.serializable(),
+            )
+            return None
+        return verify_snap
+
+    def _apply_top_level_model_target(
+        self,
+        target: str,
+        target_key: str,
+        workflow: dict,
+        result: ConsultationResult,
+    ) -> bool:
+        dropdown_snap = self._open_model_menu(workflow, result)
+        if dropdown_snap is None:
+            return False
         item = self.find_first(dropdown_snap, target_key)
         if not item:
             result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
@@ -427,13 +562,111 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return True
         clicked = self._click(item)
         time.sleep(0.8)
-        refreshed = self.runtime.snapshot()
-        selector = self.find_first(refreshed, 'model_selector')
-        if selector:
-            self._click(selector)
-            time.sleep(0.8)
-        verify_snap = self.runtime.menu_snapshot()
+        self.runtime.press('Escape')
+        time.sleep(0.2)
+        verify_snap = self._open_model_menu(workflow, result)
+        if verify_snap is None:
+            return False
         active_key = self.active_element_key(verify_snap, workflow.get('model_targets', {}).values())
+        verified = bool(clicked and active_key == target_key)
+        result.add_step(
+            'select_model',
+            verified,
+            f'ChatGPT model set to {target}',
+            active_key=active_key,
+            expected_key=target_key,
+            snapshot=verify_snap.serializable(),
+        )
+        self.runtime.press('Escape')
+        return verified
+
+    def _apply_pro_effort_target(
+        self,
+        target: str,
+        target_key: str,
+        nested_cfg: dict,
+        result: ConsultationResult,
+    ) -> bool:
+        workflow = self.cfg['workflow']['selection']
+        menu_snap = self._ensure_top_level_model_active('model_pro', workflow, result)
+        if menu_snap is None:
+            return False
+        effort_snap = self._open_pro_effort_menu(workflow, result, menu_snap=menu_snap)
+        if effort_snap is None:
+            return False
+        options = nested_cfg.get('options') or {}
+        effort_keys = [str(value) for value in options.values() if isinstance(value, str)]
+        if self.element_is_active(effort_snap, target_key):
+            self.runtime.press('Escape')
+            result.add_step(
+                'select_model',
+                True,
+                f'ChatGPT model {target} already active',
+                active_key=target_key,
+                snapshot=effort_snap.serializable(),
+            )
+            return True
+        item = self.find_first(effort_snap, target_key)
+        if not item:
+            result.add_step('select_model', False, f'ChatGPT Pro effort item {target_key} not found', snapshot=effort_snap.serializable())
+            return False
+        clicked = self.runtime.click(item, strategy='atspi_only')
+        time.sleep(0.8)
+        self.runtime.press('Escape')
+        time.sleep(0.2)
+        verify_snap = self._open_pro_effort_menu(workflow, result)
+        if verify_snap is None:
+            return False
+        active_key = self.active_element_key(verify_snap, effort_keys)
+        verified = bool(clicked and active_key == target_key)
+        result.add_step(
+            'select_model',
+            verified,
+            f'ChatGPT model set to {target}',
+            active_key=active_key,
+            expected_key=target_key,
+            snapshot=verify_snap.serializable(),
+        )
+        self.runtime.press('Escape')
+        return verified
+
+    def _apply_nested_model_target(
+        self,
+        target: str,
+        target_key: str,
+        nested_name: str | None,
+        nested_cfg: dict,
+        result: ConsultationResult,
+    ) -> bool:
+        workflow = self.cfg['workflow']['selection']
+        nested_name = nested_name or 'nested'
+        nested_snap = self._open_legacy_model_menu(workflow, nested_name, nested_cfg, result)
+        if nested_snap is None:
+            return False
+        options = nested_cfg.get('options') or {}
+        option_keys = [str(value) for value in options.values() if isinstance(value, str)]
+        if self.element_is_active(nested_snap, target_key):
+            self.runtime.press('Escape')
+            result.add_step(
+                'select_model',
+                True,
+                f'ChatGPT model {target} already active',
+                active_key=target_key,
+                snapshot=nested_snap.serializable(),
+            )
+            return True
+        item = self.find_first(nested_snap, target_key)
+        if not item:
+            result.add_step('select_model', False, f'ChatGPT nested model item {target_key} not found', snapshot=nested_snap.serializable())
+            return False
+        clicked = self.runtime.click(item, strategy='atspi_only')
+        time.sleep(0.8)
+        self.runtime.press('Escape')
+        time.sleep(0.2)
+        verify_snap = self._open_legacy_model_menu(workflow, nested_name, nested_cfg, result)
+        if verify_snap is None:
+            return False
+        active_key = self.active_element_key(verify_snap, option_keys)
         verified = bool(clicked and active_key == target_key)
         result.add_step(
             'select_model',
@@ -469,16 +702,20 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(1.0)
 
+        dropdown_snap = self.runtime.menu_snapshot()
+        if not self.tree_conformance_gate(result, dropdown_snap, surface='tools_menu'):
+            return False
         if via_key:
-            via_snap = self.runtime.menu_snapshot()
-            if not self._activate_element(via_snap, via_key, result, 'select_tool',
+            if not self._activate_element(dropdown_snap, via_key, result, 'select_tool',
                                          f'ChatGPT submenu trigger for {tool_name}',
                                          trigger_type=via_action):
                 return False
             time.sleep(0.6)
+            dropdown_snap = self.runtime.menu_snapshot()
+            if not self.tree_conformance_gate(result, dropdown_snap, surface='more_submenu'):
+                return False
 
         # Attach dropdown is a React portal — must use menu_snapshot()
-        dropdown_snap = self.runtime.menu_snapshot()
         item = self.find_first(dropdown_snap, target_key)
         if not item:
             result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=dropdown_snap.serializable())
@@ -531,7 +768,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             ):
                 return None
             time.sleep(0.6)
-        return self.runtime.menu_snapshot()
+        verify_snap = self.runtime.menu_snapshot()
+        surface = 'more_submenu' if via_key else 'tools_menu'
+        if result is not None and not self.tree_conformance_gate(result, verify_snap, surface=surface):
+            return None
+        return verify_snap
 
     # ------------------------------------------------------------------
     # File attachment

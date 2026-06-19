@@ -41,8 +41,18 @@ MATCH_SPEC_KEYS = frozenset({
     'select',
 })
 IDENTITY_SCHEMA = 'identity_v1'
-IDENTITY_ELEMENT_KEYS = frozenset({'name', 'role', 'scope', 'active_state'})
+IDENTITY_ELEMENT_KEYS = frozenset({
+    'name',
+    'role',
+    'scope',
+    'active_state',
+    'match_strategy',
+    'structural',
+    'reason',
+})
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
+IDENTITY_MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
+IDENTITY_STRUCTURAL_KEYS = frozenset({'after', 'before'})
 IDENTITY_FORBIDDEN_KEYS = FORBIDDEN_MATCHER_KEYS | frozenset({
     'names_any_of',
     'states_include',
@@ -575,12 +585,61 @@ def _validate_identity_element_map(
             key_name = str(raw_key)
             if key_name not in IDENTITY_ELEMENT_KEYS:
                 _add(findings, lines, key_path + (key_name,), key_name,
-                     'identity_v1 element entries may only declare name, role, scope, and active_state')
-        for required in ('name', 'role', 'scope'):
+                     'identity_v1 element entries may only declare exact identity fields or explicit structural strategy fields')
+        match_strategy = spec.get('match_strategy')
+        if match_strategy is not None:
+            if match_strategy not in IDENTITY_MATCH_STRATEGIES:
+                _add(findings, lines, key_path + ('match_strategy',), 'match_strategy',
+                     f'identity_v1 match_strategy must be one of {sorted(IDENTITY_MATCH_STRATEGIES)}')
+            if match_strategy == 'name_agnostic_structural' and 'name' in spec:
+                _add(findings, lines, key_path + ('name',), 'name',
+                     'identity_v1 name_agnostic_structural entries must not declare a name')
+        required_fields = ('role', 'scope') if match_strategy == 'name_agnostic_structural' else ('name', 'role', 'scope')
+        for required in required_fields:
             value = spec.get(required)
             if not isinstance(value, str) or not value or value != value.strip() or _has_wildcard(value):
                 _add(findings, lines, key_path + (required,), required,
                      f'identity_v1 {required} must be an exact non-pattern string')
+        structural = spec.get('structural')
+        if match_strategy == 'name_agnostic_structural':
+            if not isinstance(structural, dict) or not structural:
+                _add(findings, lines, key_path + ('structural',), 'structural',
+                     'identity_v1 name_agnostic_structural requires after/before structural anchors')
+            else:
+                for structural_key, structural_value in structural.items():
+                    structural_key_name = str(structural_key)
+                    if structural_key_name not in IDENTITY_STRUCTURAL_KEYS:
+                        _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
+                             f'identity_v1 structural may only declare {sorted(IDENTITY_STRUCTURAL_KEYS)}')
+                        continue
+                    if (
+                        not isinstance(structural_value, str)
+                        or not structural_value
+                        or structural_value != structural_value.strip()
+                        or _has_wildcard(structural_value)
+                    ):
+                        _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
+                             'identity_v1 structural anchors must be exact element_map keys')
+                        continue
+                    if structural_value == str(element_key):
+                        _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
+                             'identity_v1 structural anchors cannot point at the entry they identify')
+                    elif structural_value not in element_map:
+                        _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
+                             'identity_v1 structural anchor must reference an existing element_map key')
+                if not any(anchor in structural for anchor in IDENTITY_STRUCTURAL_KEYS):
+                    _add(findings, lines, key_path + ('structural',), 'structural',
+                         'identity_v1 structural requires at least one after/before anchor')
+            reason = spec.get('reason')
+            if not isinstance(reason, str) or not reason.strip():
+                _add(findings, lines, key_path + ('reason',), 'reason',
+                     'identity_v1 name_agnostic_structural requires a non-empty reason')
+        elif structural is not None:
+            _add(findings, lines, key_path + ('structural',), 'structural',
+                 'identity_v1 structural is only allowed with match_strategy: name_agnostic_structural')
+        elif 'reason' in spec:
+            _add(findings, lines, key_path + ('reason',), 'reason',
+                 'identity_v1 reason is only allowed with match_strategy: name_agnostic_structural')
         active_state = spec.get('active_state')
         if active_state is not None:
             if (

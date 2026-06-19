@@ -39,6 +39,96 @@ tree:
       - separator
       - static
       - status bar
+  conformance:
+    scopes:
+      base:
+        expected:
+          - home_link
+          - close_sidebar
+          - temporary_chat_on
+          - new_chat_shortcut
+          - search_chats
+          - library_link
+          - projects_link
+          - new_project
+          - scheduled_link
+          - apps_link
+          - pinned_toggle
+          - recents_toggle
+          - new_chat_recent
+          - organize_chats
+          - profile_menu
+          - download_apps
+          - attach_trigger
+          - input_chat_with_chatgpt
+          - model_selector
+          - dictation
+          - voice_button
+      model_menu:
+        expected:
+          - model_instant
+          - model_medium
+          - model_high
+          - model_extra_high
+          - model_pro
+          - model_gpt_5_5
+      model_menu.pro_hover:
+        expected:
+          - model_instant
+          - model_medium
+          - model_high
+          - model_extra_high
+          - model_pro
+          - model_gpt_5_5
+          - model_pro_effort_options
+      model_menu.pro_effort:
+        expected:
+          - model_instant
+          - model_medium
+          - model_high
+          - model_extra_high
+          - model_pro
+          - model_gpt_5_5
+          - model_pro_effort_options
+          - model_pro_standard
+          - model_pro_extended
+      model_menu.gpt_5_5_legacy:
+        expected:
+          - model_instant
+          - model_medium
+          - model_high
+          - model_extra_high
+          - model_pro
+          - model_gpt_5_5
+          - model_gpt_5_5_legacy_current
+          - model_gpt_5_4
+          - model_gpt_5_3
+          - model_gpt_4_5
+          - model_o3
+      tools_menu:
+        expected:
+          - tool_upload
+          - tool_recent_files
+          - tool_create_image
+          - tool_deep_research
+          - tool_web_search
+          - tool_more
+          - tool_projects
+      more_submenu:
+        expected:
+          - tool_upload
+          - tool_recent_files
+          - tool_create_image
+          - tool_deep_research
+          - tool_web_search
+          - tool_more
+          - tool_projects
+          - tool_agent_mode
+          - tool_create_task
+          - tool_finances
+          - tool_github
+          - tool_gmail
+          - tool_openai_platform
   element_map:
     home_link:
       name: Home
@@ -121,9 +211,13 @@ tree:
       role: entry
       scope: base.composer
     model_selector:
-      name: Pro
       role: push button
       scope: base.composer
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attach_trigger
+        before: dictation
+      reason: ChatGPT labels the selector with the selected model or Pro effort
     dictation:
       name: Start dictation
       role: push button
@@ -169,14 +263,67 @@ tree:
       scope: model_menu
       active_state: checked
     model_pro:
-      name: Pro
       role: radio menu item
       scope: model_menu
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_extra_high
+        before: model_gpt_5_5
+      reason: ChatGPT labels the top Pro row with the selected Pro effort
       active_state: checked
     model_gpt_5_5:
       name: GPT-5.5
       role: menu item
       scope: model_menu
+    model_pro_effort_options:
+      name: Pro effort options
+      role: menu item
+      scope: model_menu.pro_hover
+    model_pro_standard:
+      role: radio menu item
+      scope: model_menu.pro_effort
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_pro_effort_options
+      reason: ChatGPT can mirror selected effort labels into the top Pro row
+      active_state: checked
+    model_pro_extended:
+      role: radio menu item
+      scope: model_menu.pro_effort
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_pro_standard
+      reason: ChatGPT can mirror selected effort labels into the top Pro row
+      active_state: checked
+    model_gpt_5_5_legacy_current:
+      name: GPT-5.5
+      role: radio menu item
+      scope: model_menu.gpt_5_5_legacy
+      active_state: checked
+    model_gpt_5_4:
+      name: GPT-5.4
+      role: radio menu item
+      scope: model_menu.gpt_5_5_legacy
+      active_state: checked
+    model_gpt_5_3:
+      name: GPT-5.3
+      role: radio menu item
+      scope: model_menu.gpt_5_5_legacy
+      active_state: checked
+    model_gpt_4_5:
+      role: radio menu item
+      scope: model_menu.gpt_5_5_legacy
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_gpt_5_3
+        before: model_o3
+      reason: GPT-4.5 label carries a time-varying leaving date
+      active_state: checked
+    model_o3:
+      name: o3
+      role: radio menu item
+      scope: model_menu.gpt_5_5_legacy
+      active_state: checked
     tool_upload:
       name: Add photos & files Control U
       role: menu item
@@ -248,6 +395,21 @@ workflow:
       - new_chat_recent
       - new_chat_shortcut
   selection:
+    options:
+      models:
+        - instant
+        - thinking
+        - medium
+        - high
+        - extra_high
+        - pro
+        - pro_standard
+        - pro_extended
+        - gpt_5_5
+        - gpt_5_4
+        - gpt_5_3
+        - gpt_4_5
+        - o3
     model_targets:
       instant: model_instant
       thinking: model_medium
@@ -255,6 +417,41 @@ workflow:
       high: model_high
       extra_high: model_extra_high
       pro: model_pro
+      pro_standard: model_pro_standard
+      pro_extended: model_pro_extended
+      gpt_5_5: model_gpt_5_5_legacy_current
+      gpt_5_4: model_gpt_5_4
+      gpt_5_3: model_gpt_5_3
+      gpt_4_5: model_gpt_4_5
+      o3: model_o3
+    driver_operations:
+      model_menu:
+        trigger: model_selector
+        top_level:
+          - model_instant
+          - model_medium
+          - model_high
+          - model_extra_high
+          - model_pro
+          - model_gpt_5_5
+        nested:
+          pro_effort:
+            parent: model_pro
+            reveal_action: hover
+            trigger: model_pro_effort_options
+            open_action: press
+            options:
+              standard: model_pro_standard
+              extended: model_pro_extended
+          gpt_5_5_legacy:
+            parent: model_gpt_5_5
+            reveal_action: hover
+            options:
+              current: model_gpt_5_5_legacy_current
+              gpt_5_4: model_gpt_5_4
+              gpt_5_3: model_gpt_5_3
+              gpt_4_5: model_gpt_4_5
+              o3: model_o3
     composite_modes: {}
     tool_targets:
       create_image: tool_create_image

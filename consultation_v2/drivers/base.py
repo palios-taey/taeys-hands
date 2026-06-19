@@ -69,13 +69,16 @@ class BaseConsultationDriver(ABC):
         self,
         result: ConsultationResult,
         snapshot: Snapshot | None = None,
+        surface: str | None = None,
     ) -> bool:
         snap = snapshot or self.runtime.snapshot()
+        surface = surface or ('base' if self._uses_identity_schema() else None)
         discrepancies = [
             {'role': item.role, 'name': item.name}
             for item in (snap.unknown or [])
         ]
-        if not discrepancies:
+        missing = self._missing_expected_elements(snap, surface)
+        if not discrepancies and not missing:
             return True
         by_role: dict[str, int] = {}
         for item in discrepancies:
@@ -84,12 +87,55 @@ class BaseConsultationDriver(ABC):
         result.add_step(
             'tree_conformance',
             False,
-            f'{self.platform} tree conformance failed: {len(discrepancies)} unknown live element(s)',
+            (
+                f'{self.platform} tree conformance failed on {surface or "unscoped"}: '
+                f'{len(discrepancies)} unknown live element(s), '
+                f'{len(missing)} expected element(s) missing'
+            ),
+            surface=surface,
             unknown=discrepancies,
+            missing=missing,
             by_role=by_role,
             snapshot=snap.serializable(),
         )
         return False
+
+    def _uses_identity_schema(self) -> bool:
+        return (
+            self.cfg.get('schema') == 'identity_v1'
+            or (self.cfg.get('tree') or {}).get('schema') == 'identity_v1'
+        )
+
+    def _expected_keys_for_surface(self, surface: str | None) -> tuple[str, ...]:
+        if not surface:
+            return ()
+        conformance = (self.cfg.get('tree') or {}).get('conformance') or {}
+        scopes = conformance.get('scopes') or {}
+        scope_cfg = scopes.get(surface) or {}
+        expected = scope_cfg.get('expected') or []
+        if not isinstance(expected, list):
+            return ()
+        return tuple(str(key) for key in expected if isinstance(key, str) and key)
+
+    def _missing_expected_elements(self, snapshot: Snapshot, surface: str | None) -> list[dict[str, object]]:
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        missing: list[dict[str, object]] = []
+        for key in self._expected_keys_for_surface(surface):
+            if snapshot.has(key):
+                continue
+            spec = element_map.get(key) if isinstance(element_map, dict) else {}
+            spec = spec if isinstance(spec, dict) else {}
+            payload: dict[str, object] = {
+                'key': key,
+                'role': spec.get('role'),
+                'scope': spec.get('scope'),
+            }
+            if spec.get('name') is not None:
+                payload['name'] = spec.get('name')
+            if spec.get('match_strategy') is not None:
+                payload['match_strategy'] = spec.get('match_strategy')
+            missing.append(payload)
+        return missing
 
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
         validations = self.cfg.get('validation', {})
