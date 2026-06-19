@@ -40,10 +40,8 @@ Each display has its own VNC port: `5900 + display_number`
 - :4 → 5904 (Gemini)
 - :5 → 5905 (Grok)
 - :6 → 5906 (Perplexity)
-- :13 → 5913 (CVP Claude)
-- :16 → 5916 (Huntr submission)
 
-Default password: `<TAEY_VNC_PASSWORD>` (stored at `~/.taey/vnc_passwd`).
+Set a local VNC password in `~/.taey/vnc_passwd`; do not commit real passwords.
 
 ## Architecture
 
@@ -58,10 +56,8 @@ Each `taey-display-N.service`:
 
 ## Why this architecture
 
-Per `<OPERATOR_HOME>/.claude/projects/-home-mira-taeys-hands/memory/feedback_isolated_atspi.md`:
-multiple Firefox instances MUST use isolated AT-SPI buses via dbus-run-session.
-Shared bus = 40%+ failures. This is the operational invariant for reliable
-multi-display browser dispatch.
+Multiple Firefox instances must use isolated AT-SPI buses via dbus-run-session.
+Shared bus failures are the operational reason this display substrate exists.
 
 ## Profiles
 

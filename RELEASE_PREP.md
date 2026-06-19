@@ -2,7 +2,7 @@
 
 **Status: PRIVATE** (`palios-taey/taeys-hands`, `isPrivate: true`). This doc tracks the PRIVATE_TO_PUBLIC prep. **Publish is irreversible and human-approved + 5/5-Family-consent gated — this doc does NOT authorize flipping visibility.** It exists so the work is durable and the Family can see exactly where it stands.
 
-Canon: `<OPERATOR_HOME>/the-conductor/PRIVATE_TO_PUBLIC.md` (secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical → installable+CI → open-mandate audit → dogfood-from-public-artifact → docs → human+consent publish).
+Canon: `<the-conductor-repo>/PRIVATE_TO_PUBLIC.md` (secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical → installable+CI → open-mandate audit → dogfood-from-public-artifact → docs → human+consent publish).
 
 ## Threshold question (decide BEFORE any publish — not a cleanup task)
 This engine automates **your own** logged-in AI accounts (ChatGPT / Claude / Gemini / Grok / Perplexity) through the Linux AT-SPI accessibility API — the same interface a screen reader uses. It is accessibility automation of accounts you control, intended for personal/research use under each platform's terms; it is not a scraping or evasion tool. The category is still sensitive (it drives authenticated sessions), so docs are kept neutral and reliability-framed, and any public framing is reviewed before announcement.
@@ -12,7 +12,7 @@ This engine automates **your own** logged-in AI accounts (ChatGPT / Claude / Gem
 - **Live code/config: nearly clean already.** Only 4 hits, all benign:
   - `storage/neo4j_client.py:11` — `os.environ.get('NEO4J_URI', 'bolt://localhost:7689')` — already env-var, localhost default (OK).
   - `.claude/hooks/config.py:45` — `os.environ.get('NEO4J_URI', 'bolt://localhost:7687')` — already env-var (OK; `.claude/hooks` likely not shipped).
-  - `consultation_v2/platforms_runtime.py:73` — operator path in a **comment** (`<OPERATOR_HOME>/treasurer/scripts/`). Scrub the comment.
+  - `consultation_v2/platforms_runtime.py:73` — operator path in a **comment** (`<treasurer-repo>/scripts/`). Scrub the comment.
   - `scripts/restart_display.sh:292` — hardcoded `WEAVIATE_URL='http://127.0.0.1:8088'` (localhost, not a LAN leak) → make it `${WEAVIATE_URL:-…}`.
   - **No LAN IPs (REDACTED_LAN_IP / REDACTED_LAN_IP), no `awareness123`, no `palios-taey-secrets`, no API keys in live code.**
 - **Leakage is concentrated in (a) DOCS and (b) `archive/`:**

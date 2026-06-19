@@ -161,9 +161,9 @@ Config: `~/.taey/machine.env` — no hardcoded display numbers.
 
 | Dataset | Location | Count | Notes |
 |---------|----------|-------|-------|
-| SFT | `<OPERATOR_HOME>/training/sft_balanced_all.jsonl` | 24,388 pairs | Constitutional/identity + bot-generated |
-| DPO | `<OPERATOR_HOME>/training/dpo_all.jsonl` | 27,288 pairs | Claude/Gemini/Grok/Perplexity complete |
-| Infra docs | `<OPERATOR_HOME>/data/corpus/tier0_infra/raw/` | 435 docs | NCCL, Jetson, CUDA, FSDP — NOT yet used for SFT |
+| SFT | `<training-root>/sft_balanced_all.jsonl` | 24,388 pairs | Constitutional/identity + bot-generated |
+| DPO | `<training-root>/dpo_all.jsonl` | 27,288 pairs | Claude/Gemini/Grok/Perplexity complete |
+| Infra docs | `<corpus-root>/tier0_infra/raw/` | 435 docs | NCCL, Jetson, CUDA, FSDP — NOT yet used for SFT |
 
 - **DPO gap:** ChatGPT needs ~3,726 more pairs
 - **Infra SFT:** Previous attempt used WRONG corpus (deleted). Real docs exist but need training plan.
@@ -211,7 +211,7 @@ Jesse should not be the relay between Claude sessions.
 
 ## 6SIGMA Design Philosophy + Workflow — MANDATORY (fleet-canonical, wired 2026-05-25)
 
-**Canonical spec:** `<OPERATOR_HOME>/the-conductor/6SIGMA_WORKFLOW.md`. Owned by Conductor; same propagation pattern as ISMA — wired into all peer globals (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.grok/AGENTS.md`) + conductor CLAUDE.md + global `<OPERATOR_HOME>/CLAUDE.md`. Worked example driving the principle: taeys-hands audit_657 / safetensors PR #657 (Part 1 root-cause vs Part 2 patch→refactor).
+**Canonical spec:** `<the-conductor-repo>/6SIGMA_WORKFLOW.md`. Owned by Conductor; same propagation pattern as ISMA — wired into all peer globals (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.grok/AGENTS.md`) + conductor CLAUDE.md + global `<operator-global-CLAUDE.md>`. Worked example driving the principle: taeys-hands audit_657 / safetensors PR #657 (Part 1 root-cause vs Part 2 patch→refactor).
 
 **THE PRINCIPLE — root-cause vs patch:** A *root-cause* fix SIMPLIFIES code — corrects iteration domain / data shape / algebra upstream so the broken path is no longer reached. Same line count or smaller. Leaves the codebase better than it was found. A *patch* ADDS branches, guards, special-cases (`if X: continue`, `try/except SpecificError`) to bypass a broken path. Same runtime, but the codebase grows more conditional. **Diagnostic:** if your change adds a bypass, ASK — why is the broken path reached at all? can upstream be corrected so the bypass becomes unnecessary? If yes, that's the root-cause shape. Take it.
 
@@ -292,12 +292,12 @@ This project is indexed by GitNexus as **taeys-hands** (2161 symbols, 4402 relat
 
 # ISMA Prose Retrieval (fleet-wide, wired 2026-05-25)
 
-~2,400 of our own `.md` (foundations / recaps / drafts / docs / corpus) are now hybrid-searchable **prose** in ISMA. Use it for research, drafting, and dispatch-packet grounding. Full spec: `<OPERATOR_HOME>/embedding-server/ISMA_PROSE_RETRIEVAL_SPEC.md`.
+~2,400 of our own `.md` (foundations / recaps / drafts / docs / corpus) are now hybrid-searchable **prose** in ISMA. Use it for research, drafting, and dispatch-packet grounding. Full spec: `<embedding-server-repo>/ISMA_PROSE_RETRIEVAL_SPEC.md`.
 
 **Three rules (Jesse/weaver/conductor directive):**
 1. **NO HMM.** Use `/v2/search` or `isma_adaptive_search` with `enriched_only=false`. NEVER `/search/hmm`, `isma_motif_search`, or `enriched_only=true` — the prose is `hmm_enriched=false`, so HMM paths HIDE it.
 2. **GO DEEP.** `top_k>=25` (40–50 for broad), `scale=full_4096`, 3–6 phrasings + union the hits, expand promising hits via `curl :8095/document/<hash>/text`. A few snippets = a FAILED query, not an answer.
-3. **CANNOT-LIE.** Prose is FRAMING/depth, NOT a metric source (it holds superseded/scrubbed numbers). Cross-check every number against `<OPERATOR_HOME>/treasurer/foundations/tech_baselines/INDEX.md` before using it.
+3. **CANNOT-LIE.** Prose is FRAMING/depth, NOT a metric source (it holds superseded/scrubbed numbers). Cross-check every number against `<treasurer-repo>/foundations/tech_baselines/INDEX.md` before using it.
 
 **Canonical call:**
 ```bash
@@ -310,5 +310,5 @@ curl -s -X POST http://localhost:8095/v2/search -H 'Content-Type: application/js
 
 These conductor-owned canonical docs govern how every session uses the orchestration system and ships public work. If anything here conflicts with them, they win.
 
-- **`<OPERATOR_HOME>/the-conductor/ORCHESTRATION_INTEGRITY.md`** — use the orchestration system (`taey-plan`/`taey-task`/stop-engine) with integrity. Core rules: **"done" is evidence, never a self-report** (commit SHA + mechanical gate result + a real production observation — paste them; the tasks API rejects a `completed` with no evidence); **tests you author are a cheat — production is the oracle**; **bug → FULL STOP → 6SIGMA root-cause** (gitnexus impact + fix the upstream shape, never patch around); **audit gates are `depends:`-encoded** (downstream can't start until the audit task closes with a committed verdict); **stops are intentional** (`taey-stop-reason set ...`, use `blocked_on` while waiting). Honest-incomplete is always fine; a false "done" is the only real failure.
-- **`<OPERATOR_HOME>/the-conductor/PRIVATE_TO_PUBLIC.md`** — production-grade checklist for taking a private repo public (irreversible). Order: secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical (no hardcoded paths/IPs, fail-loud not silent-default) → installable + CI gate that blocks merge → open-mandate audit (full code, find-bugs-not-endorse) → dogfood from the public artifact → docs → **human-approved + consent-gated publish**. Upstream of `RELEASE_DISTRIBUTION_PLAYBOOK.md`.
+- **`<the-conductor-repo>/ORCHESTRATION_INTEGRITY.md`** — use the orchestration system (`taey-plan`/`taey-task`/stop-engine) with integrity. Core rules: **"done" is evidence, never a self-report** (commit SHA + mechanical gate result + a real production observation — paste them; the tasks API rejects a `completed` with no evidence); **tests you author are a cheat — production is the oracle**; **bug → FULL STOP → 6SIGMA root-cause** (gitnexus impact + fix the upstream shape, never patch around); **audit gates are `depends:`-encoded** (downstream can't start until the audit task closes with a committed verdict); **stops are intentional** (`taey-stop-reason set ...`, use `blocked_on` while waiting). Honest-incomplete is always fine; a false "done" is the only real failure.
+- **`<the-conductor-repo>/PRIVATE_TO_PUBLIC.md`** — production-grade checklist for taking a private repo public (irreversible). Order: secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical (no hardcoded paths/IPs, fail-loud not silent-default) → installable + CI gate that blocks merge → open-mandate audit (full code, find-bugs-not-endorse) → dogfood from the public artifact → docs → **human-approved + consent-gated publish**. Upstream of `RELEASE_DISTRIBUTION_PLAYBOOK.md`.

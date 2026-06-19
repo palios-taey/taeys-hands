@@ -33,7 +33,7 @@ status: overnight — merge-reconciliation closed; rollout teed up for attended 
 - **`taey-production-release::b-consult` (priority 22, "next" for me) needs a real research
   packet** before I can run the Family-Chat consult on the cross-repo release. Running a blind
   4-lane consult would be fabrication. Needs the release-project owner (weaver / plan at
-  `<OPERATOR_HOME>/embedding-server/plans/taey_production_release.md`) to provide the packet/question.
+  `<embedding-server-repo>/plans/taey_production_release.md`) to provide the packet/question.
 - **Audit persistence in flight:** asked `taeys-hands-grok` (Claude+Grok) and `taeys-hands-gemini`
   (Gemini+Perplexity) to write their overnight audit findings to
   `audit_logs/claude_grok_overnight_audit.md` and `audit_logs/gemini_perplexity_overnight_audit.md`

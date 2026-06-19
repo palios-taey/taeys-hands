@@ -1,6 +1,6 @@
 # Driver Contract — consultation_v2 (p0-100times: 100_TIMES.md baked into the driver/base rules)
 
-> Canonical source of these rules is `<OPERATOR_HOME>/taeys-hands/100_TIMES.md` (read it first, every
+> Canonical source of these rules is `<taeys-hands-repo>/100_TIMES.md` (read it first, every
 > session). This file is the operational contract every per-platform driver (p1) and the shared
 > base MUST satisfy. Companion: [[PRIMITIVES_CONTRACT]] (what is shared) + [[YAML_SCHEMA]] (exact-match grammar).
 > Where this conflicts with 100_TIMES.md, 100_TIMES.md wins.

@@ -7,7 +7,8 @@ PartOf=taey-display-%i.service
 [Service]
 Type=simple
 Environment=DISPLAY=:%i
-ExecStart=%h/taeys-hands/scripts/bus_watcher.sh %i
+Environment=TAEY_REPO=%h/taeys-hands
+ExecStart=/usr/bin/bash -lc 'exec "$${TAEY_REPO}/scripts/bus_watcher.sh" %i'
 Restart=always
 RestartSec=2
 

@@ -10,7 +10,7 @@
 
 ## 3-REGISTER TRUTH DESIGNATION
 
-* **OBSERVED**: Direct facts verified by static line-by-line inspection of files within `<OPERATOR_HOME>/.peer-worktrees/taeys-hands-gemini/`.
+* **OBSERVED**: Direct facts verified by static line-by-line inspection of files within `<taeys-hands-worktree>/`.
 * **INFERRED**: Deductions made from architectural patterns in `yaml_contract.py` and the reference implementation of `chatgpt.yaml` / `chatgpt.py`.
 * **UNKNOWN**: Gaps where live AT-SPI properties or runtime UI element changes could not be verified without executing the active interface.
 
