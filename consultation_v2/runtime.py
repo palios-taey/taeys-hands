@@ -169,6 +169,7 @@ class ConsultationRuntime:
         timeout: float = 8.0,
         interval: float = 0.5,
         anchor_key: str | None = None,
+        require_non_empty: bool = False,
     ) -> Snapshot:
         return self._wait_for_stable_tree(
             self.snapshot,
@@ -176,6 +177,7 @@ class ConsultationRuntime:
             timeout=timeout,
             interval=interval,
             anchor_key=anchor_key,
+            require_non_empty=require_non_empty,
         )
 
     def wait_for_stable_menu_snapshot(
@@ -185,6 +187,7 @@ class ConsultationRuntime:
         timeout: float = 2.0,
         interval: float = 0.25,
         anchor_key: str | None = None,
+        require_non_empty: bool = False,
     ) -> Snapshot:
         return self._wait_for_stable_tree(
             self.menu_snapshot,
@@ -192,6 +195,7 @@ class ConsultationRuntime:
             timeout=timeout,
             interval=interval,
             anchor_key=anchor_key,
+            require_non_empty=require_non_empty,
         )
 
     def _wait_for_stable_tree(
@@ -202,6 +206,7 @@ class ConsultationRuntime:
         timeout: float,
         interval: float,
         anchor_key: str | None = None,
+        require_non_empty: bool = False,
     ) -> Snapshot:
         required = max(1, int(consecutive))
         deadline = time.time() + timeout
@@ -212,18 +217,32 @@ class ConsultationRuntime:
         while time.time() < deadline:
             last_snapshot = snapshot_factory()
             raw_count = int(last_snapshot.raw_count or 0)
+            # Filtered count ignores excluded scan noise such as alerts/tooltips.
+            stable_count = self._stable_tree_count(last_snapshot) if require_non_empty else raw_count
             anchor_ready = anchor_key is None or last_snapshot.has(anchor_key)
-            if raw_count != last_count:
-                last_count = raw_count
-                stable = 1 if anchor_ready else 0
-            elif anchor_ready:
+            non_empty_ready = not require_non_empty or (raw_count > 0 and stable_count > 0)
+            ready = anchor_ready and non_empty_ready
+            if stable_count != last_count:
+                last_count = stable_count
+                stable = 1 if ready else 0
+            elif ready:
                 stable += 1
             else:
                 stable = 0
-            if anchor_ready and stable >= required:
+            if ready and stable >= required:
                 return last_snapshot
             time.sleep(interval)
         return last_snapshot or snapshot_factory()
+
+    @staticmethod
+    def _stable_tree_count(snapshot: Snapshot) -> int:
+        mapped_count = sum(len(items) for items in (snapshot.mapped or {}).values())
+        return (
+            mapped_count
+            + len(snapshot.sidebar or [])
+            + len(snapshot.menu_items or [])
+            + len(snapshot.unknown or [])
+        )
 
     def menu_snapshot(self) -> Snapshot:
         _, _, snapshot = build_menu_snapshot(self.platform)

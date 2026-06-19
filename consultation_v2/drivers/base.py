@@ -107,6 +107,7 @@ class BaseConsultationDriver(ABC):
         if surface == 'base':
             return self.runtime.wait_for_stable_snapshot(
                 anchor_key=self._conformance_anchor_key(surface),
+                require_non_empty=True,
             )
         return self.runtime.snapshot()
 

@@ -169,15 +169,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 f'Claude toggle menu click failed for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
-            # Settle: the toggle menu's items render a beat after the click —
-            # poll for the upload item instead of one fixed-sleep snapshot.
-            # Without this, the SECOND attachment intermittently failed 'upload
-            # item not found' (scan-before-render on the re-opened menu).
-            self.runtime.wait_until(
-                lambda: self.runtime.menu_snapshot().has('upload_files_item'),
-                timeout=8, interval=0.4,
+            menu_snap = self.runtime.wait_for_stable_menu_snapshot(
+                consecutive=2,
+                timeout=8,
+                interval=0.4,
+                anchor_key='upload_files_item',
+                require_non_empty=True,
             )
-            menu_snap = self.runtime.menu_snapshot()
             upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
                 result.add_step('attach', False,

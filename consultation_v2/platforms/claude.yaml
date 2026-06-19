@@ -46,6 +46,7 @@ tree:
       - separator
       - static
       - status bar
+      - tool tip
   sidebar_nav:
     - name: Home
       role: link
