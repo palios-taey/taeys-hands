@@ -60,14 +60,19 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def _attachment_name_matches(display_name: str, filename: str) -> bool:
         expected_path = os.path.abspath(filename)
         expected_name = os.path.basename(filename)
-        displayed_file = display_name.split()[0] if display_name else ''
+        display_name = (display_name or '').strip()
+        displayed = {display_name}
+        if display_name:
+            displayed.add(display_name.split()[0].rstrip(','))
+            displayed.add(display_name.split(',', 1)[0].strip())
         for expected in (expected_path, expected_name):
-            if display_name == expected or displayed_file == expected:
-                return True
-            if '...' in displayed_file:
-                prefix, suffix = displayed_file.split('...', 1)
-                if expected.startswith(prefix) and expected.endswith(suffix):
+            for displayed_file in displayed:
+                if displayed_file == expected:
                     return True
+                if '...' in displayed_file:
+                    prefix, suffix = displayed_file.split('...', 1)
+                    if expected.startswith(prefix) and expected.endswith(suffix):
+                        return True
         return False
 
     def _attachment_visible(self, snapshot: Snapshot, filename: str) -> bool:

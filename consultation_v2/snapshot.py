@@ -685,9 +685,9 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
     doc = atspi.get_platform_document(firefox, platform)
-    # NOTE: doc may be None if a portal/dropdown opened during navigation.
-    # Do NOT raise here — fall back gracefully; find_menu_items and find_elements
-    # will use firefox (app root) which covers React portals outside the document.
+    # NOTE: menu_snapshot is the post-click portal/dropdown scope. Keep the scan
+    # rooted at Firefox, not the document, so React overlays outside the document
+    # subtree are visible while browser chrome remains pruned below.
     try:
         firefox.clear_cache_single()
     except Exception:
@@ -703,11 +703,11 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             tree_cfg.get('menu_snapshot_roles')
             or ['menu item', 'radio menu item', 'check menu item', 'option']
         )
-        scan_root = doc if doc is not None else firefox
+        scan_root = firefox
         elements = find_elements(
             scan_root,
             fence_after=[],
-            prune_subtree_roles=(chrome_cfg.get('subtree_roles') or []) if doc is None else None,
+            prune_subtree_roles=chrome_cfg.get('subtree_roles') or [],
             prune_subtree_specs=prune_subtree_specs,
         )
         menu = [
