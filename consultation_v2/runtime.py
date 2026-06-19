@@ -162,6 +162,32 @@ class ConsultationRuntime:
         _, _, snapshot = build_snapshot(self.platform)
         return snapshot
 
+    def wait_for_stable_snapshot(
+        self,
+        *,
+        consecutive: int = 4,
+        timeout: float = 8.0,
+        interval: float = 0.5,
+    ) -> Snapshot:
+        required = max(1, int(consecutive))
+        deadline = time.time() + timeout
+        last_count: int | None = None
+        stable = 0
+        last_snapshot: Snapshot | None = None
+
+        while time.time() < deadline:
+            last_snapshot = self.snapshot()
+            raw_count = int(last_snapshot.raw_count or 0)
+            if raw_count == last_count:
+                stable += 1
+            else:
+                last_count = raw_count
+                stable = 1
+            if stable >= required:
+                return last_snapshot
+            time.sleep(interval)
+        return last_snapshot or self.snapshot()
+
     def menu_snapshot(self) -> Snapshot:
         _, _, snapshot = build_menu_snapshot(self.platform)
         return snapshot

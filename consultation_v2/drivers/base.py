@@ -74,8 +74,8 @@ class BaseConsultationDriver(ABC):
         snapshot: Snapshot | None = None,
         surface: str | None = None,
     ) -> bool:
-        snap = snapshot or self.runtime.snapshot()
         surface = surface or ('base' if self._uses_identity_schema() else None)
+        snap = snapshot or self._conformance_snapshot(surface)
         discrepancies = [
             {'role': item.role, 'name': item.name}
             for item in (snap.unknown or [])
@@ -102,6 +102,11 @@ class BaseConsultationDriver(ABC):
             snapshot=snap.serializable(),
         )
         return False
+
+    def _conformance_snapshot(self, surface: str | None) -> Snapshot:
+        if surface == 'base':
+            return self.runtime.wait_for_stable_snapshot()
+        return self.runtime.snapshot()
 
     def _uses_identity_schema(self) -> bool:
         return (
