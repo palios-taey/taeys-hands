@@ -70,6 +70,24 @@ status: overnight — merge-reconciliation closed; rollout teed up for attended 
   release blockers and caught an overclaim in `RELEASE_PREP.md` (fixed, cannot-lie).
 - NEXT: same recipe per platform (Claude→Gemini→Grok→Perplexity) via the `audit_logs/` worklists.
 
+## Shipped (afternoon/evening 2026-06-19) — CLAUDE proven end-to-end + LANDED (main 92bb7bf)
+- Rolled the Stage-1 plan-phase pattern to **Claude**: rebuilt claude.yaml→identity_v1 + `menus`,
+  claude.py onto the shared SELECT engine; **live :3 production proof PASSED end-to-end**
+  (model=opus + mode=extended_thinking[nested effort flyout] + web_search + attach + send + monitor
+  + extract **13,247 chars** + store). Fleet-gated (gemini structural + grok adversarial incl a live
+  **ChatGPT :2 no-regression** check — shared-engine changes don't regress ChatGPT). 9 commits
+  cherry-picked to main.
+- The Claude walk hardened the engine with a **settle-discipline cluster** (now in production, all
+  platforms benefit): anchor-aware base settle (judge a *rendered* tree), conditional clean-settle
+  between menus, path-reveal anchored wait, select-validation settle, default AT-SPI-action click
+  (Claude base elements have x/y=None → coords-free click required). Quirks: dynamic
+  model_selector/effort_menu names → stable_locator; personalized account button → name_agnostic;
+  promo banner → optional; volatile sidebar landmark pruned.
+- Infra: :3 degraded mid-walk (blank render, AT-SPI raw=1) → infra clean-restarted; display-watchdog
+  idea passed to infra (displays degrade under sustained automation).
+- TWO platforms now proven end-to-end (ChatGPT + Claude). NEXT: Gemini → Grok → Perplexity, faster
+  on the now-hardened engine.
+
 ## Build-in-public-worthy
 - The regression-prevention architecture caught a real -746 regression at the gate, autonomously,
   at 2 AM: strict identity-schema YAML loader + bidirectional fail-closed conformance gate +
