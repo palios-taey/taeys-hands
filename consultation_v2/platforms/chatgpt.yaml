@@ -151,7 +151,7 @@ tree:
       role: link
       scope: base.sidebar
     search_chats:
-      name: Search chats Control K
+      name: Search chats
       role: push button
       scope: base.sidebar
     library_link:
