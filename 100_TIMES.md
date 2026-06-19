@@ -37,9 +37,9 @@ Read this FIRST every session. If something breaks, the fix is almost always "yo
 - **No assumptions. No "I think it sent."** Look at the screen.
 - It will work ~90% of the time. When it doesn't, it **STOPS and is RAISED** — never silently hacks around.
 
-### 4a. SINGLE FAILURE → ESCALATE. ZERO RETRIES. (bot-detection / ban risk)
+### 4a. SINGLE FAILURE → ESCALATE. ZERO RETRIES. (reliability / respectful-client rule)
 - **A failed ACTION (click / type / send / navigate / dispatch / attach / mode-select) is retried EXACTLY ZERO times.** One failure → STOP → escalate back to me (Claude) for root-cause.
-- **WHY: repeated automated attempts are bot-detection signal. Retry loops WILL get Jesse's accounts BANNED from the platforms.** This is non-negotiable and more important than landing any single dispatch.
+- **WHY: blind automated retries are unreliable and a poor automation client — re-firing a failed UI action produces wrong results and needlessly hammers the service. Stop and fix the root cause instead.** Non-negotiable, and more important than landing any single dispatch.
 - This kills "retry-until-present" / settle-poll-the-element loops, "try again once", try-then-fallback chains, and re-dispatch-on-failure. ALL banned.
 - The root cause of a single failure is almost always a YAML/tree mismatch or a genuine page state → diagnose it, fix the YAML/driver, then ONE clean run. Not a loop.
 - **Allowed (NOT a retry):** *reading/scanning* the tree more than once (e.g. the stop-button debounce in §1 — re-SCANNING is observation, not re-acting), and ONE readiness wait before a SINGLE action. **Banned:** re-performing the ACTION itself after it fails.

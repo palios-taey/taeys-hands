@@ -39,9 +39,10 @@
 
 ## E. ZERO RETRIES on an action — single failure → STOP + escalate (100_TIMES §4a) — BASE-DRIVER LAW
 - A failed ACTION (click/type/send/navigate/attach/mode-select) is retried **exactly zero times**.
-  One failure → STOP → escalate to Claude for manual, screenshot-validated, human-paced recovery +
-  root-cause (which feeds the YAML/driver fix). **WHY: retry loops are bot-detection signal and get
-  accounts BANNED** — more important than landing any single dispatch.
+  One failure → STOP → escalate for manual, screenshot-validated recovery +
+  root-cause (which feeds the YAML/driver fix). **WHY: blind automated retries are unreliable and a
+  poor automation client — re-firing a failed UI action against the service produces wrong results
+  and hammers it; stop and fix the root cause instead.** Correctness over landing any single dispatch.
 - **BANNED in every driver:** retry-until-present, settle-poll-the-element loops, try-then-fallback
   chains, re-dispatch-on-failure, "try once more". (The current live driver's attach that misses the
   menu then re-clicks to "self-recover" is exactly this anti-pattern — the rebuilt grok/chatgpt drivers
