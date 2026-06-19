@@ -13,7 +13,7 @@ from consultation_v2.completion import (
     CompletionDetector,
 )
 from consultation_v2 import primitives
-from consultation_v2.planner import SelectionPlanError, build_selection_plan
+from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
@@ -26,6 +26,7 @@ class BaseConsultationDriver(ABC):
     def __init__(self) -> None:
         self.cfg = load_platform_yaml(self.platform)
         self.runtime = ConsultationRuntime(self.platform)
+        self._current_selection_plan: list[dict[str, Any]] | None = None
 
     def result(self, request: ConsultationRequest) -> ConsultationResult:
         return ConsultationResult(platform=self.platform, request=request)
@@ -328,14 +329,12 @@ class BaseConsultationDriver(ABC):
         return last_snapshot or self._scoped_snapshot(scope), None
 
     def apply_selection_plan(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        try:
-            plan = build_selection_plan(request)
-        except SelectionPlanError as exc:
+        plan = self._current_selection_plan
+        if plan is None:
             result.add_step(
                 'selection_plan',
                 False,
-                'Selection plan rejected in shared SELECT engine',
-                findings=list(exc.findings),
+                'Selection plan missing before SELECT; driver.run must gate before browser action',
             )
             return False
         for step in plan:
@@ -578,6 +577,22 @@ class BaseConsultationDriver(ABC):
         if isinstance(spec, dict) and isinstance(spec.get('scope'), str):
             return str(spec['scope'])
         return None
+
+    def _gate_selection_plan(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        self._current_selection_plan = None
+        if not has_selection_menus(request.platform):
+            return True
+        try:
+            self._current_selection_plan = build_selection_plan(request)
+        except SelectionPlanError as exc:
+            result.add_step(
+                'selection_plan',
+                False,
+                'Selection plan rejected before browser action',
+                findings=list(exc.findings),
+            )
+            return False
+        return True
 
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
@@ -1194,6 +1209,8 @@ class BaseConsultationDriver(ABC):
         send-registered handoff) AND on any setup/send failure or exception
         (release-safe ``finally`` in ``_display_dispatch_lock``)."""
         result = self.result(request)
+        if not self._gate_selection_plan(request, result):
+            return result
         with self._display_dispatch_lock(request) as owns_display:
             if not owns_display:
                 # Another consultation holds this display's dispatch lock. Per
