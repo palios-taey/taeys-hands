@@ -51,7 +51,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         if not self.select_model_mode_tools(request, result):
             return False
-        if request.connectors:
+        if request.selection_list('connectors'):
             if not self.toggle_connectors(request, result):
                 return False
         if not self.attach_files(request, result):
@@ -112,10 +112,10 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_model = (request.model or '').strip().lower()
+        requested_model = str(request.selection_value('model', '') or '').strip().lower()
         requested_mode = (
             self.cfg['workflow']['defaults'].get('mode') or ''
-        ).strip().lower() if request.mode is None else request.mode.strip().lower()
+        ).strip().lower() if request.selection_value('mode') is None else str(request.selection_value('mode') or '').strip().lower()
 
         # ── Model selection ───────────────────────────────────────────
         if requested_model and requested_model in workflow.get('model_targets', {}):
@@ -164,7 +164,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             result.add_step(
                 'select_model', True,
                 'Perplexity model left unchanged/default',
-                requested_model=request.model,
+                requested_model=request.selection_value('model'),
             )
 
         # ── Mode selection ────────────────────────────────────────────
@@ -202,12 +202,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             result.add_step(
                 'select_mode', True,
                 'Perplexity mode left unchanged/default',
-                requested_mode=request.mode,
+                requested_mode=request.selection_value('mode'),
             )
 
         # ── Tools (mode_targets handles all known tools) ──────────────
         mode_target_names = set(workflow.get('mode_targets', {}).keys())
-        for tool_name in request.tools:
+        for tool_name in request.selection_list('tools'):
             normalized = tool_name.strip().lower().replace(' ', '_')
             if normalized in mode_target_names:
                 result.add_step(
@@ -613,7 +613,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(2.0)
 
-        for connector_name in request.connectors:
+        for connector_name in request.selection_list('connectors'):
             normalized = connector_name.strip().lower()
             element_key = source_targets.get(normalized)
             if not element_key:
@@ -718,7 +718,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         time.sleep(2.0)
 
         all_verified = True
-        for connector_name in request.connectors:
+        for connector_name in request.selection_list('connectors'):
             normalized = connector_name.strip().lower()
             element_key = source_targets.get(normalized)
             if not element_key:
@@ -767,7 +767,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.add_step(
             'toggle_connectors', all_verified,
             'Perplexity connector toggle complete',
-            requested=request.connectors,
+            requested=request.selection_list('connectors'),
         )
         return all_verified
 
@@ -1076,7 +1076,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
 
     def _is_deep_research(self, request: ConsultationRequest) -> bool:
         """Return True if the current request is a Deep Research mode query."""
-        mode = (request.mode or '').strip().lower()
+        mode = str(request.selection_value('mode', '') or '').strip().lower()
         if mode == 'deep_research':
             return True
         default_mode = (

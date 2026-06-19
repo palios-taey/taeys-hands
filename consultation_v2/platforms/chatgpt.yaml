@@ -395,88 +395,111 @@ workflow:
       - new_chat_recent
       - new_chat_shortcut
   selection:
-    options:
-      models:
-        - instant
-        - thinking
-        - medium
-        - high
-        - extra_high
-        - pro
-        - pro_standard
-        - pro_extended
-        - gpt_5_5
-        - gpt_5_4
-        - gpt_5_3
-        - gpt_4_5
-        - o3
-    model_targets:
-      instant: model_instant
-      thinking: model_medium
-      medium: model_medium
-      high: model_high
-      extra_high: model_extra_high
-      pro: model_pro
-      pro_standard: model_pro_standard
-      pro_extended: model_pro_extended
-      gpt_5_5: model_gpt_5_5_legacy_current
-      gpt_5_4: model_gpt_5_4
-      gpt_5_3: model_gpt_5_3
-      gpt_4_5: model_gpt_4_5
-      o3: model_o3
-    driver_operations:
-      model_menu:
-        trigger: model_selector
-        top_level:
-          - model_instant
-          - model_medium
-          - model_high
-          - model_extra_high
-          - model_pro
-          - model_gpt_5_5
-        nested:
-          pro_effort:
-            parent: model_pro
-            reveal_action: hover
-            trigger: model_pro_effort_options
-            open_action: press
-            options:
-              standard: model_pro_standard
-              extended: model_pro_extended
-          gpt_5_5_legacy:
-            parent: model_gpt_5_5
-            reveal_action: hover
-            options:
-              current: model_gpt_5_5_legacy_current
-              gpt_5_4: model_gpt_5_4
-              gpt_5_3: model_gpt_5_3
-              gpt_4_5: model_gpt_4_5
-              o3: model_o3
-    composite_modes: {}
-    tool_targets:
-      create_image: tool_create_image
-      deep_research: tool_deep_research
-      web_search: tool_web_search
-      github:
-        target: tool_github
-        via: tool_more
-        via_action: hover
-      gmail:
-        target: tool_gmail
-        via: tool_more
-        via_action: hover
-      agent_mode:
-        target: tool_agent_mode
-        via: tool_more
-        via_action: hover
-      finances:
-        target: tool_finances
-        via: tool_more
-        via_action: hover
-      openai_platform:
-        target: tool_openai_platform
-        via: tool_more
-        via_action: hover
+    menus:
+      model:
+        select: single
+        active_recognition: checked
+        must_choose: true
+        resettable_on_followup: true
+        operate:
+          trigger: model_selector
+          scope: menu_snapshot
+        options:
+          instant:
+            element: model_instant
+          thinking:
+            element: model_medium
+          medium:
+            element: model_medium
+          high:
+            element: model_high
+          extra_high:
+            element: model_extra_high
+          pro:
+            element: model_pro
+          pro_standard:
+            element: model_pro_standard
+            path:
+              - element: model_pro
+                action: hover
+              - element: model_pro_effort_options
+                action: press
+          pro_extended:
+            element: model_pro_extended
+            path:
+              - element: model_pro
+                action: hover
+              - element: model_pro_effort_options
+                action: press
+          gpt_5_5:
+            element: model_gpt_5_5_legacy_current
+            path:
+              - element: model_gpt_5_5
+                action: hover
+          gpt_5_4:
+            element: model_gpt_5_4
+            path:
+              - element: model_gpt_5_5
+                action: hover
+          gpt_5_3:
+            element: model_gpt_5_3
+            path:
+              - element: model_gpt_5_5
+                action: hover
+          gpt_4_5:
+            element: model_gpt_4_5
+            path:
+              - element: model_gpt_5_5
+                action: hover
+          o3:
+            element: model_o3
+            path:
+              - element: model_gpt_5_5
+                action: hover
+        default_for_fresh: pro_extended
+        example_rationale: Use Pro Extended for high-stakes work that needs the deepest available reasoning.
+      tools:
+        select: multi
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: false
+        operate:
+          trigger: attach_trigger
+          scope: menu_snapshot
+        options:
+          create_image:
+            element: tool_create_image
+          deep_research:
+            element: tool_deep_research
+          web_search:
+            element: tool_web_search
+          github:
+            element: tool_github
+            path:
+              - element: tool_more
+                action: hover
+          gmail:
+            element: tool_gmail
+            path:
+              - element: tool_more
+                action: hover
+          agent_mode:
+            element: tool_agent_mode
+            path:
+              - element: tool_more
+                action: hover
+          finances:
+            element: tool_finances
+            path:
+              - element: tool_more
+                action: hover
+          openai_platform:
+            element: tool_openai_platform
+            path:
+              - element: tool_more
+                action: hover
+        default_for_fresh: none
+        example_rationale: No tools are needed because this request only needs the base ChatGPT model.
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload

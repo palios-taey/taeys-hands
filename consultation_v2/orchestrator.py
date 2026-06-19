@@ -15,6 +15,12 @@ from dataclasses import replace
 from consultation_v2 import primitives
 from consultation_v2.identity import consolidate_attachments
 from consultation_v2.notify import push_notification
+from consultation_v2.planner import (
+    SelectionPlanError,
+    build_selection_plan,
+    has_selection_menus,
+    selection_plan_record,
+)
 from consultation_v2.types import ConsultationRequest, ConsultationResult
 from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
 from consultation_v2.drivers.claude import ClaudeConsultationDriver
@@ -36,6 +42,21 @@ _REGISTRY = {
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
+
+    selection_record = []
+    if has_selection_menus(request.platform):
+        try:
+            planned_selections = build_selection_plan(request)
+        except SelectionPlanError as exc:
+            result = ConsultationResult(platform=request.platform, request=request)
+            result.add_step(
+                'selection_plan',
+                False,
+                'Selection plan rejected before browser action',
+                findings=list(exc.findings),
+            )
+            return result
+        selection_record = selection_plan_record(planned_selections)
 
     # --- Phase 0: Display readiness gate (all chat platforms; validation-only) ---
     # Before ANY interaction, verify the production display is readable and in
@@ -124,9 +145,13 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             from storage import neo4j_client
             plan_id = neo4j_client.create_plan(
                 platform=request.platform,
-                model=request.model or '',
-                mode=request.mode or '',
-                tools=list(request.tools),
+                model='',
+                mode='',
+                tools=[],
+                selections={
+                    'choices': request.serializable_selections(),
+                    'plan': selection_record,
+                },
                 message=request.message,
                 attachment_path=consolidated_path or '',
                 session=request.session_url or 'new',

@@ -84,10 +84,11 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_model = (request.model or '').strip().lower()
+        requested_model = str(request.selection_value('model', '') or '').strip().lower()
+        mode_selection = request.selection_value('mode')
         requested_mode = (
             self.cfg['workflow']['defaults'].get('mode') or ''
-        ).strip().lower() if request.mode is None else request.mode.strip().lower()
+        ).strip().lower() if mode_selection is None else str(mode_selection or '').strip().lower()
 
         # Gemini Deep Think REQUIRES the 3.1 Pro model selected FIRST. Toggling
         # the Deep Think *tool* on the account default (3.5 Flash) silently runs
@@ -149,7 +150,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 return False
         else:
             result.add_step('select_model', True, 'Gemini model left unchanged/default',
-                            requested_model=request.model)
+                            requested_model=request.selection_value('model'))
 
         # ── Mode / primary tool selection via Tools dropdown ──────────────────
         if requested_mode and requested_mode in workflow.get('tool_targets', {}):
@@ -232,10 +233,10 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     return False
         else:
             result.add_step('select_mode', True, 'Gemini mode left unchanged/default',
-                            requested_mode=request.mode)
+                            requested_mode=request.selection_value('mode'))
 
-        # ── Additional tools requested in request.tools ───────────────────────
-        for tool_name in request.tools:
+        # ── Additional tools requested in selections["tools"] ────────────────
+        for tool_name in request.selection_list('tools'):
             normalized = tool_name.strip().lower().replace(' ', '_')
             target_key = workflow.get('tool_targets', {}).get(normalized)
             if not target_key:
@@ -423,7 +424,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         # report. Generous timeout: plan generation can take ~1 min. Gated on the
         # deep_research mode so single-step modes (deep_think/normal/…) are
         # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
-        if (request.mode or '').strip().lower() == 'deep_research':
+        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
             start_button = self.runtime.wait_until(
                 lambda: self.find_first(self.runtime.snapshot(), 'start_research'),
                 timeout=180,
@@ -480,7 +481,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         # full report is copied via the panel's "Share & Export" -> "Copy" (a
         # menu item in the popover), NOT the chat-bubble Copy push button.
         # Proven 2026-06-15: 36KB report via this path vs 89 chars via the bubble.
-        if (request.mode or '').strip().lower() == 'deep_research':
+        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
             snap = self.runtime.snapshot()
             share = self.find_first(snap, 'share_export')
             if not share or not self.runtime.click(share, strategy='atspi_first'):
@@ -533,7 +534,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         # For Deep Research, extract_primary already captured the full report via
         # Share & Export -> Copy; re-running that path here would only duplicate it.
-        if (request.mode or '').strip().lower() == 'deep_research':
+        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
             result.add_step('extract_additional', True,
                             'Gemini Deep Research report already captured by extract_primary')
             return True

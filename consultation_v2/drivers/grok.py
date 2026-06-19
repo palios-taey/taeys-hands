@@ -102,8 +102,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
         mode_targets = selection.get('mode_targets', {})
         model_targets = selection.get('model_targets', {})
 
-        requested_mode = request.mode or defaults.get('mode') or ''
-        requested_model = request.model or defaults.get('model') or ''
+        requested_mode = request.selection_value('mode') or defaults.get('mode') or ''
+        requested_model = request.selection_value('model') or defaults.get('model') or ''
         requested = requested_mode or requested_model
         requested = str(requested).strip().lower()
         if not requested:
@@ -375,7 +375,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
     def wait_for_completion(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         defaults = self.cfg['workflow'].get('defaults', {})
         resolved_mode = (
-            request.mode or request.model or defaults.get('mode') or defaults.get('model') or ''
+            request.selection_value('mode')
+            or request.selection_value('model')
+            or defaults.get('mode')
+            or defaults.get('model')
+            or ''
         )
         return self.monitor_generation(
             request, result, mode=str(resolved_mode),

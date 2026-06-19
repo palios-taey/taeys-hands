@@ -53,6 +53,30 @@ IDENTITY_ELEMENT_KEYS = frozenset({
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
 IDENTITY_MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
 IDENTITY_STRUCTURAL_KEYS = frozenset({'after', 'before'})
+MENU_SELECTION_KEYS = frozenset({'menus'})
+MENU_KEYS = frozenset({
+    'select',
+    'active_recognition',
+    'must_choose',
+    'resettable_on_followup',
+    'operate',
+    'options',
+    'default_for_fresh',
+    'example_rationale',
+})
+MENU_SELECT_VALUES = frozenset({'single', 'multi'})
+MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
+MENU_OPERATE_SCOPES = frozenset({'menu_snapshot', 'snapshot'})
+MENU_OPTION_KEYS = frozenset({'element', 'path'})
+MENU_PATH_KEYS = frozenset({'element', 'action'})
+MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
+LEGACY_SELECTION_KEYS = frozenset({
+    'options',
+    'model_targets',
+    'tool_targets',
+    'driver_operations',
+    'composite_modes',
+})
 IDENTITY_FORBIDDEN_KEYS = FORBIDDEN_MATCHER_KEYS | frozenset({
     'names_any_of',
     'states_include',
@@ -651,6 +675,175 @@ def _validate_identity_element_map(
                      f'identity_v1 active_state must be one of {sorted(IDENTITY_ACTIVE_STATES)}')
 
 
+def _validate_selection_menus(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    data: dict[str, Any],
+) -> None:
+    workflow = data.get('workflow') or {}
+    selection = workflow.get('selection') if isinstance(workflow, dict) else None
+    selection_path = ('workflow', 'selection')
+    element_map = ((data.get('tree') or {}).get('element_map') or {})
+    if not isinstance(selection, dict):
+        _add(findings, lines, selection_path, 'selection',
+             'identity_v1 requires workflow.selection.menus')
+        return
+    for key in selection:
+        key_name = str(key)
+        if key_name not in MENU_SELECTION_KEYS:
+            if key_name in LEGACY_SELECTION_KEYS:
+                _add(findings, lines, selection_path + (key_name,), key_name,
+                     'workflow.selection must use one canonical menus block, not legacy scattered selection keys')
+            else:
+                _add(findings, lines, selection_path + (key_name,), key_name,
+                     'unsupported workflow.selection key; use menus')
+    menus = selection.get('menus')
+    if not isinstance(menus, dict) or not menus:
+        _add(findings, lines, selection_path + ('menus',), 'menus',
+             'workflow.selection.menus must be a non-empty mapping')
+        return
+    for menu_key, menu in menus.items():
+        _validate_menu(
+            findings,
+            lines,
+            str(menu_key),
+            menu,
+            selection_path + ('menus', str(menu_key)),
+            element_map,
+        )
+
+
+def _validate_menu(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    menu_key: str,
+    menu: object,
+    menu_path: tuple[str, ...],
+    element_map: dict[str, Any],
+) -> None:
+    if not isinstance(menu, dict):
+        _add(findings, lines, menu_path, menu_key, 'menu entry must be a mapping')
+        return
+    for raw_key in menu:
+        key_name = str(raw_key)
+        if key_name not in MENU_KEYS:
+            _add(findings, lines, menu_path + (key_name,), key_name,
+                 'unsupported menu key')
+    select = menu.get('select')
+    if select not in MENU_SELECT_VALUES:
+        _add(findings, lines, menu_path + ('select',), 'select',
+             f'menu.select must be one of {sorted(MENU_SELECT_VALUES)}')
+    active_recognition = menu.get('active_recognition')
+    if active_recognition not in IDENTITY_ACTIVE_STATES:
+        _add(findings, lines, menu_path + ('active_recognition',), 'active_recognition',
+             f'menu.active_recognition must name a live AT-SPI state: {sorted(IDENTITY_ACTIVE_STATES)}')
+    for bool_key in ('must_choose', 'resettable_on_followup'):
+        if not isinstance(menu.get(bool_key), bool):
+            _add(findings, lines, menu_path + (bool_key,), bool_key,
+                 f'menu.{bool_key} must be true or false')
+    operate = menu.get('operate')
+    if not isinstance(operate, dict):
+        _add(findings, lines, menu_path + ('operate',), 'operate',
+             'menu.operate must be a mapping')
+    else:
+        _validate_menu_operate(findings, lines, operate, menu_path + ('operate',), element_map)
+    options = menu.get('options')
+    if not isinstance(options, dict) or not options:
+        _add(findings, lines, menu_path + ('options',), 'options',
+             'menu.options must be a non-empty mapping')
+        options = {}
+    else:
+        for option_key, option in options.items():
+            _validate_menu_option(
+                findings,
+                lines,
+                str(option_key),
+                option,
+                menu_path + ('options', str(option_key)),
+                element_map,
+            )
+    default_for_fresh = menu.get('default_for_fresh')
+    if not isinstance(default_for_fresh, str) or not default_for_fresh.strip():
+        _add(findings, lines, menu_path + ('default_for_fresh',), 'default_for_fresh',
+             'menu.default_for_fresh must be an option key or none')
+    elif default_for_fresh != 'none' and default_for_fresh not in options:
+        _add(findings, lines, menu_path + ('default_for_fresh',), 'default_for_fresh',
+             'menu.default_for_fresh must name an option key or none')
+    example = menu.get('example_rationale')
+    if not isinstance(example, str) or not example.strip():
+        _add(findings, lines, menu_path + ('example_rationale',), 'example_rationale',
+             'menu.example_rationale must be a non-empty teaching string')
+
+
+def _validate_menu_operate(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    operate: dict[str, Any],
+    operate_path: tuple[str, ...],
+    element_map: dict[str, Any],
+) -> None:
+    for raw_key in operate:
+        key_name = str(raw_key)
+        if key_name not in MENU_OPERATE_KEYS:
+            _add(findings, lines, operate_path + (key_name,), key_name,
+                 'unsupported menu.operate key')
+    trigger = operate.get('trigger')
+    if not isinstance(trigger, str) or trigger not in element_map:
+        _add(findings, lines, operate_path + ('trigger',), 'trigger',
+             'menu.operate.trigger must name an element_map key')
+    scope = operate.get('scope')
+    if scope not in MENU_OPERATE_SCOPES:
+        _add(findings, lines, operate_path + ('scope',), 'scope',
+             f'menu.operate.scope must be one of {sorted(MENU_OPERATE_SCOPES)}')
+
+
+def _validate_menu_option(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    option_key: str,
+    option: object,
+    option_path: tuple[str, ...],
+    element_map: dict[str, Any],
+) -> None:
+    if not isinstance(option, dict):
+        _add(findings, lines, option_path, option_key, 'menu option must be a mapping')
+        return
+    for raw_key in option:
+        key_name = str(raw_key)
+        if key_name not in MENU_OPTION_KEYS:
+            _add(findings, lines, option_path + (key_name,), key_name,
+                 'unsupported menu option key')
+    element = option.get('element')
+    if not isinstance(element, str) or element not in element_map:
+        _add(findings, lines, option_path + ('element',), 'element',
+             'menu option element must name an element_map key')
+    path = option.get('path')
+    if path is None:
+        return
+    if not isinstance(path, list) or not path:
+        _add(findings, lines, option_path + ('path',), 'path',
+             'menu option path must be a non-empty ordered list')
+        return
+    for idx, step in enumerate(path):
+        step_path = option_path + ('path', str(idx))
+        if not isinstance(step, dict):
+            _add(findings, lines, step_path, 'path', 'menu path entries must be mappings')
+            continue
+        for raw_key in step:
+            key_name = str(raw_key)
+            if key_name not in MENU_PATH_KEYS:
+                _add(findings, lines, step_path + (key_name,), key_name,
+                     'unsupported menu path key')
+        path_element = step.get('element')
+        if not isinstance(path_element, str) or path_element not in element_map:
+            _add(findings, lines, step_path + ('element',), 'element',
+                 'menu path element must name an element_map key')
+        action = step.get('action')
+        if action not in MENU_PATH_ACTIONS:
+            _add(findings, lines, step_path + ('action',), 'action',
+                 f'menu path action must be one of {sorted(MENU_PATH_ACTIONS)}')
+
+
 def _validate_identity_yaml(
     findings: list[ContractFinding],
     lines: dict[tuple[str, ...], int],
@@ -671,6 +864,7 @@ def _validate_identity_yaml(
                  f'identity_v1 forbids stored/fuzzy matcher key {key!r}')
     element_map = ((data.get('tree') or {}).get('element_map') or {})
     _validate_identity_element_map(findings, lines, element_map)
+    _validate_selection_menus(findings, lines, data)
 
 
 def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source: str) -> None:

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.completion import (
     COMPLETE,
     CompletionDetector,
 )
 from consultation_v2 import primitives
+from consultation_v2.planner import SelectionPlanError, build_selection_plan
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
@@ -324,6 +326,258 @@ class BaseConsultationDriver(ABC):
         if isinstance(element, ElementRef):
             return last_snapshot or self._scoped_snapshot(scope), element
         return last_snapshot or self._scoped_snapshot(scope), None
+
+    def apply_selection_plan(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        try:
+            plan = build_selection_plan(request)
+        except SelectionPlanError as exc:
+            result.add_step(
+                'selection_plan',
+                False,
+                'Selection plan rejected in shared SELECT engine',
+                findings=list(exc.findings),
+            )
+            return False
+        for step in plan:
+            if step.get('skip'):
+                result.add_step(
+                    'select',
+                    True,
+                    f"{self.platform} selection {step['menu']} intentionally {step['value']}",
+                    menu=step['menu'],
+                    value=step['value'],
+                    because=step.get('because') or '',
+                )
+                continue
+            if not self._apply_selection_step(step, result):
+                return False
+        return True
+
+    def _apply_selection_step(self, step: dict[str, Any], result: ConsultationResult) -> bool:
+        menu = str(step['menu'])
+        option = str(step['option'])
+        operate = dict(step['operate'])
+        scope = str(operate['scope'])
+        trigger_key = str(operate['trigger'])
+        target_key = str(step['element'])
+        path = list(step.get('path') or [])
+        first_key = str(path[0]['element']) if path else target_key
+
+        opened = self._open_selection_menu(trigger_key, first_key, scope, result)
+        if opened is None:
+            return False
+        snapshot, _ = opened
+        target_snapshot, target = self._walk_selection_path(snapshot, path, target_key, scope, result)
+        if target is None:
+            return False
+        active_state = str(step['active_recognition'])
+        if self._selection_element_has_state(target, active_state):
+            self.runtime.press('Escape')
+            result.add_step(
+                'select',
+                True,
+                f'{self.platform} {menu}={option} already active',
+                menu=menu,
+                option=option,
+                active_state=active_state,
+                snapshot=target_snapshot.serializable(),
+            )
+            return True
+        if not self.runtime.click(target, strategy='atspi_only'):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} {menu}={option} click failed',
+                menu=menu,
+                option=option,
+                snapshot=target_snapshot.serializable(),
+            )
+            return False
+        time.sleep(0.3)
+        self.runtime.press('Escape')
+        time.sleep(0.2)
+        verify_opened = self._open_selection_menu(trigger_key, first_key, scope, result)
+        if verify_opened is None:
+            return False
+        verify_snapshot, _ = verify_opened
+        verify_snapshot, verified_target = self._walk_selection_path(
+            verify_snapshot,
+            path,
+            target_key,
+            scope,
+            result,
+        )
+        if verified_target is None:
+            return False
+        verified = self._selection_element_has_state(verified_target, active_state)
+        result.add_step(
+            'select',
+            verified,
+            f'{self.platform} selected {menu}={option}',
+            menu=menu,
+            option=option,
+            active_state=active_state,
+            snapshot=verify_snapshot.serializable(),
+        )
+        self.runtime.press('Escape')
+        return verified
+
+    def _open_selection_menu(
+        self,
+        trigger_key: str,
+        expected_key: str,
+        scope: str,
+        result: ConsultationResult,
+    ) -> tuple[Snapshot, ElementRef] | None:
+        trigger_snapshot, trigger = self._selection_find_once(trigger_key, 'snapshot')
+        if trigger is None:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} not found',
+                trigger=trigger_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        if not self.runtime.click(trigger):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} click failed',
+                trigger=trigger_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        snapshot, expected = self._selection_find_once(expected_key, scope)
+        if expected is None:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection expected element {expected_key} missing after menu open',
+                expected=expected_key,
+                snapshot=snapshot.serializable(),
+            )
+            return None
+        if not self._selection_conformance_gate(result, snapshot, expected_key):
+            return None
+        return snapshot, expected
+
+    def _walk_selection_path(
+        self,
+        snapshot: Snapshot,
+        path: list[dict[str, Any]],
+        target_key: str,
+        scope: str,
+        result: ConsultationResult,
+    ) -> tuple[Snapshot, ElementRef | None]:
+        current_snapshot = snapshot
+        for index, path_step in enumerate(path):
+            path_key = str(path_step['element'])
+            action = str(path_step['action'])
+            element = self.find_first(current_snapshot, path_key)
+            if element is None:
+                current_snapshot, element = self._selection_find_once(path_key, scope)
+            if element is None:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection path element {path_key} not found',
+                    element=path_key,
+                    snapshot=current_snapshot.serializable(),
+                )
+                return current_snapshot, None
+            if not self._activate_selection_path_element(element, action):
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection path {path_key} {action} failed',
+                    element=path_key,
+                    action=action,
+                    snapshot=current_snapshot.serializable(),
+                )
+                return current_snapshot, None
+            next_key = str(path[index + 1]['element']) if index + 1 < len(path) else target_key
+            current_snapshot, next_element = self._selection_find_once(next_key, scope)
+            if next_element is None:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection expected element {next_key} missing after {action}',
+                    expected=next_key,
+                    action=action,
+                    snapshot=current_snapshot.serializable(),
+                )
+                return current_snapshot, None
+            if not self._selection_conformance_gate(result, current_snapshot, next_key):
+                return current_snapshot, None
+        target = self.find_first(current_snapshot, target_key)
+        if target is None:
+            current_snapshot, target = self._selection_find_once(target_key, scope)
+        if target is None:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection target {target_key} not found',
+                target=target_key,
+                snapshot=current_snapshot.serializable(),
+            )
+        return current_snapshot, target
+
+    def _activate_selection_path_element(self, element: ElementRef, action: str) -> bool:
+        normalized = action.strip().lower()
+        if normalized == 'hover':
+            return self.runtime.hover(element)
+        if normalized in {'press', 'click'}:
+            return self.runtime.click(element, strategy='atspi_only')
+        return False
+
+    def _selection_find_once(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
+        snapshot = self._selection_snapshot(scope)
+        element = self.find_first(snapshot, key)
+        if element is not None:
+            return snapshot, element
+        time.sleep(self._selection_settle_seconds())
+        snapshot = self._selection_snapshot(scope)
+        return snapshot, self.find_first(snapshot, key)
+
+    def _selection_snapshot(self, scope: str) -> Snapshot:
+        normalized = scope.strip().lower()
+        if normalized == 'menu_snapshot':
+            return self.runtime.menu_snapshot()
+        if normalized == 'snapshot':
+            return self.runtime.snapshot()
+        raise ValueError(f'Unknown selection snapshot scope {scope!r}')
+
+    def _selection_settle_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('default_ms', 800) if isinstance(settle, dict) else 800
+        try:
+            return max(0.0, float(value) / 1000.0)
+        except (TypeError, ValueError):
+            return 0.8
+
+    def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
+        expected = state.strip().lower()
+        return expected in {str(item).lower() for item in (element.states or [])}
+
+    def _selection_conformance_gate(
+        self,
+        result: ConsultationResult,
+        snapshot: Snapshot,
+        key: str,
+    ) -> bool:
+        surface = self._element_scope(key)
+        scopes = (((self.cfg.get('tree') or {}).get('conformance') or {}).get('scopes') or {})
+        if surface and surface in scopes:
+            return self.tree_conformance_gate(result, snapshot, surface=surface)
+        return True
+
+    def _element_scope(self, key: str) -> str | None:
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        spec = element_map.get(key) if isinstance(element_map, dict) else {}
+        if isinstance(spec, dict) and isinstance(spec.get('scope'), str):
+            return str(spec['scope'])
+        return None
 
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
@@ -705,7 +959,7 @@ class BaseConsultationDriver(ABC):
             'platform': self.platform,
             'url': url,
             'requester': request.requester or 'unknown',
-            'mode': request.mode or '',
+            'mode': str(request.selection_value('mode', '') or ''),
             'timeout': request.timeout,
             'request_id': request.request_id(),
             'prompt_hash': request.prompt_hash(),

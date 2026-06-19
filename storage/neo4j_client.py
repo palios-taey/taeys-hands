@@ -98,7 +98,7 @@ def add_message(session_id: str, role: str, content: str,
 def create_plan(
     platform: str, model: str, mode: str, tools: List[str],
     message: str, attachment_path: str, session: str,
-    requester: str,
+    requester: str, selections: Dict[str, Any] = None,
 ) -> Optional[str]:
     """Create a Plan node before consultation starts. Returns plan_id."""
     driver = get_driver()
@@ -110,6 +110,7 @@ def create_plan(
             CREATE (p:Plan {
                 plan_id: $plan_id, platform: $platform,
                 model: $model, mode: $mode, tools: $tools,
+                selections: $selections,
                 message: $message, attachment_path: $attachment_path,
                 session: $session, requester: $requester,
                 status: 'pending', created_at: datetime(),
@@ -118,7 +119,9 @@ def create_plan(
                 isma_ingested: false
             })
         """, plan_id=plan_id, platform=platform, model=model,
-             mode=mode, tools=tools, message=message,
+             mode=mode, tools=tools,
+             selections=json.dumps(selections or {}, sort_keys=True),
+             message=message,
              attachment_path=attachment_path, session=session,
              requester=requester)
     return plan_id

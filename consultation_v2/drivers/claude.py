@@ -291,10 +291,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
         workflow = self.cfg['workflow']['selection']
-        requested_model = (request.model or '').strip().lower()
+        requested_model = str(request.selection_value('model', '') or '').strip().lower()
+        mode_selection = request.selection_value('mode')
         requested_mode = (
             self.cfg['workflow']['defaults'].get('mode') or ''
-        ).strip().lower() if request.mode is None else request.mode.strip().lower()
+        ).strip().lower() if mode_selection is None else str(mode_selection or '').strip().lower()
 
         # -- model --
         if requested_model and requested_model in workflow.get('model_targets', {}):
@@ -325,7 +326,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
         else:
             result.add_step('select_model', True, 'Claude model left unchanged/default',
-                            requested_model=request.model)
+                            requested_model=request.selection_value('model'))
 
         # -- mode --
         if requested_mode and requested_mode in workflow.get('mode_targets', {}):
@@ -400,7 +401,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
 
         # -- tools --
-        for tool_name in request.tools:
+        for tool_name in request.selection_list('tools'):
             normalized = tool_name.strip().lower().replace(' ', '_')
             target_key = workflow.get('tool_targets', {}).get(normalized)
             if not target_key:

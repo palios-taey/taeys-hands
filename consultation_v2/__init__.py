@@ -7,9 +7,10 @@ data structures.
 
 from . import primitives
 from .orchestrator import run_consultation
-from .types import ConsultationRequest, ConsultationResult
+from .types import Choice, ConsultationRequest, ConsultationResult
 
 __all__ = [
+    'Choice',
     'ConsultationRequest',
     'ConsultationResult',
     'primitives',

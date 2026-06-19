@@ -34,14 +34,23 @@ class ConsolidatedPackage:
 
 
 @dataclass(slots=True)
+class Choice:
+    value: Any
+    because: str = ''
+
+    def serializable(self) -> Dict[str, Any]:
+        return {
+            'value': self.value,
+            'because': self.because,
+        }
+
+
+@dataclass(slots=True)
 class ConsultationRequest:
     platform: str
     message: str
     attachments: List[str] = field(default_factory=list)
-    model: Optional[str] = None
-    mode: Optional[str] = None
-    tools: List[str] = field(default_factory=list)
-    connectors: List[str] = field(default_factory=list)
+    selections: Dict[str, Choice] = field(default_factory=dict)
     session_url: Optional[str] = None
     timeout: int = 3600
     output_path: Optional[str] = None
@@ -53,6 +62,43 @@ class ConsultationRequest:
     # The browser receives only the merged package, but this records the
     # original caller files + their content hashes so provenance survives.
     caller_attachment_provenance: List[AttachmentProvenance] = field(default_factory=list)
+
+    def serializable_selections(self) -> Dict[str, Dict[str, Any]]:
+        payload: Dict[str, Dict[str, Any]] = {}
+        for menu_key, choice in self.selections.items():
+            if isinstance(choice, Choice):
+                payload[str(menu_key)] = choice.serializable()
+            elif isinstance(choice, dict):
+                payload[str(menu_key)] = {
+                    'value': choice.get('value'),
+                    'because': str(choice.get('because') or ''),
+                }
+            else:
+                payload[str(menu_key)] = {
+                    'value': choice,
+                    'because': '',
+                }
+        return payload
+
+    def selection_value(self, menu_key: str, default: Any = None) -> Any:
+        choice = self.selections.get(menu_key)
+        if isinstance(choice, Choice):
+            return choice.value
+        if isinstance(choice, dict):
+            return choice.get('value', default)
+        if choice is None:
+            return default
+        return choice
+
+    def selection_list(self, menu_key: str) -> List[str]:
+        value = self.selection_value(menu_key, [])
+        if value in (None, 'none', 'default'):
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value if isinstance(item, str) and item]
+        if isinstance(value, str) and value:
+            return [value]
+        return []
 
     def prompt_hash(self) -> str:
         """Stable hex digest of the prompt text actually sent to the platform.
@@ -202,10 +248,7 @@ class ConsultationResult:
                 'platform': self.request.platform,
                 'message': self.request.message,
                 'attachments': list(self.request.attachments),
-                'model': self.request.model,
-                'mode': self.request.mode,
-                'tools': list(self.request.tools),
-                'connectors': list(self.request.connectors),
+                'selections': self.request.serializable_selections(),
                 'session_url': self.request.session_url,
                 'timeout': self.request.timeout,
                 'no_neo4j': self.request.no_neo4j,
