@@ -51,6 +51,25 @@ status: overnight — merge-reconciliation closed; rollout teed up for attended 
    from the audit worklist (branch, off re-fetched main) → I drive the live walk + production-proof
    (attended) → grok/gemini gate against re-fetched main → merge.
 
+## Shipped (afternoon 2026-06-19) — Stage 1 plan-phase redesign LANDED + ChatGPT proven
+- Designed + built (Codex) + fleet-gated + production-proved the **plan-phase redesign** and merged
+  it to main (`98cb9fe`): YAML `menus` schema (consolidates options/targets/driver_operations,
+  element_map byte-unchanged), generic `selections` request + `Choice{value, because}` (drops
+  static model/mode/tools), **planner intentionality gate** (new-session blanks must be an authored
+  `because` or `must_choose`/omission fails — kills silent rush-omission), plan-gate hoisted to
+  engine entry (browser never opens on plan failure, all paths), and **settle discipline**
+  (conformance + select judge a *settled* tree, observation-only, no action retries).
+- **Live ChatGPT production proof PASSED end-to-end:** navigate→clean→select(pro_extended, 3-level
+  nested)→select(web_search)→attach(RELEASE_PREP.md)→prompt→send→monitor→extract **18,572 chars**
+  →store(Neo4j). The new menus-driven plan structure drives ChatGPT autonomously — the original ask.
+- The conformance gate caught every real drift en route and never proceeded on a bad state
+  (search_chats suffix; the personalized `Jesse` greeting button → handled `name_agnostic_structural`,
+  also a public-release umbilical). One self-inflicted detour (fixed off a partial-render scan) →
+  logged the "verify tree settled before any YAML fix" lesson.
+- The proof consult doubled as real value: ChatGPT's release-readiness review confirmed the two
+  release blockers and caught an overclaim in `RELEASE_PREP.md` (fixed, cannot-lie).
+- NEXT: same recipe per platform (Claude→Gemini→Grok→Perplexity) via the `audit_logs/` worklists.
+
 ## Build-in-public-worthy
 - The regression-prevention architecture caught a real -746 regression at the gate, autonomously,
   at 2 AM: strict identity-schema YAML loader + bidirectional fail-closed conformance gate +
