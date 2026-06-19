@@ -60,6 +60,52 @@ Two steps were missing and are now explicit: **(1) pre-launch parameter determin
 **Fleet:** taeys-hands runs its OWN fleet — `taeys-hands-codex` builds; `taeys-hands-grok`/`taeys-hands-gemini` gate + cross-check (xAI/non-Claude → not starved by the shared Claude Gatekeeper's rate limit). Don't borrow conductor's peers; don't depend on the shared gate.
 **Status 2026-06-19 (end of day):** trust-rebuilt ChatGPT YAML on main = d51e0e5 (identities-only, states-live, schema-enforced). Increment `peer/taeys-hands-codex-chatgpt-nested-models @ 2835a39` (nested Pro-effort + GPT-5.5 legacy + bidirectional + Pro-Extended select path) VERIFIED — live delta selects Pro Standard→Pro Extended, final effort `active_key=model_pro_extended CHECKED`; UNKNOWN=0/MISSING=0 all surfaces; planted-missing surfaced. Gating via `taeys-hands-grok` → merge to main.
 
+## Plan phase — BUILD SPEC (menus schema · selections request · intentionality gate · engine convergence) — Jesse greenlit 2026-06-19, build it
+**Scope.** *Stage 1 (this spec, build now):* the PLAN PHASE done correctly — the `menus` YAML schema for SELECT, the generic `selections` request replacing `model/mode/tools/connectors`, the planner with **completeness + intentionality** validation, and the SELECT step driven entirely from `menus` in the shared engine. *Stage 2 (north-star, recorded now, built ONLY after Stage 1 is live-proven on ChatGPT):* converge the remaining steps (navigate/clean/attach/prompt/send/monitor/extract) to NAMED STRATEGIES declared in YAML so per-driver code trends to zero. Stage 1 leaves those steps' current per-driver code untouched — deliberate non-rushing.
+
+**(A) YAML `menus` schema — ONE block per menu; consolidates the scattered `options`+`*_targets`+`driver_operations`; references the `element_map` keys UNCHANGED (byte-for-byte).**
+```yaml
+workflow:
+  selection:
+    menus:
+      <menu_key>:                          # the key IS the request key (nothing to "map")
+        select: single | multi             # arity (model=single, tools=multi)
+        active_recognition: checked         # WHICH live AT-SPI state = active (read live; NEVER a stored value)
+        must_choose: true|false             # true → default/none REJECTED at plan time (dangerous menus: deep model, Perplexity focus)
+        resettable_on_followup: true|false  # true → also required on follow-ups; false → required only on NEW sessions
+        operate:                            # HOW the engine opens/navigates (mechanical; NEVER surfaced to the planner)
+          trigger: <element_map key>        # element that opens the menu
+          scope: menu_snapshot | snapshot
+        options:
+          <option_key>:
+            element: <element_map key>      # EXACT identity of the leaf option
+            path:                           # OPTIONAL nested reveal, ordered; actions ∈ {hover,press,click}
+              - { element: <element_map key>, action: hover }
+              - { element: <element_map key>, action: press }
+        default_for_fresh: <option_key | none>          # the CONSIDERED default applied when the plan says `default`
+        example_rationale: "<one-line teaching example>"  # guidance ONLY; this exact string is BANNED as an answer (can't copy-paste to pass)
+```
+Loader (`yaml_contract.py`) REJECTS at build: any `element`/`trigger` not present in `element_map`; any `path.action` ∉ {hover,press,click}; an `active_recognition` that names a value rather than a state; plus all existing forbidden constructs (fuzzy/best_effort/lint-allow/stored-state/presence-only). No escape hatch.
+
+**(B) The request = generic `selections` (drop the ChatGPT-shaped named fields).** Remove `model/mode/tools/connectors` from `ConsultationRequest`; add `selections: Dict[menu_key, Choice]`, `Choice = {value, because}`:
+- single menu → `value` = an `option_key` | `"default"` | `"none"`; multi menu → `value` = `[option_key, …]` | `"none"`.
+- `because` = one-line rationale; REQUIRED iff `value` is `default`/`none` on a NEW session.
+CLI: replace `--model/--mode/--tool/--connector` with repeatable `--select <menu>=<option>` (and `--select <menu>=default:"<because>"` / `=none:"<because>"`). The exact CLI surface is Codex's to finalize; `selections` is the canonical in-memory shape.
+
+**(C) Planner = THE plan phase. Runs BEFORE any browser action; on any failure → fail-loud, browser never opens.**
+1. **UNKNOWN:** every `menu_key` ∈ YAML `menus`; every `option_key` ∈ that menu's options; arity respected (single ≠ list). Else FAIL.
+2. **COMPLETENESS:** NEW session (`session_url` None) → every declared menu MUST be addressed in `selections`. Follow-up → only menus with `resettable_on_followup: true` required. A required menu absent = FAIL (kills silent omission).
+3. **INTENTIONALITY (the anti-rush gate):** a menu whose value is `default`/`none`:
+   - `must_choose: true` → REJECT regardless of `because` (must name a real option).
+   - else → require `because`: non-empty, ≥ ~15 chars, NOT in the banned-placeholder set (`n/a`, `none`, `default`, `not needed`, bare menu name, …), and NOT equal to the YAML `example_rationale`. Empty / missing / placeholder / example-copy = FAIL.
+4. Emits ordered SELECT steps, **MODEL FIRST** (per the SELECT-ORDER rule): `(menu, resolved option(s)|default|none, operate, option element+path, active_recognition)`.
+
+**The anti-rush teeth — stated honestly (cannot-lie).** Mechanical checks CANNOT verify a rationale is true or wise — only that it is present, substantive, not a placeholder, and not the canned example. The real, narrower guarantee: **omission becomes impossible, and leaving a menu empty on a NEW session forces me to AUTHOR a sentence I cannot write on autopilot** — that authoring IS the pause-and-reflect. The `example_rationale` teaches the shape yet is itself a rejected answer, so it cannot be copy-pasted to pass. The authored `because` lands in the plan record = auditable intent. This is the structural answer to "you rush and leave fields blank": blank is no longer a silent fallthrough to a default — it is either impossible (omission), forbidden (`must_choose`), or an explicit authored decision (`because`).
+
+**(D) Engine convergence (Stage 2 north-star, recorded so it isn't lost).** A shared platform-agnostic engine (`base.py`) owns the SELECT loop: open `operate.trigger` in its scope → read live `active_recognition` → if target already active, **NO-OP** → else walk the option `path` (hover/press) → click `element` → re-scan → confirm `active_recognition` true. **No action retries; settle-rescan ONCE on a miss; else NOTIFY+HALT.** Stage 2 lifts navigate/clean/attach/prompt/send/monitor/extract into NAMED STRATEGIES the YAML selects (`send: {method: composer_enter}` vs `{click_button}`; `attach: {method: gtk_open_button}` vs `{native_picker}`; …); per-platform driver files then shrink toward zero — **NOT force-merged to one file** (forcing it before a quirk is expressible declaratively is how the hacks creep back). **THE BOUNDARY LAW:** YAML declares WHAT / which / order / params; code owns HOW (the strategy implementations). A conditional or loop wanting into the YAML = the signal that a NEW NAMED CODE STRATEGY belongs in `base.py`, never a branch in data — YAML is never a scripting language. **Isolation preserved:** platform specifics live in DATA (strict-schema'd YAML, loaded independently) so a platform-A change cannot break platform-B; shared-engine changes are the highest-blast-radius → gated hardest.
+
+**(E) Build order & migration.** Reshape ChatGPT's `selection` → `menus` FIRST (gold standard), `element_map` byte-unchanged. Codex builds Stage 1 on a branch off RE-FETCHED `origin/main`; `taeys-hands-grok`/`taeys-hands-gemini` gate the schema + planner against THIS spec (no synthetic tests — schema/structural gate + then a live ChatGPT production proof); lands on main; THEN drive ChatGPT live through the new path = the production proof. The other 4 platforms get `menus` as part of their per-platform identity_v1 rebuild (audit worklists in `audit_logs/`), one at a time, each live-validated.
+
 ## Conformance runs at EVERY state — base AND every menu/submenu (Jesse 2026-06-18)
 The tree-conformance gate is NOT one-shot post-navigate — but it is also NOT a full-tree re-scan before every action. It fires on **STATE ENTRY**: the moment you transition into a new surface (after navigate; the instant a menu/submenu opens), and **BEFORE any action is taken in that state**, the **newly-revealed tree for that surface** is bounced off the YAML. **Scoped to what just appeared** — `snapshot()` (document) for the base screen; `menu_snapshot()` (the React portal = just the opened menu/submenu) for each menu — NOT a re-scan of the whole tree on every click. So: open the model menu → before clicking any option, the menu's portal tree is checked vs the YAML's model-menu expected-set. States: base, model menu, mode menu, tools menu, "More tools" submenu, attach menu, connectors/repo menu. At each entry: "what is expected when this just-opened surface appears? is every element an exact match?" Any UNKNOWN>0 (an element in that surface not mapped-or-excluded) → HALT + surface the categorized diff → I update the YAML to EXACT match → re-run. The YAML must reflect the element structure of EVERY state (base + each menu), with menu options as `enumerated_set` (unknown member present = drift exception).
 **Cleaning the ChatGPT YAML = WALK every state through the check:** open each menu/submenu in turn, run conformance, surface the diff, update YAML to exact, until UNKNOWN==0 at EVERY state. That is how a platform's YAML becomes provably complete + clean (not just the base screen). Builds on the base-screen gate (chatgpt-scoped, landing now); extend the gate to fire on each menu-open, then walk ChatGPT's menus to drive its YAML to all-states-UNKNOWN=0.
