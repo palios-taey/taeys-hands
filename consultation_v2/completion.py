@@ -13,7 +13,7 @@ exact same stop-transition semantics:
     stop-absent scan after ever_seen is not enough; it must stay absent for
     ``required_stop_cycles`` consecutive scans.
   * Deep modes ({deep_research, deep_think, pro_extended, extended_thinking,
-    heavy}) use TWO stop-gone debounce scans; all other modes use one.
+    max, heavy}) use TWO stop-gone debounce scans; all other modes use one.
   * There is deliberately NO rendered-content freeze heuristic. Thinking/browse
     phases can keep text static while the stop button remains present. The stop
     button is the only completion oracle; a genuinely stuck run is bounded by the
@@ -35,6 +35,7 @@ DEEP_MODES: Set[str] = {
     "deep_think",
     "pro_extended",
     "extended_thinking",
+    "max",
     "heavy",
 }
 

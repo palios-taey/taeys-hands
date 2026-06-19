@@ -9,6 +9,7 @@ from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import (
     ConsultationRequest,
     ConsultationResult,
+    ElementRef,
     ExtractedArtifact,
     Snapshot,
 )
@@ -88,6 +89,72 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _complete_keys(self) -> tuple[str, ...]:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        keys = monitor_cfg.get('complete_keys') or monitor_cfg.get('complete_key') or ['copy_button']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _complete_companion_keys(self) -> tuple[str, ...]:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        keys = monitor_cfg.get('complete_companion_keys') or []
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    @staticmethod
+    def _element_y(element: ElementRef) -> int | None:
+        return int(element.y) if element.y is not None else None
+
+    def _bottom_action_row_y(
+        self,
+        snapshot: Snapshot,
+        complete_keys: tuple[str, ...],
+        companion_keys: tuple[str, ...],
+        *,
+        row_tolerance: int = 48,
+    ) -> int | None:
+        complete_items = [
+            item
+            for key in complete_keys
+            for item in (snapshot.mapped.get(key) or [])
+            if item.y is not None
+        ]
+        if not complete_items:
+            return None
+        if not companion_keys:
+            return max(self._element_y(item) or 0 for item in complete_items)
+        companions = [
+            item
+            for key in companion_keys
+            for item in (snapshot.mapped.get(key) or [])
+            if item.y is not None
+        ]
+        rows = []
+        for item in complete_items:
+            item_y = self._element_y(item)
+            if item_y is None:
+                continue
+            if any(
+                companion_y is not None and abs(companion_y - item_y) <= row_tolerance
+                for companion_y in (self._element_y(companion) for companion in companions)
+            ):
+                rows.append(item_y)
+        return max(rows) if rows else None
+
+    def _complete_signal_present(
+        self,
+        snapshot: Snapshot,
+        complete_keys: tuple[str, ...],
+        companion_keys: tuple[str, ...],
+        generation_floor_y: int | None,
+    ) -> tuple[bool, int | None]:
+        row_y = self._bottom_action_row_y(snapshot, complete_keys, companion_keys)
+        if row_y is None:
+            return False, None
+        if generation_floor_y is not None and row_y <= generation_floor_y + 8:
+            return False, row_y
+        return True, row_y
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -281,6 +348,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return False
         clicked = self.runtime.click(send_button)
         stop_keys = self._stop_keys()
+        complete_keys = self._complete_keys()
+        companion_keys = self._complete_companion_keys()
+        self._generating_complete_row_y = None
         send_snap = self.runtime.wait_until(
             lambda: (
                 snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
@@ -294,6 +364,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         # button during send, so seeding ever_seen_stop lets it complete on the
         # stop-gone transition without a content/copy-button fallback.
         self._send_stop_seen = bool(stop_seen)
+        if stop_seen:
+            self._generating_complete_row_y = self._bottom_action_row_y(
+                send_snap,
+                complete_keys,
+                companion_keys,
+            )
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
@@ -312,51 +388,101 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         return verified
 
     # ------------------------------------------------------------------
-    # Monitor generation — shared stop-transition detector
-    # (consultation_v2.completion). extended_thinking is a deep mode (2
-    # stop-gone cycles). The send-phase stop observation is seeded so a
-    # sub-second reply completes on the stop-gone transition.
+    # Monitor generation — shared stop-transition detector plus Claude's
+    # finished-message action row. Max/extended modes debounce stop-gone for
+    # two fresh scans; Copy must also be rendered before completion is declared.
     # ------------------------------------------------------------------
 
     def monitor_generation(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        return self._monitor_completion_cycle(
+            request,
+            result,
+            step_name='monitor',
+            message='Claude response completed',
+            seed_stop_seen=bool(getattr(self, '_send_stop_seen', False)),
+            checkpoint=True,
+        )
+
+    def _monitor_completion_cycle(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        *,
+        step_name: str,
+        message: str,
+        seed_stop_seen: bool = False,
+        timeout: float | None = None,
+        checkpoint: bool = False,
+    ) -> bool:
         detector_mode = str(request.selection_value('mode', '') or '').strip().lower()
         detector = CompletionDetector(mode=detector_mode)
-        if getattr(self, '_send_stop_seen', False):
+        if seed_stop_seen:
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
         stop_keys = self._stop_keys()
+        complete_keys = self._complete_keys()
+        companion_keys = self._complete_companion_keys()
         completed = False
+        terminal_snapshot: Snapshot | None = None
+        stop_gone_without_done_signal = 0
+        generation_floor_y = getattr(self, '_generating_complete_row_y', None)
+        complete_signal_y: int | None = None
 
         def _poll() -> bool:
-            nonlocal completed
+            nonlocal completed, terminal_snapshot, stop_gone_without_done_signal
+            nonlocal generation_floor_y, complete_signal_y
             snap = self.runtime.snapshot()
-            verdict = detector.observe(stop_present=self.snapshot_has_any(snap, stop_keys))
-            if verdict == COMPLETE:
+            stop_present = self.snapshot_has_any(snap, stop_keys)
+            if stop_present:
+                row_y = self._bottom_action_row_y(snap, complete_keys, companion_keys)
+                if row_y is not None:
+                    generation_floor_y = max(generation_floor_y or row_y, row_y)
+            done_signal_present, done_signal_y = self._complete_signal_present(
+                snap,
+                complete_keys,
+                companion_keys,
+                generation_floor_y,
+            )
+            verdict = detector.observe(stop_present=stop_present)
+            if verdict == COMPLETE and done_signal_present:
                 completed = True
+                terminal_snapshot = snap
+                complete_signal_y = done_signal_y
                 return True
+            if verdict == COMPLETE:
+                stop_gone_without_done_signal += 1
             return False
 
-        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
-        verify_snap = self.runtime.wait_until(
-            lambda: (
-                snap if not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
-            ),
-            timeout=5.0,
-            interval=0.5,
-        ) or self.runtime.snapshot()
-        verified = bool(completed and not self.snapshot_has_any(verify_snap, stop_keys))
+        self.runtime.wait_until(_poll, timeout=float(timeout or request.timeout), interval=1.0)
+        verify_snap = terminal_snapshot or self.runtime.snapshot()
+        stop_absent = not self.snapshot_has_any(verify_snap, stop_keys)
+        done_signal_present, final_signal_y = self._complete_signal_present(
+            verify_snap,
+            complete_keys,
+            companion_keys,
+            generation_floor_y,
+        )
+        complete_signal_y = complete_signal_y if complete_signal_y is not None else final_signal_y
+        verified = bool(completed and stop_absent and done_signal_present)
         result.add_step(
-            'monitor',
+            step_name,
             verified,
-            'Claude response completed',
+            message,
             stop_seen=detector.ever_seen_stop,
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
+            complete_keys=complete_keys,
+            complete_companion_keys=companion_keys,
+            complete_signal_seen=done_signal_present,
+            complete_signal_y=complete_signal_y,
+            generation_action_row_floor_y=generation_floor_y,
+            stop_gone_cycles=detector.stop_cycles,
+            stop_gone_without_done_signal=stop_gone_without_done_signal,
             snapshot=verify_snap.serializable(),
         )
-        if verified:
+        if verified and checkpoint:
             self.checkpoint_run_state(
                 request,
                 self.RUN_STATE_COMPLETION_OBSERVED,

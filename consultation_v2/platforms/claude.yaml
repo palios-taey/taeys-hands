@@ -205,6 +205,10 @@ tree:
       name: Copy
       role: push button
       scope: response.actions
+    retry_button:
+      name: Retry
+      role: push button
+      scope: response.actions
     show_thinking:
       name: Show thinking
       role: push button
@@ -452,6 +456,8 @@ workflow:
       - stop_button
       - stop_response_button
     complete_key: copy_button
+    complete_companion_keys:
+      - retry_button
   extract:
     primary_key: copy_button
     strategy: last_by_y
