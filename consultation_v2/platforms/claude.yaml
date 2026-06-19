@@ -91,6 +91,7 @@ tree:
           - effort_high_default
           - effort_extra
           - effort_max
+          - thinking_toggle
       github_modal:
         expected:
           - github_continue_sync
@@ -318,28 +319,32 @@ tree:
     effort_low:
       name: Low
       role: radio menu item
-      scope: effort_menu
+      scope: model_menu
       active_state: checked
     effort_medium:
       name: Medium
       role: radio menu item
-      scope: effort_menu
+      scope: model_menu
       active_state: checked
     effort_high_default:
       name: High Default
       role: radio menu item
-      scope: effort_menu
+      scope: model_menu
       active_state: checked
     effort_extra:
       name: Extra
       role: radio menu item
-      scope: effort_menu
+      scope: model_menu
       active_state: checked
     effort_max:
       name: Max
       role: radio menu item
-      scope: effort_menu
+      scope: model_menu
       active_state: checked
+    thinking_toggle:
+      name: Thinking Can think for more complex tasks Thinking
+      role: menu item
+      scope: model_menu
     model_more:
       name: More models
       role: menu item
@@ -374,19 +379,34 @@ workflow:
         must_choose: true
         resettable_on_followup: true
         operate:
-          trigger: effort_menu
+          trigger: model_selector
           scope: menu_snapshot
         options:
           low:
             element: effort_low
+            path:
+              - element: effort_menu
+                action: hover
           medium:
             element: effort_medium
+            path:
+              - element: effort_menu
+                action: hover
           high:
             element: effort_high_default
+            path:
+              - element: effort_menu
+                action: hover
           extended_thinking:
             element: effort_extra
+            path:
+              - element: effort_menu
+                action: hover
           max:
             element: effort_max
+            path:
+              - element: effort_menu
+                action: hover
         default_for_fresh: extended_thinking
         example_rationale: Use extended thinking when the prompt requires deeper reasoning than the default high effort.
       tools:
