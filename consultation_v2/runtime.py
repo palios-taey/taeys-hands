@@ -169,6 +169,35 @@ class ConsultationRuntime:
         timeout: float = 8.0,
         interval: float = 0.5,
     ) -> Snapshot:
+        return self._wait_for_stable_tree(
+            self.snapshot,
+            consecutive=consecutive,
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def wait_for_stable_menu_snapshot(
+        self,
+        *,
+        consecutive: int = 2,
+        timeout: float = 2.0,
+        interval: float = 0.25,
+    ) -> Snapshot:
+        return self._wait_for_stable_tree(
+            self.menu_snapshot,
+            consecutive=consecutive,
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def _wait_for_stable_tree(
+        self,
+        snapshot_factory: Callable[[], Snapshot],
+        *,
+        consecutive: int,
+        timeout: float,
+        interval: float,
+    ) -> Snapshot:
         required = max(1, int(consecutive))
         deadline = time.time() + timeout
         last_count: int | None = None
@@ -176,7 +205,7 @@ class ConsultationRuntime:
         last_snapshot: Snapshot | None = None
 
         while time.time() < deadline:
-            last_snapshot = self.snapshot()
+            last_snapshot = snapshot_factory()
             raw_count = int(last_snapshot.raw_count or 0)
             if raw_count == last_count:
                 stable += 1
@@ -186,7 +215,7 @@ class ConsultationRuntime:
             if stable >= required:
                 return last_snapshot
             time.sleep(interval)
-        return last_snapshot or self.snapshot()
+        return last_snapshot or snapshot_factory()
 
     def menu_snapshot(self) -> Snapshot:
         _, _, snapshot = build_menu_snapshot(self.platform)

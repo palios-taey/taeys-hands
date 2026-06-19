@@ -399,6 +399,22 @@ class BaseConsultationDriver(ABC):
             return False
         time.sleep(0.3)
         self.runtime.press('Escape')
+        persistent_snapshot, persistent_verified, persistent_labels = (
+            self._selection_persistent_trigger_matches(trigger_key, option, target)
+        )
+        if persistent_verified:
+            result.add_step(
+                'select',
+                True,
+                f'{self.platform} selected {menu}={option}',
+                menu=menu,
+                option=option,
+                active_state=active_state,
+                confirmation='persistent_trigger_label',
+                expected_labels=sorted(persistent_labels),
+                snapshot=persistent_snapshot.serializable(),
+            )
+            return True
         time.sleep(0.2)
         verify_opened = self._open_selection_menu(trigger_key, first_key, scope, result)
         if verify_opened is None:
@@ -413,14 +429,23 @@ class BaseConsultationDriver(ABC):
         )
         if verified_target is None:
             return False
-        verified = self._selection_element_has_state(verified_target, active_state)
+        verify_snapshot, verified_target, verified = self._selection_wait_for_active_state(
+            target_key,
+            active_state,
+            scope,
+        )
         result.add_step(
             'select',
             verified,
-            f'{self.platform} selected {menu}={option}',
+            (
+                f'{self.platform} selected {menu}={option}'
+                if verified
+                else f'{self.platform} {menu}={option} did not show {active_state} after bounded settle-rescan'
+            ),
             menu=menu,
             option=option,
             active_state=active_state,
+            confirmation='menu_active_state',
             snapshot=verify_snapshot.serializable(),
         )
         self.runtime.press('Escape')
@@ -563,6 +588,76 @@ class BaseConsultationDriver(ABC):
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
         return expected in {str(item).lower() for item in (element.states or [])}
+
+    def _selection_wait_for_active_state(
+        self,
+        target_key: str,
+        active_state: str,
+        scope: str,
+    ) -> tuple[Snapshot, ElementRef | None, bool]:
+        timeout = self._selection_settle_seconds()
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        last_target: ElementRef | None = None
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self._selection_stable_snapshot(scope, timeout=min(remaining, 0.8))
+            last_target = self.find_first(last_snapshot, target_key)
+            if last_target is not None and self._selection_element_has_state(last_target, active_state):
+                return last_snapshot, last_target, True
+            time.sleep(0.2)
+        if last_snapshot is None:
+            last_snapshot = self._selection_snapshot(scope)
+            last_target = self.find_first(last_snapshot, target_key)
+        return last_snapshot, last_target, False
+
+    def _selection_stable_snapshot(self, scope: str, *, timeout: float) -> Snapshot:
+        normalized = scope.strip().lower()
+        if normalized == 'menu_snapshot':
+            return self.runtime.wait_for_stable_menu_snapshot(
+                consecutive=2,
+                timeout=timeout,
+                interval=0.2,
+            )
+        if normalized == 'snapshot':
+            return self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=timeout,
+                interval=0.2,
+            )
+        raise ValueError(f'Unknown selection snapshot scope {scope!r}')
+
+    def _selection_persistent_trigger_matches(
+        self,
+        trigger_key: str,
+        option: str,
+        selected_target: ElementRef,
+    ) -> tuple[Snapshot, bool, set[str]]:
+        labels = self._selection_persistent_labels(option, selected_target)
+        if trigger_key != 'model_selector' or not labels:
+            snapshot = self.runtime.snapshot()
+            return snapshot, False, labels
+        timeout = self._selection_settle_seconds()
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(remaining, 0.8),
+                interval=0.2,
+            )
+            trigger = self.find_first(last_snapshot, trigger_key)
+            if trigger is not None and trigger.name.strip() in labels:
+                return last_snapshot, True, labels
+            time.sleep(0.2)
+        return last_snapshot or self.runtime.snapshot(), False, labels
+
+    def _selection_persistent_labels(self, option: str, selected_target: ElementRef) -> set[str]:
+        labels = {selected_target.name.strip()} if selected_target.name and selected_target.name.strip() else set()
+        if option:
+            labels.add(' '.join(part.capitalize() for part in option.split('_') if part))
+        return labels
 
     def _selection_conformance_gate(
         self,
