@@ -83,7 +83,6 @@ tree:
           - model_haiku
           - model_fable
           - effort_menu
-          - thinking_toggle
           - model_more
       effort_menu:
         expected:
@@ -314,7 +313,7 @@ tree:
       match_strategy: name_agnostic_structural
       structural:
         after: model_haiku
-        before: thinking_toggle
+        before: model_more
       reason: Claude labels this row with the currently selected effort level.
     effort_low:
       name: Low
@@ -341,10 +340,6 @@ tree:
       role: radio menu item
       scope: effort_menu
       active_state: checked
-    thinking_toggle:
-      name: Thinking Can think for more complex tasks Thinking
-      role: menu item
-      scope: model_menu
     model_more:
       name: More models
       role: menu item
@@ -379,34 +374,19 @@ workflow:
         must_choose: true
         resettable_on_followup: true
         operate:
-          trigger: model_selector
+          trigger: effort_menu
           scope: menu_snapshot
         options:
           low:
             element: effort_low
-            path:
-              - element: effort_menu
-                action: hover
           medium:
             element: effort_medium
-            path:
-              - element: effort_menu
-                action: hover
           high:
             element: effort_high_default
-            path:
-              - element: effort_menu
-                action: hover
           extended_thinking:
             element: effort_extra
-            path:
-              - element: effort_menu
-                action: hover
           max:
             element: effort_max
-            path:
-              - element: effort_menu
-                action: hover
         default_for_fresh: extended_thinking
         example_rationale: Use extended thinking when the prompt requires deeper reasoning than the default high effort.
       tools:
