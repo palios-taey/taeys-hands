@@ -168,12 +168,14 @@ class ConsultationRuntime:
         consecutive: int = 4,
         timeout: float = 8.0,
         interval: float = 0.5,
+        anchor_key: str | None = None,
     ) -> Snapshot:
         return self._wait_for_stable_tree(
             self.snapshot,
             consecutive=consecutive,
             timeout=timeout,
             interval=interval,
+            anchor_key=anchor_key,
         )
 
     def wait_for_stable_menu_snapshot(
@@ -182,12 +184,14 @@ class ConsultationRuntime:
         consecutive: int = 2,
         timeout: float = 2.0,
         interval: float = 0.25,
+        anchor_key: str | None = None,
     ) -> Snapshot:
         return self._wait_for_stable_tree(
             self.menu_snapshot,
             consecutive=consecutive,
             timeout=timeout,
             interval=interval,
+            anchor_key=anchor_key,
         )
 
     def _wait_for_stable_tree(
@@ -197,6 +201,7 @@ class ConsultationRuntime:
         consecutive: int,
         timeout: float,
         interval: float,
+        anchor_key: str | None = None,
     ) -> Snapshot:
         required = max(1, int(consecutive))
         deadline = time.time() + timeout
@@ -207,12 +212,15 @@ class ConsultationRuntime:
         while time.time() < deadline:
             last_snapshot = snapshot_factory()
             raw_count = int(last_snapshot.raw_count or 0)
-            if raw_count == last_count:
+            anchor_ready = anchor_key is None or last_snapshot.has(anchor_key)
+            if raw_count != last_count:
+                last_count = raw_count
+                stable = 1 if anchor_ready else 0
+            elif anchor_ready:
                 stable += 1
             else:
-                last_count = raw_count
-                stable = 1
-            if stable >= required:
+                stable = 0
+            if anchor_ready and stable >= required:
                 return last_snapshot
             time.sleep(interval)
         return last_snapshot or snapshot_factory()

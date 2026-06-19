@@ -105,8 +105,28 @@ class BaseConsultationDriver(ABC):
 
     def _conformance_snapshot(self, surface: str | None) -> Snapshot:
         if surface == 'base':
-            return self.runtime.wait_for_stable_snapshot()
+            return self.runtime.wait_for_stable_snapshot(
+                anchor_key=self._conformance_anchor_key(surface),
+            )
         return self.runtime.snapshot()
+
+    def _conformance_anchor_key(self, surface: str | None) -> str | None:
+        if surface != 'base':
+            return None
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return None
+        for key in self._expected_keys_for_surface(surface):
+            spec = element_map.get(key)
+            if not isinstance(spec, dict):
+                continue
+            role = str(spec.get('role') or '').strip().lower()
+            scope = str(spec.get('scope') or '').strip().lower()
+            if role == 'entry' and (
+                scope == 'base.composer' or scope.startswith('base.composer.')
+            ):
+                return key
+        return None
 
     def _uses_identity_schema(self) -> bool:
         return (
