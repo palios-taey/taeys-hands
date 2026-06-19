@@ -3,12 +3,12 @@ from __future__ import annotations
 import os
 import time
 
+from consultation_v2.completion import COMPLETE, CompletionDetector
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import (
     ConsultationRequest,
     ConsultationResult,
-    ElementRef,
     ExtractedArtifact,
     Snapshot,
 )
@@ -55,132 +55,39 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         prefix_matches = not normalized_message or normalized_live.startswith(normalized_message[:30])
         return landed_chars, landed_chars >= min_chars and prefix_matches
 
-    def _activate_element(self, snapshot, key: str) -> bool:
-        element = self.find_first(snapshot, key)
-        if not element:
-            return False
-        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
-        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
-        if trigger_type == 'hover':
-            return self.runtime.hover(element)
-        return self.runtime.click(element)
+    @staticmethod
+    def _attachment_name_matches(display_name: str, filename: str) -> bool:
+        expected_path = os.path.abspath(filename)
+        expected_name = os.path.basename(filename)
+        displayed_file = display_name.split()[0] if display_name else ''
+        for expected in (expected_path, expected_name):
+            if display_name == expected or displayed_file == expected:
+                return True
+            if '...' in displayed_file:
+                prefix, suffix = displayed_file.split('...', 1)
+                if expected.startswith(prefix) and expected.endswith(suffix):
+                    return True
+        return False
 
-    def _all_snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
-        elements: list[ElementRef] = []
+    def _attachment_visible(self, snapshot: Snapshot, filename: str) -> bool:
+        all_elements = []
         for items in getattr(snapshot, 'mapped', {}).values():
-            elements.extend(items)
-        elements.extend(getattr(snapshot, 'unknown', []) or [])
-        elements.extend(getattr(snapshot, 'sidebar', []) or [])
-        elements.extend(getattr(snapshot, 'menu_items', []) or [])
-        return elements
-
-    def _find_claude_model_selector(self, snapshot: Snapshot) -> ElementRef | None:
-        selector_spec = (
-            self.cfg.get('tree', {})
-            .get('element_map', {})
-            .get('model_selector', {})
+            all_elements.extend(items)
+        all_elements.extend(getattr(snapshot, 'unknown', []) or [])
+        all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
+        all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
+        allowed_roles = {'push button', 'list item', 'heading'}
+        return any(
+            element.role in allowed_roles
+            and self._attachment_name_matches(element.name or '', filename)
+            for element in all_elements
         )
-        structural = selector_spec.get('structural') if isinstance(selector_spec, dict) else None
-        structural = structural if isinstance(structural, dict) else {}
-        parent_key = str(structural.get('parent') or 'toggle_menu')
-        expected_role = str(structural.get('role') or 'push button').strip().lower()
-        ordinal = str(structural.get('ordinal') or 'first').strip().lower()
-        index = structural.get('index')
 
-        parent = self.find_first(snapshot, parent_key)
-        parent_x = getattr(parent, 'x', None)
-        parent_y = getattr(parent, 'y', None)
-        parent_name = getattr(parent, 'name', None)
-        if not parent or parent_x is None or parent_y is None:
-            return None
-        candidates = []
-        for element in self._all_snapshot_elements(snapshot):
-            role = str(getattr(element, 'role', '') or '').strip().lower()
-            if role != expected_role:
-                continue
-            if getattr(element, 'name', None) == parent_name:
-                continue
-            element_x = getattr(element, 'x', None)
-            element_y = getattr(element, 'y', None)
-            if element_x is None or element_y is None:
-                continue
-            if abs(int(element_y) - int(parent_y)) > 24:
-                continue
-            if int(element_x) <= int(parent_x):
-                continue
-            states = {str(state).lower() for state in (getattr(element, 'states', None) or [])}
-            if states and 'enabled' not in states:
-                continue
-            candidates.append(element)
-        if not candidates:
-            return None
-        candidates.sort(key=lambda element: int(element.x or 0))
-        if isinstance(index, int) and 0 <= index < len(candidates):
-            return candidates[index]
-        if ordinal == 'last':
-            return candidates[-1]
-        return candidates[0]
-
-    def _claude_model_menu_keys(self, workflow: dict) -> list[str]:
-        keys = []
-        for target in workflow.get('model_targets', {}).values():
-            if isinstance(target, str) and target:
-                keys.append(target)
-        for key in ('effort_menu', 'model_more'):
-            if key not in keys:
-                keys.append(key)
-        return keys
-
-    def _open_claude_model_selector(
-        self,
-        workflow: dict,
-        result: ConsultationResult,
-        step: str,
-        reason: str,
-    ) -> Snapshot | None:
-        snap = self.runtime.snapshot()
-        selector = self._find_claude_model_selector(snap)
-        if not selector:
-            result.add_step(
-                step,
-                False,
-                f'Claude model selector not found for {reason}',
-                snapshot=snap.serializable(),
-            )
-            return None
-        if not self.runtime.click(selector, strategy='coordinate_only'):
-            result.add_step(
-                step,
-                False,
-                f'Claude model selector coordinate click failed for {reason}',
-                selector=selector.serializable(),
-                snapshot=snap.serializable(),
-            )
-            return None
-
-        expected_keys = self._claude_model_menu_keys(workflow)
-        last_snapshot: Snapshot | None = None
-
-        def _menu_opened() -> Snapshot | None:
-            nonlocal last_snapshot
-            last_snapshot = self.runtime.menu_snapshot()
-            if any(last_snapshot.has(key) for key in expected_keys):
-                return last_snapshot
-            return None
-
-        matched = self.runtime.wait_until(_menu_opened, timeout=8, interval=0.4)
-        if matched:
-            return matched
-        menu_snap = last_snapshot or self.runtime.menu_snapshot()
-        result.add_step(
-            step,
-            False,
-            f'Claude model selector opened no configured menu targets for {reason}',
-            selector=selector.serializable(),
-            expected_keys=expected_keys,
-            snapshot=menu_snap.serializable(),
-        )
-        return None
+    def _stop_keys(self) -> tuple[str, ...]:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -209,7 +116,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             )
             if not navigated:
                 return False
-        if not self.select_model_mode_tools(request, result):
+        if not self.tree_conformance_gate(result):
+            return False
+        if not self.apply_selection_plan(request, result):
             return False
         if not self.attach_files(request, result):
             return False
@@ -236,212 +145,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         if not self.store_in_neo4j(request, result):
             return
         result.ok = True
-
-    # ------------------------------------------------------------------
-    # Model / mode / tool selection
-    # ------------------------------------------------------------------
-
-    def _select_effort_target(
-        self,
-        workflow: dict,
-        effort_name: str,
-        result: ConsultationResult,
-    ) -> bool:
-        effort_targets = workflow.get('effort_targets', {})
-        effort_key = effort_targets.get(effort_name)
-        if not effort_key:
-            result.add_step('select_mode', False,
-                            f'Claude effort {effort_name!r} is not mapped in YAML')
-            return False
-
-        effort_snap = self._open_claude_model_selector(
-            workflow,
-            result,
-            'select_mode',
-            f'effort {effort_name}',
-        )
-        if not effort_snap:
-            return False
-        if not self._activate_element(effort_snap, 'effort_menu'):
-            result.add_step('select_mode', False,
-                            'Claude effort submenu hover failed',
-                            snapshot=effort_snap.serializable())
-            return False
-        self.runtime.wait_until(
-            lambda: self.runtime.menu_snapshot().has(effort_key),
-            timeout=8, interval=0.4,
-        )
-        submenu_snap = self.runtime.menu_snapshot()
-        effort_item = self.find_first(submenu_snap, effort_key)
-        if not effort_item:
-            result.add_step('select_mode', False,
-                            f'Claude effort item {effort_key!r} not found',
-                            snapshot=submenu_snap.serializable())
-            self.runtime.press('Escape')
-            return False
-        # Claude renders this submenu outside the visible X display extents on
-        # :3; coordinate clicks can report success without selecting the item.
-        clicked = self.runtime.click(effort_item, strategy='atspi_only')
-        time.sleep(0.5)
-        self.runtime.press('Escape')
-        time.sleep(0.4)
-        return bool(clicked)
-
-    def select_model_mode_tools(
-        self, request: ConsultationRequest, result: ConsultationResult
-    ) -> bool:
-        workflow = self.cfg['workflow']['selection']
-        requested_model = str(request.selection_value('model', '') or '').strip().lower()
-        mode_selection = request.selection_value('mode')
-        requested_mode = (
-            self.cfg['workflow']['defaults'].get('mode') or ''
-        ).strip().lower() if mode_selection is None else str(mode_selection or '').strip().lower()
-
-        # -- model --
-        if requested_model and requested_model in workflow.get('model_targets', {}):
-            menu_snap = self._open_claude_model_selector(
-                workflow,
-                result,
-                'select_model',
-                f'model {requested_model}',
-            )
-            if not menu_snap:
-                return False
-            item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
-            if not item:
-                result.add_step('select_model', False,
-                                f'Claude model item for {requested_model} not found',
-                                snapshot=menu_snap.serializable())
-                return False
-            clicked = self.runtime.click(item)
-            verify_snap = self.wait_for_validation(
-                f'{requested_model}_active',
-                timeout=6.0,
-                interval=0.4,
-            )
-            verified = clicked and self.validation_passes(verify_snap, f'{requested_model}_active')
-            result.add_step('select_model', verified, f'Claude model set to {requested_model}',
-                            snapshot=verify_snap.serializable())
-            if not verified:
-                return False
-        else:
-            result.add_step('select_model', True, 'Claude model left unchanged/default',
-                            requested_model=request.selection_value('model'))
-
-        # -- mode --
-        if requested_mode and requested_mode in workflow.get('mode_targets', {}):
-            # Settle: after navigate, the composer + model selector render into
-            # the AT-SPI tree a beat late. Poll for the selector BEFORE checking
-            # mode-active or looking it up, so select_mode doesn't scan before
-            # render — that race was failing 'model selector unavailable' AND
-            # missing the already-active state on a slow :3 (reproducible).
-            self.runtime.wait_until(
-                lambda: self._find_claude_model_selector(self.runtime.snapshot()) is not None,
-                timeout=12, interval=0.5,
-            )
-            snap = self.runtime.snapshot()
-            mode_active_key = f'{requested_mode}_active'
-            if self.validation_passes(snap, mode_active_key):
-                result.add_step('select_mode', True, f'Claude {requested_mode} already active')
-                return True
-
-            menu_snap = self._open_claude_model_selector(
-                workflow,
-                result,
-                'select_mode',
-                f'mode {requested_mode}',
-            )
-            if not menu_snap:
-                return False
-            mode_spec = workflow['mode_targets'][requested_mode]
-            if isinstance(mode_spec, dict):
-                model_target = mode_spec.get('model') or mode_spec.get('target')
-                effort_name = mode_spec.get('effort')
-                verification_key = mode_spec.get('validation') or mode_active_key
-            else:
-                model_target = mode_spec
-                effort_name = None
-                verification_key = mode_active_key
-            if not model_target:
-                result.add_step('select_mode', False,
-                                f'Claude mode {requested_mode!r} has no model target')
-                return False
-            item = self.find_first(menu_snap, model_target)
-            if not item:
-                result.add_step('select_mode', False,
-                                f'Claude mode item {requested_mode} not found',
-                                snapshot=menu_snap.serializable())
-                return False
-            clicked = self.runtime.click(item)
-            time.sleep(0.8)
-            if not clicked:
-                result.add_step('select_mode', False,
-                                f'Claude mode model target {model_target!r} click failed',
-                                snapshot=menu_snap.serializable())
-                return False
-
-            if effort_name:
-                clicked = self._select_effort_target(
-                    workflow,
-                    str(effort_name),
-                    result,
-                )
-                if not clicked:
-                    return False
-
-            verify_snap = self.wait_for_validation(
-                str(verification_key),
-                timeout=6.0,
-                interval=0.4,
-            )
-            verified = clicked and self.validation_passes(verify_snap, str(verification_key))
-            result.add_step('select_mode', verified, f'Claude mode applied: {requested_mode}',
-                            snapshot=verify_snap.serializable())
-            if not verified:
-                return False
-
-        # -- tools --
-        for tool_name in request.selection_list('tools'):
-            normalized = tool_name.strip().lower().replace(' ', '_')
-            target_key = workflow.get('tool_targets', {}).get(normalized)
-            if not target_key:
-                result.add_step('select_tool', False,
-                                f'Claude tool {tool_name!r} not mapped in Consultation V2 YAML')
-                return False
-            snap = self.runtime.snapshot()
-            toggle_menu = self.find_first(snap, 'toggle_menu')
-            if not toggle_menu or not self.runtime.click(toggle_menu):
-                result.add_step('select_tool', False,
-                                f'Claude failed to open toggle menu for {tool_name}',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.8)
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, target_key)
-            if not item:
-                result.add_step('select_tool', False,
-                                f'Claude tool item {target_key} not found',
-                                snapshot=menu_snap.serializable())
-                return False
-            clicked = self.runtime.click(item)
-            validation_key = f'{normalized}_active'
-            if validation_key not in self.cfg.get('validation', {}):
-                verify_snap = self.runtime.snapshot()
-                result.add_step(
-                    'select_tool',
-                    False,
-                    f'Claude tool {tool_name!r} has no tree validation key {validation_key!r}',
-                    snapshot=verify_snap.serializable(),
-                )
-                return False
-            verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
-            verified = bool(clicked and self.validation_passes(verify_snap, validation_key))
-            result.add_step('select_tool', verified,
-                            f'Claude tool click validated for {tool_name}',
-                            snapshot=verify_snap.serializable())
-            if not verified:
-                return False
-        return True
 
     # ------------------------------------------------------------------
     # Attach files
@@ -494,7 +197,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             time.sleep(0.3)
             self.runtime.press('Return')
             verify_snap = self._wait_for_attach_success(abs_path)
-            verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
+            verified = self._attachment_visible(verify_snap, abs_path)
             result.add_step('attach', verified,
                             f'Claude attached {os.path.basename(abs_path)}',
                             file=abs_path, snapshot=verify_snap.serializable())
@@ -511,11 +214,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             nonlocal last_snapshot
             for snapshot in (self.runtime.snapshot(), self.runtime.menu_snapshot()):
                 last_snapshot = snapshot
-                if self.validation_passes(
-                    snapshot,
-                    'attach_success',
-                    filename=abs_path,
-                ):
+                if self._attachment_visible(snapshot, abs_path):
                     return snapshot
             return None
 
@@ -543,18 +242,20 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.3)
         pasted = self.runtime.paste(request.message)
-        verify_snap = self.wait_for_validation(
-            'prompt_ready',
+        verify_snap = self.runtime.wait_until(
+            lambda: (
+                snap if (snap := self.runtime.snapshot()).has('send_button') else None
+            ),
             timeout=8.0,
             interval=0.4,
-        )
+        ) or self.runtime.snapshot()
         # The "Send message" button only appears once the composer holds content,
         # so prompt_ready is the reliable "text landed" signal. Do NOT gate on a
         # char-count read of the composer: Claude's React contenteditable does
         # not report its text reliably over AT-SPI, which false-negatived a paste
         # that DID land and triggered a type_text fallback that DOUBLED the prompt
         # (production-observed). One paste + Send-button-present is the contract.
-        prompt_ready = self.validation_passes(verify_snap, 'prompt_ready')
+        prompt_ready = verify_snap.has('send_button')
         landed_chars, _ = self._prompt_text_status(request.message)
         verified = bool(pasted and prompt_ready)
         result.add_step('prompt', verified, 'Claude prompt entered',
@@ -579,8 +280,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button)
-        send_snap = self.wait_for_validation('send_success', timeout=30, interval=0.6)
-        stop_seen = self.validation_passes(send_snap, 'send_success')
+        stop_keys = self._stop_keys()
+        send_snap = self.runtime.wait_until(
+            lambda: (
+                snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+            ),
+            timeout=30,
+            interval=0.6,
+        ) or self.runtime.snapshot()
+        stop_seen = self.snapshot_has_any(send_snap, stop_keys)
         # Carry the send-phase stop observation into the shared completion
         # detector: a sub-second Extended Thinking reply may only show the stop
         # button during send, so seeding ever_seen_stop lets it complete on the
@@ -613,9 +321,49 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def monitor_generation(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        return super().monitor_generation(
-            request, result, seed_stop_seen=getattr(self, '_send_stop_seen', False)
+        detector_mode = str(request.selection_value('mode', '') or '').strip().lower()
+        detector = CompletionDetector(mode=detector_mode)
+        if getattr(self, '_send_stop_seen', False):
+            detector.ever_seen_stop = True
+            detector.stop_was_visible = True
+        stop_keys = self._stop_keys()
+        completed = False
+
+        def _poll() -> bool:
+            nonlocal completed
+            snap = self.runtime.snapshot()
+            verdict = detector.observe(stop_present=self.snapshot_has_any(snap, stop_keys))
+            if verdict == COMPLETE:
+                completed = True
+                return True
+            return False
+
+        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        verify_snap = self.runtime.wait_until(
+            lambda: (
+                snap if not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+            ),
+            timeout=5.0,
+            interval=0.5,
+        ) or self.runtime.snapshot()
+        verified = bool(completed and not self.snapshot_has_any(verify_snap, stop_keys))
+        result.add_step(
+            'monitor',
+            verified,
+            'Claude response completed',
+            stop_seen=detector.ever_seen_stop,
+            mode=detector_mode or 'default',
+            stop_keys=stop_keys,
+            snapshot=verify_snap.serializable(),
         )
+        if verified:
+            self.checkpoint_run_state(
+                request,
+                self.RUN_STATE_COMPLETION_OBSERVED,
+                result=result,
+                url=result.session_url_after or self.runtime.current_url() or '',
+            )
+        return verified
 
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/chat/' in (url or '')

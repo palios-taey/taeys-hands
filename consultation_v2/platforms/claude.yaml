@@ -1,3 +1,4 @@
+schema: identity_v1
 platform: claude
 click_strategy: xdotool_first
 navigation_key: F6
@@ -5,290 +6,418 @@ urls:
   fresh: https://claude.ai/new
   verify_navigation: false
 tree:
+  schema: identity_v1
   fence_after:
-  - name: Starred
-    role: heading
+    - name: Starred
+      role: heading
+  menu_snapshot_scan: document_menu_roles
+  menu_snapshot_roles:
+    - menu item
+    - radio menu item
+    - check menu item
+    - option
   exclude:
     names:
-    - Close sidebar
-    - Claude
-    - Profile image
-    - Sidebar
-    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
-    - Upgrade to
-    - ', Settings'
-    - Get apps and extensions
-    - Claude's choice
+      - Close sidebar
+      - Claude
+      - Profile image
+      - Sidebar
+      - Get apps and extensions
     roles:
-    - separator
-    - document web
-    - paragraph
-    - list item
+      - alert
+      - document web
+      - form
+      - heading
+      - image
+      - landmark
+      - list
+      - list item
+      - menu
+      - paragraph
+      - section
+      - separator
+      - static
+      - status bar
   sidebar_nav:
-  - name: Home
-    role: link
-  - name: New chat
-    role: link
-  - name: Search
-    role: link
-  - name: Customize
-    role: link
-  - name: Chats
-    role: link
-  - name: Projects
-    role: link
-  - name: Artifacts
-    role: link
-  - name: Code
-    role: link
+    - name: Home
+      role: link
+    - name: New chat
+      role: link
+    - name: Search
+      role: link
+    - name: Customize
+      role: link
+    - name: Chats
+      role: link
+    - name: Projects
+      role: link
+    - name: Artifacts
+      role: link
+    - name: Code
+      role: link
+  conformance:
+    scopes:
+      base:
+        expected:
+          - input
+          - toggle_menu
+          - model_selector
+      toggle_menu:
+        expected:
+          - upload_files_item
+          - take_screenshot
+          - add_to_project
+          - git_connector_item
+          - skills
+          - add_connectors
+          - tool_research
+          - tool_web_search
+          - use_style
+      model_menu:
+        expected:
+          - model_opus
+          - model_sonnet
+          - model_haiku
+          - model_fable
+          - effort_menu
+          - thinking_toggle
+          - model_more
+      effort_menu:
+        expected:
+          - effort_low
+          - effort_medium
+          - effort_high_default
+          - effort_extra
+          - effort_max
+      github_modal:
+        expected:
+          - github_continue_sync
+          - github_paste_url
+      artifacts:
+        expected:
+          - artifacts_link
   element_map:
-    # -- Main page persistent elements --
+    home_link:
+      name: Home
+      role: link
+      scope: base.sidebar
+    new_chat_link:
+      name: New chat
+      role: link
+      scope: base.sidebar
+    search_link:
+      name: Search
+      role: link
+      scope: base.sidebar
+    customize_link:
+      name: Customize
+      role: link
+      scope: base.sidebar
+    chats_link:
+      name: Chats
+      role: link
+      scope: base.sidebar
+    projects_link:
+      name: Projects
+      role: link
+      scope: base.sidebar
+    artifacts_link:
+      name: Artifacts
+      role: link
+      scope: base.sidebar
+    code_link:
+      name: Code
+      role: link
+      scope: base.sidebar
     input:
       name: Write your prompt to Claude
       role: entry
-      states_include:
-      - editable
+      scope: base.composer
     toggle_menu:
       name: Add files, connectors, and more
       role: push button
+      scope: base.composer
+    model_selector:
+      role: push button
+      scope: base.composer
+      match_strategy: name_agnostic_structural
+      structural:
+        after: toggle_menu
+        before: input
+      reason: Claude labels the selector with the selected model and effort.
     send_button:
       name: Send message
       role: push button
+      scope: base.composer
     stop_button:
-      names_any_of:
-      - Stop
-      - Stop response
+      name: Stop
       role: push button
+      scope: response.generating
+    stop_response_button:
+      name: Stop response
+      role: push button
+      scope: response.generating
     copy_button:
       name: Copy
       role: push button
+      scope: response.actions
     show_thinking:
       name: Show thinking
       role: push button
+      scope: response.actions
     hide_thinking:
       name: Hide thinking
       role: push button
+      scope: response.actions
     open_sidebar:
       name: Open sidebar
       role: push button
+      scope: base.header
     incognito:
       name: Use incognito
       role: push button
+      scope: base.header
     prompt_categories:
       name: Prompt categories
       role: page tab list
-    prompt_tab:
-      names_any_of:
-      - Write
-      - Learn
-      - Code
-      - Life stuff
-      - "Claude’s choice"
+      scope: base.main
+    prompt_tab_write:
+      name: Write
       role: push button
-
-    # -- Toggle-menu portal items (require menu_snapshot) --
+      scope: base.main
+    prompt_tab_learn:
+      name: Learn
+      role: push button
+      scope: base.main
+    prompt_tab_code:
+      name: Code
+      role: push button
+      scope: base.main
+    prompt_tab_life:
+      name: Life stuff
+      role: push button
+      scope: base.main
+    prompt_tab_choice:
+      name: Claude's choice
+      role: push button
+      scope: base.main
+    prompt_tab_choice_curly:
+      name: Claude’s choice
+      role: push button
+      scope: base.main
     upload_files_item:
-      name: "Add files or photos Ctrl+U"
+      name: Add files or photos Ctrl+U
       role: menu item
+      scope: toggle_menu
     take_screenshot:
       name: Take a screenshot
       role: menu item
+      scope: toggle_menu
     add_to_project:
       name: Add to project
       role: menu item
+      scope: toggle_menu
     git_connector_item:
       name: Add from GitHub
       role: menu item
-    # GitHub flow (verified live 2026-05-22):
-    # +menu -> git_connector_item -> "Try Claude Code for GitHub" modal ->
-    # github_continue_sync -> "Add content from GitHub" modal (repo select / paste URL -> pick files)
+      scope: toggle_menu
     github_continue_sync:
+      # Needs live :3 confirmation; first-time GitHub connector interstitial only.
       name: Continue to GitHub sync
       role: push button
+      scope: github_modal
     github_paste_url:
+      # Needs live :3 confirmation inside the Add content from GitHub modal.
       name: Paste GitHub URL
       role: push button
-    # NOTE: the repo dropdown renders as a combo box whose displayed text is
-    # "Select a repository" but whose AT-SPI name is empty — needs a live re-scan
-    # in the open "Add content from GitHub" modal to capture an exact matchable
-    # name/role before the driver can target it deterministically.
+      scope: github_modal
     skills:
       name: Skills
       role: menu item
+      scope: toggle_menu
     add_connectors:
       name: Connectors
       role: menu item
+      scope: toggle_menu
     tool_research:
       name: Research
       role: check menu item
+      scope: toggle_menu
+      active_state: checked
     tool_web_search:
       name: Web search
       role: check menu item
+      scope: toggle_menu
+      active_state: checked
     use_style:
       name: Use style
       role: menu item
-
-    # -- Model selector trigger (structural; label changes with active model) --
-    model_selector:
-      structural:
-        parent: toggle_menu
-        role: push button
-        ordinal: last
-
-    # -- Model / mode menu items (require menu_snapshot after clicking selector) --
+      scope: toggle_menu
     model_opus:
       name: Opus 4.8 For complex tasks
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_sonnet:
       name: Sonnet 4.6 Most efficient for everyday tasks
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_haiku:
       name: Haiku 4.5 Fastest for quick answers
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_fable:
+      # Needs live :3 confirmation; last audit saw this disabled/unavailable.
       name: Fable 5Currently unavailable For your toughest challenges
       role: radio menu item
+      scope: model_menu
     effort_menu:
-      names_any_of: [Effort Low, Effort Medium, Effort High, Effort Extra, Effort Max] # lint-allow: known p5 debt; dynamic-name effort menu needs structural/stable locator remap
+      # Needs live :3 confirmation; Claude labels this row with dynamic effort text.
       role: menu item
-      trigger_type: hover
+      scope: model_menu
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_haiku
+        before: thinking_toggle
+      reason: Claude labels this row with the currently selected effort level.
     effort_low:
       name: Low
       role: radio menu item
+      scope: effort_menu
+      active_state: checked
     effort_medium:
       name: Medium
       role: radio menu item
+      scope: effort_menu
+      active_state: checked
     effort_high_default:
       name: High Default
       role: radio menu item
+      scope: effort_menu
+      active_state: checked
     effort_extra:
       name: Extra
       role: radio menu item
+      scope: effort_menu
+      active_state: checked
     effort_max:
       name: Max
       role: radio menu item
+      scope: effort_menu
+      active_state: checked
     thinking_toggle:
       name: Thinking Can think for more complex tasks Thinking
       role: menu item
+      scope: model_menu
     model_more:
       name: More models
       role: menu item
-
+      scope: model_menu
 workflow:
   defaults:
     model: null
     mode: extended_thinking
     tools: []
   selection:
-    model_targets:
-      opus: model_opus
-      sonnet: model_sonnet
-      haiku: model_haiku
-      fable: model_fable
-    effort_targets:
-      low: effort_low
-      medium: effort_medium
-      high: effort_high_default
-      extra: effort_extra
-      max: effort_max
-    mode_targets:
-      extended_thinking:
-        model: model_opus
-        effort: extra
-        validation: extended_thinking_active
-    tool_targets:
-      research: tool_research
-      web_search: tool_web_search
-      github: git_connector_item
+    menus:
+      model:
+        select: single
+        active_recognition: checked
+        must_choose: true
+        resettable_on_followup: true
+        operate:
+          trigger: model_selector
+          scope: menu_snapshot
+        options:
+          opus:
+            element: model_opus
+          sonnet:
+            element: model_sonnet
+          haiku:
+            element: model_haiku
+        default_for_fresh: opus
+        example_rationale: Use Opus for deep synthesis, complex audits, and high-stakes mission work.
+      mode:
+        select: single
+        active_recognition: checked
+        must_choose: true
+        resettable_on_followup: true
+        operate:
+          trigger: model_selector
+          scope: menu_snapshot
+        options:
+          low:
+            element: effort_low
+            path:
+              - element: effort_menu
+                action: hover
+          medium:
+            element: effort_medium
+            path:
+              - element: effort_menu
+                action: hover
+          high:
+            element: effort_high_default
+            path:
+              - element: effort_menu
+                action: hover
+          extended_thinking:
+            element: effort_extra
+            path:
+              - element: effort_menu
+                action: hover
+          max:
+            element: effort_max
+            path:
+              - element: effort_menu
+                action: hover
+        default_for_fresh: extended_thinking
+        example_rationale: Use extended thinking when the prompt requires deeper reasoning than the default high effort.
+      tools:
+        select: multi
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: false
+        operate:
+          trigger: toggle_menu
+          scope: menu_snapshot
+        options:
+          research:
+            element: tool_research
+          web_search:
+            element: tool_web_search
+        default_for_fresh: none
+        example_rationale: No Claude tools are needed because the request is fully answered from supplied context.
   attachment:
     trigger: toggle_menu
     menu_target: upload_files_item
     open_method: atspi_menu
-    # Keyboard shortcut: Ctrl+U opens file dialog directly, bypassing
-    # the toggle_menu portal entirely. More reliable than AT-SPI menu
-    # click because it avoids stale portal/menu_snapshot issues.
     keyboard_shortcut: ctrl+u
   prompt:
     input: input
     send_button: send_button
   send:
     trigger: send_button
-    stop_key: stop_button
+    stop_keys:
+      - stop_button
+      - stop_response_button
   monitor:
-    stop_key: stop_button
+    stop_keys:
+      - stop_button
+      - stop_response_button
     complete_key: copy_button
   extract:
     primary_key: copy_button
     strategy: last_by_y
   extra_extract:
     strategy: none
-
 settle:
   default_ms: 1500
   navigate_ms: 3500
   attach_ms: 2500
   rescan_attempts: 1
-validation:
-  attach_success:
-    file_chip:
-      roles:
-      - push button
-      - list item
-      - heading
-  prompt_ready:
-    indicators:
-    - name: Send message
-      role: push button
-  send_success:
-    indicators:
-    - names_any_of:
-      - Stop
-      - Stop response
-      role: push button
-    timeout: 30
-  response_complete:
-    indicators:
-    - name: Copy
-      role: push button
-    stop_absent: stop_button
-  sonnet_active: {}
-    # Persistent Sonnet active-state is not mapped in the current live tree.
-    # If requested, validation_passes returns false and select_model fails loud.
-  opus_active:
-    indicators:
-    - names_any_of:
-      - "Model: Opus 4.8 Max"
-      - "Model: Opus 4.8 Extra"
-      - "Model: Opus 4.8 High"
-      - "Model: Opus 4.8 Medium"
-      - "Model: Opus 4.8 Low"
-      role: push button
-  haiku_active: {}
-    # Persistent Haiku active-state is not mapped in the current live tree.
-    # If requested, validation_passes returns false and select_model fails loud.
-  fable_active: {}
-    # Live scan 2026-06-14 exposed Fable 5 as "Currently unavailable"; selecting
-    # it must fail loud until a live enabled-state validation exists.
-  # Jesse/task #170: Claude consultation extended_thinking means Opus 4.8 plus
-  # Effort Extra, not High and not Max. Live map:
-  # consultations/p2_map_claude_exact.md lines 31-45.
-  extended_thinking_active:
-    indicators:
-    - name: "Model: Opus 4.8 Extra" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
-      role: push button
-
-# ============================================================================
-# extraction — output-type -> ordered exact-matched workflow.
-# Schema + load-time validation: consultation_v2/yaml_contract.py;
-# grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-# assistant_text is production-proven on the captured answer-thread URL after
-# absolute bottom scroll, lowest visible Copy by y, AT-SPI activate, clipboard,
-# reject prompt echo. Claude ARTIFACT panel extraction is NOT enabled in V2
-# (driver records it as not configured) and is deliberately NOT declared here —
-# the downstream p4-artifact task maps the artifact-panel copy path. No downgrade: an artifact
-# request with no mapped workflow stops/notifies, it does not fall back to the
-# chat bubble.
-# ============================================================================
 extraction:
   assistant_text:
     steps:
@@ -298,4 +427,3 @@ extraction:
         element: copy_button
         select: last
       - action: read_clipboard
-        validation: response_complete
