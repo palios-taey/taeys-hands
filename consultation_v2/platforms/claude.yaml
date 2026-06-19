@@ -7,9 +7,14 @@ urls:
   verify_navigation: false
 tree:
   schema: identity_v1
+  prune_subtrees:
+    - name: Sidebar
+      role: landmark
   fence_after:
     - name: Starred
       role: heading
+    - name: Recents
+      role: push button
   menu_snapshot_scan: document_menu_roles
   menu_snapshot_roles:
     - menu item
@@ -48,6 +53,12 @@ tree:
       role: link
     - name: Search
       role: link
+    - name: Search
+      role: push button
+    - name: Products
+      role: push button
+    - name: Recents
+      role: push button
     - name: Customize
       role: link
     - name: Chats
