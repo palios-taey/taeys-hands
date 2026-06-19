@@ -1,7 +1,7 @@
 schema: identity_v1
 platform: claude
 click_strategy: xdotool_first
-navigation_key: F6
+navigation_key: alt+d
 urls:
   fresh: https://claude.ai/new
   verify_navigation: false
@@ -70,12 +70,11 @@ tree:
           - upload_files_item
           - take_screenshot
           - add_to_project
-          - git_connector_item
           - skills
-          - add_connectors
           - tool_research
           - tool_web_search
-          - use_style
+          - add_connector
+          - add_plugins
       model_menu:
         expected:
           - model_opus
@@ -269,8 +268,8 @@ tree:
       name: Skills
       role: menu item
       scope: toggle_menu
-    add_connectors:
-      name: Connectors
+    add_connector:
+      name: Add connector
       role: menu item
       scope: toggle_menu
     tool_research:
@@ -283,8 +282,8 @@ tree:
       role: check menu item
       scope: toggle_menu
       active_state: checked
-    use_style:
-      name: Use style
+    add_plugins:
+      name: Add plugins...
       role: menu item
       scope: toggle_menu
     model_opus:

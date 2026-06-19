@@ -449,6 +449,30 @@ class ConsultationRuntime:
     # Navigation
     # ------------------------------------------------------------------
 
+    def _focused_composer_entry(self) -> ElementRef | None:
+        element_map = ((self.cfg.get('tree') or {}).get('element_map') or {})
+        if not isinstance(element_map, dict):
+            return None
+        candidate_keys: list[str] = []
+        for key, spec in element_map.items():
+            if not isinstance(spec, dict):
+                continue
+            role = str(spec.get('role') or '').strip().lower()
+            scope = str(spec.get('scope') or '').strip().lower()
+            if role != 'entry':
+                continue
+            if scope.startswith('base.composer') or str(key).startswith('input'):
+                candidate_keys.append(str(key))
+        if not candidate_keys:
+            return None
+        snapshot = self.snapshot()
+        for key in candidate_keys:
+            for element in snapshot.mapped.get(key) or []:
+                states = {str(state).lower() for state in (element.states or [])}
+                if 'focused' in states:
+                    return element
+        return None
+
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         before = self.current_url()
         # Close stale GTK file dialogs FIRST — they intercept the address-bar
@@ -460,13 +484,19 @@ class ConsultationRuntime:
         time.sleep(0.3)
         inp.press_key("Escape")
         time.sleep(0.2)
-        # Use platform-configured address bar key (F6 for Claude which intercepts Ctrl+L)
+        # Use the platform-configured address bar key; fail below if it leaves
+        # the composer focused instead of the browser chrome.
         nav_key = str(self.cfg.get("navigation_key") or "ctrl+l")
         inp.press_key(nav_key)
         # Critical settle: on Xvfb the address bar is not focused the instant the
         # nav_key returns; ctrl+a/paste/Return that follow MUST land in the
         # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
         time.sleep(0.3)
+        if self._focused_composer_entry() is not None:
+            logger.error(
+                'navigate: composer still focused after address-bar key; refusing to paste URL'
+            )
+            return False
         inp.press_key("ctrl+a")
         time.sleep(0.1)
         if not self.paste(url):

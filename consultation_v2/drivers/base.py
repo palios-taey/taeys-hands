@@ -478,7 +478,14 @@ class BaseConsultationDriver(ABC):
         scope: str,
         result: ConsultationResult,
     ) -> tuple[Snapshot, ElementRef] | None:
+        clean_snapshot = self._selection_prepare_base_for_menu(result)
+        if clean_snapshot is None:
+            return None
         trigger_snapshot, trigger = self._selection_find_once(trigger_key, 'snapshot')
+        anchor_key = self._selection_base_anchor_key()
+        if anchor_key is None or not self._selection_base_snapshot_clean(trigger_snapshot, anchor_key):
+            trigger_snapshot = clean_snapshot
+            trigger = self.find_first(trigger_snapshot, trigger_key)
         if trigger is None:
             result.add_step(
                 'select',
@@ -488,7 +495,7 @@ class BaseConsultationDriver(ABC):
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if not self.runtime.click(trigger):
+        if not self.runtime.click(trigger, strategy='coordinate_only'):
             result.add_step(
                 'select',
                 False,
@@ -497,7 +504,7 @@ class BaseConsultationDriver(ABC):
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        snapshot, expected = self._selection_find_once(expected_key, scope)
+        snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
                 'select',
@@ -510,6 +517,100 @@ class BaseConsultationDriver(ABC):
         if not self._selection_conformance_gate(result, snapshot, expected_key):
             return None
         return snapshot, expected
+
+    def _selection_prepare_base_for_menu(self, result: ConsultationResult) -> Snapshot | None:
+        menu_snapshot = self.runtime.menu_snapshot()
+        if int(menu_snapshot.raw_count or 0) > 0:
+            self.runtime.press('Escape')
+            menu_snapshot = self._selection_wait_for_menu_closed()
+            if int(menu_snapshot.raw_count or 0) > 0:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection menu surface still open before trigger',
+                    snapshot=menu_snapshot.serializable(),
+                )
+                return None
+        anchor_key = self._selection_base_anchor_key()
+        if anchor_key is None:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection base anchor unavailable before trigger',
+            )
+            return None
+        timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
+        self.runtime.press('Escape')
+        snapshot = self._selection_wait_for_clean_base(anchor_key, timeout=timeout)
+        if not self._selection_base_snapshot_clean(snapshot, anchor_key):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection base did not settle on anchor {anchor_key}',
+                anchor=anchor_key,
+                snapshot=snapshot.serializable(),
+            )
+            return None
+        return snapshot
+
+    def _selection_wait_for_clean_base(self, anchor_key: str, *, timeout: float) -> Snapshot:
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(remaining, 0.8),
+                interval=0.2,
+                anchor_key=anchor_key,
+            )
+            if self._selection_base_snapshot_clean(last_snapshot, anchor_key):
+                return last_snapshot
+            time.sleep(0.2)
+        return last_snapshot or self.runtime.snapshot()
+
+    def _selection_base_snapshot_clean(self, snapshot: Snapshot, anchor_key: str) -> bool:
+        if not snapshot.has(anchor_key):
+            return False
+        for items in (snapshot.mapped or {}).values():
+            for element in items:
+                states = {str(state).lower() for state in (element.states or [])}
+                if 'expanded' in states:
+                    return False
+        scopes = (((self.cfg.get('tree') or {}).get('conformance') or {}).get('scopes') or {})
+        if 'base' not in scopes:
+            return True
+        return not (snapshot.unknown or []) and not self._missing_expected_elements(snapshot, 'base')
+
+    def _selection_wait_for_menu_closed(self) -> Snapshot:
+        timeout = max(self._selection_settle_seconds(), 1.0)
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            last_snapshot = self.runtime.menu_snapshot()
+            if int(last_snapshot.raw_count or 0) == 0:
+                return last_snapshot
+            time.sleep(0.2)
+        return last_snapshot or self.runtime.menu_snapshot()
+
+    def _selection_base_anchor_key(self) -> str | None:
+        conformance_anchor = self._conformance_anchor_key('base')
+        if conformance_anchor:
+            return conformance_anchor
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return None
+        for key in ('input', 'input_chat_with_chatgpt'):
+            spec = element_map.get(key)
+            if isinstance(spec, dict) and str(spec.get('role') or '').strip().lower() == 'entry':
+                return key
+        for key, spec in element_map.items():
+            if not isinstance(spec, dict):
+                continue
+            role = str(spec.get('role') or '').strip().lower()
+            if role == 'entry' and str(key).startswith('input'):
+                return str(key)
+        return None
 
     def _walk_selection_path(
         self,
@@ -546,7 +647,7 @@ class BaseConsultationDriver(ABC):
                 )
                 return current_snapshot, None
             next_key = str(path[index + 1]['element']) if index + 1 < len(path) else target_key
-            current_snapshot, next_element = self._selection_wait_for_path_anchor(next_key, scope)
+            current_snapshot, next_element = self._selection_wait_for_revealed_anchor(next_key, scope)
             if next_element is None:
                 result.add_step(
                     'select',
@@ -572,7 +673,7 @@ class BaseConsultationDriver(ABC):
             )
         return current_snapshot, target
 
-    def _selection_wait_for_path_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
+    def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
         timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
         snapshot = self._selection_stable_snapshot(
             scope,
