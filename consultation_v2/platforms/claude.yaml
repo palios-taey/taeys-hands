@@ -194,10 +194,6 @@ tree:
       role: push button
       scope: base.composer
     stop_button:
-      name: Stop
-      role: push button
-      scope: response.generating
-    stop_response_button:
       name: Stop response
       role: push button
       scope: response.generating
@@ -209,6 +205,10 @@ tree:
       name: Retry
       role: push button
       scope: response.actions
+    continue_button:
+      name: Continue
+      role: push button
+      scope: response.document
     show_thinking:
       name: Show thinking
       role: push button
@@ -450,14 +450,9 @@ workflow:
     trigger: send_button
     stop_keys:
       - stop_button
-      - stop_response_button
   monitor:
     stop_keys:
       - stop_button
-      - stop_response_button
-    complete_key: copy_button
-    complete_companion_keys:
-      - retry_button
   extract:
     primary_key: copy_button
     strategy: last_by_y

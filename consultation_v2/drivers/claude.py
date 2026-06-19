@@ -90,72 +90,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
 
-    def _complete_keys(self) -> tuple[str, ...]:
-        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
-        keys = monitor_cfg.get('complete_keys') or monitor_cfg.get('complete_key') or ['copy_button']
-        keys = keys if isinstance(keys, list) else [keys]
-        return tuple(str(key) for key in keys if isinstance(key, str) and key)
-
-    def _complete_companion_keys(self) -> tuple[str, ...]:
-        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
-        keys = monitor_cfg.get('complete_companion_keys') or []
-        keys = keys if isinstance(keys, list) else [keys]
-        return tuple(str(key) for key in keys if isinstance(key, str) and key)
-
-    @staticmethod
-    def _element_y(element: ElementRef) -> int | None:
-        return int(element.y) if element.y is not None else None
-
-    def _bottom_action_row_y(
-        self,
-        snapshot: Snapshot,
-        complete_keys: tuple[str, ...],
-        companion_keys: tuple[str, ...],
-        *,
-        row_tolerance: int = 48,
-    ) -> int | None:
-        complete_items = [
-            item
-            for key in complete_keys
-            for item in (snapshot.mapped.get(key) or [])
-            if item.y is not None
-        ]
-        if not complete_items:
-            return None
-        if not companion_keys:
-            return max(self._element_y(item) or 0 for item in complete_items)
-        companions = [
-            item
-            for key in companion_keys
-            for item in (snapshot.mapped.get(key) or [])
-            if item.y is not None
-        ]
-        rows = []
-        for item in complete_items:
-            item_y = self._element_y(item)
-            if item_y is None:
-                continue
-            if any(
-                companion_y is not None and abs(companion_y - item_y) <= row_tolerance
-                for companion_y in (self._element_y(companion) for companion in companions)
-            ):
-                rows.append(item_y)
-        return max(rows) if rows else None
-
-    def _complete_signal_present(
-        self,
-        snapshot: Snapshot,
-        complete_keys: tuple[str, ...],
-        companion_keys: tuple[str, ...],
-        generation_floor_y: int | None,
-    ) -> tuple[bool, int | None]:
-        row_y = self._bottom_action_row_y(snapshot, complete_keys, companion_keys)
-        if row_y is None:
-            return False, None
-        if generation_floor_y is not None and row_y <= generation_floor_y + 8:
-            return False, row_y
-        return True, row_y
-
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
     # releases it before monitor_and_extract so monitoring runs concurrently.
@@ -348,9 +282,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return False
         clicked = self.runtime.click(send_button)
         stop_keys = self._stop_keys()
-        complete_keys = self._complete_keys()
-        companion_keys = self._complete_companion_keys()
-        self._generating_complete_row_y = None
         send_snap = self.runtime.wait_until(
             lambda: (
                 snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
@@ -364,12 +295,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         # button during send, so seeding ever_seen_stop lets it complete on the
         # stop-gone transition without a content/copy-button fallback.
         self._send_stop_seen = bool(stop_seen)
-        if stop_seen:
-            self._generating_complete_row_y = self._bottom_action_row_y(
-                send_snap,
-                complete_keys,
-                companion_keys,
-            )
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
@@ -389,8 +314,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
     # ------------------------------------------------------------------
     # Monitor generation — shared stop-transition detector plus Claude's
-    # finished-message action row. Max/extended modes debounce stop-gone for
-    # two fresh scans; Copy must also be rendered before completion is declared.
+    # incomplete-response Continue affordance. Max/extended modes debounce
+    # stop-gone in CompletionDetector; Continue is a Claude-scoped veto after
+    # that detector says complete.
     # ------------------------------------------------------------------
 
     def monitor_generation(
@@ -422,50 +348,71 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
         stop_keys = self._stop_keys()
-        complete_keys = self._complete_keys()
-        companion_keys = self._complete_companion_keys()
         completed = False
         terminal_snapshot: Snapshot | None = None
-        stop_gone_without_done_signal = 0
-        generation_floor_y = getattr(self, '_generating_complete_row_y', None)
-        complete_signal_y: int | None = None
+        continue_clicks = 0
+        continue_click_failed = False
+        self._claude_continue_clicks = 0
 
         def _poll() -> bool:
-            nonlocal completed, terminal_snapshot, stop_gone_without_done_signal
-            nonlocal generation_floor_y, complete_signal_y
+            nonlocal detector, completed, terminal_snapshot
+            nonlocal continue_clicks, continue_click_failed
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
-            if stop_present:
-                row_y = self._bottom_action_row_y(snap, complete_keys, companion_keys)
-                if row_y is not None:
-                    generation_floor_y = max(generation_floor_y or row_y, row_y)
-            done_signal_present, done_signal_y = self._complete_signal_present(
-                snap,
-                complete_keys,
-                companion_keys,
-                generation_floor_y,
-            )
             verdict = detector.observe(stop_present=stop_present)
-            if verdict == COMPLETE and done_signal_present:
+            if verdict != COMPLETE:
+                return False
+
+            continue_snap, continue_button, scroll_ok = self._scan_for_continue_button()
+            if continue_button:
+                clicked = self.runtime.click(continue_button)
+                continue_clicks += 1
+                self._claude_continue_clicks = continue_clicks
+                result.add_step(
+                    f'{step_name}_continue',
+                    clicked,
+                    'Claude Continue affordance clicked; monitoring resumed',
+                    continue_clicks=continue_clicks,
+                    scroll_ok=scroll_ok,
+                    continue_button=continue_button.serializable(),
+                    snapshot=continue_snap.serializable(),
+                )
+                if not clicked:
+                    continue_click_failed = True
+                    terminal_snapshot = continue_snap
+                    return True
+                detector = CompletionDetector(mode=detector_mode)
+                stop_snap = self.runtime.wait_until(
+                    lambda: (
+                        follow if self.snapshot_has_any(
+                            follow := self.runtime.snapshot(),
+                            stop_keys,
+                        ) else None
+                    ),
+                    timeout=15.0,
+                    interval=0.5,
+                )
+                if isinstance(stop_snap, Snapshot):
+                    detector.ever_seen_stop = True
+                    detector.stop_was_visible = True
+                return False
+
+            if not self.snapshot_has_any(continue_snap, stop_keys):
                 completed = True
-                terminal_snapshot = snap
-                complete_signal_y = done_signal_y
+                terminal_snapshot = continue_snap
                 return True
-            if verdict == COMPLETE:
-                stop_gone_without_done_signal += 1
             return False
 
         self.runtime.wait_until(_poll, timeout=float(timeout or request.timeout), interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.snapshot()
         stop_absent = not self.snapshot_has_any(verify_snap, stop_keys)
-        done_signal_present, final_signal_y = self._complete_signal_present(
-            verify_snap,
-            complete_keys,
-            companion_keys,
-            generation_floor_y,
+        continue_present = bool(verify_snap.has('continue_button'))
+        verified = bool(
+            completed
+            and stop_absent
+            and not continue_present
+            and not continue_click_failed
         )
-        complete_signal_y = complete_signal_y if complete_signal_y is not None else final_signal_y
-        verified = bool(completed and stop_absent and done_signal_present)
         result.add_step(
             step_name,
             verified,
@@ -473,13 +420,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             stop_seen=detector.ever_seen_stop,
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
-            complete_keys=complete_keys,
-            complete_companion_keys=companion_keys,
-            complete_signal_seen=done_signal_present,
-            complete_signal_y=complete_signal_y,
-            generation_action_row_floor_y=generation_floor_y,
             stop_gone_cycles=detector.stop_cycles,
-            stop_gone_without_done_signal=stop_gone_without_done_signal,
+            continue_clicks=continue_clicks,
+            continue_present=continue_present,
             snapshot=verify_snap.serializable(),
         )
         if verified and checkpoint:
@@ -490,6 +433,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 url=result.session_url_after or self.runtime.current_url() or '',
             )
         return verified
+
+    def _scan_for_continue_button(self) -> tuple[Snapshot, ElementRef | None, bool]:
+        self.runtime.press('ctrl+End')
+        time.sleep(0.2)
+        scroll_ok = self.runtime.scroll_document_to_bottom(clicks=8, rounds=2, settle=0.4)
+        snap = self.runtime.snapshot()
+        return snap, self.find_last(snap, 'continue_button'), scroll_ok
 
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/chat/' in (url or '')
@@ -532,9 +482,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             except Exception:
                 pass
             all_el = raw_find_elements(firefox, fence_after=[])
-            copy_btns = [e for e in all_el
-                         if (e.get('name') or '').strip() == 'Copy'
-                         and 'button' in (e.get('role') or '')]
+            copy_btns = self._copy_button_candidates(all_el)
             # The response's Copy button is the LOWEST on the page (the latest
             # turn). Do NOT require >=2 (prompt Copy + response Copy): Claude
             # often renders only ONE Copy — the response's — because the user
@@ -545,14 +493,32 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             # so taking the lowest Copy when >=1 is safe.
             if not copy_btns:
                 continue
-            target = max(copy_btns, key=lambda e: e.get('y') or 0)
-            clipboard.write('')
-            time.sleep(0.3)
-            if not atspi_click(target):
-                continue
-            time.sleep(1.5)
-            content = (clipboard.read() or '').strip()
-            if content and not self._is_prompt_echo(content, request):
+            continue_clicks = max(0, int(getattr(self, '_claude_continue_clicks', 0) or 0))
+            targets = sorted(copy_btns, key=lambda e: e.get('y') or 0)[-(continue_clicks + 1):]
+            copied = []
+            for target in targets:
+                clipboard.write('')
+                time.sleep(0.3)
+                if not atspi_click(target):
+                    continue
+                time.sleep(1.5)
+                segment = (clipboard.read() or '').strip()
+                if segment and not self._is_prompt_echo(segment, request):
+                    copied.append((segment, target))
+                elif segment:
+                    result.add_step(
+                        'extract_primary_echo_rejected',
+                        True,
+                        'Claude copied prompt echo; continuing response-copy search',
+                        characters=len(segment),
+                        preview=segment[:200],
+                        attempt=attempt + 1,
+                        copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                    )
+            segments = self._dedupe_response_segments([segment for segment, _ in copied])
+            if segments:
+                content = '\n\n'.join(segments)
+                target = copied[-1][1]
                 result.response_text = content
                 if not self.extract_thinking_notes(
                     request,
@@ -566,22 +532,41 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                                 characters=len(content), preview=content[:200],
                                 scroll_ok=scroll_ok,
                                 copy_buttons_found=len(copy_btns),
+                                copied_segments=len(segments),
+                                continue_clicks=continue_clicks,
                                 copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')})
                 return True
-            if content:
-                result.add_step(
-                    'extract_primary_echo_rejected', True,
-                    'Claude copied prompt echo; continuing response-copy search',
-                    characters=len(content),
-                    preview=content[:200],
-                    attempt=attempt + 1,
-                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
-                )
 
         result.add_step('extract_primary', False,
                         f'Claude extraction failed after 5 attempts',
                         elements=len(all_el) if all_el else 0)
         return False
+
+    def _copy_button_candidates(self, elements: list[dict]) -> list[dict]:
+        copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        return [
+            element for element in elements
+            if matches_spec(element, copy_spec)
+            and element.get('y') is not None
+        ]
+
+    @staticmethod
+    def _dedupe_response_segments(segments: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for segment in segments:
+            normalized = ' '.join(segment.split())
+            if not normalized:
+                continue
+            if any(normalized == ' '.join(existing.split()) for existing in deduped):
+                continue
+            if any(normalized in ' '.join(existing.split()) for existing in deduped):
+                continue
+            deduped = [
+                existing for existing in deduped
+                if ' '.join(existing.split()) not in normalized
+            ]
+            deduped.append(segment)
+        return deduped
 
     def extract_thinking_notes(
         self,
