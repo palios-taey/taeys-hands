@@ -70,7 +70,7 @@ URL_PATTERNS = {
     'gemini': 'gemini.google.com', 'grok': 'grok.com',
     'perplexity': 'perplexity.ai', 'x_twitter': 'x.com',
     'linkedin': 'linkedin.com',
-    # Treasurer-side platforms (used by <OPERATOR_HOME>/treasurer/scripts/)
+    # Treasurer-side platforms used by external automation.
     'upwork': 'upwork.com',
     'lesswrong': 'lesswrong.com',
     'reddit': 'reddit.com',

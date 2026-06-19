@@ -11,8 +11,7 @@
 #   ~/.config/systemd/user/taey-display-N.service   (one per display)
 #
 # After install, units are daemon-reloaded, enabled, and started.
-# VNC port for display :N is 5900+N. Default VNC password is "<TAEY_VNC_PASSWORD>" (the
-# canonical Family password) — override via TAEY_VNC_PASSWORD in machine.env.
+# VNC port for display :N is 5900+N. Set TAEY_VNC_PASSWORD in machine.env.
 #
 # Usage: ./scripts/install_machine_displays.sh [--no-start] [--no-vnc]
 #   --no-start    Generate + enable units but do not start (for staged rollouts)
@@ -52,7 +51,11 @@ fi
 # shellcheck source=/dev/null
 source "${MACHINE_ENV}"
 
-VNC_PASSWORD="${TAEY_VNC_PASSWORD:?set TAEY_VNC_PASSWORD}"
+if [[ -z "${TAEY_VNC_PASSWORD:-}" ]]; then
+    echo "ERROR: TAEY_VNC_PASSWORD must be set in ${MACHINE_ENV}" >&2
+    exit 1
+fi
+VNC_PASSWORD="${TAEY_VNC_PASSWORD}"
 
 # --- Required tooling ---
 require_cmd() {

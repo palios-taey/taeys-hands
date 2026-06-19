@@ -289,7 +289,7 @@ start_bot() {
     fi
 
     local bot_cmd
-    bot_cmd="cd '${REPO_ROOT}' && env DISPLAY='${DISPLAY_STR}' DBUS_SESSION_BUS_ADDRESS='${DBUS_SESSION_BUS_ADDRESS}' TAEY_NOTIFY_NODE='taeys-hands' REDIS_HOST='${REDIS_HOST}' WEAVIATE_URL='http://127.0.0.1:8088' PYTHONPATH='${HOME}/embedding-server' python3 ${bot_script} ${bot_args} 2>&1 | tee '${BOT_LOG_FILE}'"
+    bot_cmd="cd '${REPO_ROOT}' && env DISPLAY='${DISPLAY_STR}' DBUS_SESSION_BUS_ADDRESS='${DBUS_SESSION_BUS_ADDRESS}' TAEY_NOTIFY_NODE='taeys-hands' REDIS_HOST='${REDIS_HOST}' WEAVIATE_URL='${WEAVIATE_URL:-http://127.0.0.1:8088}' PYTHONPATH='${HOME}/embedding-server' python3 ${bot_script} ${bot_args} 2>&1 | tee '${BOT_LOG_FILE}'"
 
     tmux new-session -d -s "${SESSION_NAME}" "${bot_cmd}" || fail "Failed to start tmux session ${SESSION_NAME}"
 
