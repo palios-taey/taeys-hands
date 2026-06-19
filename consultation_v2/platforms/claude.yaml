@@ -23,6 +23,9 @@ tree:
       - Profile image
       - Sidebar
       - Get apps and extensions
+    structural:
+      - name: ""
+        role: panel
     roles:
       - alert
       - document web
@@ -129,6 +132,29 @@ tree:
       name: Code
       role: link
       scope: base.sidebar
+    design_link:
+      name: Design
+      role: link
+      scope: base
+    settings_button:
+      name: Settings
+      role: push button
+      scope: base
+    account_settings_button:
+      role: push button
+      scope: base
+      match_strategy: name_agnostic_structural
+      structural:
+        after: press_record_button
+      reason: personalized account/settings button -- user-specific name
+    learn_more_promo:
+      name: Learn more (opens in new tab)
+      role: link
+      scope: base
+    dismiss_promo:
+      name: Dismiss
+      role: push button
+      scope: base
     input:
       name: Write your prompt to Claude
       role: entry
@@ -143,8 +169,16 @@ tree:
       match_strategy: name_agnostic_structural
       structural:
         after: toggle_menu
-        before: input
-      reason: Claude labels the selector with the selected model and effort.
+        before: press_record_button
+      reason: stable locator for Claude's dynamic model and effort label
+    press_record_button:
+      name: Press and hold to record
+      role: push button
+      scope: base
+    voice_mode_button:
+      name: Use voice mode
+      role: push button
+      scope: base
     send_button:
       name: Send message
       role: push button
