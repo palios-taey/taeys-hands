@@ -26,7 +26,7 @@ status: overnight — merge-reconciliation closed; rollout teed up for attended 
 
 ## Blocked / deferred to attended hours (account-safety + no-regression)
 - **Live per-platform menu-walks + production-proofs are NOT safe unattended.** Monitors are
-  not yet reliable; 100_TIMES 4a = zero action-retries (retry loops get accounts banned). The
+  not yet reliable; 100_TIMES 4a = zero action-retries (blind retries are unreliable + a poor automation client). The
   live AT-SPI tree is the only validation oracle, so each walk/proof must be screenshot-verified,
   human-paced, one platform at a time. Merging un-live-validated YAMLs would risk the exact
   regression Jesse named as primary concern. → do these attended.

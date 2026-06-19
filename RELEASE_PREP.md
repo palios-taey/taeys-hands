@@ -16,7 +16,7 @@ This engine automates **your own** logged-in AI accounts (ChatGPT / Claude / Gem
   - `scripts/restart_display.sh:292` — hardcoded `WEAVIATE_URL='http://127.0.0.1:8088'` (localhost, not a LAN leak) → make it `${WEAVIATE_URL:-…}`.
   - **No LAN IPs (REDACTED_LAN_IP / REDACTED_LAN_IP), no `awareness123`, no `palios-taey-secrets`, no API keys in live code.**
 - **Leakage is concentrated in (a) DOCS and (b) `archive/`:**
-  - Docs with topology/IPs/display-map/VNC/the "undetectable" framing: `CLAUDE.md` (8), `systemd/README.md` (6), `STABILIZATION_FREEZE.md` (5), `FLOW_CONSULTATION_ENGINE.md` (3), `consultation_v2/DRIVER_CONTRACT.md` (2), `systemd/DISPLAY_REGISTRY.md` (2), `audit_logs/*.md`, `recaps/*.md`, `LICENSE.md` (3).
+  - Docs with topology/IPs/display-map/VNC mentions: `CLAUDE.md` (8), `systemd/README.md` (6), `STABILIZATION_FREEZE.md` (5), `FLOW_CONSULTATION_ENGINE.md` (3), `consultation_v2/DRIVER_CONTRACT.md` (2), `systemd/DISPLAY_REGISTRY.md` (2), `audit_logs/*.md`, `recaps/*.md`.
   - `archive/` = **390 tracked dead V1 files** (also the gitleaks FP source). `.gitignore` lists `archive/` but they were committed before that, so they're still tracked.
   - `CLAUDE.local.md` (fleet topology) is already `.gitignore`'d — good.
 
