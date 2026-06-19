@@ -9,11 +9,27 @@ from typing import Any, Callable, Optional
 from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
 from consultation_v2.platforms_runtime import get_platform_display
+from consultation_v2.tree import find_elements
 from .snapshot import build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
 
 logger = logging.getLogger(__name__)
+
+_POPUP_ROOT_ROLES = {'alert', 'banner', 'dialog'}
+_POPUP_DISMISS_NAMES = {
+    'close',
+    'dismiss',
+    'got it',
+    'maybe later',
+    'no thanks',
+    'not now',
+    'ok',
+    'okay',
+    'skip',
+    'x',
+    '×',
+}
 
 
 class ConsultationRuntime:
@@ -210,7 +226,7 @@ class ConsultationRuntime:
     ) -> Snapshot:
         required = max(1, int(consecutive))
         deadline = time.time() + timeout
-        last_count: int | None = None
+        last_signature: tuple[tuple[str, str, str, tuple[str, ...]], ...] | None = None
         stable = 0
         last_snapshot: Snapshot | None = None
 
@@ -219,11 +235,12 @@ class ConsultationRuntime:
             raw_count = int(last_snapshot.raw_count or 0)
             # Filtered count ignores excluded scan noise such as alerts/tooltips.
             stable_count = self._stable_tree_count(last_snapshot) if require_non_empty else raw_count
+            signature = self._stable_tree_signature(last_snapshot)
             anchor_ready = anchor_key is None or last_snapshot.has(anchor_key)
             non_empty_ready = not require_non_empty or (raw_count > 0 and stable_count > 0)
             ready = anchor_ready and non_empty_ready
-            if stable_count != last_count:
-                last_count = stable_count
+            if signature != last_signature:
+                last_signature = signature
                 stable = 1 if ready else 0
             elif ready:
                 stable += 1
@@ -244,9 +261,89 @@ class ConsultationRuntime:
             + len(snapshot.unknown or [])
         )
 
+    @staticmethod
+    def _stable_tree_signature(snapshot: Snapshot) -> tuple[tuple[str, str, str, tuple[str, ...]], ...]:
+        rows: list[tuple[str, str, str, tuple[str, ...]]] = []
+        for key, items in sorted((snapshot.mapped or {}).items()):
+            for element in items:
+                rows.append((
+                    f'mapped:{key}',
+                    element.role or '',
+                    element.name or '',
+                    tuple(sorted(str(state) for state in (element.states or []))),
+                ))
+        for bucket_name, items in (
+            ('sidebar', snapshot.sidebar or []),
+            ('menu', snapshot.menu_items or []),
+            ('unknown', snapshot.unknown or []),
+        ):
+            for element in items:
+                rows.append((
+                    bucket_name,
+                    element.role or '',
+                    element.name or '',
+                    tuple(sorted(str(state) for state in (element.states or []))),
+                ))
+        return tuple(sorted(rows))
+
     def menu_snapshot(self) -> Snapshot:
         _, _, snapshot = build_menu_snapshot(self.platform)
         return snapshot
+
+    def close_all_popups(self) -> int:
+        self.focus_firefox()
+        inp.press_key('Escape')
+        time.sleep(0.2)
+        clicked = 0
+        for _ in range(3):
+            candidate = self._generic_popup_dismiss_control()
+            if candidate is None:
+                break
+            if not atspi_click(candidate):
+                break
+            clicked += 1
+            time.sleep(0.3)
+        return clicked
+
+    def _generic_popup_dismiss_control(self) -> dict | None:
+        firefox = atspi.find_firefox_for_platform(self.platform)
+        if firefox is None:
+            return None
+        try:
+            elements = find_elements(firefox, fence_after=[])
+        except Exception:
+            return None
+        for element in elements:
+            role = str(element.get('role') or '').strip().lower()
+            name = str(element.get('name') or '').strip()
+            if role not in {'push button', 'button', 'menu item'}:
+                continue
+            if not self._is_generic_popup_dismiss_name(name):
+                continue
+            obj = element.get('atspi_obj')
+            if obj is not None and self._has_popup_ancestor(obj):
+                return element
+        return None
+
+    @staticmethod
+    def _is_generic_popup_dismiss_name(name: str) -> bool:
+        normalized = ' '.join((name or '').strip().lower().split())
+        return normalized in _POPUP_DISMISS_NAMES or normalized.startswith('close ')
+
+    @staticmethod
+    def _has_popup_ancestor(obj: Any) -> bool:
+        current = obj
+        for _ in range(20):
+            try:
+                role = str(current.get_role_name() or '').strip().lower()
+                if role in _POPUP_ROOT_ROLES:
+                    return True
+                current = current.get_parent()
+            except Exception:
+                return False
+            if current is None:
+                return False
+        return False
 
     # ------------------------------------------------------------------
     # Interaction primitives

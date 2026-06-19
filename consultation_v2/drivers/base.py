@@ -76,17 +76,42 @@ class BaseConsultationDriver(ABC):
     ) -> bool:
         surface = surface or ('base' if self._uses_identity_schema() else None)
         snap = snapshot or self._conformance_snapshot(surface)
-        discrepancies = [
-            {'role': item.role, 'name': item.name}
-            for item in (snap.unknown or [])
-        ]
-        missing = self._missing_expected_elements(snap, surface)
+        discrepancies, missing, by_role = self._conformance_findings(snap, surface)
         if not discrepancies and not missing:
             return True
-        by_role: dict[str, int] = {}
-        for item in discrepancies:
-            role = item['role'] or ''
-            by_role[role] = by_role.get(role, 0) + 1
+        if discrepancies:
+            dismissed = self.runtime.close_all_popups()
+            recovered_snap = self._conformance_snapshot(surface)
+            recovered_discrepancies, recovered_missing, recovered_by_role = (
+                self._conformance_findings(recovered_snap, surface)
+            )
+            if not recovered_discrepancies and not recovered_missing:
+                result.add_step(
+                    'popup_recovery',
+                    True,
+                    f'{self.platform} cleared transient popup drift on {surface or "unscoped"}',
+                    surface=surface,
+                    dismissed=dismissed,
+                    before_unknown=discrepancies,
+                    snapshot=recovered_snap.serializable(),
+                )
+                return True
+            snap = recovered_snap
+            discrepancies = recovered_discrepancies
+            missing = recovered_missing
+            by_role = recovered_by_role
+            if dismissed:
+                result.add_step(
+                    'popup_recovery',
+                    False,
+                    f'{self.platform} popup recovery ran but conformance drift persisted',
+                    surface=surface,
+                    dismissed=dismissed,
+                    unknown=discrepancies,
+                    missing=missing,
+                    by_role=by_role,
+                    snapshot=snap.serializable(),
+                )
         result.add_step(
             'tree_conformance',
             False,
@@ -103,10 +128,33 @@ class BaseConsultationDriver(ABC):
         )
         return False
 
+    def _conformance_findings(
+        self,
+        snapshot: Snapshot,
+        surface: str | None,
+    ) -> tuple[list[dict[str, str | None]], list[dict[str, object]], dict[str, int]]:
+        discrepancies = [
+            {'role': item.role, 'name': item.name}
+            for item in (snapshot.unknown or [])
+        ]
+        missing = self._missing_expected_elements(snapshot, surface)
+        by_role: dict[str, int] = {}
+        for item in discrepancies:
+            role = item['role'] or ''
+            by_role[role] = by_role.get(role, 0) + 1
+        return discrepancies, missing, by_role
+
     def _conformance_snapshot(self, surface: str | None) -> Snapshot:
         if surface == 'base':
             return self.runtime.wait_for_stable_snapshot(
                 anchor_key=self._conformance_anchor_key(surface),
+                require_non_empty=True,
+            )
+        if surface:
+            return self.runtime.wait_for_stable_menu_snapshot(
+                consecutive=2,
+                timeout=max(self._selection_settle_seconds() + 1.0, 3.0),
+                interval=0.2,
                 require_non_empty=True,
             )
         return self.runtime.snapshot()
@@ -568,6 +616,7 @@ class BaseConsultationDriver(ABC):
                 timeout=min(remaining, 0.8),
                 interval=0.2,
                 anchor_key=anchor_key,
+                require_non_empty=True,
             )
             if self._selection_base_snapshot_clean(last_snapshot, anchor_key):
                 return last_snapshot
@@ -696,12 +745,15 @@ class BaseConsultationDriver(ABC):
         return False
 
     def _selection_find_once(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        snapshot = self._selection_snapshot(scope)
+        snapshot = self._selection_stable_snapshot(scope, timeout=0.8, anchor_key=key)
         element = self.find_first(snapshot, key)
         if element is not None:
             return snapshot, element
-        time.sleep(self._selection_settle_seconds())
-        snapshot = self._selection_snapshot(scope)
+        snapshot = self._selection_stable_snapshot(
+            scope,
+            timeout=max(self._selection_settle_seconds(), 0.8),
+            anchor_key=key,
+        )
         return snapshot, self.find_first(snapshot, key)
 
     def _selection_snapshot(self, scope: str) -> Snapshot:
@@ -760,6 +812,7 @@ class BaseConsultationDriver(ABC):
                 timeout=timeout,
                 interval=0.2,
                 anchor_key=anchor_key,
+                require_non_empty=True,
             )
         if normalized == 'snapshot':
             return self.runtime.wait_for_stable_snapshot(
@@ -767,6 +820,7 @@ class BaseConsultationDriver(ABC):
                 timeout=timeout,
                 interval=0.2,
                 anchor_key=anchor_key,
+                require_non_empty=True,
             )
         raise ValueError(f'Unknown selection snapshot scope {scope!r}')
 
@@ -789,6 +843,7 @@ class BaseConsultationDriver(ABC):
                 consecutive=2,
                 timeout=min(remaining, 0.8),
                 interval=0.2,
+                require_non_empty=True,
             )
             trigger = self.find_first(last_snapshot, trigger_key)
             if trigger is not None and trigger.name.strip() in labels:
