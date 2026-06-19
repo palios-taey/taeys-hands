@@ -29,6 +29,8 @@ MATCH_SPEC_KEYS = frozenset({
     'name',
     'names_any_of',
     'role',
+    'scope',
+    'active_state',
     'states_include',
     'structural',
     'attributes',
@@ -37,6 +39,26 @@ MATCH_SPEC_KEYS = frozenset({
     'pick',
     'trigger_type',
     'select',
+})
+IDENTITY_SCHEMA = 'identity_v1'
+IDENTITY_ELEMENT_KEYS = frozenset({'name', 'role', 'scope', 'active_state'})
+IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
+IDENTITY_FORBIDDEN_KEYS = FORBIDDEN_MATCHER_KEYS | frozenset({
+    'names_any_of',
+    'states_include',
+    'best_effort',
+    'active',
+    'active_value',
+    'checked',
+    'selected',
+    'pressed',
+    'state',
+    'states',
+    'state_value',
+    'state_values',
+    'stored_state',
+    'value',
+    'stop_present',
 })
 VALIDATION_KEYS = frozenset({
     'indicators',
@@ -527,7 +549,69 @@ def _validate_extraction_specs(
             or not all(isinstance(item, str) and item for item in markers)
         ):
             _add(findings, lines, extraction_path + ('validate_markers',), 'validate_markers',
-                 'validate_markers must be a non-empty list of exact marker strings')
+                'validate_markers must be a non-empty list of exact marker strings')
+
+
+def _uses_identity_schema(data: dict[str, Any]) -> bool:
+    return data.get('schema') == IDENTITY_SCHEMA or (data.get('tree') or {}).get('schema') == IDENTITY_SCHEMA
+
+
+def _validate_identity_element_map(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    element_map: object,
+) -> None:
+    if not isinstance(element_map, dict) or not element_map:
+        _add(findings, lines, ('tree', 'element_map'), 'element_map',
+             'identity_v1 requires a non-empty tree.element_map')
+        return
+    for element_key, spec in element_map.items():
+        key_path = ('tree', 'element_map', str(element_key))
+        if not isinstance(spec, dict):
+            _add(findings, lines, key_path, str(element_key),
+                 'identity_v1 element entries must be mappings')
+            continue
+        for raw_key in spec:
+            key_name = str(raw_key)
+            if key_name not in IDENTITY_ELEMENT_KEYS:
+                _add(findings, lines, key_path + (key_name,), key_name,
+                     'identity_v1 element entries may only declare name, role, scope, and active_state')
+        for required in ('name', 'role', 'scope'):
+            value = spec.get(required)
+            if not isinstance(value, str) or not value or value != value.strip() or _has_wildcard(value):
+                _add(findings, lines, key_path + (required,), required,
+                     f'identity_v1 {required} must be an exact non-pattern string')
+        active_state = spec.get('active_state')
+        if active_state is not None:
+            if (
+                not isinstance(active_state, str)
+                or active_state not in IDENTITY_ACTIVE_STATES
+                or active_state != active_state.strip()
+            ):
+                _add(findings, lines, key_path + ('active_state',), 'active_state',
+                     f'identity_v1 active_state must be one of {sorted(IDENTITY_ACTIVE_STATES)}')
+
+
+def _validate_identity_yaml(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    data: dict[str, Any],
+    source: str,
+) -> None:
+    if ALLOW_RE in source:
+        for idx, line in enumerate(source.splitlines(), start=1):
+            if ALLOW_RE in line:
+                findings.append(ContractFinding(idx, 'lint-allow',
+                                                'identity_v1 forbids lint-allow escape hatches'))
+    if 'validation' in data:
+        _add(findings, lines, ('validation',), 'validation',
+             'identity_v1 deletes validation; read live state through active_state recognition rules')
+    for key_path, key in _iter_mapping_keys(data):
+        if key in IDENTITY_FORBIDDEN_KEYS:
+            _add(findings, lines, key_path, key,
+                 f'identity_v1 forbids stored/fuzzy matcher key {key!r}')
+    element_map = ((data.get('tree') or {}).get('element_map') or {})
+    _validate_identity_element_map(findings, lines, element_map)
 
 
 def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source: str) -> None:
@@ -536,21 +620,26 @@ def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source:
     lines = _yaml_key_lines(source)
     allowed_debt_lines = _allowed_debt_lines(source)
     findings: list[ContractFinding] = []
+    identity_schema = _uses_identity_schema(data)
+    if identity_schema:
+        _validate_identity_yaml(findings, lines, data, source)
+        _validate_extraction_specs(findings, lines, data)
+        allowed_debt_lines = set()
+    else:
+        element_map = ((data.get('tree') or {}).get('element_map') or {})
+        if isinstance(element_map, dict):
+            for element_key, spec in element_map.items():
+                _validate_match_spec(
+                    findings, lines, spec,
+                    ('tree', 'element_map', str(element_key)),
+                    str(element_key),
+                    element_map,
+                )
+        _validate_validation_specs(findings, lines, data)
+        _validate_extraction_specs(findings, lines, data)
     for key_path, key in _iter_mapping_keys(data):
         if key in FORBIDDEN_MATCHER_KEYS:
             _add(findings, lines, key_path, key, f'forbidden consultation_v2 matcher key {key!r}')
-
-    element_map = ((data.get('tree') or {}).get('element_map') or {})
-    if isinstance(element_map, dict):
-        for element_key, spec in element_map.items():
-            _validate_match_spec(
-                findings, lines, spec,
-                ('tree', 'element_map', str(element_key)),
-                str(element_key),
-                element_map,
-            )
-    _validate_validation_specs(findings, lines, data)
-    _validate_extraction_specs(findings, lines, data)
     findings = [finding for finding in findings if finding.line not in allowed_debt_lines]
 
     if findings:
@@ -567,7 +656,8 @@ def load_platform_yaml(platform: str) -> Dict[str, Any]:
     data = yaml.safe_load(source) or {}
     if not isinstance(data, dict):
         raise ValueError(f'{path.name} top-level YAML node must be a mapping')
-    required = ('platform', 'urls', 'tree', 'workflow', 'validation')
+    base_required = ('platform', 'urls', 'tree', 'workflow')
+    required = base_required if _uses_identity_schema(data) else base_required + ('validation',)
     missing = [key for key in required if key not in data]
     if missing:
         raise ValueError(f'{path.name} missing required keys: {missing}')

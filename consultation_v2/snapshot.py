@@ -589,6 +589,10 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
 
 
 def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
+    cfg = load_platform_yaml(platform)
+    chrome_cfg = _load_firefox_chrome_filter()
+    tree_cfg = dict(cfg.get('tree') or {})
+    prune_subtree_specs = _subtree_prune_specs(tree_cfg)
     # Clear desktop cache to discover new portal documents that appeared
     # since the last scan (dropdowns, overlays, file dialogs).
     try:
@@ -615,6 +619,29 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             doc.clear_cache_single()
         except Exception:
             pass
+
+    if tree_cfg.get('menu_snapshot_scan') == 'document_menu_roles':
+        role_filter = _role_set(
+            tree_cfg.get('menu_snapshot_roles')
+            or ['menu item', 'radio menu item', 'check menu item', 'option']
+        )
+        scan_root = doc if doc is not None else firefox
+        elements = find_elements(
+            scan_root,
+            fence_after=[],
+            prune_subtree_roles=(chrome_cfg.get('subtree_roles') or []) if doc is None else None,
+            prune_subtree_specs=prune_subtree_specs,
+        )
+        menu = [
+            item for item in elements
+            if (item.get('name') or '').strip()
+            and (item.get('role') or '').strip().lower() in role_filter
+        ]
+        menu = _dedupe_elements(menu)
+        menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
+        snapshot = _classify_elements(platform, menu, menu_items=menu, chrome_cfg=chrome_cfg)
+        snapshot.url = atspi.get_document_url(doc) if doc is not None else None
+        return firefox, doc, snapshot
 
     menu = find_menu_items(firefox, doc)
 

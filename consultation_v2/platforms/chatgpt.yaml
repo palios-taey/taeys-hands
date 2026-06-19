@@ -1,312 +1,310 @@
+schema: identity_v1
 platform: chatgpt
 click_strategy: xdotool_first
 urls:
-  # Bare chatgpt.com/ opens a new chat AND carries the real model selector
-  # ('Pro Extended'). NOTE: ?temporary-chat=true was tried and REVERTED — the
-  # temporary-chat page REMOVES the model selector (shows only a 'High' effort
-  # dropdown) so select_model fails. The stale-thread send false-positive is
-  # fixed by Stop-button send validation (16d4f67), not by the URL.
   fresh: https://chatgpt.com/
   verify_navigation: false
 tree:
+  schema: identity_v1
   fence_after: []
-  # Subtree prune sidebar containers before classification. We keep the standalone
-  # New chat link used by clean_composer, but structurally remove sidebar nav,
-  # mutable chat lists, and footer controls from conformance accounting.
+  menu_snapshot_scan: document_menu_roles
+  menu_snapshot_roles:
+    - menu item
+    - radio menu item
+    - check menu item
+    - option
   prune_subtrees:
-  - role: list
-    name: ""
-    ancestor:
-      role: landmark
-      name: Chat history
-    min_child_count: 2
-  - role: link
-    ancestor:
-      role: landmark
-      name: Chat history
-    min_child_count: 1
-  - role: push button
-    ancestor:
-      role: landmark
-      name: Chat history
-  - role: push button
-    names_any_of:
-    - Pinned
-    - Recents
-    ancestor:
-      role: landmark
-      name: Chat history
-  - role: push button
-    ancestor:
-      role: document web
-      name: ChatGPT
-    min_child_count: 4
-  exclude:
-    structural:
-    - role: push button
+    - role: list
+      name: ""
       ancestor:
         role: landmark
-        name: ""
-      ancestor_ordinal: first
-    - role: image
-      name: ""
-    - role: alert
-      name: ""
-    - role: static
-      ancestor:
-        role: heading
-    - role: push button
-      ancestor:
-        role: heading
+        name: Chat history
+      min_child_count: 3
+  exclude:
     names:
-    - Close sidebar
-    - Turn off temporary chat
-    - Start Voice
-    - Profile image
-    - ChatGPT
-    - Chat history
-    - Skip to content
+      - Skip to content
+      - Profile image
     roles:
-    - separator
-    - document web
-    - landmark
-    - heading
-    - section
-  sidebar_nav:
-  - name: Home
-    role: link
-  - names_any_of:
-    - New chat
-    - New chat Control Shift O
-    role: link
-  - name: Pulse
-    role: link
-  - name: Images
-    role: link
-  - name: Apps
-    role: link
-  - name: Deep research
-    role: link
-  - name: Codex
-    role: link
-  - name: GPTs
-    role: link
-  - name: Projects
-    role: push button
-  - name: Your chats
-    role: push button
+      - alert
+      - document web
+      - form
+      - heading
+      - image
+      - landmark
+      - list
+      - list item
+      - menu
+      - paragraph
+      - section
+      - separator
+      - static
+      - status bar
   element_map:
-    input:
-      names_any_of:
-      - Chat with ChatGPT
-      - Ask anything
-      role: entry
-      states_include:
-      - editable
-    composer_form:
-      name: ""
-      role: form
-    model_selector:
-      structural:
-        parent: composer_form
-        role: push button
-    attach_trigger:
-      name: Add files and more
+    home_link:
+      name: Home
+      role: link
+      scope: base.sidebar
+    close_sidebar:
+      name: Close sidebar
       role: push button
-    copy_button:
-      name: Copy response
+      scope: base.sidebar
+    temporary_chat_on:
+      name: Turn on temporary chat
       role: push button
-    stop_button:
-      names_any_of:
-      - Stop streaming
-      - Stop answering
+      scope: base.header
+    temporary_chat_off:
+      name: Turn off temporary chat
       role: push button
-    pro_indicator:
-      name: Pro Extended
-      role: push button
-    thinking_mode:
-      name: Pro Extended
-      role: push button
-    extended_pro:
-      name: Pro Extended
-      role: push button
+      scope: base.header
+    new_chat_shortcut:
+      name: New chat Control Shift O
+      role: link
+      scope: base.sidebar
     search_chats:
       name: Search chats Control K
       role: push button
+      scope: base.sidebar
+    library_link:
+      name: Library
+      role: link
+      scope: base.sidebar
+    projects_link:
+      name: Projects New project
+      role: link
+      scope: base.sidebar
+    new_project:
+      name: New project
+      role: push button
+      scope: base.sidebar
+    scheduled_link:
+      name: Scheduled
+      role: link
+      scope: base.sidebar
+    apps_link:
+      name: Apps
+      role: link
+      scope: base.sidebar
+    pinned_toggle:
+      name: Pinned
+      role: push button
+      scope: base.sidebar
+    recents_toggle:
+      name: Recents
+      role: push button
+      scope: base.sidebar
+    new_chat_recent:
+      name: New chat
+      role: link
+      scope: base.sidebar
+    organize_chats:
+      name: Organize chats
+      role: push button
+      scope: base.sidebar
+    profile_menu:
+      name: Jesse LaRose Pro, open profile menu
+      role: push button
+      scope: base.sidebar.footer
+    download_apps:
+      name: Download apps
+      role: push button
+      scope: base.sidebar.footer
+    attach_trigger:
+      name: Add files and more
+      role: push button
+      scope: base.composer
+    input_chat_with_chatgpt:
+      name: Chat with ChatGPT
+      role: entry
+      scope: base.composer
+    input_ask_anything:
+      name: Ask anything
+      role: entry
+      scope: base.composer
+    model_selector:
+      name: Pro
+      role: push button
+      scope: base.composer
     dictation:
       name: Start dictation
       role: push button
+      scope: base.composer
+    voice_button:
+      name: Start Voice
+      role: push button
+      scope: base.composer
     send_button:
       name: Send prompt
       role: push button
-    # New-chat link in the sidebar — clicking it FORCES a clean fresh chat so a
-    # restored stale draft / old file attachment / reopened temporary thread can
-    # never be sent (D1 clean-composer). Exact name+role from the live :2 scan
-    # (consultations/p2_map_chatgpt_exact.md line 40: sidebar links 'New chat'
-    # and 'New chat Control Shift O'). Both exact labels are valid live states.
-    new_chat:
-      names_any_of:
-      - New chat
-      - New chat Control Shift O
-      role: link
-    # --- Model selector dropdown items (Firefox root / menu_snapshot) ---
+      scope: base.composer
+    stop_streaming_button:
+      name: Stop streaming
+      role: push button
+      scope: response.generating
+    stop_answering_button:
+      name: Stop answering
+      role: push button
+      scope: response.generating
+    copy_button:
+      name: Copy response
+      role: push button
+      scope: response.actions
     model_instant:
       name: Instant
       role: radio menu item
-    model_thinking:
-      name: Medium
-      role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_medium:
       name: Medium
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_high:
       name: High
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_extra_high:
       name: Extra High
       role: radio menu item
+      scope: model_menu
+      active_state: checked
     model_pro:
-      name: Pro Extended
+      name: Pro
       role: radio menu item
-    # Bug 4 fixed: "Configure..." was present in live scan, missing from YAML
-    model_configure:
-      name: "Configure..."
+      scope: model_menu
+      active_state: checked
+    model_gpt_5_5:
+      name: GPT-5.5
       role: menu item
-    # --- Pro Extended thinking selector (Firefox root / menu_snapshot) ---
-    thinking_standard:
-      name: Standard
-      role: radio menu item
-    thinking_extended:
-      name: Extended
-      role: radio menu item
-    # --- Attach/+ dropdown items (Firefox root / menu_snapshot) ---
-    # Bug 1 fixed: was name:"Add photos and files" role:push button
-    # AT-SPI actual: [menu item] "Add photos & files Control U"
+      scope: model_menu
     tool_upload:
-      name: "Add photos & files Control U"
+      name: Add photos & files Control U
       role: menu item
+      scope: tools_menu
     tool_recent_files:
       name: Recent files
       role: menu item
-    # Re-baselined 2026-05-22 (live scan, "More" submenu EXPANDED).
-    # TOP-LEVEL items of the "Add files and more" menu:
+      scope: tools_menu
     tool_create_image:
       name: Create image
       role: radio menu item
+      scope: tools_menu
+      active_state: checked
     tool_deep_research:
       name: Deep research
       role: radio menu item
+      scope: tools_menu
+      active_state: checked
     tool_web_search:
       name: Web search
       role: radio menu item
+      scope: tools_menu
+      active_state: checked
     tool_more:
       name: More
       role: menu item
-      trigger_type: hover
-    # "More" SUBMENU items (must hover/click tool_more first to reveal these):
+      scope: tools_menu
+    tool_projects:
+      name: Projects
+      role: menu item
+      scope: tools_menu
     tool_agent_mode:
       name: Agent mode
       role: radio menu item
+      scope: more_submenu
+      active_state: checked
     tool_create_task:
       name: Create task
       role: radio menu item
+      scope: more_submenu
+      active_state: checked
     tool_finances:
       name: Finances
       role: radio menu item
+      scope: more_submenu
+      active_state: checked
     tool_github:
       name: GitHub
       role: radio menu item
+      scope: more_submenu
+      active_state: checked
     tool_gmail:
       name: Gmail
       role: radio menu item
+      scope: more_submenu
+      active_state: checked
     tool_openai_platform:
       name: OpenAI Platform
       role: radio menu item
-    # GitHub repo picker (after selecting tool_github, a chip + selector appear in
-    # the composer). Verified live 2026-05-22:
-    github_chip:
-      name: "GitHub, click to remove"
-      role: push button
-    github_repo_selector:
-      name: GitHub
-      role: push button
-    github_search_repos:
-      name: "Search repositories…"
-      role: menu item
-    github_configure_repos:
-      name: Configure Repositories
-      role: menu item
-    # Repo menu items are dynamic and must be mapped from a live exact inventory
-    # before connector repo selection is enabled in the clean driver.
+      scope: more_submenu
+      active_state: checked
 workflow:
   defaults:
     model: pro
     mode: pro
     tools: []
+  clean:
+    new_chat_keys:
+      - new_chat_recent
+      - new_chat_shortcut
   selection:
     model_targets:
       instant: model_instant
-      thinking: model_thinking
-      pro: model_pro
+      thinking: model_medium
       medium: model_medium
       high: model_high
       extra_high: model_extra_high
-    composite_modes:
-      pro_extended:
-      - trigger: model_selector
-        target: model_pro
-        verification: pro_active
-      - trigger: model_selector
-        target: thinking_extended
-        verification: pro_extended_active
-      extended_thinking:
-      - trigger: model_selector
-        target: model_pro
-        verification: pro_active
-      - trigger: model_selector
-        target: thinking_extended
-        verification: extended_thinking_active
-    # Re-baselined 2026-05-22. Top-level tools selectable directly; tools marked
-    # `via: tool_more` live in the "More" submenu (driver must click tool_more first).
+      pro: model_pro
+    composite_modes: {}
     tool_targets:
+      create_image: tool_create_image
       deep_research: tool_deep_research
       web_search: tool_web_search
-      create_image: tool_create_image
-      github: { target: tool_github, via: tool_more }
-      gmail: { target: tool_gmail, via: tool_more }
-      agent_mode: { target: tool_agent_mode, via: tool_more }
-  # GitHub repo connector flow (verified live 2026-05-22):
-  #  attach_trigger -> tool_more -> tool_github (activates tool) ->
-  #  github_repo_selector (push button) -> repo dropdown
-  #  (github_search_repos to filter; click github_repo_item "palios-taey/<repo>").
-  # INDEXING: repo items ending " Not indexed" must be indexed first via
-  # github_configure_repos (slow/async). Select an indexed repo to scope it.
-  connectors:
-    trigger: attach_trigger
-    enable_tool: { target: tool_github, via: tool_more }
-    repo_selector: github_repo_selector
-    repo_search: github_search_repos
-    repo_item_pattern: "palios-taey/{repo}"
-    not_indexed_suffix: " Not indexed"
-    configure: github_configure_repos
+      github:
+        target: tool_github
+        via: tool_more
+        via_action: hover
+      gmail:
+        target: tool_gmail
+        via: tool_more
+        via_action: hover
+      agent_mode:
+        target: tool_agent_mode
+        via: tool_more
+        via_action: hover
+      finances:
+        target: tool_finances
+        via: tool_more
+        via_action: hover
+      openai_platform:
+        target: tool_openai_platform
+        via: tool_more
+        via_action: hover
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
     open_method: keyboard_nav
   prompt:
-    input: input
-    send_button: send_button
+    input_keys:
+      - input_chat_with_chatgpt
+      - input_ask_anything
+    send_button_keys:
+      - send_button
   send:
-    trigger: send_button
     require_new_url: true
-    stop_key: stop_button
+    stop_keys:
+      - stop_streaming_button
+      - stop_answering_button
+    timeout: 30
   monitor:
-    stop_key: stop_button
+    stop_keys:
+      - stop_streaming_button
+      - stop_answering_button
     complete_key: copy_button
   extract:
     primary_key: copy_button
     strategy: last_by_y
-    hover_anchor_key: input
+    hover_anchor_key: input_chat_with_chatgpt
     hover_offset_y: 60
   extra_extract:
     strategy: none
@@ -315,69 +313,6 @@ settle:
   navigate_ms: 4000
   attach_ms: 3500
   rescan_attempts: 1
-validation:
-  attach_success:
-    file_chip:
-      roles:
-      - push button
-  prompt_ready:
-    indicators:
-    - name: Send prompt
-      role: push button
-  send_success:
-    indicators:
-    - names_any_of:
-      - Stop streaming
-      - Stop answering
-      role: push button
-    timeout: 30
-  response_complete:
-    stop_absent: stop_button
-  # pro_active: the model selector is present at the stable composer position.
-  # Its name is intentionally not asserted; the label flips with active state.
-  pro_active:
-    stop_present: model_selector
-  # pro_extended_active: Pro Extended is active.
-  pro_extended_active:
-    stop_present: model_selector
-  # instant_active: No persistent toolbar badge exists for Instant.
-  # Use best_effort + dropdown item check (open selector, verify item present).
-  # Driver opens the dropdown, finds the item, then closes — acceptable because
-  # best_effort: true means a miss here does not abort the run.
-  instant_active:
-    best_effort: true # lint-allow: known p5 debt; model active validation needs mapped persistent exact state
-    indicators:
-    - name: Instant
-      role: menu item
-  # thinking_active: No persistent toolbar badge exists for Thinking.
-  # Same best_effort + dropdown item approach as instant_active.
-  thinking_active:
-    best_effort: true # lint-allow: known p5 debt; mode active validation needs mapped persistent exact state
-    indicators:
-    - name: Medium
-      role: menu item
-  # extended_thinking_active: the same stable selector persists after selection.
-  extended_thinking_active:
-    stop_present: model_selector
-
-# ============================================================================
-# extraction — output-type -> ordered exact-matched workflow.
-# Schema + load-time validation: consultation_v2/yaml_contract.py
-# (EXTRACTION_OUTPUT_TYPES / EXTRACTION_STEP_ACTIONS); grammar doc:
-# consultation_v2/EXTRACTION_SCHEMA.md. Each step's `element` is an exact
-# element_map key; the strict loader rejects unknown output types, unknown step
-# actions, loose matchers, and missing element/validation keys, fail-loud at
-# load. Drivers consume this via get_extraction(); they are NOT rewritten here
-# (p4-assistant-text wires the runtime executor).
-#
-# Only assistant_text is mapped: production-proven path is captured answer-thread
-# URL reassertion, absolute bottom scroll, assistant-message lower-body hover to
-# mount `Copy response`, then lowest response Copy by y.
-# ChatGPT Deep Research Canvas / Download (artifact / downloaded_file) is documented in
-# EXTRACTION_PATTERNS.md but NOT wired in V2 — deliberately NOT declared here so
-# the engine stops rather than silently extracting the wrong surface. Mapping it
-# is the downstream p4-artifact task.
-# ============================================================================
 extraction:
   assistant_text:
     steps:
@@ -387,4 +322,3 @@ extraction:
         element: copy_button
         select: last
       - action: read_clipboard
-        validation: response_complete

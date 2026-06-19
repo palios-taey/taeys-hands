@@ -34,6 +34,37 @@ class BaseConsultationDriver(ABC):
     def find_last(self, snapshot: Snapshot, key: str) -> Optional[ElementRef]:
         return snapshot.last(key)
 
+    def element_active_state(self, key: str) -> str | None:
+        spec = self.cfg.get('tree', {}).get('element_map', {}).get(key, {})
+        state = spec.get('active_state') if isinstance(spec, dict) else None
+        return str(state).strip().lower() if state else None
+
+    def element_is_active(self, snapshot: Snapshot, key: str) -> bool:
+        active_state = self.element_active_state(key)
+        if not active_state:
+            return False
+        for element in snapshot.mapped.get(key) or []:
+            states = {str(state).lower() for state in (element.states or [])}
+            if active_state in states:
+                return True
+        return False
+
+    def active_element_key(self, snapshot: Snapshot, keys: Iterable[str]) -> str | None:
+        for key in keys:
+            if self.element_is_active(snapshot, key):
+                return key
+        return None
+
+    def snapshot_has_any(self, snapshot: Snapshot, keys: Iterable[str]) -> bool:
+        return any(snapshot.has(key) for key in keys)
+
+    def find_first_any(self, snapshot: Snapshot, keys: Iterable[str]) -> tuple[str | None, Optional[ElementRef]]:
+        for key in keys:
+            element = self.find_first(snapshot, key)
+            if element:
+                return key, element
+        return None, None
+
     def tree_conformance_gate(
         self,
         result: ConsultationResult,

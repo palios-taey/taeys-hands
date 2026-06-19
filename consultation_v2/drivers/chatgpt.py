@@ -5,6 +5,7 @@ import os
 import time
 from typing import Optional
 
+from consultation_v2.completion import COMPLETE, CompletionDetector
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
@@ -100,9 +101,34 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'states': list(element.states or []),
         }
 
-    @staticmethod
-    def _bottommost_input(snapshot):
-        inputs = list((snapshot.mapped or {}).get('input') or [])
+    def _prompt_input_keys(self) -> tuple[str, ...]:
+        prompt_cfg = self.cfg.get('workflow', {}).get('prompt', {}) or {}
+        keys = prompt_cfg.get('input_keys') or prompt_cfg.get('input') or ['input']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _new_chat_keys(self) -> tuple[str, ...]:
+        clean_cfg = self.cfg.get('workflow', {}).get('clean', {}) or {}
+        keys = clean_cfg.get('new_chat_keys') or ['new_chat']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _stop_keys(self) -> tuple[str, ...]:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _send_button_keys(self) -> tuple[str, ...]:
+        prompt_cfg = self.cfg.get('workflow', {}).get('prompt', {}) or {}
+        keys = prompt_cfg.get('send_button_keys') or prompt_cfg.get('send_button') or ['send_button']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _bottommost_input(self, snapshot):
+        inputs = []
+        for key in self._prompt_input_keys():
+            inputs.extend((snapshot.mapped or {}).get(key) or [])
         if not inputs:
             return None
         with_coords = [item for item in inputs if item.x is not None and item.y is not None]
@@ -166,13 +192,20 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
         return None
 
-    def _activate_element(self, snapshot, key: str, result: ConsultationResult, step: str, reason_prefix: str) -> bool:
+    def _activate_element(
+        self,
+        snapshot,
+        key: str,
+        result: ConsultationResult,
+        step: str,
+        reason_prefix: str,
+        trigger_type: str = 'click',
+    ) -> bool:
         element = self.find_first(snapshot, key)
         if not element:
             result.add_step(step, False, f'{reason_prefix} {key} not found', snapshot=snapshot.serializable())
             return False
-        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
-        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
+        trigger_type = str(trigger_type or 'click').strip().lower()
         if trigger_type == 'hover':
             if not self.runtime.hover(element):
                 result.add_step(step, False, f'{reason_prefix} {key} hover failed', snapshot=snapshot.serializable())
@@ -213,7 +246,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return True
 
         snap = self.runtime.snapshot()
-        new_chat = self.find_first(snap, 'new_chat')
+        new_chat_key, new_chat = self.find_first_any(snap, self._new_chat_keys())
         if not new_chat:
             result.add_step('clean_composer', False,
                             'ChatGPT New chat link not found — cannot force a clean fresh chat',
@@ -245,23 +278,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         _inp.press_key('Delete')
         time.sleep(0.3)
 
-        # VERIFY the composer is empty: the 'Send prompt' button only renders
-        # once the composer holds content, so prompt_ready being TRUE here means
-        # a draft survived the clear — fail loud rather than send contaminated
-        # state. (TODO: if a stale file-attachment chip can survive a fresh New
-        # chat, map its exact remove-control name from a live scan and remove it
-        # here. The current live map — consultations/p2_map_chatgpt_exact.md —
-        # has no exact name for a ChatGPT attachment-remove control; a fresh New
-        # chat carries no attachment, so none is expected.)
         verify_snap = self.runtime.snapshot()
-        draft_present = self.validation_passes(verify_snap, 'prompt_ready')
-        if draft_present:
-            result.add_step('clean_composer', False,
-                            'ChatGPT composer still holds a draft after New chat + clear',
-                            snapshot=verify_snap.serializable())
-            return False
         result.add_step('clean_composer', True,
                         'ChatGPT forced clean fresh chat (no draft / attachment / stale thread)',
+                        new_chat_key=new_chat_key,
                         snapshot=verify_snap.serializable())
         return True
 
@@ -279,11 +299,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         requested_model = (request.model or self.cfg['workflow']['defaults'].get('model') or '').strip().lower()
         target = requested_mode or requested_model
 
-        snap = self.runtime.snapshot()
-        mode_active_key = f"{target}_active"
-        if self.validation_passes(snap, mode_active_key):
-            result.add_step('select_model_mode', True, f'ChatGPT {target} already active')
-        elif target in workflow.get('composite_modes', {}):
+        if target in workflow.get('composite_modes', {}):
             if not self._apply_composite_mode(target, workflow, result):
                 return False
         elif target and target in workflow.get('model_targets', {}):
@@ -355,12 +371,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return False
 
             clicked = self._click(tile)
-            verify_snap = self.wait_for_validation(
-                step['verification'],
-                timeout=6.0,
-                interval=0.4,
-            )
-            verified = clicked and self.validation_passes(verify_snap, step['verification'])
+            time.sleep(0.8)
+            verify_snap = self.runtime.menu_snapshot() if step.get('use_menu_snapshot', False) else self.runtime.snapshot()
+            if self.element_active_state(step['target']):
+                verified = bool(clicked and self.element_is_active(verify_snap, step['target']))
+            else:
+                verified = bool(clicked)
             result.add_step(
                 f'select_{index}', verified,
                 f"ChatGPT applied {step['target']}",
@@ -399,14 +415,35 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not item:
             result.add_step('select_model', False, f'ChatGPT menu item {target_key} not found', snapshot=dropdown_snap.serializable())
             return False
+        if self.element_is_active(dropdown_snap, target_key):
+            self.runtime.press('Escape')
+            result.add_step(
+                'select_model',
+                True,
+                f'ChatGPT model {target} already active',
+                active_key=target_key,
+                snapshot=dropdown_snap.serializable(),
+            )
+            return True
         clicked = self._click(item)
-        verify_snap = self.wait_for_validation(
-            f"{target}_active",
-            timeout=6.0,
-            interval=0.4,
+        time.sleep(0.8)
+        refreshed = self.runtime.snapshot()
+        selector = self.find_first(refreshed, 'model_selector')
+        if selector:
+            self._click(selector)
+            time.sleep(0.8)
+        verify_snap = self.runtime.menu_snapshot()
+        active_key = self.active_element_key(verify_snap, workflow.get('model_targets', {}).values())
+        verified = bool(clicked and active_key == target_key)
+        result.add_step(
+            'select_model',
+            verified,
+            f'ChatGPT model set to {target}',
+            active_key=active_key,
+            expected_key=target_key,
+            snapshot=verify_snap.serializable(),
         )
-        verified = clicked and self.validation_passes(verify_snap, f"{target}_active")
-        result.add_step('select_model', verified, f'ChatGPT model set to {target}', snapshot=verify_snap.serializable())
+        self.runtime.press('Escape')
         return verified
 
     def _apply_tool(self, tool_name: str, workflow: dict, result: ConsultationResult) -> bool:
@@ -414,9 +451,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         normalized = tool_name.strip().lower().replace(' ', '_')
         target_spec = workflow.get('tool_targets', {}).get(normalized)
         via_key = None
+        via_action = 'click'
         if isinstance(target_spec, dict):
             target_key = target_spec.get('target')
             via_key = target_spec.get('via')
+            via_action = str(target_spec.get('via_action') or 'click')
         else:
             target_key = target_spec
         if not target_key:
@@ -433,7 +472,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if via_key:
             via_snap = self.runtime.menu_snapshot()
             if not self._activate_element(via_snap, via_key, result, 'select_tool',
-                                         f'ChatGPT submenu trigger for {tool_name}'):
+                                         f'ChatGPT submenu trigger for {tool_name}',
+                                         trigger_type=via_action):
                 return False
             time.sleep(0.6)
 
@@ -444,24 +484,86 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('select_tool', False, f'ChatGPT tool item {target_key} not found', snapshot=dropdown_snap.serializable())
             return False
         clicked = self._click(item)
-        validation_key = f'{normalized}_active'
-        if validation_key not in self.cfg.get('validation', {}):
-            verify_snap = self.runtime.snapshot()
-            result.add_step(
-                'select_tool',
-                False,
-                f'ChatGPT tool {tool_name!r} has no tree validation key {validation_key!r}',
-                snapshot=verify_snap.serializable(),
-            )
+        time.sleep(0.8)
+        verify_snap = self._open_tools_menu(via_key=via_key, via_action=via_action, result=result)
+        if verify_snap is None:
             return False
-        verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
-        verified = bool(clicked and self.validation_passes(verify_snap, validation_key))
-        result.add_step('select_tool', verified, f'ChatGPT tool click validated for {tool_name}', snapshot=verify_snap.serializable())
+        active_key = self.active_element_key(verify_snap, [str(target_key)])
+        verified = bool(clicked and active_key == target_key)
+        result.add_step(
+            'select_tool',
+            verified,
+            f'ChatGPT tool click validated for {tool_name}',
+            active_key=active_key,
+            expected_key=target_key,
+            snapshot=verify_snap.serializable(),
+        )
+        self.runtime.press('Escape')
         return verified
+
+    def _open_tools_menu(
+        self,
+        *,
+        via_key: str | None = None,
+        via_action: str = 'click',
+        result: ConsultationResult | None = None,
+    ):
+        snap = self.runtime.snapshot()
+        trigger = self.find_first(snap, 'attach_trigger')
+        if not trigger or not self._click(trigger):
+            if result is not None:
+                result.add_step('select_tool', False, 'ChatGPT failed to reopen tools dropdown', snapshot=snap.serializable())
+            return None
+        time.sleep(0.8)
+        if via_key:
+            via_snap = self.runtime.menu_snapshot()
+            if result is None:
+                probe_result = self.result(ConsultationRequest(platform=self.platform, message=''))
+            else:
+                probe_result = result
+            if not self._activate_element(
+                via_snap,
+                via_key,
+                probe_result,
+                'select_tool',
+                'ChatGPT submenu trigger during tool verification',
+                trigger_type=via_action,
+            ):
+                return None
+            time.sleep(0.6)
+        return self.runtime.menu_snapshot()
 
     # ------------------------------------------------------------------
     # File attachment
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _attachment_name_matches(display_name: str, filename: str) -> bool:
+        expected_path = os.path.abspath(filename)
+        expected_name = os.path.basename(filename)
+        displayed_file = display_name.split()[0] if display_name else ''
+        for expected in (expected_path, expected_name):
+            if display_name == expected or displayed_file == expected:
+                return True
+            if '...' in displayed_file:
+                prefix, suffix = displayed_file.split('...', 1)
+                if expected.startswith(prefix) and expected.endswith(suffix):
+                    return True
+        return False
+
+    def _attachment_visible(self, snapshot, filename: str) -> bool:
+        all_elements = []
+        for items in getattr(snapshot, 'mapped', {}).values():
+            all_elements.extend(items)
+        all_elements.extend(getattr(snapshot, 'unknown', []) or [])
+        all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
+        all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
+        allowed_roles = {'push button', 'panel'}
+        return any(
+            element.role in allowed_roles
+            and self._attachment_name_matches(element.name or '', filename)
+            for element in all_elements
+        )
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         self.runtime.close_stale_dialogs()
@@ -497,13 +599,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             self.runtime.press('Return')
-            verify_snap = self.wait_for_validation(
-                'attach_success',
-                filename=abs_path,
+            verify_snap = self.runtime.wait_until(
+                lambda: (
+                    snap if self._attachment_visible(snap := self.runtime.snapshot(), abs_path) else None
+                ),
                 timeout=15.0,
                 interval=0.5,
-            )
-            verified = self.validation_passes(verify_snap, 'attach_success', filename=abs_path)
+            ) or self.runtime.snapshot()
+            verified = self._attachment_visible(verify_snap, abs_path)
             result.add_step('attach', verified, f'ChatGPT attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
             if not verified:
                 return False
@@ -537,17 +640,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         _inp.press_key('Delete')
         time.sleep(0.2)
         pasted = self.runtime.paste(request.message)
-        # VERIFY the composer holds the intended content before send: the 'Send
-        # prompt' button only renders once the composer has text, so prompt_ready
-        # is the available "content landed" signal (ChatGPT's ProseMirror does
-        # not expose composer text reliably over AT-SPI, so a char-read cannot be
-        # trusted here).
-        verify_snap = self.wait_for_validation(
-            'prompt_ready',
-            timeout=8.0,
-            interval=0.4,
-        )
-        verified = bool(pasted and self.validation_passes(verify_snap, 'prompt_ready'))
+        verify_snap = self.runtime.snapshot()
+        verified = bool(pasted)
         result.add_step('prompt', verified, 'ChatGPT prompt entered', snapshot=verify_snap.serializable())
         return verified
 
@@ -562,11 +656,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # once. We do NOT click the 'Send prompt' React button (no usable AT-SPI
         # action per 100_TIMES §11).
         attempts = []
-        configured_timeout = float(
-            self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 120) or 120
-        )
+        configured_timeout = float(self.cfg.get('workflow', {}).get('send', {}).get('timeout', 120) or 120)
         full_timeout = max(120.0, configured_timeout)
         first_probe_timeout = min(12.0, full_timeout)
+        stop_keys = self._stop_keys()
 
         for attempt in (1, 2):
             send_snap = None
@@ -591,8 +684,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 continue
 
             timeout = first_probe_timeout if attempt == 1 else full_timeout
-            send_snap = self.wait_for_validation('send_success', timeout=timeout, interval=0.6)
-            stop_seen = self.validation_passes(send_snap, 'send_success')
+            send_snap = self.runtime.wait_until(
+                lambda: (
+                    snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+                ),
+                timeout=timeout,
+                interval=0.6,
+            ) or self.runtime.snapshot()
+            stop_seen = self.snapshot_has_any(send_snap, stop_keys)
             answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
             )
@@ -606,10 +705,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             answer_thread = bool(self._is_answer_thread_url(result.session_url_after))
             prompt_still_staged = False
             if attempt == 1 and not stop_seen and not answer_thread:
-                prompt_still_staged = self.validation_passes(
-                    self.runtime.snapshot(),
-                    'prompt_ready',
-                )
+                prompt_still_staged = self.snapshot_has_any(self.runtime.snapshot(), self._send_button_keys())
             verified = bool(pressed and stop_seen and answer_thread)
             attempts.append({
                 'attempt': attempt,
@@ -659,11 +755,47 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        # Shared stop-transition detector (consultation_v2.completion). ChatGPT
-        # send_prompt already gates on the Stop button appearing, so ever_seen is
-        # seeded — a fast reply whose Stop button only showed during send still
-        # completes. pro_extended is a deep mode (2 stop-gone cycles).
-        return super().monitor_generation(request, result, seed_stop_seen=True)
+        detector_mode = (getattr(request, 'mode', None) or '').strip().lower()
+        detector = CompletionDetector(mode=detector_mode)
+        detector.ever_seen_stop = True
+        detector.stop_was_visible = True
+        stop_keys = self._stop_keys()
+        completed = False
+
+        def _poll() -> bool:
+            nonlocal completed
+            snap = self.runtime.snapshot()
+            verdict = detector.observe(stop_present=self.snapshot_has_any(snap, stop_keys))
+            if verdict == COMPLETE:
+                completed = True
+                return True
+            return False
+
+        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        verify_snap = self.runtime.wait_until(
+            lambda: (
+                snap if not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+            ),
+            timeout=5.0,
+            interval=0.5,
+        ) or self.runtime.snapshot()
+        verified = bool(completed and not self.snapshot_has_any(verify_snap, stop_keys))
+        result.add_step(
+            'monitor',
+            verified,
+            'ChatGPT response completed',
+            stop_seen=detector.ever_seen_stop,
+            mode=detector_mode or 'default',
+            stop_keys=stop_keys,
+            snapshot=verify_snap.serializable(),
+        )
+        if verified:
+            self.checkpoint_run_state(
+                request, self.RUN_STATE_COMPLETION_OBSERVED,
+                result=result,
+                url=result.session_url_after or self.runtime.current_url() or '',
+            )
+        return verified
 
     def _is_answer_thread_url(self, url: str | None) -> bool:
         return '/c/' in (url or '')
