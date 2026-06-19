@@ -42,8 +42,11 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from redis.exceptions import WatchError
 
 from storage.redis_pool import node_key, get_client, NODE_ID
 
@@ -98,21 +101,51 @@ def _plan_lock_key() -> str:
     return f"taey:plan_active:{_display()}"
 
 
-def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 3600) -> bool:
+def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 3600) -> str | None:
     """Take the DISPLAY-scoped dispatch lock so the monitor will not cycle the
-    tab mid-setup. Returns True on success. Raises ConnectionError if Redis is
-    unreachable — a lock that cannot be taken is a loud failure, never a silent
-    "proceed without the lock"."""
+    tab mid-setup. Returns this owner's token on success, None if another owner
+    already holds the lock. Raises ConnectionError if Redis is unreachable — a
+    lock that cannot be taken is a loud failure, never a silent "proceed without
+    the lock"."""
     client = get_client()
-    body = json.dumps(payload or {"locked_at": datetime.now(timezone.utc).isoformat()})
-    return bool(client.setex(_plan_lock_key(), ttl, body))
+    record = dict(payload or {})
+    owner_token = str(record.get("owner_token") or uuid.uuid4())
+    record["owner_token"] = owner_token
+    record.setdefault("locked_at", datetime.now(timezone.utc).isoformat())
+    body = json.dumps(record)
+    acquired = client.set(_plan_lock_key(), body, ex=ttl, nx=True)
+    return owner_token if acquired else None
 
 
-def release_display_lock() -> bool:
+def release_display_lock(owner_token: str | None) -> bool:
     """Release the DISPLAY-scoped dispatch lock (send complete / step failed).
-    Returns True if a lock was present and removed, False if none was held."""
+    Returns True only if the lock still belongs to ``owner_token`` and was
+    removed. Never deletes a lock owned by another dispatch."""
+    if not owner_token:
+        return False
     client = get_client()
-    return bool(client.delete(_plan_lock_key()))
+    key = _plan_lock_key()
+    while True:
+        with client.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                raw = pipe.get(key)
+                if not raw:
+                    pipe.unwatch()
+                    return False
+                try:
+                    record = json.loads(raw)
+                except json.JSONDecodeError:
+                    record = {}
+                if record.get("owner_token") != owner_token:
+                    pipe.unwatch()
+                    return False
+                pipe.multi()
+                pipe.delete(key)
+                removed = pipe.execute()[0]
+                return bool(removed)
+            except WatchError:
+                continue
 
 
 def display_lock_held() -> bool:

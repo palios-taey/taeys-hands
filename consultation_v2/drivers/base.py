@@ -848,11 +848,11 @@ class BaseConsultationDriver(ABC):
     # ``self.platform`` (opaque data), request ids, and monitor ids.
     # ------------------------------------------------------------------
 
-    def acquire_display_lock(self, payload: Optional[dict] = None, ttl: int = 3600) -> bool:
+    def acquire_display_lock(self, payload: Optional[dict] = None, ttl: int = 3600) -> str | None:
         return primitives.acquire_display_lock(payload=payload, ttl=ttl)
 
-    def release_display_lock(self) -> bool:
-        return primitives.release_display_lock()
+    def release_display_lock(self, owner_token: str | None) -> bool:
+        return primitives.release_display_lock(owner_token)
 
     def write_run_state(self, request_id: str, state: dict, ttl: int = 7200) -> bool:
         return primitives.write_run_state(request_id, state, ttl=ttl)
@@ -925,21 +925,12 @@ class BaseConsultationDriver(ABC):
             'request_id': request.request_id(),
             'locked_at': datetime.now(timezone.utc).isoformat(),
         }
-        # setex with no NX is last-writer-wins, so guard against an already-held
-        # lock explicitly: if another consultation owns this display, do NOT
-        # acquire (and do NOT clobber its payload) — yield False so the caller
-        # stops. A stale lock would mean a prior dispatch crashed mid-setup
-        # without releasing; that is a loud halt condition for the operator to
-        # clear, never an auto-steal.
-        if primitives.display_lock_held():
-            yield False
-            return
-        acquired = primitives.acquire_display_lock(payload=payload)
+        owner_token = primitives.acquire_display_lock(payload=payload)
         try:
-            yield acquired
+            yield bool(owner_token)
         finally:
-            if acquired:
-                primitives.release_display_lock()
+            if owner_token:
+                primitives.release_display_lock(owner_token)
 
     # ------------------------------------------------------------------
     # Run-state idempotency (FLOW §8, CONSULTATION_CONTRACT §10)

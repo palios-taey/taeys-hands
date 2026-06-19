@@ -52,9 +52,13 @@ def push_notification(
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
         key = f'taey:{target}:notifications'
-        r.rpush(key, payload)
-        logger.info("Notification pushed to %s (plan=%s, status=%s)", key, plan_id, status)
-        return True
+        new_length = r.rpush(key, payload)
+        delivered = bool(new_length and int(new_length) > 0)
+        if delivered:
+            logger.info("Notification pushed to %s (plan=%s, status=%s)", key, plan_id, status)
+        else:
+            logger.error("Notification push to %s returned %r", key, new_length)
+        return delivered
     except Exception as exc:
         logger.error("Notification push failed: %s", exc)
         return False

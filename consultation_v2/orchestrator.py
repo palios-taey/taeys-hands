@@ -215,38 +215,70 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # (provenance), independent of who RECEIVES it (recipient), so a
     # operator-routed failure still records who the consult was for.
     delivered = bool(result.ok and result.response_text)
+    notification_delivered = False
     operator = os.environ.get('TAEY_NODE_ID') or 'taeys-hands'
     if delivered:
         # Success → deliver to the requester. With no requester, surface LOUDLY
         # rather than dropping (the GAIA->tutor orphan: result ready, nobody told).
         if request.requester:
-            try:
-                push_notification(
-                    requester=request.requester,
-                    platform=request.platform,
-                    status='completed',
+            notification_delivered = _push_notification_step(
+                result,
+                requester=request.requester,
+                recipient=None,
+                platform=request.platform,
+                status='completed',
+                plan_id=plan_id or 'unknown',
+                preview=(result.response_text or '')[:200],
+                purpose=request.purpose,
+                step_name='notify_requester',
+            )
+            if notification_delivered:
+                _write_notification_evidence(
+                    request,
+                    delivered=True,
+                    recipient=request.requester,
                     plan_id=plan_id or 'unknown',
-                    preview=(result.response_text or '')[:200],
-                    purpose=request.purpose,
                 )
-                # notification_evidence milestone (FLOW §8): the requester was
-                # notified of the delivered result.
-                try:
-                    primitives.write_run_state(
-                        request_id=request.request_id(),
-                        state={
-                            'status': 'notification_sent',
-                            'notification_evidence': {
-                                'requester': request.requester,
-                                'plan_id': plan_id or 'unknown',
-                            },
-                        },
-                    )
-                except Exception as exc:
-                    logger.error("Run-state notification checkpoint failed: %s", exc)
-            except Exception as exc:
-                logger.error("Notification failed: %s", exc)
+            else:
+                _park_notification_failure(
+                    request,
+                    result,
+                    recipient=request.requester,
+                    plan_id=plan_id or 'unknown',
+                    reason='requester notification delivery failed',
+                    preserve_extraction_done=True,
+                )
+                _push_notification_step(
+                    result,
+                    requester=request.requester,
+                    recipient=operator,
+                    platform=request.platform,
+                    status='failed',
+                    plan_id=plan_id or 'unknown',
+                    preview='Requester notification failed; result parked for attention.',
+                    purpose=request.purpose,
+                    step_name='notify_operator_delivery_failure',
+                )
         else:
+            _park_notification_failure(
+                request,
+                result,
+                recipient=None,
+                plan_id=plan_id or 'unknown',
+                reason='completed consultation has no requester',
+                preserve_extraction_done=True,
+            )
+            _push_notification_step(
+                result,
+                requester='unknown',
+                recipient=operator,
+                platform=request.platform,
+                status='failed',
+                plan_id=plan_id or 'unknown',
+                preview='Completed consultation has no requester; result parked for attention.',
+                purpose=request.purpose,
+                step_name='notify_operator_orphan_result',
+            )
             logger.warning(
                 "ORPHAN RISK: %s consultation (purpose=%r) completed with a result but NO "
                 "requester — result will not be routed to any session. Pass --requester.",
@@ -256,18 +288,26 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         # Failure → notify the operator (taeys-hands), NEVER the requester. The
         # original requester (or 'unknown') is stamped into the payload for
         # audit; the queue is the operator's so the driver sees the failure.
-        try:
-            push_notification(
-                requester=request.requester or 'unknown',
-                platform=request.platform,
-                status='failed',
-                plan_id=plan_id or 'unknown',
-                preview=(result.response_text or '')[:200],
-                purpose=request.purpose,
+        operator_notified = _push_notification_step(
+            result,
+            requester=request.requester or 'unknown',
+            recipient=operator,
+            platform=request.platform,
+            status='failed',
+            plan_id=plan_id or 'unknown',
+            preview=(result.response_text or '')[:200],
+            purpose=request.purpose,
+            step_name='notify_operator_failure',
+        )
+        if not operator_notified:
+            _park_notification_failure(
+                request,
+                result,
                 recipient=operator,
+                plan_id=plan_id or 'unknown',
+                reason='operator failure notification delivery failed',
+                preserve_extraction_done=False,
             )
-        except Exception as exc:
-            logger.error("Failure notification to operator failed: %s", exc)
 
     # ISMA ingestion (non-blocking)
     if result.ok and result.response_text:
@@ -293,7 +333,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # landed send (resume + re-extract) instead of re-sending the irreversible
     # turn. monitor_id is derived from the same stable request_id the driver
     # used to register, so deregistration targets the right session.
-    if delivered:
+    if delivered and notification_delivered:
         monitor_id = f'{request.platform}:{request.request_id()}'
         try:
             primitives.deregister_monitor_session(monitor_id)
@@ -313,3 +353,113 @@ def _extraction_method(result: ConsultationResult) -> str:
         if step.step == 'extract_primary' and step.success:
             return step.message
     return 'unknown'
+
+
+def _push_notification_step(
+    result: ConsultationResult,
+    *,
+    requester: str,
+    recipient: str | None,
+    platform: str,
+    status: str,
+    plan_id: str,
+    preview: str,
+    purpose: str | None,
+    step_name: str,
+) -> bool:
+    target = recipient or requester
+    try:
+        delivered = push_notification(
+            requester=requester,
+            platform=platform,
+            status=status,
+            plan_id=plan_id,
+            preview=preview,
+            purpose=purpose,
+            recipient=recipient,
+        )
+    except Exception as exc:
+        delivered = False
+        result.add_step(
+            step_name,
+            False,
+            f'Notification delivery to {target!r} raised: {exc}',
+            recipient=target,
+            status=status,
+            plan_id=plan_id,
+        )
+        logger.error("Notification delivery to %s raised: %s", target, exc)
+        return False
+    result.add_step(
+        step_name,
+        bool(delivered),
+        (
+            f'Notification delivered to {target!r}'
+            if delivered else f'Notification delivery to {target!r} failed'
+        ),
+        recipient=target,
+        status=status,
+        plan_id=plan_id,
+    )
+    return bool(delivered)
+
+
+def _write_notification_evidence(
+    request: ConsultationRequest,
+    *,
+    delivered: bool,
+    recipient: str,
+    plan_id: str,
+) -> None:
+    try:
+        primitives.write_run_state(
+            request_id=request.request_id(),
+            state={
+                'status': 'extraction_done',
+                'notification_evidence': {
+                    'delivered': delivered,
+                    'recipient': recipient,
+                    'plan_id': plan_id,
+                },
+                'needs_attention': False,
+            },
+        )
+    except Exception as exc:
+        logger.error("Run-state notification evidence checkpoint failed: %s", exc)
+
+
+def _park_notification_failure(
+    request: ConsultationRequest,
+    result: ConsultationResult,
+    *,
+    recipient: str | None,
+    plan_id: str,
+    reason: str,
+    preserve_extraction_done: bool,
+) -> None:
+    state = {
+        'notification_evidence': {
+            'delivered': False,
+            'recipient': recipient,
+            'plan_id': plan_id,
+            'reason': reason,
+        },
+        'needs_attention': True,
+        'parked_reason': reason,
+    }
+    if preserve_extraction_done:
+        state['status'] = 'extraction_done'
+    try:
+        primitives.write_run_state(
+            request_id=request.request_id(),
+            state=state,
+        )
+    except Exception as exc:
+        logger.error("Run-state notification failure park failed: %s", exc)
+    result.add_step(
+        'notification_parked',
+        False,
+        f'Notification failure parked for attention: {reason}',
+        recipient=recipient,
+        plan_id=plan_id,
+    )

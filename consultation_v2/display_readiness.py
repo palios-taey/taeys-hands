@@ -2,13 +2,15 @@
 
 Validation only: this module reports what is wrong and, where known, how to
 recover manually. It never closes windows, restarts displays, or mutates browser
-state.
+state. It temporarily scopes process AT-SPI environment while reading one
+display, then restores the caller's environment before returning.
 """
 from __future__ import annotations
 
 import os
 import re
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -18,6 +20,7 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 MACHINE_ENV = Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
 CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
+AT_SPI_ENV_KEYS = ('DISPLAY', 'AT_SPI_BUS_ADDRESS', 'DBUS_SESSION_BUS_ADDRESS')
 
 
 def _sh(cmd: str) -> subprocess.CompletedProcess[str]:
@@ -95,6 +98,22 @@ def _live_bus(display: str) -> str | None:
     return match.group(0) if match else None
 
 
+@contextmanager
+def _scoped_atspi_env(display: str, live_bus: str):
+    saved = {key: os.environ.get(key) for key in AT_SPI_ENV_KEYS}
+    os.environ['DISPLAY'] = display
+    os.environ['AT_SPI_BUS_ADDRESS'] = live_bus
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = live_bus
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def _viewable_windows(display: str) -> int:
     # Count only real visible windows: Firefox also keeps tiny internal windows
     # that may be IsViewable, so require real geometry as well.
@@ -116,7 +135,11 @@ def _viewable_windows(display: str) -> int:
 
 
 def _count_tabs_and_url(platform: str) -> tuple[int, str | None, int]:
-    """Return readable tree size, active URL, and real tab-strip page-tab count."""
+    """Return readable tree size, active URL, and real tab-strip page-tab count.
+
+    Caller must scope DISPLAY/AT_SPI_BUS_ADDRESS/DBUS_SESSION_BUS_ADDRESS to the
+    target display before calling.
+    """
     from consultation_v2.runtime import ConsultationRuntime
 
     runtime = ConsultationRuntime(platform)
@@ -211,34 +234,34 @@ def check(platform: str) -> dict[str, Any]:
             f'Restart display {display}; expected xprop -display {display} -root AT_SPI_BUS to expose a unix bus',
         )
 
-    os.environ['DISPLAY'] = display
+    total = 0
+    url = None
+    tabs = None
     if live_bus:
-        os.environ['AT_SPI_BUS_ADDRESS'] = live_bus
-        os.environ['DBUS_SESSION_BUS_ADDRESS'] = live_bus
-
-    try:
-        total, url, tabs = _count_tabs_and_url(platform)
-        if total < 5:
-            _add_issue(
-                issues,
-                resolutions,
-                f'L1: tree near-empty ({total} elems), accessibility registration likely broken',
-                f'Restart display {display} and confirm /tmp/a11y_bus_{display} matches xprop AT_SPI_BUS',
-            )
-    except Exception as exc:
-        return {
-            'platform': platform,
-            'display': display,
-            'ready': False,
-            'layer_failed': 'L1',
-            'issues': [f'L1: cannot read tree ({type(exc).__name__}: {exc})'],
-            'resolutions': [f'Restart display {display}; if it recurs, inspect Firefox/AT-SPI registration on that display'],
-            'windows': None,
-            'tabs': None,
-            'url': None,
-            'expected_host': _expected_host(platform),
-            'tree': 0,
-        }
+        try:
+            with _scoped_atspi_env(display, live_bus):
+                total, url, tabs = _count_tabs_and_url(platform)
+            if total < 5:
+                _add_issue(
+                    issues,
+                    resolutions,
+                    f'L1: tree near-empty ({total} elems), accessibility registration likely broken',
+                    f'Restart display {display} and confirm /tmp/a11y_bus_{display} matches xprop AT_SPI_BUS',
+                )
+        except Exception as exc:
+            return {
+                'platform': platform,
+                'display': display,
+                'ready': False,
+                'layer_failed': 'L1',
+                'issues': [f'L1: cannot read tree ({type(exc).__name__}: {exc})'],
+                'resolutions': [f'Restart display {display}; if it recurs, inspect Firefox/AT-SPI registration on that display'],
+                'windows': None,
+                'tabs': None,
+                'url': None,
+                'expected_host': _expected_host(platform),
+                'tree': 0,
+            }
 
     visible_windows = _viewable_windows(display)
     if visible_windows != 1:
@@ -257,7 +280,7 @@ def check(platform: str) -> dict[str, Any]:
         )
 
     expected_host = _expected_host(platform)
-    if not _host_matches(expected_host, url):
+    if live_bus and not _host_matches(expected_host, url):
         _add_issue(
             issues,
             resolutions,
