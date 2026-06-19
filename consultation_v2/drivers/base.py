@@ -546,7 +546,7 @@ class BaseConsultationDriver(ABC):
                 )
                 return current_snapshot, None
             next_key = str(path[index + 1]['element']) if index + 1 < len(path) else target_key
-            current_snapshot, next_element = self._selection_find_once(next_key, scope)
+            current_snapshot, next_element = self._selection_wait_for_path_anchor(next_key, scope)
             if next_element is None:
                 result.add_step(
                     'select',
@@ -571,6 +571,15 @@ class BaseConsultationDriver(ABC):
                 snapshot=current_snapshot.serializable(),
             )
         return current_snapshot, target
+
+    def _selection_wait_for_path_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
+        timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
+        snapshot = self._selection_stable_snapshot(
+            scope,
+            timeout=timeout,
+            anchor_key=key,
+        )
+        return snapshot, self.find_first(snapshot, key)
 
     def _activate_selection_path_element(self, element: ElementRef, action: str) -> bool:
         normalized = action.strip().lower()
@@ -631,19 +640,27 @@ class BaseConsultationDriver(ABC):
             last_target = self.find_first(last_snapshot, target_key)
         return last_snapshot, last_target, False
 
-    def _selection_stable_snapshot(self, scope: str, *, timeout: float) -> Snapshot:
+    def _selection_stable_snapshot(
+        self,
+        scope: str,
+        *,
+        timeout: float,
+        anchor_key: str | None = None,
+    ) -> Snapshot:
         normalized = scope.strip().lower()
         if normalized == 'menu_snapshot':
             return self.runtime.wait_for_stable_menu_snapshot(
                 consecutive=2,
                 timeout=timeout,
                 interval=0.2,
+                anchor_key=anchor_key,
             )
         if normalized == 'snapshot':
             return self.runtime.wait_for_stable_snapshot(
                 consecutive=2,
                 timeout=timeout,
                 interval=0.2,
+                anchor_key=anchor_key,
             )
         raise ValueError(f'Unknown selection snapshot scope {scope!r}')
 
