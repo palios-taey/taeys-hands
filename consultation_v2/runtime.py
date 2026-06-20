@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
@@ -296,11 +296,15 @@ class ConsultationRuntime:
         _, _, snapshot = build_menu_snapshot(self.platform)
         return snapshot
 
-    def close_all_popups(self) -> int:
+    def close_all_popups(
+        self,
+        *,
+        drift_controls: Optional[Iterable[ElementRef]] = None,
+    ) -> int:
         self.focus_firefox()
+        clicked = self._click_drift_dismiss_controls(drift_controls)
         inp.press_key('Escape')
         time.sleep(0.2)
-        clicked = 0
         for _ in range(3):
             candidate = self._generic_popup_dismiss_control()
             if candidate is None:
@@ -309,6 +313,23 @@ class ConsultationRuntime:
                 break
             clicked += 1
             time.sleep(0.3)
+        return clicked
+
+    def _click_drift_dismiss_controls(
+        self,
+        drift_controls: Optional[Iterable[ElementRef]],
+    ) -> int:
+        clicked = 0
+        for element in drift_controls or []:
+            role = (element.role or '').strip().lower()
+            name = (element.name or '').strip()
+            if role not in {'push button', 'button'}:
+                continue
+            if not self._is_generic_popup_dismiss_name(name):
+                continue
+            if self.click(element, strategy='atspi_first'):
+                clicked += 1
+                time.sleep(0.3)
         return clicked
 
     def _generic_popup_dismiss_control(self) -> dict | None:

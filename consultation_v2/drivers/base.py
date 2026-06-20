@@ -98,7 +98,8 @@ class BaseConsultationDriver(ABC):
         if not discrepancies and not missing:
             return True
         if discrepancies:
-            dismissed = self.runtime.close_all_popups()
+            drift_controls = snap.unknown if surface == 'base' else None
+            dismissed = self.runtime.close_all_popups(drift_controls=drift_controls)
             recovered_snap = self._conformance_snapshot(surface)
             recovered_discrepancies, recovered_missing, recovered_by_role = (
                 self._conformance_findings(recovered_snap, surface)
