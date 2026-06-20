@@ -11,16 +11,24 @@ _LOCK_DIR = os.path.expanduser('~/.taey')
 os.makedirs(_LOCK_DIR, exist_ok=True)
 
 _ENV = None
+_DISPLAY_ENV_KEYS = ('DISPLAY', 'XAUTHORITY')
 
 
 def _get_env() -> dict:
     global _ENV
     if _ENV is None:
         _ENV = {**os.environ}
+    for key in _DISPLAY_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            _ENV[key] = value
+        else:
+            _ENV.pop(key, None)
     return _ENV
 
 
 def set_display(display: str):
+    os.environ['DISPLAY'] = display
     _get_env()['DISPLAY'] = display
 
 
