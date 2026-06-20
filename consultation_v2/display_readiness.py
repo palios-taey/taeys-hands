@@ -69,6 +69,10 @@ def available_platforms() -> list[str]:
     return sorted(platform for platform in _machine_display_records() if platform in CHAT_PLATFORMS)
 
 
+def display_for_platform(platform: str) -> str | None:
+    return _display_for_platform(platform)
+
+
 def _display_for_platform(platform: str) -> str | None:
     record = _machine_display_records().get(platform)
     return record['display'] if record else None

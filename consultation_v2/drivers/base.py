@@ -13,6 +13,8 @@ from consultation_v2.completion import (
     CompletionDetector,
 )
 from consultation_v2 import primitives
+from consultation_v2.display_readiness import display_for_platform
+from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
@@ -1331,7 +1333,7 @@ class BaseConsultationDriver(ABC):
     # any setup/send step fails), so monitor/extract run UNLOCKED.
 
     def _display(self) -> str:
-        return os.environ.get('DISPLAY', ':0')
+        return display_for_platform(self.platform) or os.environ.get('DISPLAY', ':0')
 
     @contextmanager
     def _display_dispatch_lock(self, request: ConsultationRequest) -> Iterator[bool]:
@@ -1891,34 +1893,35 @@ class BaseConsultationDriver(ABC):
         The lock is released at the EXACT moment setup_and_send returns (the
         send-registered handoff) AND on any setup/send failure or exception
         (release-safe ``finally`` in ``_display_dispatch_lock``)."""
-        result = self.result(request)
-        if not self._gate_selection_plan(request, result):
+        with pause_display_watchdog(self.platform, self._display()):
+            result = self.result(request)
+            if not self._gate_selection_plan(request, result):
+                return result
+            with self._display_dispatch_lock(request) as owns_display:
+                if not owns_display:
+                    # Another consultation holds this display's dispatch lock. Per
+                    # FLOW §10 setup/send is sequential per display — do NOT race the
+                    # shared browser. Loud failure, not a silent skip or a wait-loop.
+                    result.add_step(
+                        'dispatch_lock', False,
+                        f'{self.platform} display {self._display()} dispatch lock is '
+                        f'already held by another consultation — setup/send is '
+                        f'sequential per display (FLOW §10); not racing the shared '
+                        f'browser/AT-SPI bus',
+                        display=self._display(),
+                    )
+                    return result
+                # --- LOCKED region: setup + send + monitor registration ----------
+                if not self.setup_and_send(request, result):
+                    # Setup/send failed; lock released by the context manager's
+                    # finally as the with-block exits. No monitor handoff happened.
+                    return result
+            # --- UNLOCKED region: monitor + extract + store ----------------------
+            # Reached only when setup_and_send returned True (send registered, monitor
+            # handed off). The display lock is now RELEASED (with-block exited), so a
+            # concurrent consultation may set up/send on this display while we monitor.
+            self.monitor_and_extract(request, result)
             return result
-        with self._display_dispatch_lock(request) as owns_display:
-            if not owns_display:
-                # Another consultation holds this display's dispatch lock. Per
-                # FLOW §10 setup/send is sequential per display — do NOT race the
-                # shared browser. Loud failure, not a silent skip or a wait-loop.
-                result.add_step(
-                    'dispatch_lock', False,
-                    f'{self.platform} display {self._display()} dispatch lock is '
-                    f'already held by another consultation — setup/send is '
-                    f'sequential per display (FLOW §10); not racing the shared '
-                    f'browser/AT-SPI bus',
-                    display=self._display(),
-                )
-                return result
-            # --- LOCKED region: setup + send + monitor registration ----------
-            if not self.setup_and_send(request, result):
-                # Setup/send failed; lock released by the context manager's
-                # finally as the with-block exits. No monitor handoff happened.
-                return result
-        # --- UNLOCKED region: monitor + extract + store ----------------------
-        # Reached only when setup_and_send returned True (send registered, monitor
-        # handed off). The display lock is now RELEASED (with-block exited), so a
-        # concurrent consultation may set up/send on this display while we monitor.
-        self.monitor_and_extract(request, result)
-        return result
 
     @abstractmethod
     def setup_and_send(
