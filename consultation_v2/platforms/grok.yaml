@@ -5,6 +5,11 @@ urls:
   verify_navigation: true
 tree:
   fence_after: []
+  menu_snapshot_roles:
+    - menu item
+    - radio menu item
+    - check menu item
+    - option
   menu_snapshot_exclude:
     names:
     - Undo
@@ -149,18 +154,26 @@ workflow:
     expert: model_expert
     heavy: model_heavy
   selection:
-    # Grok exposes one model selector; model_targets and mode_targets intentionally
-    # point to the same exact dropdown items so callers can request either field.
-    model_targets:
-      auto: model_auto
-      fast: model_fast
-      expert: model_expert
-      heavy: model_heavy
-    mode_targets:
-      auto: model_auto
-      fast: model_fast
-      expert: model_expert
-      heavy: model_heavy
+    menus:
+      model:
+        select: single
+        active_recognition: click_only
+        must_choose: true
+        resettable_on_followup: true
+        operate:
+          trigger: model_selector
+          scope: menu_snapshot
+        options:
+          auto:
+            element: model_auto
+          expert:
+            element: model_expert
+          fast:
+            element: model_fast
+          heavy:
+            element: model_heavy
+        default_for_fresh: auto
+        example_rationale: Use Auto when the caller wants Grok to choose between Fast and Expert for this consult.
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item

@@ -49,7 +49,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
 
         if not self.navigate(request, result):
             return False
-        if not self.select_mode(request, result):
+        if not self.apply_selection_plan(request, result):
             return False
         if not self.attach_files(request, result):
             return False
@@ -93,97 +93,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not navigated:
             return False
         return self.wait_for_page_ready_after_navigation(result)
-
-    # ------------------------------------------------------------------
-    # Step 2 — model / mode selection (state-checked, click ONCE, no skip-hack)
-    # ------------------------------------------------------------------
-    def select_mode(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        workflow = self.cfg['workflow']
-        defaults = workflow.get('defaults', {})
-        selection = workflow.get('selection', {})
-        mode_targets = selection.get('mode_targets', {})
-        model_targets = selection.get('model_targets', {})
-
-        requested_mode = request.selection_value('mode') or defaults.get('mode') or ''
-        requested_model = request.selection_value('model') or defaults.get('model') or ''
-        requested = requested_mode or requested_model
-        requested = str(requested).strip().lower()
-        if not requested:
-            result.add_step('select_mode', True, 'Grok using current/default model')
-            return True
-        target_map = mode_targets if requested_mode else model_targets
-        target_kind = 'mode' if requested_mode else 'model'
-        if requested not in target_map:
-            result.add_step('select_mode', False,
-                            f'Grok {target_kind} {requested!r} is not mapped in grok.yaml workflow.selection.{target_kind}_targets')
-            return False
-
-        item_key = target_map[requested]
-        active_validation_key = f'{requested}_active'
-
-        # ONE bounded readiness wait (DRIVER_CONTRACT §E — allowed: a single
-        # readiness wait before a SINGLE action). A cold navigate to the grok.com
-        # home page renders the composer/toolbar slower than a warm thread, so the
-        # model_selector may not be in the tree the instant navigate() returns.
-        # Re-SNAPSHOT here is observation (waiting for the page to render), NOT a
-        # retry of any action. After the page is ready we open the dropdown ONCE.
-        self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has('model_selector'),
-            timeout=12,
-            interval=0.5,
-        )
-
-        # Open the model dropdown ONCE (a single, necessary action — not a retry).
-        snap = self.runtime.snapshot()
-        selector = self.find_first(snap, 'model_selector')
-        if not selector:
-            result.add_step('select_mode', False, 'Grok model selector not found',
-                            snapshot=snap.serializable())
-            return False
-        if not self.runtime.click(selector):
-            result.add_step('select_mode', False, 'Grok model selector click failed',
-                            snapshot=snap.serializable())
-            return False
-
-        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the dropdown's menu
-        # items ("Heavy Team of Experts" etc.) render a beat after the selector
-        # click, so menu_snapshot() can fire before they exist. Re-SNAPSHOT here
-        # is observation while the portal renders; the selector is NOT re-clicked.
-        # Ready = the target item is present OR the current-mode active indicator
-        # already shows (the dropdown rendered with this mode selected).
-        self.runtime.wait_until(
-            lambda: (self.runtime.menu_snapshot().has(item_key)
-                     or self.validation_passes(self.runtime.menu_snapshot(), active_validation_key)),
-            timeout=10,
-            interval=0.4,
-        )
-
-        menu = self.runtime.menu_snapshot()
-
-        # State check: if the requested item is already the active model, do NOT
-        # click it — close the dropdown and report success.
-        if self.validation_passes(menu, active_validation_key):
-            self.runtime.press('Escape')
-            result.add_step('select_mode', True, f'Grok {requested} already active (no click)',
-                            snapshot=menu.serializable())
-            return True
-
-        item = self.find_first(menu, item_key)
-        if not item:
-            self.runtime.press('Escape')
-            result.add_step('select_mode', False,
-                            f'Grok model item {item_key!r} not found in dropdown',
-                            snapshot=menu.serializable())
-            return False
-        if not self.runtime.click(item):
-            self.runtime.press('Escape')
-            result.add_step('select_mode', False,
-                            f'Grok model item click failed for {item_key!r}',
-                            snapshot=menu.serializable())
-            return False
-
-        result.add_step('select_mode', True, f'Grok model set to {requested}')
-        return True
 
     # ------------------------------------------------------------------
     # Step 3 — attach (exact Attach -> menu_snapshot -> exact Upload a file,
@@ -252,11 +161,38 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 return False
 
             # GTK file dialog: focus it, type the absolute path, confirm ONCE.
-            self.runtime.focus_file_dialog()
-            self.runtime.press('ctrl+l')
+            if not self.runtime.focus_file_dialog():
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog did not focus for {abs_path}',
+                    snapshot=menu.serializable(),
+                )
+                return False
+            if not self.runtime.press('ctrl+l'):
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog location shortcut failed for {abs_path}',
+                )
+                return False
             if not self.runtime.paste(abs_path):
-                self.runtime.type_text(abs_path, delay_ms=5)
-            self.runtime.press('Return')
+                if not self.runtime.type_text(abs_path, delay_ms=5):
+                    result.add_step(
+                        'attach', False,
+                        f'Grok file dialog path entry failed for {abs_path}',
+                    )
+                    return False
+            if not self.runtime.focus_file_dialog():
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog lost focus before submit for {abs_path}',
+                )
+                return False
+            if not self.runtime.press('Return'):
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog submit failed for {abs_path}',
+                )
+                return False
 
             # ONE bounded readiness wait (DRIVER_CONTRACT §E — a single readiness
             # wait before a SINGLE action/check; NOT a retry of the upload). Grok
@@ -315,6 +251,14 @@ class GrokConsultationDriver(BaseConsultationDriver):
         input_el = self._focus_input()
         if not input_el:
             result.add_step('prompt', False, 'Grok input field not found',
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
+        if not self.runtime.press('ctrl+a'):
+            result.add_step('prompt', False, 'Grok prompt stale-draft select-all failed',
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
+        if not self.runtime.press('BackSpace'):
+            result.add_step('prompt', False, 'Grok prompt stale-draft clear failed',
                             snapshot=self.runtime.snapshot().serializable())
             return False
         if not self.runtime.paste(request.message):

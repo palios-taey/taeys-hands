@@ -774,6 +774,23 @@ class BaseConsultationDriver(ABC):
             return False
         time.sleep(0.3)
         self.runtime.press('Escape')
+        if active_state.strip().lower() == 'click_only':
+            closed_snapshot = self._selection_wait_for_menu_closed()
+            closed = int(closed_snapshot.raw_count or 0) == 0
+            result.add_step(
+                'select',
+                closed,
+                (
+                    f'{self.platform} selected {menu}={option}'
+                    if closed
+                    else f'{self.platform} {menu}={option} click landed but menu surface stayed open'
+                ),
+                menu=menu,
+                option=option,
+                confirmation='click_only_menu_closed',
+                snapshot=closed_snapshot.serializable(),
+            )
+            return closed
         if active_element_key:
             active_snapshot, active_present = self._selection_wait_for_active_element(active_element_key)
             result.add_step(
@@ -1097,6 +1114,8 @@ class BaseConsultationDriver(ABC):
         normalized = active_recognition.strip().lower()
         if normalized == 'selected_name_prefix':
             return (element.name or '').strip().lower().startswith('selected ')
+        if normalized == 'click_only':
+            return False
         return self._selection_element_has_state(element, normalized)
 
     def _selection_wait_for_active_state(

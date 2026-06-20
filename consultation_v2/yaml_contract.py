@@ -51,7 +51,7 @@ IDENTITY_ELEMENT_KEYS = frozenset({
     'reason',
 })
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
-MENU_ACTIVE_RECOGNITIONS = IDENTITY_ACTIVE_STATES | frozenset({'selected_name_prefix'})
+MENU_ACTIVE_RECOGNITIONS = IDENTITY_ACTIVE_STATES | frozenset({'selected_name_prefix', 'click_only'})
 IDENTITY_MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
 IDENTITY_STRUCTURAL_KEYS = frozenset({'after', 'before'})
 MENU_SELECTION_KEYS = frozenset({'menus'})
