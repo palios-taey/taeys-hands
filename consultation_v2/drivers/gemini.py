@@ -42,6 +42,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             )
             if not navigated:
                 return False
+            if not self.wait_for_page_ready_after_navigation(result):
+                return False
         if not self.select_model_mode_tools(request, result):
             return False
         if not self.attach_files(request, result):

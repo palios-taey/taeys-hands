@@ -224,6 +224,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             )
             if not navigated:
                 return False
+            if not self.wait_for_page_ready_after_navigation(result):
+                return False
         if not self.tree_conformance_gate(result):
             return False
         if not self.apply_selection_plan(request, result):

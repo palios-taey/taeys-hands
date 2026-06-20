@@ -43,6 +43,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('navigate', navigated, 'Navigated to ChatGPT session target', target_url=target_url, snapshot=snap.serializable())
             if not navigated:
                 return False
+            if not self.wait_for_page_ready_after_navigation(result):
+                return False
         if not self.tree_conformance_gate(result):
             return False
 

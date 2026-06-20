@@ -90,7 +90,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         result.add_step('navigate', navigated, 'Navigated to Grok target',
                         target_url=target_url, snapshot=snap.serializable())
-        return navigated
+        if not navigated:
+            return False
+        return self.wait_for_page_ready_after_navigation(result)
 
     # ------------------------------------------------------------------
     # Step 2 — model / mode selection (state-checked, click ONCE, no skip-hack)

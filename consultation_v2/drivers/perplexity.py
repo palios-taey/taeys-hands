@@ -47,6 +47,8 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             if not navigated:
                 return False
+            if not self.wait_for_page_ready_after_navigation(result):
+                return False
         if not self._wait_for_prompt_ready(result):
             return False
         if not self.select_model_mode_tools(request, result):

@@ -251,6 +251,184 @@ class BaseConsultationDriver(ABC):
             missing.append(payload)
         return missing
 
+    def wait_for_page_ready_after_navigation(
+        self,
+        result: ConsultationResult,
+        *,
+        timeout: float = 15.0,
+    ) -> bool:
+        timeout = max(float(timeout), 15.0)
+        groups = self._page_ready_key_groups()
+        started = time.time()
+        deadline = started + timeout
+        anchor_key = self._page_ready_anchor_key(groups)
+        last_snapshot: Snapshot | None = None
+        missing = self._page_ready_group_labels(groups)
+
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(remaining, 1.2),
+                interval=0.25,
+                anchor_key=anchor_key,
+                require_non_empty=True,
+            )
+            missing = self._page_ready_missing_groups(last_snapshot, groups)
+            if not missing:
+                elapsed = round(time.time() - started, 2)
+                result.add_step(
+                    'page_ready',
+                    True,
+                    f'{self.platform} page ready after navigation',
+                    required=self._page_ready_group_labels(groups),
+                    optional_present=self._page_ready_present_optional_keys(last_snapshot),
+                    elapsed_seconds=elapsed,
+                    snapshot=last_snapshot.serializable(),
+                )
+                return True
+            time.sleep(0.25)
+
+        snapshot = last_snapshot or self.runtime.snapshot()
+        result.add_step(
+            'page_ready',
+            False,
+            f'{self.platform} page did not expose required controls after navigation',
+            required=self._page_ready_group_labels(groups),
+            missing=missing,
+            optional_present=self._page_ready_present_optional_keys(snapshot),
+            timeout_seconds=timeout,
+            snapshot=snapshot.serializable(),
+        )
+        return False
+
+    def _page_ready_key_groups(self) -> tuple[tuple[str, ...], ...]:
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return ()
+        groups: list[tuple[str, ...]] = []
+        seen: set[tuple[str, ...]] = set()
+
+        def add_group(keys: Iterable[str]) -> None:
+            group = tuple(
+                key
+                for key in dict.fromkeys(str(key).strip() for key in keys if str(key).strip())
+                if key in element_map
+            )
+            if group and group not in seen:
+                seen.add(group)
+                groups.append(group)
+
+        for key in self._expected_keys_for_surface('base'):
+            add_group((key,))
+
+        for key in self._selection_trigger_keys():
+            add_group((key,))
+
+        input_keys = self._workflow_prompt_keys(
+            'input',
+            'input_fallback',
+            'input_keys',
+            'input_candidates',
+        )
+        add_group(input_keys)
+
+        attachment = (self.cfg.get('workflow') or {}).get('attachment') or {}
+        trigger = attachment.get('trigger') if isinstance(attachment, dict) else None
+        if isinstance(trigger, str):
+            add_group((trigger,))
+
+        return tuple(groups)
+
+    def _selection_trigger_keys(self) -> tuple[str, ...]:
+        workflow = self.cfg.get('workflow') or {}
+        selection = workflow.get('selection') or {}
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(selection, dict) or not isinstance(element_map, dict):
+            return ()
+        keys: list[str] = []
+        menus = selection.get('menus')
+        if isinstance(menus, dict):
+            for menu in menus.values():
+                if not isinstance(menu, dict):
+                    continue
+                operate = menu.get('operate') or {}
+                if isinstance(operate, dict) and isinstance(operate.get('trigger'), str):
+                    keys.append(operate['trigger'])
+
+        model_targets = selection.get('model_targets')
+        mode_targets = selection.get('mode_targets')
+        tool_targets = selection.get('tool_targets')
+        if isinstance(model_targets, dict) and model_targets:
+            if 'mode_picker' in element_map:
+                keys.append('mode_picker')
+            elif 'model_selector' in element_map:
+                keys.append('model_selector')
+        if isinstance(mode_targets, dict) and mode_targets:
+            if isinstance(model_targets, dict) and model_targets and 'model_selector' in element_map:
+                keys.append('model_selector')
+            elif 'attach_trigger' in element_map:
+                keys.append('attach_trigger')
+            elif 'mode_picker' in element_map:
+                keys.append('mode_picker')
+        if isinstance(tool_targets, dict) and tool_targets:
+            if 'tools_button' in element_map:
+                keys.append('tools_button')
+            elif 'upload_menu' in element_map:
+                keys.append('upload_menu')
+            elif 'attach_trigger' in element_map:
+                keys.append('attach_trigger')
+        return tuple(dict.fromkeys(keys))
+
+    def _workflow_prompt_keys(self, *names: str) -> tuple[str, ...]:
+        prompt = (self.cfg.get('workflow') or {}).get('prompt') or {}
+        if not isinstance(prompt, dict):
+            return ()
+        keys: list[str] = []
+        for name in names:
+            value = prompt.get(name)
+            if isinstance(value, str):
+                keys.append(value)
+            elif isinstance(value, list):
+                keys.extend(str(item) for item in value if isinstance(item, str))
+        return tuple(dict.fromkeys(key for key in keys if key))
+
+    def _page_ready_optional_keys(self) -> tuple[str, ...]:
+        return self._workflow_prompt_keys('send_button', 'send_button_keys')
+
+    def _page_ready_present_optional_keys(self, snapshot: Snapshot) -> list[str]:
+        return [
+            key for key in self._page_ready_optional_keys()
+            if snapshot.has(key)
+        ]
+
+    @staticmethod
+    def _page_ready_group_labels(groups: tuple[tuple[str, ...], ...]) -> list[str]:
+        return [
+            group[0] if len(group) == 1 else '|'.join(group)
+            for group in groups
+        ]
+
+    def _page_ready_missing_groups(
+        self,
+        snapshot: Snapshot,
+        groups: tuple[tuple[str, ...], ...],
+    ) -> list[str]:
+        return [
+            group[0] if len(group) == 1 else '|'.join(group)
+            for group in groups
+            if not any(snapshot.has(key) for key in group)
+        ]
+
+    @staticmethod
+    def _page_ready_anchor_key(groups: tuple[tuple[str, ...], ...]) -> str | None:
+        for group in groups:
+            if len(group) == 1:
+                return group[0]
+        if groups and groups[0]:
+            return groups[0][0]
+        return None
+
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
         validations = self.cfg.get('validation', {})
         if validation_key not in validations:
@@ -765,7 +943,7 @@ class BaseConsultationDriver(ABC):
         return current_snapshot, target
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
+        timeout = max(self._selection_settle_seconds() + 1.0, 15.0)
         snapshot = self._selection_stable_snapshot(
             scope,
             timeout=timeout,
