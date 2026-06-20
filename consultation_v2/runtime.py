@@ -30,10 +30,6 @@ _POPUP_DISMISS_NAMES = {
     'x',
     '×',
 }
-_FILE_DIALOG_TITLES = {'file upload', 'open', 'open file'}
-_FILE_DIALOG_ROOT_ROLES = {'dialog', 'file chooser', 'frame', 'window'}
-_FILE_DIALOG_OPEN_ROLES = {'push button', 'button'}
-
 
 class ConsultationRuntime:
     def __init__(self, platform: str):
@@ -134,63 +130,6 @@ class ConsultationRuntime:
             except Exception:
                 pass
         logger.warning("focus_file_dialog: no file dialog window found")
-        return False
-
-    def click_file_dialog_open_button(self) -> bool:
-        """Click the exact GTK file dialog ``Open`` button."""
-        self._sync_platform_io_display()
-        if not self.focus_file_dialog():
-            return False
-        try:
-            import gi
-            gi.require_version("Atspi", "2.0")
-            from gi.repository import Atspi as _Atspi
-
-            desktop = _Atspi.get_desktop(0)
-            desktop.clear_cache_single()
-            elements = find_elements(desktop, fence_after=[])
-        except Exception as exc:
-            logger.warning("click_file_dialog_open_button: scan failed: %s", exc)
-            return False
-        for element in elements:
-            if not self._is_file_dialog_open_button(element):
-                continue
-            if atspi_click(element):
-                logger.info("click_file_dialog_open_button: clicked Open via AT-SPI")
-                time.sleep(0.5)
-                return True
-            x = element.get('x')
-            y = element.get('y')
-            if x is not None and y is not None and inp.click_at(int(x), int(y)):
-                logger.info("click_file_dialog_open_button: clicked Open at (%s,%s)", x, y)
-                time.sleep(0.5)
-                return True
-        logger.warning("click_file_dialog_open_button: exact Open button not found")
-        return False
-
-    @classmethod
-    def _is_file_dialog_open_button(cls, element: dict[str, Any]) -> bool:
-        name = str(element.get('name') or '').strip()
-        role = str(element.get('role') or '').strip().lower()
-        if name != 'Open' or role not in _FILE_DIALOG_OPEN_ROLES:
-            return False
-        obj = element.get('atspi_obj')
-        return obj is not None and cls._has_file_dialog_ancestor(obj)
-
-    @classmethod
-    def _has_file_dialog_ancestor(cls, obj: Any) -> bool:
-        current = obj
-        for _ in range(30):
-            try:
-                name = str(current.get_name() or '').strip().lower()
-                role = str(current.get_role_name() or '').strip().lower()
-                if name in _FILE_DIALOG_TITLES and role in _FILE_DIALOG_ROOT_ROLES:
-                    return True
-                current = current.get_parent()
-            except Exception:
-                return False
-            if current is None:
-                return False
         return False
 
     # ------------------------------------------------------------------

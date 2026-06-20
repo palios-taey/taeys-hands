@@ -312,9 +312,14 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             file=abs_path)
             return False
         time.sleep(0.3)
-        if not self.runtime.click_file_dialog_open_button():
+        if not self.runtime.focus_file_dialog():
             result.add_step('attach', False,
-                            f'Claude file dialog Open button click failed for {abs_path}',
+                            f'Claude file dialog lost focus before submit for {abs_path}',
+                            file=abs_path)
+            return False
+        if not self.runtime.press('Return'):
+            result.add_step('attach', False,
+                            f'Claude file dialog Return submit failed for {abs_path}',
                             file=abs_path)
             return False
         verify_snap = self._wait_for_attach_success(abs_path)
@@ -326,7 +331,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                         method='file_upload_dialog',
                         trigger=trigger_key,
                         menu_target=upload_key,
-                        open_button_clicked=True,
+                        dialog_submit='return',
                         chip_name=chip_name,
                         snapshot=verify_snap.serializable())
         return verified
