@@ -50,10 +50,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         self,
         snapshot: Snapshot,
         baseline_names: set[str],
+        elements: list[ElementRef] | None = None,
     ) -> set[str]:
+        candidates = elements if elements is not None else self._snapshot_elements(snapshot)
         return {
             name
-            for element in self._snapshot_elements(snapshot)
+            for element in candidates
             if (name := (element.name or '').strip())
             and name not in baseline_names
             and self._looks_like_paste_chip(element, name)
@@ -103,10 +105,84 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         ]
         if snapshot.has('send_button'):
             blockers.append('composer_send_button_present')
-        chip_names = sorted(self._paste_chip_names(snapshot, set()))
+        chip_names = sorted(self._paste_chip_names(
+            snapshot,
+            set(),
+            elements=self._composer_scope_elements(snapshot),
+        ))
         if chip_names:
             blockers.append('composer_paste_chip_present:' + ', '.join(chip_names[:3]))
         return blockers
+
+    def _composer_scope_elements(self, snapshot: Snapshot) -> list[ElementRef]:
+        root = self._composer_scope_root(snapshot)
+        if root is None:
+            return []
+        return [
+            element
+            for element in self._snapshot_elements(snapshot)
+            if self._element_descends_from(element, root)
+        ]
+
+    def _composer_scope_root(self, snapshot: Snapshot):
+        objects = [
+            element.atspi_obj
+            for key in self._composer_scope_keys()
+            for element in (snapshot.mapped.get(key) or [])
+            if element.atspi_obj is not None
+        ]
+        paths = [path for obj in objects if (path := self._atspi_path_to_root(obj))]
+        if not paths:
+            return None
+        if len(paths) == 1:
+            root = paths[0][1] if len(paths[0]) > 1 else paths[0][0]
+            return None if self._is_broad_scope_root(root) else root
+        for candidate in paths[0]:
+            if all(any(candidate == other for other in path) for path in paths[1:]):
+                return None if self._is_broad_scope_root(candidate) else candidate
+        return None
+
+    def _composer_scope_keys(self) -> tuple[str, ...]:
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return ()
+        keys: list[str] = []
+        for key, spec in element_map.items():
+            if not isinstance(spec, dict):
+                continue
+            scope = str(spec.get('scope') or '').strip().lower()
+            if scope == 'base.composer' or scope.startswith('base.composer.'):
+                keys.append(str(key))
+        return tuple(keys)
+
+    @staticmethod
+    def _atspi_path_to_root(obj) -> list[object]:
+        path: list[object] = []
+        current = obj
+        for _ in range(60):
+            if current is None:
+                break
+            path.append(current)
+            try:
+                current = current.get_parent()
+            except Exception:
+                break
+        return path
+
+    @classmethod
+    def _element_descends_from(cls, element: ElementRef, root) -> bool:
+        obj = element.atspi_obj
+        if obj is None:
+            return False
+        return any(candidate == root for candidate in cls._atspi_path_to_root(obj))
+
+    @staticmethod
+    def _is_broad_scope_root(root) -> bool:
+        try:
+            role = str(root.get_role_name() or '').strip().lower()
+        except Exception:
+            return False
+        return role in {'application', 'document web', 'frame', 'window'}
 
     def _read_input_text(self) -> str:
         snapshot = self.runtime.snapshot()
