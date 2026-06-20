@@ -241,6 +241,7 @@ def _step(
         'operate': dict(menu['operate']),
         'element': option['element'],
         'active_element': option.get('active_element'),
+        'click_strategy': option.get('click_strategy'),
         'path': [dict(item) for item in option.get('path') or []],
         'skip': False,
     }

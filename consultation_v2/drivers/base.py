@@ -721,6 +721,7 @@ class BaseConsultationDriver(ABC):
         trigger_key = str(operate['trigger'])
         target_key = str(step['element'])
         active_element_key = str(step.get('active_element') or '').strip()
+        click_strategy = str(step.get('click_strategy') or 'atspi_only')
         path = list(step.get('path') or [])
         first_key = str(path[0]['element']) if path else target_key
 
@@ -762,13 +763,14 @@ class BaseConsultationDriver(ABC):
                 snapshot=target_snapshot.serializable(),
             )
             return True
-        if not self.runtime.click(target, strategy='atspi_only'):
+        if not self.runtime.click(target, strategy=click_strategy):
             result.add_step(
                 'select',
                 False,
                 f'{self.platform} {menu}={option} click failed',
                 menu=menu,
                 option=option,
+                click_strategy=click_strategy,
                 snapshot=target_snapshot.serializable(),
             )
             return False

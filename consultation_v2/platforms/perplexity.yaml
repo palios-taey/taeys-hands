@@ -7,6 +7,11 @@ tree:
   # fence_after disabled — Deep Research and input controls appear AFTER
   # sidebar history in AT-SPI tree. Fencing cuts them off.
   fence_after: []
+  menu_snapshot_roles:
+    - menu item
+    - radio menu item
+    - check menu item
+    - option
   menu_snapshot_exclude:
     names:
     - Undo
@@ -230,9 +235,7 @@ tree:
       role: push button
       pick: last_by_y
     stop_button:
-      names_any_of:
-      - Stop response (Esc)
-      - Stop response
+      name: Stop response
       role: push button
     copy_button:
       name: Copy
@@ -274,19 +277,22 @@ workflow:
     mode: deep_research
     tools: []
   selection:
-    # model_targets: empty until live AT-SPI scan of model selector dropdown
-    # is available with exact [radio menu item] names.
-    model_targets: {}
-    mode_targets:
-      deep_research: deep_research_toggle
-      model_council: tool_model_council
-      computer: computer_dropdown
-      create_files_and_apps: mode_create_files
-      learn_step_by_step: mode_learn
-    # Modes that live inside the "More" sub-menu of the attach dropdown.
-    # The driver must click attach_more_trigger before these items are visible.
-    mode_submenu_keys:
-    - create_files_and_apps
+    menus:
+      mode:
+        select: single
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: true
+        operate:
+          trigger: search_mode_trigger
+          scope: menu_snapshot
+        options:
+          deep_research:
+            element: deep_research
+            active_element: deep_research_toggle
+            click_strategy: coordinate_only
+        default_for_fresh: deep_research
+        example_rationale: Use Deep Research for Perplexity because regular Pro Search can return thin or incomplete research.
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
@@ -320,7 +326,7 @@ workflow:
     stop_key: stop_button
     complete_key: copy_button
   extract:
-    primary_key: copy_button
+    primary_key: copy_contents_button
     strategy: last_by_y
   extra_extract:
     strategy: copy_contents_button
@@ -349,9 +355,7 @@ validation:
       states_include: [editable]
   send_success:
     indicators:
-    - names_any_of:
-      - Stop response (Esc)
-      - Stop response
+    - name: Stop response
       role: push button
     timeout: 120
   response_complete:
@@ -375,7 +379,7 @@ validation:
     indicators:
     - name: "Learn step by step"
       role: push button
-  # model_targets is empty — no model-specific *_active specs until dropdown scanned.
+  # No model menu is declared until the model selector dropdown is live-scanned.
 
 # ============================================================================
 # extraction — output-type -> ordered exact-matched workflow.

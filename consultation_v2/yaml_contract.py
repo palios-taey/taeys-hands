@@ -68,7 +68,8 @@ MENU_KEYS = frozenset({
 MENU_SELECT_VALUES = frozenset({'single', 'multi'})
 MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
 MENU_OPERATE_SCOPES = frozenset({'menu_snapshot', 'snapshot'})
-MENU_OPTION_KEYS = frozenset({'element', 'path', 'active_element'})
+MENU_CLICK_STRATEGIES = frozenset({'atspi_only', 'atspi_first', 'coordinate_only', 'xdotool_first'})
+MENU_OPTION_KEYS = frozenset({'element', 'path', 'active_element', 'click_strategy'})
 MENU_PATH_KEYS = frozenset({'element', 'action'})
 MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
 LEGACY_SELECTION_KEYS = frozenset({
@@ -824,6 +825,10 @@ def _validate_menu_option(
     ):
         _add(findings, lines, option_path + ('active_element',), 'active_element',
              'menu option active_element must name an element_map key')
+    click_strategy = option.get('click_strategy')
+    if click_strategy is not None and click_strategy not in MENU_CLICK_STRATEGIES:
+        _add(findings, lines, option_path + ('click_strategy',), 'click_strategy',
+             f'menu option click_strategy must be one of {sorted(MENU_CLICK_STRATEGIES)}')
     path = option.get('path')
     if path is None:
         return
