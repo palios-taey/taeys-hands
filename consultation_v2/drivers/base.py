@@ -22,6 +22,24 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 class BaseConsultationDriver(ABC):
     platform: str
+    _INTERACTIVE_UNKNOWN_ROLES = {
+        'button',
+        'check box',
+        'check menu item',
+        'combo box',
+        'entry',
+        'link',
+        'menu item',
+        'option',
+        'page tab',
+        'push button',
+        'radio button',
+        'radio menu item',
+        'slider',
+        'spin button',
+        'switch',
+        'toggle button',
+    }
 
     def __init__(self) -> None:
         self.cfg = load_platform_yaml(self.platform)
@@ -133,16 +151,35 @@ class BaseConsultationDriver(ABC):
         snapshot: Snapshot,
         surface: str | None,
     ) -> tuple[list[dict[str, str | None]], list[dict[str, object]], dict[str, int]]:
-        discrepancies = [
-            {'role': item.role, 'name': item.name}
-            for item in (snapshot.unknown or [])
-        ]
+        discrepancies = self._conformance_unknown_discrepancies(snapshot, surface)
         missing = self._missing_expected_elements(snapshot, surface)
         by_role: dict[str, int] = {}
         for item in discrepancies:
             role = item['role'] or ''
             by_role[role] = by_role.get(role, 0) + 1
         return discrepancies, missing, by_role
+
+    def _conformance_unknown_discrepancies(
+        self,
+        snapshot: Snapshot,
+        surface: str | None,
+    ) -> list[dict[str, str | None]]:
+        return [
+            {'role': item.role, 'name': item.name}
+            for item in (snapshot.unknown or [])
+            if not (
+                surface == 'base'
+                and self._is_incidental_base_unknown(item)
+            )
+        ]
+
+    @classmethod
+    def _is_incidental_base_unknown(cls, item: ElementRef) -> bool:
+        name = (item.name or '').strip()
+        role = (item.role or '').strip().lower()
+        if role == 'link' and (name.startswith('http://') or name.startswith('https://')):
+            return True
+        return not name and role not in cls._INTERACTIVE_UNKNOWN_ROLES
 
     def _conformance_snapshot(self, surface: str | None) -> Snapshot:
         if surface == 'base':
@@ -631,7 +668,10 @@ class BaseConsultationDriver(ABC):
         scopes = (((self.cfg.get('tree') or {}).get('conformance') or {}).get('scopes') or {})
         if 'base' not in scopes:
             return True
-        return not (snapshot.unknown or []) and not self._missing_expected_elements(snapshot, 'base')
+        return (
+            not self._conformance_unknown_discrepancies(snapshot, 'base')
+            and not self._missing_expected_elements(snapshot, 'base')
+        )
 
     def _selection_wait_for_menu_closed(self) -> Snapshot:
         timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
