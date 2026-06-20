@@ -7,6 +7,12 @@ tree:
   fence_after:
   - name: Chats
     role: heading
+  menu_snapshot_scan: document_menu_roles
+  menu_snapshot_roles:
+    - menu item
+    - radio menu item
+    - check menu item
+    - option
   menu_snapshot_exclude:
     names:
     - Undo
