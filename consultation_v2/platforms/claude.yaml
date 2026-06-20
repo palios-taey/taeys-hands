@@ -169,14 +169,6 @@ tree:
       structural:
         after: press_record_button
       reason: personalized account/settings button -- user-specific name
-    learn_more_promo:
-      name: Learn more (opens in new tab)
-      role: link
-      scope: base
-    dismiss_promo:
-      name: Dismiss
-      role: push button
-      scope: base
     input:
       name: Write your prompt to Claude
       role: entry
