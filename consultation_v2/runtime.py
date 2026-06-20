@@ -30,6 +30,7 @@ _POPUP_DISMISS_NAMES = {
     'x',
     '×',
 }
+_FILE_DIALOG_TITLES = ("File Upload", "Open", "Open File")
 
 class ConsultationRuntime:
     def __init__(self, platform: str):
@@ -72,7 +73,7 @@ class ConsultationRuntime:
         env = self._dialog_env()
 
         closed = 0
-        for title in ("File Upload", "Open", "Open File"):
+        for title in _FILE_DIALOG_TITLES:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -106,8 +107,27 @@ class ConsultationRuntime:
         approach (tools/attach.py).
         """
         env = self._dialog_env()
+        deadline = time.monotonic() + self._file_dialog_focus_timeout_seconds()
 
-        for title in ("File Upload", "Open", "Open File"):
+        while time.monotonic() < deadline:
+            found = self._file_dialog_window(env)
+            if found is not None:
+                wid, title = found
+                subprocess.run(
+                    ["xdotool", "windowactivate", wid],
+                    capture_output=True,
+                    timeout=5,
+                    env=env,
+                )
+                logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
+                time.sleep(0.5)
+                return True
+            time.sleep(0.25)
+        logger.warning("focus_file_dialog: no file dialog window found")
+        return False
+
+    def _file_dialog_window(self, env: dict) -> tuple[str, str] | None:
+        for title in _FILE_DIALOG_TITLES:
             try:
                 r = subprocess.run(
                     ["xdotool", "search", "--name", title],
@@ -116,21 +136,20 @@ class ConsultationRuntime:
                     timeout=2,
                     env=env,
                 )
-                if r.stdout.strip():
-                    wid = r.stdout.strip().split("\n")[0]
-                    subprocess.run(
-                        ["xdotool", "windowactivate", wid],
-                        capture_output=True,
-                        timeout=5,
-                        env=env,
-                    )
-                    logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
-                    time.sleep(0.5)
-                    return True
             except Exception:
-                pass
-        logger.warning("focus_file_dialog: no file dialog window found")
-        return False
+                continue
+            if r.stdout.strip():
+                return r.stdout.strip().split()[0], title
+        return None
+
+    def _file_dialog_focus_timeout_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('file_dialog_focus_ms', 5000) if isinstance(settle, dict) else 5000
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            seconds = 5.0
+        return min(max(seconds, 3.0), 5.0)
 
     # ------------------------------------------------------------------
     # Display / navigation helpers
