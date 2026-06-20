@@ -51,7 +51,7 @@ Observed:
   persistent profiles. Evidence: `design/PRODUCTION_GRADE_BRIEF.md:8-15`,
   `design/PRODUCTION_GRADE_BRIEF.md:47-50`,
   `scripts/install_machine_displays.sh:1-19`,
-  `systemd/user/firefox-user.js:1-36`, and
+  `systemd/user/firefox-user.js:1-37`, and
   `consultations/inventory/p1_display_substrate_inventory.md:1-194`.
 - Extraction exists, but it is not yet one clean mapped extraction contract.
   Evidence: `consultations/inventory/p1_extraction_inventory.md:34-91`
@@ -172,7 +172,7 @@ Production display substrate to preserve:
   including live X root fallback when the bus file is missing.
 - `machine.env.example:1-32`: machine-local display/platform/profile/source URL
   mapping is the single source of truth for launch scripts.
-- `systemd/user/firefox-user.js:1-36`: profile policy preserves one-tab behavior
+- `systemd/user/firefox-user.js:1-37`: profile policy preserves one-tab behavior
   and forces Firefox accessibility on.
 - `consultations/inventory/p1_display_substrate_inventory.md:1-194`: retain
   list, checked-in vs live drift, redundant bus-refresh note, and

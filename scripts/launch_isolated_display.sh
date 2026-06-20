@@ -11,8 +11,7 @@
 #   - DETERMINISTIC AT-SPI bus capture to /tmp/a11y_bus_:N (retry loop, NOT a
 #     single sleep) + a background re-capture loop (the bus address can change
 #     after Firefox attaches)
-#   - Firefox profile gets accessibility.force_disabled=-1 (REQUIRED — without
-#     it Firefox never builds the a11y tree) plus the repo firefox-user.js
+#   - Firefox profile gets the repo firefox-user.js policy before launch
 #   - AT_SPI_BUS_ADDRESS exported to Firefox; real /usr/lib/firefox/firefox
 #   - x11vnc on 59NN (best-effort, only if ~/.taey/vnc_passwd exists)
 #
@@ -82,10 +81,7 @@ _taey_session() {
             -forever -shared -bg -o "/tmp/x11vnc-${TAEY_D}.log" >/dev/null 2>&1 || true
     fi
 
-    # profile + REQUIRED accessibility pref
-    mkdir -p "${TAEY_PROFILE_DIR}"
-    if [ -f "${TAEY_USERJS}" ]; then cp "${TAEY_USERJS}" "${TAEY_PROFILE_DIR}/user.js"; else : > "${TAEY_PROFILE_DIR}/user.js"; fi
-    printf '%s\n' 'user_pref("accessibility.force_disabled", -1);' >> "${TAEY_PROFILE_DIR}/user.js"
+    "${TAEY_REPO:-$REPO}/scripts/install_firefox_user_js.sh" "${TAEY_PROFILE_DIR}" "${TAEY_USERJS}"
 
     GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge \
         AT_SPI_BUS_ADDRESS="$A" \

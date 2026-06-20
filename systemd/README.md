@@ -62,8 +62,10 @@ Shared bus failures are the operational reason this display substrate exists.
 ## Profiles
 
 Firefox profiles live at `~/.taey/profiles/<profile-name>/`. The `user.js`
-template at `systemd/user/firefox-user.js` is copied into each profile at
-display launch to set `accessibility.force_disabled = -1` (force AT-SPI on).
+template at `systemd/user/firefox-user.js` is installed into each profile at
+display launch by `scripts/install_firefox_user_js.sh`; the installer clears
+immutable `user.js`, removes stale sessionstore files, and keeps
+`accessibility.force_disabled = 0` so AT-SPI remains available.
 The source path is `${TAEY_REPO}/systemd/user/firefox-user.js`, where
 `TAEY_REPO` defaults to `%h/taeys-hands` and may be overridden via a systemd
 drop-in.

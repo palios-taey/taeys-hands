@@ -34,6 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 FIREFOX_USER_JS_SRC="${REPO_ROOT}/systemd/user/firefox-user.js"
+FIREFOX_USER_JS_INSTALLER="${REPO_ROOT}/scripts/install_firefox_user_js.sh"
 
 # --- Load machine.env ---
 MACHINE_ENV=""
@@ -88,6 +89,7 @@ echo "[install] firefox binary: ${FIREFOX_BIN}"
 
 [[ -e /usr/libexec/at-spi-bus-launcher ]] || { echo "ERROR: at-spi-bus-launcher missing" >&2; exit 1; }
 [[ -f "${FIREFOX_USER_JS_SRC}" ]] || { echo "ERROR: ${FIREFOX_USER_JS_SRC} missing" >&2; exit 1; }
+[[ -x "${FIREFOX_USER_JS_INSTALLER}" ]] || { echo "ERROR: ${FIREFOX_USER_JS_INSTALLER} missing or not executable" >&2; exit 1; }
 
 mkdir -p "${SYSTEMD_USER_DIR}" "${HOME}/.taey/profiles"
 
@@ -175,7 +177,8 @@ Requires=taey-xvfb@${display_num}.service
 [Service]
 Type=simple
 Environment=DISPLAY=:${display_num}
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "\$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:${display_num}; /usr/libexec/at-spi-bus-launcher --launch-immediately & A11Y_ADDR=""; for i in \$(seq 1 20); do TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} && break ;; esac; sleep 1; done; if [[ -z "\$A11Y_ADDR" ]]; then TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} ;; esac; fi; AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" /usr/libexec/at-spi2-registryd & sleep 1; openbox & sleep 1; ${vnc_block}mkdir -p \$HOME/.taey/profiles/${profile}; cp ${FIREFOX_USER_JS_SRC} \$HOME/.taey/profiles/${profile}/user.js; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" ${FIREFOX_BIN} --no-remote --profile \$HOME/.taey/profiles/${profile} "${url}" & FIREFOX_PID=\$!; if [[ -z "\$FIREFOX_PID" ]]; then for _ in \$(seq 1 10); do FIREFOX_PID=\$(pgrep -P \$\$ -o -x firefox 2>/dev/null || true); [[ -n "\$FIREFOX_PID" ]] && break; sleep 1; done; fi; [ -s /tmp/a11y_bus_:${display_num} ] || echo "WARNING: AT-SPI bus capture failed for :${display_num}" >&2; echo "\${FIREFOX_PID}" > /tmp/firefox_pid_:${display_num}; if [[ -n "\${FIREFOX_PID}" ]]; then wait \${FIREFOX_PID}; else wait; fi'
+Environment=TAEY_REPO=${REPO_ROOT}
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "\$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:${display_num}; /usr/libexec/at-spi-bus-launcher --launch-immediately & A11Y_ADDR=""; for i in \$(seq 1 20); do TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} && break ;; esac; sleep 1; done; if [[ -z "\$A11Y_ADDR" ]]; then TMP_ADDR=\$(xprop -display :${display_num} -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \\"//;s/\\"\$//"); case "\$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="\$TMP_ADDR"; echo "\$A11Y_ADDR" > /tmp/a11y_bus_:${display_num} ;; esac; fi; AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" /usr/libexec/at-spi2-registryd & sleep 1; openbox & sleep 1; ${vnc_block}"\${TAEY_REPO}/scripts/install_firefox_user_js.sh" "\$HOME/.taey/profiles/${profile}"; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge AT_SPI_BUS_ADDRESS="\${A11Y_ADDR}" ${FIREFOX_BIN} --no-remote --profile \$HOME/.taey/profiles/${profile} "${url}" & FIREFOX_PID=\$!; if [[ -z "\$FIREFOX_PID" ]]; then for _ in \$(seq 1 10); do FIREFOX_PID=\$(pgrep -P \$\$ -o -x firefox 2>/dev/null || true); [[ -n "\$FIREFOX_PID" ]] && break; sleep 1; done; fi; [ -s /tmp/a11y_bus_:${display_num} ] || echo "WARNING: AT-SPI bus capture failed for :${display_num}" >&2; echo "\${FIREFOX_PID}" > /tmp/firefox_pid_:${display_num}; if [[ -n "\${FIREFOX_PID}" ]]; then wait \${FIREFOX_PID}; else wait; fi'
 ExecStopPost=/usr/bin/bash -lc '${stop_kill}rm -f /tmp/dbus_session_bus_:${display_num} /tmp/firefox_pid_:${display_num}'
 Restart=always
 RestartSec=10

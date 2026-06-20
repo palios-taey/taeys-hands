@@ -4,6 +4,7 @@
 // Disable session restore — no reopening previous tabs on startup
 user_pref("browser.startup.page", 0);
 user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.sessionstore.max_resumed_crashes", 0);
 user_pref("browser.sessionstore.resume_session_once", false);
 user_pref("browser.sessionstore.max_tabs_undo", 0);
 user_pref("browser.sessionstore.max_windows_undo", 0);
@@ -32,5 +33,5 @@ user_pref("datareporting.policy.firstRunURL", "");
 user_pref("browser.tabs.crashReporting.email", "");
 user_pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
 
-// Force accessibility on for AT-SPI-driven automation in isolated displays.
-user_pref("accessibility.force_disabled", -1);
+// Keep accessibility available for AT-SPI-driven automation in isolated displays.
+user_pref("accessibility.force_disabled", 0);
