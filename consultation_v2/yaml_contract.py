@@ -67,7 +67,7 @@ MENU_KEYS = frozenset({
 MENU_SELECT_VALUES = frozenset({'single', 'multi'})
 MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
 MENU_OPERATE_SCOPES = frozenset({'menu_snapshot', 'snapshot'})
-MENU_OPTION_KEYS = frozenset({'element', 'path'})
+MENU_OPTION_KEYS = frozenset({'element', 'path', 'active_element'})
 MENU_PATH_KEYS = frozenset({'element', 'action'})
 MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
 LEGACY_SELECTION_KEYS = frozenset({
@@ -817,6 +817,12 @@ def _validate_menu_option(
     if not isinstance(element, str) or element not in element_map:
         _add(findings, lines, option_path + ('element',), 'element',
              'menu option element must name an element_map key')
+    active_element = option.get('active_element')
+    if active_element is not None and (
+        not isinstance(active_element, str) or active_element not in element_map
+    ):
+        _add(findings, lines, option_path + ('active_element',), 'active_element',
+             'menu option active_element must name an element_map key')
     path = option.get('path')
     if path is None:
         return

@@ -44,7 +44,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 return False
             if not self.wait_for_page_ready_after_navigation(result):
                 return False
-        if not self.select_model_mode_tools(request, result):
+        if not self.apply_selection_plan(request, result):
             return False
         if not self.attach_files(request, result):
             return False
@@ -71,225 +71,6 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         if not self.store_in_neo4j(request, result):
             return
         result.ok = True
-
-    def _activate_element(self, snapshot, key: str, step: str, reason_prefix: str):
-        element = self.find_first(snapshot, key)
-        if not element:
-            return False
-        spec = dict(self.cfg.get('tree', {}).get('element_map', {}).get(key, {}))
-        trigger_type = str(spec.get('trigger_type') or 'click').strip().lower()
-        if trigger_type == 'hover':
-            return self.runtime.hover(element)
-        return self.runtime.click(element, strategy='atspi_first')
-
-    def select_model_mode_tools(
-        self, request: ConsultationRequest, result: ConsultationResult
-    ) -> bool:
-        workflow = self.cfg['workflow']['selection']
-        requested_model = str(request.selection_value('model', '') or '').strip().lower()
-        mode_selection = request.selection_value('mode')
-        requested_mode = (
-            self.cfg['workflow']['defaults'].get('mode') or ''
-        ).strip().lower() if mode_selection is None else str(mode_selection or '').strip().lower()
-
-        # Gemini Deep Think REQUIRES the 3.1 Pro model selected FIRST. Toggling
-        # the Deep Think *tool* on the account default (3.5 Flash) silently runs
-        # the consult on FLASH (per this YAML's own note + Jesse 2026-06-15: a
-        # Family consult ran on Flash because select_model left the model on
-        # default). So if deep_think is requested with no explicit model, force
-        # Pro — otherwise the consult is degraded to a fast model.
-        if requested_mode == 'deep_think' and not requested_model:
-            requested_model = 'pro'
-
-        # ── Model selection via mode picker ──────────────────────────────────
-        if requested_model and requested_model in workflow.get('model_targets', {}):
-            snap = self.runtime.snapshot()
-            picker = self.find_first(snap, 'mode_picker')
-            if not picker:
-                result.add_step('select_model', False, 'Gemini mode picker not found',
-                                snapshot=snap.serializable())
-                return False
-            if not self.runtime.click(picker, strategy='atspi_first'):
-                result.add_step('select_model', False, 'Gemini mode picker click failed',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.8)
-            # BUG 8 FIX: use menu_snapshot() for portal/dropdown reads
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, workflow['model_targets'][requested_model])
-            if not item:
-                result.add_step('select_model', False,
-                                f'Gemini model item {requested_model} not found',
-                                menu=menu_snap.serializable())
-                return False
-            if not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_model', False,
-                                f'Gemini model click failed for {requested_model}',
-                                menu=menu_snap.serializable())
-                return False
-            time.sleep(0.8)
-            # Re-open picker to validate checked state, then close
-            verify_root = self.runtime.snapshot()
-            picker = self.find_first(verify_root, 'mode_picker')
-            verified = False
-            if picker and self.runtime.click(picker, strategy='atspi_first'):
-                time.sleep(0.5)
-                # BUG 8 FIX: menu_snapshot for portal
-                verify_menu = self.wait_for_validation(
-                    f'{requested_model}_active',
-                    timeout=6.0,
-                    interval=0.4,
-                    scope='menu',
-                )
-                verified = self.validation_passes(verify_menu, f'{requested_model}_active')
-                # BUG 10 FIX: close the dropdown after verification
-                self.runtime.press('Escape')
-                time.sleep(0.3)
-            result.add_step('select_model', verified,
-                            f'Gemini model set to {requested_model}',
-                            snapshot=self.runtime.snapshot().serializable())
-            if not verified:
-                return False
-        else:
-            result.add_step('select_model', True, 'Gemini model left unchanged/default',
-                            requested_model=request.selection_value('model'))
-
-        # ── Mode / primary tool selection via Tools dropdown ──────────────────
-        if requested_mode and requested_mode in workflow.get('tool_targets', {}):
-            snap = self.runtime.snapshot()
-            mode_active_key = f'{requested_mode}_active'
-            if self.validation_passes(snap, mode_active_key):
-                result.add_step('select_mode', True, f'Gemini {requested_mode} already active')
-            else:
-                tools_button = self.find_first(snap, 'tools_button')
-                if not tools_button:
-                    result.add_step('select_mode', False,
-                                    'Gemini tools button not found',
-                                    snapshot=snap.serializable())
-                    return False
-                if not self.runtime.click(tools_button, strategy='atspi_first'):
-                    result.add_step('select_mode', False,
-                                    'Gemini tools button click failed',
-                                    snapshot=snap.serializable())
-                    return False
-                time.sleep(0.8)
-                # BUG 8 FIX: menu_snapshot for Tools portal
-                menu_snap = self.runtime.menu_snapshot()
-                item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
-                if not item:
-                    # "Deep think" / "Guided learning" live behind a "More tools"
-                    # expander inside the Upload & tools menu (UI 2026-05-21).
-                    # Expand it before declaring the tool missing.
-                    if self._activate_element(menu_snap, 'more_tools', 'select_mode', 'Gemini more tools expander'):
-                        time.sleep(0.6)
-                        menu_snap = self.runtime.menu_snapshot()
-                        item = self.find_first(menu_snap, workflow['tool_targets'][requested_mode])
-                if not item:
-                    result.add_step('select_mode', False,
-                                    f'Gemini tool item {requested_mode} not found',
-                                    menu=menu_snap.serializable())
-                    return False
-                if not self.runtime.click(item, strategy='atspi_first'):
-                    result.add_step('select_mode', False,
-                                    f'Gemini tool click failed for {requested_mode}',
-                                    menu=menu_snap.serializable())
-                    return False
-                time.sleep(0.8)
-                if requested_mode in ('deep_think', 'deep_research'):
-                    # Both expose a COMPOSER toggle ("Deselect Deep think" /
-                    # "Deselect Deep research") that renders a beat after the
-                    # tool click — poll a normal snapshot for it. Do NOT re-open
-                    # the Tools menu to verify these: the indicator lives in the
-                    # composer, not the tools portal, so a menu re-check never
-                    # finds it and aborts a genuinely-engaged Deep Research.
-                    verify_snap = self.wait_for_validation(
-                        mode_active_key,
-                        timeout=6.0,
-                        interval=0.4,
-                    )
-                    verified = self.validation_passes(verify_snap, mode_active_key)
-                    evidence_snap = verify_snap
-                else:
-                    # Re-open Tools to verify checked state, then close
-                    verify_root = self.runtime.snapshot()
-                    tools_button = self.find_first(verify_root, 'tools_button')
-                    verified = False
-                    if tools_button and self.runtime.click(tools_button, strategy='atspi_first'):
-                        time.sleep(0.5)
-                        # BUG 8 FIX: menu_snapshot for portal
-                        verify_menu = self.wait_for_validation(
-                            mode_active_key,
-                            timeout=6.0,
-                            interval=0.4,
-                            scope='menu',
-                        )
-                        verified = self.validation_passes(verify_menu, mode_active_key)
-                        # BUG 10 FIX: close the dropdown after verification
-                        self.runtime.press('Escape')
-                        time.sleep(0.3)
-                    evidence_snap = self.runtime.snapshot()
-                result.add_step('select_mode', verified,
-                                f'Gemini mode/tool set to {requested_mode}',
-                                snapshot=evidence_snap.serializable())
-                if not verified:
-                    return False
-        else:
-            result.add_step('select_mode', True, 'Gemini mode left unchanged/default',
-                            requested_mode=request.selection_value('mode'))
-
-        # ── Additional tools requested in selections["tools"] ────────────────
-        for tool_name in request.selection_list('tools'):
-            normalized = tool_name.strip().lower().replace(' ', '_')
-            target_key = workflow.get('tool_targets', {}).get(normalized)
-            if not target_key:
-                result.add_step('select_tool', False,
-                                f'Gemini tool {tool_name!r} not mapped in Consultation V2 YAML')
-                return False
-            snap = self.runtime.snapshot()
-            tools_button = self.find_first(snap, 'tools_button')
-            if not tools_button or not self.runtime.click(tools_button, strategy='atspi_first'):
-                result.add_step('select_tool', False,
-                                f'Gemini failed to open tools menu for {tool_name}',
-                                snapshot=snap.serializable())
-                return False
-            time.sleep(0.6)
-            # BUG 8 FIX: menu_snapshot() — not snapshot() — for portal reads
-            menu_snap = self.runtime.menu_snapshot()
-            item = self.find_first(menu_snap, target_key)
-            if not item:
-                result.add_step('select_tool', False,
-                                f'Gemini tool item {target_key} not found',
-                                menu=menu_snap.serializable())
-                return False
-            if not self.runtime.click(item, strategy='atspi_first'):
-                result.add_step('select_tool', False,
-                                f'Gemini failed to click tool {tool_name}',
-                                menu=menu_snap.serializable())
-                return False
-            validation_key = f'{normalized}_active'
-            self.runtime.press('Escape')
-            if validation_key not in self.cfg.get('validation', {}):
-                result.add_step(
-                    'select_tool',
-                    False,
-                    f'Gemini tool {tool_name!r} has no tree validation key {validation_key!r}',
-                    snapshot=self.runtime.snapshot().serializable(),
-                )
-                return False
-            verify_snap = self.wait_for_validation(validation_key, timeout=6.0, interval=0.4)
-            verified = self.validation_passes(verify_snap, validation_key)
-            result.add_step('select_tool', verified,
-                            f'Gemini tool click validated for {tool_name}',
-                            snapshot=verify_snap.serializable())
-            if not verified:
-                return False
-        return True
-
-    def _active_snapshot(self, validation_key: str):
-        snap = self.runtime.snapshot()
-        if self.validation_passes(snap, validation_key):
-            return snap
-        return None
 
     def attach_files(
         self, request: ConsultationRequest, result: ConsultationResult
@@ -346,15 +127,47 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                                 menu=menu_snap.serializable())
                 return False
             time.sleep(0.8)
-            self.runtime.focus_file_dialog()
-            self.runtime.press('ctrl+l')
+            if not self.runtime.focus_file_dialog():
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog did not focus for {abs_path}',
+                    menu=menu_snap.serializable(),
+                    open_attempts=open_attempts,
+                )
+                return False
+            if not self.runtime.press('ctrl+l'):
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog location shortcut failed for {abs_path}',
+                    open_attempts=open_attempts,
+                )
+                return False
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
-                self.runtime.type_text(abs_path, delay_ms=5)
+                if not self.runtime.type_text(abs_path, delay_ms=5):
+                    result.add_step(
+                        'attach', False,
+                        f'Gemini file dialog path entry failed for {abs_path}',
+                        open_attempts=open_attempts,
+                    )
+                    return False
             time.sleep(0.2)
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
-            self.runtime.press('Return')
+            if not self.runtime.focus_file_dialog():
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog lost focus before submit for {abs_path}',
+                    open_attempts=open_attempts,
+                )
+                return False
+            if not self.runtime.press('Return'):
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog submit failed for {abs_path}',
+                    open_attempts=open_attempts,
+                )
+                return False
             verify_snap = self.wait_for_validation(
                 'attach_success',
                 filename=abs_path,

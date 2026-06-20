@@ -720,8 +720,27 @@ class BaseConsultationDriver(ABC):
         scope = str(operate['scope'])
         trigger_key = str(operate['trigger'])
         target_key = str(step['element'])
+        active_element_key = str(step.get('active_element') or '').strip()
         path = list(step.get('path') or [])
         first_key = str(path[0]['element']) if path else target_key
+
+        if active_element_key:
+            active_snapshot, active_present = self._selection_wait_for_active_element(
+                active_element_key,
+                timeout=0.8,
+            )
+            if active_present:
+                result.add_step(
+                    'select',
+                    True,
+                    f'{self.platform} {menu}={option} already active',
+                    menu=menu,
+                    option=option,
+                    confirmation='active_element_present',
+                    active_element=active_element_key,
+                    snapshot=active_snapshot.serializable(),
+                )
+                return True
 
         opened = self._open_selection_menu(trigger_key, first_key, scope, result)
         if opened is None:
@@ -731,7 +750,7 @@ class BaseConsultationDriver(ABC):
         if target is None:
             return False
         active_state = str(step['active_recognition'])
-        if self._selection_element_has_state(target, active_state):
+        if not active_element_key and self._selection_element_has_state(target, active_state):
             self.runtime.press('Escape')
             result.add_step(
                 'select',
@@ -755,6 +774,23 @@ class BaseConsultationDriver(ABC):
             return False
         time.sleep(0.3)
         self.runtime.press('Escape')
+        if active_element_key:
+            active_snapshot, active_present = self._selection_wait_for_active_element(active_element_key)
+            result.add_step(
+                'select',
+                active_present,
+                (
+                    f'{self.platform} selected {menu}={option}'
+                    if active_present
+                    else f'{self.platform} {menu}={option} did not expose active element after bounded settle-rescan'
+                ),
+                menu=menu,
+                option=option,
+                confirmation='active_element_present',
+                active_element=active_element_key,
+                snapshot=active_snapshot.serializable(),
+            )
+            return active_present
         persistent_snapshot, persistent_verified, persistent_labels = (
             self._selection_persistent_trigger_matches(trigger_key, option, target)
         )
@@ -1078,6 +1114,35 @@ class BaseConsultationDriver(ABC):
             last_snapshot = self._selection_snapshot(scope)
             last_target = self.find_first(last_snapshot, target_key)
         return last_snapshot, last_target, False
+
+    def _selection_wait_for_active_element(
+        self,
+        active_element_key: str,
+        *,
+        timeout: float | None = None,
+    ) -> tuple[Snapshot, bool]:
+        wait_seconds = (
+            max(self._selection_settle_seconds() + 1.0, 6.0)
+            if timeout is None
+            else max(float(timeout), 0.1)
+        )
+        deadline = time.time() + wait_seconds
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=1,
+                timeout=min(remaining, 0.8),
+                interval=0.2,
+                anchor_key=active_element_key,
+                require_non_empty=True,
+            )
+            if last_snapshot.has(active_element_key):
+                return last_snapshot, True
+            time.sleep(0.2)
+        if last_snapshot is None:
+            last_snapshot = self.runtime.snapshot()
+        return last_snapshot, last_snapshot.has(active_element_key)
 
     def _selection_stable_snapshot(
         self,

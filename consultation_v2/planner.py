@@ -240,6 +240,7 @@ def _step(
         'active_recognition': menu['active_recognition'],
         'operate': dict(menu['operate']),
         'element': option['element'],
+        'active_element': option.get('active_element'),
         'path': [dict(item) for item in option.get('path') or []],
         'skip': False,
     }

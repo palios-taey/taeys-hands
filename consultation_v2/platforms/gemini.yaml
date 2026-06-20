@@ -171,25 +171,50 @@ tree:
     tool_deselect_deep_think:
       name: Deselect Deep think
       role: push button
+    tool_deselect_deep_research:
+      name: Deselect Deep research
+      role: push button
 workflow:
   defaults:
     model: null
     mode: deep_think
     tools: []
   selection:
-    model_targets:
-      fast: mode_fast
-      thinking: mode_thinking
-      pro: mode_pro
-    tool_targets:
-      deep_think: tool_deep_think
-      deep_research: tool_deep_research
-      canvas: tool_canvas
-      create_image: tool_create_image
-      create_video: tool_create_video
-      create_music: tool_create_music
-      guided_learning: tool_guided_learning
-      import_code: import_code_item
+    menus:
+      model:
+        select: single
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: true
+        operate:
+          trigger: mode_picker
+          scope: menu_snapshot
+        options:
+          fast:
+            element: mode_fast
+          pro:
+            element: mode_pro
+          thinking:
+            element: mode_thinking
+        default_for_fresh: pro
+        example_rationale: Use Gemini 3.1 Pro before Deep Think so the consult does not silently run on Flash.
+      mode:
+        select: single
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: true
+        operate:
+          trigger: tools_button
+          scope: menu_snapshot
+        options:
+          deep_think:
+            element: tool_deep_think
+            active_element: tool_deselect_deep_think
+          deep_research:
+            element: tool_deep_research
+            active_element: tool_deselect_deep_research
+        default_for_fresh: deep_think
+        example_rationale: Use Deep Think for substantive Gemini reasoning unless a research report is explicitly needed.
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
