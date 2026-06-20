@@ -551,10 +551,7 @@ class BaseConsultationDriver(ABC):
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if transition_seen:
-            snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
-        else:
-            snapshot, expected = self._selection_find_once(expected_key, scope)
+        snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
                 'select',
@@ -745,16 +742,7 @@ class BaseConsultationDriver(ABC):
         return False
 
     def _selection_find_once(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        snapshot = self._selection_stable_snapshot(scope, timeout=0.8, anchor_key=key)
-        element = self.find_first(snapshot, key)
-        if element is not None:
-            return snapshot, element
-        snapshot = self._selection_stable_snapshot(
-            scope,
-            timeout=max(self._selection_settle_seconds(), 0.8),
-            anchor_key=key,
-        )
-        return snapshot, self.find_first(snapshot, key)
+        return self._selection_wait_for_revealed_anchor(key, scope)
 
     def _selection_snapshot(self, scope: str) -> Snapshot:
         normalized = scope.strip().lower()
@@ -788,7 +776,11 @@ class BaseConsultationDriver(ABC):
         last_target: ElementRef | None = None
         while time.time() < deadline:
             remaining = max(0.1, deadline - time.time())
-            last_snapshot = self._selection_stable_snapshot(scope, timeout=min(remaining, 0.8))
+            last_snapshot = self._selection_stable_snapshot(
+                scope,
+                timeout=min(remaining, 0.8),
+                anchor_key=target_key,
+            )
             last_target = self.find_first(last_snapshot, target_key)
             if last_target is not None and self._selection_element_has_state(last_target, active_state):
                 return last_snapshot, last_target, True

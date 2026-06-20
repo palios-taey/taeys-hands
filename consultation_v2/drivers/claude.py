@@ -666,7 +666,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         from consultation_v2.atspi import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
-        from consultation_v2 import clipboard
 
         if not self.reassert_captured_session_url(
             result,
@@ -706,12 +705,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             targets = sorted(copy_btns, key=lambda e: e.get('y') or 0)[-(continue_clicks + 1):]
             copied = []
             for target in targets:
-                clipboard.write('')
+                self.runtime.write_clipboard('')
                 time.sleep(0.3)
                 if not atspi_click(target):
                     continue
                 time.sleep(1.5)
-                segment = (clipboard.read() or '').strip()
+                segment = self.runtime.read_clipboard().strip()
                 if segment and not self._is_prompt_echo(segment, request):
                     copied.append((segment, target))
                 elif segment:
@@ -795,7 +794,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         from consultation_v2.atspi import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
-        from consultation_v2 import clipboard
 
         snap = self.runtime.snapshot()
         show_toggle = self.find_last(snap, 'show_thinking')
@@ -818,8 +816,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                     snapshot=snap.serializable(),
                 )
                 return False
-            expanded_snap = self.wait_for_key('hide_thinking', timeout=6.0, interval=0.4)
-            hide_toggle = self.find_last(expanded_snap, 'hide_thinking')
+            expanded_snap, hide_toggle = self.wait_for_key(
+                'hide_thinking',
+                timeout=6.0,
+                interval=0.4,
+                select='last',
+            )
             if not hide_toggle:
                 result.add_step(
                     'extract_thinking',
@@ -854,7 +856,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             )
             return False
 
-        clipboard.write('')
+        self.runtime.write_clipboard('')
         time.sleep(0.3)
         if not atspi_click(thinking_copy):
             result.add_step(
@@ -865,7 +867,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(1.0)
-        thinking_text = (clipboard.read() or '').strip()
+        thinking_text = self.runtime.read_clipboard().strip()
         if not self._valid_thinking_text(thinking_text, response_text, request.message):
             result.add_step(
                 'extract_thinking',

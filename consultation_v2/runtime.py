@@ -147,6 +147,13 @@ class ConsultationRuntime:
             return True
         return False
 
+    def _sync_platform_io_display(self) -> None:
+        display = get_platform_display(self.platform)
+        if not display:
+            return
+        inp.set_display(display)
+        clipboard.set_display(display)
+
     def current_url(self) -> Optional[str]:
         # Read FRESH. The AT-SPI document URL is cached and stays STALE for a few
         # seconds after a page transition (e.g. grok.com/ -> /c/<thread> after
@@ -515,15 +522,18 @@ class ConsultationRuntime:
         return bool(inp.focus_firefox())
 
     def paste(self, text: str) -> bool:
+        self._sync_platform_io_display()
         return bool(inp.clipboard_paste(text))
 
     def type_text(self, text: str, delay_ms: int = 5) -> bool:
         return bool(inp.type_text(text, delay_ms=delay_ms))
 
     def read_clipboard(self) -> str:
+        self._sync_platform_io_display()
         return clipboard.read() or ""
 
     def write_clipboard(self, text: str) -> bool:
+        self._sync_platform_io_display()
         return clipboard.write(text)
 
     # ------------------------------------------------------------------

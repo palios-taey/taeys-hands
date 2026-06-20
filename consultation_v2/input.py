@@ -18,6 +18,7 @@ def _get_env() -> dict:
 
 
 def set_display(display: str):
+    os.environ['DISPLAY'] = display
     _get_env()['DISPLAY'] = display
 
 
