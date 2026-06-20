@@ -44,7 +44,6 @@ tree:
       - name: ""
         role: panel
     roles:
-      - alert
       - document web
       - form
       - heading
@@ -210,6 +209,18 @@ tree:
       name: Stop response
       role: push button
       scope: response.generating
+    send_blocked_previous_message:
+      name: Your previous message wasn't sent. You can try again.
+      role: alert
+      scope: send.blocked
+    send_blocked_previous_message_curly:
+      name: Your previous message wasn’t sent. You can try again.
+      role: alert
+      scope: send.blocked
+    send_blocked_caution_banner:
+      name: Use caution before running this prompt. Malicious conversation content could trick Claude into attempting harmful actions or sharing your data.
+      role: alert
+      scope: send.blocked
     copy_button:
       name: Copy
       role: push button

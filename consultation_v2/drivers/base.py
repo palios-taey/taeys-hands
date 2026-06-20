@@ -1637,25 +1637,27 @@ class BaseConsultationDriver(ABC):
         number of cycles (2 for deep modes, 1 otherwise). No content-guess
         fallback (100_TIMES §1); the stop button is the only completion oracle.
 
-        ``seed_stop_seen`` lets a driver whose send step already observed the
-        stop button mark ever_seen_stop up front, so a sub-second generation
-        whose stop button was only visible during send still completes (it is an
-        OBSERVATION carried forward, not a content fallback).
+        ``seed_stop_seen`` is accepted only as explicit upstream proof from a
+        validated send. Without that proof, this monitor call must observe Stop
+        itself before Stop-gone can complete.
         """
         detector_mode = (
             (mode if mode is not None else getattr(request, 'mode', None)) or ''
         ).strip().lower()
         detector = CompletionDetector(mode=detector_mode)
+        stop_key = self._stop_key()
+        completed = False
+        observed_stop = bool(seed_stop_seen)
         if seed_stop_seen:
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
-        stop_key = self._stop_key()
-        completed = False
 
         def _poll() -> bool:
-            nonlocal completed
+            nonlocal completed, observed_stop
             snap = self.runtime.snapshot()
-            verdict = detector.observe(stop_present=snap.has(stop_key))
+            stop_present = snap.has(stop_key)
+            observed_stop = observed_stop or stop_present
+            verdict = detector.observe(stop_present=stop_present)
             if verdict == COMPLETE:
                 completed = True
                 return True
@@ -1667,10 +1669,25 @@ class BaseConsultationDriver(ABC):
             timeout=5.0,
             interval=0.5,
         )
+        if not observed_stop:
+            result.add_step(
+                'monitor', False,
+                f'{self.platform} monitor never observed Stop button after send',
+                stop_seen=False, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                snapshot=verify_snap.serializable(),
+            )
+            return False
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
+        monitor_message = (
+            f'{self.platform} response completed'
+            if verified else
+            f'{self.platform} response did not reach Stop-gone completion'
+        )
         result.add_step(
-            'monitor', verified, f'{self.platform} response completed',
-            stop_seen=detector.ever_seen_stop, mode=detector_mode or 'default',
+            'monitor', verified, monitor_message,
+            stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+            mode=detector_mode or 'default',
             snapshot=verify_snap.serializable(),
         )
         if verified:

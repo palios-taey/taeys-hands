@@ -53,6 +53,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         'Use voice mode',
         'Write your prompt to Claude',
     }
+    _BLOCKED_SEND_KEYS = (
+        'send_blocked_previous_message',
+        'send_blocked_previous_message_curly',
+        'send_blocked_caution_banner',
+    )
 
     @staticmethod
     def _snapshot_elements(snapshot: Snapshot) -> list[ElementRef]:
@@ -130,6 +135,19 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             size_terms = (' bytes', ' kb', ' mb', ' lines', ' words')
             return any(term in lower_name for term in size_terms)
         return False
+
+    def _send_blockers(self, snapshot: Snapshot) -> list[str]:
+        blockers = [
+            key
+            for key in self._BLOCKED_SEND_KEYS
+            if snapshot.has(key)
+        ]
+        if snapshot.has('send_button'):
+            blockers.append('composer_send_button_present')
+        chip_names = sorted(self._paste_chip_names(snapshot, set()))
+        if chip_names:
+            blockers.append('composer_paste_chip_present:' + ', '.join(chip_names[:3]))
+        return blockers
 
     def _read_input_text(self) -> str:
         snapshot = self.runtime.snapshot()
@@ -493,32 +511,54 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return False
         clicked = self.runtime.click(send_button)
         stop_keys = self._stop_keys()
+        stop_seen = False
+        last_send_snapshot: Snapshot | None = None
+
+        def _send_observation() -> Snapshot | None:
+            nonlocal stop_seen, last_send_snapshot
+            last_send_snapshot = self.runtime.snapshot()
+            if self.snapshot_has_any(last_send_snapshot, stop_keys):
+                stop_seen = True
+            blockers = self._send_blockers(last_send_snapshot)
+            if any(blocker in self._BLOCKED_SEND_KEYS for blocker in blockers):
+                return last_send_snapshot
+            if stop_seen and not blockers:
+                return last_send_snapshot
+            return None
+
         send_snap = self.runtime.wait_until(
-            lambda: (
-                snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
-            ),
+            _send_observation,
             timeout=30,
             interval=0.6,
-        ) or self.runtime.snapshot()
-        stop_seen = self.snapshot_has_any(send_snap, stop_keys)
-        # Carry the send-phase stop observation into the shared completion
-        # detector: a sub-second Extended Thinking reply may only show the stop
-        # button during send, so seeding ever_seen_stop lets it complete on the
-        # stop-gone transition without a content/copy-button fallback.
-        self._send_stop_seen = bool(stop_seen)
+        ) or last_send_snapshot or self.runtime.snapshot()
+        stop_seen = stop_seen or self.snapshot_has_any(send_snap, stop_keys)
+        send_blockers = self._send_blockers(send_snap)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
+        verify_blockers = self._send_blockers(verify_snap)
+        if verify_blockers:
+            send_blockers = verify_blockers
+        message_landed = bool(stop_seen and not send_blockers)
+        self._send_stop_seen = bool(message_landed)
         url_changed = result.session_url_after and result.session_url_after != before
+        answer_thread = self._is_answer_thread_url(result.session_url_after)
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(clicked and stop_seen and url_changed)
+            verified = bool(clicked and message_landed and url_changed and answer_thread)
         else:
-            verified = bool(clicked and stop_seen and result.session_url_after)
+            verified = bool(clicked and message_landed and answer_thread)
+        message = (
+            'Claude send validated by Stop button, answer-thread URL, and cleared composer'
+            if verified else
+            'Claude send failed validation: user message did not land in thread'
+        )
         result.add_step(
-            'send', verified, 'Claude send validated by Stop button and URL capture',
+            'send', verified, message,
             url_before=before, url_after=result.session_url_after,
-            stop_seen=stop_seen, url_changed=bool(url_changed),
+            stop_seen=stop_seen, message_landed=message_landed,
+            send_blockers=send_blockers,
+            url_changed=bool(url_changed), answer_thread=bool(answer_thread),
             snapshot=verify_snap.serializable(),
         )
         return verified
@@ -555,21 +595,23 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         detector_mode = str(request.selection_value('mode', '') or '').strip().lower()
         detector = CompletionDetector(mode=detector_mode)
+        stop_keys = self._stop_keys()
+        completed = False
+        observed_stop = bool(seed_stop_seen)
         if seed_stop_seen:
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
-        stop_keys = self._stop_keys()
-        completed = False
         terminal_snapshot: Snapshot | None = None
         continue_clicks = 0
         continue_click_failed = False
         self._claude_continue_clicks = 0
 
         def _poll() -> bool:
-            nonlocal detector, completed, terminal_snapshot
+            nonlocal detector, completed, observed_stop, terminal_snapshot
             nonlocal continue_clicks, continue_click_failed
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
+            observed_stop = observed_stop or stop_present
             verdict = detector.observe(stop_present=stop_present)
             if verdict != COMPLETE:
                 return False
@@ -604,6 +646,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                     interval=0.5,
                 )
                 if isinstance(stop_snap, Snapshot):
+                    observed_stop = True
                     detector.ever_seen_stop = True
                     detector.stop_was_visible = True
                 return False
@@ -616,6 +659,18 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         self.runtime.wait_until(_poll, timeout=float(timeout or request.timeout), interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.snapshot()
+        if not observed_stop:
+            result.add_step(
+                step_name,
+                False,
+                'Claude monitor never observed Stop button after send',
+                stop_seen=False,
+                seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                stop_keys=stop_keys,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
         stop_absent = not self.snapshot_has_any(verify_snap, stop_keys)
         continue_present = bool(verify_snap.has('continue_button'))
         verified = bool(
@@ -624,11 +679,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             and not continue_present
             and not continue_click_failed
         )
+        monitor_message = message if verified else 'Claude response did not reach Stop-gone completion'
         result.add_step(
             step_name,
             verified,
-            message,
-            stop_seen=detector.ever_seen_stop,
+            monitor_message,
+            stop_seen=observed_stop,
+            seed_stop_seen=bool(seed_stop_seen),
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
             stop_gone_cycles=detector.stop_cycles,

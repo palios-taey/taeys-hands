@@ -487,15 +487,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         detector_mode = (getattr(request, 'mode', None) or '').strip().lower()
         detector = CompletionDetector(mode=detector_mode)
-        detector.ever_seen_stop = True
-        detector.stop_was_visible = True
         stop_keys = self._stop_keys()
         completed = False
+        observed_stop = False
 
         def _poll() -> bool:
-            nonlocal completed
+            nonlocal completed, observed_stop
             snap = self.runtime.snapshot()
-            verdict = detector.observe(stop_present=self.snapshot_has_any(snap, stop_keys))
+            stop_present = self.snapshot_has_any(snap, stop_keys)
+            observed_stop = observed_stop or stop_present
+            verdict = detector.observe(stop_present=stop_present)
             if verdict == COMPLETE:
                 completed = True
                 return True
@@ -509,12 +510,28 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             timeout=5.0,
             interval=0.5,
         ) or self.runtime.snapshot()
+        if not observed_stop:
+            result.add_step(
+                'monitor',
+                False,
+                'ChatGPT monitor never observed Stop button after send',
+                stop_seen=False,
+                mode=detector_mode or 'default',
+                stop_keys=stop_keys,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
         verified = bool(completed and not self.snapshot_has_any(verify_snap, stop_keys))
+        monitor_message = (
+            'ChatGPT response completed'
+            if verified else
+            'ChatGPT response did not reach Stop-gone completion'
+        )
         result.add_step(
             'monitor',
             verified,
-            'ChatGPT response completed',
-            stop_seen=detector.ever_seen_stop,
+            monitor_message,
+            stop_seen=observed_stop,
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
             snapshot=verify_snap.serializable(),
