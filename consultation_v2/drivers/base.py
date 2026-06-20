@@ -100,10 +100,13 @@ class BaseConsultationDriver(ABC):
         if discrepancies:
             drift_controls = snap.unknown if surface == 'base' else None
             dismissed = self.runtime.close_all_popups(drift_controls=drift_controls)
-            recovered_snap = self._conformance_snapshot(surface)
-            recovered_discrepancies, recovered_missing, recovered_by_role = (
-                self._conformance_findings(recovered_snap, surface)
-            )
+            (
+                recovered_snap,
+                recovered_discrepancies,
+                recovered_missing,
+                recovered_by_role,
+                recovery_elapsed,
+            ) = self._post_popup_recovery_findings(surface, discrepancies)
             if not recovered_discrepancies and not recovered_missing:
                 result.add_step(
                     'popup_recovery',
@@ -111,6 +114,7 @@ class BaseConsultationDriver(ABC):
                     f'{self.platform} cleared transient popup drift on {surface or "unscoped"}',
                     surface=surface,
                     dismissed=dismissed,
+                    recovery_elapsed_seconds=round(recovery_elapsed, 3),
                     before_unknown=discrepancies,
                     snapshot=recovered_snap.serializable(),
                 )
@@ -126,6 +130,7 @@ class BaseConsultationDriver(ABC):
                     f'{self.platform} popup recovery ran but conformance drift persisted',
                     surface=surface,
                     dismissed=dismissed,
+                    recovery_elapsed_seconds=round(recovery_elapsed, 3),
                     unknown=discrepancies,
                     missing=missing,
                     by_role=by_role,
@@ -196,6 +201,71 @@ class BaseConsultationDriver(ABC):
                 require_non_empty=True,
             )
         return self.runtime.snapshot()
+
+    def _post_popup_recovery_findings(
+        self,
+        surface: str | None,
+        before_discrepancies: list[dict[str, str | None]],
+    ) -> tuple[Snapshot, list[dict[str, str | None]], list[dict[str, object]], dict[str, int], float]:
+        started = time.monotonic()
+        if surface != 'base':
+            snap = self._conformance_snapshot(surface)
+            discrepancies, missing, by_role = self._conformance_findings(snap, surface)
+            return snap, discrepancies, missing, by_role, time.monotonic() - started
+
+        timeout = self._popup_recovery_settle_seconds()
+        deadline = time.monotonic() + timeout
+        anchor_key = self._conformance_anchor_key(surface)
+        last_snapshot: Snapshot | None = None
+        last_findings: tuple[list[dict[str, str | None]], list[dict[str, object]], dict[str, int]] | None = None
+
+        while time.monotonic() < deadline:
+            remaining = max(0.1, deadline - time.monotonic())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=1,
+                timeout=min(remaining, 0.8),
+                interval=0.2,
+                anchor_key=anchor_key,
+                require_non_empty=True,
+            )
+            last_findings = self._conformance_findings(last_snapshot, surface)
+            discrepancies, missing, by_role = last_findings
+            if not discrepancies and not missing:
+                return last_snapshot, discrepancies, missing, by_role, time.monotonic() - started
+            if not self._conformance_discrepancies_still_present(discrepancies, before_discrepancies):
+                return last_snapshot, discrepancies, missing, by_role, time.monotonic() - started
+            time.sleep(0.2)
+
+        if last_snapshot is None or last_findings is None:
+            last_snapshot = self._conformance_snapshot(surface)
+            last_findings = self._conformance_findings(last_snapshot, surface)
+        discrepancies, missing, by_role = last_findings
+        return last_snapshot, discrepancies, missing, by_role, time.monotonic() - started
+
+    def _popup_recovery_settle_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('popup_recovery_ms', 5000) if isinstance(settle, dict) else 5000
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            seconds = 5.0
+        return min(max(seconds, 3.0), 5.0)
+
+    @classmethod
+    def _conformance_discrepancies_still_present(
+        cls,
+        current: list[dict[str, str | None]],
+        before: list[dict[str, str | None]],
+    ) -> bool:
+        before_keys = {cls._conformance_discrepancy_key(item) for item in before}
+        return any(cls._conformance_discrepancy_key(item) in before_keys for item in current)
+
+    @staticmethod
+    def _conformance_discrepancy_key(item: dict[str, str | None]) -> tuple[str, str]:
+        return (
+            str(item.get('role') or '').strip().lower(),
+            str(item.get('name') or '').strip(),
+        )
 
     def _conformance_anchor_key(self, surface: str | None) -> str | None:
         if surface != 'base':
