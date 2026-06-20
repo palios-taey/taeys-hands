@@ -22,29 +22,6 @@ except Exception:  # pragma: no cover - optional dependency in runtime
 
 class ClaudeConsultationDriver(BaseConsultationDriver):
     platform = 'claude'
-    _TEXT_ATTACHMENT_SUFFIXES = {
-        '.cfg',
-        '.conf',
-        '.css',
-        '.csv',
-        '.html',
-        '.ini',
-        '.js',
-        '.json',
-        '.jsx',
-        '.log',
-        '.md',
-        '.py',
-        '.rst',
-        '.sh',
-        '.toml',
-        '.ts',
-        '.tsx',
-        '.txt',
-        '.xml',
-        '.yaml',
-        '.yml',
-    }
     _AUTO_CHIP_ROLES = {'push button', 'list item', 'heading'}
     _AUTO_CHIP_IGNORED_NAMES = {
         'Add files, connectors, and more',
@@ -68,24 +45,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
         all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
         return all_elements
-
-    @classmethod
-    def _read_text_attachment(cls, abs_path: str) -> str | None:
-        suffix = os.path.splitext(abs_path)[1].lower()
-        if suffix not in cls._TEXT_ATTACHMENT_SUFFIXES:
-            return None
-        with open(abs_path, 'rb') as handle:
-            data = handle.read()
-        if b'\0' in data:
-            raise ValueError(f'text attachment contains NUL bytes: {abs_path}')
-        return data.decode('utf-8')
-
-    def _snapshot_names(self, snapshot: Snapshot) -> set[str]:
-        return {
-            name
-            for element in self._snapshot_elements(snapshot)
-            if (name := (element.name or '').strip())
-        }
 
     def _paste_chip_names(
         self,
@@ -202,11 +161,18 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         return False
 
     def _attachment_visible(self, snapshot: Snapshot, filename: str) -> bool:
+        return self._attachment_chip_name(snapshot, filename) is not None
+
+    def _attachment_chip_name(self, snapshot: Snapshot, filename: str) -> str | None:
         allowed_roles = {'push button', 'list item', 'heading'}
-        return any(
-            element.role in allowed_roles
-            and self._attachment_name_matches(element.name or '', filename)
-            for element in self._snapshot_elements(snapshot)
+        return next(
+            (
+                element.name
+                for element in self._snapshot_elements(snapshot)
+                if element.role in allowed_roles
+                and self._attachment_name_matches(element.name or '', filename)
+            ),
+            None,
         )
 
     def _stop_keys(self) -> tuple[str, ...]:
@@ -284,157 +250,85 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         self.runtime.close_stale_dialogs()
         for file_path in request.attachments:
             abs_path = os.path.abspath(file_path)
-            try:
-                text_payload = self._read_text_attachment(abs_path)
-            except (OSError, UnicodeDecodeError, ValueError) as exc:
-                result.add_step(
-                    'attach',
-                    False,
-                    f'Claude text attachment unreadable for {abs_path}: {exc}',
-                    file=abs_path,
-                )
-                return False
-            if text_payload is not None:
-                if not self._paste_text_attachment(abs_path, text_payload, result):
-                    return False
-                continue
             if not self._attach_file_via_dialog(abs_path, result):
                 return False
         if not request.attachments:
             result.add_step('attach', True, 'No Claude attachments requested')
         return True
 
-    def _paste_text_attachment(
-        self,
-        abs_path: str,
-        text_payload: str,
-        result: ConsultationResult,
-    ) -> bool:
-        if not text_payload:
-            result.add_step(
-                'attach',
-                False,
-                f'Claude text attachment empty for {abs_path}',
-                file=abs_path,
-            )
-            return False
-        snap = self.runtime.wait_for_stable_snapshot(
-            consecutive=2,
-            timeout=8,
-            interval=0.4,
-            anchor_key='input',
-            require_non_empty=True,
-        )
-        input_el = self.find_first(snap, 'input')
-        if not input_el:
-            result.add_step(
-                'attach',
-                False,
-                f'Claude input field missing for pasted text attachment {abs_path}',
-                snapshot=snap.serializable(),
-            )
-            return False
-        baseline_names = self._snapshot_names(snap)
-        self.runtime.focus_firefox()
-        if not self.runtime.click(input_el):
-            result.add_step(
-                'attach',
-                False,
-                f'Claude input focus click failed for pasted text attachment {abs_path}',
-                snapshot=snap.serializable(),
-            )
-            return False
-        time.sleep(0.3)
-        if not self.runtime.paste(text_payload):
-            result.add_step(
-                'attach',
-                False,
-                f'Claude clipboard paste failed for text attachment {abs_path}',
-                file=abs_path,
-                method='paste_auto_chip',
-                chars=len(text_payload),
-                snapshot=snap.serializable(),
-            )
-            return False
-
-        verify_snap = self._wait_for_paste_chip_success(baseline_names)
-        chip_names = self._paste_chip_names(verify_snap, baseline_names)
-        verified = bool(chip_names)
-        result.add_step(
-            'attach',
-            verified,
-            f'Claude pasted {os.path.basename(abs_path)} as auto-chip',
-            file=abs_path,
-            method='paste_auto_chip',
-            chars=len(text_payload),
-            chip_names=sorted(chip_names),
-            snapshot=verify_snap.serializable(),
-        )
-        return verified
-
-    def _wait_for_paste_chip_success(self, baseline_names: set[str]) -> Snapshot:
-        last_snapshot = None
-
-        def _probe():
-            nonlocal last_snapshot
-            last_snapshot = self.runtime.snapshot()
-            if self._paste_chip_names(last_snapshot, baseline_names):
-                return last_snapshot
-            return None
-
-        matched = self.runtime.wait_until(_probe, timeout=20.0, interval=0.5)
-        if isinstance(matched, Snapshot):
-            return matched
-        return last_snapshot or self.runtime.snapshot()
-
     def _attach_file_via_dialog(
         self,
         abs_path: str,
         result: ConsultationResult,
     ) -> bool:
+        attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+        trigger_key = str(attachment_cfg.get('trigger') or 'toggle_menu')
+        upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
         snap = self.runtime.snapshot()
-        toggle_menu = self.find_first(snap, 'toggle_menu')
+        toggle_menu = self.find_first(snap, trigger_key)
         if not toggle_menu:
             result.add_step('attach', False,
-                            f'Claude toggle menu missing for {abs_path}',
+                            f'Claude attach trigger {trigger_key!r} missing for {abs_path}',
                             snapshot=snap.serializable())
             return False
         if not self.runtime.click(toggle_menu):
             result.add_step('attach', False,
-                            f'Claude toggle menu click failed for {abs_path}',
+                            f'Claude attach trigger {trigger_key!r} click failed for {abs_path}',
                             snapshot=snap.serializable())
             return False
         menu_snap = self.runtime.wait_for_stable_menu_snapshot(
             consecutive=2,
             timeout=8,
             interval=0.4,
-            anchor_key='upload_files_item',
+            anchor_key=upload_key,
             require_non_empty=True,
         )
-        upload_item = self.find_first(menu_snap, 'upload_files_item')
+        upload_item = self.find_first(menu_snap, upload_key)
         if not upload_item:
             result.add_step('attach', False,
-                            f'Claude upload item not found for {abs_path}',
+                            f'Claude upload item {upload_key!r} not found for {abs_path}',
                             snapshot=menu_snap.serializable())
             return False
         if not self.runtime.click(upload_item):
             result.add_step('attach', False,
-                            f'Claude upload item click failed for {abs_path}',
+                            f'Claude upload item {upload_key!r} click failed for {abs_path}',
                             snapshot=menu_snap.serializable())
             return False
         time.sleep(1.0)
-        self.runtime.focus_file_dialog()
-        self.runtime.press('ctrl+l')
+        if not self.runtime.focus_file_dialog():
+            result.add_step('attach', False,
+                            f'Claude file dialog did not focus for {abs_path}',
+                            file=abs_path)
+            return False
+        if not self.runtime.press('ctrl+l'):
+            result.add_step('attach', False,
+                            f'Claude file dialog location shortcut failed for {abs_path}',
+                            file=abs_path)
+            return False
         time.sleep(0.3)
-        if not self.runtime.paste(abs_path):
-            self.runtime.type_text(abs_path, delay_ms=5)
+        if not self.runtime.type_text(abs_path, delay_ms=5):
+            result.add_step('attach', False,
+                            f'Claude file dialog path typing failed for {abs_path}',
+                            file=abs_path)
+            return False
         time.sleep(0.3)
-        self.runtime.press('Return')
+        if not self.runtime.click_file_dialog_open_button():
+            result.add_step('attach', False,
+                            f'Claude file dialog Open button click failed for {abs_path}',
+                            file=abs_path)
+            return False
         verify_snap = self._wait_for_attach_success(abs_path)
-        verified = self._attachment_visible(verify_snap, abs_path)
+        chip_name = self._attachment_chip_name(verify_snap, abs_path)
+        verified = chip_name is not None
         result.add_step('attach', verified,
                         f'Claude attached {os.path.basename(abs_path)}',
-                        file=abs_path, snapshot=verify_snap.serializable())
+                        file=abs_path,
+                        method='file_upload_dialog',
+                        trigger=trigger_key,
+                        menu_target=upload_key,
+                        open_button_clicked=True,
+                        chip_name=chip_name,
+                        snapshot=verify_snap.serializable())
         return verified
 
     def _wait_for_attach_success(self, abs_path: str):
