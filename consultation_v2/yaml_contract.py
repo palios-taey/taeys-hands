@@ -51,6 +51,7 @@ IDENTITY_ELEMENT_KEYS = frozenset({
     'reason',
 })
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
+MENU_ACTIVE_RECOGNITIONS = IDENTITY_ACTIVE_STATES | frozenset({'selected_name_prefix'})
 IDENTITY_MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
 IDENTITY_STRUCTURAL_KEYS = frozenset({'after', 'before'})
 MENU_SELECTION_KEYS = frozenset({'menus'})
@@ -734,9 +735,9 @@ def _validate_menu(
         _add(findings, lines, menu_path + ('select',), 'select',
              f'menu.select must be one of {sorted(MENU_SELECT_VALUES)}')
     active_recognition = menu.get('active_recognition')
-    if active_recognition not in IDENTITY_ACTIVE_STATES:
+    if active_recognition not in MENU_ACTIVE_RECOGNITIONS:
         _add(findings, lines, menu_path + ('active_recognition',), 'active_recognition',
-             f'menu.active_recognition must name a live AT-SPI state: {sorted(IDENTITY_ACTIVE_STATES)}')
+             f'menu.active_recognition must be one of {sorted(MENU_ACTIVE_RECOGNITIONS)}')
     for bool_key in ('must_choose', 'resettable_on_followup'):
         if not isinstance(menu.get(bool_key), bool):
             _add(findings, lines, menu_path + (bool_key,), bool_key,

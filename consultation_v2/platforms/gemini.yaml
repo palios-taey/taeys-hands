@@ -7,7 +7,6 @@ tree:
   fence_after:
   - name: Chats
     role: heading
-  menu_snapshot_scan: document_menu_roles
   menu_snapshot_roles:
     - menu item
     - radio menu item
@@ -136,10 +135,14 @@ tree:
       name: NotebookLM
       role: menu item
     mode_fast:
-      name: 3.5 Flash All-around help New
+      names_any_of:
+        - "3.5 Flash All-around help"
+        - "Selected 3.5 Flash All-around help"
       role: menu item
     mode_thinking:
-      name: 3.5 Thinking Solves complex problems
+      names_any_of:
+        - "3.5 Thinking Solves complex problems"
+        - "Selected 3.5 Thinking Solves complex problems"
       role: menu item
     # The model menu prefixes "Selected " onto the ACTIVE model, so a single
     # exact name can't click Pro FROM Flash (when Flash is active the Pro item
@@ -189,7 +192,7 @@ workflow:
     menus:
       model:
         select: single
-        active_recognition: checked
+        active_recognition: selected_name_prefix
         must_choose: false
         resettable_on_followup: true
         operate:
@@ -211,10 +214,13 @@ workflow:
         resettable_on_followup: true
         operate:
           trigger: tools_button
-          scope: menu_snapshot
+          scope: snapshot
         options:
           deep_think:
             element: tool_deep_think
+            path:
+              - element: more_tools
+                action: hover
             active_element: tool_deselect_deep_think
           deep_research:
             element: tool_deep_research

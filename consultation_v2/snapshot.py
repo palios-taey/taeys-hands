@@ -715,10 +715,10 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
         except Exception:
             pass
 
+    menu_snapshot_roles = _role_set(tree_cfg.get('menu_snapshot_roles') or [])
     if tree_cfg.get('menu_snapshot_scan') == 'document_menu_roles':
-        role_filter = _role_set(
-            tree_cfg.get('menu_snapshot_roles')
-            or ['menu item', 'radio menu item', 'check menu item', 'option']
+        role_filter = menu_snapshot_roles or _role_set(
+            ['menu item', 'radio menu item', 'check menu item', 'option']
         )
         scan_root = firefox
         elements = find_elements(
@@ -739,7 +739,10 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
         snapshot.url = atspi.get_document_url(doc) if doc is not None else None
         return firefox, doc, snapshot
 
-    menu = _menu_snapshot_filtered(find_menu_items(firefox, doc), tree_cfg)
+    menu = _menu_snapshot_filtered(
+        find_menu_items(firefox, doc, allowed_roles=menu_snapshot_roles or None),
+        tree_cfg,
+    )
 
     # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
     # only partial results (e.g., on Claude it finds 9 file/connector items but
@@ -747,7 +750,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     # Since find_menu_items returns non-empty, the old fallback never fired and
     # those items were silently dropped. Now we always merge both sources.
     elements = find_elements(firefox)
-    _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button', 'toggle button'}
+    _EXTRA_ROLES = menu_snapshot_roles or (_MENU_ROLES | {'entry', 'push button', 'toggle button'})
     extra = [
         e for e in _menu_snapshot_filtered(elements, tree_cfg)
         if (e.get('role') or '').strip().lower() in _EXTRA_ROLES

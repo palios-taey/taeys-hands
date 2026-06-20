@@ -750,7 +750,7 @@ class BaseConsultationDriver(ABC):
         if target is None:
             return False
         active_state = str(step['active_recognition'])
-        if not active_element_key and self._selection_element_has_state(target, active_state):
+        if not active_element_key and self._selection_element_matches_active_recognition(target, active_state):
             self.runtime.press('Escape')
             result.add_step(
                 'select',
@@ -1089,6 +1089,16 @@ class BaseConsultationDriver(ABC):
         expected = state.strip().lower()
         return expected in {str(item).lower() for item in (element.states or [])}
 
+    def _selection_element_matches_active_recognition(
+        self,
+        element: ElementRef,
+        active_recognition: str,
+    ) -> bool:
+        normalized = active_recognition.strip().lower()
+        if normalized == 'selected_name_prefix':
+            return (element.name or '').strip().lower().startswith('selected ')
+        return self._selection_element_has_state(element, normalized)
+
     def _selection_wait_for_active_state(
         self,
         target_key: str,
@@ -1107,7 +1117,7 @@ class BaseConsultationDriver(ABC):
                 anchor_key=target_key,
             )
             last_target = self.find_first(last_snapshot, target_key)
-            if last_target is not None and self._selection_element_has_state(last_target, active_state):
+            if last_target is not None and self._selection_element_matches_active_recognition(last_target, active_state):
                 return last_snapshot, last_target, True
             time.sleep(0.2)
         if last_snapshot is None:
