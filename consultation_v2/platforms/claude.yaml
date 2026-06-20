@@ -1,6 +1,6 @@
 schema: identity_v1
 platform: claude
-click_strategy: xdotool_first
+click_strategy: atspi_first
 navigation_key: alt+d
 urls:
   fresh: https://claude.ai/new
