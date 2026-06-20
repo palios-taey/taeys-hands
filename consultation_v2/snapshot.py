@@ -385,6 +385,23 @@ def _classify_elements(
     return snapshot
 
 
+def _menu_snapshot_filtered(
+    elements: Iterable[Dict[str, Any]],
+    tree_cfg: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    menu_exclude = tree_cfg.get('menu_snapshot_exclude') or {}
+    names = menu_exclude.get('names') or []
+    if isinstance(names, str):
+        names = [names]
+    excluded_names = {str(name).strip() for name in names if str(name).strip()}
+    if not excluded_names:
+        return list(elements)
+    return [
+        element for element in elements
+        if (element.get('name') or '').strip() not in excluded_names
+    ]
+
+
 def _resolve_structural_mappings(
     element_map: Dict[str, Any],
     elements: List[Dict[str, Any]],
@@ -715,13 +732,14 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             if (item.get('name') or '').strip()
             and (item.get('role') or '').strip().lower() in role_filter
         ]
+        menu = _menu_snapshot_filtered(menu, tree_cfg)
         menu = _dedupe_elements(menu)
         menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
         snapshot = _classify_elements(platform, menu, menu_items=menu, chrome_cfg=chrome_cfg)
         snapshot.url = atspi.get_document_url(doc) if doc is not None else None
         return firefox, doc, snapshot
 
-    menu = find_menu_items(firefox, doc)
+    menu = _menu_snapshot_filtered(find_menu_items(firefox, doc), tree_cfg)
 
     # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
     # only partial results (e.g., on Claude it finds 9 file/connector items but
@@ -730,7 +748,11 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     # those items were silently dropped. Now we always merge both sources.
     elements = find_elements(firefox)
     _EXTRA_ROLES = _MENU_ROLES | {'entry', 'push button', 'toggle button'}
-    extra = [e for e in elements if (e.get('role') or '').strip().lower() in _EXTRA_ROLES and (e.get('name') or '').strip()]
+    extra = [
+        e for e in _menu_snapshot_filtered(elements, tree_cfg)
+        if (e.get('role') or '').strip().lower() in _EXTRA_ROLES
+        and (e.get('name') or '').strip()
+    ]
     # Dedupe by (name, role) — preserve original menu order first, then append new items.
     seen = {(m.get('name', ''), m.get('role', '')) for m in menu}
     for e in extra:

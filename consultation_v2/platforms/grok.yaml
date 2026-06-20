@@ -5,6 +5,18 @@ urls:
   verify_navigation: true
 tree:
   fence_after: []
+  menu_snapshot_exclude:
+    names:
+    - Undo
+    - Redo
+    - Cut
+    - Copy
+    - Paste
+    - Paste Without Formatting
+    - Delete
+    - Select All
+    - Check Spelling
+    - Inspect
   exclude:
     names:
     - Toggle Sidebar

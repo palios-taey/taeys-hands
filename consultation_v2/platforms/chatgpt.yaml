@@ -13,6 +13,18 @@ tree:
     - radio menu item
     - check menu item
     - option
+  menu_snapshot_exclude:
+    names:
+      - Undo
+      - Redo
+      - Cut
+      - Copy
+      - Paste
+      - Paste Without Formatting
+      - Delete
+      - Select All
+      - Check Spelling
+      - Inspect
   prune_subtrees:
     - role: list
       name: ""

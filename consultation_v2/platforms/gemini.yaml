@@ -7,6 +7,18 @@ tree:
   fence_after:
   - name: Chats
     role: heading
+  menu_snapshot_exclude:
+    names:
+    - Undo
+    - Redo
+    - Cut
+    - Copy
+    - Paste
+    - Paste Without Formatting
+    - Delete
+    - Select All
+    - Check Spelling
+    - Inspect
   exclude:
     names:
     - Gemini

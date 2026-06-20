@@ -7,6 +7,18 @@ tree:
   # fence_after disabled — Deep Research and input controls appear AFTER
   # sidebar history in AT-SPI tree. Fencing cuts them off.
   fence_after: []
+  menu_snapshot_exclude:
+    names:
+    - Undo
+    - Redo
+    - Cut
+    - Copy
+    - Paste
+    - Paste Without Formatting
+    - Delete
+    - Select All
+    - Check Spelling
+    - Inspect
   exclude:
     names:
     - User avatar
