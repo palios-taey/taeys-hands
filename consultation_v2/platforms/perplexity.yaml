@@ -235,7 +235,7 @@ tree:
       role: push button
       pick: last_by_y
     stop_button:
-      name: Stop response
+      name: Stop response (Esc)
       role: push button
     copy_button:
       name: Copy
@@ -324,7 +324,6 @@ workflow:
     settle_redirects: true
   monitor:
     stop_key: stop_button
-    complete_key: copy_button
   extract:
     primary_key: copy_contents_button
     strategy: last_by_y
@@ -355,7 +354,7 @@ validation:
       states_include: [editable]
   send_success:
     indicators:
-    - name: Stop response
+    - name: Stop response (Esc)
       role: push button
     timeout: 120
   response_complete:
