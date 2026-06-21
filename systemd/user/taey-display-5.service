@@ -1,16 +1,22 @@
 [Unit]
-Description=Taey Display :5 (Grok)
+Description=Taey Display :5 (grok)
 After=taey-xvfb@5.service
 Requires=taey-xvfb@5.service
 
 [Service]
 Type=simple
+EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:5
-Environment=TAEY_REPO=%h/taeys-hands
-ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'echo "$$DBUS_SESSION_BUS_ADDRESS" > /tmp/dbus_session_bus_:5; /usr/libexec/at-spi-bus-launcher --launch-immediately & A11Y_ADDR=""; for i in $$(seq 1 20); do TMP_ADDR=$$(xprop -display :5 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$$//"); case "$$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="$$TMP_ADDR"; echo "$$A11Y_ADDR" > /tmp/a11y_bus_:5 && break ;; esac; sleep 1; done; if [[ -z "$$A11Y_ADDR" ]]; then TMP_ADDR=$$(xprop -display :5 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$$//"); case "$$TMP_ADDR" in unix:path=*|unix:abstract=*) A11Y_ADDR="$$TMP_ADDR"; echo "$$A11Y_ADDR" > /tmp/a11y_bus_:5 ;; esac; fi; AT_SPI_BUS_ADDRESS="$${A11Y_ADDR}" /usr/libexec/at-spi2-registryd & sleep 1; openbox & sleep 1; /usr/bin/x11vnc -display :5 -rfbport 5905 -rfbauth $$HOME/.taey/vnc_passwd -forever -shared -bg -o /tmp/x11vnc-5.log; "$${TAEY_REPO}/scripts/install_firefox_user_js.sh" "$$HOME/.taey/profiles/ff-profile-grok"; GTK_USE_PORTAL=0 LIBGL_ALWAYS_SOFTWARE=1 GNOME_ACCESSIBILITY=1 GTK_MODULES=gail:atk-bridge AT_SPI_BUS_ADDRESS="$${A11Y_ADDR}" /usr/lib/firefox/firefox --no-remote --profile $$HOME/.taey/profiles/ff-profile-grok "https://grok.com/" & FIREFOX_PID=$$!; if [[ -z "$$FIREFOX_PID" ]]; then for _ in $$(seq 1 10); do FIREFOX_PID=$$(pgrep -P $$$$ -o -x firefox 2>/dev/null || true); [[ -n "$$FIREFOX_PID" ]] && break; sleep 1; done; fi; ( L_ADDR="$$A11Y_ADDR"; while kill -0 "$${FIREFOX_PID}" >/dev/null 2>&1; do C_ADDR=$$(xprop -display :5 -root AT_SPI_BUS 2>/dev/null | sed "s/.*= \"//;s/\"$$//"); if [[ "$$C_ADDR" == unix:* ]]; then if [[ "$$C_ADDR" != "$$L_ADDR" || ! -s /tmp/a11y_bus_:5 ]]; then printf "%%s\n" "$$C_ADDR" > /tmp/a11y_bus_:5.tmp && mv /tmp/a11y_bus_:5.tmp /tmp/a11y_bus_:5; L_ADDR="$$C_ADDR"; fi; fi; sleep 2; done ) & [ -s /tmp/a11y_bus_:5 ] || echo "WARNING: AT-SPI bus capture failed for :5" >&2; echo "$${FIREFOX_PID}" > /tmp/firefox_pid_:5; if [[ -n "$${FIREFOX_PID}" ]]; then wait $${FIREFOX_PID}; else wait; fi'
-ExecStopPost=/usr/bin/bash -lc 'pkill -f "x11vnc.*rfbport 5905" 2>/dev/null || true; rm -f /tmp/dbus_session_bus_:5 /tmp/firefox_pid_:5'
+Environment=TAEY_PLATFORM=grok
+Environment=TAEY_PROFILE=ff-profile-grok
+Environment=TAEY_URL=https://grok.com/
+Environment=TAEY_VNC_ENABLED=1
+Environment=TAEY_VNC_PORT=5905
+ExecStartPre=/usr/bin/bash -lc 'set -Eeuo pipefail; : "$${TAEY_REPO:?TAEY_REPO}"; test -x "$${TAEY_REPO}/scripts/display_unit_runner.sh"'
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/bash -lc 'set -Eeuo pipefail; : "$${TAEY_REPO:?TAEY_REPO}"; exec "$${TAEY_REPO}/scripts/display_unit_runner.sh" 5'
 Restart=always
 RestartSec=10
+TimeoutStopSec=20
 
 [Install]
 WantedBy=default.target

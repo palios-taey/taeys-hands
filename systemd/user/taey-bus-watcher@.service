@@ -6,9 +6,9 @@ PartOf=taey-display-%i.service
 
 [Service]
 Type=simple
+EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:%i
-Environment=TAEY_REPO=%h/taeys-hands
-ExecStart=/usr/bin/bash -lc 'exec "$${TAEY_REPO}/scripts/bus_watcher.sh" %i'
+ExecStart=/usr/bin/bash -lc 'set -Eeuo pipefail; : "$${TAEY_REPO:?TAEY_REPO}"; exec "$${TAEY_REPO}/scripts/bus_watcher.sh" %i'
 Restart=always
 RestartSec=2
 

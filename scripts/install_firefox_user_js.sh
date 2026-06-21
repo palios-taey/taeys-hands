@@ -22,7 +22,10 @@ fi
 mkdir -p "${PROFILE_DIR}"
 
 if [[ -e "${USER_JS}" ]] && command -v chattr >/dev/null 2>&1; then
-    chattr -i "${USER_JS}" 2>/dev/null || true
+    if ! chattr -i "${USER_JS}"; then
+        echo "ERROR: failed to clear immutable bit on ${USER_JS}" >&2
+        exit 1
+    fi
 fi
 
 shopt -s nullglob

@@ -4,7 +4,7 @@ After=basic.target
 
 [Service]
 Type=simple
-ExecStartPre=/usr/bin/bash -c 'rm -f /tmp/.X%i-lock /tmp/.X11-unix/X%i /tmp/a11y_bus_:%i /tmp/dbus_session_bus_:%i /tmp/firefox_pid_:%i'
+ExecStartPre=/usr/bin/bash -lc 'set -Eeuo pipefail; rm -f /tmp/.X%i-lock /tmp/.X11-unix/X%i /tmp/a11y_bus_:%i /tmp/dbus_session_bus_:%i /tmp/firefox_pid_:%i'
 ExecStart=/usr/bin/Xvfb :%i -screen 0 1920x1080x24 -ac -noreset
 Restart=on-failure
 RestartSec=3

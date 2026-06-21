@@ -1,8 +1,8 @@
 """Platform definitions: URL patterns, tab shortcuts, screen detection."""
 
 import os
-import socket
 import subprocess
+from pathlib import Path
 
 
 def _detect_screen_size() -> tuple:
@@ -50,8 +50,8 @@ class _LazyDim:
 SCREEN_WIDTH = _LazyDim(0)
 SCREEN_HEIGHT = _LazyDim(1)
 
-# Tab shortcuts — workers have fewer tabs
-_WORKER_HOSTNAMES = {'jetson', 'thor'}
+# Tab shortcuts. Dedicated-display deployments do not use tab switching;
+# TAEY_TAB_PROFILE keeps the legacy reduced-tab mode explicit when needed.
 _DEFAULT_TABS = {
     'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3',
     'grok': 'alt+4', 'perplexity': 'alt+5', 'x_twitter': 'alt+6',
@@ -60,8 +60,10 @@ _WORKER_TABS = {
     'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3', 'grok': 'alt+4',
 }
 
-_hostname = socket.gethostname().lower()
-TAB_SHORTCUTS = _WORKER_TABS if _hostname in _WORKER_HOSTNAMES else _DEFAULT_TABS
+_TAB_PROFILE = os.environ.get('TAEY_TAB_PROFILE', 'default').strip().lower()
+if _TAB_PROFILE not in {'default', 'worker'}:
+    raise RuntimeError(f"Unsupported TAEY_TAB_PROFILE={_TAB_PROFILE!r}; expected default or worker")
+TAB_SHORTCUTS = _WORKER_TABS if _TAB_PROFILE == 'worker' else _DEFAULT_TABS
 
 # URL patterns for platform detection (order: specific first)
 _EXTRA_URL_PATTERNS = {'grok': 'x.com/i/grok'}
@@ -95,31 +97,88 @@ CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 SOCIAL_PLATFORMS = {'x_twitter', 'linkedin', 'reddit', 'nvidia_forum'}
 ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
-# ─── Multi-Display Support ──────────────────────────────────────────────
-# Set PLATFORM_DISPLAYS env var: "chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"
-# If not set, all platforms use the server's DISPLAY (tab-switching mode).
+# Multi-display support.
+# Sources, in precedence order:
+#   1. PLATFORM_DISPLAYS env var or repo .env:
+#      "chatgpt:2,claude:3,gemini:4,grok:5,perplexity:6"
+#   2. TAEY_MACHINE_ENV or ~/.taey/machine.env TAEY_DISPLAY_N rows:
+#      TAEY_DISPLAY_2="chatgpt:ff-profile-chatgpt:https://chatgpt.com/"
+# If no source is configured, all platforms use the current DISPLAY.
 _PLATFORM_DISPLAYS: dict[str, str] = {}
 
-def _parse_platform_displays():
-    raw = os.environ.get('PLATFORM_DISPLAYS', '')
-    if not raw:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
-        try:
-            with open(env_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('PLATFORM_DISPLAYS='):
-                        raw = line.split('=', 1)[1].strip()
-                        break
-        except FileNotFoundError:
-            pass
-    if not raw:
-        return
+
+def _strip_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    return value
+
+
+def _read_repo_dotenv_platform_displays() -> str:
+    env_file = Path(__file__).resolve().parents[1] / '.env'
+    try:
+        with env_file.open() as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('PLATFORM_DISPLAYS='):
+                    return _strip_env_value(line.split('=', 1)[1])
+    except FileNotFoundError:
+        return ''
+    return ''
+
+
+def _parse_platform_display_pairs(raw: str) -> dict[str, str]:
+    displays: dict[str, str] = {}
     for pair in raw.split(','):
         pair = pair.strip()
-        if ':' in pair:
-            plat, dnum = pair.rsplit(':', 1)
-            _PLATFORM_DISPLAYS[plat.strip()] = f':{dnum.strip()}'
+        if not pair:
+            continue
+        if ':' not in pair:
+            raise RuntimeError(f"Malformed PLATFORM_DISPLAYS pair {pair!r}; expected platform:display")
+        plat, dnum = pair.rsplit(':', 1)
+        plat = plat.strip()
+        dnum = dnum.strip().lstrip(':')
+        if not plat or not dnum.isdigit():
+            raise RuntimeError(f"Malformed PLATFORM_DISPLAYS pair {pair!r}; expected platform:display")
+        displays[plat] = f':{dnum}'
+    return displays
+
+
+def _read_machine_env_platform_displays() -> dict[str, str]:
+    machine_env = Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
+    try:
+        lines = machine_env.read_text().splitlines()
+    except FileNotFoundError:
+        return {}
+
+    displays: dict[str, str] = {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#') or '=' not in stripped:
+            continue
+        key, value = stripped.split('=', 1)
+        key = key.strip()
+        if not key.startswith('TAEY_DISPLAY_'):
+            continue
+        display_num = key.removeprefix('TAEY_DISPLAY_')
+        if not display_num.isdigit():
+            raise RuntimeError(f"Malformed {key} in {machine_env}; display suffix must be numeric")
+        value = _strip_env_value(value)
+        parts = value.split(':', 2)
+        if len(parts) != 3 or not parts[0].strip():
+            raise RuntimeError(f"Malformed {key} in {machine_env}; expected platform:profile:url")
+        displays[parts[0].strip()] = f':{display_num}'
+    return displays
+
+
+def _parse_platform_displays():
+    raw = os.environ.get('PLATFORM_DISPLAYS', '').strip()
+    if not raw:
+        raw = _read_repo_dotenv_platform_displays()
+    if raw:
+        _PLATFORM_DISPLAYS.update(_parse_platform_display_pairs(raw))
+    else:
+        _PLATFORM_DISPLAYS.update(_read_machine_env_platform_displays())
 
 _parse_platform_displays()
 
@@ -189,5 +248,5 @@ def get_platform_firefox_pid(platform: str) -> int | None:
 
 
 def is_multi_display() -> bool:
-    """True if PLATFORM_DISPLAYS is configured (Mira mode)."""
+    """True if platform-to-display routing is configured."""
     return bool(_PLATFORM_DISPLAYS)
