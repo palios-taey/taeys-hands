@@ -33,6 +33,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         prompt → guarded send + monitor registration."""
         urls = self.cfg.get('urls', {})
         target_url = request.session_url or urls.get('fresh')
+        cleaned_before_ready = False
         if not self.runtime.switch():
             result.add_step('navigate', False, 'Could not switch to ChatGPT tab')
             return False
@@ -43,12 +44,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step('navigate', navigated, 'Navigated to ChatGPT session target', target_url=target_url, snapshot=snap.serializable())
             if not navigated:
                 return False
+            if not request.session_url:
+                if not self.clean_composer(request, result):
+                    return False
+                cleaned_before_ready = True
             if not self.wait_for_page_ready_after_navigation(result):
                 return False
         if not self.tree_conformance_gate(result):
             return False
 
-        if not self.clean_composer(request, result):
+        if not cleaned_before_ready and not self.clean_composer(request, result):
             return False
         if not self.apply_selection_plan(request, result):
             return False
@@ -223,8 +228,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                             'ChatGPT follow-up session — keeping existing thread (no New chat)')
             return True
 
-        snap = self.runtime.snapshot()
-        new_chat_key, new_chat = self.find_first_any(snap, self._new_chat_keys())
+        def _find_new_chat():
+            snap = self.runtime.snapshot()
+            key, element = self.find_first_any(snap, self._new_chat_keys())
+            if key and element:
+                return snap, key, element
+            return None
+
+        found = self.runtime.wait_until(_find_new_chat, timeout=15.0, interval=0.4)
+        snap, new_chat_key, new_chat = found if found else (self.runtime.snapshot(), None, None)
         if not new_chat:
             result.add_step('clean_composer', False,
                             'ChatGPT New chat link not found — cannot force a clean fresh chat',
