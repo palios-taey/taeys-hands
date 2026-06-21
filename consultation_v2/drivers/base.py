@@ -1119,13 +1119,22 @@ class BaseConsultationDriver(ABC):
         return current_snapshot, target
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 15.0)
-        snapshot = self._selection_stable_snapshot(
-            scope,
-            timeout=timeout,
-            anchor_key=key,
-        )
-        return snapshot, self.find_first(snapshot, key)
+        timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self._selection_stable_snapshot(
+                scope,
+                timeout=min(remaining, 0.8),
+                anchor_key=key,
+            )
+            element = self.find_first(last_snapshot, key)
+            if element is not None:
+                return last_snapshot, element
+            time.sleep(0.4)
+        last_snapshot = last_snapshot or self._selection_snapshot(scope)
+        return last_snapshot, self.find_first(last_snapshot, key)
 
     def _activate_selection_path_element(self, element: ElementRef, action: str) -> bool:
         normalized = action.strip().lower()
