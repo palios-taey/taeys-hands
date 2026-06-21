@@ -32,11 +32,6 @@ tree:
         role: landmark
         name: Chat history
       min_child_count: 3
-    - role: push button
-      parent:
-        role: landmark
-        name: Chat history
-      min_child_count: 1
   exclude:
     names:
       - Skip to content

@@ -35,32 +35,13 @@ _TEXT_EXTRACT_MAX_CHILDREN = 8
 FIREFOX_CHROME_Y = 100
 
 
-def _validate_prune_relation_spec(spec: Dict, label: str) -> None:
-    for key in spec:
-        if key not in {'role', 'name', 'names_any_of'}:
-            raise ValueError(f'unsupported prune_subtree_specs {label} key {key!r}')
-    if not any(key in spec for key in ('role', 'name', 'names_any_of')):
-        raise ValueError(f'prune_subtree_specs {label} must declare role, name, or names_any_of')
-    if 'role' in spec and not isinstance(spec['role'], str):
-        raise ValueError(f'prune_subtree_specs {label} role must be an exact string')
-    if 'name' in spec and not isinstance(spec['name'], str):
-        raise ValueError(f'prune_subtree_specs {label} name must be an exact string')
-    if 'names_any_of' in spec:
-        candidates = spec['names_any_of']
-        if (
-            not isinstance(candidates, list)
-            or not all(isinstance(item, str) for item in candidates)
-        ):
-            raise ValueError(f'prune_subtree_specs {label} names_any_of must be a list of exact strings')
-
-
 def _validate_prune_subtree_specs(specs: Optional[List[Dict]]) -> List[Dict[str, Any]]:
     normalized = []
     for spec in specs or []:
         if not isinstance(spec, dict):
             raise ValueError('prune_subtree_specs entries must be mappings')
         for key in spec:
-            if key not in {'role', 'name', 'names_any_of', 'ancestor', 'parent', 'min_child_count'}:
+            if key not in {'role', 'name', 'names_any_of', 'ancestor', 'min_child_count'}:
                 raise ValueError(f'unsupported prune_subtree_specs key {key!r}')
         if not any(key in spec for key in ('role', 'name', 'names_any_of')):
             raise ValueError('prune_subtree_specs entries must declare role, name, or names_any_of')
@@ -79,12 +60,22 @@ def _validate_prune_subtree_specs(specs: Optional[List[Dict]]) -> List[Dict[str,
             ancestor = spec['ancestor']
             if not isinstance(ancestor, dict):
                 raise ValueError('prune_subtree_specs ancestor must be a mapping')
-            _validate_prune_relation_spec(ancestor, 'ancestor')
-        if 'parent' in spec:
-            parent = spec['parent']
-            if not isinstance(parent, dict):
-                raise ValueError('prune_subtree_specs parent must be a mapping')
-            _validate_prune_relation_spec(parent, 'parent')
+            for key in ancestor:
+                if key not in {'role', 'name', 'names_any_of'}:
+                    raise ValueError(f'unsupported prune_subtree_specs ancestor key {key!r}')
+            if not any(key in ancestor for key in ('role', 'name', 'names_any_of')):
+                raise ValueError('prune_subtree_specs ancestor must declare role, name, or names_any_of')
+            if 'role' in ancestor and not isinstance(ancestor['role'], str):
+                raise ValueError('prune_subtree_specs ancestor role must be an exact string')
+            if 'name' in ancestor and not isinstance(ancestor['name'], str):
+                raise ValueError('prune_subtree_specs ancestor name must be an exact string')
+            if 'names_any_of' in ancestor:
+                candidates = ancestor['names_any_of']
+                if (
+                    not isinstance(candidates, list)
+                    or not all(isinstance(item, str) for item in candidates)
+                ):
+                    raise ValueError('prune_subtree_specs ancestor names_any_of must be a list of exact strings')
         if 'min_child_count' in spec and not isinstance(spec['min_child_count'], int):
             raise ValueError('prune_subtree_specs min_child_count must be an integer')
         normalized.append(dict(spec))
@@ -106,13 +97,6 @@ def _has_matching_ancestor(ancestors: List[tuple[str, str]], spec: Dict[str, Any
         _node_matches_prune_spec(ancestor_name, ancestor_role, spec)
         for ancestor_name, ancestor_role in ancestors
     )
-
-
-def _has_matching_parent(ancestors: List[tuple[str, str]], spec: Dict[str, Any]) -> bool:
-    if not ancestors:
-        return False
-    parent_name, parent_role = ancestors[-1]
-    return _node_matches_prune_spec(parent_name, parent_role, spec)
 
 
 def _collect_child_text(obj, max_children=_TEXT_EXTRACT_MAX_CHILDREN,
@@ -186,9 +170,6 @@ def find_elements(scope, max_depth: int = 25,
                 continue
             ancestor = spec.get('ancestor')
             if ancestor and not _has_matching_ancestor(ancestors, ancestor):
-                continue
-            parent = spec.get('parent')
-            if parent and not _has_matching_parent(ancestors, parent):
                 continue
             return True
         return False
