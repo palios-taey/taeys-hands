@@ -402,6 +402,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         full_timeout = max(120.0, configured_timeout)
         first_probe_timeout = min(12.0, full_timeout)
         stop_keys = self._stop_keys()
+        if request.attachments:
+            return self._send_attached_prompt_by_settled_button(
+                request,
+                result,
+                before=before,
+                full_timeout=full_timeout,
+                stop_keys=stop_keys,
+                attempts=attempts,
+            )
 
         for attempt in (1, 2):
             send_snap = None
@@ -568,6 +577,259 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return current if self._is_answer_thread_url(current) else None
 
         return self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
+
+    def _send_button_probe(self):
+        snap = self.runtime.snapshot()
+        candidates = []
+        for key in self._send_button_keys():
+            for element in (snap.mapped or {}).get(key) or []:
+                rect = self._screen_rect(element.atspi_obj)
+                if rect:
+                    center_x = int(rect['x'] + rect['width'] // 2)
+                    center_y = int(rect['y'] + rect['height'] // 2)
+                    source = 'component_extents'
+                    signature = (
+                        rect['x'],
+                        rect['y'],
+                        rect['width'],
+                        rect['height'],
+                    )
+                elif element.x is not None and element.y is not None:
+                    center_x = int(element.x)
+                    center_y = int(element.y)
+                    source = 'snapshot_center'
+                    rect = {
+                        'x': center_x,
+                        'y': center_y,
+                        'width': 0,
+                        'height': 0,
+                    }
+                    signature = (center_x, center_y, 0, 0)
+                else:
+                    continue
+                states = {str(state).strip().lower() for state in (element.states or [])}
+                candidates.append({
+                    'key': key,
+                    'element': element,
+                    'rect': rect,
+                    'center_x': center_x,
+                    'center_y': center_y,
+                    'source': source,
+                    'signature': signature,
+                    'ready': bool('enabled' in states and 'focusable' in states),
+                    'states': list(element.states or []),
+                })
+        if not candidates:
+            return snap, None
+        return snap, max(candidates, key=lambda item: (item['center_y'], item['center_x']))
+
+    @staticmethod
+    def _send_button_probe_evidence(probe):
+        if not probe:
+            return None
+        element = probe['element']
+        return {
+            'key': probe['key'],
+            'source': probe['source'],
+            'rect': dict(probe['rect']),
+            'center_x': probe['center_x'],
+            'center_y': probe['center_y'],
+            'ready': probe['ready'],
+            'element': {
+                'name': element.name,
+                'role': element.role,
+                'x': element.x,
+                'y': element.y,
+                'states': list(element.states or []),
+            },
+        }
+
+    def _wait_for_settled_send_button(
+        self,
+        *,
+        timeout: float,
+        min_settle_seconds: float = 4.0,
+        required_stable_cycles: int = 4,
+    ):
+        started = time.time()
+        last_signature = None
+        stable_cycles = 0
+        last_snapshot = None
+        last_probe = None
+        last_evidence = {
+            'phase': 'send_button_settle',
+            'min_settle_seconds': min_settle_seconds,
+            'required_stable_cycles': required_stable_cycles,
+            'observed_stable_cycles': 0,
+            'elapsed_seconds': 0.0,
+            'send_button': None,
+        }
+
+        def _probe_settled():
+            nonlocal stable_cycles, last_signature, last_snapshot, last_probe, last_evidence
+            snap, probe = self._send_button_probe()
+            last_snapshot = snap
+            last_probe = probe
+            signature = probe['signature'] if probe else None
+            if probe and probe['ready'] and signature == last_signature:
+                stable_cycles += 1
+            elif probe and probe['ready']:
+                stable_cycles = 1
+            else:
+                stable_cycles = 0
+            last_signature = signature
+            elapsed = time.time() - started
+            last_evidence = {
+                'phase': 'send_button_settle',
+                'min_settle_seconds': min_settle_seconds,
+                'required_stable_cycles': required_stable_cycles,
+                'observed_stable_cycles': stable_cycles,
+                'elapsed_seconds': round(elapsed, 2),
+                'send_button': self._send_button_probe_evidence(probe),
+            }
+            if (
+                probe
+                and probe['ready']
+                and stable_cycles >= required_stable_cycles
+                and elapsed >= min_settle_seconds
+            ):
+                return snap
+            return None
+
+        settled_snapshot = self.runtime.wait_until(
+            _probe_settled,
+            timeout=max(float(timeout), min_settle_seconds + 2.0),
+            interval=0.5,
+        )
+        return settled_snapshot, last_probe, last_evidence, last_snapshot
+
+    def _send_attached_prompt_by_settled_button(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        *,
+        before: str | None,
+        full_timeout: float,
+        stop_keys: tuple[str, ...],
+        attempts: list[dict],
+    ) -> bool:
+        from consultation_v2 import input as _inp
+
+        settle_timeout = min(full_timeout, 45.0)
+        send_snap = None
+        for attempt in (1, 2):
+            settled_snap, _settled_probe, settle_evidence, last_settle_snap = (
+                self._wait_for_settled_send_button(timeout=settle_timeout)
+            )
+            attempts.append({
+                'attempt': attempt,
+                **settle_evidence,
+            })
+            if settled_snap is None:
+                verify_snap = last_settle_snap or self.runtime.snapshot()
+                result.session_url_after = self.runtime.current_url() or before
+                result.add_step(
+                    'send', False,
+                    'ChatGPT attachment send button did not settle before coordinate click',
+                    url_before=before,
+                    url_after=result.session_url_after,
+                    attempts=attempts,
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
+
+            fresh_snap, fresh_probe = self._send_button_probe()
+            fresh_evidence = self._send_button_probe_evidence(fresh_probe)
+            if not fresh_probe or not fresh_probe['ready']:
+                attempts.append({
+                    'attempt': attempt,
+                    'phase': 'fresh_send_button_reread',
+                    'send_button': fresh_evidence,
+                    'clicked': False,
+                })
+                verify_snap = fresh_snap or settled_snap
+                result.session_url_after = self.runtime.current_url() or before
+                result.add_step(
+                    'send', False,
+                    'ChatGPT attachment send button disappeared before coordinate click',
+                    url_before=before,
+                    url_after=result.session_url_after,
+                    attempts=attempts,
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
+
+            clicked = bool(_inp.click_at(fresh_probe['center_x'], fresh_probe['center_y']))
+            timeout = 30.0 if attempt == 1 else full_timeout
+            if clicked:
+                send_snap = self.runtime.wait_until(
+                    lambda: (
+                        snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+                    ),
+                    timeout=timeout,
+                    interval=0.6,
+                ) or self.runtime.snapshot()
+            else:
+                send_snap = self.runtime.snapshot()
+            stop_seen = self.snapshot_has_any(send_snap, stop_keys)
+            answer_url = self._wait_for_answer_thread_url(
+                timeout=30.0 if stop_seen else 5.0,
+            )
+            after = answer_url or self.runtime.wait_for_url_change(
+                before,
+                timeout=5.0,
+                interval=1.0,
+            )
+            result.session_url_after = after or self.runtime.current_url() or before
+            url_changed = bool(result.session_url_after and result.session_url_after != before)
+            answer_thread = bool(self._is_answer_thread_url(result.session_url_after))
+            prompt_still_staged = False
+            if not stop_seen and not answer_thread:
+                prompt_still_staged = self.snapshot_has_any(
+                    self.runtime.snapshot(),
+                    self._send_button_keys(),
+                )
+            attempts.append({
+                'attempt': attempt,
+                'phase': 'fresh_send_button_coordinate_click',
+                'settled_rect': (
+                    settle_evidence.get('send_button', {}).get('rect')
+                    if settle_evidence.get('send_button')
+                    else None
+                ),
+                'send_button': fresh_evidence,
+                'clicked': clicked,
+                'stop_seen': stop_seen,
+                'url_changed': url_changed,
+                'answer_thread': answer_thread,
+                'prompt_still_staged': prompt_still_staged,
+            })
+            if clicked and stop_seen and answer_thread:
+                result.add_step(
+                    'send', True,
+                    'ChatGPT attachment send validated by settled send-button coordinate click',
+                    url_before=before,
+                    url_after=result.session_url_after,
+                    stop_seen=stop_seen,
+                    url_changed=url_changed,
+                    attempts=attempts,
+                    snapshot=send_snap.serializable(),
+                )
+                return True
+            if attempt == 1 and not stop_seen and not answer_thread and prompt_still_staged:
+                continue
+            break
+
+        verify_snap = send_snap or self.runtime.snapshot()
+        result.add_step(
+            'send', False,
+            'ChatGPT attachment send failed validation after settled send-button coordinate click',
+            url_before=before,
+            url_after=result.session_url_after or self.runtime.current_url() or before,
+            attempts=attempts,
+            snapshot=verify_snap.serializable(),
+        )
+        return False
 
     @staticmethod
     def _screen_rect(obj):
