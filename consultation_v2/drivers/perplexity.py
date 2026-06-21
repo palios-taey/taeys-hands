@@ -91,7 +91,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.ok = True
 
     def _wait_for_prompt_ready(self, result: ConsultationResult) -> bool:
-        snap = self.wait_for_validation('prompt_ready', timeout=5.0, interval=0.5)
+        snap = self.wait_for_validation(
+            'prompt_ready',
+            timeout=max(self._mode_settle_timeout(), 8.0),
+            interval=0.4,
+        )
         verified = self.validation_passes(snap, 'prompt_ready')
         result.add_step(
             'prompt_ready', verified,

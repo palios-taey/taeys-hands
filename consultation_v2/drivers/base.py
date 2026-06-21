@@ -333,34 +333,28 @@ class BaseConsultationDriver(ABC):
         timeout = max(float(timeout), 15.0)
         groups = self._page_ready_key_groups()
         started = time.time()
-        deadline = started + timeout
-        anchor_key = self._page_ready_anchor_key(groups)
         last_snapshot: Snapshot | None = None
         missing = self._page_ready_group_labels(groups)
 
-        while time.time() < deadline:
-            remaining = max(0.1, deadline - time.time())
-            last_snapshot = self.runtime.wait_for_stable_snapshot(
-                consecutive=2,
-                timeout=min(remaining, 1.2),
-                interval=0.25,
-                anchor_key=anchor_key,
-                require_non_empty=True,
-            )
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot, missing
+            last_snapshot = self.runtime.snapshot()
             missing = self._page_ready_missing_groups(last_snapshot, groups)
-            if not missing:
-                elapsed = round(time.time() - started, 2)
-                result.add_step(
-                    'page_ready',
-                    True,
-                    f'{self.platform} page ready after navigation',
-                    required=self._page_ready_group_labels(groups),
-                    optional_present=self._page_ready_present_optional_keys(last_snapshot),
-                    elapsed_seconds=elapsed,
-                    snapshot=last_snapshot.serializable(),
-                )
-                return True
-            time.sleep(0.25)
+            return last_snapshot if not missing else None
+
+        matched = self.runtime.wait_until(_probe, timeout=timeout, interval=0.4)
+        if isinstance(matched, Snapshot):
+            elapsed = round(time.time() - started, 2)
+            result.add_step(
+                'page_ready',
+                True,
+                f'{self.platform} page ready after navigation',
+                required=self._page_ready_group_labels(groups),
+                optional_present=self._page_ready_present_optional_keys(matched),
+                elapsed_seconds=elapsed,
+                snapshot=matched.serializable(),
+            )
+            return True
 
         snapshot = last_snapshot or self.runtime.snapshot()
         result.add_step(
@@ -492,15 +486,6 @@ class BaseConsultationDriver(ABC):
             for group in groups
             if not any(snapshot.has(key) for key in group)
         ]
-
-    @staticmethod
-    def _page_ready_anchor_key(groups: tuple[tuple[str, ...], ...]) -> str | None:
-        for group in groups:
-            if len(group) == 1:
-                return group[0]
-        if groups and groups[0]:
-            return groups[0][0]
-        return None
 
     def validation_passes(self, snapshot: Snapshot, validation_key: str, filename: str | None = None) -> bool:
         validations = self.cfg.get('validation', {})
