@@ -417,12 +417,16 @@ def _resolve_structural_mappings(
             expected_role = str(spec.get('role') or '').strip()
             if not expected_role:
                 continue
+            needed_states = {str(item).lower() for item in _listify(spec.get('states_include'))}
             candidates = []
             for element in elements:
                 identity = _element_identity(element)
                 if identity in accounted or identity in structural_accounted:
                     continue
                 if (element.get('role') or '') != expected_role:
+                    continue
+                states = {str(item).lower() for item in (element.get('states') or [])}
+                if needed_states and not needed_states.issubset(states):
                     continue
                 candidates.append(element)
             selected = _select_structural_between(candidates, structural, mapped)

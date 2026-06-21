@@ -91,12 +91,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result.ok = True
 
     def _wait_for_prompt_ready(self, result: ConsultationResult) -> bool:
-        snap = self.wait_for_validation(
-            'prompt_ready',
+        input_key = str(self.cfg['workflow']['prompt']['input'])
+        snap, input_el = self.wait_for_key(
+            input_key,
             timeout=max(self._mode_settle_timeout(), 8.0),
             interval=0.4,
         )
-        verified = self.validation_passes(snap, 'prompt_ready')
+        verified = input_el is not None
         result.add_step(
             'prompt_ready', verified,
             (
@@ -104,6 +105,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 if verified else
                 'Perplexity prompt not ready before mode selection'
             ),
+            input_key=input_key,
             snapshot=snap.serializable(),
         )
         return verified

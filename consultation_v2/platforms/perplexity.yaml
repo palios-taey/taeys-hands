@@ -52,6 +52,14 @@ tree:
     role: push button
   element_map:
     # ─── Toolbar / persistent controls ───────────────────────────────────────
+    input:
+      role: entry
+      states_include:
+      - editable
+      match_strategy: name_agnostic_structural
+      structural:
+        before: submit_button
+      reason: Perplexity's composer entry is nameless; anchor the editable page entry before the stable Submit button.
     input_message:
       name: Message
       role: entry
@@ -304,7 +312,7 @@ workflow:
       blockscout: source_blockscout
       github: source_github
   prompt:
-    input: input_message
+    input: input
     send_button: submit_button
   send:
     trigger: submit_button
@@ -333,11 +341,6 @@ validation:
       - section
       - link
       - heading
-  prompt_ready:
-    indicators:
-    - name: Message
-      role: entry
-      states_include: [editable]
   send_success:
     indicators:
     - name: Stop response (Esc)
