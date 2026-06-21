@@ -386,9 +386,9 @@ class BaseConsultationDriver(ABC):
                 seen.add(group)
                 groups.append(group)
 
-        for key in self._expected_keys_for_surface('base'):
-            add_group((key,))
-
+        # Page readiness is narrower than base conformance: some platform
+        # snapshots intentionally exclude sidebar/nav chrome, so this gate uses
+        # only workflow controls required to interact with the composer.
         for key in self._selection_trigger_keys():
             add_group((key,))
 
