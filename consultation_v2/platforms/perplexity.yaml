@@ -58,8 +58,8 @@ tree:
       - editable
       match_strategy: name_agnostic_structural
       structural:
-        before: submit_button
-      reason: Perplexity's composer entry is nameless; anchor the editable page entry before the stable Submit button.
+        before: attach_trigger
+      reason: Perplexity's composer entry is nameless; the Submit button is absent on an empty composer (it appears only after text entry), so anchor the editable page entry before the always-present "Add files or tools" trigger that sits just below the composer (composer y<attach y).
     input_message:
       name: Message
       role: entry
