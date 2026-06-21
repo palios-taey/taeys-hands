@@ -159,6 +159,10 @@ tree:
       name: New chat Control Shift O
       role: link
       scope: base.sidebar
+    new_chat:
+      name: New chat
+      role: link
+      scope: base.sidebar
     search_chats:
       name: Search chats Control K
       role: push button
@@ -409,6 +413,7 @@ workflow:
     tools: []
   clean:
     new_chat_keys:
+      - new_chat
       - new_chat_recent
       - new_chat_shortcut
   selection:

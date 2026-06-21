@@ -59,8 +59,9 @@ tree:
       role: push button
       match_strategy: name_agnostic_structural
       structural:
+        after: input
         before: tools_button
-      reason: Gemini's model picker visible name changes with the selected model; use the last push button before Upload & tools.
+      reason: Gemini's model picker visible name changes with the selected model; bracket the composer toolbar between the prompt input and Upload & tools.
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
     tools_button:
