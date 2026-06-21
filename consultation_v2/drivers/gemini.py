@@ -4,7 +4,7 @@ import os
 import time
 
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
+from consultation_v2.types import ConsultationRequest, ConsultationResult
 
 
 class GeminiConsultationDriver(BaseConsultationDriver):
@@ -337,53 +337,19 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        mode = str(request.selection_value('mode', '') or '').strip().lower()
         # For Deep Research, extract_primary already captured the full report via
         # Share & Export -> Copy; re-running that path here would only duplicate it.
-        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
+        if mode == 'deep_research':
             result.add_step('extract_additional', True,
                             'Gemini Deep Research report already captured by extract_primary')
             return True
-        snap = self.runtime.snapshot()
-        share_export = self.find_first(snap, 'share_export')
-        if not share_export:
-            result.add_step('extract_additional', False,
-                            'Gemini no additional export surface was visible')
-            return False
-        if not self.runtime.click(share_export, strategy='atspi_first'):
-            result.add_step('extract_additional', False,
-                            'Gemini Share & export click failed',
-                            snapshot=snap.serializable())
-            return False
-        time.sleep(0.7)
-        # BUG 8 FIX: Share & export submenu is a portal — use menu_snapshot
-        menu_snap = self.runtime.menu_snapshot()
-        copy_item = self.find_first(menu_snap, 'copy_content_item')
-        if not copy_item:
-            result.add_step('extract_additional', False,
-                            'Gemini Share & export opened but Copy Content item was not exposed',
-                            menu=menu_snap.serializable())
-            return False
-        if not self.runtime.click(copy_item, strategy='atspi_first'):
-            result.add_step('extract_additional', False,
-                            'Gemini Copy Content click failed',
-                            menu=menu_snap.serializable())
-            return False
-        time.sleep(0.5)
-        content = self.runtime.read_clipboard().strip()
-        if content:
-            result.extractions.append(ExtractedArtifact(
-                name='gemini_export.md',
-                content=content,
-                kind='report_export',
-                metadata={'source': 'share_export_copy_content'},
-            ))
-            result.add_step('extract_additional', True,
-                            'Gemini additional export copied',
-                            characters=len(content), preview=content[:200])
-            return True
-        result.add_step('extract_additional', False,
-                        'Gemini additional export clipboard was empty')
-        return False
+        result.add_step('extract_additional', True,
+                        'Gemini additional export is Deep Research-only; primary extraction is final',
+                        mode=mode or None,
+                        primary_characters=len(result.response_text or ''),
+                        artifacts=[])
+        return True
 
     def store_in_neo4j(
         self, request: ConsultationRequest, result: ConsultationResult
