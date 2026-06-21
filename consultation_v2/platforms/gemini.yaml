@@ -27,10 +27,8 @@ tree:
   exclude:
     names:
     - Gemini
-    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
     - Gemini Apps Activity
     - Manage extensions
-    - ', Google Account'
     - tap to use tool
     roles:
     - separator
@@ -57,15 +55,12 @@ tree:
       role: entry
       states_include:
       - editable
-    input_alt:
-      name: ""
-      role: section
-      states_include:
-      - editable
-      - focusable
     mode_picker:
-      name: Open mode picker, currently Pro # lint-allow: known p5 debt; dynamic-name mode picker needs structural/stable locator remap
       role: push button
+      match_strategy: name_agnostic_structural
+      structural:
+        before: tools_button
+      reason: Gemini's model picker visible name changes with the selected model; use the last push button before Upload & tools.
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
     tools_button:
@@ -233,7 +228,6 @@ workflow:
     open_method: atspi_menu
   prompt:
     input: input
-    input_fallback: input_alt
     send_button: send_button
   send:
     trigger: send_button
@@ -242,7 +236,6 @@ workflow:
     post_send_key: start_research
   monitor:
     stop_key: stop_button
-    complete_key: copy_button
   extract:
     primary_key: copy_button
     strategy: last_by_y
@@ -282,16 +275,6 @@ validation:
     indicators:
     - name: 3.5 Thinking
       states_include: [checked]
-  # The PERSISTENT Pro indicator is the mode-picker BUTTON, whose name encodes
-  # the active model ("Open mode picker, currently Pro") and is present whether
-  # the menu is open or CLOSED. The old "Selected 3.1 Pro..." menu item only
-  # exists while the menu is OPEN, so it false-negatived Pro once the menu
-  # closed — making select_model fail verification on a genuinely-Pro session
-  # (and masking that deep_think was toggled on Flash). Jesse 2026-06-15.
-  pro_active:
-    indicators:
-    - name: "Open mode picker, currently Pro" # lint-allow: known p5 debt; dynamic-name active-state validation needs structural/stable locator remap
-      role: push button
   deep_think_active:
     indicators:
     - name: Deselect Deep think

@@ -27,10 +27,7 @@ tree:
   exclude:
     names:
     - User avatar
-    name_contains: # lint-allow: known p1 debt; sidebar/noise exclusions still rely on substring until exact live map rewrite
     - Upgrade to Pro
-    - ', open profile menu'
-    - User avatar Jesse
     roles:
     - separator
     - document web
@@ -55,11 +52,6 @@ tree:
     role: push button
   element_map:
     # ─── Toolbar / persistent controls ───────────────────────────────────────
-    input:
-      name: ""
-      role: entry
-      states_include:
-      - editable
     input_message:
       name: Message
       role: entry
@@ -312,10 +304,7 @@ workflow:
       blockscout: source_blockscout
       github: source_github
   prompt:
-    input: input
-    input_candidates:
-    - input
-    - input_message
+    input: input_message
     send_button: submit_button
   send:
     trigger: submit_button
@@ -346,9 +335,6 @@ validation:
       - heading
   prompt_ready:
     indicators:
-    - name: ""
-      role: entry
-      states_include: [editable]
     - name: Message
       role: entry
       states_include: [editable]
@@ -359,8 +345,6 @@ validation:
     timeout: 120
   response_complete:
     stop_absent: stop_button
-  computer_active:
-    url_contains: /computer/ # lint-allow: known p1 debt; URL gate still reflects the live /computer/ area until exact route key lands
   deep_research_active:
     indicators:
     - name: Deep research

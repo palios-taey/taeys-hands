@@ -2,10 +2,9 @@
 """Mechanical integrity gate for consultation_v2 YAML + driver rules.
 
 This gate is intentionally narrow: it only scans the consultation_v2 YAML
-catalog and driver/runtime Python surface named in p0-gate. Anything it
-flags is a hard failure for commit/CI unless the exact line carries:
-
-    # lint-allow: <non-empty reason>
+catalog and driver/runtime Python surface named in p0-gate. YAML findings are
+hard failures for commit/CI with no local opt-out; Python diagnostic strings may
+still use a local lint-allow marker when the line is not executable behavior.
 
 Usage:
   consultation_v2/validators/lint_no_yaml_silent_fallbacks.py --all
@@ -48,6 +47,14 @@ YAML_RULES: list[Rule] = [
          "THE RULE §1: YAML must not use name_pattern in consultation_v2/platforms"),
     Rule(re.compile(r"role_contains:"), "yaml-role-contains",
          "THE RULE §1: YAML must not use role_contains in consultation_v2/platforms"),
+    Rule(re.compile(r"url_contains:"), "yaml-url-contains",
+         "THE RULE §1: YAML must not use url_contains in consultation_v2/platforms"),
+    Rule(re.compile(r"complete_key:"), "yaml-complete-key",
+         "completion must be stop-button disappearance only, never a positive marker"),
+    Rule(re.compile(r"input_fallback:"), "yaml-input-fallback",
+         "prompt input must name one exact control, not a fallback chain"),
+    Rule(re.compile(r"name:\s*['\"]{2}"), "yaml-empty-name",
+         "YAML name matchers must be exact non-empty strings"),
     Rule(re.compile(r"name_contains_model:"), "yaml-name-contains-model",
          "model-specific substring fallback is forbidden everywhere"),
 ]
@@ -160,7 +167,7 @@ def scan_file(path: Path) -> list[Finding]:
         for rule in rules:
             if not rule.pattern.search(logical):
                 continue
-            if allowed(line):
+            if is_consultation_v2_python(path) and allowed(line):
                 continue
             findings.append(Finding(str(path), idx, rule.label, rule.why, line.rstrip()))
 
@@ -248,8 +255,8 @@ def main() -> int:
     for label, count in sorted(by_label.items(), key=lambda item: (-item[1], item[0])):
         print(f"    {count:>3}  {label}")
     print()
-    print("Add '# lint-allow: <reason>' on the exact line only when the debt is known and")
-    print("explicitly accepted. Empty reasons still fail.")
+    print("YAML findings have no local opt-out. Python diagnostic false positives may use")
+    print("'# lint-allow: <reason>' on the exact line; empty reasons still fail.")
     return 1
 
 

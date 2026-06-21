@@ -40,9 +40,6 @@ tree:
       - Profile image
       - Sidebar
       - Get apps and extensions
-    structural:
-      - name: ""
-        role: panel
     roles:
       - document web
       - form

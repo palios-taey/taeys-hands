@@ -332,15 +332,22 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'ChatGPT upload item click failed for {abs_path}', snapshot=portal_snap.serializable())
                 return False
             time.sleep(0.8)
-            self.runtime.focus_file_dialog()
-            self.runtime.press('ctrl+l')
+            if not self.runtime.focus_file_dialog():
+                result.add_step('attach', False, f'ChatGPT file dialog did not focus for {abs_path}', snapshot=portal_snap.serializable())
+                return False
+            if not self.runtime.press('ctrl+l'):
+                result.add_step('attach', False, f'ChatGPT file dialog location shortcut failed for {abs_path}', snapshot=portal_snap.serializable())
+                return False
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
-                self.runtime.type_text(abs_path, delay_ms=5)
+                result.add_step('attach', False, f'ChatGPT file dialog path paste failed for {abs_path}', snapshot=portal_snap.serializable())
+                return False
             time.sleep(0.2)
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
-            self.runtime.press('Return')
+            if not self.runtime.press('Return'):
+                result.add_step('attach', False, f'ChatGPT file dialog submit failed for {abs_path}', snapshot=portal_snap.serializable())
+                return False
             verify_snap = self.runtime.wait_until(
                 lambda: (
                     snap if self._attachment_visible(snap := self.runtime.snapshot(), abs_path) else None

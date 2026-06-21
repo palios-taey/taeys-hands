@@ -175,12 +175,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             if not self.runtime.paste(abs_path):
-                if not self.runtime.type_text(abs_path, delay_ms=5):
-                    result.add_step(
-                        'attach', False,
-                        f'Grok file dialog path entry failed for {abs_path}',
-                    )
-                    return False
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog path paste failed for {abs_path}',
+                )
+                return False
             if not self.runtime.focus_file_dialog():
                 result.add_step(
                     'attach', False,
@@ -231,7 +230,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
             return None
         # 1) coordinate click on the input (xdotool), 2) grab_focus on its
         # component interface — mirrors the proven path exactly.
-        self.runtime.click(input_el, strategy='coordinate_only')
+        if not self.runtime.click(input_el):
+            return None
         time.sleep(0.3)
         obj = input_el.atspi_obj
         if obj is not None:

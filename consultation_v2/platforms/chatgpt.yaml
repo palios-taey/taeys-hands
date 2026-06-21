@@ -26,11 +26,8 @@ tree:
       - Check Spelling
       - Inspect
   prune_subtrees:
-    - role: list
-      name: ""
-      ancestor:
-        role: landmark
-        name: Chat history
+    - role: landmark
+      name: Chat history
       min_child_count: 3
   exclude:
     names:
@@ -540,7 +537,6 @@ workflow:
     stop_keys:
       - stop_streaming_button
       - stop_answering_button
-    complete_key: copy_button
   extract:
     primary_key: copy_button
     strategy: last_by_y

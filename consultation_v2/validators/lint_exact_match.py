@@ -25,14 +25,8 @@ import subprocess
 # with exact role/parent/index, so '*_contains' keys are never legitimate).
 FORBIDDEN = ("name_contains", "name_not_contains", "name_contains_all",
              "name_pattern", "role_contains", "url_contains",
-             "title_contains", "contains", "regex", "matches", "fuzzy")
-
-
-def _allowed(line: str) -> bool:
-    marker = "# lint-allow:"
-    if marker not in line:
-        return False
-    return bool(line.split(marker, 1)[1].strip())
+             "title_contains", "contains", "regex", "matches", "fuzzy",
+             "complete_key", "complete_keys", "input_fallback")
 
 
 def _staged_yaml() -> list:
@@ -56,8 +50,10 @@ def lint(paths: list) -> int:
         for n, line in enumerate(lines, 1):
             stripped = line.split("#", 1)[0]  # ignore trailing comments
             key = stripped.split(":", 1)[0].strip()
-            if key in FORBIDDEN and not _allowed(line):
+            if key in FORBIDDEN:
                 findings.append((path, n, key, line.strip()))
+            if key == "name" and stripped.split(":", 1)[1].strip() in {'""', "''"}:
+                findings.append((path, n, "empty-name", line.strip()))
     if findings:
         print("EXACT-MATCH LINT FAIL — loose matchers are forbidden "
               "(use exact name+role, or a 'structural:' locator for dynamic values):")

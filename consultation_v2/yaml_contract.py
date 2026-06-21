@@ -25,6 +25,11 @@ FORBIDDEN_MATCHER_KEYS = frozenset({
     'fuzzy',  # lint-allow: strict loader enumerates rejected matcher grammar
     'substring',
 })
+FORBIDDEN_WORKFLOW_KEYS = frozenset({
+    'complete_key',
+    'complete_keys',
+    'input_fallback',
+})
 MATCH_SPEC_KEYS = frozenset({
     'name',
     'names_any_of',
@@ -39,6 +44,19 @@ MATCH_SPEC_KEYS = frozenset({
     'pick',
     'trigger_type',
     'select',
+    'match_strategy',
+    'reason',
+})
+MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
+STRUCTURAL_KEYS = frozenset({
+    'after',
+    'before',
+    'container_path',
+    'index',
+    'name_must_be_nonempty',
+    'ordinal',
+    'parent',
+    'role',
 })
 IDENTITY_SCHEMA = 'identity_v1'
 IDENTITY_ELEMENT_KEYS = frozenset({
@@ -320,19 +338,33 @@ def _validate_structural(
         _add(findings, lines, structural_path, 'structural',
              'structural locator must be a mapping with exact role and container path')
         return
+    for raw_key in structural:
+        key_name = str(raw_key)
+        if key_name not in STRUCTURAL_KEYS:
+            _add(findings, lines, structural_path + (key_name,), key_name,
+                 'unsupported structural locator key')
     role = structural.get('role')
     if not isinstance(role, str) or not role or role != role.strip() or _has_wildcard(role):
-        _add(findings, lines, structural_path + ('role',), 'role',
-             'structural.role must be an exact non-pattern role string')
+        if 'role' in structural:
+            _add(findings, lines, structural_path + ('role',), 'role',
+                 'structural.role must be an exact non-pattern role string')
     parent = structural.get('parent')
     container_path = structural.get('container_path')
-    if parent is None and container_path is None:
+    after = structural.get('after')
+    before = structural.get('before')
+    if parent is None and container_path is None and after is None and before is None:
         _add(findings, lines, structural_path, 'structural',
-             'structural locator must declare parent or container_path')
+             'structural locator must declare parent, container_path, after, or before')
     if parent is not None:
         if not isinstance(parent, str) or parent not in element_map:
             _add(findings, lines, structural_path + ('parent',), 'parent',
                  'structural.parent must be an exact element_map key')
+    for anchor_key, anchor_value in (('after', after), ('before', before)):
+        if anchor_value is not None and (
+            not isinstance(anchor_value, str) or anchor_value not in element_map
+        ):
+            _add(findings, lines, structural_path + (anchor_key,), anchor_key,
+                 f'structural.{anchor_key} must be an exact element_map key')
     if container_path is not None:
         if (
             not isinstance(container_path, list)
@@ -411,9 +443,31 @@ def _validate_match_spec(
         if key_name not in MATCH_SPEC_KEYS:
             _add(findings, lines, key_path + (key_name,), key_name,
                  'unsupported matcher key; use exact name/role/states_include, names_any_of, or structural')
+    strategy = spec.get('match_strategy')
+    if strategy is not None and strategy not in MATCH_STRATEGIES:
+        _add(findings, lines, key_path + ('match_strategy',), 'match_strategy',
+             f'match_strategy must be one of {sorted(MATCH_STRATEGIES)}')
+    if strategy == 'name_agnostic_structural':
+        if 'name' in spec:
+            _add(findings, lines, key_path + ('name',), 'name',
+                 'name_agnostic_structural entries must not declare a visible name')
+        if not isinstance(spec.get('role'), str) or not spec.get('role'):
+            _add(findings, lines, key_path + ('role',), 'role',
+                 'name_agnostic_structural entries must declare an exact role')
+        if not isinstance(spec.get('structural'), dict) or not spec.get('structural'):
+            _add(findings, lines, key_path + ('structural',), 'structural',
+                 'name_agnostic_structural entries must declare structural anchors')
+        reason = spec.get('reason')
+        if not isinstance(reason, str) or not reason.strip():
+            _add(findings, lines, key_path + ('reason',), 'reason',
+                 'name_agnostic_structural entries must explain the dynamic visible name')
     _validate_names_any_of(findings, lines, spec, key_path)
     _validate_structural(findings, lines, spec, key_path, element_map)
     _validate_attributes(findings, lines, spec, key_path)
+    name = spec.get('name')
+    if 'name' in spec and (not isinstance(name, str) or not name or name != name.strip() or _has_wildcard(name)):
+        _add(findings, lines, key_path + ('name',), 'name',
+             'name must be an exact non-empty non-pattern string')
     role = spec.get('role')
     if 'role' in spec and (not isinstance(role, str) or not role or role != role.strip() or _has_wildcard(role)):
         _add(findings, lines, key_path + ('role',), 'role',
@@ -427,6 +481,45 @@ def _validate_match_spec(
         locator_key = 'names_any_of' if 'names_any_of' in spec else 'name'
         _add(findings, lines, key_path + (locator_key,), locator_key,
              f'dynamic-name control {element_key!r} must use structural, attributes, or testid locator')
+
+
+def _validate_global_exactness(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    node: object,
+    key_path: tuple[str, ...] = (),
+) -> None:
+    if isinstance(node, dict):
+        keys = {str(key) for key in node}
+        for raw_key, value in node.items():
+            key_name = str(raw_key)
+            child_path = key_path + (key_name,)
+            if key_name in FORBIDDEN_MATCHER_KEYS:
+                _add(findings, lines, child_path, key_name,
+                     f'forbidden consultation_v2 matcher key {key_name!r}')
+            if key_name in FORBIDDEN_WORKFLOW_KEYS:
+                _add(findings, lines, child_path, key_name,
+                     f'forbidden consultation_v2 fallback/completion key {key_name!r}')
+            if key_name == 'name' and (not isinstance(value, str) or not value):
+                _add(findings, lines, child_path, key_name,
+                     'name must be an exact non-empty string')
+            if key_name == 'names_any_of':
+                if (
+                    not isinstance(value, list)
+                    or not value
+                    or not all(isinstance(item, str) and item and item == item.strip() and not _has_wildcard(item) for item in value)
+                ):
+                    _add(findings, lines, child_path, key_name,
+                         'names_any_of must contain exact non-empty labels only')
+            _validate_global_exactness(findings, lines, value, child_path)
+        matcherish = bool(keys & {'role', 'states_include', 'active_state'})
+        exact_locator = bool(keys & {'name', 'names_any_of', 'structural', 'attributes', 'testid', 'match_strategy'})
+        if matcherish and not exact_locator:
+            _add(findings, lines, key_path, key_path[-1] if key_path else 'mapping',
+                 'presence-only matcher maps role/state without an exact stable locator')
+    elif isinstance(node, list):
+        for idx, value in enumerate(node):
+            _validate_global_exactness(findings, lines, value, key_path + (str(idx),))
 
 
 def _validate_validation_specs(
@@ -883,13 +976,17 @@ def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source:
     if platform not in CHAT_PLATFORMS:
         return
     lines = _yaml_key_lines(source)
-    allowed_debt_lines = _allowed_debt_lines(source)
     findings: list[ContractFinding] = []
+    if ALLOW_RE in source:
+        for idx, line in enumerate(source.splitlines(), start=1):
+            if ALLOW_RE in line:
+                findings.append(ContractFinding(idx, 'lint-allow',
+                                                'consultation_v2 YAML forbids lint-allow escape hatches'))
+    _validate_global_exactness(findings, lines, data)
     identity_schema = _uses_identity_schema(data)
     if identity_schema:
         _validate_identity_yaml(findings, lines, data, source)
         _validate_extraction_specs(findings, lines, data)
-        allowed_debt_lines = set()
     else:
         element_map = ((data.get('tree') or {}).get('element_map') or {})
         if isinstance(element_map, dict):
@@ -902,10 +999,6 @@ def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source:
                 )
         _validate_validation_specs(findings, lines, data)
         _validate_extraction_specs(findings, lines, data)
-    for key_path, key in _iter_mapping_keys(data):
-        if key in FORBIDDEN_MATCHER_KEYS:
-            _add(findings, lines, key_path, key, f'forbidden consultation_v2 matcher key {key!r}')
-    findings = [finding for finding in findings if finding.line not in allowed_debt_lines]
 
     if findings:
         rendered = '\n'.join(finding.render(path) for finding in findings)

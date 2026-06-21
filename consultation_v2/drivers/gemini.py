@@ -6,11 +6,6 @@ import time
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
 
-try:
-    from storage import neo4j_client
-except Exception:  # pragma: no cover - optional dependency in runtime
-    neo4j_client = None
-
 
 class GeminiConsultationDriver(BaseConsultationDriver):
     platform = 'gemini'
@@ -103,18 +98,6 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     interval=0.4,
                     scope='menu',
                 )
-            if not upload_item and 'expanded' not in trigger_states:
-                retry_snap = self.runtime.snapshot()
-                retry_trigger = self.find_first(retry_snap, 'upload_menu') or trigger
-                clicked = self.runtime.click(retry_trigger, strategy='coordinate_only')
-                open_attempts.append({'strategy': 'coordinate_only', 'clicked': bool(clicked)})
-                if clicked:
-                    menu_snap, upload_item = self.wait_for_key(
-                        'upload_files_item',
-                        timeout=5.0,
-                        interval=0.4,
-                        scope='menu',
-                    )
             if not upload_item:
                 result.add_step('attach', False,
                                 f'Gemini upload item not found for {abs_path}',
@@ -143,14 +126,21 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             time.sleep(0.2)
+            if not self.runtime.press('ctrl+a'):
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog select-all failed for {abs_path}',
+                    open_attempts=open_attempts,
+                )
+                return False
+            time.sleep(0.1)
             if not self.runtime.paste(abs_path):
-                if not self.runtime.type_text(abs_path, delay_ms=5):
-                    result.add_step(
-                        'attach', False,
-                        f'Gemini file dialog path entry failed for {abs_path}',
-                        open_attempts=open_attempts,
-                    )
-                    return False
+                result.add_step(
+                    'attach', False,
+                    f'Gemini file dialog path paste failed for {abs_path}',
+                    open_attempts=open_attempts,
+                )
+                return False
             time.sleep(0.2)
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
@@ -325,7 +315,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'input'))
         time.sleep(0.6)
         snap = self.runtime.snapshot()
-        # copy_button resolves via element_map name_contains: Copy → find_last picks last response
+        # copy_button resolves the exact "Copy" control; find_last picks the response action.
         copy_button = self.find_last(snap, 'copy_button')
         if not copy_button:
             result.add_step('extract_primary', False, 'Gemini copy button not found',
@@ -356,9 +346,9 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         share_export = self.find_first(snap, 'share_export')
         if not share_export:
-            result.add_step('extract_additional', True,
+            result.add_step('extract_additional', False,
                             'Gemini no additional export surface was visible')
-            return True
+            return False
         if not self.runtime.click(share_export, strategy='atspi_first'):
             result.add_step('extract_additional', False,
                             'Gemini Share & export click failed',
@@ -369,10 +359,10 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         menu_snap = self.runtime.menu_snapshot()
         copy_item = self.find_first(menu_snap, 'copy_content_item')
         if not copy_item:
-            result.add_step('extract_additional', True,
+            result.add_step('extract_additional', False,
                             'Gemini Share & export opened but Copy Content item was not exposed',
                             menu=menu_snap.serializable())
-            return True
+            return False
         if not self.runtime.click(copy_item, strategy='atspi_first'):
             result.add_step('extract_additional', False,
                             'Gemini Copy Content click failed',
@@ -398,36 +388,28 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def store_in_neo4j(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        if request.no_neo4j or neo4j_client is None:
+        if request.no_neo4j:
             result.storage = {'skipped': True, 'reason': 'Neo4j disabled or unavailable'}
             result.add_step('store', True, 'Gemini Neo4j storage skipped',
                             storage=result.storage)
             return True
-        try:
-            # BUG 9 FIX: URL used only for bookkeeping/storage, never as a gate
-            session_url = (
-                result.session_url_after
-                or result.session_url_before
-                or self.runtime.current_url()
-                or ''
-            )
-            session_id = neo4j_client.get_or_create_session(self.platform, session_url)
-            user_message_id = neo4j_client.add_message(
-                session_id, 'user', request.message, request.attachments
-            )
-            assistant_message_id = neo4j_client.add_message(
-                session_id, 'assistant', result.response_text,
-                self.serialize_artifacts(result.extractions),
-            )
-            result.storage = {
-                'session_id': session_id,
-                'user_message_id': user_message_id,
-                'assistant_message_id': assistant_message_id,
-                'url': session_url,
-            }
+        session_url = (
+            result.session_url_after
+            or result.session_url_before
+            or self.runtime.current_url()
+            or ''
+        )
+        result.storage = self.store_consultation(
+            session_url,
+            request.message,
+            result.response_text,
+            attachments=request.attachments,
+        )
+        result.storage['url'] = session_url
+        if result.storage.get('stored'):
             result.add_step('store', True, 'Gemini response stored in Neo4j',
                             storage=result.storage)
             return True
-        except Exception as exc:  # pragma: no cover - runtime dependent
-            result.add_step('store', False, f'Gemini Neo4j storage failed: {exc}')
-            return False
+        result.add_step('store', True, 'Gemini Neo4j storage skipped',
+                        storage=result.storage)
+        return True

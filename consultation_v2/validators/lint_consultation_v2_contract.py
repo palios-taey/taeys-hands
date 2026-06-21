@@ -30,8 +30,13 @@ FORBIDDEN_YAML_KEYS = {
     'regex',
     'matches',
     'fuzzy',
+    'complete_key',
+    'complete_keys',
+    'input_fallback',
 }
 ALLOW_RE = re.compile(r"#\s*lint-allow:\s*(.*)$")
+ACTION_METHODS = {'click', 'paste', 'press', 'type_text'}
+CRITICAL_DRIVER_STEPS = {'attach', 'prompt', 'send', 'extract_primary', 'extract_additional'}
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,14 @@ def scan_yaml_schema(path: Path, source: str) -> list[Finding]:
         findings.append(Finding(str(path), 1, 'yaml-root-type', 'top-level YAML node must be a mapping'))
         return findings
 
+    for idx, line in enumerate(lines, start=1):
+        if ALLOW_RE.search(line):
+            findings.append(Finding(
+                str(path), idx, 'yaml-lint-allow',
+                'consultation_v2 YAML forbids lint-allow escape hatches',
+                line.rstrip(),
+            ))
+
     if is_consultation_v2_yaml(path):
         settle = data.get('settle')
         if not isinstance(settle, dict):
@@ -148,11 +161,16 @@ def scan_yaml_schema(path: Path, source: str) -> list[Finding]:
                 current = f'{prefix}.{key_name}' if prefix else key_name
                 if key_name in FORBIDDEN_YAML_KEYS:
                     for loc in lines_for_key(lines, key_name):
-                        if allowed(loc[1]):
-                            continue
                         findings.append(Finding(
                             str(path), loc[0], f'yaml-forbidden-{key_name}',
                             f'Forbidden consultation_v2 matcher key: {key_name}',
+                            loc[1],
+                        ))
+                if key_name == 'name' and (not isinstance(value, str) or not value):
+                    for loc in lines_for_key(lines, key_name):
+                        findings.append(Finding(
+                            str(path), loc[0], 'yaml-empty-name',
+                            'YAML name matchers must be exact non-empty strings',
                             loc[1],
                         ))
                 walk(value, current)
@@ -189,6 +207,31 @@ class PythonContractVisitor(ast.NodeVisitor):
                 'driver-side platform branching is forbidden in consultation_v2 python',
                 ast.get_source_segment(self.source, node) or '',
             ))
+        if self._is_driver_file():
+            if self._is_paste_type_fallback(node):
+                self.findings.append(Finding(
+                    str(self.path),
+                    getattr(node, 'lineno', 1),
+                    'py-paste-type-fallback',
+                    'driver must choose one file/prompt entry primitive; paste-to-type fallback chains are forbidden',
+                    ast.get_source_segment(self.source, node) or '',
+                ))
+            if self._content_empty_test(node.test) and self._body_has_runtime_action(node.body):
+                self.findings.append(Finding(
+                    str(self.path),
+                    getattr(node, 'lineno', 1),
+                    'py-action-retry',
+                    'driver must not perform another UI action after an action produced empty content',
+                    ast.get_source_segment(self.source, node) or '',
+                ))
+            if self._miss_test(node.test) and self._body_has_critical_success_return(node.body):
+                self.findings.append(Finding(
+                    str(self.path),
+                    getattr(node, 'lineno', 1),
+                    'py-silent-proceed-on-miss',
+                    'driver must not record success/return True from a critical miss branch',
+                    ast.get_source_segment(self.source, node) or '',
+                ))
         self.generic_visit(node)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
@@ -225,6 +268,15 @@ class PythonContractVisitor(ast.NodeVisitor):
                 'subprocess(check=False) hides failure in consultation_v2',  # lint-allow: diagnostic string, not subprocess configuration
                 ast.get_source_segment(self.source, node) or '',
             ))
+        if self._is_driver_file() and self._is_runtime_action_call(node):
+            if self._is_coordinate_only_click(node):
+                self.findings.append(Finding(
+                    str(self.path),
+                    getattr(node, 'lineno', 1),
+                    'py-coordinate-only-downgrade',
+                    'driver code must not downgrade a click to coordinate_only',
+                    ast.get_source_segment(self.source, node) or '',
+                ))
         self.generic_visit(node)
 
     def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
@@ -259,6 +311,117 @@ class PythonContractVisitor(ast.NodeVisitor):
             or current.startswith('_validate')
             or current.startswith('validate_')
         )
+
+    def _is_driver_file(self) -> bool:
+        return (
+            'drivers' in self.path.parts
+            and self.path.name != 'base.py'
+            and self.path.suffix == '.py'
+        )
+
+    def _runtime_action_name(self, node: ast.Call) -> str | None:
+        fn = node.func
+        if not isinstance(fn, ast.Attribute) or fn.attr not in ACTION_METHODS:
+            return None
+        owner = fn.value
+        if not isinstance(owner, ast.Attribute) or owner.attr != 'runtime':
+            return None
+        if not isinstance(owner.value, ast.Name) or owner.value.id != 'self':
+            return None
+        return fn.attr
+
+    def _is_runtime_action_call(self, node: ast.AST) -> bool:
+        return isinstance(node, ast.Call) and self._runtime_action_name(node) is not None
+
+    def _is_coordinate_only_click(self, node: ast.Call) -> bool:
+        if self._runtime_action_name(node) != 'click':
+            return False
+        for kw in node.keywords:
+            if kw.arg == 'strategy' and isinstance(kw.value, ast.Constant):
+                return kw.value.value == 'coordinate_only'
+        return False
+
+    def _first_arg_name(self, node: ast.Call) -> str | None:
+        if not node.args:
+            return None
+        first = node.args[0]
+        if isinstance(first, ast.Name):
+            return first.id
+        if isinstance(first, ast.Attribute):
+            return first.attr
+        return None
+
+    def _miss_test(self, test: ast.AST) -> bool:
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            return isinstance(test.operand, ast.Name)
+        if isinstance(test, ast.Compare):
+            return (
+                isinstance(test.left, ast.Name)
+                and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Is)
+                and len(test.comparators) == 1
+                and isinstance(test.comparators[0], ast.Constant)
+                and test.comparators[0].value is None
+            )
+        if isinstance(test, ast.BoolOp):
+            return any(self._miss_test(value) for value in test.values)
+        return False
+
+    def _content_empty_test(self, test: ast.AST) -> bool:
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            return isinstance(test.operand, ast.Name) and test.operand.id in {'content', 'clipboard'}
+        if isinstance(test, ast.BoolOp):
+            return any(self._content_empty_test(value) for value in test.values)
+        return False
+
+    def _is_paste_type_fallback(self, node: ast.If) -> bool:
+        test = node.test
+        if not (
+            isinstance(test, ast.UnaryOp)
+            and isinstance(test.op, ast.Not)
+            and isinstance(test.operand, ast.Call)
+            and self._runtime_action_name(test.operand) == 'paste'
+        ):
+            return False
+        return any(
+            isinstance(child, ast.Call) and self._runtime_action_name(child) == 'type_text'
+            for stmt in node.body
+            for child in ast.walk(stmt)
+        )
+
+    def _body_has_runtime_action(self, body: list[ast.stmt]) -> bool:
+        return any(
+            isinstance(node, ast.Call) and self._is_runtime_action_call(node)
+            for stmt in body
+            for node in ast.walk(stmt)
+        )
+
+    def _body_has_critical_success_return(self, body: list[ast.stmt]) -> bool:
+        saw_critical_success_step = False
+        saw_true_return = False
+        for stmt in body:
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Call) and self._is_success_add_step(node):
+                    saw_critical_success_step = True
+                if (
+                    isinstance(node, ast.Return)
+                    and isinstance(node.value, ast.Constant)
+                    and node.value.value is True
+                ):
+                    saw_true_return = True
+        return saw_critical_success_step and saw_true_return
+
+    def _is_success_add_step(self, node: ast.Call) -> bool:
+        fn = node.func
+        if not isinstance(fn, ast.Attribute) or fn.attr != 'add_step':
+            return False
+        if len(node.args) < 2:
+            return False
+        step_arg = node.args[0]
+        if not isinstance(step_arg, ast.Constant) or step_arg.value not in CRITICAL_DRIVER_STEPS:
+            return False
+        success_arg = node.args[1]
+        return isinstance(success_arg, ast.Constant) and success_arg.value is True
 
     def _is_subprocess_check_false(self, node: ast.Call) -> bool:
         fn = node.func
@@ -296,6 +459,7 @@ def scan_python_contract(path: Path, source: str) -> list[Finding]:
         return [Finding(str(path), exc.lineno or 1, 'py-syntax-error', str(exc))]
     visitor = PythonContractVisitor(path)
     visitor.source = source
+    visitor.tree = tree
     visitor.visit(tree)
     return visitor.findings
 

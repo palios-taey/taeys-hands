@@ -390,13 +390,19 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 )
                 return False
             time.sleep(0.2)
+            if not self.runtime.press('ctrl+a'):
+                result.add_step(
+                    'attach', False,
+                    f'Perplexity file dialog select-all failed for {abs_path}',
+                )
+                return False
+            time.sleep(0.1)
             if not self.runtime.paste(abs_path):
-                if not self.runtime.type_text(abs_path, delay_ms=5):
-                    result.add_step(
-                        'attach', False,
-                        f'Perplexity file dialog path entry failed for {abs_path}',
-                    )
-                    return False
+                result.add_step(
+                    'attach', False,
+                    f'Perplexity file dialog path paste failed for {abs_path}',
+                )
+                return False
             time.sleep(0.2)
             if not self.runtime.focus_file_dialog():
                 result.add_step(
@@ -440,28 +446,23 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         result: ConsultationResult,
     ) -> bool:
         prompt_cfg = self.cfg['workflow']['prompt']
-        input_keys = prompt_cfg.get('input_candidates') or [prompt_cfg['input']]
-        input_keys = [str(key) for key in input_keys if isinstance(key, str) and key]
+        input_key = str(prompt_cfg['input'])
         last_snap: Snapshot | None = None
 
-        def _input_probe() -> tuple[str, ElementRef] | None:
+        def _input_probe() -> ElementRef | None:
             nonlocal last_snap
             last_snap = self.runtime.snapshot()
-            for candidate_key in input_keys:
-                candidate = self.find_first(last_snap, candidate_key)
-                if candidate:
-                    return candidate_key, candidate
-            return None
+            return self.find_first(last_snap, input_key)
 
         found = self.runtime.wait_until(_input_probe, timeout=12.0, interval=0.5)
         snap = last_snap or self.runtime.snapshot()
-        input_key, input_el = found if found else ('', None)
+        input_el = found
         if not input_el:
             result.add_step(
                 'prompt', False,
                 'Perplexity input field not found',
                 snapshot=snap.serializable(),
-                input_candidates=input_keys,
+                input_key=input_key,
             )
             return False
         if not self.runtime.focus_firefox():
@@ -472,20 +473,13 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             )
             return False
         time.sleep(0.2)
-        focus_clicked = self.runtime.click(input_el, strategy='coordinate_only')
-        focus_grabbed = False
-        try:
-            comp = input_el.atspi_obj.get_component_iface() if input_el.atspi_obj else None
-            focus_grabbed = bool(comp and comp.grab_focus())
-        except Exception:
-            focus_grabbed = False
-        if not (focus_clicked or focus_grabbed):
+        focused = self.runtime.click(input_el)
+        if not focused:
             result.add_step(
                 'prompt', False,
                 'Perplexity input focus failed',
                 snapshot=snap.serializable(),
-                focus_clicked=focus_clicked,
-                focus_grabbed=focus_grabbed,
+                focused=focused,
             )
             return False
         time.sleep(0.3)
@@ -520,8 +514,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 'Perplexity prompt entry failed validation: Submit button did not appear'
             ),
             snapshot=verify_snap.serializable(),
-            focus_clicked=focus_clicked,
-            focus_grabbed=focus_grabbed,
+            focused=focused,
             input_key=input_key,
         )
         return verified
@@ -539,6 +532,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         snap, send_button, submit_scope = self._wait_for_submit_button_for_send()
         if send_button:
             click_returned = self.runtime.click(send_button)
+            if not click_returned:
+                result.add_step(
+                    'send', False,
+                    'Perplexity submit button click failed',
+                    submit_scope=submit_scope,
+                    snapshot=snap.serializable(),
+                )
+                return False
         else:
             result.add_step(
                 'send', False,
@@ -555,7 +556,18 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             interval=0.6,
         )
         stop_seen = self.validation_passes(send_snap, 'send_success')
-        settled_url = self._wait_for_answer_thread_url(timeout=12.0) or self.runtime.current_url() or before
+        settled_url = self._wait_for_answer_thread_url(timeout=12.0)
+        if not settled_url:
+            result.add_step(
+                'send', False,
+                'Perplexity answer thread URL was not captured after submit',
+                url_before=before,
+                submit_scope=submit_scope,
+                click_returned=click_returned,
+                stop_seen=bool(stop_seen),
+                snapshot=send_snap.serializable(),
+            )
+            return False
         result.session_url_after = settled_url
         verify_snap = send_snap
         url_changed = settled_url and settled_url != before
@@ -670,187 +682,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         ).strip().lower()
         return default_mode == 'deep_research'
 
-    def _dr_select_all_copy(self, result: ConsultationResult) -> str | None:
-        """
-        Deep Research clipboard extraction via Ctrl+A / Ctrl+C on the response body.
-
-        Strategy:
-          1. Clear clipboard (sentinel).
-          2. Click into the response document area to focus it.
-          3. Ctrl+A to select all rendered text.
-          4. Ctrl+C to copy selection to clipboard.
-          5. Read and return clipboard content.
-
-        Returns the clipboard string (may be empty) or None on hard failure
-        (e.g. cannot locate a focusable response area).
-        """
-        # Step 1 — clear clipboard so stale content cannot masquerade as a fresh copy
-        self.runtime.write_clipboard('')
-        time.sleep(0.2)
-
-        # Step 2 — focus the response area.
-        # V2 only maps the stable Copy button, so we use that as the focus
-        # anchor before selecting all rendered text.
-        snap = self.runtime.snapshot()
-
-        # Focus the response area via the last visible Copy button; V2 does not
-        # map a stable response_body key, so the mapped copy_button is the only
-        # approved focus anchor here.
-        copy_btn = self.find_last(snap, 'copy_button')
-        if copy_btn:
-            self.runtime.click(copy_btn)
-        else:
-            result.add_step(
-                'extract_primary', False,
-                'Perplexity DR: cannot locate copy_button for focus',
-                snapshot=snap.serializable(),
-            )
-            return None
-
-        time.sleep(0.4)
-
-        # Step 3 — Ctrl+A: select all content in the focused region
-        self.runtime.press('ctrl+a')
-        time.sleep(0.5)
-
-        # Step 4 — Ctrl+C: copy selection
-        self.runtime.press('ctrl+c')
-        time.sleep(1.0)
-
-        # Step 5 — read clipboard
-        content = self.runtime.read_clipboard()
-        return content
-
-    def _is_report_tree_text_value(
-        self,
-        text: str,
-        role: str,
-        x: int | None,
-    ) -> bool:
-        text = (text or '').strip()
-        if not text:
-            return False
-        if role not in {'heading', 'list item', 'table cell'}:
-            return False
-        if x is None or x < 600:
-            return False
-        lowered = text.lower()
-        rejected = {
-            'answer',
-            'links',
-            'images',
-            'prepared by deep research',
-            'run as a separate task in computer for better results',
-            'computer produces a richer output using more tools and context.',
-        }
-        if lowered in rejected:
-            return False
-        if text.endswith('.md') or text.startswith('Family consultation —'):
-            return False
-        if lowered.startswith('add files') or lowered.startswith('mozilla firefox'):
-            return False
-        if lowered.startswith('search with google') or lowered.startswith('open context menu'):
-            return False
-        return True
-
-    def _is_report_tree_text(self, element: ElementRef) -> bool:
-        return self._is_report_tree_text_value(element.name, element.role, element.x)
-
-    def _collect_report_tree_text(self) -> tuple[str, dict[str, object]]:
-        """Collect Perplexity DR report text from the live AT-SPI tree.
-
-        Current Perplexity DR occasionally exposes only the bottom `Copy` button,
-        which copies an empty clipboard. When the report-level `Copy contents`
-        control is absent, the answer body is still present as main-column
-        AT-SPI text nodes. This fallback reads those nodes directly, bounded by
-        scroll rounds and minimum extracted length.
-        """
-        first_snap = self.runtime.snapshot()
-        anchor = self.find_first(first_snap, 'input')
-        chunks: list[str] = []
-        seen: set[str] = set()
-        rounds = 0
-
-        def collect(snapshot: Snapshot) -> int:
-            added = 0
-            try:
-                from consultation_v2 import atspi
-                from consultation_v2.tree import find_elements as raw_find_elements
-                firefox = atspi.find_firefox_for_platform(self.platform)
-                doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
-                raw_elements = raw_find_elements(doc or firefox, max_depth=30, fence_after=[])
-                raw_elements = sorted(
-                    raw_elements,
-                    key=lambda item: (item.get('y') or 0, item.get('x') or 0),
-                )
-            except Exception:
-                raw_elements = []
-
-            for raw in raw_elements:
-                text = ' '.join(((raw.get('name') or '')).split())
-                role = raw.get('role') or ''
-                x = raw.get('x')
-                if not self._is_report_tree_text_value(text, role, x):
-                    continue
-                if text in seen:
-                    continue
-                seen.add(text)
-                chunks.append(text)
-                added += 1
-
-            if added:
-                return added
-
-            buckets = list(snapshot.mapped.values()) + [
-                snapshot.unknown,
-                snapshot.sidebar,
-                snapshot.menu_items,
-            ]
-            for items in buckets:
-                for element in items:
-                    if not self._is_report_tree_text(element):
-                        continue
-                    text = ' '.join((element.name or '').split())
-                    if text in seen:
-                        continue
-                    seen.add(text)
-                    chunks.append(text)
-                    added += 1
-            return added
-
-        self.runtime.press('ctrl+Home')
-        time.sleep(0.2)
-        self.runtime.press('Home')
-        time.sleep(0.8)
-        stable_rounds = 0
-        last_count = 0
-        for _ in range(14):
-            rounds += 1
-            snap = self.runtime.menu_snapshot()
-            collect(snap)
-            if len(chunks) == last_count:
-                stable_rounds += 1
-            else:
-                stable_rounds = 0
-                last_count = len(chunks)
-            if stable_rounds >= 2 and rounds >= 3:
-                break
-            if anchor and anchor.x is not None and anchor.y is not None:
-                self.runtime.scroll_to_bottom(anchor, clicks=8, max_rounds=1, settle=0.5)
-            else:
-                self.runtime.press('Page_Down')
-                time.sleep(0.5)
-
-        content = '\n\n'.join(chunks).strip()
-        metadata = {
-            'tree_items': len(chunks),
-            'scroll_rounds': rounds,
-            'characters': len(content),
-        }
-        if len(content) < 1000 or len(chunks) < 3:
-            return '', metadata
-        return content, metadata
-
     def _accept_extracted_content(
         self,
         content: str,
@@ -889,12 +720,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         if not self._ensure_answer_thread(result):
             return False
 
-        # NOTE: Perplexity DR can render as either a report or a short answer.
-        # Reports need special handling: prefer report-level Copy contents, then
-        # AT-SPI report text. Short DR answers may expose only the normal mapped
-        # Copy button, which is accepted only after the report surfaces are absent
-        # or empty and the copied text passes the non-empty/non-prompt guards.
-
         is_deep_research = self._is_deep_research(request)
         if not is_deep_research:
             self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
@@ -904,25 +729,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # elements after the long monitor polling phase.
         snap = self.runtime.snapshot()
 
-        target = self.find_last(snap, 'copy_contents_button')
-        if is_deep_research and target is None:
-            content, metadata = self._collect_report_tree_text()
-            if content:
-                return self._accept_extracted_content(
-                    content,
-                    request,
-                    result,
-                    'Perplexity DR extracted via AT-SPI report tree text '
-                    '(copy_contents_button absent)',
-                    **metadata,
-                )
-            target = self.find_last(snap, 'copy_button')
-        elif target is None:
-            target = self.find_last(snap, 'copy_button')
+        target_key = 'copy_contents_button' if is_deep_research else 'copy_button'
+        target = self.find_last(snap, target_key)
         if not target:
             result.add_step(
                 'extract_primary', False,
-                'Perplexity no usable copy target found',
+                f'Perplexity required extraction target {target_key!r} not found',
                 snapshot=snap.serializable(),
             )
             return False
@@ -938,17 +750,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         self.runtime.write_clipboard('')
         time.sleep(0.3)
         clicked = self.runtime.click(target, strategy='atspi_only')
+        if not clicked:
+            result.add_step(
+                'extract_primary', False,
+                f'Perplexity copy target click failed (button: {target.name!r})',
+                snapshot=snap.serializable(),
+            )
+            return False
         time.sleep(1.0)
         content = self.runtime.read_clipboard().strip()
-        if not content:
-            # Empty clipboard → the button likely wasn't in view yet. Re-scroll
-            # the control + re-click ONCE (a local copy action, not a send/nav
-            # retry — extraction retries are allowed, cf. claude extract).
-            self.runtime.scroll_element_into_view(target)
-            time.sleep(0.6)
-            self.runtime.click(target, strategy='atspi_only')
-            time.sleep(1.2)
-            content = self.runtime.read_clipboard().strip()
 
         if content:
             return self._accept_extracted_content(
@@ -957,18 +767,6 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 result,
                 f'Perplexity response extracted via {target.name!r} ({len(content)} chars)',
             )
-
-        if is_deep_research:
-            content, metadata = self._collect_report_tree_text()
-            if content:
-                return self._accept_extracted_content(
-                    content,
-                    request,
-                    result,
-                    'Perplexity DR extracted via AT-SPI report tree text '
-                    f'after empty clipboard from {target.name!r}',
-                    **metadata,
-                )
 
         result.add_step(
             'extract_primary', False,
@@ -984,45 +782,55 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         copy_contents = self.find_first(snap, 'copy_contents_button')
 
-        # If extract_primary already consumed the DR path (Ctrl+A/Ctrl+C),
-        # skip copy_contents_button here to avoid double-extraction.
-        if copy_contents and not self._is_deep_research(request):
-            self.runtime.write_clipboard('')
-            time.sleep(0.2)
+        if self._is_deep_research(request):
+            result.add_step(
+                'extract_additional', True,
+                'Perplexity Deep Research report already captured by extract_primary',
+            )
+            return True
 
-            if self.runtime.click(copy_contents):
-                time.sleep(1.0)
-                content = self.runtime.read_clipboard().strip()
-                if content:
-                    result.extractions.append(
-                        ExtractedArtifact(
-                            name='perplexity_full_contents.md',
-                            content=content,
-                            kind='report_export',
-                            metadata={'source': 'copy_contents_button'},
-                        )
-                    )
-                    result.add_step(
-                        'extract_additional', True,
-                        'Perplexity full contents copied via copy_contents_button',
-                        characters=len(content),
-                        preview=content[:200],
-                    )
-                    return True
+        if not copy_contents:
+            result.add_step(
+                'extract_additional', False,
+                'Perplexity copy_contents_button not found',
+                snapshot=snap.serializable(),
+            )
+            return False
 
-                result.add_step(
-                    'extract_additional', True,
-                    'Perplexity copy_contents_button clicked but clipboard empty; '
-                    'AT-SPI action did not fire — skipping',
+        self.runtime.write_clipboard('')
+        time.sleep(0.2)
+
+        if not self.runtime.click(copy_contents):
+            result.add_step(
+                'extract_additional', False,
+                'Perplexity copy_contents_button click failed',
+                snapshot=snap.serializable(),
+            )
+            return False
+        time.sleep(1.0)
+        content = self.runtime.read_clipboard().strip()
+        if content:
+            result.extractions.append(
+                ExtractedArtifact(
+                    name='perplexity_full_contents.md',
+                    content=content,
+                    kind='report_export',
+                    metadata={'source': 'copy_contents_button'},
                 )
-                return True
+            )
+            result.add_step(
+                'extract_additional', True,
+                'Perplexity full contents copied via copy_contents_button',
+                characters=len(content),
+                preview=content[:200],
+            )
+            return True
 
-        # copy_contents_button not found, not clickable, or DR already extracted
         result.add_step(
-            'extract_additional', True,
-            'Perplexity copy_contents_button not found or skipped (DR already extracted)',
+            'extract_additional', False,
+            'Perplexity copy_contents_button clicked but clipboard empty',
         )
-        return True
+        return False
 
     # ------------------------------------------------------------------
     # Neo4j storage
