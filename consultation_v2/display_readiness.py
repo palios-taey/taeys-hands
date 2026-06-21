@@ -157,27 +157,58 @@ def _count_tabs_and_url(platform: str) -> tuple[int, str | None, int]:
     from gi.repository import Atspi
 
     desktop = Atspi.get_desktop(0)
-    page_tabs = 0
 
-    def walk(obj: Any, depth: int = 0) -> None:
-        nonlocal page_tabs
+    def role_name(obj: Any) -> str:
         try:
-            if obj.get_role_name() == 'page tab':
-                page_tabs += 1
-            if depth >= 25:
-                return
-            for index in range(obj.get_child_count()):
-                child = obj.get_child_at_index(index)
-                if child is not None:
-                    walk(child, depth + 1)
+            return str(obj.get_role_name() or '').strip().lower()
         except Exception:
-            pass
+            return ''
+
+    def has_document_content_ancestor(ancestors: tuple[str, ...]) -> bool:
+        return any(role.startswith('document') for role in ancestors)
+
+    def tab_list_page_tabs(tab_list: Any, depth: int = 0) -> int:
+        if depth > 6:
+            return 0
+        total_tabs = 0
+        try:
+            for index in range(tab_list.get_child_count()):
+                child = tab_list.get_child_at_index(index)
+                if child is None:
+                    continue
+                child_role = role_name(child)
+                if child_role == 'page tab':
+                    total_tabs += 1
+                elif child_role != 'page tab list':
+                    total_tabs += tab_list_page_tabs(child, depth + 1)
+        except Exception:
+            return total_tabs
+        return total_tabs
+
+    def browser_tab_count(root: Any, ancestors: tuple[str, ...] = (), depth: int = 0) -> int:
+        if depth > 25:
+            return 0
+        role = role_name(root)
+        if role == 'page tab list':
+            return 0 if has_document_content_ancestor(ancestors) else tab_list_page_tabs(root)
+        total_tabs = 0
+        next_ancestors = ancestors + ((role,) if role else ())
+        try:
+            for index in range(root.get_child_count()):
+                child = root.get_child_at_index(index)
+                if child is not None:
+                    total_tabs += browser_tab_count(child, next_ancestors, depth + 1)
+        except Exception:
+            return total_tabs
+        return total_tabs
+
+    page_tabs = 0
 
     for index in range(desktop.get_child_count()):
         app = desktop.get_child_at_index(index)
         try:
             if 'firefox' in (app.get_name() or '').lower():
-                walk(app)
+                page_tabs += browser_tab_count(app)
         except Exception:
             pass
     return total, url, page_tabs

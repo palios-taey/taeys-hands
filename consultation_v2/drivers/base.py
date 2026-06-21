@@ -765,6 +765,38 @@ class BaseConsultationDriver(ABC):
                 snapshot=target_snapshot.serializable(),
             )
             return True
+        target_snapshot, target = self._selection_wait_for_click_ready(
+            target_key,
+            scope,
+            target_snapshot,
+            target,
+            strategy=click_strategy,
+        )
+        if target is None or not self._selection_element_click_ready(target, click_strategy):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} {menu}={option} target not click-ready after bounded settle-rescan',
+                menu=menu,
+                option=option,
+                click_strategy=click_strategy,
+                readiness=self._selection_click_readiness(target, click_strategy),
+                snapshot=target_snapshot.serializable(),
+            )
+            return False
+        if not active_element_key and self._selection_element_matches_active_recognition(target, active_state):
+            self.runtime.press('Escape')
+            result.add_step(
+                'select',
+                True,
+                f'{self.platform} {menu}={option} already active',
+                menu=menu,
+                option=option,
+                active_state=active_state,
+                confirmation='post_settle_active_state',
+                snapshot=target_snapshot.serializable(),
+            )
+            return True
         if not self.runtime.click(target, strategy=click_strategy):
             result.add_step(
                 'select',
@@ -882,6 +914,22 @@ class BaseConsultationDriver(ABC):
                 False,
                 f'{self.platform} selection trigger {trigger_key} not found',
                 trigger=trigger_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        trigger_snapshot, trigger = self._selection_wait_for_click_ready(
+            trigger_key,
+            'snapshot',
+            trigger_snapshot,
+            trigger,
+        )
+        if trigger is None or not self._selection_element_click_ready(trigger, None):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} not click-ready after bounded settle-rescan',
+                trigger=trigger_key,
+                readiness=self._selection_click_readiness(trigger, None),
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
@@ -1089,6 +1137,69 @@ class BaseConsultationDriver(ABC):
 
     def _selection_find_once(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
         return self._selection_wait_for_revealed_anchor(key, scope)
+
+    def _selection_wait_for_click_ready(
+        self,
+        key: str,
+        scope: str,
+        snapshot: Snapshot,
+        element: ElementRef | None,
+        *,
+        strategy: str | None = None,
+    ) -> tuple[Snapshot, ElementRef | None]:
+        timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
+        deadline = time.time() + timeout
+        last_snapshot = snapshot
+        last_element = element
+        while time.time() < deadline:
+            if self._selection_element_click_ready(last_element, strategy):
+                return last_snapshot, last_element
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self._selection_stable_snapshot(
+                scope,
+                timeout=min(remaining, 0.8),
+                anchor_key=key,
+            )
+            last_element = self.find_first(last_snapshot, key)
+            time.sleep(0.2)
+        return last_snapshot, last_element
+
+    def _selection_element_click_ready(
+        self,
+        element: ElementRef | None,
+        strategy: str | None,
+    ) -> bool:
+        readiness = self._selection_click_readiness(element, strategy)
+        chosen = str(readiness['strategy']).lower()
+        if chosen == 'coordinate_only':
+            return bool(readiness['has_coordinates'])
+        if chosen == 'atspi_only':
+            return bool(readiness['has_action'])
+        return bool(readiness['has_coordinates'] or readiness['has_action'])
+
+    def _selection_click_readiness(
+        self,
+        element: ElementRef | None,
+        strategy: str | None,
+    ) -> dict[str, Any]:
+        chosen = (strategy or self.runtime.click_strategy or 'xdotool_first').lower()
+        has_coordinates = bool(element and element.x is not None and element.y is not None)
+        has_action = False
+        if element is not None and element.atspi_obj is not None:
+            try:
+                action = element.atspi_obj.get_action_iface()
+                has_action = bool(action and action.get_n_actions() > 0)
+            except Exception:
+                has_action = False
+        return {
+            'strategy': chosen,
+            'has_coordinates': has_coordinates,
+            'has_action': has_action,
+            'x': element.x if element is not None else None,
+            'y': element.y if element is not None else None,
+            'role': element.role if element is not None else None,
+            'name': element.name if element is not None else None,
+        }
 
     def _selection_snapshot(self, scope: str) -> Snapshot:
         normalized = scope.strip().lower()
