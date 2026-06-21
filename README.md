@@ -43,6 +43,8 @@ pip install redis neo4j PyGObject
 # accessibility.force_disabled = 0
 ```
 
+For production display provisioning, see [DEPLOY.md](DEPLOY.md).
+
 ## Usage
 
 ```bash

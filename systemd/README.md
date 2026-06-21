@@ -4,6 +4,9 @@ Stable AT-SPI-isolated browser dispatch displays. The installer is the
 canonical deploy path; checked-in units are generic examples and must not be
 hand-copied as machine-local configuration.
 
+For the full add-an-instance procedure, including per-instance runtime envs and
+the VNC login gate, see [../DEPLOY.md](../DEPLOY.md).
+
 ## Install
 
 ```bash
