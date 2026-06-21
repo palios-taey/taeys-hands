@@ -51,21 +51,18 @@ tree:
   conformance:
     scopes:
       base:
+        # The sidebar nav (home_link, close_sidebar, search_chats, library_link,
+        # projects_link, new_project, scheduled_link, apps_link, pinned_toggle,
+        # recents_toggle, new_chat_recent, organize_chats, new_chat_shortcut)
+        # lives inside landmark/list/section containers that tree.exclude.roles
+        # prunes from the snapshot, so conformance can never observe them on
+        # this scope. They are also non-critical: new-chat uses the Ctrl+Shift+O
+        # keyboard shortcut (clean_composer), not the sidebar link. Conformance
+        # therefore asserts only the composer + persistent top-bar controls that
+        # actually survive the scope. (Verified live on :2 2026-06-21: these 8
+        # present, the 13 sidebar keys pruned despite being in the raw tree.)
         expected:
-          - home_link
-          - close_sidebar
           - temporary_chat_on
-          - new_chat_shortcut
-          - search_chats
-          - library_link
-          - projects_link
-          - new_project
-          - scheduled_link
-          - apps_link
-          - pinned_toggle
-          - recents_toggle
-          - new_chat_recent
-          - organize_chats
           - profile_menu
           - download_apps
           - attach_trigger
