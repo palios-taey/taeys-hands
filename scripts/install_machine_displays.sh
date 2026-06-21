@@ -139,6 +139,15 @@ instance_platform_name() {
     fi
 }
 
+instance_display_nums() {
+    local start="$1"
+    local idx
+    validate_instance_args "scope" "${start}"
+    for idx in "${!DISPLAY_REGISTRY_PLATFORMS[@]}"; do
+        printf '%s\n' "$((start + idx))"
+    done
+}
+
 emit_instance_rows() {
     local name="$1"
     local start="$2"
@@ -339,6 +348,16 @@ if [[ ${#DISPLAY_NUMS[@]} -eq 0 ]]; then
 fi
 mapfile -t DISPLAY_NUMS < <(printf '%s\n' "${DISPLAY_NUMS[@]}" | sort -n)
 
+declare -a TARGET_DISPLAY_NUMS=()
+if [[ -n "${APPEND_INSTANCE}" ]]; then
+    mapfile -t TARGET_DISPLAY_NUMS < <(instance_display_nums "${START_DISPLAY}")
+    for display_num in "${TARGET_DISPLAY_NUMS[@]}"; do
+        [[ -n "${DISPLAY_PLATFORM[$display_num]:-}" ]] || die "--append-instance target display :${display_num} was not loaded from ${MACHINE_ENV}"
+    done
+else
+    TARGET_DISPLAY_NUMS=("${DISPLAY_NUMS[@]}")
+fi
+
 SYSTEMD_ENV_FILE="${MACHINE_ENV}"
 if [[ "${MACHINE_ENV}" == "${HOME}/"* ]]; then
     SYSTEMD_ENV_FILE="%h/${MACHINE_ENV#"${HOME}/"}"
@@ -434,7 +453,7 @@ EOF
 check_display_collisions() {
     local display_num
     ${NO_START} && return 0
-    for display_num in "${DISPLAY_NUMS[@]}"; do
+    for display_num in "${TARGET_DISPLAY_NUMS[@]}"; do
         if [[ -e "/tmp/.X${display_num}-lock" || -S "/tmp/.X11-unix/X${display_num}" ]]; then
             if ! systemctl --user is-active --quiet "taey-xvfb@${display_num}.service"; then
                 die "display :${display_num} appears in use outside taey-xvfb@${display_num}.service"
@@ -447,7 +466,7 @@ write_xvfb_unit
 write_bus_watcher_unit
 
 INSTALLED=()
-for display_num in "${DISPLAY_NUMS[@]}"; do
+for display_num in "${TARGET_DISPLAY_NUMS[@]}"; do
     write_display_unit "${display_num}"
     INSTALLED+=("taey-display-${display_num}.service")
 done
