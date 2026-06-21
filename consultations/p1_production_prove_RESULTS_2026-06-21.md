@@ -29,16 +29,17 @@ Method: temporarily set one element's `name:` to a bogus value, run, observe; re
 - HALT msg: "grok selection expected element model_heavy missing after menu open"; candidates captured (`model_auto`, `model_expert`, `model_fast` …).
 - **No downgrade**: `model_auto`/`model_expert` were present in the candidate snapshot; the engine refused to silently select one.
 
-**ChatGPT** (different, more complex selection driver) — broke `model_instant` name, ran `--select model=instant`:
-- steps reached: navigate → clean_composer → page_ready → select → **HALT** (`notify_operator_failure`).
-- did NOT reach prompt/attach/send. `ok=False`.
-- HALT msg: "chatgpt selection expected element model_instant missing after menu open"; candidates captured (`model_medium`, `model_high`, `model_pro` …).
-- **No downgrade**.
+Per-platform sweep — each platform had ONE selection-target element name broken, then a run, then `git checkout` restore (tree clean after each). Every one HALTED at `select` with `notify_operator_failure`, never reached send, never downgraded:
 
-The halt-on-drift / notify-with-candidates / no-downgrade behavior is the **shared** `base.py` match-or-notify path; proven on two structurally different selection drivers. Combined with the static contract gate (no banned matchers anywhere) and the happy-path 5/5 (each platform's elements matched exactly), this establishes the determinism invariant across the engine.
+| Platform | broken element | HALT message | reached send? | downgraded? |
+|---|---|---|---|---|
+| Grok | `model_heavy` | "grok selection expected element model_heavy missing after menu open" | No | No (model_auto/expert present, refused) |
+| ChatGPT | `model_instant` | "chatgpt selection expected element model_instant missing after menu open" | No | No (model_medium/high/pro present, refused) |
+| Claude | `model_opus` | "claude selection expected element model_opus missing after menu open" | No | No |
+| Gemini | `tool_deep_research` | "gemini selection expected element tool_deep_research missing after menu open" (after model select passed) | No | No |
+| Perplexity | `deep_research` | "perplexity mode=deep_research did not expose active element after bounded settle-rescan" | No | No |
 
-### Scope note (no silent cap)
-The Oracle runtime proof was run on 2 of 5 platforms (Grok simple menu + ChatGPT complex menu). The remaining 3 share the identical `base.py` selection/match-or-notify code path (driver isolation enforced; happy-path 5/5 confirms each routes through it) and pass the static exact-match gate. A per-platform Oracle sweep across all 5 can be added if the merge gate requires it.
+The halt-on-drift / notify-with-candidates / no-downgrade behavior is the **shared** `base.py` match-or-notify path, now proven on all 5 platforms across structurally different selection drivers (simple menu, hover-path menu, More-tools flyout, search-mode trigger). Perplexity's message confirms the contract's settle+rescan-ONCE-then-halt window. Combined with the static contract gate (no banned matchers anywhere) and the happy-path 5/5, the determinism invariant is established per-platform across the engine.
 
 ## Fixes that landed this session (all on the branch)
 - `e00a7584` — Perplexity `input` re-anchored `before: attach_trigger` (was `before: submit_button`, which is absent on an empty composer → page_ready could never resolve the nameless composer).
