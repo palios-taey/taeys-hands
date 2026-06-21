@@ -114,12 +114,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
 
-    def _new_chat_keys(self) -> tuple[str, ...]:
-        clean_cfg = self.cfg.get('workflow', {}).get('clean', {}) or {}
-        keys = clean_cfg.get('new_chat_keys') or ['new_chat']
-        keys = keys if isinstance(keys, list) else [keys]
-        return tuple(str(key) for key in keys if isinstance(key, str) and key)
-
     def _stop_keys(self) -> tuple[str, ...]:
         monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
         keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
@@ -211,41 +205,38 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         draft text + the previous file attachment + an old/temporary thread, so
         navigate->attach->enter->send operate on contaminated state and ship the
         WRONG content (PROD 2026-06-15: a sorter dispatch fired an old
-        CPT-packing packet). Clicking the sidebar 'New chat' link discards the
-        draft, the stale attachment, and the old thread in one action — a fresh
-        chat is empty with NO attachment, so there is nothing stale to remove.
-        The ctrl+a/Delete is a belt-and-suspenders clear of any draft the fresh
-        chat still restores. We then VERIFY the composer is empty (no leftover
-        Send button presence from restored text) before proceeding.
+        CPT-packing packet). The page-content snapshot excludes the sidebar, so
+        the live New Chat control is unreachable by element lookup here. Use the
+        documented Ctrl+Shift+O shortcut, then verify the fresh composer is empty
+        before proceeding.
 
         For a follow-up session (request.session_url set) we must NOT start a new
         chat — that would abandon the thread. Skip in that case.
         """
-        from consultation_v2 import input as _inp
-
         if request.session_url:
             result.add_step('clean_composer', True,
                             'ChatGPT follow-up session — keeping existing thread (no New chat)')
             return True
 
-        def _find_new_chat():
-            snap = self.runtime.snapshot()
-            key, element = self.find_first_any(snap, self._new_chat_keys())
-            if key and element:
-                return snap, key, element
-            return None
-
-        found = self.runtime.wait_until(_find_new_chat, timeout=15.0, interval=0.4)
-        snap, new_chat_key, new_chat = found if found else (self.runtime.snapshot(), None, None)
-        if not new_chat:
+        initial_focus = self._focus_composer()
+        if initial_focus is None:
             result.add_step('clean_composer', False,
-                            'ChatGPT New chat link not found — cannot force a clean fresh chat',
-                            snapshot=snap.serializable())
+                            'ChatGPT composer not focusable before New chat shortcut',
+                            snapshot=self.runtime.snapshot().serializable())
             return False
-        if not self._click(new_chat):
+        if not self.runtime.press('ctrl+shift+o'):
             result.add_step('clean_composer', False,
-                            'ChatGPT New chat click failed',
-                            snapshot=snap.serializable())
+                            'ChatGPT New chat shortcut failed',
+                            focus_node=self._element_evidence(initial_focus),
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
+        time.sleep(0.8)
+        fresh_focus = self._focus_composer()
+        if fresh_focus is None:
+            result.add_step('clean_composer', False,
+                            'ChatGPT fresh composer not focusable after New chat shortcut',
+                            focus_node=self._element_evidence(initial_focus),
+                            snapshot=self.runtime.snapshot().serializable())
             return False
         # Belt-and-suspenders: clear any draft the fresh chat restored, then
         # verify it is empty.
@@ -256,22 +247,56 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         # find_first('input') == None, the composer is 13 nameless paragraphs).
         # Nameless nodes CANNOT be exact-matched (contract forbids fuzzy/nameless
         # matching), so there is nothing to find_first/click — the contract-clean
-        # primitive is keyboard-to-focused-composer. A fresh New chat composer
-        # already holds keyboard focus; activate the Firefox window so the keys
-        # land, then ctrl+a + Delete clears any restored draft text. This is the
+        # primitive is keyboard-to-focused-composer. The shortcut-created fresh
+        # composer is explicitly focused above; activate the Firefox window so
+        # the keys land, then ctrl+a + Delete clears any restored draft text. This is the
         # documented working ChatGPT method (100_TIMES / memory: "ProseMirror not
         # in AT-SPI; paste directly into the focused composer"), NOT a fallback.
-        self.runtime.focus_firefox()
+        if not self.runtime.focus_firefox():
+            result.add_step('clean_composer', False,
+                            'ChatGPT Firefox focus failed before composer clear',
+                            focus_node=self._element_evidence(fresh_focus),
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
         time.sleep(0.3)
-        _inp.press_key('ctrl+a')
+        if not self.runtime.press('ctrl+a'):
+            result.add_step('clean_composer', False,
+                            'ChatGPT composer select-all failed during clean',
+                            focus_node=self._element_evidence(fresh_focus),
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
         time.sleep(0.15)
-        _inp.press_key('Delete')
+        if not self.runtime.press('Delete'):
+            result.add_step('clean_composer', False,
+                            'ChatGPT composer delete failed during clean',
+                            focus_node=self._element_evidence(fresh_focus),
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
         time.sleep(0.3)
 
-        verify_snap = self.runtime.snapshot()
+        def _empty_fresh_composer():
+            snap = self.runtime.snapshot()
+            if self._bottommost_input(snap) and not self.snapshot_has_any(snap, self._send_button_keys()):
+                return snap
+            return None
+
+        verify_snap = self.runtime.wait_until(_empty_fresh_composer, timeout=5.0, interval=0.4)
+        if verify_snap is None:
+            verify_snap = self.runtime.snapshot()
+            result.add_step(
+                'clean_composer',
+                False,
+                'ChatGPT clean composer verification failed',
+                has_input=bool(self._bottommost_input(verify_snap)),
+                send_button_present=self.snapshot_has_any(verify_snap, self._send_button_keys()),
+                focus_node=self._element_evidence(fresh_focus),
+                snapshot=verify_snap.serializable(),
+            )
+            return False
         result.add_step('clean_composer', True,
-                        'ChatGPT forced clean fresh chat (no draft / attachment / stale thread)',
-                        new_chat_key=new_chat_key,
+                        'ChatGPT forced clean fresh chat via New chat shortcut',
+                        shortcut='ctrl+shift+o',
+                        focus_node=self._element_evidence(fresh_focus),
                         snapshot=verify_snap.serializable())
         return True
 
