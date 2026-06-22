@@ -65,5 +65,11 @@
 
 ### Task: f10-validate - taeys-hands: production-validate a Perplexity DR consult extracts the FULL report (non-empty, length >> prompt) hands-off; my-fleet r5 + merge [priority: 40] [owner: taeys-hands] [depends: f10-build] [ref: consultation_v2/drivers/perplexity.py:700-840]
 
+## Phase: f11-lock-key-display - Dispatch lock keys on launch-DISPLAY (:0), not target display [order: 11] [ref: consultation_v2/primitives.py:89-101]
+
+### Task: f11-build - codex: primitives._plan_lock_key() keys the dispatch lock on _display()=os.environ['DISPLAY'] (which is :0 for every consult launched without a per-target DISPLAY) instead of the consult's TARGET display. OBSERVED: a ChatGPT consult driving :2 held taey:plan_active::0 (payload display=:2 but KEY=:0); a Gemini consult driving :4 was BLOCKED on the same :0 key -> all consults force-serialize on one shared :0 lock regardless of which isolated display they drive. Root cause: the lock key must derive from the consult's TARGET display (the platform->machine.env mapping, same source the runtime uses to drive the browser), NOT os.environ['DISPLAY']. Fix _plan_lock_key (and acquire/release/_plan_active readers) to key on the resolved target display so per-display isolation actually yields per-display locks (enables concurrent monitors on :2/:4/:5/:6). Workaround in use meanwhile: launch each consult with DISPLAY=<target> [priority: 16] [owner: taeys-hands-codex] [ref: consultation_v2/primitives.py:89-147]
+
+### Task: f11-validate - taeys-hands: production-validate two consults on different displays (e.g. :2 + :4) run CONCURRENTLY with distinct per-display locks, neither blocking the other, no cross-display race; my-fleet r5 + merge [priority: 17] [owner: taeys-hands] [depends: f11-build] [ref: consultation_v2/primitives.py:89-147]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
