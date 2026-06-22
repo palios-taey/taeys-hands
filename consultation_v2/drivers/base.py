@@ -1247,11 +1247,22 @@ class BaseConsultationDriver(ABC):
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
             remaining = max(0.1, deadline - time.time())
-            last_snapshot = self._selection_stable_snapshot(
-                scope,
-                timeout=min(remaining, 0.8),
-                anchor_key=key,
-            )
+            if scope.strip().lower() == 'menu_snapshot':
+                # Some native/web menus disappear after a cache-clearing menu scan;
+                # one anchored observation is the stable evidence for this surface.
+                last_snapshot = self.runtime.wait_for_stable_menu_snapshot(
+                    consecutive=1,
+                    timeout=min(remaining, 0.8),
+                    interval=0.2,
+                    anchor_key=key,
+                    require_non_empty=True,
+                )
+            else:
+                last_snapshot = self._selection_stable_snapshot(
+                    scope,
+                    timeout=min(remaining, 0.8),
+                    anchor_key=key,
+                )
             element = self.find_first(last_snapshot, key)
             if element is not None:
                 return last_snapshot, element

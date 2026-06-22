@@ -110,15 +110,19 @@ tree:
     model_auto:
       name: "Auto Chooses Fast or Expert"
       role: menu item
+      scope: menu_snapshot
     model_fast:
       name: "Fast Powered by Grok 4.3"
       role: menu item
+      scope: menu_snapshot
     model_expert:
       name: "Expert Powered by Grok 4.3"
       role: menu item
+      scope: menu_snapshot
     model_heavy:
       name: "Heavy Team of Experts"
       role: menu item
+      scope: menu_snapshot
     # --- attach dropdown item (menu_snapshot after clicking Attach) ---
     upload_files_item:
       name: "Upload a file"
