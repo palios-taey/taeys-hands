@@ -820,11 +820,36 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
 
         # Perplexity's DR Copy / "Copy contents" returns an EMPTY clipboard if
-        # action-clicked while OFF-SCREEN — scroll the button itself into view
-        # first (Component.scroll_to ANYWHERE). This is the report special-
-        # handling: scroll the CONTROL, not the page. (Production-observed:
-        # without this the copy click landed empty; with it, 23.7k extracted.)
-        self.runtime.scroll_element_into_view(target)
+        # action-clicked while OFF-SCREEN. Make the pre-copy scroll load-bearing
+        # for the report control, then rescan so the clicked AT-SPI object is the
+        # visible post-scroll element rather than the stale pre-scroll ref.
+        scrolled_into_view = bool(self.runtime.scroll_element_into_view(target))
+        document_scrolled = False
+        refreshed = False
+        if target_key == 'copy_contents_button':
+            if not scrolled_into_view:
+                document_scrolled = bool(
+                    self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+                )
+            post_scroll_snap = self.runtime.snapshot()
+            refreshed_target = self.find_last(post_scroll_snap, target_key)
+            if refreshed_target:
+                target = refreshed_target
+                snap = post_scroll_snap
+                refreshed = True
+            if not (scrolled_into_view or document_scrolled):
+                result.add_step(
+                    'extract_primary',
+                    False,
+                    'Perplexity copy_contents_button could not be scrolled into view before copy',
+                    stop_condition='extraction_failed',
+                    target_key=target_key,
+                    scrolled_into_view=scrolled_into_view,
+                    document_scrolled=document_scrolled,
+                    target_refreshed=refreshed,
+                    snapshot=snap.serializable(),
+                )
+                return False
         time.sleep(0.5)
         # Clear clipboard, click via AT-SPI action, read clipboard
         self.runtime.write_clipboard('')
@@ -834,6 +859,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             result.add_step(
                 'extract_primary', False,
                 f'Perplexity copy target click failed (button: {target.name!r})',
+                stop_condition='extraction_failed',
+                target_key=target_key,
+                scrolled_into_view=scrolled_into_view,
+                document_scrolled=document_scrolled,
+                target_refreshed=refreshed,
                 snapshot=snap.serializable(),
             )
             return False
@@ -846,11 +876,22 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 request,
                 result,
                 f'Perplexity response extracted via {target.name!r} ({len(content)} chars)',
+                target_key=target_key,
+                scrolled_into_view=scrolled_into_view,
+                document_scrolled=document_scrolled,
+                target_refreshed=refreshed,
             )
 
         result.add_step(
             'extract_primary', False,
             f'Perplexity copy target clicked but clipboard empty (button: {target.name!r})',
+            stop_condition='extraction_failed',
+            target_key=target_key,
+            scrolled_into_view=scrolled_into_view,
+            document_scrolled=document_scrolled,
+            target_refreshed=refreshed,
+            clicked=bool(clicked),
+            snapshot=snap.serializable(),
         )
         return False
 
