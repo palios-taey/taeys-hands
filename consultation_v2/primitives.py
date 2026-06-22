@@ -116,43 +116,6 @@ def _process_starttime(pid: int) -> str | None:
     return fields[19]
 
 
-def _holder_pid(record: Dict[str, Any]) -> int | None:
-    try:
-        pid = int(record.get("holder_pid"))
-    except (TypeError, ValueError):
-        return None
-    return pid if pid > 0 else None
-
-
-def _decode_lock_record(raw: Any) -> Dict[str, Any] | None:
-    try:
-        record = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    return record if isinstance(record, dict) else None
-
-
-def _holder_alive(record: Dict[str, Any] | None) -> bool:
-    if not record:
-        return False
-    pid = _holder_pid(record)
-    if pid is None:
-        return False
-    expected_starttime = str(record.get("holder_starttime") or "").strip()
-    if not expected_starttime:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        pass
-    current_starttime = _process_starttime(pid)
-    if current_starttime is None:
-        return True
-    return current_starttime == expected_starttime
-
-
 def _lock_record(owner_token: str, payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     holder_pid = os.getpid()
     holder_starttime = _process_starttime(holder_pid)
@@ -175,38 +138,18 @@ def acquire_display_lock(
     tab mid-setup. Returns this owner's token on success, None if another owner
     already holds the lock. Raises ConnectionError if Redis is unreachable — a
     lock that cannot be taken is a loud failure, never a silent "proceed without
-    the lock"."""
+    the lock".
+
+    Acquisition is a single Redis SET NX claim. If any holder key already
+    exists, this dispatcher refuses the display; acquire never deletes or
+    replaces another holder's lock.
+    """
     client = get_client()
     key = _plan_lock_key(display)
     owner_token = str((payload or {}).get("owner_token") or uuid.uuid4())
     record = _lock_record(owner_token, payload)
     body = json.dumps(record)
-    while True:
-        acquired = client.set(key, body, ex=ttl, nx=True)
-        if acquired:
-            return owner_token
-        raw = client.get(key)
-        if not raw:
-            continue
-        if _holder_alive(_decode_lock_record(raw)):
-            return None
-        with client.pipeline() as pipe:
-            try:
-                pipe.watch(key)
-                current_raw = pipe.get(key)
-                if current_raw != raw:
-                    pipe.unwatch()
-                    continue
-                if _holder_alive(_decode_lock_record(current_raw)):
-                    pipe.unwatch()
-                    return None
-                pipe.multi()
-                pipe.delete(key)
-                pipe.set(key, body, ex=ttl, nx=True)
-                _deleted, reclaimed = pipe.execute()
-                return owner_token if reclaimed else None
-            except WatchError:
-                continue
+    return owner_token if client.set(key, body, ex=ttl, nx=True) else None
 
 
 def release_display_lock(owner_token: str | None, display: str | None = None) -> bool:
