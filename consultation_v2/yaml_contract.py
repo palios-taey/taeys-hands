@@ -85,7 +85,7 @@ MENU_KEYS = frozenset({
 })
 MENU_SELECT_VALUES = frozenset({'single', 'multi'})
 MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
-MENU_OPERATE_SCOPES = frozenset({'menu_snapshot', 'snapshot'})
+MENU_OPERATE_SCOPES = frozenset({'app_root_snapshot', 'menu_snapshot', 'snapshot'})
 MENU_CLICK_STRATEGIES = frozenset({'atspi_only', 'atspi_first', 'coordinate_only', 'xdotool_first'})
 MENU_OPTION_KEYS = frozenset({'element', 'path', 'active_element', 'click_strategy'})
 MENU_PATH_KEYS = frozenset({'element', 'action'})

@@ -239,6 +239,24 @@ class ConsultationRuntime:
             require_non_empty=require_non_empty,
         )
 
+    def wait_for_stable_app_root_snapshot(
+        self,
+        *,
+        consecutive: int = 2,
+        timeout: float = 2.0,
+        interval: float = 0.25,
+        anchor_key: str | None = None,
+        require_non_empty: bool = False,
+    ) -> Snapshot:
+        return self._wait_for_stable_tree(
+            self.app_root_snapshot,
+            consecutive=consecutive,
+            timeout=timeout,
+            interval=interval,
+            anchor_key=anchor_key,
+            require_non_empty=require_non_empty,
+        )
+
     def _wait_for_stable_tree(
         self,
         snapshot_factory: Callable[[], Snapshot],

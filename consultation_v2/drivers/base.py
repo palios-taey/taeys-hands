@@ -938,6 +938,9 @@ class BaseConsultationDriver(ABC):
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
+        # Let React portal menus attach before the first scoped scan; menu_snapshot
+        # cache-clearing can dismiss these transient surfaces.
+        time.sleep(1.0)
         snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
@@ -1210,6 +1213,8 @@ class BaseConsultationDriver(ABC):
         normalized = scope.strip().lower()
         if normalized == 'menu_snapshot':
             return self.runtime.menu_snapshot()
+        if normalized == 'app_root_snapshot':
+            return self.runtime.app_root_snapshot()
         if normalized == 'snapshot':
             return self.runtime.snapshot()
         raise ValueError(f'Unknown selection snapshot scope {scope!r}')
@@ -1303,6 +1308,14 @@ class BaseConsultationDriver(ABC):
         normalized = scope.strip().lower()
         if normalized == 'menu_snapshot':
             return self.runtime.wait_for_stable_menu_snapshot(
+                consecutive=2,
+                timeout=timeout,
+                interval=0.2,
+                anchor_key=anchor_key,
+                require_non_empty=True,
+            )
+        if normalized == 'app_root_snapshot':
+            return self.runtime.wait_for_stable_app_root_snapshot(
                 consecutive=2,
                 timeout=timeout,
                 interval=0.2,
