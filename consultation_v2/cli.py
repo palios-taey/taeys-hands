@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--output', default=None)
     parser.add_argument('--no-neo4j', action='store_true')
+    parser.add_argument(
+        '--no-identity',
+        action='store_true',
+        help='Attach only caller-provided files; do not prepend FAMILY_KERNEL or platform IDENTITY.',
+    )
     parser.add_argument('--session-type', default=None)
     parser.add_argument('--purpose', default=None)
     parser.add_argument('--requester', default=None,
@@ -116,6 +121,8 @@ def main() -> int:
         selections = parse_select_args(args.platform, list(args.select or []))
     except ValueError as exc:
         parser.error(str(exc))
+    if args.no_identity and not args.attach:
+        parser.error('--no-identity requires at least one --attach file')
     request = ConsultationRequest(
         platform=args.platform,
         message=args.message,
@@ -125,6 +132,7 @@ def main() -> int:
         timeout=args.timeout,
         output_path=args.output,
         no_neo4j=args.no_neo4j,
+        no_identity=args.no_identity,
         session_type=args.session_type,
         purpose=args.purpose,
         requester=args.requester,

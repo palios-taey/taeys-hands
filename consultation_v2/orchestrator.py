@@ -13,7 +13,11 @@ import os
 from dataclasses import replace
 
 from consultation_v2 import primitives
-from consultation_v2.identity import consolidate_attachments
+from consultation_v2.identity import (
+    IdentityError,
+    consolidate_attachments,
+    validate_caller_attachments,
+)
 from consultation_v2.notify import push_notification
 from consultation_v2.planner import (
     SelectionPlanError,
@@ -89,28 +93,45 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         readiness.get('url'),
     )
 
-    # --- Phase 1: Identity consolidation ---
+    # --- Phase 1: Identity consolidation / explicit caller-only attachment mode ---
     # FAIL-LOUD (FLOW §4 / CONSULTATION_CONTRACT): a missing/unreadable
     # FAMILY_KERNEL.md or the required platform IDENTITY file raises
     # IdentityError out of consolidate_attachments. We do NOT catch it — a
     # consultation without complete identity must HALT, never proceed on a
     # partial/empty packet. consolidate_attachments now returns a
     # ConsolidatedPackage (always complete) or raises; there is no None case.
-    package = consolidate_attachments(
-        platform=request.platform,
-        caller_attachments=list(request.attachments),
-    )
-    consolidated_path = package.path
-    # Provenance survives consolidation: stamp the caller-attachment path+hashes
-    # onto the request (FLOW §3) and write them to durable run-state via the
-    # shared-primitive surface so the audit trail records what the caller sent
-    # even though the browser only receives the single merged package.
-    request = replace(
-        request,
-        attachments=[consolidated_path],
-        caller_attachment_provenance=list(package.caller_provenance),
-    )
-    if package.caller_provenance:
+    caller_attachments = list(request.attachments)
+    consolidated_path = ''
+    identity_mode = 'identity_consolidated'
+    if request.no_identity:
+        if not caller_attachments:
+            raise IdentityError(
+                '--no-identity requires at least one --attach file; refusing to '
+                'send an empty packet without FAMILY_KERNEL/IDENTITY overlay.'
+            )
+        provenance = validate_caller_attachments(caller_attachments)
+        identity_mode = 'caller_only'
+        request = replace(
+            request,
+            attachments=caller_attachments,
+            caller_attachment_provenance=provenance,
+        )
+    else:
+        package = consolidate_attachments(
+            platform=request.platform,
+            caller_attachments=caller_attachments,
+        )
+        consolidated_path = package.path
+        # Provenance survives consolidation: stamp the caller-attachment path+hashes
+        # onto the request (FLOW §3) and write them to durable run-state via the
+        # shared-primitive surface so the audit trail records what the caller sent
+        # even though the browser only receives the single merged package.
+        request = replace(
+            request,
+            attachments=[consolidated_path],
+            caller_attachment_provenance=list(package.caller_provenance),
+        )
+    if request.caller_attachment_provenance:
         try:
             # Key by the STABLE request_id (FLOW §8), NOT the consolidated-package
             # path: the package path is a per-run timestamped temp file, so keying
@@ -124,8 +145,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     'platform': request.platform,
                     'prompt_hash': request.prompt_hash(),
                     'session_target': request.session_url or 'new',
+                    'identity_mode': identity_mode,
                     'attachment_hashes': [
-                        prov.serializable() for prov in package.caller_provenance
+                        prov.serializable() for prov in request.caller_attachment_provenance
                     ],
                 },
             )
@@ -153,7 +175,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     'plan': selection_record,
                 },
                 message=request.message,
-                attachment_path=consolidated_path or '',
+                attachment_path=consolidated_path or '\n'.join(request.attachments),
                 session=request.session_url or 'new',
                 requester=request.requester or 'unknown',
             )

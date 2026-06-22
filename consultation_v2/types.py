@@ -55,6 +55,7 @@ class ConsultationRequest:
     timeout: int = 3600
     output_path: Optional[str] = None
     no_neo4j: bool = False
+    no_identity: bool = False
     session_type: Optional[str] = None
     purpose: Optional[str] = None
     requester: Optional[str] = None
@@ -125,6 +126,15 @@ class ConsultationRequest:
         which irreversible turn this is."""
         session_target = self.session_url or 'new'
         seed = f'{self.platform}\x1f{session_target}\x1f{self.prompt_hash()}'
+        if self.no_identity:
+            provenance = self.caller_attachment_provenance or []
+            if provenance:
+                attachment_seed = '\x1e'.join(
+                    f'{prov.path}\x1d{prov.sha256}' for prov in provenance
+                )
+            else:
+                attachment_seed = '\x1e'.join(self.attachments)
+            seed = f'{seed}\x1fno_identity\x1f{attachment_seed}'
         return hashlib.sha256(seed.encode('utf-8')).hexdigest()[:32]
 
 
@@ -252,6 +262,7 @@ class ConsultationResult:
                 'session_url': self.request.session_url,
                 'timeout': self.request.timeout,
                 'no_neo4j': self.request.no_neo4j,
+                'no_identity': self.request.no_identity,
                 'session_type': self.request.session_type,
                 'purpose': self.request.purpose,
             },

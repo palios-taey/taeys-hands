@@ -122,6 +122,20 @@ def _identity_path(platform: str) -> str:
     return path
 
 
+def validate_caller_attachments(caller_attachments: List[str]) -> List[AttachmentProvenance]:
+    """Validate caller-supplied files without adding identity content.
+
+    This supports explicit caller-only consultations. It preserves the same
+    fail-loud behavior for missing/unreadable caller files, but it does not
+    strip identity basenames or merge anything into a new package.
+    """
+    provenance: List[AttachmentProvenance] = []
+    for attachment in caller_attachments:
+        _, digest = _read_caller_file(attachment)
+        provenance.append(AttachmentProvenance(path=attachment, sha256=digest))
+    return provenance
+
+
 def consolidate_attachments(
     platform: str,
     caller_attachments: List[str],
