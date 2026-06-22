@@ -8,7 +8,13 @@ from typing import Optional
 from consultation_v2.completion import COMPLETE, CompletionDetector
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.snapshot import matches_spec
-from consultation_v2.types import ConsultationRequest, ConsultationResult, ExtractedArtifact
+from consultation_v2.types import (
+    ConsultationRequest,
+    ConsultationResult,
+    ElementRef,
+    ExtractedArtifact,
+    Snapshot,
+)
 
 try:
     from storage import neo4j_client
@@ -119,6 +125,53 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _complete_keys(self) -> tuple[str, ...]:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
+        keys = monitor_cfg.get('complete_keys') or extract_cfg.get('primary_key') or ['copy_button']
+        keys = keys if isinstance(keys, list) else [keys]
+        return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _minimum_stop_gone_cycles(self) -> int:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        raw = monitor_cfg.get('sustained_stop_gone_cycles', 4)
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 4
+
+    @staticmethod
+    def _element_y(element: ElementRef) -> int | None:
+        return int(element.y) if element.y is not None else None
+
+    def _bottom_action_row_y(
+        self,
+        snapshot: Snapshot,
+        action_keys: tuple[str, ...],
+    ) -> int | None:
+        items = [
+            item
+            for key in action_keys
+            for item in ((snapshot.mapped or {}).get(key) or [])
+            if item.y is not None
+        ]
+        if not items:
+            return None
+        return max(self._element_y(item) or 0 for item in items)
+
+    def _complete_signal_present(
+        self,
+        snapshot: Snapshot,
+        complete_keys: tuple[str, ...],
+        generation_floor_y: int | None,
+    ) -> tuple[bool, int | None]:
+        row_y = self._bottom_action_row_y(snapshot, complete_keys)
+        if row_y is None:
+            return False, None
+        if generation_floor_y is not None and row_y <= generation_floor_y + 8:
+            return False, row_y
+        return True, row_y
 
     def _send_button_keys(self) -> tuple[str, ...]:
         prompt_cfg = self.cfg.get('workflow', {}).get('prompt', {}) or {}
@@ -434,6 +487,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         full_timeout = max(120.0, configured_timeout)
         first_probe_timeout = min(12.0, full_timeout)
         stop_keys = self._stop_keys()
+        complete_keys = self._complete_keys()
+        self._generating_complete_row_y = None
         if request.attachments:
             return self._send_attached_prompt_by_settled_button(
                 request,
@@ -475,6 +530,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 interval=0.6,
             ) or self.runtime.snapshot()
             stop_seen = self.snapshot_has_any(send_snap, stop_keys)
+            if stop_seen:
+                self._generating_complete_row_y = self._bottom_action_row_y(
+                    send_snap,
+                    complete_keys,
+                )
             answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
             )
@@ -538,17 +598,27 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
 
     def monitor_generation(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        detector_mode = (getattr(request, 'mode', None) or '').strip().lower()
+        detector_mode = str(request.selection_value('mode', '') or '').strip().lower()
         detector = CompletionDetector(mode=detector_mode)
+        detector.required_stop_cycles = max(
+            detector.required_stop_cycles,
+            self._minimum_stop_gone_cycles(),
+        )
         stop_keys = self._stop_keys()
+        complete_keys = self._complete_keys()
         completed = False
         observed_stop = False
         intermediate_failed = False
         answer_thread_lost = False
         intermediate_actions: dict[str, int] = {}
+        terminal_snapshot: Snapshot | None = None
+        stop_gone_without_complete_signal = 0
+        generation_floor_y = getattr(self, '_generating_complete_row_y', None)
+        complete_signal_y: int | None = None
 
         def _poll() -> bool:
-            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost
+            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, terminal_snapshot
+            nonlocal stop_gone_without_complete_signal, generation_floor_y, complete_signal_y
             _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
                 result,
                 answer_url_predicate=self._is_answer_thread_url,
@@ -562,7 +632,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             stop_present = self.snapshot_has_any(snap, stop_keys)
             observed_stop = observed_stop or stop_present
             if stop_present:
-                detector.observe(stop_present=True)
+                row_y = self._bottom_action_row_y(snap, complete_keys)
+                if row_y is not None:
+                    generation_floor_y = max(generation_floor_y or row_y, row_y)
             handled, failed = self._handle_monitor_intermediate_state(
                 snap,
                 result,
@@ -572,18 +644,30 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 self._reset_detector_after_intermediate(detector)
                 intermediate_failed = failed
                 return bool(failed)
-            if stop_present:
-                return False
-            verdict = detector.observe(stop_present=False)
-            if verdict == COMPLETE:
+            complete_signal_present, signal_y = self._complete_signal_present(
+                snap,
+                complete_keys,
+                generation_floor_y,
+            )
+            verdict = detector.observe(stop_present=stop_present)
+            if verdict == COMPLETE and complete_signal_present:
                 completed = True
+                terminal_snapshot = snap
+                complete_signal_y = signal_y
                 return True
+            if verdict == COMPLETE:
+                stop_gone_without_complete_signal += 1
             return False
 
         self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
-        verify_snap = self.runtime.wait_until(
+        verify_snap = terminal_snapshot or self.runtime.wait_until(
             lambda: (
-                snap if not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+                snap
+                if (
+                    not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys)
+                    and self._complete_signal_present(snap, complete_keys, generation_floor_y)[0]
+                )
+                else None
             ),
             timeout=5.0,
             interval=0.5,
@@ -623,7 +707,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 snapshot=verify_snap.serializable(),
             )
             return False
-        verified = bool(completed and not self.snapshot_has_any(verify_snap, stop_keys))
+        stop_absent = not self.snapshot_has_any(verify_snap, stop_keys)
+        complete_signal_seen, final_signal_y = self._complete_signal_present(
+            verify_snap,
+            complete_keys,
+            generation_floor_y,
+        )
+        complete_signal_y = complete_signal_y if complete_signal_y is not None else final_signal_y
+        verified = bool(completed and stop_absent and complete_signal_seen)
         monitor_message = (
             'ChatGPT response completed'
             if verified else
@@ -636,6 +727,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             stop_seen=observed_stop,
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
+            complete_keys=complete_keys,
+            complete_signal_seen=complete_signal_seen,
+            complete_signal_y=complete_signal_y,
+            generation_action_row_floor_y=generation_floor_y,
+            intermediate_actions=intermediate_actions,
+            stop_gone_cycles=detector.stop_cycles,
+            required_stop_gone_cycles=detector.required_stop_cycles,
+            stop_gone_without_complete_signal=stop_gone_without_complete_signal,
             snapshot=verify_snap.serializable(),
         )
         if verified:
@@ -853,6 +952,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             else:
                 send_snap = self.runtime.snapshot()
             stop_seen = self.snapshot_has_any(send_snap, stop_keys)
+            if stop_seen:
+                self._generating_complete_row_y = self._bottom_action_row_y(
+                    send_snap,
+                    self._complete_keys(),
+                )
             answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
             )
