@@ -93,12 +93,12 @@ __all__ = [
 # sequential per display). The lock is keyed by DISPLAY only — never by
 # platform — because the display is the physical contention unit.
 
-def _display() -> str:
-    return os.environ.get("DISPLAY", ":0")
+def _display(display: str | None = None) -> str:
+    return display or os.environ.get("DISPLAY", ":0")
 
 
-def _plan_lock_key() -> str:
-    return f"taey:plan_active:{_display()}"
+def _plan_lock_key(display: str | None = None) -> str:
+    return f"taey:plan_active:{_display(display)}"
 
 
 def _process_starttime(pid: int) -> str | None:
@@ -166,14 +166,18 @@ def _lock_record(owner_token: str, payload: Optional[Dict[str, Any]]) -> Dict[st
     return record
 
 
-def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 3600) -> str | None:
+def acquire_display_lock(
+    payload: Optional[Dict[str, Any]] = None,
+    ttl: int = 3600,
+    display: str | None = None,
+) -> str | None:
     """Take the DISPLAY-scoped dispatch lock so the monitor will not cycle the
     tab mid-setup. Returns this owner's token on success, None if another owner
     already holds the lock. Raises ConnectionError if Redis is unreachable — a
     lock that cannot be taken is a loud failure, never a silent "proceed without
     the lock"."""
     client = get_client()
-    key = _plan_lock_key()
+    key = _plan_lock_key(display)
     owner_token = str((payload or {}).get("owner_token") or uuid.uuid4())
     record = _lock_record(owner_token, payload)
     body = json.dumps(record)
@@ -205,14 +209,14 @@ def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 36
                 continue
 
 
-def release_display_lock(owner_token: str | None) -> bool:
+def release_display_lock(owner_token: str | None, display: str | None = None) -> bool:
     """Release the DISPLAY-scoped dispatch lock (send complete / step failed).
     Returns True only if the lock still belongs to ``owner_token`` and was
     removed. Never deletes a lock owned by another dispatch."""
     if not owner_token:
         return False
     client = get_client()
-    key = _plan_lock_key()
+    key = _plan_lock_key(display)
     while True:
         with client.pipeline() as pipe:
             try:
@@ -236,10 +240,10 @@ def release_display_lock(owner_token: str | None) -> bool:
                 continue
 
 
-def display_lock_held() -> bool:
+def display_lock_held(display: str | None = None) -> bool:
     """True if the DISPLAY-scoped dispatch lock is currently held."""
     client = get_client()
-    return bool(client.exists(_plan_lock_key()))
+    return bool(client.exists(_plan_lock_key(display)))
 
 
 # ---------------------------------------------------------------------------

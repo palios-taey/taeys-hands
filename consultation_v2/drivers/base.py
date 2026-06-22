@@ -1399,11 +1399,20 @@ class BaseConsultationDriver(ABC):
     # ``self.platform`` (opaque data), request ids, and monitor ids.
     # ------------------------------------------------------------------
 
-    def acquire_display_lock(self, payload: Optional[dict] = None, ttl: int = 3600) -> str | None:
-        return primitives.acquire_display_lock(payload=payload, ttl=ttl)
+    def acquire_display_lock(
+        self,
+        payload: Optional[dict] = None,
+        ttl: int = 3600,
+        display: str | None = None,
+    ) -> str | None:
+        return primitives.acquire_display_lock(
+            payload=payload,
+            ttl=ttl,
+            display=display or self._display(),
+        )
 
-    def release_display_lock(self, owner_token: str | None) -> bool:
-        return primitives.release_display_lock(owner_token)
+    def release_display_lock(self, owner_token: str | None, display: str | None = None) -> bool:
+        return primitives.release_display_lock(owner_token, display=display or self._display())
 
     def write_run_state(self, request_id: str, state: dict, ttl: int = 7200) -> bool:
         return primitives.write_run_state(request_id, state, ttl=ttl)
@@ -1470,18 +1479,19 @@ class BaseConsultationDriver(ABC):
         This is correct resource discipline, NOT an error swallow: when the
         locked block raises, the lock is released in ``finally`` and the
         exception propagates out of the ``with`` (first-error full-stop)."""
+        display = self._display()
         payload = {
             'platform': self.platform,
-            'display': self._display(),
+            'display': display,
             'request_id': request.request_id(),
             'locked_at': datetime.now(timezone.utc).isoformat(),
         }
-        owner_token = primitives.acquire_display_lock(payload=payload)
+        owner_token = primitives.acquire_display_lock(payload=payload, display=display)
         try:
             yield bool(owner_token)
         finally:
             if owner_token:
-                primitives.release_display_lock(owner_token)
+                primitives.release_display_lock(owner_token, display=display)
 
     # ------------------------------------------------------------------
     # Run-state idempotency (FLOW §8, CONSULTATION_CONTRACT §10)
