@@ -1,52 +1,29 @@
 # Project: consult-engine-stz - Consultation Engine Stabilization → Release
-> Make consultation_v2 stable per the rules so it can be released to every fleet instance to operate autonomously: full model/mode/submenu selection coverage on all 5 platforms, reliable send/monitor/extract, every defect filed as a GitHub Issue, gated by a no-tests production sweep. Supervisor: taeys-hands (self). Builder: taeys-hands-codex. CONTROL/merge: conductor.
+> Make consultation_v2 production-reliable so every fleet instance runs it hands-off — natively handling the NORMAL behavior of these platforms (long generations, multi-path Perplexity DR extraction, Gemini DR two-step) WITHOUT a human manual-fallback. Base: current main (determinism line). Builder: taeys-hands-codex. Production validation: taeys-hands on the real 5 displays with REAL long-DR prompts (no toy prompts, no tests). Gate/merge: taeys-hands' own fleet (grok adversarial + gemini structural, r5) — NOT conductor (Jesse standing instruction). Superseded: the old p1-issues/#154-#160 + p2-audit/p3-merge tasks were framed on the 7-month-divergent tree-conformance line and are obsoleted by today's determinism main bfba7d38; the only real remaining work is the 3 core fixes below (root-caused 2026-06-22 from the p8 audit, where 3/5 lanes needed manual recovery).
 
-## Phase: p1-issues - File all production-observed defects as GitHub Issues [order: 1] [ref: 100_TIMES.md:1-40]
-<!-- Global non-negotiable rules (plain text so the ref-parser does not try to resolve them):
-NO TESTS EVER (production consults or live AT-SPI audit only; see 100_TIMES.md).
-IDLE CHAT = AUDIT the implementation until perfect (see CLAUDE.md).
-OBSERVER-ONLY on code/YAML: scan -> document -> GitHub Issue -> route to codex; conductor merges (CLAUDE.md).
-SEQUENTIAL dispatch, monitors concurrent; STOP BUTTON = completion (exact AT-SPI name); verify real end-state not flags; first error = full stop + 6SIGMA (CONSULTATION_CONTRACT.md, 100_TIMES.md). -->
+<!-- Non-negotiable rules (plain text, not refs): NO TESTS EVER — production consults / live AT-SPI only. STOP BUTTON = completion (exact AT-SPI name). Verify real end-state, not flags. First error = full stop + 6SIGMA root-cause (simplify, never patch-around). Root-cause spec for all 3 fixes: consultations/stz_core_fixes_2026-06-22.md. -->
 
-### Task: p1-t1 - ChatGPT send-robustness (issue #154, corrected): YAML is correct; focus+Enter retry before send=False [priority: 88] [owner: taeys-hands] [ref: consultation_v2/platforms/chatgpt.yaml:1-60] [ref: 100_TIMES.md:1-40]
+## Phase: f1-monitor - Monitor: progress/stall-aware, not flat-timeout [order: 1] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-### Task: p1-t2 - Perplexity DR mode-select FP/FN (issue #155) — driver logic; fixed by e7c4374 [priority: 86] [owner: taeys-hands] [ref: consultation_v2/drivers/perplexity.py:1-120] [ref: consultation_v2/platforms/perplexity.yaml:1-60]
+### Task: f1-build - codex: make monitor_generation progress/stall-aware — keep waiting while stop_present AND response growing; fail only on generation_stalled (wire the dead stop_conditions.py); completion stays stop-gone-only [priority: 10] [owner: taeys-hands-codex] [ref: consultation_v2/drivers/base.py:1899-1978] [ref: consultation_v2/completion.py:1-100]
 
-### Task: p1-t3 - Perplexity attach false-negative (issue #156) — fixed by e7c4374 [priority: 80] [owner: taeys-hands] [ref: consultation_v2/drivers/base.py:1-176] [ref: consultation_v2/drivers/perplexity.py:120-240]
+### Task: f1-validate - taeys-hands: production-validate F1 with a REAL multi-minute DR/Pro-Extended run that exceeds the old flat timeout — confirm it COMPLETES (not false-fails) and a true stall NOTIFIES; my-fleet r5 + merge to main [priority: 12] [owner: taeys-hands] [depends: f1-build] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-### Task: p1-t4 - Perplexity Submit no-op (issue #157) — fixed by b86c230/2aa8b6e [priority: 78] [owner: taeys-hands] [ref: consultation_v2/drivers/perplexity.py:240-360] [ref: 100_TIMES.md:1-40]
+## Phase: f2-px-extract - Perplexity DR extraction: multi-path mapped states [order: 2] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-### Task: p1-t5 - Perplexity DR extract empty (issue #158) — fixed by e7c4374 (Copy-contents path) [priority: 78] [owner: taeys-hands] [ref: consultation_v2/drivers/perplexity.py:360-520] [ref: CONSULTATION_CONTRACT.md:1-56]
+### Task: f2-build - codex: Perplexity extract_primary — stop hardcoding copy_contents_button for DR; enumerate mapped DR output states (report-card copy_contents / inline copy_button / Download / report-tree) and extract via the one present [priority: 20] [owner: taeys-hands-codex] [ref: consultation_v2/drivers/perplexity.py:700-840]
 
-### Task: p1-t6 - p2 selection-coverage gaps (issue #160): Claude name_contains+effort+model; Gemini deep_think; Grok schema [priority: 75] [owner: taeys-hands] [ref: consultation_v2/platforms/claude.yaml:1-180] [ref: CONSULTATION_CONTRACT.md:1-56]
+### Task: f2-validate - taeys-hands: validate BOTH the inline-answer and report-card DR shapes extract full content (the p8 failure was the inline shape); my-fleet r5 + merge [priority: 22] [owner: taeys-hands] [depends: f2-build] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-## Phase: p2-audit - Per-platform implementation audit: full model/mode/submenu selection coverage [order: 2] [depends: p1-t1] [ref: CONSULTATION_CONTRACT.md:1-56]
+## Phase: f3-gemini-dr - Gemini DR two-step + full-report extract [order: 3] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-### Task: p2-chatgpt - ChatGPT selectors audited vs YAML — DONE, full coverage confirmed [priority: 70] [owner: taeys-hands] [ref: consultation_v2/platforms/chatgpt.yaml:1-326]
+### Task: f3-build - codex: Gemini DR — click start_research via atspi_only + validate research ACTUALLY started (not stop+url); make Share&Export popover visible so menu_snapshot resolves copy_content_item (raw do_action got 22814ch vs 89ch stub) [priority: 20] [owner: taeys-hands-codex] [ref: consultation_v2/drivers/gemini.py:200-340]
 
-### Task: p2-claude - Claude effort-submenu + exact copy matcher + 4th model (issue #160 / task #170) [priority: 70] [owner: taeys-hands] [ref: consultation_v2/platforms/claude.yaml:1-252]
+### Task: f3-validate - taeys-hands: validate native plan→Start-research two-step + FULL-report extract (not the 89-char stub) on a real Gemini DR; my-fleet r5 + merge [priority: 22] [owner: taeys-hands] [depends: f3-build] [ref: consultations/stz_core_fixes_2026-06-22.md:1-40]
 
-### Task: p2-gemini - Gemini Deep Think driver wiring (f801471) or mark unsupported (issue #160) [priority: 70] [owner: taeys-hands] [ref: consultation_v2/platforms/gemini.yaml:1-261]
+## Phase: f4-sweep - Real-prompt all-5 unattended sweep [order: 4] [ref: CONSULTATION_CONTRACT.md:1-56]
 
-### Task: p2-grok - Grok normalize mode_targets under workflow.selection + add model_targets (issue #160) [priority: 68] [owner: taeys-hands] [ref: consultation_v2/platforms/grok.yaml:1-292]
-
-### Task: p2-perplexity - Perplexity selectors audited — YAML correct; driver fixes in e7c4374 [priority: 68] [owner: taeys-hands] [depends: p1-t2] [ref: consultation_v2/platforms/perplexity.yaml:1-352]
-
-## Phase: p3-fix - Builder fixes + CONTROL merge [order: 3] [depends: p2-perplexity] [ref: CLAUDE.md:1-60]
-
-### Task: p3-merge - Conductor verifies + merges peer/taeys-hands-codex-perplexity-submit-scope (e7c4374) + #154/#160 fixes [priority: 85] [owner: conductor] [ref: CLAUDE.md:1-60]
-
-## Phase: p4-gate - No-tests production sweep: one clean autonomous cycle per platform [order: 4] [depends: p3-merge] [ref: CONSULTATION_CONTRACT.md:1-56]
-
-### Task: p4-sweep - Clean unattended full-cycle on all 5 (submitted URL + Stop seen/gone + extract + notify ACK + storage), ZERO manual intervention, NO TESTS [priority: 95] [owner: taeys-hands] [ref: FLOW_CONSULTATION_ENGINE.md:1-60] [ref: CONSULTATION_CONTRACT.md:1-56]
-
-### Task: p4-concurrency - Concurrency run: sequential sends, monitors simultaneous, independent completions while later sends in flight [priority: 90] [owner: taeys-hands] [depends: p4-sweep] [ref: 100_TIMES.md:1-40]
-
-## Phase: p5-release - Release to fleet instances [order: 5] [depends: p4-concurrency] [ref: FLOW_CONSULTATION_ENGINE.md:1-60]
-
-### Task: p5-docs - Confirm FLOW + CONTRACT + 100_TIMES let an instance run hands-off from docs alone [priority: 80] [owner: taeys-hands] [ref: FLOW_CONSULTATION_ENGINE.md:1-740] [ref: CONSULTATION_CONTRACT.md:1-56]
-
-### Task: p5-go - Go/no-go: engine perfect on all 5 (full model/mode/submenu selection + send/monitor/extract), all issues closed, gate evidence on record [priority: 99] [owner: taeys-hands] [depends: p5-docs] [ref: CLAUDE.md:1-60]
+### Task: f4-sweep - taeys-hands: one clean unattended all-5 cycle with REAL long-DR prompts (submitted URL + Stop seen/gone + correct extract + requester delivery), ZERO manual intervention — the bar that the p8 audit failed [priority: 40] [owner: taeys-hands] [depends: f1-validate] [depends: f2-validate] [depends: f3-validate] [ref: FLOW_CONSULTATION_ENGINE.md:1-60] [ref: CONSULTATION_CONTRACT.md:1-56]
 
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
