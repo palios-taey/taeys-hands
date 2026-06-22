@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlparse
 
 from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult
+from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
 
 try:
     from storage import neo4j_client
@@ -85,14 +86,182 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not target_url:
             result.add_step('navigate', True, 'Grok using current tab (no target URL)')
             return True
-        verify = bool(urls.get('verify_navigation')) and request.session_url is None
+        if request.session_url:
+            navigated = self.runtime.navigate(target_url, verify_change=False)
+            snap = self.runtime.snapshot()
+            result.add_step('navigate', navigated, 'Navigated to Grok target',
+                            target_url=target_url, snapshot=snap.serializable())
+            if not navigated:
+                return False
+            return self.wait_for_page_ready_after_navigation(result)
+
+        verify = False
         navigated = self.runtime.navigate(target_url, verify_change=verify)
         snap = self.runtime.snapshot()
         result.add_step('navigate', navigated, 'Navigated to Grok target',
-                        target_url=target_url, snapshot=snap.serializable())
+                        target_url=target_url, fresh_chat_required=True,
+                        verify_change=verify, snapshot=snap.serializable())
         if not navigated:
             return False
-        return self.wait_for_page_ready_after_navigation(result)
+        if not self._trigger_new_chat(result, snap):
+            return False
+        return self._wait_for_fresh_chat_ready(result)
+
+    def _trigger_new_chat(self, result: ConsultationResult, snapshot: Snapshot) -> bool:
+        nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
+        key = nav_cfg.get('new_chat_key') or nav_cfg.get('new_chat')
+        shortcut = nav_cfg.get('new_chat_shortcut')
+        element = snapshot.first(key) if isinstance(key, str) else None
+
+        if isinstance(key, str) and not element:
+            element = self.runtime.wait_until(
+                lambda: self.runtime.snapshot().first(key),
+                timeout=3.0,
+                interval=0.4,
+            )
+
+        if isinstance(element, ElementRef):
+            clicked = self.runtime.click(element)
+            result.add_step(
+                'new_chat',
+                clicked,
+                'Triggered Grok new chat',
+                action='click',
+                key=key,
+                element=element.serializable(),
+            )
+            return clicked
+
+        if isinstance(shortcut, str) and shortcut.strip():
+            self.runtime.focus_firefox()
+            pressed = self.runtime.press(shortcut)
+            result.add_step(
+                'new_chat',
+                pressed,
+                'Triggered Grok new chat',
+                action='shortcut',
+                shortcut=shortcut,
+                configured_key=key,
+                mapped_before=bool(snapshot.has(key)) if isinstance(key, str) else False,
+            )
+            return pressed
+
+        result.add_step(
+            'new_chat',
+            False,
+            'Grok new chat affordance missing from YAML/current tree',
+            configured_key=key,
+            configured_shortcut=shortcut,
+            snapshot=snapshot.serializable(),
+        )
+        return False
+
+    def _wait_for_fresh_chat_ready(
+        self,
+        result: ConsultationResult,
+        *,
+        timeout: float = 15.0,
+    ) -> bool:
+        nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
+        prompt_cfg = (self.cfg.get('workflow') or {}).get('prompt') or {}
+        input_key = nav_cfg.get('fresh_input_key') or prompt_cfg.get('input') or 'input'
+        groups = self._page_ready_key_groups()
+        started = time.time()
+        last_snapshot: Snapshot | None = None
+        last_evidence: dict[str, object] = {}
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot, last_evidence
+            snap = self.runtime.snapshot()
+            last_snapshot = snap
+            input_el = snap.first(input_key) if isinstance(input_key, str) else None
+            input_states = self._state_set(input_el)
+            missing = self._page_ready_missing_groups(snap, groups)
+            input_text, input_text_observed, input_text_source = self._input_text(input_el)
+            input_observed_empty = bool(input_text_observed and input_text == '')
+            input_editable = 'editable' in input_states
+            current_url = (self.runtime.current_url() or snap.url or '').strip()
+            fresh_url = self._is_fresh_chat_url(current_url)
+            last_evidence = {
+                'required': self._page_ready_group_labels(groups),
+                'missing': missing,
+                'current_url': current_url,
+                'fresh_url': fresh_url,
+                'input_key': input_key,
+                'input_present': input_el is not None,
+                'input_states': sorted(input_states),
+                'input_editable': input_editable,
+                'input_observed_empty': input_observed_empty,
+                'input_text_observed': input_text_observed,
+                'input_text_source': input_text_source,
+                'input_text_length': len(input_text),
+                'optional_present': self._page_ready_present_optional_keys(snap),
+            }
+            if not (fresh_url and input_el is not None and input_editable):
+                return None
+            return snap
+
+        matched = self.runtime.wait_until(_probe, timeout=max(float(timeout), 15.0), interval=0.4)
+        if isinstance(matched, Snapshot):
+            result.add_step(
+                'page_ready',
+                True,
+                'Grok fresh composer ready after navigation',
+                elapsed_seconds=round(time.time() - started, 2),
+                snapshot=matched.serializable(),
+                **last_evidence,
+            )
+            return True
+
+        snapshot = last_snapshot or self.runtime.snapshot()
+        result.add_step(
+            'page_ready',
+            False,
+            'Grok fresh composer not ready after new-chat action',
+            timeout_seconds=max(float(timeout), 15.0),
+            snapshot=snapshot.serializable(),
+            **last_evidence,
+        )
+        return False
+
+    @staticmethod
+    def _is_fresh_chat_url(url: str | None) -> bool:
+        parsed = urlparse((url or '').strip())
+        if parsed.netloc and parsed.netloc not in {'grok.com', 'www.grok.com'}:
+            return False
+        path = (parsed.path or '/').rstrip('/')
+        return path in {'', '/'}
+
+    @staticmethod
+    def _state_set(element: ElementRef | None) -> set[str]:
+        if element is None:
+            return set()
+        return {str(state).lower() for state in (element.states or [])}
+
+    @staticmethod
+    def _input_text(element: ElementRef | None) -> tuple[str, bool, str]:
+        if element is None:
+            return '', False, 'missing_input'
+        if element.text is not None:
+            return str(element.text), True, 'snapshot_text'
+        if 'text' in element.raw:
+            return str(element.raw.get('text') or ''), True, 'raw_text'
+        try:
+            if element.atspi_obj is not None:
+                text_iface = element.atspi_obj.get_text_iface()
+                if text_iface:
+                    return text_iface.get_text(0, -1) or '', True, 'atspi_text'
+        except Exception:
+            pass
+        try:
+            if element.atspi_obj is not None:
+                value_iface = element.atspi_obj.get_value_iface()
+                if value_iface is not None:
+                    value = value_iface.get_current_value()
+                    return '' if value is None else str(value), True, 'atspi_value'
+        except Exception:
+            pass
+        return '', False, 'unobserved'
 
     # ------------------------------------------------------------------
     # Step 3 — attach (exact Attach -> menu_snapshot -> exact Upload a file,

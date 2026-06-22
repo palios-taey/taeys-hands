@@ -64,6 +64,9 @@ tree:
     model_selector:
       name: Model select
       role: push button
+    new_chat:
+      name: New Chat
+      role: link
     # send button (LIVE-CONFIRMED :5 2026-06-03). The composer is MULTI-LINE, so
     # Enter inserts a newline — submit is THIS exact push button, not a keystroke.
     send_button:
@@ -174,6 +177,10 @@ workflow:
             element: model_heavy
         default_for_fresh: auto
         example_rationale: Use Auto when the caller wants Grok to choose between Fast and Expert for this consult.
+  navigate:
+    new_chat_key: new_chat
+    new_chat_shortcut: ctrl+j
+    fresh_input_key: input
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
