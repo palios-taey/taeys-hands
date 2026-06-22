@@ -25,12 +25,18 @@ class AttachmentProvenance:
 class ConsolidatedPackage:
     """Result of identity+attachment consolidation (FLOW §3, §4).
 
-    ``path`` is the single merged package the browser is sent.
+    ``path`` is the primary package path (the only path for ordinary packages,
+    or the first chunk for a split package). ``paths`` is the ordered list the
+    browser is sent.
     ``caller_provenance`` is the per-caller-attachment path+hash list captured
     before the merge. consolidate_attachments either returns a complete one of
     these or raises loudly — it never returns a partial/None packet."""
     path: str
+    paths: List[str] = field(default_factory=list)
     caller_provenance: List[AttachmentProvenance] = field(default_factory=list)
+
+    def attachment_paths(self) -> List[str]:
+        return list(self.paths or [self.path])
 
 
 @dataclass(slots=True)

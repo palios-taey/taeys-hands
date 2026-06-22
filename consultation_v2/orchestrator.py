@@ -102,6 +102,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # ConsolidatedPackage (always complete) or raises; there is no None case.
     caller_attachments = list(request.attachments)
     consolidated_path = ''
+    package_paths = []
     identity_mode = 'identity_consolidated'
     if request.no_identity:
         if not caller_attachments:
@@ -121,14 +122,15 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             platform=request.platform,
             caller_attachments=caller_attachments,
         )
-        consolidated_path = package.path
+        package_paths = package.attachment_paths()
+        consolidated_path = '\n'.join(package_paths)
         # Provenance survives consolidation: stamp the caller-attachment path+hashes
         # onto the request (FLOW §3) and write them to durable run-state via the
         # shared-primitive surface so the audit trail records what the caller sent
-        # even though the browser only receives the single merged package.
+        # even though the browser receives the merged package file(s).
         request = replace(
             request,
-            attachments=[consolidated_path],
+            attachments=package_paths,
             caller_attachment_provenance=list(package.caller_provenance),
         )
     if request.caller_attachment_provenance:
@@ -149,6 +151,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     'attachment_hashes': [
                         prov.serializable() for prov in request.caller_attachment_provenance
                     ],
+                    'package_paths': list(request.attachments),
                 },
             )
         except Exception as exc:

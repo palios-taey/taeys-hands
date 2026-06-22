@@ -35,6 +35,70 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         'send_blocked_previous_message_curly',
         'send_blocked_caution_banner',
     )
+    _LARGE_PACKET_SUBSTANCE_BYTES = 50_000
+    _LARGE_PACKET_FAILURE_PHRASES = (
+        'middle was truncated',
+        'was truncated',
+        'got truncated',
+        'content was truncated',
+        'large and the middle',
+        "i don't have the full",
+        'i do not have the full',
+        "i can't access the attached",
+        'i cannot access the attached',
+        'unable to access the attached',
+        "i can't read the attached",
+        'i cannot read the attached',
+        "i don't see the diff",
+        'i do not see the diff',
+        "can't find the actual",
+        'cannot find the actual',
+        "couldn't find the actual",
+        'unable to find the actual',
+        'not sure i can',
+    )
+    _AUDIT_REQUEST_TERMS = (
+        'audit',
+        'verdict',
+        'review',
+        'blocker',
+        'finding',
+        'defect',
+        'diff',
+        'gate',
+        'validate',
+        'validation',
+        'proof',
+        'counterexample',
+    )
+    _AUDIT_VERDICT_TERMS = (
+        'verdict',
+        'pass',
+        'fail',
+        'go',
+        'no-go',
+        'approved',
+        'rejected',
+        'blocker',
+        'finding',
+        'defect',
+    )
+    _AUDIT_GROUNDING_TERMS = (
+        'observed',
+        'inferred',
+        'unknown',
+        'evidence',
+        'line',
+        'diff',
+        'code',
+        'because',
+        'marker',
+        'chunk',
+        'sha256',
+        'begin',
+        'middle',
+        'end',
+    )
 
     @staticmethod
     def _snapshot_elements(snapshot: Snapshot) -> list[ElementRef]:
@@ -449,9 +513,117 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return
         if not self.extract_additional(request, result):
             return
+        if not self.large_packet_substance_gate(request, result):
+            return
         if not self.store_in_neo4j(request, result):
             return
         result.ok = True
+
+    def large_packet_substance_gate(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        sizes: dict[str, int] = {}
+        errors: list[str] = []
+        for attachment in request.attachments:
+            try:
+                sizes[attachment] = os.path.getsize(attachment)
+            except OSError as exc:
+                errors.append(f'{attachment}: {exc}')
+        if errors:
+            result.add_step(
+                'substance_gate',
+                False,
+                'Claude could not stat attachment(s) for large-packet substance gate',
+                errors=errors,
+            )
+            return False
+
+        total_bytes = sum(sizes.values())
+        if total_bytes < self._LARGE_PACKET_SUBSTANCE_BYTES:
+            return True
+
+        body = self._response_body_without_thinking(result.response_text)
+        normalized_body = self._normalized_text(body)
+        normalized_lower = normalized_body.lower()
+        failure_phrases = [
+            phrase for phrase in self._LARGE_PACKET_FAILURE_PHRASES
+            if phrase in normalized_lower
+        ]
+        findings: list[str] = []
+        if not normalized_body:
+            findings.append('empty assistant body')
+        if self._is_prompt_echo(body, request):
+            findings.append('assistant body is prompt echo')
+        if failure_phrases:
+            findings.append('large-packet access/truncation uncertainty: ' + ', '.join(failure_phrases[:5]))
+        if self._request_requires_audit_substance(request):
+            if len(normalized_body) < 120:
+                findings.append('audit-like large-packet response is too short')
+            if not self._contains_any_term(normalized_lower, self._AUDIT_VERDICT_TERMS):
+                findings.append('audit-like large-packet response has no verdict term')
+            if not self._contains_any_term(normalized_lower, self._AUDIT_GROUNDING_TERMS):
+                findings.append('audit-like large-packet response has no grounding term')
+
+        if findings:
+            result.add_step(
+                'substance_gate',
+                False,
+                'Claude large-packet response failed substance gate',
+                attachment_bytes=total_bytes,
+                attachment_sizes=sizes,
+                findings=findings,
+                preview=body[:500],
+            )
+            return False
+
+        result.add_step(
+            'substance_gate',
+            True,
+            'Claude large-packet response passed substance gate',
+            attachment_bytes=total_bytes,
+            attachment_sizes=sizes,
+            response_body_chars=len(body),
+        )
+        return True
+
+    @staticmethod
+    def _response_body_without_thinking(text: str) -> str:
+        content = text or ''
+        start = content.find('<thinking>')
+        end = content.find('</thinking>')
+        if start != -1 and end != -1 and end > start:
+            return (content[:start] + content[end + len('</thinking>'):]).strip()
+        return content.strip()
+
+    def _request_requires_audit_substance(self, request: ConsultationRequest) -> bool:
+        request_text = self._normalized_text(
+            ' '.join([
+                request.message or '',
+                request.purpose or '',
+                request.session_type or '',
+            ])
+        ).lower()
+        return self._contains_any_term(request_text, self._AUDIT_REQUEST_TERMS)
+
+    @staticmethod
+    def _contains_any_term(text: str, terms: tuple[str, ...]) -> bool:
+        normalized = ''.join(
+            char if char.isalnum() or char in {'-', '_'} else ' '
+            for char in text.lower()
+        )
+        padded = f' {normalized} '
+        for term in terms:
+            if f' {term} ' in padded:
+                return True
+            if term in {'marker', 'sha256'} and term in normalized:
+                return True
+            if term in {'begin', 'middle', 'end'} and (
+                f'{term}_' in normalized or f'{term}-' in normalized
+            ):
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Attach files
