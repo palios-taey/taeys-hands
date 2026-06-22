@@ -1,9 +1,10 @@
 """Auto-ingestion: save extracted responses to corpus and trigger ISMA pipeline.
 
-Called after successful extraction. ISMA activation is gated by ISMA_API_URL:
-when unset, the ISMA step is a no-op; when set, request/auth/network failures
-raise so the caller logs a configured-path failure and does not mark ingestion
-complete.
+Called after successful extraction. ISMA activation is gated by ISMA_API_URL
+from the process environment, falling back to ~/.taey/machine.env: when unset
+in both places, the ISMA step is a no-op; when set, request/auth/network
+failures raise so the caller logs a configured-path failure and does not mark
+ingestion complete.
 
 Two steps:
 1. Save response to TAEY_CORPUS_PATH/extracts/{platform}/{timestamp}.md
@@ -14,12 +15,13 @@ import json
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
-_ISMA_API_URL = os.environ.get('ISMA_API_URL', '')
+_MACHINE_ENV = Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
 _SECRETS_PATH = '/home/mira/palios-taey-secrets.json'
 _ALLOWED_ISMA_PLATFORMS = {
     'chatgpt',
@@ -36,6 +38,35 @@ _PLATFORM_ALIASES = {
 
 class ISMAIngestError(RuntimeError):
     """Configured ISMA ingest path failed; callers must not treat it as success."""
+
+
+def _strip_env_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
+def _read_machine_env_value(name: str) -> str:
+    try:
+        lines = _MACHINE_ENV.read_text().splitlines()
+    except FileNotFoundError:
+        return ''
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#') or '=' not in stripped:
+            continue
+        key, value = stripped.split('=', 1)
+        if key.strip() == name:
+            return _strip_env_value(value)
+    return ''
+
+
+def _env_or_machine(name: str) -> str:
+    return str(os.environ.get(name) or _read_machine_env_value(name) or '').strip()
+
+
+_ISMA_API_URL = _env_or_machine('ISMA_API_URL')
 
 
 def save_to_corpus(platform: str, content: str, url: str = None,
@@ -82,7 +113,7 @@ def save_to_corpus(platform: str, content: str, url: str = None,
 
 
 def _read_isma_api_key() -> str:
-    env_key = str(os.environ.get('ISMA_API_KEY') or '').strip()
+    env_key = _env_or_machine('ISMA_API_KEY')
     try:
         with open(_SECRETS_PATH, encoding='utf-8') as handle:
             secrets = json.load(handle)
