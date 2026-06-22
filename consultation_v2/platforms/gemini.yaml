@@ -7,6 +7,12 @@ tree:
   fence_after:
   - name: Chats
     role: heading
+  # Scan the Firefox app-root for menu roles (like chatgpt) so React-portal
+  # popovers — notably the Deep Research "Share & Export" popover whose "Copy"
+  # menu item holds the full report — are visible to menu_snapshot. Without this
+  # the find_menu_items path missed that popover and DR extract got the 89-char
+  # stub instead of the full report (p8 2026-06-21).
+  menu_snapshot_scan: document_menu_roles
   menu_snapshot_roles:
     - menu item
     - radio menu item

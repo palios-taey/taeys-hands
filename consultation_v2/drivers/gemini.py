@@ -229,7 +229,8 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         # report. Generous timeout: plan generation can take ~1 min. Gated on the
         # deep_research mode so single-step modes (deep_think/normal/…) are
         # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
-        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
+        is_dr_send = str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research'
+        if is_dr_send:
             start_button = self.runtime.wait_until(
                 lambda: self.find_first(self.runtime.snapshot(), 'start_research'),
                 timeout=180,
@@ -242,16 +243,25 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                     snapshot=self.runtime.snapshot().serializable(),
                 )
                 return False
-            post_send_clicked = self.runtime.click(start_button, strategy='atspi_first')
+            # Click via atspi_only (do_action): the React "Start research" button
+            # no-ops under atspi_first in practice (p8 2026-06-21: start_research
+            # returned clicked=True yet the research never started, so no stop
+            # button appeared and send-validation false-failed). A direct AT-SPI
+            # action reliably fires the research run.
+            post_send_clicked = self.runtime.click(start_button, strategy='atspi_only')
             if not post_send_clicked:
                 result.add_step(
                     'send', False, 'Gemini "Start research" click failed',
                     snapshot=self.runtime.snapshot().serializable(),
                 )
                 return False
-            time.sleep(1.5)
-        # Confirm the generation (the research run, for DR) actually started.
-        send_snap = self.wait_for_validation('send_success', timeout=30, interval=0.6)
+            time.sleep(2.0)
+        # Confirm the generation (the research run, for DR) actually started. DR
+        # research spin-up can lag after Start research, so allow a generous window
+        # for the research-phase stop button to appear.
+        send_snap = self.wait_for_validation(
+            'send_success', timeout=(60 if is_dr_send else 30), interval=0.6
+        )
         stop_seen = self.validation_passes(send_snap, 'send_success')
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
@@ -289,15 +299,21 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
             snap = self.runtime.snapshot()
             share = self.find_first(snap, 'share_export')
-            if not share or not self.runtime.click(share, strategy='atspi_first'):
+            # atspi_only (do_action) reliably opens the popover; the React control
+            # can no-op under atspi_first. Generous settle — the Share & Export
+            # popover renders slowly, and menu_snapshot now scans the app-root
+            # (menu_snapshot_scan: document_menu_roles) so the popover's "Copy"
+            # menu item is visible (p8 2026-06-21: this path got 22814ch vs the
+            # 89-char bubble stub).
+            if not share or not self.runtime.click(share, strategy='atspi_only'):
                 result.add_step('extract_primary', False,
                                 'Gemini Deep Research "Share & Export" not found/clickable',
                                 snapshot=snap.serializable())
                 return False
-            time.sleep(1.2)
+            time.sleep(2.5)
             menu = self.runtime.menu_snapshot()
             copy_item = self.find_first(menu, 'copy_content_item')
-            if not copy_item or not self.runtime.click(copy_item, strategy='atspi_first'):
+            if not copy_item or not self.runtime.click(copy_item, strategy='atspi_only'):
                 result.add_step('extract_primary', False,
                                 'Gemini Deep Research Share & Export -> Copy item not found',
                                 menu=menu.serializable())
