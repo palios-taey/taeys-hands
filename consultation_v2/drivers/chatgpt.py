@@ -1267,12 +1267,38 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             normalized_seen.append(normalized)
         return deduped
 
+    def _is_browser_chrome_garbage(self, content: str) -> bool:
+        forbidden_markers = [
+            "Expedia",
+            "Temu",
+            "Wikipedia",
+            "Switch model",
+            "Open context menu",
+            "Address and search bar",
+            "New Tab",
+            "Customize Chrome",
+            "Search with Google",
+            "View site information",
+            "Bookmarks Toolbar",
+        ]
+        text_lower = content.lower()
+        for marker in forbidden_markers:
+            if marker.lower() in text_lower:
+                return True
+        return False
+
     def _direct_response_text_from_tree(
         self,
         elements: list[dict],
         request: ConsultationRequest,
     ) -> dict:
-        response_panels = self._response_action_panels(elements)
+        doc_element = next((e for e in elements if e.get('role') == 'document web'), None)
+        chrome_y = int(doc_element.get('y') or 120) if doc_element else 120
+
+        response_panels = [
+            p for p in self._response_action_panels(elements)
+            if int(p.get('y') or 0) > chrome_y
+        ]
         if not response_panels:
             return {'ok': False, 'reason': 'response_actions_panel_not_found'}
         response_panel = max(response_panels, key=lambda element: int(element.get('y') or 0))
@@ -1288,15 +1314,19 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             ],
             default=0,
         )
+        user_message_panels = [
+            u for u in self._user_message_action_panels(elements)
+            if int(u.get('y') or 0) > chrome_y
+        ]
         user_action_y = max(
             [
                 int(element.get('y') or 0)
-                for element in self._user_message_action_panels(elements)
+                for element in user_message_panels
                 if int(element.get('y') or 0) < response_y
             ],
             default=0,
         )
-        lower_bound_y = max(prior_response_y, user_action_y)
+        lower_bound_y = max(chrome_y, prior_response_y, user_action_y)
         candidates = [
             element for element in elements
             if lower_bound_y < int(element.get('y') or 0) < response_y
@@ -1319,10 +1349,24 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'text_candidates': len(candidates),
             'segments': len(segments),
             'response_actions_panels': len(response_panels),
-            'user_message_action_panels': len(self._user_message_action_panels(elements)),
+            'user_message_action_panels': len(user_message_panels),
         }
         if not content:
             evidence['reason'] = 'no_text_between_action_anchors'
+            return evidence
+        if len(content) <= len(request.message):
+            evidence.update({
+                'reason': 'content_shorter_than_prompt',
+                'characters': len(content),
+                'preview': content[:200],
+            })
+            return evidence
+        if self._is_browser_chrome_garbage(content):
+            evidence.update({
+                'reason': 'contains_browser_chrome_garbage',
+                'characters': len(content),
+                'preview': content[:200],
+            })
             return evidence
         if self._is_prompt_echo(content, request):
             evidence.update({
