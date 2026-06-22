@@ -170,8 +170,12 @@ class BaseConsultationDriver(ABC):
         snapshot: Snapshot,
         surface: str | None,
     ) -> tuple[list[dict[str, str | None]], list[dict[str, object]], dict[str, int]]:
-        discrepancies = self._conformance_unknown_discrepancies(snapshot, surface)
-        missing = self._missing_expected_elements(snapshot, surface)
+        expected_keys = self._expected_keys_for_surface(surface)
+        menu_surface = self._conformance_surface_is_menu_only(surface, expected_keys)
+        if self._conformance_menu_surface_closed(snapshot, surface, expected_keys):
+            return [], [], {}
+        discrepancies = [] if menu_surface else self._conformance_unknown_discrepancies(snapshot, surface)
+        missing = self._missing_expected_elements(snapshot, surface, expected_keys=expected_keys)
         by_role: dict[str, int] = {}
         for item in discrepancies:
             role = item['role'] or ''
@@ -315,10 +319,51 @@ class BaseConsultationDriver(ABC):
             return ()
         return tuple(str(key) for key in expected if isinstance(key, str) and key)
 
-    def _missing_expected_elements(self, snapshot: Snapshot, surface: str | None) -> list[dict[str, object]]:
+    def _conformance_menu_surface_closed(
+        self,
+        snapshot: Snapshot,
+        surface: str | None,
+        expected_keys: tuple[str, ...],
+    ) -> bool:
+        if not surface or surface == 'base' or not expected_keys:
+            return False
+        if any(snapshot.has(key) for key in expected_keys):
+            return False
+        return self._conformance_surface_is_menu_only(surface, expected_keys)
+
+    def _conformance_surface_is_menu_only(
+        self,
+        surface: str | None,
+        expected_keys: tuple[str, ...],
+    ) -> bool:
+        if not surface or not expected_keys:
+            return False
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return False
+        return all(self._is_menu_scoped_element(element_map.get(key), surface) for key in expected_keys)
+
+    @staticmethod
+    def _is_menu_scoped_element(spec: object, surface: str) -> bool:
+        if not isinstance(spec, dict):
+            return False
+        role = str(spec.get('role') or '').strip().lower()
+        scope = str(spec.get('scope') or '').strip()
+        return (
+            role in {'check menu item', 'menu item', 'option', 'radio menu item'}
+            and (scope == surface or scope.startswith(f'{surface}.'))
+        )
+
+    def _missing_expected_elements(
+        self,
+        snapshot: Snapshot,
+        surface: str | None,
+        *,
+        expected_keys: tuple[str, ...] | None = None,
+    ) -> list[dict[str, object]]:
         element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
         missing: list[dict[str, object]] = []
-        for key in self._expected_keys_for_surface(surface):
+        for key in expected_keys if expected_keys is not None else self._expected_keys_for_surface(surface):
             if snapshot.has(key):
                 continue
             spec = element_map.get(key) if isinstance(element_map, dict) else {}
@@ -368,6 +413,35 @@ class BaseConsultationDriver(ABC):
             return True
 
         snapshot = last_snapshot or self.runtime.snapshot()
+        dismissed = self.runtime.close_all_popups(drift_controls=snapshot.unknown)
+        if dismissed:
+            recovery_started = time.time()
+            matched = self.runtime.wait_until(
+                _probe,
+                timeout=self._popup_recovery_settle_seconds(),
+                interval=0.4,
+            )
+            if isinstance(matched, Snapshot):
+                elapsed = round(time.time() - started, 2)
+                result.add_step(
+                    'popup_recovery',
+                    True,
+                    f'{self.platform} cleared transient popup before page-ready',
+                    dismissed=dismissed,
+                    recovery_elapsed_seconds=round(time.time() - recovery_started, 2),
+                    snapshot=matched.serializable(),
+                )
+                result.add_step(
+                    'page_ready',
+                    True,
+                    f'{self.platform} page ready after navigation',
+                    required=self._page_ready_group_labels(groups),
+                    optional_present=self._page_ready_present_optional_keys(matched),
+                    elapsed_seconds=elapsed,
+                    snapshot=matched.serializable(),
+                )
+                return True
+            snapshot = last_snapshot or self.runtime.snapshot()
         result.add_step(
             'page_ready',
             False,
@@ -376,6 +450,7 @@ class BaseConsultationDriver(ABC):
             missing=missing,
             optional_present=self._page_ready_present_optional_keys(snapshot),
             timeout_seconds=timeout,
+            dismissed_popups=dismissed,
             snapshot=snapshot.serializable(),
         )
         return False
@@ -741,6 +816,24 @@ class BaseConsultationDriver(ABC):
                 )
                 return True
 
+        trigger_snapshot, trigger_active, trigger_labels = self._selection_trigger_already_reflects_option(
+            trigger_key,
+            option,
+            target_key,
+        )
+        if trigger_active and trigger_snapshot is not None:
+            result.add_step(
+                'select',
+                True,
+                f'{self.platform} {menu}={option} already active',
+                menu=menu,
+                option=option,
+                confirmation='persistent_trigger_label',
+                expected_labels=sorted(trigger_labels),
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return True
+
         opened = self._open_selection_menu(trigger_key, first_key, scope, result)
         if opened is None:
             return False
@@ -901,6 +994,12 @@ class BaseConsultationDriver(ABC):
     ) -> tuple[Snapshot, ElementRef] | None:
         transition_seen = bool(getattr(self, '_selection_menu_transition_seen', False))
         if transition_seen:
+            existing_snapshot = self.runtime.menu_snapshot()
+            existing_expected = self.find_first(existing_snapshot, expected_key)
+            if existing_expected is not None:
+                if not self._selection_conformance_gate(result, existing_snapshot, expected_key):
+                    return None
+                return existing_snapshot, existing_expected
             if not self._selection_prepare_base_for_menu(result):
                 return None
         trigger_snapshot, trigger = self._selection_find_once(trigger_key, 'snapshot')
@@ -964,15 +1063,27 @@ class BaseConsultationDriver(ABC):
         time.sleep(0.1)
         self.runtime.press('Escape')
         menu_snapshot = self._selection_wait_for_menu_closed()
+        anchor_key = self._selection_base_anchor_key()
+        if int(menu_snapshot.raw_count or 0) > 0:
+            if anchor_key is None:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection base anchor unavailable while closing menu',
+                    snapshot=menu_snapshot.serializable(),
+                )
+                return False
+            if self._selection_click_base_anchor(anchor_key):
+                menu_snapshot = self._selection_wait_for_menu_closed()
         if int(menu_snapshot.raw_count or 0) > 0:
             result.add_step(
                 'select',
                 False,
                 f'{self.platform} selection menu surface still open before trigger',
+                anchor=anchor_key,
                 snapshot=menu_snapshot.serializable(),
             )
             return False
-        anchor_key = self._selection_base_anchor_key()
         if anchor_key is None:
             result.add_step(
                 'select',
@@ -992,6 +1103,19 @@ class BaseConsultationDriver(ABC):
             )
             return False
         return True
+
+    def _selection_click_base_anchor(self, anchor_key: str) -> bool:
+        snapshot = self.runtime.wait_for_stable_snapshot(
+            consecutive=1,
+            timeout=max(self._selection_settle_seconds(), 1.0),
+            interval=0.2,
+            anchor_key=anchor_key,
+            require_non_empty=True,
+        )
+        anchor = self.find_first(snapshot, anchor_key)
+        if anchor is None:
+            return False
+        return self.runtime.click(anchor)
 
     def _selection_wait_for_clean_base(self, anchor_key: str, *, timeout: float) -> Snapshot:
         deadline = time.time() + timeout
@@ -1132,6 +1256,23 @@ class BaseConsultationDriver(ABC):
             if element is not None:
                 return last_snapshot, element
             time.sleep(0.4)
+        if scope.strip().lower() == 'menu_snapshot':
+            fallback = self.runtime.wait_for_stable_app_root_snapshot(
+                consecutive=1,
+                timeout=max(self._selection_settle_seconds(), 1.0),
+                interval=0.2,
+                anchor_key=key,
+                require_non_empty=True,
+            )
+            fallback_element = self.find_first(fallback, key)
+            if fallback_element is not None:
+                return fallback, fallback_element
+            last_snapshot = fallback
+            fallback = self.runtime.app_root_snapshot()
+            fallback_element = self.find_first(fallback, key)
+            if fallback_element is not None:
+                return fallback, fallback_element
+            last_snapshot = fallback
         last_snapshot = last_snapshot or self._selection_snapshot(scope)
         return last_snapshot, self.find_first(last_snapshot, key)
 
@@ -1364,6 +1505,62 @@ class BaseConsultationDriver(ABC):
         if option:
             labels.add(' '.join(part.capitalize() for part in option.split('_') if part))
         return labels
+
+    def _selection_trigger_already_reflects_option(
+        self,
+        trigger_key: str,
+        option: str,
+        target_key: str,
+    ) -> tuple[Snapshot | None, bool, set[str]]:
+        labels = self._selection_trigger_label_candidates(option, target_key)
+        if trigger_key != 'model_selector' or not labels:
+            return None, False, labels
+        snapshot = self.runtime.wait_for_stable_snapshot(
+            consecutive=1,
+            timeout=max(self._selection_settle_seconds(), 0.8),
+            interval=0.2,
+            anchor_key=trigger_key,
+            require_non_empty=True,
+        )
+        trigger = self.find_first(snapshot, trigger_key)
+        if trigger is None:
+            return snapshot, False, labels
+        trigger_label = trigger.name or ''
+        return snapshot, self._selection_label_matches_any(trigger_label, labels), labels
+
+    def _selection_trigger_label_candidates(self, option: str, target_key: str) -> set[str]:
+        labels: set[str] = set()
+        option_label = ' '.join(part.capitalize() for part in option.split('_') if part)
+        if option_label:
+            labels.add(option_label)
+            labels.update(part for part in option_label.split() if len(part) > 2)
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        spec = element_map.get(target_key) if isinstance(element_map, dict) else {}
+        name = str(spec.get('name') or '').strip() if isinstance(spec, dict) else ''
+        if name:
+            labels.add(name)
+            for delimiter in (' For ', ' Most ', ' Fastest ', ' Default'):
+                if delimiter in name:
+                    labels.add(name.split(delimiter, 1)[0].strip())
+            first_word = name.split(maxsplit=1)[0].strip()
+            if len(first_word) > 2:
+                labels.add(first_word)
+        return {label for label in labels if self._selection_normalized_label(label)}
+
+    def _selection_label_matches_any(self, text: str, labels: set[str]) -> bool:
+        normalized_text = f' {self._selection_normalized_label(text)} '
+        if not normalized_text.strip():
+            return False
+        for label in labels:
+            normalized_label = self._selection_normalized_label(label)
+            if normalized_label and f' {normalized_label} ' in normalized_text:
+                return True
+        return False
+
+    @staticmethod
+    def _selection_normalized_label(value: str) -> str:
+        normalized = ''.join(ch.lower() if ch.isalnum() else ' ' for ch in value)
+        return ' '.join(normalized.split())
 
     def _selection_conformance_gate(
         self,

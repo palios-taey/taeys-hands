@@ -584,6 +584,38 @@ class ConsultationRuntime:
         Xvfb, so a bare ``xdotool key`` lands nowhere — call this first."""
         return bool(inp.focus_firefox())
 
+    def focus_address_bar(self) -> bool:
+        entry = self._address_bar_entry()
+        if entry is None:
+            return False
+        if not self.click(entry, strategy='coordinate_only'):
+            return False
+        time.sleep(0.2)
+        return self._address_bar_focused()
+
+    def _address_bar_focused(self) -> bool:
+        entry = self._address_bar_entry()
+        if entry is None:
+            return False
+        states = {str(state).lower() for state in (entry.states or [])}
+        return 'focused' in states
+
+    def _address_bar_entry(self) -> ElementRef | None:
+        snapshot = self.app_root_snapshot()
+        for items in (
+            snapshot.unknown or [],
+            snapshot.mapped.get('firefox_address_bar') or [],
+            snapshot.menu_items or [],
+        ):
+            for element in items:
+                name = (element.name or '').strip().lower()
+                role = (element.role or '').strip().lower()
+                if role != 'entry':
+                    continue
+                if 'address' in name and 'search' in name:
+                    return element
+        return None
+
     def paste(self, text: str) -> bool:
         self._sync_platform_io_display()
         return bool(inp.clipboard_paste(text))
@@ -681,9 +713,14 @@ class ConsultationRuntime:
         # nav_key returns; ctrl+a/paste/Return that follow MUST land in the
         # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
         time.sleep(0.3)
+        if not self._address_bar_focused() and not self.focus_address_bar():
+            logger.error(
+                'navigate: address bar not focused after navigation key; refusing to paste URL'
+            )
+            return False
         if self._focused_composer_entry() is not None:
             logger.error(
-                'navigate: composer still focused after address-bar key; refusing to paste URL'
+                'navigate: composer still focused after address-bar focus; refusing to paste URL'
             )
             return False
         inp.press_key("ctrl+a")

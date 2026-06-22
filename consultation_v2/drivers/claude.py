@@ -46,6 +46,19 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
         return all_elements
 
+    @classmethod
+    def _is_incidental_base_unknown(cls, item: ElementRef) -> bool:
+        if super()._is_incidental_base_unknown(item):
+            return True
+        name = (item.name or '').strip()
+        role = (item.role or '').strip().lower()
+        description = str(item.description or '').strip()
+        if role == 'push button' and name.endswith('.md MD'):
+            return True
+        if role == 'push button' and name == 'Remove' and description.endswith('.md'):
+            return True
+        return False
+
     def _paste_chip_names(
         self,
         snapshot: Snapshot,
@@ -267,20 +280,27 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         """LOCKED phase (FLOW §10): navigate → mode → attach → prompt →
         guarded send + monitor registration."""
         urls = self.cfg.get('urls', {})
-        target_url = request.session_url or urls.get('fresh')
+        target_url = request.session_url or self._fresh_url_with_nonce(urls.get('fresh'))
         if not self.runtime.switch():
             result.add_step('navigate', False, 'Could not switch to Claude tab')
             return False
         result.session_url_before = self.runtime.current_url()
         if target_url:
-            navigated = self.runtime.navigate(
-                target_url,
-                verify_change=bool(urls.get('verify_navigation')),
-            )
+            if request.session_url:
+                navigated = self.runtime.navigate(
+                    target_url,
+                    verify_change=bool(urls.get('verify_navigation')),
+                )
+            else:
+                navigated = self._navigate_fresh_with_new_tab(target_url)
             snap = self.runtime.snapshot()
+            clean_navigation = self._navigation_snapshot_clean(snap)
+            navigated = bool(navigated and clean_navigation)
             result.add_step(
                 'navigate', navigated, 'Navigated to Claude session target',
-                target_url=target_url, snapshot=snap.serializable(),
+                target_url=target_url,
+                clean_navigation=clean_navigation,
+                snapshot=snap.serializable(),
             )
             if not navigated:
                 return False
@@ -288,9 +308,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
         if not self.tree_conformance_gate(result):
             return False
+        pre_attach_for_research = 'research' in request.selection_list('tools')
+        if pre_attach_for_research:
+            if not self._disable_research_mode_before_attach(result):
+                return False
+            if not self.attach_files(request, result):
+                return False
         if not self.apply_selection_plan(request, result):
             return False
-        if not self.attach_files(request, result):
+        if not pre_attach_for_research and not self.attach_files(request, result):
             return False
         if not self.enter_prompt(request, result):
             return False
@@ -300,6 +326,117 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         if not self.guarded_send(request, result):
             return False
         return True
+
+    @staticmethod
+    def _fresh_url_with_nonce(url: str | None) -> str | None:
+        if not url:
+            return None
+        separator = '&' if '?' in url else '?'
+        return f'{url}{separator}taey_fresh={int(time.time() * 1000)}'
+
+    def _navigate_fresh_with_new_tab(self, target_url: str) -> bool:
+        before = self.runtime.current_url()
+        self.runtime.close_stale_dialogs()
+        if not self.runtime.focus_firefox():
+            return False
+        time.sleep(0.2)
+        if not self.runtime.press('ctrl+t'):
+            return False
+        time.sleep(0.4)
+        if not self.runtime.focus_address_bar():
+            return False
+        if not self.runtime.press('ctrl+a'):
+            return False
+        time.sleep(0.1)
+        if not self.runtime.paste(target_url):
+            return False
+        time.sleep(0.2)
+        if not self.runtime.press('Return'):
+            return False
+        self.runtime.wait_for_url_change(before, timeout=20.0, interval=0.5)
+        current = (self.runtime.current_url() or '').strip()
+        if not self._url_matches_target(current, target_url):
+            return False
+        if not self._close_previous_tab_after_new_tab(target_url):
+            return False
+        self.runtime.press('Escape')
+        time.sleep(0.4)
+        return True
+
+    def _close_previous_tab_after_new_tab(self, target_url: str) -> bool:
+        if not self.runtime.press('ctrl+shift+Tab'):
+            return False
+        time.sleep(0.2)
+        if not self.runtime.press('ctrl+w'):
+            return False
+        time.sleep(0.8)
+        current = (self.runtime.current_url() or '').strip()
+        return self._url_matches_target(current, target_url)
+
+    @staticmethod
+    def _url_matches_target(current_url: str, target_url: str) -> bool:
+        current = (current_url or '').strip().rstrip('/').lower()
+        target = (target_url or '').strip().rstrip('/').lower()
+        if not current or not target:
+            return False
+        if current == target:
+            return True
+        return any(current.startswith(target + sep) for sep in ('?', '#', '/'))
+
+    def _navigation_snapshot_clean(self, snapshot: Snapshot) -> bool:
+        chrome_names = {
+            'search with google or enter address',
+            'redirecting',
+            'wikipedia',
+            'youtube',
+            'reddit',
+        }
+        for element in self._snapshot_elements(snapshot):
+            name = ' '.join((element.name or '').strip().lower().split())
+            if not name:
+                continue
+            if name in chrome_names:
+                return False
+            if name.endswith('— wikipedia.org') or name.endswith('— youtube.com') or name.endswith('— reddit.com'):
+                return False
+        return True
+
+    def _disable_research_mode_before_attach(self, result: ConsultationResult) -> bool:
+        snapshot = self.runtime.snapshot()
+        research_mode = self.find_first(snapshot, 'research_mode')
+        if research_mode is None or not self.element_is_active(snapshot, 'research_mode'):
+            return True
+        if not self.runtime.click(research_mode):
+            result.add_step(
+                'attach_prepare',
+                False,
+                'Claude stale Research mode toggle click failed before attachment',
+                snapshot=snapshot.serializable(),
+            )
+            return False
+        settled = self.runtime.wait_until(
+            lambda: (
+                snap if not self.element_is_active(snap := self.runtime.snapshot(), 'research_mode') else None
+            ),
+            timeout=5.0,
+            interval=0.4,
+        )
+        if isinstance(settled, Snapshot):
+            result.add_step(
+                'attach_prepare',
+                True,
+                'Claude disabled stale Research mode before attachment',
+                snapshot=settled.serializable(),
+            )
+            return True
+        final_snapshot = self.runtime.snapshot()
+        result.add_step(
+            'attach_prepare',
+            False,
+            'Claude stale Research mode stayed active before attachment',
+            snapshot=final_snapshot.serializable(),
+        )
+        return False
 
     def monitor_and_extract(
         self, request: ConsultationRequest, result: ConsultationResult,
@@ -339,7 +476,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
         trigger_key = str(attachment_cfg.get('trigger') or 'toggle_menu')
+        trigger_strategy = str(attachment_cfg.get('trigger_click_strategy') or self.cfg.get('click_strategy') or 'atspi_first')
         upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
+        self.runtime.focus_firefox()
+        self.runtime.press('Escape')
+        time.sleep(0.2)
         snap = self.runtime.snapshot()
         toggle_menu = self.find_first(snap, trigger_key)
         if not toggle_menu:
@@ -347,19 +488,12 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             f'Claude attach trigger {trigger_key!r} missing for {abs_path}',
                             snapshot=snap.serializable())
             return False
-        if not self.runtime.click(toggle_menu):
+        if not self.runtime.click(toggle_menu, strategy=trigger_strategy):
             result.add_step('attach', False,
                             f'Claude attach trigger {trigger_key!r} click failed for {abs_path}',
                             snapshot=snap.serializable())
             return False
-        menu_snap = self.runtime.wait_for_stable_menu_snapshot(
-            consecutive=2,
-            timeout=8,
-            interval=0.4,
-            anchor_key=upload_key,
-            require_non_empty=True,
-        )
-        upload_item = self.find_first(menu_snap, upload_key)
+        menu_snap, upload_item = self._wait_for_upload_menu_item(upload_key)
         if not upload_item:
             result.add_step('attach', False,
                             f'Claude upload item {upload_key!r} not found for {abs_path}',
@@ -370,11 +504,36 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             f'Claude upload item {upload_key!r} click failed for {abs_path}',
                             snapshot=menu_snap.serializable())
             return False
+        dialog_open = 'menu_item'
         time.sleep(1.0)
+        if not self.runtime.focus_file_dialog():
+            shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
+            if shortcut:
+                self.runtime.focus_firefox()
+                time.sleep(0.2)
+                if self.runtime.press(shortcut):
+                    time.sleep(1.0)
+                    if self.runtime.focus_file_dialog():
+                        dialog_open = 'keyboard_shortcut'
+            if dialog_open != 'keyboard_shortcut':
+                result.add_step('attach', False,
+                                f'Claude file dialog did not focus for {abs_path}',
+                                file=abs_path,
+                                dialog_open=dialog_open,
+                                keyboard_shortcut=shortcut or None)
+                return False
+        if dialog_open == 'keyboard_shortcut':
+            result.add_step(
+                'attach_prepare',
+                True,
+                'Claude opened file dialog with attachment keyboard shortcut fallback',
+                shortcut=shortcut,
+            )
         if not self.runtime.focus_file_dialog():
             result.add_step('attach', False,
                             f'Claude file dialog did not focus for {abs_path}',
-                            file=abs_path)
+                            file=abs_path,
+                            dialog_open=dialog_open)
             return False
         if not self.runtime.press('ctrl+l'):
             result.add_step('attach', False,
@@ -382,6 +541,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                             file=abs_path)
             return False
         time.sleep(0.3)
+        if not self.runtime.press('ctrl+a'):
+            result.add_step('attach', False,
+                            f'Claude file dialog path select-all failed for {abs_path}',
+                            file=abs_path,
+                            dialog_open=dialog_open)
+            return False
+        time.sleep(0.1)
         if not self.runtime.type_text(abs_path, delay_ms=5):
             result.add_step('attach', False,
                             f'Claude file dialog path typing failed for {abs_path}',
@@ -406,11 +572,29 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                         file=abs_path,
                         method='file_upload_dialog',
                         trigger=trigger_key,
+                        trigger_click_strategy=trigger_strategy,
                         menu_target=upload_key,
+                        dialog_open=dialog_open,
                         dialog_submit='return',
                         chip_name=chip_name,
                         snapshot=verify_snap.serializable())
         return verified
+
+    def _wait_for_upload_menu_item(self, upload_key: str) -> tuple[Snapshot, ElementRef | None]:
+        deadline = time.time() + 12.0
+        last_snapshot: Snapshot | None = None
+        while time.time() < deadline:
+            for snapshot in (
+                self.runtime.menu_snapshot(),
+                self.runtime.snapshot(),
+                self.runtime.app_root_snapshot(),
+            ):
+                last_snapshot = snapshot
+                upload_item = self.find_first(snapshot, upload_key)
+                if upload_item is not None:
+                    return snapshot, upload_item
+            time.sleep(0.3)
+        return last_snapshot or self.runtime.menu_snapshot(), None
 
     def _wait_for_attach_success(self, abs_path: str):
         last_snapshot = None
@@ -657,6 +841,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
 
             if not self.snapshot_has_any(continue_snap, stop_keys):
+                if not self._monitor_response_rendered(continue_snap):
+                    terminal_snapshot = continue_snap
+                    return False
                 completed = True
                 terminal_snapshot = continue_snap
                 return True
@@ -722,6 +909,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             stop_gone_cycles=detector.stop_cycles,
             continue_clicks=continue_clicks,
             continue_present=continue_present,
+            response_rendered=self._monitor_response_rendered(verify_snap),
             snapshot=verify_snap.serializable(),
         )
         if verified and checkpoint:
@@ -732,6 +920,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 url=result.session_url_after or self.runtime.current_url() or '',
             )
         return verified
+
+    def _monitor_response_rendered(self, snapshot: Snapshot) -> bool:
+        return bool(snapshot.has('copy_button'))
 
     def _scan_for_continue_button(self) -> tuple[Snapshot, ElementRef | None, bool]:
         self.runtime.press('ctrl+End')
@@ -762,6 +953,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             answer_url_predicate=self._is_answer_thread_url,
         ):
             return False
+        pre_extract_snapshot = self.runtime.snapshot()
+        dismissed = self.runtime.close_all_popups(drift_controls=pre_extract_snapshot.unknown)
+        if dismissed:
+            result.add_step(
+                'popup_recovery',
+                True,
+                'Claude cleared transient popup before extraction',
+                dismissed=dismissed,
+            )
 
         # Retry: scroll the conversation to the BOTTOM each pass, THEN scan.
         # The response's Copy button only enters the AT-SPI tree when on-screen;
@@ -769,6 +969,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         # Scroll the document surface itself before every tree scan; do not use
         # the composer as the scroll anchor.
         all_el = []
+        copy_buttons_seen = 0
+        click_failures = 0
+        empty_copies = 0
         for attempt in range(5):
             time.sleep(2.0)
             scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
@@ -781,6 +984,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 pass
             all_el = raw_find_elements(firefox, fence_after=[])
             copy_btns = self._copy_button_candidates(all_el)
+            copy_buttons_seen = max(copy_buttons_seen, len(copy_btns))
             # The response's Copy button is the LOWEST on the page (the latest
             # turn). Do NOT require >=2 (prompt Copy + response Copy): Claude
             # often renders only ONE Copy — the response's — because the user
@@ -797,9 +1001,20 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             for target in targets:
                 self.runtime.write_clipboard('')
                 time.sleep(0.3)
+                self.runtime.scroll_element_into_view(ElementRef(
+                    key=None,
+                    name=str(target.get('name') or ''),
+                    role=str(target.get('role') or ''),
+                    x=target.get('x'),
+                    y=target.get('y'),
+                    states=list(target.get('states') or []),
+                    atspi_obj=target.get('atspi_obj'),
+                ))
+                time.sleep(0.3)
                 if not atspi_click(target):
+                    click_failures += 1
                     continue
-                time.sleep(1.5)
+                time.sleep(2.5)
                 segment = self.runtime.read_clipboard().strip()
                 if segment and not self._is_prompt_echo(segment, request):
                     copied.append((segment, target))
@@ -813,6 +1028,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                         attempt=attempt + 1,
                         copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
                     )
+                else:
+                    empty_copies += 1
             segments = self._dedupe_response_segments([segment for segment, _ in copied])
             if segments:
                 content = '\n\n'.join(segments)
@@ -837,7 +1054,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         result.add_step('extract_primary', False,
                         f'Claude extraction failed after 5 attempts',
-                        elements=len(all_el) if all_el else 0)
+                        elements=len(all_el) if all_el else 0,
+                        copy_buttons_seen=copy_buttons_seen,
+                        click_failures=click_failures,
+                        empty_copies=empty_copies)
         return False
 
     def _copy_button_candidates(self, elements: list[dict]) -> list[dict]:
