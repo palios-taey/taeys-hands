@@ -302,7 +302,7 @@ tree:
       role: menu item
       scope: toggle_menu
     add_connector:
-      name: Add connector
+      name: Connectors
       role: menu item
       scope: toggle_menu
     tool_research:
