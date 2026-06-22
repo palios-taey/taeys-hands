@@ -53,5 +53,11 @@
 
 ### Task: f8-validate - taeys-hands: production-validate a long ChatGPT Pro/Extended generation where the tab is forced off the answer thread mid-run — monitor must re-navigate + still reach true Stop-gone + extract the full response; my-fleet r5 + merge [priority: 30] [owner: taeys-hands] [depends: f8-build] [ref: consultation_v2/drivers/base.py:1899-1978]
 
+## Phase: f9-gemini-url - Gemini send must capture the conversation URL, not generic /app [order: 9] [ref: consultations/f9_gemini_url_capture_rootcause_2026-06-22.md:1-40]
+
+### Task: f9-build - codex: Gemini send captures session_url_after = generic https://gemini.google.com/app (home) instead of the /app/<conversation-id>, so f8 thread-pin is a no-op for Gemini and the response is lost when the tab resets to a new chat (extract_primary 'copy button not found' on the home page). Settle current_url() post-send to a real /app/<id> before recording; make gemini _is_answer_thread_url distinguish bare /app from /app/<id>; resolve the open question (does Gemini assign /app/<id>? if not, keep-tab-put + history recovery). Consider extending f8 thread-pin to the pre-extract phase (shared) [priority: 34] [owner: taeys-hands-codex] [depends: f7-build] [ref: consultations/f9_gemini_url_capture_rootcause_2026-06-22.md:1-40] [ref: consultation_v2/drivers/gemini.py:260-275]
+
+### Task: f9-validate - taeys-hands: production-validate a Gemini Pro-Thinking consult — session_url_after is a real /app/<id>, tab forced off conversation mid-run re-navigates back, monitor completes, extract returns FULL response hands-off; my-fleet r5 + merge [priority: 36] [owner: taeys-hands] [depends: f9-build] [ref: consultation_v2/drivers/gemini.py:260-275]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
