@@ -11,7 +11,17 @@ from typing import Any, Iterable, Iterator, List, Optional, Tuple
 from consultation_v2.completion import (
     COMPLETE,
     CompletionDetector,
+    DEEP_MODES,
 )
+from consultation_v2.stop_conditions import is_stop_condition
+
+# Deep/research generations legitimately run for many minutes. A caller that
+# under-sets --timeout (e.g. a quick-chat default) must not be able to bound a
+# deep generation below this floor — the monitor floors the effective wait for
+# deep modes so a long-but-healthy run completes instead of false-failing.
+# (FLOW Monitor Contract: stop-present = generating; the timeout is the LOUD
+# bound for a genuinely-stuck run, never a content/elapsed completion heuristic.)
+DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 from consultation_v2 import primitives
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
@@ -1937,7 +1947,16 @@ class BaseConsultationDriver(ABC):
                 return True
             return False
 
-        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        # Per-mode timeout floor: deep/research generations run for many minutes,
+        # so a caller's short --timeout must not bound them below the floor (the
+        # p8 audit false-failure: a deep run dispatched with --timeout 900). The
+        # timeout remains the contract's LOUD bound for a genuinely-stuck run; it
+        # is never an elapsed-time completion heuristic (completion stays
+        # Stop-gone-only).
+        effective_timeout = float(request.timeout)
+        if detector_mode in DEEP_MODES:
+            effective_timeout = max(effective_timeout, DEEP_GENERATION_FLOOR_SECONDS)
+        self.runtime.wait_until(_poll, timeout=effective_timeout, interval=1.0)
         verify_snap = self.wait_for_validation(
             'response_complete',
             timeout=5.0,
@@ -1953,15 +1972,32 @@ class BaseConsultationDriver(ABC):
             )
             return False
         verified = bool(completed and self.validation_passes(verify_snap, 'response_complete'))
-        monitor_message = (
-            f'{self.platform} response completed'
-            if verified else
-            f'{self.platform} response did not reach Stop-gone completion'
+        # Classify a non-completion: if the Stop button is STILL present at the
+        # final fresh scan, this is the contract's "genuinely stuck visible-stop"
+        # run bounded by the (now floored) timeout — a LOUD, mapped
+        # generation_stalled failure (FLOW §9 / stop_conditions.py), not a generic
+        # completion miss. (Stop gone but debounce-cycles incomplete is the other,
+        # non-stalled, miss.)
+        stop_still_present = bool(verify_snap.has(stop_key))
+        stop_condition = (
+            'generation_stalled'
+            if (not verified and stop_still_present and is_stop_condition('generation_stalled'))
+            else None
         )
+        if verified:
+            monitor_message = f'{self.platform} response completed'
+        elif stop_condition == 'generation_stalled':
+            monitor_message = (
+                f'{self.platform} generation_stalled: Stop still present after '
+                f'{effective_timeout:.0f}s (mode={detector_mode or "default"}) — loud bound, not completion'
+            )
+        else:
+            monitor_message = f'{self.platform} response did not reach Stop-gone completion'
         result.add_step(
             'monitor', verified, monitor_message,
             stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
             mode=detector_mode or 'default',
+            stop_condition=stop_condition,
             snapshot=verify_snap.serializable(),
         )
         if verified:
