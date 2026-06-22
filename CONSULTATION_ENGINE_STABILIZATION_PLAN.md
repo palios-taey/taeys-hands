@@ -27,7 +27,7 @@
 
 ## Phase: f5-lock-reclaim - Display-lock survives kill/crash (orphan-on-kill) [order: 5] [ref: consultation_v2/primitives.py:104-160]
 
-### Task: f5-build - codex: orphaned display-lock blocks the next dispatch on that display because release lives in a `finally` that SIGTERM/SIGKILL/crash bypass (1hr TTL stuck). Root-cause shape: record holder PID (+ start time) in the lock payload; `acquire_display_lock` reclaims when the recorded holder is provably dead (not alive) — NO blind steal of a live lock, NO short-TTL band-aid [priority: 18] [owner: taeys-hands-codex] [ref: consultation_v2/primitives.py:104-160] [ref: consultation_v2/drivers/base.py:1455-1486]
+### Task: f5-build - codex: orphaned display-lock blocks the next dispatch on that display because release lives in a `finally` that SIGTERM/SIGKILL/crash bypass (1hr TTL stuck). Root-cause shape: record holder PID (+ start time) in the lock payload; `acquire_display_lock` reclaims when the recorded holder is provably dead (not alive) — NO blind steal of a live lock, NO short-TTL band-aid [priority: 18] [owner: taeys-hands-codex] [ref: consultations/f5_orphaned_lock_rootcause_2026-06-22.md:1-40] [ref: consultation_v2/primitives.py:89-147] [ref: consultation_v2/drivers/base.py:1455-1486]
 
 ### Task: f5-validate - taeys-hands: production-validate — kill a mid-setup lane, confirm the NEXT dispatch on that display acquires (no dispatch_lock failure) AND a genuinely-live holder is still NOT stolen; my-fleet r5 + merge [priority: 19] [owner: taeys-hands] [depends: f5-build] [ref: consultation_v2/primitives.py:104-160]
 
