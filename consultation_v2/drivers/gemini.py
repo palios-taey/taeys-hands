@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from urllib.parse import urlparse
 
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult
@@ -263,26 +264,46 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             'send_success', timeout=(60 if is_dr_send else 30), interval=0.6
         )
         stop_seen = self.validation_passes(send_snap, 'send_success')
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url()
+        answer_url = self._wait_for_answer_thread_url(timeout=30.0)
+        result.session_url_after = answer_url or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
         url_changed = result.session_url_after and result.session_url_after != before
+        answer_thread = self._is_answer_thread_url(result.session_url_after)
         is_new_session = not request.session_url
         if is_new_session:
-            verified = bool(clicked and stop_seen and url_changed)
+            verified = bool(clicked and stop_seen and url_changed and answer_thread)
         else:
-            verified = bool(clicked and stop_seen and result.session_url_after)
+            verified = bool(clicked and stop_seen and answer_thread)
         result.add_step(
             'send', verified,
-            'Gemini send validated by Stop button and URL capture',
+            'Gemini send validated by Stop button and answer-thread URL capture',
             url_before=before,
             url_after=result.session_url_after,
             start_research_clicked=post_send_clicked,
             stop_seen=stop_seen,
             url_changed=bool(url_changed),
+            answer_thread=bool(answer_thread),
             snapshot=verify_snap.serializable(),
         )
         return verified
+
+    def _is_answer_thread_url(self, url: str | None) -> bool:
+        parsed = urlparse((url or '').strip())
+        if parsed.netloc and parsed.netloc != 'gemini.google.com':
+            return False
+        segments = [segment for segment in parsed.path.split('/') if segment]
+        return len(segments) >= 2 and segments[0] == 'app' and bool(segments[1])
+
+    def is_resumable_session_url(self, url: str | None) -> bool:
+        return self._is_answer_thread_url(url)
+
+    def _wait_for_answer_thread_url(self, *, timeout: float = 12.0) -> str | None:
+        def _current_answer_url() -> str | None:
+            current = (self.runtime.current_url() or '').strip()
+            return current if self._is_answer_thread_url(current) else None
+
+        found = self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
+        return str(found) if found else None
 
     # monitor_generation is inherited from BaseConsultationDriver — the shared
     # stop-transition detector (consultation_v2.completion). deep_think /
@@ -291,6 +312,11 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        if not self.reassert_captured_session_url(
+            result,
+            answer_url_predicate=self._is_answer_thread_url,
+        ):
+            return False
         # Deep Research renders its report in a CANVAS/immersive panel — the chat
         # bubble holds only a ~89-char "I've completed your research" stub. The
         # full report is copied via the panel's "Share & Export" -> "Copy" (a
