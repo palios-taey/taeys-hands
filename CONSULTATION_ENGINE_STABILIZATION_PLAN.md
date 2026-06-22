@@ -59,5 +59,11 @@
 
 ### Task: f9-validate - taeys-hands: production-validate a Gemini Pro-Thinking consult — session_url_after is a real /app/<id>, tab forced off conversation mid-run re-navigates back, monitor completes, extract returns FULL response hands-off; my-fleet r5 + merge [priority: 36] [owner: taeys-hands] [depends: f9-build] [ref: consultation_v2/drivers/gemini.py:260-275]
 
+## Phase: f10-ppx-extract - Perplexity Copy-contents returns empty clipboard [order: 10] [ref: consultation_v2/drivers/perplexity.py:700-840]
+
+### Task: f10-build - codex: Perplexity consult sends+completes fine (monitor=True, real /search/<id> captured — f8 works) but extract_primary fails 'Copy contents clicked but clipboard empty'. Known quirk: the Copy-contents do_action returns empty clipboard unless the report component is scrolled into view first. Fix: before do_action on the copy target, Component.scroll_to(ANYWHERE)/scroll the report to bottom, then click + read clipboard; verify clipboard non-empty (retry-free: if empty after scroll+click, surface extraction_failed, do not silently return empty) [priority: 38] [owner: taeys-hands-codex] [ref: consultation_v2/drivers/perplexity.py:700-840]
+
+### Task: f10-validate - taeys-hands: production-validate a Perplexity DR consult extracts the FULL report (non-empty, length >> prompt) hands-off; my-fleet r5 + merge [priority: 40] [owner: taeys-hands] [depends: f10-build] [ref: consultation_v2/drivers/perplexity.py:700-840]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
