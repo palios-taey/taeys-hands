@@ -25,5 +25,21 @@
 
 ### Task: f4-sweep - taeys-hands: one clean unattended all-5 cycle with REAL long-DR prompts (submitted URL + Stop seen/gone + correct extract + requester delivery), ZERO manual intervention — the bar that the p8 audit failed [priority: 40] [owner: taeys-hands] [depends: f1-validate] [depends: f2-validate] [depends: f3-validate] [ref: FLOW_CONSULTATION_ENGINE.md:1-60] [ref: CONSULTATION_CONTRACT.md:1-56]
 
+## Phase: f5-lock-reclaim - Display-lock survives kill/crash (orphan-on-kill) [order: 5] [ref: consultation_v2/primitives.py:104-160]
+
+### Task: f5-build - codex: orphaned display-lock blocks the next dispatch on that display because release lives in a `finally` that SIGTERM/SIGKILL/crash bypass (1hr TTL stuck). Root-cause shape: record holder PID (+ start time) in the lock payload; `acquire_display_lock` reclaims when the recorded holder is provably dead (not alive) — NO blind steal of a live lock, NO short-TTL band-aid [priority: 18] [owner: taeys-hands-codex] [ref: consultation_v2/primitives.py:104-160] [ref: consultation_v2/drivers/base.py:1455-1486]
+
+### Task: f5-validate - taeys-hands: production-validate — kill a mid-setup lane, confirm the NEXT dispatch on that display acquires (no dispatch_lock failure) AND a genuinely-live holder is still NOT stolen; my-fleet r5 + merge [priority: 19] [owner: taeys-hands] [depends: f5-build] [ref: consultation_v2/primitives.py:104-160]
+
+## Phase: f6-connector-modal - Connector-permission modal is a mapped state, not a false-complete [order: 6] [ref: consultation_v2/completion.py:1-100]
+
+### Task: f6-build - codex: a platform connector-permission modal (ChatGPT "Allow ChatGPT to use GitHub?"; Claude Research "Enable connectors") makes the Stop button vanish mid-run → the Stop-gone completion detector FALSE-COMPLETES and extraction then finds no finished message. Map the connector modal as a known intermediate state (exact AT-SPI names per platform YAML): for connector-required audits, dispose deterministically (Allow once) and KEEP waiting; never count it as completion [priority: 24] [owner: taeys-hands-codex] [ref: consultation_v2/platforms/chatgpt.yaml:240-260] [ref: consultation_v2/completion.py:1-100]
+
+### Task: f6-validate - taeys-hands: production-validate a real git-connector repo-audit consult drives THROUGH the modal to a true completion + correct extract, zero manual click; my-fleet r5 + merge [priority: 25] [owner: taeys-hands] [depends: f6-build] [ref: consultation_v2/drivers/chatgpt.py:1-60]
+
+## Phase: f7-grok-navigate - Grok navigate on a stale /c/ thread [order: 7] [ref: consultation_v2/drivers/grok.py:1-80]
+
+### Task: f7-nav-diagnose - taeys-hands: diagnose the grok @navigate failure when :5 still holds a prior /c/ thread — is it a navigate-validation false-negative or a real failed nav? Capture live AT-SPI + screenshot evidence, then route the exact root-cause shape to codex (clean-nav precondition vs corrected validation) [priority: 28] [owner: taeys-hands] [ref: consultation_v2/drivers/grok.py:1-80]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
