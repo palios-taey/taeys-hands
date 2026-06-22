@@ -735,12 +735,38 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         # elements after the long monitor polling phase.
         snap = self.runtime.snapshot()
 
-        target_key = 'copy_contents_button' if is_deep_research else 'copy_button'
-        target = self.find_last(snap, target_key)
+        # Deep Research renders in one of several mapped output shapes; extract via
+        # the control actually PRESENT (observe-then-dispatch, mapped states — NOT a
+        # fallback-on-action-miss chain). The previous code hardcoded
+        # copy_contents_button for ALL deep_research and FALSE-FAILED when DR rendered
+        # the inline-answer shape (p8 2026-06-21: copy_button held the full 13998-char
+        # answer). Selection by presence:
+        #   - report-card present -> copy_contents_button (full report; preferred — the
+        #     bottom copy_button is also present on a report-card but yields only the
+        #     intro stub there, so report-card MUST win when both are present)
+        #   - inline answer (no report-card) -> copy_button (the inline answer is the
+        #     full content)
+        if is_deep_research:
+            if self.find_last(snap, 'copy_contents_button'):
+                target_key = 'copy_contents_button'
+            elif self.find_last(snap, 'copy_button'):
+                target_key = 'copy_button'
+            else:
+                target_key = None
+        else:
+            target_key = 'copy_button'
+
+        target = self.find_last(snap, target_key) if target_key else None
         if not target:
             result.add_step(
                 'extract_primary', False,
-                f'Perplexity required extraction target {target_key!r} not found',
+                (
+                    'Perplexity Deep Research: no mapped extraction control present '
+                    '(neither copy_contents_button report-card nor copy_button inline answer)'
+                    if is_deep_research
+                    else f'Perplexity required extraction target {target_key!r} not found'
+                ),
+                stop_condition='extraction_failed',
                 snapshot=snap.serializable(),
             )
             return False
