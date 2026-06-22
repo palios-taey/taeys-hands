@@ -543,13 +543,28 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         stop_keys = self._stop_keys()
         completed = False
         observed_stop = False
+        intermediate_failed = False
+        intermediate_actions: dict[str, int] = {}
 
         def _poll() -> bool:
-            nonlocal completed, observed_stop
+            nonlocal completed, observed_stop, intermediate_failed
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
             observed_stop = observed_stop or stop_present
-            verdict = detector.observe(stop_present=stop_present)
+            if stop_present:
+                detector.observe(stop_present=True)
+            handled, failed = self._handle_monitor_intermediate_state(
+                snap,
+                result,
+                intermediate_actions,
+            )
+            if handled:
+                self._reset_detector_after_intermediate(detector)
+                intermediate_failed = failed
+                return bool(failed)
+            if stop_present:
+                return False
+            verdict = detector.observe(stop_present=False)
             if verdict == COMPLETE:
                 completed = True
                 return True
@@ -571,6 +586,18 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 stop_seen=False,
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if intermediate_failed:
+            result.add_step(
+                'monitor',
+                False,
+                'ChatGPT monitor failed while disposing intermediate state',
+                stop_seen=observed_stop,
+                mode=detector_mode or 'default',
+                stop_keys=stop_keys,
+                intermediate_actions=intermediate_actions,
                 snapshot=verify_snap.serializable(),
             )
             return False

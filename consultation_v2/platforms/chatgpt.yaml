@@ -256,6 +256,10 @@ tree:
       name: Copy response
       role: push button
       scope: response.actions
+    github_connector_permission_allow:
+      name: Allow
+      role: push button
+      scope: connector_permission_modal
     model_instant:
       name: Instant
       role: radio menu item
@@ -530,6 +534,14 @@ workflow:
     stop_keys:
       - stop_streaming_button
       - stop_answering_button
+    intermediate_states:
+      - name: github_connector_permission
+        detect:
+          - github_connector_permission_allow
+        action: click
+        element: github_connector_permission_allow
+        click_strategy: atspi_first
+        max_actions: 1
   extract:
     primary_key: copy_button
     strategy: last_by_y

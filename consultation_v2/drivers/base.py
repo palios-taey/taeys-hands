@@ -1802,6 +1802,113 @@ class BaseConsultationDriver(ABC):
         """YAML-declared stop-button element key (default 'stop_button')."""
         return self.cfg.get('workflow', {}).get('monitor', {}).get('stop_key') or 'stop_button'
 
+    def _monitor_intermediate_states(self) -> list[dict[str, Any]]:
+        monitor = (self.cfg.get('workflow') or {}).get('monitor') or {}
+        raw_states = monitor.get('intermediate_states') or []
+        if not raw_states:
+            return []
+        if not isinstance(raw_states, list):
+            raise ValueError(f'{self.platform} workflow.monitor.intermediate_states must be a list')
+        states: list[dict[str, Any]] = []
+        for state in raw_states:
+            if not isinstance(state, dict):
+                raise ValueError(f'{self.platform} workflow.monitor.intermediate_states entries must be mappings')
+            states.append(dict(state))
+        return states
+
+    def _monitor_state_keys(self, state: dict[str, Any]) -> tuple[str, ...]:
+        raw_keys = state.get('detect') or state.get('detect_keys') or state.get('elements')
+        action_key = state.get('element') or state.get('action_element')
+        if raw_keys is None and action_key:
+            raw_keys = [action_key]
+        if isinstance(raw_keys, str):
+            keys = (raw_keys,)
+        elif isinstance(raw_keys, list):
+            keys = tuple(str(key) for key in raw_keys if str(key).strip())
+        else:
+            raise ValueError(f'{self.platform} monitor intermediate state requires detect keys')
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        missing = [key for key in keys if key not in element_map]
+        if missing:
+            raise ValueError(f'{self.platform} monitor intermediate key(s) not in element_map: {missing}')
+        return keys
+
+    def _monitor_intermediate_max_actions(self, state: dict[str, Any]) -> int:
+        raw_value = state.get('max_actions', 1)
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{self.platform} monitor intermediate max_actions must be an integer') from exc
+        if value < 0:
+            raise ValueError(f'{self.platform} monitor intermediate max_actions must be >= 0')
+        return value
+
+    @staticmethod
+    def _reset_detector_after_intermediate(detector: CompletionDetector) -> None:
+        detector.ever_seen_stop = False
+        detector.stop_was_visible = False
+        detector.stop_cycles = 0
+
+    def _handle_monitor_intermediate_state(
+        self,
+        snapshot: Snapshot,
+        result: ConsultationResult,
+        action_counts: dict[str, int],
+        *,
+        step_name: str = 'monitor',
+    ) -> tuple[bool, bool]:
+        for state in self._monitor_intermediate_states():
+            name = str(state.get('name') or state.get('state') or 'intermediate').strip()
+            keys = self._monitor_state_keys(state)
+            matched_key = next((key for key in keys if snapshot.has(key)), None)
+            if not matched_key:
+                continue
+            action = str(state.get('action') or 'wait').strip().lower()
+            if action != 'click':
+                return True, False
+            action_key = str(state.get('element') or state.get('action_element') or matched_key).strip()
+            if action_key not in ((self.cfg.get('tree') or {}).get('element_map') or {}):
+                raise ValueError(f'{self.platform} monitor intermediate action key not in element_map: {action_key}')
+            max_actions = self._monitor_intermediate_max_actions(state)
+            current_count = action_counts.get(name, 0)
+            if current_count >= max_actions:
+                return True, False
+            action_element = self.find_first(snapshot, action_key)
+            if action_element is None:
+                result.add_step(
+                    f'{step_name}_intermediate',
+                    False,
+                    f'{self.platform} monitor intermediate {name} matched but action {action_key} was absent',
+                    state=name,
+                    matched_key=matched_key,
+                    action_key=action_key,
+                    snapshot=snapshot.serializable(),
+                )
+                return True, True
+            clicked = self.runtime.click(
+                action_element,
+                strategy=str(state.get('click_strategy') or 'atspi_first'),
+            )
+            action_counts[name] = current_count + 1
+            result.add_step(
+                f'{step_name}_intermediate',
+                clicked,
+                (
+                    f'{self.platform} monitor disposed intermediate state {name}'
+                    if clicked else
+                    f'{self.platform} monitor failed to dispose intermediate state {name}'
+                ),
+                state=name,
+                matched_key=matched_key,
+                action_key=action_key,
+                action_count=action_counts[name],
+                max_actions=max_actions,
+                element=action_element.serializable(),
+                snapshot=snapshot.serializable(),
+            )
+            return True, not clicked
+        return False, False
+
     @staticmethod
     def _normalized_text(text: str) -> str:
         return ' '.join((text or '').split())
@@ -1933,16 +2040,31 @@ class BaseConsultationDriver(ABC):
         stop_key = self._stop_key()
         completed = False
         observed_stop = bool(seed_stop_seen)
+        intermediate_failed = False
+        intermediate_actions: dict[str, int] = {}
         if seed_stop_seen:
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
 
         def _poll() -> bool:
-            nonlocal completed, observed_stop
+            nonlocal completed, observed_stop, intermediate_failed
             snap = self.runtime.snapshot()
             stop_present = snap.has(stop_key)
             observed_stop = observed_stop or stop_present
-            verdict = detector.observe(stop_present=stop_present)
+            if stop_present:
+                detector.observe(stop_present=True)
+            handled, failed = self._handle_monitor_intermediate_state(
+                snap,
+                result,
+                intermediate_actions,
+            )
+            if handled:
+                self._reset_detector_after_intermediate(detector)
+                intermediate_failed = failed
+                return bool(failed)
+            if stop_present:
+                return False
+            verdict = detector.observe(stop_present=False)
             if verdict == COMPLETE:
                 completed = True
                 return True
@@ -1969,6 +2091,16 @@ class BaseConsultationDriver(ABC):
                 f'{self.platform} monitor never observed Stop button after send',
                 stop_seen=False, seed_stop_seen=bool(seed_stop_seen),
                 mode=detector_mode or 'default',
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if intermediate_failed:
+            result.add_step(
+                'monitor', False,
+                f'{self.platform} monitor failed while disposing intermediate state',
+                stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                intermediate_actions=intermediate_actions,
                 snapshot=verify_snap.serializable(),
             )
             return False

@@ -579,15 +579,33 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         terminal_snapshot: Snapshot | None = None
         continue_clicks = 0
         continue_click_failed = False
+        intermediate_failed = False
+        intermediate_actions: dict[str, int] = {}
         self._claude_continue_clicks = 0
 
         def _poll() -> bool:
             nonlocal detector, completed, observed_stop, terminal_snapshot
             nonlocal continue_clicks, continue_click_failed
+            nonlocal intermediate_failed
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
             observed_stop = observed_stop or stop_present
-            verdict = detector.observe(stop_present=stop_present)
+            if stop_present:
+                detector.observe(stop_present=True)
+            handled, failed = self._handle_monitor_intermediate_state(
+                snap,
+                result,
+                intermediate_actions,
+                step_name=step_name,
+            )
+            if handled:
+                self._reset_detector_after_intermediate(detector)
+                intermediate_failed = failed
+                terminal_snapshot = snap
+                return bool(failed)
+            if stop_present:
+                return False
+            verdict = detector.observe(stop_present=False)
             if verdict != COMPLETE:
                 return False
 
@@ -643,6 +661,19 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 seed_stop_seen=bool(seed_stop_seen),
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if intermediate_failed:
+            result.add_step(
+                step_name,
+                False,
+                'Claude monitor failed while disposing intermediate state',
+                stop_seen=observed_stop,
+                seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                stop_keys=stop_keys,
+                intermediate_actions=intermediate_actions,
                 snapshot=verify_snap.serializable(),
             )
             return False
