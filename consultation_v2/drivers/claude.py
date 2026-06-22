@@ -580,13 +580,25 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         continue_clicks = 0
         continue_click_failed = False
         intermediate_failed = False
+        answer_thread_lost = False
         intermediate_actions: dict[str, int] = {}
         self._claude_continue_clicks = 0
 
         def _poll() -> bool:
             nonlocal detector, completed, observed_stop, terminal_snapshot
             nonlocal continue_clicks, continue_click_failed
-            nonlocal intermediate_failed
+            nonlocal intermediate_failed, answer_thread_lost
+            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
+                result,
+                step_name=step_name,
+                answer_url_predicate=self._is_answer_thread_url,
+            )
+            if thread_lost:
+                answer_thread_lost = True
+                terminal_snapshot = self.runtime.snapshot()
+                return True
+            if thread_restored:
+                return False
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
             observed_stop = observed_stop or stop_present
@@ -652,6 +664,19 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
 
         self.runtime.wait_until(_poll, timeout=float(timeout or request.timeout), interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.snapshot()
+        if answer_thread_lost:
+            result.add_step(
+                step_name,
+                False,
+                'Claude answer_thread_lost: monitor could not restore pinned answer thread',
+                stop_seen=observed_stop,
+                seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                stop_keys=stop_keys,
+                stop_condition='answer_thread_lost',
+                snapshot=verify_snap.serializable(),
+            )
+            return False
         if not observed_stop:
             result.add_step(
                 step_name,

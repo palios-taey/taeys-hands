@@ -1932,6 +1932,70 @@ class BaseConsultationDriver(ABC):
     def _urls_equivalent(left: str | None, right: str | None) -> bool:
         return (left or '').strip().rstrip('/') == (right or '').strip().rstrip('/')
 
+    def _reassert_monitor_answer_thread(
+        self,
+        result: ConsultationResult,
+        *,
+        step_name: str = 'monitor',
+        answer_url_predicate=None,
+        timeout: float = 8.0,
+    ) -> tuple[bool, bool, bool]:
+        captured = (result.session_url_after or '').strip()
+        current_before = (self.runtime.current_url() or '').strip()
+        predicate = answer_url_predicate or self.is_resumable_session_url
+        if not captured:
+            result.add_step(
+                f'{step_name}_answer_thread',
+                False,
+                f'{self.platform} monitor has no pinned answer-thread URL',
+                current_url=current_before,
+                captured_url=captured,
+                stop_condition='answer_thread_lost',
+            )
+            return False, True, False
+        if predicate is not None and not predicate(captured):
+            result.add_step(
+                f'{step_name}_answer_thread',
+                False,
+                f'{self.platform} monitor pinned URL is not a valid answer thread',
+                current_url=current_before,
+                captured_url=captured,
+                stop_condition='answer_thread_lost',
+            )
+            return False, True, False
+        if self._urls_equivalent(current_before, captured):
+            return True, False, False
+
+        navigated = self.runtime.navigate(captured, verify_change=False)
+
+        def _arrived() -> str | None:
+            current = (self.runtime.current_url() or '').strip()
+            if self._urls_equivalent(current, captured):
+                return current
+            return None
+
+        arrived = self.runtime.wait_until(_arrived, timeout=timeout, interval=0.5)
+        ok = bool(arrived)
+        evidence = {
+            'current_url': current_before,
+            'captured_url': captured,
+            'after_url': arrived or self.runtime.current_url(),
+            'navigated': navigated,
+        }
+        if not ok:
+            evidence['stop_condition'] = 'answer_thread_lost'
+        result.add_step(
+            f'{step_name}_answer_thread',
+            ok,
+            (
+                f'{self.platform} monitor re-navigated to pinned answer thread'
+                if ok else
+                f'{self.platform} monitor lost pinned answer thread'
+            ),
+            **evidence,
+        )
+        return ok, not ok, ok
+
     def reassert_captured_session_url(
         self,
         result: ConsultationResult,
@@ -2041,13 +2105,20 @@ class BaseConsultationDriver(ABC):
         completed = False
         observed_stop = bool(seed_stop_seen)
         intermediate_failed = False
+        answer_thread_lost = False
         intermediate_actions: dict[str, int] = {}
         if seed_stop_seen:
             detector.ever_seen_stop = True
             detector.stop_was_visible = True
 
         def _poll() -> bool:
-            nonlocal completed, observed_stop, intermediate_failed
+            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost
+            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(result)
+            if thread_lost:
+                answer_thread_lost = True
+                return True
+            if thread_restored:
+                return False
             snap = self.runtime.snapshot()
             stop_present = snap.has(stop_key)
             observed_stop = observed_stop or stop_present
@@ -2086,11 +2157,31 @@ class BaseConsultationDriver(ABC):
             interval=0.5,
         )
         if not observed_stop:
+            if answer_thread_lost:
+                result.add_step(
+                    'monitor', False,
+                    f'{self.platform} answer_thread_lost: monitor could not restore pinned answer thread',
+                    stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                    mode=detector_mode or 'default',
+                    stop_condition='answer_thread_lost',
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
             result.add_step(
                 'monitor', False,
                 f'{self.platform} monitor never observed Stop button after send',
                 stop_seen=False, seed_stop_seen=bool(seed_stop_seen),
                 mode=detector_mode or 'default',
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if answer_thread_lost:
+            result.add_step(
+                'monitor', False,
+                f'{self.platform} answer_thread_lost: monitor could not restore pinned answer thread',
+                stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode or 'default',
+                stop_condition='answer_thread_lost',
                 snapshot=verify_snap.serializable(),
             )
             return False
