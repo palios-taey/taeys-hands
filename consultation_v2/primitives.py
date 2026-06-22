@@ -101,6 +101,71 @@ def _plan_lock_key() -> str:
     return f"taey:plan_active:{_display()}"
 
 
+def _process_starttime(pid: int) -> str | None:
+    try:
+        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+            stat = fh.read()
+    except OSError:
+        return None
+    end = stat.rfind(")")
+    if end < 0:
+        return None
+    fields = stat[end + 2:].split()
+    if len(fields) < 20:
+        return None
+    return fields[19]
+
+
+def _holder_pid(record: Dict[str, Any]) -> int | None:
+    try:
+        pid = int(record.get("holder_pid"))
+    except (TypeError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _decode_lock_record(raw: Any) -> Dict[str, Any] | None:
+    try:
+        record = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _holder_alive(record: Dict[str, Any] | None) -> bool:
+    if not record:
+        return False
+    pid = _holder_pid(record)
+    if pid is None:
+        return False
+    expected_starttime = str(record.get("holder_starttime") or "").strip()
+    if not expected_starttime:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    current_starttime = _process_starttime(pid)
+    if current_starttime is None:
+        return True
+    return current_starttime == expected_starttime
+
+
+def _lock_record(owner_token: str, payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    holder_pid = os.getpid()
+    holder_starttime = _process_starttime(holder_pid)
+    if not holder_starttime:
+        raise RuntimeError(f"unable to read holder_starttime for pid {holder_pid}")
+    record = dict(payload or {})
+    record["owner_token"] = owner_token
+    record["holder_pid"] = holder_pid
+    record["holder_starttime"] = holder_starttime
+    record.setdefault("locked_at", datetime.now(timezone.utc).isoformat())
+    return record
+
+
 def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 3600) -> str | None:
     """Take the DISPLAY-scoped dispatch lock so the monitor will not cycle the
     tab mid-setup. Returns this owner's token on success, None if another owner
@@ -108,13 +173,36 @@ def acquire_display_lock(payload: Optional[Dict[str, Any]] = None, ttl: int = 36
     lock that cannot be taken is a loud failure, never a silent "proceed without
     the lock"."""
     client = get_client()
-    record = dict(payload or {})
-    owner_token = str(record.get("owner_token") or uuid.uuid4())
-    record["owner_token"] = owner_token
-    record.setdefault("locked_at", datetime.now(timezone.utc).isoformat())
+    key = _plan_lock_key()
+    owner_token = str((payload or {}).get("owner_token") or uuid.uuid4())
+    record = _lock_record(owner_token, payload)
     body = json.dumps(record)
-    acquired = client.set(_plan_lock_key(), body, ex=ttl, nx=True)
-    return owner_token if acquired else None
+    while True:
+        acquired = client.set(key, body, ex=ttl, nx=True)
+        if acquired:
+            return owner_token
+        raw = client.get(key)
+        if not raw:
+            continue
+        if _holder_alive(_decode_lock_record(raw)):
+            return None
+        with client.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                current_raw = pipe.get(key)
+                if current_raw != raw:
+                    pipe.unwatch()
+                    continue
+                if _holder_alive(_decode_lock_record(current_raw)):
+                    pipe.unwatch()
+                    return None
+                pipe.multi()
+                pipe.delete(key)
+                pipe.set(key, body, ex=ttl, nx=True)
+                _deleted, reclaimed = pipe.execute()
+                return owner_token if reclaimed else None
+            except WatchError:
+                continue
 
 
 def release_display_lock(owner_token: str | None) -> bool:
