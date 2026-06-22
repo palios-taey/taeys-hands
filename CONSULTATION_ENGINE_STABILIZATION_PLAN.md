@@ -41,5 +41,13 @@
 
 ### Task: f7-nav-diagnose - taeys-hands: diagnose the grok @navigate failure when :5 still holds a prior /c/ thread — is it a navigate-validation false-negative or a real failed nav? Capture live AT-SPI + screenshot evidence, then route the exact root-cause shape to codex (clean-nav precondition vs corrected validation) [priority: 28] [owner: taeys-hands] [ref: consultation_v2/drivers/grok.py:1-80]
 
+## Phase: f8-monitor-thread-pin - Monitor must pin the answer thread (tab-navigation false-fail) [order: 8] [ref: consultation_v2/drivers/base.py:1899-1978]
+
+### Task: f8-diagnose - taeys-hands: OBSERVED 2026-06-22 — a ChatGPT Pro audit executed the full plan and generated correctly SERVER-SIDE (~15min, real content on /c/6a394640), but the live :2 tab navigated to chatgpt.com HOME mid-generation; the monitor (polling the navigated-away home tab) saw no answer-thread Stop button and false-failed 'did not reach Stop-gone completion'. Ruled OUT: central cycler (none running) + monitor poll (read-only). UNPINNED: the home-navigation trigger (likely a ChatGPT SPA reconnect/redirect). Pin the trigger if reproducible; capture live evidence [priority: 26] [owner: taeys-hands] [ref: consultation_v2/drivers/base.py:1899-1978]
+
+### Task: f8-build - codex: monitor must PIN the post-send answer-thread identity (the submitted /c/<id> URL captured at send) and, each poll, verify the live tab is still on it; on drift (tab navigated away / home) RE-NAVIGATE back to the answer thread and continue monitoring rather than concluding non-completion. A genuinely-lost thread is a DISTINCT mapped state ('answer_thread_lost'), not generic 'did not reach Stop-gone'. Root-cause shape: the answer-thread URL is already known post-send; bind the monitor to it [priority: 28] [owner: taeys-hands-codex] [depends: f8-diagnose] [ref: consultation_v2/drivers/base.py:1899-1978] [ref: consultation_v2/drivers/chatgpt.py:71-150]
+
+### Task: f8-validate - taeys-hands: production-validate a long ChatGPT Pro/Extended generation where the tab is forced off the answer thread mid-run — monitor must re-navigate + still reach true Stop-gone + extract the full response; my-fleet r5 + merge [priority: 30] [owner: taeys-hands] [depends: f8-build] [ref: consultation_v2/drivers/base.py:1899-1978]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
