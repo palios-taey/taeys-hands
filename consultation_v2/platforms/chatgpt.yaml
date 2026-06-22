@@ -257,7 +257,7 @@ tree:
       role: push button
       scope: response.actions
     github_connector_permission_allow:
-      name: Allow
+      name: Allow once
       role: push button
       scope: connector_permission_modal
     model_instant:

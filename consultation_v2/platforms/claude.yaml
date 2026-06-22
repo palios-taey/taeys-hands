@@ -198,10 +198,6 @@ tree:
       name: Stop response
       role: push button
       scope: response.generating
-    research_connectors_enable:
-      name: Enable connectors
-      role: push button
-      scope: connector_permission_modal
     send_blocked_previous_message:
       name: Your previous message wasn't sent. You can try again.
       role: alert
@@ -470,14 +466,6 @@ workflow:
   monitor:
     stop_keys:
       - stop_button
-    intermediate_states:
-      - name: research_connectors_permission
-        detect:
-          - research_connectors_enable
-        action: click
-        element: research_connectors_enable
-        click_strategy: atspi_first
-        max_actions: 1
   extract:
     primary_key: copy_button
     strategy: last_by_y
