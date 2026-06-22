@@ -1,16 +1,17 @@
 """Auto-ingestion: save extracted responses to corpus and trigger ISMA pipeline.
 
-Called by extract.py after successful extraction. Non-blocking — failures are
-logged but never break the extraction flow.
+Called after successful extraction. ISMA activation is gated by ISMA_API_URL:
+when unset, the ISMA step is a no-op; when set, request/auth/network failures
+raise so the caller logs a configured-path failure and does not mark ingestion
+complete.
 
 Two steps:
 1. Save response to TAEY_CORPUS_PATH/extracts/{platform}/{timestamp}.md
-2. POST to ISMA /api/ingest/transcript to feed the tile pipeline
+2. POST to ISMA /ingest/session to feed the governed tile pipeline
 """
 
 import json
 import os
-import time
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -19,7 +20,22 @@ logger = logging.getLogger(__name__)
 
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
 _ISMA_API_URL = os.environ.get('ISMA_API_URL', '')
-_ISMA_API_KEY = os.environ.get('ISMA_API_KEY', '')
+_SECRETS_PATH = '/home/mira/palios-taey-secrets.json'
+_ALLOWED_ISMA_PLATFORMS = {
+    'chatgpt',
+    'claude',
+    'claude_chat',
+    'gemini',
+    'grok',
+    'perplexity',
+}
+_PLATFORM_ALIASES = {
+    'perplexity_ai': 'perplexity',
+}
+
+
+class ISMAIngestError(RuntimeError):
+    """Configured ISMA ingest path failed; callers must not treat it as success."""
 
 
 def save_to_corpus(platform: str, content: str, url: str = None,
@@ -65,12 +81,44 @@ def save_to_corpus(platform: str, content: str, url: str = None,
         return None
 
 
+def _read_isma_api_key() -> str:
+    env_key = str(os.environ.get('ISMA_API_KEY') or '').strip()
+    try:
+        with open(_SECRETS_PATH, encoding='utf-8') as handle:
+            secrets = json.load(handle)
+    except FileNotFoundError:
+        secrets = {}
+    except (OSError, json.JSONDecodeError) as exc:
+        if env_key:
+            logger.warning("Cannot read ISMA API key secrets file %s; using ISMA_API_KEY env", _SECRETS_PATH)
+            return env_key
+        raise ISMAIngestError(f"Cannot read ISMA API key secrets file {_SECRETS_PATH}: {exc}") from exc
+    key = str(secrets.get('isma_api_key') or env_key).strip()
+    if not key:
+        raise ISMAIngestError(
+            'ISMA_API_URL is configured but no isma_api_key is present in '
+            f'{_SECRETS_PATH} and ISMA_API_KEY is unset'
+        )
+    return key
+
+
+def _isma_platform(platform: str) -> str:
+    normalized = str(platform or '').strip().lower().replace('-', '_')
+    mapped = _PLATFORM_ALIASES.get(normalized, normalized)
+    if mapped not in _ALLOWED_ISMA_PLATFORMS:
+        raise ISMAIngestError(
+            f"Unsupported ISMA ingest platform {platform!r}; expected one of "
+            f"{sorted(_ALLOWED_ISMA_PLATFORMS)}"
+        )
+    return mapped
+
+
 def trigger_isma_ingest(platform: str, content: str, url: str = None,
                         session_id: str = None) -> Optional[Dict]:
     """POST extracted response to ISMA for tile ingestion.
 
-    Uses /api/ingest/transcript endpoint. Non-blocking — returns result or None.
-    Only runs if ISMA_API_URL and ISMA_API_KEY are configured.
+    Uses the governed /ingest/session endpoint. Build-only gate: returns None
+    while ISMA_API_URL is unset; once configured, failures raise loudly.
     """
     if not _ISMA_API_URL:
         return None
@@ -79,40 +127,51 @@ def trigger_isma_ingest(platform: str, content: str, url: str = None,
 
     try:
         import requests
+    except ImportError as exc:
+        logger.error("ISMA ingest configured but requests is not installed")
+        raise ISMAIngestError("ISMA ingest configured but requests is not installed") from exc
+
+    api_key = _read_isma_api_key()
+    mapped_platform = _isma_platform(platform)
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    payload = {
+        "content": content[:20000],
+        "source_file": f"taeys-hands/{mapped_platform}/{ts}",
+        "platform": mapped_platform,
+        "source_type": "chat_session",
+        "truth_tier": "operational",
+        "session_id": session_id or "",
+    }
+    try:
         resp = requests.post(
             f"{_ISMA_API_URL.rstrip('/')}/ingest/session",
-            json={
-                "content": content[:50000],  # Cap at 50k chars
-                "source_file": f"taeys-hands/{platform}/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                "platform": platform,
-                "url": url or "",
-                "session_id": session_id or "",
-            },
+            json=payload,
             headers={
                 "Content-Type": "application/json",
+                "X-API-Key": api_key,
             },
             timeout=30,
         )
         if resp.ok:
             result = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {"status": "ok"}
-            logger.info("ISMA ingest triggered for %s: %s", platform, result.get("status", "ok"))
+            logger.info("ISMA ingest triggered for %s: %s", mapped_platform, result.get("status", "ok"))
             return result
-        else:
-            logger.warning("ISMA ingest failed (%d): %s", resp.status_code, resp.text[:200])
-            return None
-    except ImportError:
-        logger.warning("requests not installed — ISMA ingest skipped")
-        return None
+        message = f"ISMA ingest failed ({resp.status_code}): {resp.text[:200]}"
+        logger.error(message)
+        raise ISMAIngestError(message)
     except Exception as e:
-        logger.warning("ISMA ingest failed: %s", e)
-        return None
+        if isinstance(e, ISMAIngestError):
+            raise
+        logger.error("ISMA ingest failed: %s", e)
+        raise ISMAIngestError(f"ISMA ingest failed: {e}") from e
 
 
 def auto_ingest(platform: str, content: str, url: str = None,
                 session_id: str = None, metadata: Dict = None) -> Dict[str, Any]:
     """Combined auto-ingestion: save to corpus + trigger ISMA.
 
-    Returns a summary dict of what was done. Never raises.
+    Returns a summary dict of what was done. Corpus-save errors are local and
+    non-fatal; configured ISMA request/auth/network failures raise.
     """
     result = {"corpus_path": None, "isma_triggered": False}
 
