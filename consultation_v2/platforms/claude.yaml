@@ -390,7 +390,7 @@ workflow:
         resettable_on_followup: true
         operate:
           trigger: model_selector
-          scope: app_root_snapshot
+          scope: menu_snapshot
         options:
           opus:
             element: model_opus
@@ -407,7 +407,7 @@ workflow:
         resettable_on_followup: true
         operate:
           trigger: model_selector
-          scope: app_root_snapshot
+          scope: menu_snapshot
         options:
           low:
             element: effort_low
