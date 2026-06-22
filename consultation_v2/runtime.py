@@ -10,7 +10,7 @@ from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
 from consultation_v2.platforms_runtime import get_platform_display
 from consultation_v2.tree import find_elements
-from .snapshot import build_menu_snapshot, build_snapshot
+from .snapshot import build_app_root_snapshot, build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
 
@@ -314,6 +314,12 @@ class ConsultationRuntime:
     def menu_snapshot(self) -> Snapshot:
         _, _, snapshot = build_menu_snapshot(self.platform)
         return snapshot
+
+    def app_root_snapshot(self, allowed_roles=None) -> Snapshot:
+        """Live app-root scan with no cache-clear/prune — for transient portal
+        popovers that menu_snapshot's cache-clear dismisses (e.g. Gemini Deep
+        Research Share & Export -> Copy). See snapshot.build_app_root_snapshot."""
+        return build_app_root_snapshot(self.platform, allowed_roles=allowed_roles)
 
     def close_all_popups(
         self,

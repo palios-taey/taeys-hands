@@ -297,21 +297,25 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         # menu item in the popover), NOT the chat-bubble Copy push button.
         # Proven 2026-06-15: 36KB report via this path vs 89 chars via the bubble.
         if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
-            snap = self.runtime.snapshot()
+            # Resolve Share & Export from a LIVE app-root scan (no cache-clear) so
+            # the atspi_obj is fresh — a stale snapshot ref do_action's True but
+            # doesn't open the popover (p8 2026-06-21). atspi_only = do_action(0)
+            # = the button's only action ('press'), which reliably opens it.
+            snap = self.runtime.app_root_snapshot()
             share = self.find_first(snap, 'share_export')
-            # atspi_only (do_action) reliably opens the popover; the React control
-            # can no-op under atspi_first. Generous settle — the Share & Export
-            # popover renders slowly, and menu_snapshot now scans the app-root
-            # (menu_snapshot_scan: document_menu_roles) so the popover's "Copy"
-            # menu item is visible (p8 2026-06-21: this path got 22814ch vs the
-            # 89-char bubble stub).
             if not share or not self.runtime.click(share, strategy='atspi_only'):
                 result.add_step('extract_primary', False,
                                 'Gemini Deep Research "Share & Export" not found/clickable',
                                 snapshot=snap.serializable())
                 return False
             time.sleep(2.5)
-            menu = self.runtime.menu_snapshot()
+            # The Share & Export popover is a transient React portal that
+            # menu_snapshot's clear_cache_single() DISMISSES before its scan (it
+            # returned 0 items with the popover provably open). app_root_snapshot
+            # scans the live tree directly with no cache-clear, so the popover's
+            # "Copy" menu item is captured (raw path got 22814ch vs the 89-char
+            # bubble stub).
+            menu = self.runtime.app_root_snapshot(allowed_roles=['menu item'])
             copy_item = self.find_first(menu, 'copy_content_item')
             if not copy_item or not self.runtime.click(copy_item, strategy='atspi_only'):
                 result.add_step('extract_primary', False,

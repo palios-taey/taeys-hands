@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 
@@ -772,3 +772,32 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     snapshot = _classify_elements(platform, menu, menu_items=menu)
     snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot
+
+
+def build_app_root_snapshot(
+    platform: str, allowed_roles: Optional[Iterable[str]] = None
+) -> Snapshot:
+    """Scan the LIVE Firefox app-root with NO cache-clear and NO subtree pruning.
+
+    For transient React-portal popovers that the normal ``menu_snapshot`` misses:
+    its ``clear_cache_single()`` dismisses the popover before the scan (observed
+    on Gemini Deep Research "Share & Export": with the popover open, a raw
+    find_elements(firefox) sees its "Copy" menu item, but menu_snapshot returns
+    empty). This scans the already-open live tree directly so the popover items
+    are captured. Noisy (no prune) — use ONLY to resolve a specific popover
+    control, never as the general tree.
+    """
+    chrome_cfg = _load_firefox_chrome_filter()
+    firefox = atspi.find_firefox_for_platform(platform)
+    if not firefox:
+        raise RuntimeError(f'Firefox not found for {platform}')
+    elements = find_elements(firefox)
+    if allowed_roles:
+        role_filter = _role_set(allowed_roles)
+        elements = [
+            e for e in elements
+            if (e.get('role') or '').strip().lower() in role_filter
+            and (e.get('name') or '').strip()
+        ]
+    snapshot = _classify_elements(platform, elements, menu_items=elements, chrome_cfg=chrome_cfg)
+    return snapshot
