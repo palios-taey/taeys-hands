@@ -14,14 +14,6 @@ from consultation_v2.completion import (
     DEEP_MODES,
 )
 from consultation_v2.stop_conditions import is_stop_condition
-
-# Deep/research generations legitimately run for many minutes. A caller that
-# under-sets --timeout (e.g. a quick-chat default) must not be able to bound a
-# deep generation below this floor — the monitor floors the effective wait for
-# deep modes so a long-but-healthy run completes instead of false-failing.
-# (FLOW Monitor Contract: stop-present = generating; the timeout is the LOUD
-# bound for a genuinely-stuck run, never a content/elapsed completion heuristic.)
-DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 from consultation_v2 import primitives
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
@@ -30,6 +22,15 @@ from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
+
+
+# Deep/research generations legitimately run for many minutes. A caller that
+# under-sets --timeout (e.g. a quick-chat default) must not be able to bound a
+# deep generation below this floor — the monitor floors the effective wait for
+# deep modes so a long-but-healthy run completes instead of false-failing.
+# (FLOW Monitor Contract: stop-present = generating; the timeout is the LOUD
+# bound for a genuinely-stuck run, never a content/elapsed completion heuristic.)
+DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 
 
 class BaseConsultationDriver(ABC):
