@@ -252,6 +252,14 @@ tree:
       name: Stop answering
       role: push button
       scope: response.generating
+    user_message_actions_panel:
+      name: Your message actions
+      role: panel
+      scope: prompt.actions
+    response_actions_panel:
+      name: Response actions
+      role: panel
+      scope: response.actions
     copy_button:
       name: Copy response
       role: push button

@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 class ChatGPTConsultationDriver(BaseConsultationDriver):
     platform = 'chatgpt'
+    _RESPONSE_TEXT_ROLES = {
+        'heading',
+        'label',
+        'link',
+        'list item',
+        'paragraph',
+        'section',
+        'static',
+        'table cell',
+        'text',
+    }
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -1202,6 +1213,132 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         logger.warning('ChatGPT extract assistant-message hover probe: no document rect found')
         return evidence
 
+    def _response_action_panels(self, elements: list[dict]) -> list[dict]:
+        spec = self.cfg.get('tree', {}).get('element_map', {}).get('response_actions_panel', {})
+        return [
+            element for element in elements
+            if matches_spec(element, spec)
+            and element.get('y') is not None
+        ]
+
+    def _user_message_action_panels(self, elements: list[dict]) -> list[dict]:
+        spec = self.cfg.get('tree', {}).get('element_map', {}).get('user_message_actions_panel', {})
+        return [
+            element for element in elements
+            if matches_spec(element, spec)
+            and element.get('y') is not None
+        ]
+
+    @staticmethod
+    def _element_tree_text(element: dict) -> str:
+        direct = str(element.get('name') or element.get('text') or '').strip()
+        if direct:
+            return direct
+        obj = element.get('atspi_obj')
+        if obj is None:
+            return ''
+        try:
+            text_iface = obj.get_text_iface()
+            if not text_iface:
+                return ''
+            return (text_iface.get_text(0, text_iface.get_character_count()) or '').strip()
+        except Exception:
+            return ''
+
+    @staticmethod
+    def _dedupe_direct_text_segments(segments: list[str]) -> list[str]:
+        deduped: list[str] = []
+        normalized_seen: list[str] = []
+        for segment in segments:
+            text = segment.strip()
+            normalized = ' '.join(text.split())
+            if not normalized:
+                continue
+            if any(normalized == seen or normalized in seen for seen in normalized_seen):
+                continue
+            keep = [
+                (existing, seen)
+                for existing, seen in zip(deduped, normalized_seen)
+                if seen not in normalized
+            ]
+            deduped = [existing for existing, _seen in keep]
+            normalized_seen = [seen for _existing, seen in keep]
+            deduped.append(text)
+            normalized_seen.append(normalized)
+        return deduped
+
+    def _direct_response_text_from_tree(
+        self,
+        elements: list[dict],
+        request: ConsultationRequest,
+    ) -> dict:
+        response_panels = self._response_action_panels(elements)
+        if not response_panels:
+            return {'ok': False, 'reason': 'response_actions_panel_not_found'}
+        response_panel = max(response_panels, key=lambda element: int(element.get('y') or 0))
+        response_y = int(response_panel.get('y') or 0)
+        response_x = int(response_panel.get('x') or 0)
+        min_content_x = max(0, response_x - 450)
+        max_content_x = response_x + 550
+        prior_response_y = max(
+            [
+                int(element.get('y') or 0)
+                for element in response_panels
+                if int(element.get('y') or 0) < response_y
+            ],
+            default=0,
+        )
+        user_action_y = max(
+            [
+                int(element.get('y') or 0)
+                for element in self._user_message_action_panels(elements)
+                if int(element.get('y') or 0) < response_y
+            ],
+            default=0,
+        )
+        lower_bound_y = max(prior_response_y, user_action_y)
+        candidates = [
+            element for element in elements
+            if lower_bound_y < int(element.get('y') or 0) < response_y
+            and min_content_x <= int(element.get('x') or 0) <= max_content_x
+            and str(element.get('role') or '').strip() in self._RESPONSE_TEXT_ROLES
+        ]
+        segments = self._dedupe_direct_text_segments([
+            self._element_tree_text(element)
+            for element in sorted(candidates, key=lambda item: (int(item.get('y') or 0), int(item.get('x') or 0)))
+        ])
+        content = '\n'.join(segments).strip()
+        evidence = {
+            'ok': False,
+            'source': 'direct_tree_text',
+            'response_actions_y': response_y,
+            'response_actions_x': response_x,
+            'lower_bound_y': lower_bound_y,
+            'min_content_x': min_content_x,
+            'max_content_x': max_content_x,
+            'text_candidates': len(candidates),
+            'segments': len(segments),
+            'response_actions_panels': len(response_panels),
+            'user_message_action_panels': len(self._user_message_action_panels(elements)),
+        }
+        if not content:
+            evidence['reason'] = 'no_text_between_action_anchors'
+            return evidence
+        if self._is_prompt_echo(content, request):
+            evidence.update({
+                'reason': 'prompt_echo',
+                'characters': len(content),
+                'preview': content[:200],
+            })
+            return evidence
+        evidence.update({
+            'ok': True,
+            'characters': len(content),
+            'preview': content[:200],
+            'content': content,
+        })
+        return evidence
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
         from consultation_v2.atspi import find_firefox_for_platform
@@ -1218,6 +1355,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         last_snapshot = None
         all_elements: list[dict] = []
         scroll_evidence = {}
+        direct_evidence = {}
         hover_evidence = {}
         for attempt in range(5):
             time.sleep(2.0)
@@ -1225,17 +1363,46 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not scroll_evidence.get('ok'):
                 result.add_step(
                     'extract_primary', False,
-                    'ChatGPT thread scroll-to-bottom failed before Copy response hover',
+                    'ChatGPT thread scroll-to-bottom failed before direct response extraction',
                     attempt=attempt + 1,
                     scroll=scroll_evidence,
                     snapshot=last_snapshot.serializable() if last_snapshot else {},
                 )
                 return False
+            firefox = find_firefox_for_platform(self.platform)
+            if not firefox:
+                continue
+            try:
+                firefox.clear_cache_single()
+            except Exception:
+                pass
+            all_elements = raw_find_elements(firefox, fence_after=[])
+            direct_evidence = self._direct_response_text_from_tree(all_elements, request)
+            if direct_evidence.get('ok'):
+                content = str(direct_evidence.pop('content')).strip()
+                result.response_text = content
+                result.add_step(
+                    'extract_primary',
+                    True,
+                    f'ChatGPT response read from assistant tree text ({len(content)} chars, attempt {attempt + 1})',
+                    attempt=attempt + 1,
+                    scroll=scroll_evidence,
+                    direct=direct_evidence,
+                )
+                return True
+            result.add_step(
+                'extract_direct_probe',
+                False,
+                'ChatGPT direct assistant tree-text extraction unavailable; falling back to Copy response',
+                attempt=attempt + 1,
+                scroll=scroll_evidence,
+                direct=direct_evidence,
+            )
             hover_evidence = self._hover_assistant_message_for_copy_button()
             result.add_step(
                 'extract_hover_probe',
                 bool(hover_evidence.get('ok')),
-                'ChatGPT assistant-message hover probe before Copy response scan',
+                'ChatGPT assistant-message hover probe for secondary Copy response path',
                 attempt=attempt + 1,
                 scroll=scroll_evidence,
                 hover=hover_evidence,
@@ -1254,9 +1421,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             last_snapshot = self.runtime.snapshot()
             time.sleep(0.8)
 
-            firefox = find_firefox_for_platform(self.platform)
-            if not firefox:
-                continue
             try:
                 firefox.clear_cache_single()
             except Exception:
@@ -1307,6 +1471,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'ChatGPT response copy button not found or only prompt echo copied',
             elements=len(all_elements),
             last_scroll=scroll_evidence,
+            last_direct=direct_evidence,
             last_hover=hover_evidence,
             snapshot=last_snapshot.serializable() if last_snapshot else {},
         )
