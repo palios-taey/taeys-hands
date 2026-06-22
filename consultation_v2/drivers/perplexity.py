@@ -537,7 +537,11 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         before = result.session_url_before
         snap, send_button, submit_scope = self._wait_for_submit_button_for_send()
         if send_button:
-            click_returned = self.runtime.click(send_button)
+            # Use atspi_only (direct do_action(0) on the AT-SPI push button) for reliable
+            # submit registration. xdotool/coord clicks on the 'Submit' (last_by_y) are
+            # proven unreliable for Perplexity even when enabled (message+attach+mode staged
+            # but no navigation to /search/<id> thread).
+            click_returned = self.runtime.click(send_button, strategy='atspi_only')
             if not click_returned:
                 result.add_step(
                     'send', False,
@@ -552,6 +556,21 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 'Perplexity submit button not found',
                 submit_scope=submit_scope,
                 snapshot=snap.serializable(),
+            )
+            return False
+
+        # VERIFY submit actually fired before declaring success (no silent success on
+        # staged-but-not-submitted state). Composer cleared (submit_button gone or disabled)
+        # OR URL transitioned to /search/<id> thread within settle. This catches cases where
+        # even a "successful" do_action(0) did not cause the web app to process the submit.
+        if not self._verify_submit_fired(before, timeout=5.0):
+            result.add_step(
+                'send', False,
+                'Perplexity submit did not fire (composer not cleared and no /search/<id> thread URL within settle)',
+                url_before=before,
+                url_after=self.runtime.current_url() or '',
+                submit_scope=submit_scope,
+                click_returned=click_returned,
             )
             return False
 
@@ -652,6 +671,25 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
 
         found = self.runtime.wait_until(_probe, timeout=timeout, interval=0.5)
         return str(found) if found else None
+
+    def _verify_submit_fired(self, before: str, *, timeout: float = 5.0) -> bool:
+        """Confirm the submit action registered: either the URL became a /search/<id>
+        answer thread, OR the submit_button is cleared (no longer present or not enabled)
+        from the composer (UI transitioned). Used after do_action(0) to avoid silent
+        success when the form stays staged on home.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            url = self.runtime.current_url() or ''
+            if self._is_answer_thread_url(url) and url != before:
+                return True
+            # Composer cleared equiv: the enabled submit is gone (stop or thread view now).
+            snap = self.runtime.snapshot()
+            btn = self.find_last(snap, 'submit_button')
+            if btn is None or 'enabled' not in set(btn.states or []):
+                return True
+            time.sleep(0.2)
+        return False
 
     def _ensure_answer_thread(self, result: ConsultationResult) -> bool:
         current = self.runtime.current_url()
