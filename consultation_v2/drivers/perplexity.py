@@ -626,7 +626,17 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         snap = self.runtime.snapshot()
         send_button = self.find_last(snap, 'submit_button')
         if send_button:
-            return snap, send_button, 'document'
+            # Require ENABLED for the SEND. While a (large) attachment is still
+            # uploading, the submit button is PRESENT but DISABLED; clicking the
+            # disabled ghost no-ops -> no thread, no answer-thread URL (observed
+            # 2026-06-22: ~80KB consolidated attach, submit disabled mid-upload,
+            # send false-failed + needed manual recovery). Per CONSULTATION_CONTRACT
+            # a disabled control is a DISTINCT state, not a match, so the send
+            # wait-loop keeps polling until the upload finishes and submit enables —
+            # i.e. the send gates on attach-upload-complete by construction.
+            if 'enabled' in set(send_button.states or []):
+                return snap, send_button, 'document'
+            return snap, None, 'present_but_disabled'
         return snap, None, 'not_found'
 
     def _is_answer_thread_url(self, url: str | None) -> bool:
