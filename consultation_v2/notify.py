@@ -22,9 +22,11 @@ def push_notification(
     platform: str,
     status: str,
     plan_id: str,
-    preview: str,
+    response_text: str,
     purpose: Optional[str] = None,
     recipient: Optional[str] = None,
+    source_file: Optional[str] = None,
+    output_path: Optional[str] = None,
 ) -> bool:
     """Push a consultation notification to a session's Redis queue.
 
@@ -41,6 +43,9 @@ def push_notification(
     try:
         import redis
         r = redis.Redis(host=_REDIS_HOST, port=_REDIS_PORT, decode_responses=True)
+        full_response = response_text or ''
+        source = source_file or output_path or ''
+        output = output_path or source_file or ''
         payload = json.dumps({
             'event': 'consultation_complete',
             'platform': platform,
@@ -48,7 +53,10 @@ def push_notification(
             'plan_id': plan_id,
             'requester': requester,
             'purpose': purpose,
-            'preview': preview[:200],
+            'response_text': full_response,
+            'response_chars': len(full_response),
+            'source_file': source,
+            'output_path': output,
             'timestamp': datetime.now(timezone.utc).isoformat(),
         })
         key = f'taey:{target}:notifications'

@@ -250,7 +250,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 platform=request.platform,
                 status='completed',
                 plan_id=plan_id or 'unknown',
-                preview=(result.response_text or '')[:200],
+                response_text=result.response_text or '',
+                source_file=request.output_path,
+                output_path=request.output_path,
                 purpose=request.purpose,
                 step_name='notify_requester',
             )
@@ -277,7 +279,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     platform=request.platform,
                     status='failed',
                     plan_id=plan_id or 'unknown',
-                    preview='Requester notification failed; result parked for attention.',
+                    response_text=result.response_text or '',
+                    source_file=request.output_path,
+                    output_path=request.output_path,
                     purpose=request.purpose,
                     step_name='notify_operator_delivery_failure',
                 )
@@ -297,7 +301,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 platform=request.platform,
                 status='failed',
                 plan_id=plan_id or 'unknown',
-                preview='Completed consultation has no requester; result parked for attention.',
+                response_text=result.response_text or '',
+                source_file=request.output_path,
+                output_path=request.output_path,
                 purpose=request.purpose,
                 step_name='notify_operator_orphan_result',
             )
@@ -317,7 +323,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             platform=request.platform,
             status='failed',
             plan_id=plan_id or 'unknown',
-            preview=(result.response_text or '')[:200],
+            response_text=result.response_text or '',
+            source_file=request.output_path,
+            output_path=request.output_path,
             purpose=request.purpose,
             step_name='notify_operator_failure',
         )
@@ -385,7 +393,9 @@ def _push_notification_step(
     platform: str,
     status: str,
     plan_id: str,
-    preview: str,
+    response_text: str,
+    source_file: str | None,
+    output_path: str | None,
     purpose: str | None,
     step_name: str,
 ) -> bool:
@@ -396,9 +406,11 @@ def _push_notification_step(
             platform=platform,
             status=status,
             plan_id=plan_id,
-            preview=preview,
+            response_text=response_text,
             purpose=purpose,
             recipient=recipient,
+            source_file=source_file,
+            output_path=output_path,
         )
     except Exception as exc:
         delivered = False
@@ -422,6 +434,9 @@ def _push_notification_step(
         recipient=target,
         status=status,
         plan_id=plan_id,
+        response_chars=len(response_text or ''),
+        source_file=source_file or '',
+        output_path=output_path or '',
     )
     return bool(delivered)
 
