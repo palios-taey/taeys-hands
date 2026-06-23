@@ -107,12 +107,18 @@ class GrokConsultationDriver(BaseConsultationDriver):
     def _trigger_new_chat(self, result: ConsultationResult, snapshot: Snapshot) -> bool:
         nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
         key = nav_cfg.get('new_chat_key') or nav_cfg.get('new_chat')
+        lookup_snapshot = snapshot
         element = snapshot.first(key) if isinstance(key, str) else None
 
         if isinstance(key, str) and not element:
+            def _find_new_chat() -> ElementRef | None:
+                nonlocal lookup_snapshot
+                lookup_snapshot = self.runtime.snapshot()
+                return lookup_snapshot.first(key)
+
             element = self.runtime.wait_until(
-                lambda: self.runtime.snapshot().first(key),
-                timeout=3.0,
+                _find_new_chat,
+                timeout=self._fresh_chat_action_timeout(),
                 interval=0.4,
             )
 
@@ -133,7 +139,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             False,
             'Grok mapped New Chat affordance missing from current tree',
             configured_key=key,
-            snapshot=snapshot.serializable(),
+            snapshot=lookup_snapshot.serializable(),
         )
         return False
 
@@ -189,6 +195,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             }
             if not (
                 fresh_url
+                and not missing
                 and input_el is not None
                 and input_editable
                 and input_observed_empty
@@ -197,7 +204,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 return None
             return snap
 
-        matched = self.runtime.wait_until(_probe, timeout=max(float(timeout), 15.0), interval=0.4)
+        effective_timeout = max(float(timeout), self._fresh_chat_action_timeout())
+        matched = self.runtime.wait_until(_probe, timeout=effective_timeout, interval=0.4)
         if isinstance(matched, Snapshot):
             readiness = display_readiness.check(self.platform)
             readiness_ok = (
@@ -232,11 +240,36 @@ class GrokConsultationDriver(BaseConsultationDriver):
             'page_ready',
             False,
             'Grok fresh composer not ready after new-chat action',
-            timeout_seconds=max(float(timeout), 15.0),
+            timeout_seconds=effective_timeout,
+            elapsed_seconds=round(time.time() - started, 2),
             snapshot=snapshot.serializable(),
             **last_evidence,
         )
         return False
+
+    def _settle_seconds(self, key: str, fallback_ms: int) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = None
+        if isinstance(settle, dict):
+            value = settle.get(f'{key}_ms') if key else None
+            if value is None:
+                value = settle.get('default_ms')
+        if value is None:
+            value = fallback_ms
+        try:
+            return max(0.0, float(value) / 1000.0)
+        except (TypeError, ValueError):
+            return max(0.0, float(fallback_ms) / 1000.0)
+
+    def _fresh_chat_action_timeout(self) -> float:
+        return max(
+            self._settle_seconds('navigate', 4000)
+            + self._settle_seconds('', 2000),
+            20.0,
+        )
+
+    def _attach_menu_timeout(self) -> float:
+        return max(self._settle_seconds('attach', 3000) + 1.0, 10.0)
 
     @staticmethod
     def _is_fresh_chat_url(url: str | None) -> bool:
@@ -322,17 +355,12 @@ class GrokConsultationDriver(BaseConsultationDriver):
             # Attach click, so menu_snapshot() can fire before they exist.
             # Re-SNAPSHOT here is observation while the portal renders; the Attach
             # trigger is NOT re-clicked.
-            self.runtime.wait_until(
-                lambda: self.runtime.menu_snapshot().has(upload_key),
-                timeout=10,
+            menu, upload_item = self.wait_for_key(
+                upload_key,
+                timeout=self._attach_menu_timeout(),
                 interval=0.4,
+                scope='menu',
             )
-
-            # Read the dropdown via menu_snapshot (React portal). If the exact
-            # Upload item is absent on this single read, that is a STOP/failure
-            # — NOT a re-click (the wrong-menu re-click was the §4a bug).
-            menu = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu, upload_key)
             if not upload_item:
                 result.add_step('attach', False,
                                 f'Grok upload item {upload_key!r} not in attach menu for {abs_path}',

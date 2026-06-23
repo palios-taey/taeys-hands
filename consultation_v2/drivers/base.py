@@ -1037,9 +1037,6 @@ class BaseConsultationDriver(ABC):
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        # Let React portal menus attach before the first scoped scan; menu_snapshot
-        # cache-clearing can dismiss these transient surfaces.
-        time.sleep(1.0)
         snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
@@ -1373,7 +1370,10 @@ class BaseConsultationDriver(ABC):
 
     def _selection_settle_seconds(self) -> float:
         settle = self.cfg.get('settle') or {}
-        value = settle.get('default_ms', 800) if isinstance(settle, dict) else 800
+        if isinstance(settle, dict):
+            value = settle.get('selection_ms') or settle.get('default_ms', 800)
+        else:
+            value = 800
         try:
             return max(0.0, float(value) / 1000.0)
         except (TypeError, ValueError):

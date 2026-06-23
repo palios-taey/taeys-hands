@@ -360,13 +360,12 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             # item not found") when the menu was slow to render — the item was
             # present moments later. Poll for it (observation only, no re-click)
             # before declaring it missing, same readiness pattern as mode-select.
-            self.runtime.wait_until(
-                lambda: self.runtime.menu_snapshot().has('upload_files_item'),
-                timeout=10,
+            menu_snap, upload_item = self.wait_for_key(
+                'upload_files_item',
+                timeout=10.0,
                 interval=0.4,
+                scope='menu',
             )
-            menu_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(menu_snap, 'upload_files_item')
             if not upload_item:
                 result.add_step(
                     'attach', False,
