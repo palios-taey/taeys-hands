@@ -551,19 +551,34 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             phrase for phrase in self._LARGE_PACKET_FAILURE_PHRASES
             if phrase in normalized_lower
         ]
+        body_chars = len(normalized_body)
+        has_verdict_term = self._contains_any_term(
+            normalized_lower, self._AUDIT_VERDICT_TERMS
+        )
+        has_grounding_term = self._contains_any_term(
+            normalized_lower, self._AUDIT_GROUNDING_TERMS
+        )
+        has_substantive_large_packet_body = (
+            body_chars >= 1500
+            and has_verdict_term
+            and has_grounding_term
+        )
         findings: list[str] = []
         if not normalized_body:
             findings.append('empty assistant body')
         if self._is_prompt_echo(body, request):
             findings.append('assistant body is prompt echo')
-        if failure_phrases:
-            findings.append('large-packet access/truncation uncertainty: ' + ', '.join(failure_phrases[:5]))
+        if failure_phrases and not has_substantive_large_packet_body:
+            findings.append(
+                'large-packet access/truncation uncertainty: '
+                + ', '.join(failure_phrases[:5])
+            )
         if self._request_requires_audit_substance(request):
-            if len(normalized_body) < 120:
+            if body_chars < 120:
                 findings.append('audit-like large-packet response is too short')
-            if not self._contains_any_term(normalized_lower, self._AUDIT_VERDICT_TERMS):
+            if not has_verdict_term:
                 findings.append('audit-like large-packet response has no verdict term')
-            if not self._contains_any_term(normalized_lower, self._AUDIT_GROUNDING_TERMS):
+            if not has_grounding_term:
                 findings.append('audit-like large-packet response has no grounding term')
 
         if findings:
@@ -574,6 +589,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 attachment_bytes=total_bytes,
                 attachment_sizes=sizes,
                 findings=findings,
+                failure_phrases=failure_phrases[:5],
+                response_body_chars=body_chars,
+                has_verdict_term=has_verdict_term,
+                has_grounding_term=has_grounding_term,
                 preview=body[:500],
             )
             return False
@@ -584,7 +603,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             'Claude large-packet response passed substance gate',
             attachment_bytes=total_bytes,
             attachment_sizes=sizes,
-            response_body_chars=len(body),
+            failure_phrases=failure_phrases[:5],
+            response_body_chars=body_chars,
+            has_verdict_term=has_verdict_term,
+            has_grounding_term=has_grounding_term,
         )
         return True
 
