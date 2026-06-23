@@ -206,15 +206,174 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             ),
         )
 
-    def _focus_composer(self):
-        """Focus the YAML-mapped ChatGPT input and return it after tree proof.
+    @staticmethod
+    def _atspi_state_names(obj) -> set[str]:
+        if obj is None:
+            return set()
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
 
-        The send contract is input-entry focus -> Return. focus_firefox() only
-        activates the window; it does not prove keyboard focus is in the
-        composer. Live recovery for issue #154 used the exact mapped entry
-        (name="Chat with ChatGPT", role=entry), then Return.
+            states = obj.get_state_set()
+            interesting = (
+                _Atspi.StateType.EDITABLE,
+                _Atspi.StateType.ENABLED,
+                _Atspi.StateType.FOCUSED,
+                _Atspi.StateType.FOCUSABLE,
+                _Atspi.StateType.MULTI_LINE,
+                _Atspi.StateType.SHOWING,
+                _Atspi.StateType.VISIBLE,
+            )
+            return {
+                state.value_nick
+                for state in interesting
+                if states.contains(state)
+            }
+        except Exception:
+            return set()
+
+    def _atspi_object_evidence(self, obj) -> dict[str, object] | None:
+        if obj is None:
+            return None
+        try:
+            name = obj.get_name() or ''
+        except Exception:
+            name = ''
+        try:
+            role = obj.get_role_name() or ''
+        except Exception:
+            role = ''
+        return {
+            'name': name,
+            'role': role,
+            'states': sorted(self._atspi_state_names(obj)),
+            'rect': self._screen_rect(obj),
+        }
+
+    def _bounded_composer_focus_target(self, snapshot: Snapshot, input_node) -> tuple[object | None, dict[str, object]]:
+        evidence: dict[str, object] = {
+            'ok': False,
+            'source': 'bounded_composer_ancestor',
+            'input_node': self._element_evidence(input_node),
+            'input_rect': self._screen_rect(input_node.atspi_obj) if input_node else None,
+        }
+        if input_node is None or input_node.atspi_obj is None:
+            evidence['reason'] = 'composer_input_missing'
+            return None, evidence
+
+        seen: set[int] = set()
+        candidates: list[tuple[str, int, object]] = []
+
+        root = self._composer_scope_root(snapshot)
+        evidence['composer_scope_root'] = self._atspi_object_evidence(root)
+        if root is not None:
+            for depth, obj in enumerate(self._atspi_path_to_root(root)):
+                candidates.append(('composer_scope_root', depth, obj))
+                if depth > 0 and self._is_broad_scope_root(obj):
+                    break
+
+        for depth, obj in enumerate(self._atspi_path_to_root(input_node.atspi_obj)[1:], start=1):
+            candidates.append(('composer_input_ancestor', depth, obj))
+            if self._is_broad_scope_root(obj):
+                break
+
+        checked: list[dict[str, object]] = []
+        for source, depth, obj in candidates:
+            identity = id(obj)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            broad = self._is_broad_scope_root(obj)
+            rect = None if broad else self._screen_rect(obj)
+            candidate_evidence = {
+                'source': source,
+                'depth': depth,
+                'broad': broad,
+                'node': self._atspi_object_evidence(obj),
+            }
+            checked.append(candidate_evidence)
+            if not rect:
+                continue
+            x = int(rect['x'] + rect['width'] // 2)
+            y = int(rect['y'] + rect['height'] // 2)
+            evidence.update({
+                'ok': True,
+                'reason': 'bounded_composer_ancestor',
+                'target': candidate_evidence,
+                'click_point': {'x': x, 'y': y},
+                'checked_candidates': checked[:8],
+            })
+            return obj, evidence
+
+        evidence.update({
+            'reason': 'no_bounded_composer_ancestor',
+            'checked_candidates': checked[:8],
+        })
+        return None, evidence
+
+    def _focused_editable_descendant(self, root):
+        if root is None:
+            return None
+        seen: set[int] = set()
+        queue: list[tuple[object, int]] = [(root, 0)]
+        while queue:
+            obj, depth = queue.pop(0)
+            identity = id(obj)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            states = self._atspi_state_names(obj)
+            try:
+                role = obj.get_role_name() or ''
+            except Exception:
+                role = ''
+            if 'focused' in states and ('editable' in states or role in {'entry', 'paragraph'}):
+                return obj
+            if depth >= 12:
+                continue
+            try:
+                count = min(obj.get_child_count(), 80)
+            except Exception:
+                continue
+            for index in range(count):
+                try:
+                    child = obj.get_child_at_index(index)
+                except Exception:
+                    child = None
+                if child is not None:
+                    queue.append((child, depth + 1))
+        return None
+
+    def _composer_focus_verification(self, target_obj) -> tuple[bool, ElementRef | None, dict[str, object]]:
+        focused_editable = self._focused_editable_descendant(target_obj)
+        snap = self.runtime.snapshot()
+        focused_input = self._bottommost_input(snap)
+        input_states = {str(state).strip().lower() for state in (focused_input.states or [])} if focused_input else set()
+        evidence = {
+            'focused_editable': self._atspi_object_evidence(focused_editable),
+            'focused_input': self._element_evidence(focused_input),
+            'focused_input_states': sorted(input_states),
+            'focused_input_wrapper': bool(focused_input and 'focused' in input_states),
+        }
+        return bool(focused_editable), focused_input, evidence
+
+    def _focus_composer(self):
+        """Focus ChatGPT's bounded composer ancestor and return the input proof.
+
+        The mapped ChatGPT composer entry exists in AT-SPI but can expose no
+        component extents, so clicking the entry itself may set wrapper focus
+        without placing keyboard focus in ProseMirror. Use the bounded composer
+        scope ancestor as the click target, then require a focused editable
+        descendant before Return.
         """
-        self.runtime.focus_firefox()
+        from consultation_v2 import input as _inp
+
+        self._last_composer_focus_evidence = {
+            'ok': False,
+            'reason': 'not_started',
+        }
+        firefox_focused = self.runtime.focus_firefox()
         time.sleep(0.2)
 
         def _find_input_entry():
@@ -223,37 +382,60 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
         node = self.runtime.wait_until(_find_input_entry, timeout=10, interval=0.4)
         if node is None:
+            self._last_composer_focus_evidence = {
+                'ok': False,
+                'reason': 'composer_input_missing',
+                'firefox_focused': firefox_focused,
+            }
             return None
 
         for click_attempt in (1, 2):
-            if not self.runtime.click(node):
-                if click_attempt == 2:
-                    return None
+            snap = self.runtime.snapshot()
+            refreshed = self._bottommost_input(snap)
+            if refreshed is not None:
+                node = refreshed
+            target_obj, target_evidence = self._bounded_composer_focus_target(snap, node)
+            focus_evidence = {
+                'ok': False,
+                'attempt': click_attempt,
+                'firefox_focused': firefox_focused,
+                **target_evidence,
+            }
+            if target_obj is None or not target_evidence.get('ok'):
+                self._last_composer_focus_evidence = focus_evidence
+                continue
+            click_point = target_evidence.get('click_point') or {}
+            clicked = bool(_inp.click_at(int(click_point['x']), int(click_point['y'])))
+            focus_evidence['clicked'] = clicked
+            if not clicked:
+                focus_evidence['reason'] = 'bounded_composer_click_failed'
+                self._last_composer_focus_evidence = focus_evidence
                 continue
             time.sleep(0.25)
 
-            consecutive_focused = 0
+            last_verification: dict[str, object] = {}
 
-            def _focused_input_entry():
-                nonlocal consecutive_focused
-                snap = self.runtime.snapshot()
-                focused = self._bottommost_input(snap)
-                states = {s.lower() for s in (focused.states or [])} if focused else set()
-                if focused and 'focused' in states:
-                    consecutive_focused += 1
-                    if consecutive_focused >= 2:
-                        return focused
-                else:
-                    consecutive_focused = 0
+            def _focused_editable_entry():
+                nonlocal last_verification
+                landed, focused_input, verification = self._composer_focus_verification(target_obj)
+                last_verification = verification
+                if landed:
+                    return focused_input or node
                 return None
 
-            focused = self.runtime.wait_until(_focused_input_entry, timeout=5.0, interval=0.25)
+            focused = self.runtime.wait_until(_focused_editable_entry, timeout=5.0, interval=0.25)
+            focus_evidence['verification'] = last_verification
             if focused is not None:
+                focus_evidence.update({
+                    'ok': True,
+                    'reason': 'focused_editable_descendant',
+                    'focus_node': self._element_evidence(focused),
+                })
+                self._last_composer_focus_evidence = focus_evidence
                 return focused
 
-            refreshed = self._bottommost_input(self.runtime.snapshot())
-            if refreshed is not None:
-                node = refreshed
+            focus_evidence['reason'] = 'composer_focus_not_landed_extentsless_node'
+            self._last_composer_focus_evidence = focus_evidence
 
         return None
 
@@ -719,12 +901,34 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         result.add_step('prompt', verified, 'ChatGPT prompt entered', snapshot=verify_snap.serializable())
         return verified
 
+    @staticmethod
+    def _send_failure_reason(attempts: list[dict]) -> str:
+        if not attempts:
+            return 'send_not_attempted'
+        last = attempts[-1]
+        focus = last.get('focus') if isinstance(last.get('focus'), dict) else {}
+        if focus.get('reason') == 'composer_focus_not_landed_extentsless_node':
+            return 'composer_focus_did_not_land_extentsless_node'
+        if focus.get('reason') == 'no_bounded_composer_ancestor':
+            return 'composer_has_no_bounded_focus_ancestor'
+        if not last.get('focused'):
+            return 'composer_focus_did_not_land'
+        if not last.get('pressed'):
+            return 'return_keypress_failed'
+        if last.get('stop_seen') and not last.get('url_landed'):
+            return 'send_validation_stop_seen_url_missing'
+        if last.get('url_landed') and not last.get('stop_seen'):
+            return 'send_validation_url_seen_stop_missing'
+        if last.get('prompt_still_staged'):
+            return 'return_not_delivered_prompt_still_staged'
+        return 'send_landing_unverified'
+
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
-        # SEND = exact mapped input focus -> Return, for both attachment and
-        # no-attachment prompts. The 'Send prompt' React button is presence
+        # SEND = bounded composer-ancestor focus -> Return, for both attachment
+        # and no-attachment prompts. The 'Send prompt' React button is presence
         # evidence only; it must not be settled or coordinate-clicked.
         attempts = []
         configured_timeout = float(self.cfg.get('workflow', {}).get('send', {}).get('timeout', 120) or 120)
@@ -760,9 +964,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         for attempt in (1, 2):
             send_snap = None
             focus_node = self._focus_composer()
+            focus_detail = dict(getattr(self, '_last_composer_focus_evidence', {}) or {})
             focus_evidence = self._element_evidence(focus_node)
             if focus_node is None:
-                attempts.append({'attempt': attempt, 'focused': False, 'pressed': False})
+                attempts.append({
+                    'attempt': attempt,
+                    'focused': False,
+                    'pressed': False,
+                    'focus_node': focus_evidence,
+                    'focus': focus_detail,
+                })
                 if attempt == 2:
                     break
                 continue
@@ -774,6 +985,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     'focused': True,
                     'pressed': False,
                     'focus_node': focus_evidence,
+                    'focus': focus_detail,
                 })
                 if attempt == 2:
                     break
@@ -813,6 +1025,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'attempt': attempt,
                 'focused': True,
                 'focus_node': focus_evidence,
+                'focus': focus_detail,
                 'pressed': True,
                 'stop_seen': stop_seen,
                 'url_changed': url_changed,
@@ -844,11 +1057,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             break
 
         verify_snap = send_snap or self.runtime.snapshot()
+        failure_reason = self._send_failure_reason(attempts)
         result.add_step(
             'send', False,
-            'ChatGPT send failed validation after focused composer Return',
+            'ChatGPT send failed validation after bounded composer focus and Return',
             url_before=before,
             url_after=result.session_url_after or self.runtime.current_url() or before,
+            failure_reason=failure_reason,
             attempts=attempts,
             snapshot=verify_snap.serializable(),
         )
