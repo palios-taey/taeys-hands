@@ -383,18 +383,142 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return False
 
     def _attachment_visible(self, snapshot, filename: str) -> bool:
-        all_elements = []
-        for items in getattr(snapshot, 'mapped', {}).values():
-            all_elements.extend(items)
-        all_elements.extend(getattr(snapshot, 'unknown', []) or [])
-        all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
-        all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
+        return self._attachment_chip(snapshot, filename) is not None
+
+    def _attachment_chip(self, snapshot: Snapshot, filename: str) -> ElementRef | None:
         allowed_roles = {'push button', 'panel'}
-        return any(
-            element.role in allowed_roles
-            and self._attachment_name_matches(element.name or '', filename)
-            for element in all_elements
+        return next(
+            (
+                element
+                for element in self._composer_scope_elements(snapshot)
+                if element.role in allowed_roles
+                and self._attachment_name_matches(element.name or '', filename)
+            ),
+            None,
         )
+
+    def _composer_scope_elements(self, snapshot: Snapshot) -> list[ElementRef]:
+        root = self._composer_scope_root(snapshot)
+        if root is not None:
+            return [
+                element
+                for element in self._snapshot_elements(snapshot)
+                if self._element_descends_from(element, root)
+            ]
+        return self._composer_band_elements(snapshot)
+
+    def _composer_scope_root(self, snapshot: Snapshot):
+        objects = [
+            element.atspi_obj
+            for key in self._composer_scope_keys()
+            for element in (snapshot.mapped.get(key) or [])
+            if element.atspi_obj is not None
+        ]
+        paths = [path for obj in objects if (path := self._atspi_path_to_root(obj))]
+        if not paths:
+            return None
+        if len(paths) == 1:
+            root = paths[0][1] if len(paths[0]) > 1 else paths[0][0]
+            return None if self._is_broad_scope_root(root) else root
+        for candidate in paths[0]:
+            if all(any(candidate == other for other in path) for path in paths[1:]):
+                return None if self._is_broad_scope_root(candidate) else candidate
+        return None
+
+    def _composer_band_elements(self, snapshot: Snapshot) -> list[ElementRef]:
+        anchors = [
+            element
+            for key in self._composer_scope_keys()
+            for element in (snapshot.mapped.get(key) or [])
+            if element.x is not None and element.y is not None
+        ]
+        if not anchors:
+            return []
+        min_x = min(int(element.x) for element in anchors) - 80
+        max_x = max(int(element.x) for element in anchors) + 80
+        min_y = min(int(element.y) for element in anchors) - 140
+        max_y = max(int(element.y) for element in anchors) + 140
+        candidates: list[ElementRef] = []
+        for items in getattr(snapshot, 'mapped', {}).values():
+            candidates.extend(items)
+        candidates.extend(getattr(snapshot, 'unknown', []) or [])
+        return [
+            element
+            for element in candidates
+            if element.x is not None
+            and element.y is not None
+            and min_x <= int(element.x) <= max_x
+            and min_y <= int(element.y) <= max_y
+        ]
+
+    def _composer_scope_keys(self) -> tuple[str, ...]:
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        if not isinstance(element_map, dict):
+            return ()
+        keys: list[str] = []
+        for key, spec in element_map.items():
+            if not isinstance(spec, dict):
+                continue
+            scope = str(spec.get('scope') or '').strip().lower()
+            if scope == 'base.composer' or scope.startswith('base.composer.'):
+                keys.append(str(key))
+        return tuple(keys)
+
+    @staticmethod
+    def _atspi_path_to_root(obj) -> list[object]:
+        path: list[object] = []
+        current = obj
+        for _ in range(60):
+            if current is None:
+                break
+            path.append(current)
+            try:
+                current = current.get_parent()
+            except Exception:
+                break
+        return path
+
+    @classmethod
+    def _element_descends_from(cls, element: ElementRef, root) -> bool:
+        obj = element.atspi_obj
+        if obj is None:
+            return False
+        return any(candidate == root for candidate in cls._atspi_path_to_root(obj))
+
+    @staticmethod
+    def _is_broad_scope_root(root) -> bool:
+        try:
+            role = str(root.get_role_name() or '').strip().lower()
+        except Exception:
+            return False
+        return role in {'application', 'document web', 'frame', 'window'}
+
+    def _file_dialog_open(self) -> bool:
+        env_factory = getattr(self.runtime, '_dialog_env', None)
+        finder = getattr(self.runtime, '_file_dialog_window', None)
+        if not callable(env_factory) or not callable(finder):
+            return False
+        return finder(env_factory()) is not None
+
+    def _wait_for_attachment_chip(self, abs_path: str) -> tuple[Snapshot, ElementRef | None, bool]:
+        last_snapshot: Snapshot | None = None
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot
+            if self._file_dialog_open():
+                return None
+            snap = self.runtime.snapshot()
+            last_snapshot = snap
+            chip = self._attachment_chip(snap, abs_path)
+            return snap if chip is not None else None
+
+        matched = self.runtime.wait_until(
+            _probe,
+            timeout=15.0,
+            interval=0.5,
+        )
+        verify_snap = matched if isinstance(matched, Snapshot) else last_snapshot or self.runtime.snapshot()
+        return verify_snap, self._attachment_chip(verify_snap, abs_path), not self._file_dialog_open()
 
     def _snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
         all_elements: list[ElementRef] = []
@@ -511,13 +635,17 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             if not self._click(trigger):
                 result.add_step('attach', False, f'ChatGPT attach trigger click failed for {abs_path}', snapshot=snap.serializable())
                 return False
-            time.sleep(0.7)
 
-            # Attach dropdown is a React portal — must use menu_snapshot()
-            portal_snap = self.runtime.menu_snapshot()
-            upload_item = self.find_first(portal_snap, 'tool_upload')
+            attachment = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+            upload_key = str(attachment.get('menu_target') or 'tool_upload')
+            portal_snap, upload_item = self.wait_for_key(
+                upload_key,
+                timeout=10.0,
+                interval=0.4,
+                scope='menu',
+            )
             if not upload_item:
-                result.add_step('attach', False, f'ChatGPT upload item not found for {abs_path}', snapshot=portal_snap.serializable())
+                result.add_step('attach', False, f'ChatGPT upload item {upload_key!r} not found for {abs_path}', snapshot=portal_snap.serializable())
                 return False
             clicked = self._click(upload_item)
             if not clicked:
@@ -535,20 +663,25 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 result.add_step('attach', False, f'ChatGPT file dialog path paste failed for {abs_path}', snapshot=portal_snap.serializable())
                 return False
             time.sleep(0.2)
+            if not self.runtime.focus_file_dialog():
+                result.add_step('attach', False, f'ChatGPT file dialog lost focus before submit for {abs_path}', snapshot=portal_snap.serializable())
+                return False
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             if not self.runtime.press('Return'):
                 result.add_step('attach', False, f'ChatGPT file dialog submit failed for {abs_path}', snapshot=portal_snap.serializable())
                 return False
-            verify_snap = self.runtime.wait_until(
-                lambda: (
-                    snap if self._attachment_visible(snap := self.runtime.snapshot(), abs_path) else None
-                ),
-                timeout=15.0,
-                interval=0.5,
-            ) or self.runtime.snapshot()
-            verified = self._attachment_visible(verify_snap, abs_path)
-            result.add_step('attach', verified, f'ChatGPT attached {os.path.basename(abs_path)}', file=abs_path, snapshot=verify_snap.serializable())
+            verify_snap, chip, dialog_closed = self._wait_for_attachment_chip(abs_path)
+            verified = bool(chip and dialog_closed)
+            result.add_step(
+                'attach',
+                verified,
+                f'ChatGPT attached {os.path.basename(abs_path)}',
+                file=abs_path,
+                dialog_closed=dialog_closed,
+                chip=self._element_evidence(chip),
+                snapshot=verify_snap.serializable(),
+            )
             if not verified:
                 return False
         if not request.attachments:
