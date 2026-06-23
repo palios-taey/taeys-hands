@@ -179,11 +179,18 @@ class GrokConsultationDriver(BaseConsultationDriver):
             input_states = self._state_set(input_el)
             missing = self._page_ready_missing_groups(snap, groups)
             input_text, input_text_observed, input_text_source = self._input_text(input_el)
-            input_observed_empty = bool(input_text_observed and input_text == '')
             input_editable = 'editable' in input_states
             remove_attachment_present = snap.has('remove_attachment')
             current_url = (self.runtime.current_url() or snap.url or '').strip()
             fresh_url = self._is_fresh_chat_url(current_url)
+            input_text_length = len(input_text)
+            input_observed_empty = bool(
+                input_text == ''
+                and (
+                    input_text_observed
+                    or (input_text_source == 'unobserved' and input_text_length == 0)
+                )
+            )
             last_evidence = {
                 'required': self._page_ready_group_labels(groups),
                 'missing': missing,
@@ -196,7 +203,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 'input_observed_empty': input_observed_empty,
                 'input_text_observed': input_text_observed,
                 'input_text_source': input_text_source,
-                'input_text_length': len(input_text),
+                'input_text_length': input_text_length,
                 'remove_attachment_present': remove_attachment_present,
                 'optional_present': self._page_ready_present_optional_keys(snap),
             }
