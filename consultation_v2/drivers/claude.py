@@ -357,8 +357,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 )
             else:
                 navigated = self._navigate_fresh_with_new_tab(target_url)
-            if navigated and not self._dismiss_claude_selection_transients(result, 'navigate_cleanup'):
-                return False
             snap = self.runtime.snapshot()
             clean_navigation = self._navigation_snapshot_clean(snap)
             navigated = bool(navigated and clean_navigation)
@@ -381,8 +379,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             if not self.attach_files(request, result):
                 return False
         if not self.apply_selection_plan(request, result):
-            return False
-        if pre_attach_for_research and not self._settle_research_tool_selection(result):
             return False
         if not pre_attach_for_research and not self.attach_files(request, result):
             return False
@@ -505,100 +501,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             snapshot=final_snapshot.serializable(),
         )
         return False
-
-    def _selection_prepare_base_for_menu(self, result: ConsultationResult) -> bool:
-        if not self._dismiss_claude_selection_transients(result, 'select_prepare'):
-            return False
-        return super()._selection_prepare_base_for_menu(result)
-
-    def _settle_research_tool_selection(self, result: ConsultationResult) -> bool:
-        if not self._dismiss_claude_selection_transients(result, 'select_research_cleanup'):
-            return False
-        anchor_key = self._selection_base_anchor_key()
-        if anchor_key is None:
-            result.add_step(
-                'select_research_settle',
-                False,
-                'Claude Research selection base anchor unavailable',
-            )
-            return False
-        timeout = max(self._selection_settle_seconds() + 1.0, 3.0)
-        snapshot = self._selection_wait_for_clean_base(anchor_key, timeout=timeout)
-        _, connector_open = self._claude_connector_picker_open()
-        address_bar_focused = self._claude_address_bar_focused()
-        clean = (
-            self._selection_base_snapshot_clean(snapshot, anchor_key)
-            and not connector_open
-            and not address_bar_focused
-        )
-        result.add_step(
-            'select_research_settle',
-            clean,
-            (
-                'Claude Research selection settled on composer base'
-                if clean
-                else 'Claude Research selection left connector modal or chrome focus open'
-            ),
-            anchor=anchor_key,
-            connector_open=connector_open,
-            address_bar_focused=address_bar_focused,
-            snapshot=snapshot.serializable(),
-        )
-        return clean
-
-    def _dismiss_claude_selection_transients(
-        self,
-        result: ConsultationResult,
-        step_name: str,
-    ) -> bool:
-        connector_snapshot, connector_open = self._claude_connector_picker_open()
-        address_bar_focused = self._claude_address_bar_focused()
-        if not connector_open and not address_bar_focused:
-            return True
-        self.runtime.focus_firefox()
-        last_escape_ok = True
-        for _ in range(3):
-            last_escape_ok = self.runtime.press('Escape')
-            time.sleep(0.4)
-            connector_snapshot, connector_open = self._claude_connector_picker_open()
-            address_bar_focused = self._claude_address_bar_focused()
-            if not connector_open and not address_bar_focused:
-                result.add_step(
-                    step_name,
-                    True,
-                    'Claude cleared transient Research connector modal/chrome focus',
-                    escape_ok=last_escape_ok,
-                    connector_open=False,
-                    address_bar_focused=False,
-                    snapshot=connector_snapshot.serializable(),
-                )
-                return True
-        result.add_step(
-            step_name,
-            False,
-            'Claude transient Research connector modal/chrome focus persisted',
-            escape_ok=last_escape_ok,
-            connector_open=connector_open,
-            address_bar_focused=address_bar_focused,
-            snapshot=connector_snapshot.serializable(),
-        )
-        return False
-
-    def _claude_connector_picker_open(self) -> tuple[Snapshot, bool]:
-        snapshot = self.runtime.app_root_snapshot(
-            allowed_roles=('list item', 'push button', 'button')
-        )
-        open_keys = (
-            'research_connector_from_gmail_list',
-            'research_connector_from_gmail_button',
-        )
-        return snapshot, any(snapshot.has(key) for key in open_keys)
-
-    def _claude_address_bar_focused(self) -> bool:
-        try:
-            return bool(self.runtime._address_bar_focused())
-        except Exception:
-            return False
 
     def monitor_and_extract(
         self, request: ConsultationRequest, result: ConsultationResult,

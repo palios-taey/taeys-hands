@@ -297,14 +297,6 @@ tree:
       name: Paste GitHub URL
       role: push button
       scope: github_modal
-    research_connector_from_gmail_list:
-      name: From Gmail
-      role: list item
-      scope: connector_modal
-    research_connector_from_gmail_button:
-      name: From Gmail
-      role: push button
-      scope: connector_modal
     skills:
       name: Skills
       role: menu item

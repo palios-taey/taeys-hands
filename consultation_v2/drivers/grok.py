@@ -96,14 +96,10 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 return False
             return self.wait_for_page_ready_after_navigation(result)
 
-        verify = False
-        navigated = self.runtime.navigate(target_url, verify_change=verify)
         snap = self.runtime.snapshot()
-        result.add_step('navigate', navigated, 'Navigated to Grok target',
+        result.add_step('navigate', True, 'Grok fresh session uses current page and in-page New Chat',
                         target_url=target_url, fresh_chat_required=True,
-                        verify_change=verify, snapshot=snap.serializable())
-        if not navigated:
-            return False
+                        snapshot=snap.serializable())
         if not self._trigger_new_chat(result, snap):
             return False
         return self._wait_for_fresh_chat_ready(result)
@@ -111,7 +107,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
     def _trigger_new_chat(self, result: ConsultationResult, snapshot: Snapshot) -> bool:
         nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
         key = nav_cfg.get('new_chat_key') or nav_cfg.get('new_chat')
-        shortcut = nav_cfg.get('new_chat_shortcut')
         element = snapshot.first(key) if isinstance(key, str) else None
 
         if isinstance(key, str) and not element:
@@ -133,26 +128,11 @@ class GrokConsultationDriver(BaseConsultationDriver):
             )
             return clicked
 
-        if isinstance(shortcut, str) and shortcut.strip():
-            self.runtime.focus_firefox()
-            pressed = self.runtime.press(shortcut)
-            result.add_step(
-                'new_chat',
-                pressed,
-                'Triggered Grok new chat',
-                action='shortcut',
-                shortcut=shortcut,
-                configured_key=key,
-                mapped_before=bool(snapshot.has(key)) if isinstance(key, str) else False,
-            )
-            return pressed
-
         result.add_step(
             'new_chat',
             False,
-            'Grok new chat affordance missing from YAML/current tree',
+            'Grok mapped New Chat affordance missing from current tree',
             configured_key=key,
-            configured_shortcut=shortcut,
             snapshot=snapshot.serializable(),
         )
         return False

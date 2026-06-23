@@ -600,6 +600,41 @@ class ConsultationRuntime:
         states = {str(state).lower() for state in (entry.states or [])}
         return 'focused' in states
 
+    def _address_bar_text(self) -> tuple[str, bool, str]:
+        entry = self._address_bar_entry()
+        if entry is None:
+            return '', False, 'missing_address_bar'
+        if entry.text is not None:
+            return str(entry.text), True, 'snapshot_text'
+        if 'text' in entry.raw:
+            return str(entry.raw.get('text') or ''), True, 'raw_text'
+        try:
+            if entry.atspi_obj is not None:
+                text_iface = entry.atspi_obj.get_text_iface()
+                if text_iface:
+                    return text_iface.get_text(0, -1) or '', True, 'atspi_text'
+        except Exception:
+            pass
+        try:
+            if entry.atspi_obj is not None:
+                value_iface = entry.atspi_obj.get_value_iface()
+                if value_iface is not None:
+                    value = value_iface.get_current_value()
+                    return '' if value is None else str(value), True, 'atspi_value'
+        except Exception:
+            pass
+        return '', False, 'unobserved'
+
+    def _dismiss_address_bar(self) -> bool:
+        if not self._address_bar_focused():
+            return True
+        for _ in range(3):
+            inp.press_key("Escape")
+            time.sleep(0.2)
+            if not self._address_bar_focused():
+                return True
+        return False
+
     def _address_bar_entry(self) -> ElementRef | None:
         snapshot = self.app_root_snapshot()
         for items in (
@@ -695,7 +730,6 @@ class ConsultationRuntime:
         return None
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
-        before = self.current_url()
         # Close stale GTK file dialogs FIRST — they intercept the address-bar
         # focus key (ctrl+l) and leave the composer focused, so the URL gets
         # typed/pasted into the chat input and sent as a message. (Proven path:
@@ -722,29 +756,56 @@ class ConsultationRuntime:
             logger.error(
                 'navigate: composer still focused after address-bar focus; refusing to paste URL'
             )
+            self._dismiss_address_bar()
             return False
         inp.press_key("ctrl+a")
         time.sleep(0.1)
         if not self.paste(url):
             self.type_text(url, delay_ms=5)
         time.sleep(0.3)
+        address_text, address_observed, address_source = self._address_bar_text()
+        if not address_observed or address_text.strip() != (url or '').strip():
+            logger.error(
+                'navigate: URL did not land in focused address bar; refusing Return '
+                '(observed=%s source=%s length=%s)',
+                address_observed,
+                address_source,
+                len(address_text),
+            )
+            self._dismiss_address_bar()
+            return False
         inp.press_key("Return")
-        if not verify_change:
-            time.sleep(2.0)
-            return True
-        # Wait for the URL to actually change, then confirm it became the target.
-        self.wait_for_url_change(before, timeout=20.0, interval=1.0)
+        self.wait_until(
+            lambda: (
+                current
+                if self._navigation_target_loaded((current := self.current_url() or ''), url)
+                else None
+            ),
+            timeout=20.0 if verify_change else 8.0,
+            interval=0.5,
+        )
+        if not self._dismiss_address_bar():
+            logger.error('navigate: address bar stayed focused after committed navigation')
+            return False
         current = (self.current_url() or "").strip()
-        target = (url or "").strip()
-
-        def _norm(u: str) -> str:
-            return u.rstrip("/").lower()
 
         # Defense: if the nav did not land on the target (still a stale thread,
         # unchanged, or empty), return False so the driver STOPs instead of
         # sending into a polluted composer. Single check — no retry.
         if not current:
             return False
+        return self._navigation_target_loaded(current, url)
+
+    @staticmethod
+    def _navigation_target_loaded(current_url: str, target_url: str) -> bool:
+        current = (current_url or "").strip()
+        target = (target_url or "").strip()
+        if not current or not target:
+            return False
+
+        def _norm(u: str) -> str:
+            return u.rstrip("/").lower()
+
         cur_n, tgt_n = _norm(current), _norm(target)
         if cur_n == tgt_n:
             return True
