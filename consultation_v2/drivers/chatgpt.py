@@ -137,6 +137,109 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
 
+    @staticmethod
+    def _snapshot_elements_for_evidence(snapshot: Snapshot) -> list[ElementRef]:
+        elements: list[ElementRef] = []
+        for items in (snapshot.mapped or {}).values():
+            elements.extend(items)
+        elements.extend(snapshot.unknown or [])
+        elements.extend(snapshot.menu_items or [])
+        elements.extend(snapshot.sidebar or [])
+        return elements
+
+    def _stop_like_candidates(self, snapshot: Snapshot, *, limit: int = 12) -> list[dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        for element in self._snapshot_elements_for_evidence(snapshot):
+            name = str(element.name or '').strip()
+            role = str(element.role or '').strip().lower()
+            if 'stop' not in name.lower() or role not in {'push button', 'button'}:
+                continue
+            candidates.append(self._element_evidence(element))
+            if len(candidates) >= limit:
+                break
+        return candidates
+
+    def _stop_read_evidence(
+        self,
+        scope: str,
+        snapshot: Snapshot,
+        stop_keys: tuple[str, ...],
+    ) -> dict[str, object]:
+        found = {
+            key: [self._element_evidence(element) for element in (snapshot.mapped or {}).get(key) or []]
+            for key in stop_keys
+            if (snapshot.mapped or {}).get(key)
+        }
+        return {
+            'scope': scope,
+            'raw_count': int(snapshot.raw_count or 0),
+            'present': bool(found),
+            'found': found,
+            'stop_like_candidates': self._stop_like_candidates(snapshot),
+        }
+
+    def _stop_snapshot_probe(self, stop_keys: tuple[str, ...]) -> tuple[bool, Snapshot, dict[str, object]]:
+        scopes: list[dict[str, object]] = []
+        snap = self.runtime.snapshot()
+        doc_evidence = self._stop_read_evidence('snapshot', snap, stop_keys)
+        scopes.append(doc_evidence)
+        if doc_evidence['present']:
+            return True, snap, {'present': True, 'scope': 'snapshot', 'scopes': scopes}
+
+        app_snap = self.runtime.app_root_snapshot(allowed_roles=['push button'])
+        app_evidence = self._stop_read_evidence('app_root_push_buttons', app_snap, stop_keys)
+        scopes.append(app_evidence)
+        if app_evidence['present']:
+            return True, app_snap, {'present': True, 'scope': 'app_root_push_buttons', 'scopes': scopes}
+        return False, app_snap, {'present': False, 'scope': 'absent', 'scopes': scopes}
+
+    def _read_stop_state(
+        self,
+        stop_keys: tuple[str, ...],
+        *,
+        confirm_absence: bool,
+    ) -> tuple[bool, Snapshot, dict[str, object]]:
+        first_present, first_snapshot, first_evidence = self._stop_snapshot_probe(stop_keys)
+        if first_present or not confirm_absence:
+            first_evidence['confirmed_absent'] = False
+            return first_present, first_snapshot, first_evidence
+
+        time.sleep(0.25)
+        second_present, second_snapshot, second_evidence = self._stop_snapshot_probe(stop_keys)
+        if second_present:
+            second_evidence.update({
+                'confirmed_absent': False,
+                'rescan_after_absent': True,
+                'previous_absent_read': first_evidence,
+            })
+            return True, second_snapshot, second_evidence
+        second_evidence.update({
+            'confirmed_absent': True,
+            'rescan_after_absent': True,
+            'previous_absent_read': first_evidence,
+        })
+        return False, second_snapshot, second_evidence
+
+    @staticmethod
+    def _compact_stop_reading(evidence: dict[str, object]) -> dict[str, object]:
+        return {
+            'present': bool(evidence.get('present')),
+            'scope': evidence.get('scope'),
+            'confirmed_absent': bool(evidence.get('confirmed_absent')),
+            'rescan_after_absent': bool(evidence.get('rescan_after_absent')),
+            'scopes': [
+                {
+                    'scope': scope.get('scope'),
+                    'raw_count': scope.get('raw_count'),
+                    'present': bool(scope.get('present')),
+                    'found_keys': sorted((scope.get('found') or {}).keys()),
+                    'stop_like_candidates': scope.get('stop_like_candidates') or [],
+                }
+                for scope in (evidence.get('scopes') or [])
+                if isinstance(scope, dict)
+            ],
+        }
+
     def _complete_keys(self) -> tuple[str, ...]:
         monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
         extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
@@ -907,6 +1010,18 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return 'send_not_attempted'
         last = attempts[-1]
         focus = last.get('focus') if isinstance(last.get('focus'), dict) else {}
+        if last.get('phase') == 'send_button_ready' and not last.get('ready'):
+            return 'send_button_not_ready'
+        if last.get('phase') == 'exact_send_button_click' and not last.get('clicked'):
+            return 'send_button_click_failed'
+        if last.get('phase') == 'exact_send_button_click':
+            if last.get('stop_seen') and not last.get('url_landed'):
+                return 'send_validation_stop_seen_url_missing'
+            if last.get('url_landed') and not last.get('stop_seen'):
+                return 'send_validation_url_seen_stop_missing'
+            if last.get('prompt_still_staged'):
+                return 'send_button_click_not_delivered_prompt_still_staged'
+            return 'send_landing_unverified'
         if focus.get('reason') == 'composer_focus_not_landed_extentsless_node':
             return 'composer_focus_did_not_land_extentsless_node'
         if focus.get('reason') == 'no_bounded_composer_ancestor':
@@ -923,13 +1038,31 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return 'return_not_delivered_prompt_still_staged'
         return 'send_landing_unverified'
 
+    def _send_button_readiness(self, snapshot: Snapshot) -> tuple[str | None, ElementRef | None, dict[str, object]]:
+        send_key, send_button = self.find_first_any(snapshot, self._send_button_keys())
+        states = self._element_state_set(send_button)
+        ready = bool(
+            send_button
+            and send_button.x is not None
+            and send_button.y is not None
+            and 'enabled' in states
+        )
+        return send_key, send_button, {
+            'phase': 'send_button_ready',
+            'send_key': send_key,
+            'send_button': self._element_evidence(send_button),
+            'states': sorted(states),
+            'ready': ready,
+            'has_coordinates': bool(send_button and send_button.x is not None and send_button.y is not None),
+        }
+
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
-        # SEND = bounded composer-ancestor focus -> Return, for both attachment
-        # and no-attachment prompts. The 'Send prompt' React button is presence
-        # evidence only; it must not be settled or coordinate-clicked.
+        # SEND = exact mapped Send prompt button click. This is not a fixed pixel
+        # fallback: the click point comes from the YAML-mapped, enabled send
+        # element in the current tree. Stop/url validation still gates success.
         attempts = []
         configured_timeout = float(self.cfg.get('workflow', {}).get('send', {}).get('timeout', 120) or 120)
         full_timeout = max(120.0, configured_timeout)
@@ -963,43 +1096,43 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
         for attempt in (1, 2):
             send_snap = None
-            focus_node = self._focus_composer()
-            focus_detail = dict(getattr(self, '_last_composer_focus_evidence', {}) or {})
-            focus_evidence = self._element_evidence(focus_node)
-            if focus_node is None:
-                attempts.append({
-                    'attempt': attempt,
-                    'focused': False,
-                    'pressed': False,
-                    'focus_node': focus_evidence,
-                    'focus': focus_detail,
-                })
-                if attempt == 2:
-                    break
-                continue
-
-            pressed = self.runtime.press('Return')
-            if not pressed:
-                attempts.append({
-                    'attempt': attempt,
-                    'focused': True,
-                    'pressed': False,
-                    'focus_node': focus_evidence,
-                    'focus': focus_detail,
-                })
-                if attempt == 2:
-                    break
-                continue
-
-            timeout = first_probe_timeout if attempt == 1 else full_timeout
-            send_snap = self.runtime.wait_until(
+            readiness_snapshot = self.runtime.wait_until(
                 lambda: (
-                    snap if self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys) else None
+                    snap
+                    if self._send_button_readiness(snap := self.runtime.snapshot())[2]['ready']
+                    else None
                 ),
-                timeout=timeout,
-                interval=0.6,
+                timeout=5.0,
+                interval=0.25,
             ) or self.runtime.snapshot()
-            stop_seen = self.snapshot_has_any(send_snap, stop_keys)
+            send_key, send_button, readiness = self._send_button_readiness(readiness_snapshot)
+            readiness['attempt'] = attempt
+            attempts.append(readiness)
+            if not readiness['ready'] or send_button is None:
+                if attempt == 2:
+                    break
+                continue
+
+            clicked = self._click(send_button)
+            timeout = first_probe_timeout if attempt == 1 else full_timeout
+            if clicked:
+                send_snap = self.runtime.wait_until(
+                    lambda: (
+                        stop_state[1]
+                        if (stop_state := self._read_stop_state(stop_keys, confirm_absence=False))[0]
+                        else None
+                    ),
+                    timeout=timeout,
+                    interval=0.6,
+                ) or self.runtime.snapshot()
+            else:
+                send_snap = self.runtime.snapshot()
+            stop_seen, stop_snap, stop_reading = self._read_stop_state(
+                stop_keys,
+                confirm_absence=False,
+            )
+            if stop_seen:
+                send_snap = stop_snap
             if stop_seen:
                 self._generating_complete_row_y = self._bottom_action_row_y(
                     send_snap,
@@ -1020,14 +1153,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             prompt_still_staged = False
             if attempt == 1 and not stop_seen and not url_landed:
                 prompt_still_staged = self.snapshot_has_any(self.runtime.snapshot(), self._send_button_keys())
-            verified = bool(pressed and stop_seen and url_landed)
+            verified = bool(clicked and stop_seen and url_landed)
             attempts.append({
                 'attempt': attempt,
-                'focused': True,
-                'focus_node': focus_evidence,
-                'focus': focus_detail,
-                'pressed': True,
+                'phase': 'exact_send_button_click',
+                'send_key': send_key,
+                'send_button': self._element_evidence(send_button),
+                'clicked': clicked,
                 'stop_seen': stop_seen,
+                'stop_reading': self._compact_stop_reading(stop_reading),
                 'url_changed': url_changed,
                 'answer_thread': answer_thread,
                 'url_landed': url_landed,
@@ -1037,7 +1171,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 verify_snap = send_snap
                 result.add_step(
                     'send', True,
-                    'ChatGPT send validated by focused composer Return, Stop button, and answer-thread URL',
+                    'ChatGPT send validated by exact Send prompt click, Stop button, and answer-thread URL',
                     url_before=before,
                     url_after=result.session_url_after,
                     stop_seen=stop_seen,
@@ -1048,10 +1182,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 )
                 return True
 
-            # The only retry Jesse authorized here is the focus+Enter path when
-            # the first Enter clearly did not land: no Stop, no answer-thread URL, and
-            # the prompt is still staged in the composer. If any send evidence
-            # appears, do not press Enter again.
+            # Retry only when the exact send click produced no send evidence and
+            # the prompt is still staged. If Stop or a thread URL appears, do not
+            # click again.
             if attempt == 1 and not stop_seen and not url_landed and prompt_still_staged:
                 continue
             break
@@ -1060,7 +1193,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         failure_reason = self._send_failure_reason(attempts)
         result.add_step(
             'send', False,
-            'ChatGPT send failed validation after bounded composer focus and Return',
+            'ChatGPT send failed validation after exact Send prompt click',
             url_before=before,
             url_after=result.session_url_after or self.runtime.current_url() or before,
             failure_reason=failure_reason,
@@ -1091,6 +1224,22 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         stop_gone_without_complete_signal = 0
         generation_floor_y = getattr(self, '_generating_complete_row_y', None)
         complete_signal_y: int | None = None
+        stop_read_samples: list[dict[str, object]] = []
+        last_stop_reading: dict[str, object] = {}
+
+        def _record_stop_reading(evidence: dict[str, object]) -> None:
+            nonlocal last_stop_reading
+            compact = self._compact_stop_reading(evidence)
+            last_stop_reading = compact
+            if len(stop_read_samples) >= 10:
+                return
+            if (
+                compact.get('present')
+                or compact.get('confirmed_absent')
+                or compact.get('rescan_after_absent')
+                or not stop_read_samples
+            ):
+                stop_read_samples.append(compact)
 
         def _poll() -> bool:
             nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, terminal_snapshot
@@ -1104,8 +1253,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return True
             if thread_restored:
                 return False
-            snap = self.runtime.snapshot()
-            stop_present = self.snapshot_has_any(snap, stop_keys)
+            stop_present, snap, stop_reading = self._read_stop_state(
+                stop_keys,
+                confirm_absence=detector.ever_seen_stop or observed_stop,
+            )
+            _record_stop_reading(stop_reading)
             observed_stop = observed_stop or stop_present
             if stop_present:
                 row_y = self._bottom_action_row_y(snap, complete_keys)
@@ -1135,16 +1287,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 stop_gone_without_complete_signal += 1
             return False
 
+        def _verified_stop_absent_snapshot() -> Snapshot | None:
+            stop_present, snap, stop_reading = self._read_stop_state(
+                stop_keys,
+                confirm_absence=True,
+            )
+            _record_stop_reading(stop_reading)
+            if stop_present:
+                return None
+            if not self._complete_signal_present(snap, complete_keys, generation_floor_y)[0]:
+                return None
+            return snap
+
         self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.wait_until(
-            lambda: (
-                snap
-                if (
-                    not self.snapshot_has_any(snap := self.runtime.snapshot(), stop_keys)
-                    and self._complete_signal_present(snap, complete_keys, generation_floor_y)[0]
-                )
-                else None
-            ),
+            _verified_stop_absent_snapshot,
             timeout=5.0,
             interval=0.5,
         ) or self.runtime.snapshot()
@@ -1157,6 +1314,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,
                 stop_condition='answer_thread_lost',
+                stop_read_samples=stop_read_samples,
+                last_stop_reading=last_stop_reading,
                 snapshot=verify_snap.serializable(),
             )
             return False
@@ -1168,6 +1327,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 stop_seen=False,
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,
+                stop_read_samples=stop_read_samples,
+                last_stop_reading=last_stop_reading,
                 snapshot=verify_snap.serializable(),
             )
             return False
@@ -1180,10 +1341,19 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,
                 intermediate_actions=intermediate_actions,
+                stop_read_samples=stop_read_samples,
+                last_stop_reading=last_stop_reading,
                 snapshot=verify_snap.serializable(),
             )
             return False
-        stop_absent = not self.snapshot_has_any(verify_snap, stop_keys)
+        stop_present_final, stop_verify_snap, stop_verify_reading = self._read_stop_state(
+            stop_keys,
+            confirm_absence=True,
+        )
+        _record_stop_reading(stop_verify_reading)
+        if not stop_present_final:
+            verify_snap = stop_verify_snap
+        stop_absent = not stop_present_final
         complete_signal_seen, final_signal_y = self._complete_signal_present(
             verify_snap,
             complete_keys,
@@ -1211,6 +1381,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             stop_gone_cycles=detector.stop_cycles,
             required_stop_gone_cycles=detector.required_stop_cycles,
             stop_gone_without_complete_signal=stop_gone_without_complete_signal,
+            stop_read_samples=stop_read_samples,
+            last_stop_reading=last_stop_reading,
             snapshot=verify_snap.serializable(),
         )
         if verified:
