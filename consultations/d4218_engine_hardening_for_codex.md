@@ -37,3 +37,14 @@ Per defect, a REAL consult on the live display, hands-off, full extract:
 - Claude Research: `--select tools=research` → connector picker handled → settles → sends → extracts hands-off.
 - web default: a consult with NO `--select tools` → web_search confirmed active in the live UI (screenshot the pill).
 Plus: `lint_consultation_v2_contract.py --all` + `lint_no_yaml_silent_fallbacks.py --all` CLEAN, and `gitnexus_impact` before editing each driver/yaml. Root-cause shapes only — no `if X: continue` bypasses.
+
+---
+
+## VALIDATION ROUND 1 — Defect 1 fix (120a1517) is CLOSE but page_ready over-strict on Grok
+
+**taeys-hands production run on stale :5 (codex branch 120a1517):** `navigate ✓ → new_chat ✓ ("Triggered Grok new chat") → page_ready FALSE "Grok fresh composer not ready after new-chat action."` The New Chat auto-recovery WORKS. The post-click readiness assertion is the new defect.
+
+**Root cause of the page_ready failure (evidence from the run):** post-new-chat state is genuinely fresh+empty —
+`current_url=https://grok.com/`, `fresh_url=True`, `input_present=True` (editable/enabled/multi-line), `input_text_length=0`, `remove_attachment_present=False`, `missing=[]` — BUT `input_observed_empty=False` because `input_text_observed=False`, `input_text_source='unobserved'`. **Grok's composer text is AT-SPI-UNOBSERVABLE** (known: Grok composer + response text return nothing to AT-SPI). So requiring `input_observed_empty=True` (a POSITIVE text observation) is unsatisfiable for Grok → page_ready ALWAYS fails after a successful new_chat, even on a perfectly fresh empty composer.
+
+**Fix (root-cause shape):** the "composer empty" precondition must be satisfiable on an AT-SPI-blind composer. Treat the composer as empty when `input_text_length == 0 AND remove_attachment absent AND fresh_url` — do NOT hard-require a positive text observation. Concretely: `input_observed_empty` should be True when text is `unobserved` but zero-length (i.e. `input_text_source=='unobserved'` counts as empty, not as "not-empty"), OR the empty gate should not require observation for Grok. Keep the new_chat trigger + remove_attachment + one-tab checks as-is. Validation bar unchanged: fresh dispatch on a stale :5 must auto-recover and proceed to attach→send→extract with NO manual New Chat.
