@@ -600,31 +600,6 @@ class ConsultationRuntime:
         states = {str(state).lower() for state in (entry.states or [])}
         return 'focused' in states
 
-    def _address_bar_text(self) -> tuple[str, bool, str]:
-        entry = self._address_bar_entry()
-        if entry is None:
-            return '', False, 'missing_address_bar'
-        if entry.text is not None:
-            return str(entry.text), True, 'snapshot_text'
-        if 'text' in entry.raw:
-            return str(entry.raw.get('text') or ''), True, 'raw_text'
-        try:
-            if entry.atspi_obj is not None:
-                text_iface = entry.atspi_obj.get_text_iface()
-                if text_iface:
-                    return text_iface.get_text(0, -1) or '', True, 'atspi_text'
-        except Exception:
-            pass
-        try:
-            if entry.atspi_obj is not None:
-                value_iface = entry.atspi_obj.get_value_iface()
-                if value_iface is not None:
-                    value = value_iface.get_current_value()
-                    return '' if value is None else str(value), True, 'atspi_value'
-        except Exception:
-            pass
-        return '', False, 'unobserved'
-
     def _dismiss_address_bar(self) -> bool:
         if not self._address_bar_focused():
             return True
@@ -760,28 +735,25 @@ class ConsultationRuntime:
             return False
         inp.press_key("ctrl+a")
         time.sleep(0.1)
-        if not self.paste(url):
-            self.type_text(url, delay_ms=5)
-        time.sleep(0.3)
-        address_text, address_observed, address_source = self._address_bar_text()
-        if not address_observed or address_text.strip() != (url or '').strip():
-            logger.error(
-                'navigate: URL did not land in focused address bar; refusing Return '
-                '(observed=%s source=%s length=%s)',
-                address_observed,
-                address_source,
-                len(address_text),
-            )
+        if not self.paste(url) and not self.type_text(url, delay_ms=5):
+            logger.error('navigate: URL paste/type failed in focused address bar')
             self._dismiss_address_bar()
             return False
+        time.sleep(0.3)
         inp.press_key("Return")
+        if not verify_change:
+            time.sleep(2.0)
+            if not self._dismiss_address_bar():
+                logger.error('navigate: address bar stayed focused after committed navigation')
+                return False
+            return True
         self.wait_until(
             lambda: (
                 current
                 if self._navigation_target_loaded((current := self.current_url() or ''), url)
                 else None
             ),
-            timeout=20.0 if verify_change else 8.0,
+            timeout=20.0,
             interval=0.5,
         )
         if not self._dismiss_address_bar():
