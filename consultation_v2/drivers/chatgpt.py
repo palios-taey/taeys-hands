@@ -1134,6 +1134,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def _hover_assistant_message_for_copy_button(self) -> dict:
         from consultation_v2 import input as _inp
+        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.tree import find_elements as raw_find_elements
 
         evidence = {
             'ok': False,
@@ -1167,12 +1169,18 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 y = int(point['y'])
                 hover_ok = bool(_inp.hover(x, y))
                 time.sleep(0.65)
-                copy_snap = self.runtime.snapshot()
-                copy_buttons = copy_snap.mapped.get('copy_button') or []
+                firefox = find_firefox_for_platform(self.platform)
+                copy_buttons = (
+                    self._copy_button_candidates(raw_find_elements(firefox, fence_after=[]))
+                    if firefox else []
+                )
                 if not copy_buttons:
                     time.sleep(0.25)
-                    copy_snap = self.runtime.snapshot()
-                    copy_buttons = copy_snap.mapped.get('copy_button') or []
+                    firefox = find_firefox_for_platform(self.platform)
+                    copy_buttons = (
+                        self._copy_button_candidates(raw_find_elements(firefox, fence_after=[]))
+                        if firefox else []
+                    )
                 attempt = {
                     'x': x,
                     'y': y,
@@ -1186,7 +1194,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     continue
                 evidence.update({
                     **attempt,
-                    'copy_buttons': [button.serializable() for button in copy_buttons[-3:]],
+                    'copy_buttons': [
+                        {key: button.get(key) for key in ('name', 'role', 'x', 'y')}
+                        for button in copy_buttons[-3:]
+                    ],
                     'attempts': attempts,
                     'ok': True,
                 })
@@ -1212,6 +1223,49 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return evidence
         logger.warning('ChatGPT extract assistant-message hover probe: no document rect found')
         return evidence
+
+    def _copy_button_names(self) -> tuple[str, ...]:
+        extract_cfg = ((self.cfg.get('workflow') or {}).get('extract') or {})
+        configured = extract_cfg.get('copy_button_names') or []
+        configured = configured if isinstance(configured, list) else [configured]
+        names = [
+            str(name)
+            for name in configured
+            if isinstance(name, str) and name.strip()
+        ]
+        copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        if isinstance(copy_spec, dict):
+            if isinstance(copy_spec.get('name'), str):
+                names.append(str(copy_spec['name']))
+            names_any = copy_spec.get('names_any_of') or []
+            if isinstance(names_any, list):
+                names.extend(str(name) for name in names_any if isinstance(name, str) and name.strip())
+        return tuple(dict.fromkeys(names))
+
+    def _copy_button_candidates(
+        self,
+        elements: list[dict],
+        copy_spec: dict | None = None,
+    ) -> list[dict]:
+        spec = copy_spec or self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        copy_names = set(self._copy_button_names())
+        candidates: list[dict] = []
+        seen: set[tuple[object, ...]] = set()
+        for element in elements:
+            if element.get('y') is None:
+                continue
+            role = str(element.get('role') or '').strip().lower()
+            name = str(element.get('name') or '').strip()
+            matches_yaml = matches_spec(element, spec)
+            matches_configured_copy = role in {'push button', 'button'} and name in copy_names
+            if not (matches_yaml or matches_configured_copy):
+                continue
+            key = (name, role, element.get('x'), element.get('y'), id(element.get('atspi_obj')))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(element)
+        return sorted(candidates, key=lambda element: int(element.get('y') or 0))
 
     def _response_action_panels(self, elements: list[dict]) -> list[dict]:
         spec = self.cfg.get('tree', {}).get('element_map', {}).get('response_actions_panel', {})
@@ -1338,6 +1392,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             for element in sorted(candidates, key=lambda item: (int(item.get('y') or 0), int(item.get('x') or 0)))
         ])
         content = '\n'.join(segments).strip()
+        copy_buttons_found = len(self._copy_button_candidates(elements))
         evidence = {
             'ok': False,
             'source': 'direct_tree_text',
@@ -1350,27 +1405,20 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'segments': len(segments),
             'response_actions_panels': len(response_panels),
             'user_message_action_panels': len(user_message_panels),
+            'copy_buttons_found': copy_buttons_found,
         }
         if not content:
             evidence['reason'] = 'no_text_between_action_anchors'
             return evidence
-        if len(content) <= len(request.message):
+        findings = self._response_content_findings(
+            content,
+            request,
+            copy_buttons_found=copy_buttons_found,
+        )
+        if findings:
             evidence.update({
-                'reason': 'content_shorter_than_prompt',
-                'characters': len(content),
-                'preview': content[:200],
-            })
-            return evidence
-        if self._is_browser_chrome_garbage(content):
-            evidence.update({
-                'reason': 'contains_browser_chrome_garbage',
-                'characters': len(content),
-                'preview': content[:200],
-            })
-            return evidence
-        if self._is_prompt_echo(content, request):
-            evidence.update({
-                'reason': 'prompt_echo',
+                'reason': 'invalid_response_content',
+                'findings': findings,
                 'characters': len(content),
                 'preview': content[:200],
             })
@@ -1382,6 +1430,64 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'content': content,
         })
         return evidence
+
+    def _response_content_findings(
+        self,
+        content: str,
+        request: ConsultationRequest,
+        *,
+        copy_buttons_found: int = 0,
+    ) -> list[str]:
+        findings: list[str] = []
+        stripped = (content or '').strip()
+        if not stripped:
+            return ['empty']
+        normalized = self._normalized_text(stripped)
+        lowered = normalized.lower()
+        if len(stripped) <= len(request.message):
+            findings.append('content_shorter_than_prompt')
+        if self._is_browser_chrome_garbage(stripped):
+            findings.append('contains_browser_chrome_garbage')
+        if self._is_prompt_echo(stripped, request):
+            findings.append('prompt_echo')
+        first_chunk = lowered[:500]
+        if (
+            lowered.startswith('share | open conversation options')
+            or lowered.startswith('share open conversation options')
+            or ('open conversation options' in first_chunk and 'share' in first_chunk)
+        ):
+            findings.append('ui_chrome_extract')
+        if copy_buttons_found >= 8 and len(stripped) < 2500:
+            findings.append('thin_extract_with_many_copy_buttons')
+        if copy_buttons_found >= 2 and self._looks_like_standalone_code_fragment(stripped):
+            findings.append('standalone_code_fragment')
+        return findings
+
+    @staticmethod
+    def _looks_like_standalone_code_fragment(content: str) -> bool:
+        stripped = content.strip()
+        if not stripped or '```' in stripped:
+            return False
+        lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+        if len(lines) < 5:
+            return False
+        code_prefixes = (
+            'def ', 'class ', 'import ', 'from ', 'async ', 'await ', 'return ',
+            'if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except ', 'with ',
+            'function ', 'const ', 'let ', 'var ', 'export ', 'public ', 'private ',
+            '<', '{', '}', '#!', '@', 'package ', 'use ', 'namespace ',
+        )
+        code_markers = (' = ', ' == ', ' != ', ' <= ', ' >= ', '=>', '();', ');', ' {', '};')
+        code_lines = 0
+        prose_lines = 0
+        for line in lines:
+            lowered = line.lower()
+            if lowered.startswith(code_prefixes) or any(marker in line for marker in code_markers):
+                code_lines += 1
+            words = [word for word in line.split() if word]
+            if len(words) >= 8 and line.endswith(('.', '!', '?', ':')):
+                prose_lines += 1
+        return code_lines / max(1, len(lines)) >= 0.55 and prose_lines <= 1
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
@@ -1470,49 +1576,72 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             except Exception:
                 pass
             all_elements = raw_find_elements(firefox, fence_after=[])
-            copy_buttons = [
-                element for element in all_elements
-                if matches_spec(element, copy_spec)
-                and element.get('y') is not None
-            ]
+            copy_buttons = self._copy_button_candidates(all_elements, copy_spec)
             if not copy_buttons:
                 continue
 
-            target = max(copy_buttons, key=lambda element: int(element.get('y') or 0))
-            clipboard.write('')
-            time.sleep(0.3)
-            if not atspi_click(target):
-                continue
-            time.sleep(1.2)
-            content = (clipboard.read() or '').strip()
-            if content and not self._is_prompt_echo(content, request):
+            rejected_copies = []
+            for target in reversed(copy_buttons):
+                clipboard.write('')
+                time.sleep(0.3)
+                self.runtime.scroll_element_into_view(ElementRef(
+                    key=None,
+                    name=str(target.get('name') or ''),
+                    role=str(target.get('role') or ''),
+                    x=target.get('x'),
+                    y=target.get('y'),
+                    states=list(target.get('states') or []),
+                    atspi_obj=target.get('atspi_obj'),
+                ))
+                time.sleep(0.3)
+                if not atspi_click(target):
+                    rejected_copies.append({
+                        'findings': ['click_failed'],
+                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
+                    })
+                    continue
+                time.sleep(1.2)
+                content = (clipboard.read() or '').strip()
+                findings = self._response_content_findings(
+                    content,
+                    request,
+                    copy_buttons_found=len(copy_buttons),
+                )
+                if not content or findings:
+                    rejected_copies.append({
+                        'findings': findings or ['empty_clipboard'],
+                        'characters': len(content),
+                        'preview': content[:200],
+                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
+                    })
+                    continue
                 result.response_text = content
                 result.add_step(
                     'extract_primary', True,
-                    f'ChatGPT response copied ({len(content)} chars, attempt {attempt + 1})',
+                    f'ChatGPT response copied from assistant message Copy ({len(content)} chars, attempt {attempt + 1})',
                     characters=len(content),
                     preview=content[:200],
                     scroll=scroll_evidence,
                     hover=hover_evidence,
                     copy_buttons_found=len(copy_buttons),
-                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
                 )
                 return True
-            if content:
+            if rejected_copies:
                 result.add_step(
-                    'extract_primary_echo_rejected', True,
-                    'ChatGPT copied prompt echo; continuing response-copy search',
-                    characters=len(content),
-                    preview=content[:200],
+                    'extract_primary_copy_rejected',
+                    True,
+                    'ChatGPT rejected copied prompt/chrome/code-fragment content; continuing response-copy search',
                     attempt=attempt + 1,
                     scroll=scroll_evidence,
                     hover=hover_evidence,
-                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                    copy_buttons_found=len(copy_buttons),
+                    rejected_copies=rejected_copies[:6],
                 )
 
         result.add_step(
             'extract_primary', False,
-            'ChatGPT response copy button not found or only prompt echo copied',
+            'ChatGPT response copy button not found or copied content failed response-quality gates',
             elements=len(all_elements),
             last_scroll=scroll_evidence,
             last_direct=direct_evidence,
