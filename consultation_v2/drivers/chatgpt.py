@@ -396,6 +396,109 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             for element in all_elements
         )
 
+    def _snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
+        all_elements: list[ElementRef] = []
+        for items in getattr(snapshot, 'mapped', {}).values():
+            all_elements.extend(items)
+        all_elements.extend(getattr(snapshot, 'unknown', []) or [])
+        all_elements.extend(getattr(snapshot, 'sidebar', []) or [])
+        all_elements.extend(getattr(snapshot, 'menu_items', []) or [])
+        return all_elements
+
+    @staticmethod
+    def _element_state_set(element: ElementRef | None) -> set[str]:
+        if element is None:
+            return set()
+        return {str(state).strip().lower() for state in (element.states or [])}
+
+    def _attachment_upload_blockers(self, snapshot: Snapshot) -> list[dict[str, object]]:
+        busy_terms = (
+            'uploading',
+            'processing',
+            'scanning',
+            'loading',
+            'spinner',
+            'progress',
+            'preparing',
+            'queued',
+        )
+        blockers = []
+        for element in self._snapshot_elements(snapshot):
+            haystack = ' '.join(
+                str(value or '')
+                for value in (
+                    element.name,
+                    element.description,
+                    element.text,
+                    element.role,
+                )
+            ).lower()
+            if any(term in haystack for term in busy_terms):
+                blockers.append(self._element_evidence(element))
+        return blockers
+
+    def _wait_for_attachment_upload_complete(
+        self,
+        request: ConsultationRequest,
+        timeout: float,
+    ) -> tuple[Snapshot | None, dict[str, object], Snapshot | None]:
+        attachment_paths = [os.path.abspath(path) for path in request.attachments]
+        started = time.time()
+        last_snapshot: Snapshot | None = None
+        last_evidence: dict[str, object] = {
+            'attachments': attachment_paths,
+            'missing_attachments': attachment_paths,
+            'send_key': None,
+            'send_button': None,
+            'send_button_ready': False,
+            'upload_blockers': [],
+            'elapsed_seconds': 0.0,
+        }
+        consecutive_ready = 0
+
+        def _probe_ready() -> Snapshot | None:
+            nonlocal consecutive_ready, last_snapshot, last_evidence
+            snap = self.runtime.snapshot()
+            last_snapshot = snap
+            missing = [
+                path for path in attachment_paths
+                if not self._attachment_visible(snap, path)
+            ]
+            send_key, send_button = self.find_first_any(snap, self._send_button_keys())
+            states = self._element_state_set(send_button)
+            upload_blockers = self._attachment_upload_blockers(snap)
+            send_button_ready = bool(
+                send_button
+                and 'enabled' in states
+                and 'focusable' in states
+            )
+            ready = bool(not missing and send_button_ready and not upload_blockers)
+            if ready:
+                consecutive_ready += 1
+            else:
+                consecutive_ready = 0
+            last_evidence = {
+                'attachments': attachment_paths,
+                'missing_attachments': missing,
+                'send_key': send_key,
+                'send_button': self._element_evidence(send_button),
+                'send_button_ready': send_button_ready,
+                'required_ready_cycles': 2,
+                'observed_ready_cycles': consecutive_ready,
+                'upload_blockers': upload_blockers,
+                'elapsed_seconds': round(time.time() - started, 2),
+            }
+            if consecutive_ready >= 2:
+                return snap
+            return None
+
+        ready_snapshot = self.runtime.wait_until(
+            _probe_ready,
+            timeout=max(float(timeout), 15.0),
+            interval=0.5,
+        )
+        return ready_snapshot, last_evidence, last_snapshot
+
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         self.runtime.close_stale_dialogs()
         for file_path in request.attachments:
@@ -497,6 +600,29 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         stop_keys = self._stop_keys()
         complete_keys = self._complete_keys()
         self._generating_complete_row_y = None
+        if request.attachments:
+            upload_snap, upload_readiness, last_upload_snap = (
+                self._wait_for_attachment_upload_complete(
+                    request,
+                    timeout=max(full_timeout, 300.0),
+                )
+            )
+            attempts.append({
+                'phase': 'attachment_upload_ready',
+                **upload_readiness,
+            })
+            if upload_snap is None:
+                verify_snap = last_upload_snap or self.runtime.snapshot()
+                result.session_url_after = self.runtime.current_url() or before
+                result.add_step(
+                    'send', False,
+                    'ChatGPT attachment upload did not become send-ready before send',
+                    url_before=before,
+                    url_after=result.session_url_after,
+                    attempts=attempts,
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
 
         for attempt in (1, 2):
             send_snap = None
