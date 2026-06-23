@@ -559,28 +559,34 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             return False
 
         # VERIFY submit actually fired before declaring success (no silent success on
-        # staged-but-not-submitted state). Composer cleared (submit_button gone or disabled)
-        # OR URL transitioned to /search/<id> thread within settle. This catches cases where
-        # even a "successful" do_action(0) did not cause the web app to process the submit.
-        if not self._verify_submit_fired(before, timeout=5.0):
+        # staged-but-not-submitted state). Stop button, answer-thread URL, or composer
+        # clear are all landed signals; Deep Research with attachments can surface them
+        # after the ordinary DOM settle window.
+        submit_timeout = self._submit_fire_timeout(request)
+        submit_fired, submit_evidence = self._verify_submit_fired(
+            before,
+            timeout=submit_timeout,
+        )
+        if not submit_fired:
             result.add_step(
                 'send', False,
-                'Perplexity submit did not fire (composer not cleared and no /search/<id> thread URL within settle)',
+                'Perplexity submit did not fire (no Stop button, composer clear, or /search/<id> thread URL within settle)',
                 url_before=before,
                 url_after=self.runtime.current_url() or '',
                 submit_scope=submit_scope,
                 click_returned=click_returned,
+                submit_verification=submit_evidence,
             )
             return False
 
-        send_timeout = float(self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 60))
+        send_timeout = self._send_success_timeout()
         send_snap = self.wait_for_validation(
             'send_success',
             timeout=send_timeout,
             interval=0.6,
         )
         stop_seen = self.validation_passes(send_snap, 'send_success')
-        settled_url = self._wait_for_answer_thread_url(timeout=12.0)
+        settled_url = self._wait_for_answer_thread_url(timeout=submit_timeout)
         if not settled_url:
             result.add_step(
                 'send', False,
@@ -588,6 +594,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 url_before=before,
                 submit_scope=submit_scope,
                 click_returned=click_returned,
+                answer_thread_timeout=submit_timeout,
                 stop_seen=bool(stop_seen),
                 snapshot=send_snap.serializable(),
             )
@@ -612,6 +619,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             url_after=settled_url,
             submit_scope=submit_scope,
             click_returned=click_returned,
+            submit_verification=submit_evidence,
             stop_seen=bool(stop_seen),
             answer_thread=bool(self._is_answer_thread_url(settled_url)),
             snapshot=verify_snap.serializable(),
@@ -671,24 +679,69 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
         found = self.runtime.wait_until(_probe, timeout=timeout, interval=0.5)
         return str(found) if found else None
 
-    def _verify_submit_fired(self, before: str, *, timeout: float = 5.0) -> bool:
-        """Confirm the submit action registered: either the URL became a /search/<id>
-        answer thread, OR the submit_button is cleared (no longer present or not enabled)
-        from the composer (UI transitioned). Used after do_action(0) to avoid silent
-        success when the form stays staged on home.
-        """
+    def _send_success_timeout(self) -> float:
+        raw_timeout = self.cfg.get('validation', {}).get('send_success', {}).get('timeout', 60)
+        try:
+            return max(float(raw_timeout), self._mode_settle_timeout())
+        except (TypeError, ValueError) as exc:
+            raise ValueError('Perplexity validation.send_success.timeout must be numeric seconds') from exc
+
+    def _submit_fire_timeout(self, request: ConsultationRequest) -> float:
+        timeout = self._mode_settle_timeout()
+        settle = self.cfg.get('settle') or {}
+        if request.attachments:
+            raw_attach_ms = settle.get('attach_ms', 0) if isinstance(settle, dict) else 0
+            try:
+                timeout += max(float(int(raw_attach_ms)) / 1000.0, 0.0)
+            except (TypeError, ValueError) as exc:
+                raise ValueError('Perplexity YAML settle.attach_ms must be integer milliseconds') from exc
+        default_mode = self.cfg.get('workflow', {}).get('defaults', {}).get('mode')
+        selected_mode = str(request.selection_value('mode', default_mode) or '').strip().lower()
+        send_timeout = self._send_success_timeout()
+        if selected_mode == 'deep_research':
+            timeout = max(timeout, send_timeout)
+        return min(max(timeout, 1.0), send_timeout)
+
+    def _verify_submit_fired(self, before: str, *, timeout: float) -> tuple[bool, dict[str, object]]:
+        """Confirm the submit action registered before entering send_success wait."""
         deadline = time.time() + timeout
+        stop_key = self._stop_key()
+        last_url = self.runtime.current_url() or ''
+        last_signal = 'timeout'
         while time.time() < deadline:
             url = self.runtime.current_url() or ''
+            last_url = url
             if self._is_answer_thread_url(url) and url != before:
-                return True
-            # Composer cleared equiv: the enabled submit is gone (stop or thread view now).
+                return True, {
+                    'signal': 'answer_thread_url',
+                    'timeout': timeout,
+                    'url_after': url,
+                    'stop_key': stop_key,
+                }
             snap = self.runtime.snapshot()
+            if snap.has(stop_key):
+                return True, {
+                    'signal': 'stop_button',
+                    'timeout': timeout,
+                    'url_after': url,
+                    'stop_key': stop_key,
+                }
             btn = self.find_last(snap, 'submit_button')
             if btn is None or 'enabled' not in set(btn.states or []):
-                return True
+                return True, {
+                    'signal': 'composer_cleared',
+                    'timeout': timeout,
+                    'url_after': url,
+                    'stop_key': stop_key,
+                }
+            last_signal = 'composer_still_enabled'
             time.sleep(0.2)
-        return False
+        return False, {
+            'signal': last_signal,
+            'timeout': timeout,
+            'url_after': last_url,
+            'stop_key': stop_key,
+        }
 
     def _ensure_answer_thread(self, result: ConsultationResult) -> bool:
         current = self.runtime.current_url()
