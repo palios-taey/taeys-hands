@@ -521,53 +521,109 @@ class GrokConsultationDriver(BaseConsultationDriver):
     def extract_response(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         copy_key = self.cfg['workflow']['extract']['primary_key']
 
-        # Scroll the thread to the BOTTOM so the last Copy button is the final
-        # assistant turn and is actionable.
-        self.runtime.press('ctrl+End')
+        bottom_evidence = {
+            'focus_input': False,
+            'ctrl_end': False,
+            'scroll_to_bottom': False,
+            'scroll_document_to_bottom': False,
+        }
+        input_key = self.cfg['workflow']['prompt']['input']
+        input_el = self._focus_input()
+        bottom_evidence['focus_input'] = bool(input_el)
+        if input_el is None:
+            input_el = self.find_first(self.runtime.snapshot(), input_key)
 
-        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the Copy button on the
-        # final assistant turn can render a beat after the stop button disappears
-        # / after the scroll settles. Re-SNAPSHOT here is observation; the Copy
-        # button is NOT clicked until found ONCE below.
-        self.runtime.wait_until(
-            lambda: self.runtime.snapshot().has(copy_key),
-            timeout=10,
+        bottom_evidence['ctrl_end'] = bool(self.runtime.press('ctrl+End'))
+        time.sleep(0.5)
+        if input_el is not None:
+            bottom_evidence['scroll_to_bottom'] = bool(
+                self.runtime.scroll_to_bottom(input_el, clicks=15, max_rounds=8, settle=0.35)
+            )
+        if not bottom_evidence['scroll_to_bottom']:
+            bottom_evidence['scroll_document_to_bottom'] = bool(
+                self.runtime.scroll_document_to_bottom(clicks=12, rounds=4, settle=0.4)
+            )
+
+        snap = self.runtime.wait_until(
+            lambda: (
+                current
+                if (current := self.runtime.snapshot()).has(copy_key)
+                else None
+            ),
+            timeout=12,
             interval=0.4,
+        ) or self.runtime.snapshot()
+        copy_buttons = sorted(
+            (snap.mapped or {}).get(copy_key) or [],
+            key=lambda item: (
+                item.y is not None,
+                item.y if item.y is not None else -1,
+                item.x is not None,
+                item.x if item.x is not None else -1,
+            ),
+            reverse=True,
         )
-
-        snap = self.runtime.snapshot()
-        copy_button = self.find_last(snap, copy_key)
-        if not copy_button:
+        if not copy_buttons:
             result.add_step('extract', False, 'Grok copy button not found',
+                            bottom_evidence=bottom_evidence,
                             snapshot=snap.serializable())
             return False
 
-        self.runtime.write_clipboard('')
-        # Click the Copy button via its AT-SPI element action (never raw x/y).
-        if not self.runtime.click(copy_button, strategy='atspi_only'):
-            result.add_step('extract', False, 'Grok copy button AT-SPI action failed',
-                            snapshot=snap.serializable())
-            return False
+        prompt_norm = self._normalized_text(request.message)
+        attempts = []
+        for index_from_bottom, copy_button in enumerate(copy_buttons):
+            self.runtime.write_clipboard('')
+            scrolled = self.runtime.scroll_element_into_view(copy_button)
+            clicked = self.runtime.click(copy_button, strategy='atspi_only')
+            if clicked:
+                self.runtime.wait_until(
+                    lambda: bool(self.runtime.read_clipboard().strip()),
+                    timeout=4,
+                    interval=0.3,
+                )
+            content = self.runtime.read_clipboard().strip()
+            content_norm = self._normalized_text(content)
+            prompt_echo = (
+                self._is_prompt_echo(content, request)
+                or bool(prompt_norm and content_norm.startswith(prompt_norm))
+            )
+            valid = bool(content) and not prompt_echo
+            attempt = {
+                'index_from_bottom': index_from_bottom,
+                'scrolled_into_view': scrolled,
+                'clicked': clicked,
+                'characters': len(content),
+                'prompt_echo': prompt_echo,
+                'element': copy_button.serializable(),
+                'preview': content[:120],
+            }
+            attempts.append(attempt)
+            if valid:
+                result.response_text = content
+                result.add_step(
+                    'extract', True,
+                    f'Grok response copied ({len(content)} chars)',
+                    characters=len(content),
+                    prompt_len=len(request.message),
+                    selected_index_from_bottom=index_from_bottom,
+                    copy_button_count=len(copy_buttons),
+                    bottom_evidence=bottom_evidence,
+                    attempts=attempts,
+                    preview=content[:200],
+                )
+                return True
 
-        # ONE bounded readiness wait (DRIVER_CONTRACT §E) — the copy button's
-        # clipboard write completes a beat after the element action returns;
-        # reading immediately yields 0 chars. Re-READING the clipboard is
-        # observation (the copy button is NOT re-clicked), so we poll until it
-        # populates, then read ONCE. Still empty after the wait -> real STOP.
-        self.runtime.wait_until(
-            lambda: bool(self.runtime.read_clipboard().strip()),
-            timeout=4,
-            interval=0.3,
+        result.response_text = ''
+        result.add_step(
+            'extract', False,
+            'Grok copy buttons did not yield non-echo response content',
+            prompt_len=len(request.message),
+            copy_button_count=len(copy_buttons),
+            bottom_evidence=bottom_evidence,
+            attempts=attempts,
+            snapshot=snap.serializable(),
         )
-
-        content = self.runtime.read_clipboard().strip()
-        result.response_text = content
-        # Validate the extract is real: non-empty, longer than the prompt, not an echo.
-        verified = bool(content) and content != request.message and len(content) > len(request.message)
-        result.add_step('extract', verified, f'Grok response copied ({len(content)} chars)',
-                        characters=len(content), prompt_len=len(request.message),
-                        preview=content[:200])
-        return verified
+        return False
 
     # ------------------------------------------------------------------
     # Step 8 — store
