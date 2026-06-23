@@ -19,6 +19,7 @@ import os
 import time
 from urllib.parse import urlparse
 
+from consultation_v2 import display_readiness
 from consultation_v2.drivers.base import BaseConsultationDriver
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
 
@@ -180,6 +181,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             input_text, input_text_observed, input_text_source = self._input_text(input_el)
             input_observed_empty = bool(input_text_observed and input_text == '')
             input_editable = 'editable' in input_states
+            remove_attachment_present = snap.has('remove_attachment')
             current_url = (self.runtime.current_url() or snap.url or '').strip()
             fresh_url = self._is_fresh_chat_url(current_url)
             last_evidence = {
@@ -195,19 +197,44 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 'input_text_observed': input_text_observed,
                 'input_text_source': input_text_source,
                 'input_text_length': len(input_text),
+                'remove_attachment_present': remove_attachment_present,
                 'optional_present': self._page_ready_present_optional_keys(snap),
             }
-            if not (fresh_url and input_el is not None and input_editable):
+            if not (
+                fresh_url
+                and input_el is not None
+                and input_editable
+                and input_observed_empty
+                and not remove_attachment_present
+            ):
                 return None
             return snap
 
         matched = self.runtime.wait_until(_probe, timeout=max(float(timeout), 15.0), interval=0.4)
         if isinstance(matched, Snapshot):
+            readiness = display_readiness.check(self.platform)
+            readiness_ok = (
+                bool(readiness.get('ready'))
+                and readiness.get('windows') == 1
+                and readiness.get('tabs') == 1
+            )
+            if not readiness_ok:
+                result.add_step(
+                    'page_ready',
+                    False,
+                    'Grok fresh composer ready but display topology is not isolated',
+                    elapsed_seconds=round(time.time() - started, 2),
+                    readiness=readiness,
+                    snapshot=matched.serializable(),
+                    **last_evidence,
+                )
+                return False
             result.add_step(
                 'page_ready',
                 True,
                 'Grok fresh composer ready after navigation',
                 elapsed_seconds=round(time.time() - started, 2),
+                readiness=readiness,
                 snapshot=matched.serializable(),
                 **last_evidence,
             )

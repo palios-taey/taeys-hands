@@ -54,7 +54,12 @@ def normalize_choice(raw: Any) -> Choice:
 
 
 def build_selection_plan(request: ConsultationRequest) -> list[dict[str, Any]]:
-    menus = selection_menus(request.platform)
+    cfg = load_platform_yaml(request.platform)
+    selection = ((cfg.get('workflow') or {}).get('selection') or {})
+    menus = selection.get('menus') or {}
+    if not isinstance(menus, dict) or not menus:
+        raise SelectionPlanError((f'{request.platform} workflow.selection.menus is not declared',))
+    defaults = (cfg.get('workflow') or {}).get('defaults') or {}
     selections = {
         str(menu_key): normalize_choice(choice)
         for menu_key, choice in (request.selections or {}).items()
@@ -66,6 +71,7 @@ def build_selection_plan(request: ConsultationRequest) -> list[dict[str, Any]]:
             findings.append(f'unknown selection menu {menu_key!r}')
 
     required = _required_menus(menus, followup=bool(request.session_url))
+    _seed_default_selections(selections, defaults, required)
     for menu_key in required:
         if menu_key not in selections:
             findings.append(f'required selection menu {menu_key!r} is absent')
@@ -82,6 +88,22 @@ def build_selection_plan(request: ConsultationRequest) -> list[dict[str, Any]]:
     if findings:
         raise SelectionPlanError(tuple(findings))
     return plan
+
+
+def _seed_default_selections(
+    selections: dict[str, Choice],
+    defaults: dict[str, Any],
+    required: tuple[str, ...],
+) -> None:
+    if not isinstance(defaults, dict):
+        return
+    for menu_key in required:
+        if menu_key in selections or menu_key not in defaults:
+            continue
+        value = defaults.get(menu_key)
+        if value is None:
+            continue
+        selections[menu_key] = Choice(value=value, because='workflow default')
 
 
 def selection_plan_record(plan: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -141,11 +163,8 @@ def _plan_menu(
         findings.append(f'selection menu {menu_key!r} value must be a non-empty option/default/none')
         return []
     value = value.strip()
-    if select_kind == 'multi' and value == 'default':
-        findings.append(f'selection menu {menu_key!r} is multi-select and must receive a list or none')
-        return []
-    if select_kind == 'multi' and value != 'none':
-        findings.append(f'selection menu {menu_key!r} is multi-select and must receive a list or none')
+    if select_kind == 'multi' and value not in {'default', 'none'}:
+        findings.append(f'selection menu {menu_key!r} is multi-select and must receive a list, default, or none')
         return []
 
     if value in {'default', 'none'}:

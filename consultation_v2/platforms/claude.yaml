@@ -297,6 +297,14 @@ tree:
       name: Paste GitHub URL
       role: push button
       scope: github_modal
+    research_connector_from_gmail_list:
+      name: From Gmail
+      role: list item
+      scope: connector_modal
+    research_connector_from_gmail_button:
+      name: From Gmail
+      role: push button
+      scope: connector_modal
     skills:
       name: Skills
       role: menu item
@@ -385,7 +393,8 @@ workflow:
   defaults:
     model: null
     mode: extended_thinking
-    tools: []
+    tools:
+      - web_search
   selection:
     menus:
       model:
@@ -456,8 +465,8 @@ workflow:
             click_strategy: coordinate_only
           web_search:
             element: tool_web_search
-        default_for_fresh: none
-        example_rationale: No Claude tools are needed because the request is fully answered from supplied context.
+        default_for_fresh: web_search
+        example_rationale: Web access is enabled by default; Research remains opt-in for report-style investigations.
   attachment:
     trigger: toggle_menu
     trigger_click_strategy: coordinate_only
