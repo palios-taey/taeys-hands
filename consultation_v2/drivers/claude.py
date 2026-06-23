@@ -1210,25 +1210,35 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                     continue
                 time.sleep(2.5)
                 segment = self.runtime.read_clipboard().strip()
-                if segment and not self._is_prompt_echo(segment, request):
-                    copied.append((segment, target))
-                elif segment:
-                    result.add_step(
-                        'extract_primary_echo_rejected',
-                        True,
-                        'Claude copied prompt echo; continuing response-copy search',
-                        characters=len(segment),
-                        preview=segment[:200],
+                if segment:
+                    if self.reject_prompt_echo_response(
+                        request,
+                        result,
+                        segment,
+                        step='extract_primary',
+                        source='claude_copy_candidate',
                         attempt=attempt + 1,
                         copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
-                    )
+                    ):
+                        continue
+                    copied.append((segment, target))
                 else:
                     empty_copies += 1
             segments = self._dedupe_response_segments([segment for segment, _ in copied])
             if segments:
                 content = '\n\n'.join(segments)
                 target = copied[-1][1]
-                result.response_text = content
+                if not self.set_response_text_if_not_prompt_echo(
+                    request,
+                    result,
+                    content,
+                    step='extract_primary',
+                    source='claude_copy_response',
+                    attempt=attempt + 1,
+                    copy_button={k: target.get(k) for k in ('name', 'role', 'x', 'y')},
+                    copied_segments=len(segments),
+                ):
+                    return False
                 if not self.extract_thinking_notes(
                     request,
                     result,
@@ -1388,7 +1398,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             kind='thinking_notes',
             metadata={'source': 'show_thinking_copy_button'},
         ))
-        result.response_text = f'<thinking>\n{thinking_text}\n</thinking>\n\n{response_text}'
+        combined_response = f'<thinking>\n{thinking_text}\n</thinking>\n\n{response_text}'
+        if not self.set_response_text_if_not_prompt_echo(
+            request,
+            result,
+            combined_response,
+            step='extract_thinking',
+            source='claude_thinking_plus_response',
+        ):
+            return False
         result.add_step(
             'extract_thinking',
             True,

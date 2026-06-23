@@ -748,14 +748,15 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             characters=len(content),
             preview=content[:200],
         )
-        if self._is_prompt_echo(content, request):
-            result.add_step(
-                'extract_primary', False,
-                'Perplexity extraction matched the submitted prompt; refusing prompt echo',
-                **step_evidence,
-            )
+        if not self.set_response_text_if_not_prompt_echo(
+            request,
+            result,
+            content,
+            step='extract_primary',
+            source='perplexity_copy_response',
+            **step_evidence,
+        ):
             return False
-        result.response_text = content
         result.add_step(
             'extract_primary', True,
             message,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from consultation_v2.yaml_contract import load_platform_yaml
 # (FLOW Monitor Contract: stop-present = generating; the timeout is the LOUD
 # bound for a genuinely-stuck run, never a content/elapsed completion heuristic.)
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
+PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt — echo, not a response'
 
 
 class BaseConsultationDriver(ABC):
@@ -2017,6 +2019,14 @@ class BaseConsultationDriver(ABC):
         response_text: str,
         attachments: Optional[List[str]] = None,
     ) -> dict:
+        echo = self._prompt_echo_evidence(response_text, user_prompt)
+        if echo.get('is_echo'):
+            return {
+                'stored': False,
+                'reason': 'prompt_echo_guard',
+                'error': PROMPT_ECHO_FAILURE_MESSAGE,
+                'echo_guard': echo,
+            }
         return primitives.store_consultation(
             platform=self.platform,
             url=url,
@@ -2144,20 +2154,134 @@ class BaseConsultationDriver(ABC):
     def _normalized_text(text: str) -> str:
         return ' '.join((text or '').split())
 
-    def _is_prompt_echo(self, content: str, request: ConsultationRequest) -> bool:
+    @staticmethod
+    def _echo_tokens(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9][a-z0-9_-]{3,}", (text or '').lower()))
+
+    def _prompt_echo_evidence(
+        self,
+        content: str,
+        request_or_prompt: ConsultationRequest | str,
+    ) -> dict[str, Any]:
+        prompt_text = (
+            request_or_prompt.message
+            if isinstance(request_or_prompt, ConsultationRequest)
+            else str(request_or_prompt or '')
+        )
         content_norm = self._normalized_text(content)
-        prompt_norm = self._normalized_text(request.message)
+        prompt_norm = self._normalized_text(prompt_text)
+        evidence: dict[str, Any] = {
+            'is_echo': False,
+            'reason': '',
+            'content_chars': len(content_norm),
+            'prompt_chars': len(prompt_norm),
+        }
         if len(content_norm) < 80 or not prompt_norm:
-            return False
+            return evidence
+
+        content_lower = content_norm.lower()
+        prompt_lower = prompt_norm.lower()
         if content_norm == prompt_norm:
-            return True
+            evidence.update(is_echo=True, reason='exact_match')
+            return evidence
         if content_norm in prompt_norm and len(content_norm) >= 160:
-            return True
+            evidence.update(is_echo=True, reason='content_substring_of_prompt')
+            return evidence
         if prompt_norm in content_norm and len(content_norm) <= int(len(prompt_norm) * 1.25):
-            return True
+            evidence.update(is_echo=True, reason='prompt_with_only_small_appendix')
+            return evidence
         if len(prompt_norm) >= 120 and content_norm.startswith(prompt_norm[:120]):
-            return True
-        return False
+            evidence.update(is_echo=True, reason='prompt_prefix_match')
+            return evidence
+
+        content_tokens = self._echo_tokens(content_norm)
+        prompt_tokens = self._echo_tokens(prompt_norm)
+        if content_tokens and prompt_tokens:
+            shared_tokens = content_tokens & prompt_tokens
+            content_overlap = len(shared_tokens) / len(content_tokens)
+            prompt_overlap = len(shared_tokens) / len(prompt_tokens)
+            evidence.update(
+                content_token_count=len(content_tokens),
+                prompt_token_count=len(prompt_tokens),
+                shared_token_count=len(shared_tokens),
+                content_token_overlap=round(content_overlap, 4),
+                prompt_token_overlap=round(prompt_overlap, 4),
+            )
+            if (
+                len(content_tokens) >= 25
+                and content_overlap >= 0.82
+                and prompt_overlap >= 0.20
+                and len(content_norm) <= int(len(prompt_norm) * 1.35)
+            ):
+                evidence.update(is_echo=True, reason='high_prompt_token_overlap')
+                return evidence
+
+        distinctive_markers = (
+            'see the attached file for full ground truth',
+            'full ground truth',
+            'attached file for full',
+            'answer a-f',
+            'questions a-f',
+        )
+        markers = [
+            marker for marker in distinctive_markers
+            if marker in prompt_lower and marker in content_lower
+        ]
+        if markers:
+            evidence['distinctive_prompt_markers'] = markers
+            content_overlap = float(evidence.get('content_token_overlap') or 0.0)
+            if len(content_norm) <= int(len(prompt_norm) * 1.35) and content_overlap >= 0.65:
+                evidence.update(is_echo=True, reason='distinctive_prompt_marker_overlap')
+                return evidence
+        return evidence
+
+    def _is_prompt_echo(self, content: str, request: ConsultationRequest) -> bool:
+        return bool(self._prompt_echo_evidence(content, request).get('is_echo'))
+
+    def reject_prompt_echo_response(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        content: str,
+        *,
+        step: str = 'extract_primary',
+        source: str = '',
+        **evidence: Any,
+    ) -> bool:
+        echo = self._prompt_echo_evidence(content, request)
+        if not echo.get('is_echo'):
+            return False
+        result.response_text = ''
+        step_evidence = dict(evidence)
+        if source:
+            step_evidence.setdefault('source', source)
+        step_evidence.setdefault('characters', len(content or ''))
+        step_evidence.setdefault('preview', (content or '')[:200])
+        step_evidence['echo_guard'] = echo
+        result.add_step(step, False, PROMPT_ECHO_FAILURE_MESSAGE, **step_evidence)
+        return True
+
+    def set_response_text_if_not_prompt_echo(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        content: str,
+        *,
+        step: str = 'extract_primary',
+        source: str = '',
+        **evidence: Any,
+    ) -> bool:
+        if self.reject_prompt_echo_response(
+            request,
+            result,
+            content,
+            step=step,
+            source=source,
+            **evidence,
+        ):
+            return False
+        result.response_text = content
+        return True
 
     @staticmethod
     def _urls_equivalent(left: str | None, right: str | None) -> bool:

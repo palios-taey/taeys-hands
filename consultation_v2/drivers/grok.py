@@ -597,7 +597,6 @@ class GrokConsultationDriver(BaseConsultationDriver):
                             snapshot=snap.serializable())
             return False
 
-        prompt_norm = self._normalized_text(request.message)
         attempts = []
         for index_from_bottom, copy_button in enumerate(copy_buttons):
             self.runtime.write_clipboard('')
@@ -610,11 +609,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                     interval=0.3,
                 )
             content = self.runtime.read_clipboard().strip()
-            content_norm = self._normalized_text(content)
-            prompt_echo = (
-                self._is_prompt_echo(content, request)
-                or bool(prompt_norm and content_norm.startswith(prompt_norm))
-            )
+            prompt_echo = self._is_prompt_echo(content, request)
             valid = bool(content) and not prompt_echo
             attempt = {
                 'index_from_bottom': index_from_bottom,
@@ -626,8 +621,30 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 'preview': content[:120],
             }
             attempts.append(attempt)
+            if content and prompt_echo:
+                self.reject_prompt_echo_response(
+                    request,
+                    result,
+                    content,
+                    step='extract',
+                    source='grok_copy_candidate',
+                    index_from_bottom=index_from_bottom,
+                    copy_button_count=len(copy_buttons),
+                    element=copy_button.serializable(),
+                )
+                continue
             if valid:
-                result.response_text = content
+                if not self.set_response_text_if_not_prompt_echo(
+                    request,
+                    result,
+                    content,
+                    step='extract',
+                    source='grok_copy_response',
+                    index_from_bottom=index_from_bottom,
+                    copy_button_count=len(copy_buttons),
+                    element=copy_button.serializable(),
+                ):
+                    continue
                 result.add_step(
                     'extract', True,
                     f'Grok response copied ({len(content)} chars)',

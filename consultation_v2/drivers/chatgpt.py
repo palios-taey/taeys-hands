@@ -1522,16 +1522,27 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             direct_evidence = self._direct_response_text_from_tree(all_elements, request)
             if direct_evidence.get('ok'):
                 content = str(direct_evidence.pop('content')).strip()
-                result.response_text = content
-                result.add_step(
-                    'extract_primary',
-                    True,
-                    f'ChatGPT response read from assistant tree text ({len(content)} chars, attempt {attempt + 1})',
+                if not self.set_response_text_if_not_prompt_echo(
+                    request,
+                    result,
+                    content,
+                    step='extract_primary',
+                    source='chatgpt_direct_tree_text',
                     attempt=attempt + 1,
-                    scroll=scroll_evidence,
                     direct=direct_evidence,
-                )
-                return True
+                ):
+                    direct_evidence['reason'] = 'prompt_echo'
+                    direct_evidence['ok'] = False
+                else:
+                    result.add_step(
+                        'extract_primary',
+                        True,
+                        f'ChatGPT response read from assistant tree text ({len(content)} chars, attempt {attempt + 1})',
+                        attempt=attempt + 1,
+                        scroll=scroll_evidence,
+                        direct=direct_evidence,
+                    )
+                    return True
             result.add_step(
                 'extract_direct_probe',
                 False,
@@ -1594,6 +1605,22 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     continue
                 time.sleep(1.2)
                 content = (clipboard.read() or '').strip()
+                if content and self.reject_prompt_echo_response(
+                    request,
+                    result,
+                    content,
+                    step='extract_primary',
+                    source='chatgpt_copy_candidate',
+                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
+                    copy_buttons_found=len(copy_buttons),
+                ):
+                    rejected_copies.append({
+                        'findings': ['prompt_echo'],
+                        'characters': len(content),
+                        'preview': content[:200],
+                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
+                    })
+                    continue
                 findings = self._response_content_findings(
                     content,
                     request,
@@ -1607,7 +1634,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                         'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
                     })
                     continue
-                result.response_text = content
+                if not self.set_response_text_if_not_prompt_echo(
+                    request,
+                    result,
+                    content,
+                    step='extract_primary',
+                    source='chatgpt_copy_response',
+                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
+                    copy_buttons_found=len(copy_buttons),
+                ):
+                    continue
                 result.add_step(
                     'extract_primary', True,
                     f'ChatGPT response copied from assistant message Copy ({len(content)} chars, attempt {attempt + 1})',

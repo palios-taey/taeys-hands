@@ -188,6 +188,19 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # --- Phase 3: Run driver ---
     driver = _REGISTRY[request.platform]()
     result = driver.run(request)
+    if result.ok and result.response_text and driver.reject_prompt_echo_response(
+        request,
+        result,
+        result.response_text,
+        step='extract_primary',
+        source='orchestrator_delivery_gate',
+    ):
+        result.ok = False
+        logger.error(
+            'Prompt echo blocked at orchestrator delivery gate for %s purpose=%r',
+            request.platform,
+            request.purpose,
+        )
 
     # extraction_done milestone (FLOW §8): the driver returned a real extracted
     # response. Checkpointed so a re-run that crashes between extraction and

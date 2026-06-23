@@ -350,12 +350,23 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 return False
             time.sleep(0.8)
             content = self.runtime.read_clipboard().strip()
-            result.response_text = content
-            verified = bool(content)
-            result.add_step('extract_primary', verified,
+            if not content:
+                result.add_step('extract_primary', False,
+                                'Gemini Deep Research Share & Export -> Copy returned empty clipboard',
+                                characters=0, preview='')
+                return False
+            if not self.set_response_text_if_not_prompt_echo(
+                request,
+                result,
+                content,
+                step='extract_primary',
+                source='gemini_deep_research_copy',
+            ):
+                return False
+            result.add_step('extract_primary', True,
                             'Gemini Deep Research report copied via Share & Export -> Copy',
                             characters=len(content), preview=content[:200])
-            return verified
+            return True
         # RULE: scroll to bottom before extract — a long response's Copy button
         # sits below the fold and is not in the AT-SPI tree until on-screen.
         self.runtime.scroll_to_bottom(self.find_first(self.runtime.snapshot(), 'input'))
@@ -373,12 +384,24 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             return False
         time.sleep(0.4)
         content = self.runtime.read_clipboard().strip()
-        result.response_text = content
-        verified = bool(content)
-        result.add_step('extract_primary', verified,
+        if not content:
+            result.add_step('extract_primary', False,
+                            'Gemini response Copy returned empty clipboard',
+                            characters=0, preview='')
+            return False
+        if not self.set_response_text_if_not_prompt_echo(
+            request,
+            result,
+            content,
+            step='extract_primary',
+            source='gemini_copy_response',
+            copy_button=copy_button.serializable(),
+        ):
+            return False
+        result.add_step('extract_primary', True,
                         'Gemini response copied to clipboard',
                         characters=len(content), preview=content[:200])
-        return verified
+        return True
 
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
