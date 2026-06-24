@@ -544,6 +544,7 @@ workflow:
       - stop_streaming_button
       - stop_answering_button
     sustained_stop_gone_cycles: 4
+    post_complete_quiet_cycles: 8
     intermediate_states:
       - name: github_connector_permission
         detect:

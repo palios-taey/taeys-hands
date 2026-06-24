@@ -255,6 +255,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         except (TypeError, ValueError):
             return 4
 
+    def _post_complete_quiet_cycles(self) -> int:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        raw = monitor_cfg.get('post_complete_quiet_cycles', 8)
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 8
+
     @staticmethod
     def _element_y(element: ElementRef) -> int | None:
         return int(element.y) if element.y is not None else None
@@ -1226,6 +1234,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         complete_signal_y: int | None = None
         stop_read_samples: list[dict[str, object]] = []
         last_stop_reading: dict[str, object] = {}
+        completion_quiet_samples: list[dict[str, object]] = []
+        completion_quiet_resets: dict[str, int] = {}
+        post_complete_quiet_cycles = self._post_complete_quiet_cycles()
 
         def _record_stop_reading(evidence: dict[str, object]) -> None:
             nonlocal last_stop_reading
@@ -1240,6 +1251,73 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 or not stop_read_samples
             ):
                 stop_read_samples.append(compact)
+
+        def _record_completion_quiet_sample(sample: dict[str, object]) -> None:
+            if len(completion_quiet_samples) < 16:
+                completion_quiet_samples.append(sample)
+
+        def _record_completion_quiet_reset(reason: str) -> None:
+            completion_quiet_resets[reason] = completion_quiet_resets.get(reason, 0) + 1
+
+        def _confirm_completion_quiet_window() -> tuple[Snapshot | None, int | None, str]:
+            nonlocal observed_stop, intermediate_failed, generation_floor_y
+            last_snapshot: Snapshot | None = None
+            last_signal_y: int | None = None
+            for cycle in range(1, post_complete_quiet_cycles + 1):
+                time.sleep(1.0)
+                stop_present, snap, stop_reading = self._read_stop_state(
+                    stop_keys,
+                    confirm_absence=True,
+                )
+                _record_stop_reading(stop_reading)
+                observed_stop = observed_stop or stop_present
+                if stop_present:
+                    detector.observe(stop_present=True)
+                    row_y = self._bottom_action_row_y(snap, complete_keys)
+                    if row_y is not None:
+                        generation_floor_y = max(generation_floor_y or row_y, row_y)
+                    _record_completion_quiet_sample({
+                        'cycle': cycle,
+                        'stop_present': True,
+                        'complete_signal_present': False,
+                        'reason': 'stop_reappeared',
+                    })
+                    return None, None, 'stop_reappeared'
+
+                handled, failed = self._handle_monitor_intermediate_state(
+                    snap,
+                    result,
+                    intermediate_actions,
+                )
+                if handled:
+                    self._reset_detector_after_intermediate(detector)
+                    intermediate_failed = failed
+                    reason = 'intermediate_failed' if failed else 'intermediate_state'
+                    _record_completion_quiet_sample({
+                        'cycle': cycle,
+                        'stop_present': False,
+                        'complete_signal_present': False,
+                        'reason': reason,
+                    })
+                    return None, None, reason
+
+                complete_signal_present, signal_y = self._complete_signal_present(
+                    snap,
+                    complete_keys,
+                    generation_floor_y,
+                )
+                _record_completion_quiet_sample({
+                    'cycle': cycle,
+                    'stop_present': False,
+                    'complete_signal_present': bool(complete_signal_present),
+                    'complete_signal_y': signal_y,
+                    'reason': 'quiet' if complete_signal_present else 'complete_signal_missing',
+                })
+                if not complete_signal_present:
+                    return None, None, 'complete_signal_missing'
+                last_snapshot = snap
+                last_signal_y = signal_y
+            return last_snapshot, last_signal_y, 'quiet'
 
         def _poll() -> bool:
             nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, terminal_snapshot
@@ -1279,10 +1357,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             )
             verdict = detector.observe(stop_present=stop_present)
             if verdict == COMPLETE and complete_signal_present:
-                completed = True
-                terminal_snapshot = snap
-                complete_signal_y = signal_y
-                return True
+                quiet_snapshot, quiet_signal_y, quiet_reason = _confirm_completion_quiet_window()
+                if quiet_snapshot is not None:
+                    completed = True
+                    terminal_snapshot = quiet_snapshot
+                    complete_signal_y = quiet_signal_y
+                    return True
+                _record_completion_quiet_reset(quiet_reason)
+                return False
             if verdict == COMPLETE:
                 stop_gone_without_complete_signal += 1
             return False
@@ -1380,6 +1462,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             intermediate_actions=intermediate_actions,
             stop_gone_cycles=detector.stop_cycles,
             required_stop_gone_cycles=detector.required_stop_cycles,
+            post_complete_quiet_cycles=post_complete_quiet_cycles,
+            completion_quiet_resets=completion_quiet_resets,
+            completion_quiet_samples=completion_quiet_samples,
             stop_gone_without_complete_signal=stop_gone_without_complete_signal,
             stop_read_samples=stop_read_samples,
             last_stop_reading=last_stop_reading,
