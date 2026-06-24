@@ -68,3 +68,21 @@ This doc records the exact path per platform. When YAML extract sequences need u
 ## Why this matters
 
 Training corpora are built from these extractions. Prompt contamination in the corpus TRAINS the model to re-emit the prompt pattern. Incomplete reports (summary only) lose the bulk of the cited sources. Both failure modes appear silent to the caller — file size looks reasonable, but content is wrong.
+
+## Claude markdown artifacts (canvas docs, e.g. a spec/doc Claude builds)
+
+**Symptom**: Claude builds the deliverable as an artifact (right-panel canvas, chip shows `<name>.md / Download`). The chat-bubble extract (`extract_primary`) captures only Claude's narration + a closing SUMMARY of the artifact — NOT the artifact body. Do NOT pass the narration off as the content.
+
+**What does NOT work** (verified 2026-06-24, Claude voice-spec artifact on :3):
+- `extract_additional` raw artifact path / `serialize_artifacts` — returned 0 (the artifact's Copy/Download buttons + body text do NOT surface in `snapshot()` or `menu_snapshot()`, even on hover — React portal, no AT-SPI extents).
+- The ChatGPT-canvas "len(name)>2000 push-button" trick — Claude artifact text is NOT in a push-button `name`.
+
+**What WORKS** (the documented recovery):
+1. `focus_firefox`; click into the artifact/right panel (e.g. mousemove to the right-half + click).
+2. `Ctrl+A` then `Ctrl+C` (this page-selects: ~47KB incl. the chat narration AND the rendered artifact body).
+3. Read the clipboard (`xsel -bo`).
+4. LOCATE the artifact-spec START marker within the clip — first of the document's own headings (e.g. `# <TITLE>`, the doc's `Version:` line, `## §0`, the canonical first header). Slice from there.
+5. STRIP trailing Claude chrome: cut at `Claude is AI and can make mistakes` / `Write a message` / `Reply to Claude`.
+6. Verify: result starts with the artifact heading (not "Claude finished the response"/narration), length ≫ the narration.
+
+Output: the full artifact markdown (40K+ chars typical). This is the path until `extract_additional` implements step 4-5 (locate-marker-within-page-select + strip-chrome); raw panel-copy alone is insufficient.
