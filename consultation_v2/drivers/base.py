@@ -138,6 +138,20 @@ class BaseConsultationDriver(ABC):
             discrepancies = recovered_discrepancies
             missing = recovered_missing
             by_role = recovered_by_role
+            if surface == 'base' and discrepancies and not missing:
+                result.add_step(
+                    'tree_conformance_drift',
+                    True,
+                    (
+                        f'{self.platform} base conformance observed unknown extra '
+                        'element(s); expected elements present, proceeding'
+                    ),
+                    surface=surface,
+                    unknown=discrepancies,
+                    by_role=by_role,
+                    snapshot=snap.serializable(),
+                )
+                return True
             if dismissed:
                 result.add_step(
                     'popup_recovery',

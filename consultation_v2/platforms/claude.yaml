@@ -176,6 +176,10 @@ tree:
       name: Add files, connectors, and more
       role: push button
       scope: base.composer
+    gmail_connector_suggestion:
+      name: From Gmail
+      role: push button
+      scope: base.composer
     research_mode:
       name: Research mode
       role: toggle button
