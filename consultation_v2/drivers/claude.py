@@ -1514,20 +1514,16 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
         expected_names = self._artifact_names_from_response(result.response_text)
-        artifact_expected = bool(expected_names) or self._response_expects_artifact(result.response_text)
         attempts: list[dict] = []
-        copied = None
-
-        if artifact_expected:
-            self.runtime._sync_platform_io_display()
+        self.runtime._sync_platform_io_display()
+        copied = self._copy_artifact_from_focused_panel(
+            request,
+            result,
+            expected_names,
+            attempts,
+        )
+        if copied is None:
             copied = self._copy_artifact_from_tree_controls(
-                request,
-                result,
-                expected_names,
-                attempts,
-            )
-        if artifact_expected and copied is None:
-            copied = self._copy_artifact_from_focused_panel(
                 request,
                 result,
                 expected_names,
@@ -1553,19 +1549,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             )
             return True
 
-        if artifact_expected:
-            result.add_step(
-                'extract_additional',
-                False,
-                'Claude response referenced an artifact but artifact content could not be copied',
-                expected_artifacts=expected_names,
-                attempts=attempts,
-            )
-            return False
-
         result.add_step(
             'extract_additional', True,
-            'Claude response did not expose an artifact to extract',
+            'Claude artifact extraction found no artifact marker in acquired clipboard',
             expected_artifacts=expected_names,
             attempts=attempts,
             artifacts=[],
@@ -1800,7 +1786,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                         **metadata,
                     },
                 }
-        if self._valid_artifact_text(stripped, request, result, expected_names):
+        if expected_names and self._valid_artifact_text(stripped, request, result, expected_names):
             return {
                 'content': stripped,
                 'metadata': {
