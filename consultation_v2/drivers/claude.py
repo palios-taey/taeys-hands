@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 
 from consultation_v2.completion import COMPLETE, CompletionDetector
@@ -98,6 +99,39 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         'begin',
         'middle',
         'end',
+    )
+    _ARTIFACT_EXTENSIONS = (
+        'md',
+        'markdown',
+        'txt',
+        'json',
+        'yaml',
+        'yml',
+        'py',
+        'js',
+        'ts',
+        'tsx',
+        'html',
+        'css',
+        'csv',
+    )
+    _ARTIFACT_COPY_NAMES = (
+        'Copy',
+        'Copy contents',
+        'Copy artifact',
+        'Copy markdown',
+        'Copy Markdown',
+    )
+    _ARTIFACT_EXPECTED_PHRASES = (
+        'created an artifact',
+        'created the artifact',
+        'created a markdown artifact',
+        'created the markdown artifact',
+        'artifact has been created',
+        'artifact is ready',
+        'in the artifact',
+        'open the artifact',
+        'artifacts panel',
     )
 
     @staticmethod
@@ -1468,11 +1502,315 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        expected_names = self._artifact_names_from_response(result.response_text)
+        artifact_expected = bool(expected_names) or self._response_expects_artifact(result.response_text)
+        attempts: list[dict] = []
+        copied = None
+
+        if artifact_expected:
+            copied = self._copy_artifact_from_tree_controls(
+                request,
+                result,
+                expected_names,
+                attempts,
+            )
+        if artifact_expected and copied is None:
+            copied = self._copy_artifact_from_focused_panel(
+                request,
+                result,
+                expected_names,
+                attempts,
+            )
+
+        if copied is not None:
+            content = str(copied['content']).strip()
+            artifact = ExtractedArtifact(
+                name=self._artifact_name(expected_names, content),
+                content=content,
+                kind='artifact',
+                metadata=dict(copied['metadata']),
+            )
+            result.extractions.append(artifact)
+            result.add_step(
+                'extract_additional',
+                True,
+                f'Claude artifact copied ({len(content)} chars)',
+                expected_artifacts=expected_names,
+                attempts=attempts,
+                artifacts=[artifact.serializable()],
+            )
+            return True
+
+        if artifact_expected:
+            result.add_step(
+                'extract_additional',
+                False,
+                'Claude response referenced an artifact but artifact content could not be copied',
+                expected_artifacts=expected_names,
+                attempts=attempts,
+            )
+            return False
+
         result.add_step(
             'extract_additional', True,
-            'Claude artifact-specific extraction needs one live-label pass before enabling',
+            'Claude response did not expose an artifact to extract',
+            expected_artifacts=expected_names,
+            attempts=attempts,
+            artifacts=[],
         )
         return True
+
+    def _copy_artifact_from_tree_controls(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        expected_names: list[str],
+        attempts: list[dict],
+    ) -> dict | None:
+        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.interact import atspi_click
+        from consultation_v2.tree import find_elements as raw_find_elements
+
+        firefox = find_firefox_for_platform(self.platform)
+        if not firefox:
+            attempts.append({
+                'source': 'artifact_tree_copy_button',
+                'ok': False,
+                'reason': 'firefox_not_found',
+            })
+            return None
+        try:
+            firefox.clear_cache_single()
+        except Exception:
+            pass
+
+        elements = raw_find_elements(firefox, fence_after=[])
+        screen_width, _ = self._screen_size()
+        candidates = self._artifact_copy_candidates(elements, screen_width)
+        attempts.append({
+            'source': 'artifact_tree_copy_button_scan',
+            'ok': bool(candidates),
+            'candidates': [self._element_evidence(item) for item in candidates[:8]],
+            'elements': len(elements),
+            'screen_width': screen_width,
+        })
+        for target in candidates[:6]:
+            self.runtime.write_clipboard('')
+            time.sleep(0.2)
+            self.runtime.scroll_element_into_view(ElementRef(
+                key=None,
+                name=str(target.get('name') or ''),
+                role=str(target.get('role') or ''),
+                x=target.get('x'),
+                y=target.get('y'),
+                states=list(target.get('states') or []),
+                atspi_obj=target.get('atspi_obj'),
+            ))
+            time.sleep(0.2)
+            clicked = atspi_click(target)
+            time.sleep(1.0)
+            content = self.runtime.read_clipboard().strip()
+            valid = self._valid_artifact_text(content, request, result, expected_names)
+            attempts.append({
+                'source': 'artifact_tree_copy_button',
+                'ok': bool(valid),
+                'clicked': bool(clicked),
+                'characters': len(content),
+                'preview': content[:200],
+                'copy_button': self._element_evidence(target),
+            })
+            if clicked and valid:
+                return {
+                    'content': content,
+                    'metadata': {
+                        'source': 'claude_artifact_tree_copy_button',
+                        'copy_button': self._element_evidence(target),
+                    },
+                }
+        return None
+
+    def _copy_artifact_from_focused_panel(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        expected_names: list[str],
+        attempts: list[dict],
+    ) -> dict | None:
+        from consultation_v2 import input as _inp
+
+        screen_width, screen_height = self._screen_size()
+        if screen_width <= 0 or screen_height <= 0:
+            attempts.append({
+                'source': 'artifact_panel_focus_copy',
+                'ok': False,
+                'reason': 'screen_size_unavailable',
+            })
+            return None
+
+        self.runtime.focus_firefox()
+        time.sleep(0.2)
+        for label, x, y in self._artifact_panel_focus_points(screen_width, screen_height):
+            self.runtime.write_clipboard('')
+            clicked = bool(_inp.click_at(x, y))
+            time.sleep(0.3)
+            selected = self.runtime.press('ctrl+a')
+            time.sleep(0.15)
+            copied = self.runtime.press('ctrl+c')
+            time.sleep(0.8)
+            content = self.runtime.read_clipboard().strip()
+            valid = self._valid_artifact_text(content, request, result, expected_names)
+            attempts.append({
+                'source': 'artifact_panel_focus_copy',
+                'ok': bool(valid),
+                'point': label,
+                'x': x,
+                'y': y,
+                'clicked': clicked,
+                'selected': bool(selected),
+                'copied': bool(copied),
+                'characters': len(content),
+                'preview': content[:200],
+            })
+            if clicked and selected and copied and valid:
+                return {
+                    'content': content,
+                    'metadata': {
+                        'source': 'claude_artifact_panel_ctrl_a_copy',
+                        'focus_point': label,
+                        'x': x,
+                        'y': y,
+                    },
+                }
+        return None
+
+    def _artifact_copy_candidates(self, elements: list[dict], screen_width: int) -> list[dict]:
+        copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
+        right_edge = int(screen_width * 0.58) if screen_width > 0 else 0
+        candidates = []
+        for element in elements:
+            x = element.get('x')
+            y = element.get('y')
+            if x is None or y is None:
+                continue
+            role = str(element.get('role') or '').strip().lower()
+            if role not in {'push button', 'button', 'menu item'}:
+                continue
+            if right_edge and int(x) < right_edge:
+                continue
+            name = str(element.get('name') or '').strip()
+            if matches_spec(element, copy_spec) or name in self._ARTIFACT_COPY_NAMES:
+                candidates.append(element)
+        return sorted(
+            candidates,
+            key=lambda item: (-(int(item.get('x') or 0)), int(item.get('y') or 0)),
+        )
+
+    def _artifact_panel_focus_points(
+        self,
+        screen_width: int,
+        screen_height: int,
+    ) -> list[tuple[str, int, int]]:
+        return [
+            ('right_panel_upper_body', int(screen_width * 0.78), int(screen_height * 0.42)),
+            ('right_panel_middle_body', int(screen_width * 0.82), int(screen_height * 0.55)),
+            ('right_panel_lower_body', int(screen_width * 0.78), int(screen_height * 0.68)),
+            ('right_panel_far_body', int(screen_width * 0.90), int(screen_height * 0.50)),
+        ]
+
+    @classmethod
+    def _artifact_names_from_response(cls, text: str) -> list[str]:
+        if not text:
+            return []
+        extensions = '|'.join(re.escape(ext) for ext in cls._ARTIFACT_EXTENSIONS)
+        pattern = re.compile(
+            rf'(?<![\w./-])([A-Za-z0-9][A-Za-z0-9_. -]{{0,160}}\.(?:{extensions}))(?![\w./-])',
+            re.IGNORECASE,
+        )
+        names: list[str] = []
+        seen = set()
+        for match in pattern.finditer(text):
+            name = match.group(1).strip('`"\'()[]{}<>.,:; \n\t')
+            if '/' in name or '\\' in name:
+                name = re.split(r'[/\\]', name)[-1]
+            normalized = name.lower()
+            if name and normalized not in seen:
+                seen.add(normalized)
+                names.append(name)
+        return names
+
+    @classmethod
+    def _response_expects_artifact(cls, text: str) -> bool:
+        lowered = ' '.join((text or '').lower().split())
+        return any(phrase in lowered for phrase in cls._ARTIFACT_EXPECTED_PHRASES)
+
+    def _valid_artifact_text(
+        self,
+        content: str,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        expected_names: list[str],
+    ) -> bool:
+        stripped = (content or '').strip()
+        if len(stripped) < 80:
+            return False
+        if self._is_prompt_echo(stripped, request):
+            return False
+        normalized = ' '.join(stripped.split())
+        prompt_norm = ' '.join((request.message or '').split())
+        response_norm = ' '.join((result.response_text or '').split())
+        if prompt_norm and normalized == prompt_norm:
+            return False
+        if response_norm and normalized == response_norm:
+            return False
+        if prompt_norm and len(prompt_norm) >= 80 and normalized.startswith(prompt_norm[:80]):
+            return False
+        if response_norm and len(response_norm) >= 80 and normalized.startswith(response_norm[:80]):
+            return False
+        if prompt_norm and response_norm and prompt_norm[:80] in normalized and response_norm[:80] in normalized:
+            return False
+        if response_norm and response_norm in normalized and len(normalized) <= int(len(response_norm) * 2.0):
+            return False
+        if expected_names:
+            return True
+        markers = (
+            '\n#',
+            '\n##',
+            '\n- ',
+            '\n* ',
+            '\n```',
+            '\n|',
+            '\n---',
+        )
+        if any(marker in stripped for marker in markers):
+            return True
+        return len(stripped) >= 500 and stripped.count('\n') >= 3
+
+    @staticmethod
+    def _artifact_name(expected_names: list[str], content: str) -> str:
+        if expected_names:
+            return expected_names[0]
+        first_line = (content or '').strip().splitlines()[0:1]
+        if first_line:
+            title = first_line[0].strip().strip('#').strip()
+            if title:
+                slug = re.sub(r'[^A-Za-z0-9]+', '_', title).strip('_').lower()
+                if slug:
+                    return f'{slug[:80]}.md'
+        return 'claude_artifact.md'
+
+    @staticmethod
+    def _screen_size() -> tuple[int, int]:
+        try:
+            from consultation_v2.platforms_runtime import get_screen_size
+
+            width, height = get_screen_size()
+            return int(width), int(height)
+        except Exception:
+            return 0, 0
+
+    @staticmethod
+    def _element_evidence(element: dict) -> dict:
+        return {key: element.get(key) for key in ('name', 'role', 'x', 'y')}
 
     # ------------------------------------------------------------------
     # Store in Neo4j
