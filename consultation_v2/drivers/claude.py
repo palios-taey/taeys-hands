@@ -133,6 +133,16 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         'open the artifact',
         'artifacts panel',
     )
+    _ARTIFACT_PAGE_START_MARKERS = (
+        '# JESSE',
+        'UNIFIED MULTI-REGISTER',
+        'Version: 4.0',
+        '## §0',
+    )
+    _ARTIFACT_TRAILING_CHROME_MARKERS = (
+        'Claude is AI and can make mistakes',
+        'Write a message',
+    )
 
     @staticmethod
     def _snapshot_elements(snapshot: Snapshot) -> list[ElementRef]:
@@ -1610,21 +1620,24 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             clicked = atspi_click(target)
             time.sleep(1.0)
             content = self.runtime.read_clipboard().strip()
-            valid = self._valid_artifact_text(content, request, result, expected_names)
+            payload = self._artifact_payload_from_clipboard(content, request, result, expected_names)
             attempts.append({
                 'source': 'artifact_tree_copy_button',
-                'ok': bool(valid),
+                'ok': bool(payload),
                 'clicked': bool(clicked),
                 'characters': len(content),
                 'preview': content[:200],
+                'artifact_characters': len(payload['content']) if payload else 0,
+                'clip_transform': payload['metadata'].get('clip_transform') if payload else None,
                 'copy_button': self._element_evidence(target),
             })
-            if clicked and valid:
+            if payload:
                 return {
-                    'content': content,
+                    'content': payload['content'],
                     'metadata': {
                         'source': 'claude_artifact_tree_copy_button',
                         'copy_button': self._element_evidence(target),
+                        **payload['metadata'],
                     },
                 }
         return None
@@ -1658,10 +1671,10 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             copied = self.runtime.press('ctrl+c')
             time.sleep(0.8)
             content = self.runtime.read_clipboard().strip()
-            valid = self._valid_artifact_text(content, request, result, expected_names)
+            payload = self._artifact_payload_from_clipboard(content, request, result, expected_names)
             attempts.append({
                 'source': 'artifact_panel_focus_copy',
-                'ok': bool(valid),
+                'ok': bool(payload),
                 'point': label,
                 'x': x,
                 'y': y,
@@ -1670,15 +1683,18 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 'copied': bool(copied),
                 'characters': len(content),
                 'preview': content[:200],
+                'artifact_characters': len(payload['content']) if payload else 0,
+                'clip_transform': payload['metadata'].get('clip_transform') if payload else None,
             })
-            if clicked and selected and copied and valid:
+            if payload:
                 return {
-                    'content': content,
+                    'content': payload['content'],
                     'metadata': {
                         'source': 'claude_artifact_panel_ctrl_a_copy',
                         'focus_point': label,
                         'x': x,
                         'y': y,
+                        **payload['metadata'],
                     },
                 }
         return None
@@ -1742,6 +1758,108 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def _response_expects_artifact(cls, text: str) -> bool:
         lowered = ' '.join((text or '').lower().split())
         return any(phrase in lowered for phrase in cls._ARTIFACT_EXPECTED_PHRASES)
+
+    def _artifact_payload_from_clipboard(
+        self,
+        content: str,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        expected_names: list[str],
+    ) -> dict | None:
+        stripped = (content or '').strip()
+        if not stripped:
+            return None
+        sliced = self._slice_artifact_from_page_selection(
+            stripped,
+            after_text=result.response_text,
+        )
+        if sliced is not None:
+            artifact_text, metadata = sliced
+            if self._valid_artifact_text(artifact_text, request, result, expected_names):
+                return {
+                    'content': artifact_text,
+                    'metadata': {
+                        'clip_transform': 'page_selection_marker_slice',
+                        **metadata,
+                    },
+                }
+        if self._valid_artifact_text(stripped, request, result, expected_names):
+            return {
+                'content': stripped,
+                'metadata': {
+                    'clip_transform': 'direct_clipboard',
+                    'raw_characters': len(stripped),
+                    'artifact_characters': len(stripped),
+                },
+            }
+        return None
+
+    @classmethod
+    def _slice_artifact_from_page_selection(
+        cls,
+        text: str,
+        after_text: str = '',
+    ) -> tuple[str, dict] | None:
+        folded = text.casefold()
+        search_start = cls._page_selection_artifact_search_start(folded, after_text)
+        starts = []
+        for marker in cls._ARTIFACT_PAGE_START_MARKERS:
+            idx = folded.find(marker.casefold(), search_start)
+            if idx >= 0:
+                starts.append((idx, marker))
+        if not starts and search_start > 0:
+            for marker in cls._ARTIFACT_PAGE_START_MARKERS:
+                idx = folded.find(marker.casefold())
+                if idx >= 0:
+                    starts.append((idx, marker))
+        if not starts:
+            return None
+        start_idx, start_marker = min(starts, key=lambda item: item[0])
+        sliced = text[start_idx:].lstrip()
+        trailing = []
+        folded_sliced = sliced.casefold()
+        for marker in cls._ARTIFACT_TRAILING_CHROME_MARKERS:
+            marker_folded = marker.casefold()
+            for needle in (f'\n{marker_folded}', marker_folded):
+                idx = folded_sliced.find(needle)
+                if idx >= 0:
+                    trailing.append((idx, marker))
+                    break
+        end_idx = None
+        trailing_marker = None
+        if trailing:
+            end_idx, trailing_marker = min(trailing, key=lambda item: item[0])
+            sliced = sliced[:end_idx].rstrip()
+        sliced = sliced.strip()
+        if not sliced:
+            return None
+        return sliced, {
+            'raw_characters': len(text),
+            'artifact_characters': len(sliced),
+            'start_marker': start_marker,
+            'start_index': start_idx,
+            'trailing_marker': trailing_marker,
+            'trailing_index': end_idx,
+        }
+
+    @staticmethod
+    def _page_selection_artifact_search_start(folded_clipboard: str, after_text: str) -> int:
+        normalized_after = (after_text or '').strip()
+        if not normalized_after:
+            return 0
+        candidates = [
+            normalized_after,
+            normalized_after[:300],
+            normalized_after[-300:],
+        ]
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if len(candidate) < 40:
+                continue
+            idx = folded_clipboard.find(candidate.casefold())
+            if idx >= 0:
+                return idx + len(candidate)
+        return 0
 
     def _valid_artifact_text(
         self,
