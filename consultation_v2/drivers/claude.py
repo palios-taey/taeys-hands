@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import time
 
 from consultation_v2.completion import COMPLETE, CompletionDetector
@@ -1518,6 +1519,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         copied = None
 
         if artifact_expected:
+            self.runtime._sync_platform_io_display()
             copied = self._copy_artifact_from_tree_controls(
                 request,
                 result,
@@ -1651,6 +1653,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     ) -> dict | None:
         from consultation_v2 import input as _inp
 
+        self.runtime._sync_platform_io_display()
         screen_width, screen_height = self._screen_size()
         if screen_width <= 0 or screen_height <= 0:
             attempts.append({
@@ -1660,17 +1663,16 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             })
             return None
 
-        self.runtime.focus_firefox()
+        focused = self.runtime.focus_firefox()
         time.sleep(0.2)
         for label, x, y in self._artifact_panel_focus_points(screen_width, screen_height):
-            self.runtime.write_clipboard('')
+            cleared = self._clear_xsel_clipboard()
             clicked = bool(_inp.click_at(x, y))
             time.sleep(0.3)
-            selected = self.runtime.press('ctrl+a')
+            selected = bool(_inp.press_key('ctrl+a'))
             time.sleep(0.15)
-            copied = self.runtime.press('ctrl+c')
-            time.sleep(0.8)
-            content = self.runtime.read_clipboard().strip()
+            copied = bool(_inp.press_key('ctrl+c'))
+            content = self._read_xsel_clipboard(timeout=2.5).strip()
             payload = self._artifact_payload_from_clipboard(content, request, result, expected_names)
             attempts.append({
                 'source': 'artifact_panel_focus_copy',
@@ -1678,6 +1680,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 'point': label,
                 'x': x,
                 'y': y,
+                'focused': bool(focused),
+                'cleared': bool(cleared),
                 'clicked': clicked,
                 'selected': bool(selected),
                 'copied': bool(copied),
@@ -1726,12 +1730,25 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         screen_width: int,
         screen_height: int,
     ) -> list[tuple[str, int, int]]:
-        return [
+        points: list[tuple[str, int, int]] = []
+        if screen_width > 1320 and screen_height > 470:
+            points.append(('right_panel_manual_1300_450', 1300, 450))
+        points.extend([
+            ('right_panel_manual_ratio', int(screen_width * 0.68), int(screen_height * 0.42)),
             ('right_panel_upper_body', int(screen_width * 0.78), int(screen_height * 0.42)),
             ('right_panel_middle_body', int(screen_width * 0.82), int(screen_height * 0.55)),
             ('right_panel_lower_body', int(screen_width * 0.78), int(screen_height * 0.68)),
             ('right_panel_far_body', int(screen_width * 0.90), int(screen_height * 0.50)),
-        ]
+        ])
+        deduped: list[tuple[str, int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for label, x, y in points:
+            point = (max(1, min(int(x), screen_width - 1)), max(1, min(int(y), screen_height - 1)))
+            if point in seen:
+                continue
+            seen.add(point)
+            deduped.append((label, point[0], point[1]))
+        return deduped
 
     @classmethod
     def _artifact_names_from_response(cls, text: str) -> list[str]:
@@ -1860,6 +1877,42 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             if idx >= 0:
                 return idx + len(candidate)
         return 0
+
+    @staticmethod
+    def _clear_xsel_clipboard() -> bool:
+        try:
+            result = subprocess.run(
+                ['xsel', '--clipboard', '--input'],
+                input=b'',
+                capture_output=True,
+                timeout=3.0,
+                env={**os.environ},
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _read_xsel_clipboard(self, timeout: float = 2.5) -> str:
+        deadline = time.monotonic() + timeout
+        last = ''
+        while time.monotonic() < deadline:
+            try:
+                result = subprocess.run(
+                    ['xsel', '-bo'],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                    env={**os.environ},
+                )
+            except Exception:
+                result = None
+            if result is not None and result.returncode == 0 and result.stdout:
+                return result.stdout
+            last = self.runtime.read_clipboard()
+            if last:
+                return last
+            time.sleep(0.2)
+        return last
 
     def _valid_artifact_text(
         self,
