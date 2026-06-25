@@ -1617,6 +1617,71 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             time.sleep(0.25)
         return evidence
 
+    def _chatgpt_latest_turn_copy_candidates(
+        self,
+        elements: list[dict],
+        copy_buttons: list[dict],
+        request: ConsultationRequest,
+    ) -> tuple[list[dict], dict[str, object]]:
+        prompt_norm = self._normalized_text(request.message).lower()
+        user_panel_spec = self.cfg.get('tree', {}).get('element_map', {}).get('user_message_actions_panel', {})
+        prompt_matches: list[dict[str, object]] = []
+        user_action_panels: list[dict[str, object]] = []
+
+        for element in elements:
+            y = element.get('y')
+            if y is None:
+                continue
+            name = str(element.get('name') or '').strip()
+            role = str(element.get('role') or '').strip()
+            text = str(element.get('text') or '').strip()
+            element_norm = self._normalized_text(' '.join(part for part in (name, text) if part)).lower()
+            if matches_spec(element, user_panel_spec):
+                user_action_panels.append({'y': int(y), 'name': name, 'role': role})
+            if not (prompt_norm and element_norm):
+                continue
+            prompt_seen = (
+                element_norm == prompt_norm
+                or (len(prompt_norm) >= 24 and prompt_norm in element_norm)
+                or (len(element_norm) >= 80 and element_norm in prompt_norm)
+            )
+            if prompt_seen:
+                prompt_matches.append({
+                    'y': int(y),
+                    'name': name[:120],
+                    'role': role,
+                })
+
+        anchor_source = ''
+        anchor_y: int | None = None
+        if prompt_matches:
+            anchor_source = 'prompt_text'
+            anchor_y = max(int(item['y']) for item in prompt_matches)
+        elif user_action_panels:
+            anchor_source = 'user_message_actions_panel'
+            anchor_y = max(int(item['y']) for item in user_action_panels)
+
+        if anchor_y is None:
+            return [], {
+                'ok': False,
+                'reason': 'newest_user_turn_anchor_not_found',
+                'prompt_text_matches': len(prompt_matches),
+                'user_message_action_panels': len(user_action_panels),
+            }
+
+        correlated = [
+            button for button in copy_buttons
+            if button.get('y') is not None and int(button.get('y') or 0) > anchor_y
+        ]
+        return correlated, {
+            'ok': bool(correlated),
+            'anchor_source': anchor_source,
+            'anchor_y': anchor_y,
+            'prompt_text_matches': len(prompt_matches),
+            'user_message_action_panels': len(user_action_panels),
+            'copy_buttons_after_anchor': len(correlated),
+        }
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
         from consultation_v2.atspi import find_firefox_for_platform
@@ -1637,6 +1702,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         for attempt in range(5):
             time.sleep(1.0)
             last_scroll = self._scroll_chatgpt_thread_to_bottom()
+            if not last_scroll.get('ok'):
+                result.add_step(
+                    'extract_primary',
+                    False,
+                    'ChatGPT thread scroll-to-bottom failed; refusing to copy a possibly stale visible response',
+                    attempt=attempt + 1,
+                    scroll=last_scroll,
+                    snapshot=last_snapshot.serializable() if last_snapshot else {},
+                )
+                return False
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
                 attempts.append({
@@ -1670,7 +1745,22 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 })
                 continue
 
-            target = copy_buttons[-1]
+            correlated_copy_buttons, turn_correlation = self._chatgpt_latest_turn_copy_candidates(
+                all_elements,
+                copy_buttons,
+                request,
+            )
+            if not correlated_copy_buttons:
+                attempts.append({
+                    'attempt': attempt + 1,
+                    'scroll': last_scroll,
+                    'copy_buttons_found': len(copy_buttons),
+                    'turn_correlation': turn_correlation,
+                    'reason': 'copy_button_not_correlated_to_latest_user_turn',
+                })
+                continue
+
+            target = correlated_copy_buttons[-1]
             copy_button = {key: target.get(key) for key in ('name', 'role', 'x', 'y')}
             scrolled_button = self.runtime.scroll_element_into_view(ElementRef(
                 key='copy_button',
@@ -1694,6 +1784,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'attempt': attempt + 1,
                 'scroll': last_scroll,
                 'copy_buttons_found': len(copy_buttons),
+                'turn_correlation': turn_correlation,
                 'copy_button': copy_button,
                 'button_scrolled_to_anywhere': bool(scrolled_button),
                 'clicked': bool(clicked),

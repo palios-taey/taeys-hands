@@ -499,6 +499,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
             result.add_step('send', False, 'Grok input field not found for send',
                             snapshot=self.runtime.snapshot().serializable())
             return False
+        copy_key = self.cfg['workflow']['extract']['primary_key']
+        pre_send_copy_baseline = self._copy_button_baseline(copy_key)
+        self._pre_send_copy_button_baseline = pre_send_copy_baseline
         if not self.runtime.press('Return'):
             result.add_step('send', False, 'Grok Return keypress failed')
             return False
@@ -521,6 +524,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         result.add_step('send', verified, 'Grok send validated by Stop button and URL capture',
                         url_before=before, url_after=result.session_url_after,
                         stop_seen=stop_seen, url_changed=url_changed,
+                        pre_send_copy_button_baseline=pre_send_copy_baseline,
                         snapshot=verify_snap.serializable())
         return verified
 
@@ -584,54 +588,112 @@ class GrokConsultationDriver(BaseConsultationDriver):
             return ''
         return ''
 
+    @staticmethod
+    def _copy_button_signature(element: ElementRef) -> tuple[object, ...]:
+        return (
+            element.name,
+            element.role,
+            element.x,
+            element.y,
+        )
+
+    def _copy_button_baseline(self, copy_key: str) -> dict[str, object]:
+        snapshot = self.runtime.snapshot()
+        buttons = (snapshot.mapped or {}).get(copy_key) or []
+        signatures = [self._copy_button_signature(button) for button in buttons]
+        return {
+            'copy_key': copy_key,
+            'count': len(buttons),
+            'signatures': signatures,
+            'buttons': [button.serializable() for button in buttons],
+        }
+
+    def _new_copy_buttons_since_baseline(
+        self,
+        snapshot: Snapshot,
+        copy_key: str,
+        baseline: dict[str, object],
+    ) -> list[ElementRef]:
+        buttons = list((snapshot.mapped or {}).get(copy_key) or [])
+        baseline_count = int(baseline.get('count') or 0)
+        baseline_signatures = {
+            tuple(signature)
+            for signature in (baseline.get('signatures') or [])
+            if isinstance(signature, (list, tuple))
+        }
+        if len(buttons) <= baseline_count:
+            return []
+        return [
+            button for button in buttons
+            if self._copy_button_signature(button) not in baseline_signatures
+        ]
+
     def _copy_buttons_ready_snapshot(
         self,
         copy_key: str,
+        baseline: dict[str, object],
         timeout: float = 20.0,
         interval: float = 0.4,
-    ) -> tuple[Snapshot, dict[str, object]]:
+    ) -> tuple[Snapshot | None, dict[str, object]]:
         started = time.monotonic()
-        last_snapshot: Snapshot | None = None
         last_title = ''
         last_conversation_title = ''
         last_copy_count = 0
+        last_new_copy_count = 0
         samples: list[dict[str, object]] = []
 
         def _probe() -> Snapshot | None:
-            nonlocal last_snapshot, last_title, last_conversation_title, last_copy_count
+            nonlocal last_title, last_conversation_title, last_copy_count, last_new_copy_count
             snapshot = self.runtime.snapshot()
-            last_snapshot = snapshot
             last_title = self._grok_window_title()
             last_conversation_title = self._conversation_title(last_title)
             generic_title = last_conversation_title == self.platform
             last_copy_count = len((snapshot.mapped or {}).get(copy_key) or [])
+            last_new_copy_count = len(self._new_copy_buttons_since_baseline(snapshot, copy_key, baseline))
             samples.append({
                 'elapsed_seconds': round(time.monotonic() - started, 3),
                 'title': last_title,
                 'conversation_title': last_conversation_title,
                 'generic_title': generic_title,
                 'copy_button_count': last_copy_count,
+                'baseline_copy_button_count': int(baseline.get('count') or 0),
+                'new_copy_button_count': last_new_copy_count,
             })
-            if last_copy_count > 0 and last_conversation_title and not generic_title:
+            if last_new_copy_count > 0 and last_conversation_title and not generic_title:
                 return snapshot
             return None
 
         matched = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
-        snapshot = matched if isinstance(matched, Snapshot) else last_snapshot or self.runtime.snapshot()
+        snapshot = matched if isinstance(matched, Snapshot) else None
         evidence = {
             'copy_button_settle_timeout_seconds': timeout,
             'copy_button_settle_interval_seconds': interval,
             'copy_button_settle_elapsed_seconds': round(time.monotonic() - started, 3),
+            'copy_button_settle_matched': bool(snapshot),
             'title': last_title,
             'conversation_title': last_conversation_title,
             'generic_title': last_conversation_title == self.platform,
             'copy_button_count': last_copy_count,
+            'baseline_copy_button_count': int(baseline.get('count') or 0),
+            'new_copy_button_count': last_new_copy_count,
+            'baseline_copy_buttons': baseline.get('buttons') or [],
             'settle_samples': samples[-8:],
         }
         return snapshot, evidence
 
     def extract_response(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         copy_key = self.cfg['workflow']['extract']['primary_key']
+        copy_button_baseline = getattr(self, '_pre_send_copy_button_baseline', None)
+        if not isinstance(copy_button_baseline, dict):
+            result.add_step(
+                'extract',
+                False,
+                'Grok pre-send Copy baseline missing; refusing to extract from possibly stale Copy buttons',
+                bottom_evidence={},
+                copy_button_settle={'reason': 'pre_send_copy_button_baseline_missing'},
+                snapshot=self.runtime.snapshot().serializable(),
+            )
+            return False
 
         bottom_evidence = {
             'focus_input': False,
@@ -656,9 +718,15 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 self.runtime.scroll_document_to_bottom(clicks=12, rounds=4, settle=0.4)
             )
 
-        snap, copy_button_settle = self._copy_buttons_ready_snapshot(copy_key)
+        snap, copy_button_settle = self._copy_buttons_ready_snapshot(copy_key, copy_button_baseline)
+        if snap is None:
+            result.add_step('extract', False, 'Grok new Copy button did not appear before settle timeout',
+                            bottom_evidence=bottom_evidence,
+                            copy_button_settle=copy_button_settle,
+                            snapshot=self.runtime.snapshot().serializable())
+            return False
         copy_buttons = sorted(
-            (snap.mapped or {}).get(copy_key) or [],
+            self._new_copy_buttons_since_baseline(snap, copy_key, copy_button_baseline),
             key=lambda item: (
                 item.y is not None,
                 item.y if item.y is not None else -1,
@@ -668,7 +736,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             reverse=True,
         )
         if not copy_buttons:
-            result.add_step('extract', False, 'Grok copy button not found',
+            result.add_step('extract', False, 'Grok new Copy button not found after settle',
                             bottom_evidence=bottom_evidence,
                             copy_button_settle=copy_button_settle,
                             snapshot=snap.serializable())
