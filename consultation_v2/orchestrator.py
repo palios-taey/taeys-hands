@@ -15,6 +15,7 @@ from dataclasses import replace
 from consultation_v2 import primitives
 from consultation_v2.identity import (
     IdentityError,
+    build_inline_context,
     consolidate_attachments,
     validate_caller_attachments,
 )
@@ -41,6 +42,18 @@ _REGISTRY = {
     'grok': GrokConsultationDriver,
     'perplexity': PerplexityConsultationDriver,
 }
+
+
+def _inline_context_message(context: str, message: str) -> str:
+    return (
+        "Read the following identity/context packet before answering. It replaces "
+        "the usual ChatGPT attachment for this run.\n\n"
+        "<TAEY_INLINE_CONTEXT>\n"
+        f"{context}\n"
+        "</TAEY_INLINE_CONTEXT>\n\n"
+        "User request:\n"
+        f"{message}"
+    )
 
 
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
@@ -118,21 +131,35 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             caller_attachment_provenance=provenance,
         )
     else:
-        package = consolidate_attachments(
-            platform=request.platform,
-            caller_attachments=caller_attachments,
-        )
-        package_paths = package.attachment_paths()
-        consolidated_path = '\n'.join(package_paths)
-        # Provenance survives consolidation: stamp the caller-attachment path+hashes
-        # onto the request (FLOW §3) and write them to durable run-state via the
-        # shared-primitive surface so the audit trail records what the caller sent
-        # even though the browser receives the merged package file(s).
-        request = replace(
-            request,
-            attachments=package_paths,
-            caller_attachment_provenance=list(package.caller_provenance),
-        )
+        if request.platform == 'chatgpt' and not request.session_url and not caller_attachments:
+            inline_context, provenance = build_inline_context(
+                platform=request.platform,
+                caller_attachments=[],
+            )
+            identity_mode = 'identity_inline'
+            consolidated_path = 'inline:chatgpt_identity_context'
+            request = replace(
+                request,
+                message=_inline_context_message(inline_context, request.message),
+                attachments=[],
+                caller_attachment_provenance=list(provenance),
+            )
+        else:
+            package = consolidate_attachments(
+                platform=request.platform,
+                caller_attachments=caller_attachments,
+            )
+            package_paths = package.attachment_paths()
+            consolidated_path = '\n'.join(package_paths)
+            # Provenance survives consolidation: stamp the caller-attachment path+hashes
+            # onto the request (FLOW §3) and write them to durable run-state via the
+            # shared-primitive surface so the audit trail records what the caller sent
+            # even though the browser receives the merged package file(s).
+            request = replace(
+                request,
+                attachments=package_paths,
+                caller_attachment_provenance=list(package.caller_provenance),
+            )
     if request.caller_attachment_provenance:
         try:
             # Key by the STABLE request_id (FLOW §8), NOT the consolidated-package

@@ -209,26 +209,10 @@ def validate_caller_attachments(caller_attachments: List[str]) -> List[Attachmen
     return provenance
 
 
-def consolidate_attachments(
+def _build_package_text(
     platform: str,
     caller_attachments: List[str],
-) -> ConsolidatedPackage:
-    """Build one consolidated identity+attachments package (FLOW §3, §4).
-
-    Order (FLOW §4): FAMILY_KERNEL.md, then IDENTITY_<platform>.md, then the
-    caller attachments. The kernel and platform identity are MANDATORY and read
-    via ``_read_required`` — a missing/unreadable one raises IdentityError and
-    halts the consultation (no silent skip, no partial packet).
-
-    Caller-supplied identity files are stripped (identity is automatic), but a
-    caller file that is genuinely missing/unreadable is a loud failure, not a
-    silent drop. Each caller attachment's path + content hash is captured BEFORE
-    consolidation so provenance survives the merge.
-
-    Returns a ConsolidatedPackage: the package path plus the caller-attachment
-    provenance (path + sha256). Never returns None and never returns a partial
-    packet — it either yields a complete package or raises.
-    """
+) -> Tuple[str, List[AttachmentProvenance], int]:
     # Mandatory identity content — read loudly (raises if missing/unreadable).
     kernel_content = _read_required(_FAMILY_KERNEL, 'FAMILY_KERNEL.md')
     identity_path = _identity_path(platform)
@@ -267,13 +251,50 @@ def consolidate_attachments(
         sections.append(
             f"\n---\n\n## {basename}\n\n`{display_path}`\n\n" + block
         )
+    return ''.join(sections), provenance, len(sections_src)
 
+
+def build_inline_context(
+    platform: str,
+    caller_attachments: List[str],
+) -> Tuple[str, List[AttachmentProvenance]]:
+    """Build a complete identity packet as inline text without writing files."""
+    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
+    logger.info(
+        "Built inline identity context for %s from %d file(s), %d byte(s)",
+        platform,
+        section_count,
+        len(package_text.encode('utf-8')),
+    )
+    return package_text, provenance
+
+
+def consolidate_attachments(
+    platform: str,
+    caller_attachments: List[str],
+) -> ConsolidatedPackage:
+    """Build one consolidated identity+attachments package (FLOW §3, §4).
+
+    Order (FLOW §4): FAMILY_KERNEL.md, then IDENTITY_<platform>.md, then the
+    caller attachments. The kernel and platform identity are MANDATORY and read
+    via ``_read_required`` — a missing/unreadable one raises IdentityError and
+    halts the consultation (no silent skip, no partial packet).
+
+    Caller-supplied identity files are stripped (identity is automatic), but a
+    caller file that is genuinely missing/unreadable is a loud failure, not a
+    silent drop. Each caller attachment's path + content hash is captured BEFORE
+    consolidation so provenance survives the merge.
+
+    Returns a ConsolidatedPackage: the package path plus the caller-attachment
+    provenance (path + sha256). Never returns None and never returns a partial
+    packet — it either yields a complete package or raises.
+    """
     out_stem = f"/tmp/taey_package_{platform}_{int(time.time())}"
-    package_text = ''.join(sections)
+    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
     paths = _write_package_chunks(platform, package_text, out_stem)
     logger.info(
         "Consolidated %d files -> %d attachment package file(s): %s",
-        len(sections_src),
+        section_count,
         len(paths),
         ', '.join(paths),
     )

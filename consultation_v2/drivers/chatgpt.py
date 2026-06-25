@@ -74,7 +74,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return False
         if not self.apply_selection_plan(request, result):
             return False
-        if not self.attach_files(request, result):
+        if request.attachments and not self.attach_files(request, result):
             return False
         if not self.enter_prompt(request, result):
             return False
