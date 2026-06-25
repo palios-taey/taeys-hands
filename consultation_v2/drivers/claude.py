@@ -885,6 +885,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         paste_chip_names = self._composer_paste_chip_names(verify_snap)
         # Long pasted messages can become a PASTED chip with empty composer text;
         # that chip carries the prompt, so it is send-ready content.
+        # Do NOT gate prompt readiness on a composer text / char-count read:
+        # Claude's React contenteditable does not report its text reliably over
+        # AT-SPI, which false-negatived a paste that DID land and triggered a
+        # type_text fallback that DOUBLED the prompt (production-observed). One
+        # paste + (Send-button-present OR a PASTED chip) is the contract.
         prompt_ready = verify_snap.has('send_button') or bool(paste_chip_names)
         landed_chars, _ = self._prompt_text_status(request.message)
         verified = bool(pasted and prompt_ready)

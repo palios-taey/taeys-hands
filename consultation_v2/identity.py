@@ -123,6 +123,11 @@ def _identity_path(platform: str) -> str:
 
 
 def _write_package_chunks(platform: str, package_text: str, out_stem: str) -> List[str]:
+    # Claude packages over ~45KB were historically split into ~22KB
+    # sha256-tagged ordered chunks on a PRESUMED Claude upload/read ceiling.
+    # That DEGRADED answers: Claude reported only the last chunk in context,
+    # while Claude.ai accepts a large single .md fine. Root-cause shape per
+    # Jesse: there is no chunking, so write exactly one package file.
     out_path = f"{out_stem}.md"
     with open(out_path, 'w', encoding='utf-8') as handle:
         handle.write(package_text)
