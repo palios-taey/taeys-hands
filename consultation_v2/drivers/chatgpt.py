@@ -1966,186 +1966,96 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return False
 
         copy_spec = self.cfg.get('tree', {}).get('element_map', {}).get('copy_button', {})
-        last_snapshot = None
-        all_elements: list[dict] = []
-        scroll_evidence = {}
-        direct_evidence = {}
-        hover_evidence = {}
+        last_snapshot = self.runtime.snapshot()
+        last_scroll: dict[str, object] = {}
+        last_copy_buttons: list[dict[str, object]] = []
+        attempts: list[dict[str, object]] = []
         for attempt in range(5):
-            time.sleep(2.0)
-            scroll_evidence = self._scroll_chatgpt_thread_to_bottom()
-            if not scroll_evidence.get('ok'):
-                result.add_step(
-                    'extract_primary', False,
-                    'ChatGPT thread scroll-to-bottom failed before direct response extraction',
-                    attempt=attempt + 1,
-                    scroll=scroll_evidence,
-                    snapshot=last_snapshot.serializable() if last_snapshot else {},
-                )
-                return False
+            time.sleep(1.0)
+            last_scroll = self._scroll_chatgpt_thread_to_bottom()
             firefox = find_firefox_for_platform(self.platform)
             if not firefox:
+                attempts.append({
+                    'attempt': attempt + 1,
+                    'scroll': last_scroll,
+                    'reason': 'firefox_not_found',
+                })
                 continue
             try:
                 firefox.clear_cache_single()
             except Exception:
                 pass
-            all_elements = raw_find_elements(firefox, fence_after=[])
-            direct_evidence = self._direct_response_text_from_tree(all_elements, request)
-            if direct_evidence.get('ok'):
-                content = str(direct_evidence.pop('content')).strip()
-                if not self.set_response_text_if_not_prompt_echo(
-                    request,
-                    result,
-                    content,
-                    step='extract_primary',
-                    source='chatgpt_direct_tree_text',
-                    attempt=attempt + 1,
-                    direct=direct_evidence,
-                ):
-                    direct_evidence['reason'] = 'prompt_echo'
-                    direct_evidence['ok'] = False
-                else:
-                    result.add_step(
-                        'extract_primary',
-                        True,
-                        f'ChatGPT response read from assistant tree text ({len(content)} chars, attempt {attempt + 1})',
-                        attempt=attempt + 1,
-                        scroll=scroll_evidence,
-                        direct=direct_evidence,
-                    )
-                    return True
-            result.add_step(
-                'extract_direct_probe',
-                False,
-                'ChatGPT direct assistant tree-text extraction unavailable; falling back to Copy response',
-                attempt=attempt + 1,
-                scroll=scroll_evidence,
-                direct=direct_evidence,
-            )
-            hover_evidence = self._hover_assistant_message_for_copy_button()
-            result.add_step(
-                'extract_hover_probe',
-                bool(hover_evidence.get('ok')),
-                'ChatGPT assistant-message hover probe for secondary Copy response path',
-                attempt=attempt + 1,
-                scroll=scroll_evidence,
-                hover=hover_evidence,
-            )
-            if not hover_evidence.get('ok'):
-                result.add_step(
-                    'extract_primary', False,
-                    'ChatGPT assistant-message hover failed to mount Copy response',
-                    attempt=attempt + 1,
-                    scroll=scroll_evidence,
-                    hover=hover_evidence,
-                    snapshot=last_snapshot.serializable() if last_snapshot else {},
-                )
-                return False
-            time.sleep(0.5)
             last_snapshot = self.runtime.snapshot()
-            time.sleep(0.8)
-
-            try:
-                firefox.clear_cache_single()
-            except Exception:
-                pass
             all_elements = raw_find_elements(firefox, fence_after=[])
-            copy_buttons = self._copy_button_candidates(all_elements, copy_spec)
+            copy_buttons = [
+                element for element in all_elements
+                if matches_spec(element, copy_spec)
+                and element.get('y') is not None
+            ]
+            copy_buttons = sorted(copy_buttons, key=lambda element: int(element.get('y') or 0))
+            last_copy_buttons = [
+                {key: button.get(key) for key in ('name', 'role', 'x', 'y')}
+                for button in copy_buttons
+            ]
             if not copy_buttons:
+                attempts.append({
+                    'attempt': attempt + 1,
+                    'scroll': last_scroll,
+                    'copy_buttons_found': 0,
+                    'reason': 'copy_button_not_found',
+                })
                 continue
 
-            rejected_copies = []
-            for target in reversed(copy_buttons):
-                clipboard.write('')
-                time.sleep(0.3)
-                self.runtime.scroll_element_into_view(ElementRef(
-                    key=None,
-                    name=str(target.get('name') or ''),
-                    role=str(target.get('role') or ''),
-                    x=target.get('x'),
-                    y=target.get('y'),
-                    states=list(target.get('states') or []),
-                    atspi_obj=target.get('atspi_obj'),
-                ))
-                time.sleep(0.3)
-                if not atspi_click(target):
-                    rejected_copies.append({
-                        'findings': ['click_failed'],
-                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                    })
-                    continue
-                time.sleep(1.2)
-                content = (clipboard.read() or '').strip()
-                if content and self.reject_prompt_echo_response(
-                    request,
-                    result,
-                    content,
-                    step='extract_primary',
-                    source='chatgpt_copy_candidate',
-                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                    copy_buttons_found=len(copy_buttons),
-                ):
-                    rejected_copies.append({
-                        'findings': ['prompt_echo'],
-                        'characters': len(content),
-                        'preview': content[:200],
-                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                    })
-                    continue
-                findings = self._response_content_findings(
-                    content,
-                    request,
-                    copy_buttons_found=len(copy_buttons),
-                )
-                if not content or findings:
-                    rejected_copies.append({
-                        'findings': findings or ['empty_clipboard'],
-                        'characters': len(content),
-                        'preview': content[:200],
-                        'copy_button': {key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                    })
-                    continue
-                if not self.set_response_text_if_not_prompt_echo(
-                    request,
-                    result,
-                    content,
-                    step='extract_primary',
-                    source='chatgpt_copy_response',
-                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                    copy_buttons_found=len(copy_buttons),
-                ):
-                    continue
-                result.add_step(
-                    'extract_primary', True,
-                    f'ChatGPT response copied from assistant message Copy ({len(content)} chars, attempt {attempt + 1})',
-                    characters=len(content),
-                    preview=content[:200],
-                    scroll=scroll_evidence,
-                    hover=hover_evidence,
-                    copy_buttons_found=len(copy_buttons),
-                    copy_button={key: target.get(key) for key in ('name', 'role', 'x', 'y')},
-                )
-                return True
-            if rejected_copies:
-                result.add_step(
-                    'extract_primary_copy_rejected',
-                    True,
-                    'ChatGPT rejected copied prompt/chrome/code-fragment content; continuing response-copy search',
-                    attempt=attempt + 1,
-                    scroll=scroll_evidence,
-                    hover=hover_evidence,
-                    copy_buttons_found=len(copy_buttons),
-                    rejected_copies=rejected_copies[:6],
-                )
+            target = copy_buttons[-1]
+            copy_button = {key: target.get(key) for key in ('name', 'role', 'x', 'y')}
+            scrolled_button = self.runtime.scroll_element_into_view(ElementRef(
+                key='copy_button',
+                name=str(target.get('name') or ''),
+                role=str(target.get('role') or ''),
+                x=target.get('x'),
+                y=target.get('y'),
+                states=list(target.get('states') or []),
+                atspi_obj=target.get('atspi_obj'),
+            ))
+            clipboard.write('')
+            time.sleep(0.2)
+            clicked = atspi_click(target)
+            time.sleep(1.0)
+            content = (clipboard.read() or '').strip()
+            exact_prompt_echo = (
+                bool(content)
+                and self._normalized_text(content) == self._normalized_text(request.message)
+            )
+            attempt_evidence = {
+                'attempt': attempt + 1,
+                'scroll': last_scroll,
+                'copy_buttons_found': len(copy_buttons),
+                'copy_button': copy_button,
+                'button_scrolled_to_anywhere': bool(scrolled_button),
+                'clicked': bool(clicked),
+                'characters': len(content),
+                'preview': content[:200],
+                'exact_prompt_echo': exact_prompt_echo,
+            }
+            attempts.append(attempt_evidence)
+            if not clicked or not content or exact_prompt_echo:
+                continue
+            result.response_text = content
+            result.add_step(
+                'extract_primary',
+                True,
+                f'ChatGPT response copied from Copy response button ({len(content)} chars, attempt {attempt + 1})',
+                source='chatgpt_copy_response_simple',
+                **attempt_evidence,
+            )
+            return True
 
         result.add_step(
             'extract_primary', False,
-            'ChatGPT response copy button not found or copied content failed response-quality gates',
-            elements=len(all_elements),
-            last_scroll=scroll_evidence,
-            last_direct=direct_evidence,
-            last_hover=hover_evidence,
+            'ChatGPT Copy response button did not yield non-empty response text',
+            attempts=attempts,
+            last_scroll=last_scroll,
+            copy_buttons=last_copy_buttons,
             snapshot=last_snapshot.serializable() if last_snapshot else {},
         )
         return False
