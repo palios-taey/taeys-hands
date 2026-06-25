@@ -14,6 +14,30 @@ except Exception:  # pragma: no cover - optional dependency in runtime
 class PerplexityConsultationDriver(BaseConsultationDriver):
     platform = 'perplexity'
 
+    def _read_clipboard_until_nonempty(
+        self,
+        timeout: float = 4.0,
+        interval: float = 0.3,
+    ) -> tuple[str, dict[str, object]]:
+        started = time.monotonic()
+        deadline = started + timeout
+        reads = 0
+        content = ''
+        while True:
+            reads += 1
+            content = (self.runtime.read_clipboard() or '').strip()
+            if content:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(interval, remaining))
+        return content, {
+            'clipboard_reads': reads,
+            'clipboard_wait_seconds': round(time.monotonic() - started, 3),
+            'clipboard_timeout_seconds': timeout,
+        }
+
     # ------------------------------------------------------------------
     # Top-level orchestration
     # ------------------------------------------------------------------
@@ -920,8 +944,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(1.0)
-        content = self.runtime.read_clipboard().strip()
+        content, clipboard_poll = self._read_clipboard_until_nonempty()
 
         if content:
             return self._accept_extracted_content(
@@ -933,6 +956,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 scrolled_into_view=scrolled_into_view,
                 document_scrolled=document_scrolled,
                 target_refreshed=refreshed,
+                **clipboard_poll,
             )
 
         result.add_step(
@@ -944,6 +968,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
             document_scrolled=document_scrolled,
             target_refreshed=refreshed,
             clicked=bool(clicked),
+            **clipboard_poll,
             snapshot=snap.serializable(),
         )
         return False
@@ -981,8 +1006,7 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 snapshot=snap.serializable(),
             )
             return False
-        time.sleep(1.0)
-        content = self.runtime.read_clipboard().strip()
+        content, clipboard_poll = self._read_clipboard_until_nonempty()
         if content:
             result.extractions.append(
                 ExtractedArtifact(
@@ -997,12 +1021,14 @@ class PerplexityConsultationDriver(BaseConsultationDriver):
                 'Perplexity full contents copied via copy_contents_button',
                 characters=len(content),
                 preview=content[:200],
+                **clipboard_poll,
             )
             return True
 
         result.add_step(
             'extract_additional', False,
             'Perplexity copy_contents_button clicked but clipboard empty',
+            **clipboard_poll,
         )
         return False
 

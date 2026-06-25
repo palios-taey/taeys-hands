@@ -47,9 +47,6 @@ _IDENTITY_BASENAMES = (
     {os.path.basename(p) for p in _PLATFORM_IDENTITY.values()}
 )
 
-_CLAUDE_CHUNK_THRESHOLD_BYTES = 45_000
-_CLAUDE_CHUNK_TARGET_BYTES = 22_000
-
 _EXT_LANG = {
     '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
     '.yaml': 'yaml', '.yml': 'yaml', '.json': 'json', '.md': 'markdown',
@@ -125,74 +122,16 @@ def _identity_path(platform: str) -> str:
     return path
 
 
-def _split_utf8_bytes(data: bytes, target_bytes: int) -> List[Tuple[int, int, str]]:
-    chunks: List[Tuple[int, int, str]] = []
-    offset = 0
-    total = len(data)
-    while offset < total:
-        hard_end = min(offset + target_bytes, total)
-        end = hard_end
-        if hard_end < total:
-            preferred = data.rfind(b'\n', offset + int(target_bytes * 0.65), hard_end)
-            if preferred > offset:
-                end = preferred + 1
-        while end > offset:
-            try:
-                text = data[offset:end].decode('utf-8')
-                break
-            except UnicodeDecodeError:
-                end -= 1
-        else:
-            end = hard_end
-            while end < total:
-                try:
-                    text = data[offset:end].decode('utf-8')
-                    break
-                except UnicodeDecodeError:
-                    end += 1
-            else:
-                text = data[offset:total].decode('utf-8')
-                end = total
-        chunks.append((offset, end, text))
-        offset = end
-    return chunks
-
-
 def _write_package_chunks(platform: str, package_text: str, out_stem: str) -> List[str]:
-    package_bytes = package_text.encode('utf-8')
-    if platform != 'claude' or len(package_bytes) <= _CLAUDE_CHUNK_THRESHOLD_BYTES:
-        out_path = f"{out_stem}.md"
-        with open(out_path, 'w', encoding='utf-8') as handle:
-            handle.write(package_text)
-        return [out_path]
-
-    digest = hashlib.sha256(package_bytes).hexdigest()
-    chunks = _split_utf8_bytes(package_bytes, _CLAUDE_CHUNK_TARGET_BYTES)
-    paths: List[str] = []
-    total_chunks = len(chunks)
-    for index, (start, end, chunk_text) in enumerate(chunks, start=1):
-        out_path = f"{out_stem}_part{index:03d}of{total_chunks:03d}.md"
-        header = (
-            f"# Package for {platform} — chunk {index}/{total_chunks}\n\n"
-            "**Chunked package contract**: read every ordered chunk before answering. "
-            "The complete consultation packet is the exact concatenation of each "
-            "chunk body between the BEGIN/END markers.\n\n"
-            f"**Full packet sha256**: `{digest}`\n"
-            f"**Full packet bytes**: `{len(package_bytes)}`\n"
-            f"**This chunk byte range**: `{start}:{end}`\n\n"
-            f"<!-- BEGIN TAEY_PACKAGE_CHUNK {index}/{total_chunks} "
-            f"sha256={digest} bytes={start}:{end} -->\n"
-        )
-        footer = (
-            f"\n<!-- END TAEY_PACKAGE_CHUNK {index}/{total_chunks} "
-            f"sha256={digest} bytes={start}:{end} -->\n"
-        )
-        with open(out_path, 'w', encoding='utf-8') as handle:
-            handle.write(header)
-            handle.write(chunk_text)
-            handle.write(footer)
-        paths.append(out_path)
-    return paths
+    # Claude packages over ~45KB were historically split into ~22KB
+    # sha256-tagged ordered chunks on a PRESUMED Claude upload/read ceiling.
+    # That DEGRADED answers: Claude reported only the last chunk in context,
+    # while Claude.ai accepts a large single .md fine. Root-cause shape per
+    # Jesse: there is no chunking, so write exactly one package file.
+    out_path = f"{out_stem}.md"
+    with open(out_path, 'w', encoding='utf-8') as handle:
+        handle.write(package_text)
+    return [out_path]
 
 
 def validate_caller_attachments(caller_attachments: List[str]) -> List[AttachmentProvenance]:
@@ -209,26 +148,10 @@ def validate_caller_attachments(caller_attachments: List[str]) -> List[Attachmen
     return provenance
 
 
-def consolidate_attachments(
+def _build_package_text(
     platform: str,
     caller_attachments: List[str],
-) -> ConsolidatedPackage:
-    """Build one consolidated identity+attachments package (FLOW §3, §4).
-
-    Order (FLOW §4): FAMILY_KERNEL.md, then IDENTITY_<platform>.md, then the
-    caller attachments. The kernel and platform identity are MANDATORY and read
-    via ``_read_required`` — a missing/unreadable one raises IdentityError and
-    halts the consultation (no silent skip, no partial packet).
-
-    Caller-supplied identity files are stripped (identity is automatic), but a
-    caller file that is genuinely missing/unreadable is a loud failure, not a
-    silent drop. Each caller attachment's path + content hash is captured BEFORE
-    consolidation so provenance survives the merge.
-
-    Returns a ConsolidatedPackage: the package path plus the caller-attachment
-    provenance (path + sha256). Never returns None and never returns a partial
-    packet — it either yields a complete package or raises.
-    """
+) -> Tuple[str, List[AttachmentProvenance], int]:
     # Mandatory identity content — read loudly (raises if missing/unreadable).
     kernel_content = _read_required(_FAMILY_KERNEL, 'FAMILY_KERNEL.md')
     identity_path = _identity_path(platform)
@@ -267,13 +190,50 @@ def consolidate_attachments(
         sections.append(
             f"\n---\n\n## {basename}\n\n`{display_path}`\n\n" + block
         )
+    return ''.join(sections), provenance, len(sections_src)
 
+
+def build_inline_context(
+    platform: str,
+    caller_attachments: List[str],
+) -> Tuple[str, List[AttachmentProvenance]]:
+    """Build a complete identity packet as inline text without writing files."""
+    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
+    logger.info(
+        "Built inline identity context for %s from %d file(s), %d byte(s)",
+        platform,
+        section_count,
+        len(package_text.encode('utf-8')),
+    )
+    return package_text, provenance
+
+
+def consolidate_attachments(
+    platform: str,
+    caller_attachments: List[str],
+) -> ConsolidatedPackage:
+    """Build one consolidated identity+attachments package (FLOW §3, §4).
+
+    Order (FLOW §4): FAMILY_KERNEL.md, then IDENTITY_<platform>.md, then the
+    caller attachments. The kernel and platform identity are MANDATORY and read
+    via ``_read_required`` — a missing/unreadable one raises IdentityError and
+    halts the consultation (no silent skip, no partial packet).
+
+    Caller-supplied identity files are stripped (identity is automatic), but a
+    caller file that is genuinely missing/unreadable is a loud failure, not a
+    silent drop. Each caller attachment's path + content hash is captured BEFORE
+    consolidation so provenance survives the merge.
+
+    Returns a ConsolidatedPackage: the package path plus the caller-attachment
+    provenance (path + sha256). Never returns None and never returns a partial
+    packet — it either yields a complete package or raises.
+    """
     out_stem = f"/tmp/taey_package_{platform}_{int(time.time())}"
-    package_text = ''.join(sections)
+    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
     paths = _write_package_chunks(platform, package_text, out_stem)
     logger.info(
         "Consolidated %d files -> %d attachment package file(s): %s",
-        len(sections_src),
+        section_count,
         len(paths),
         ', '.join(paths),
     )
