@@ -183,6 +183,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             and self._looks_like_paste_chip(element, name)
         }
 
+    def _composer_paste_chip_names(self, snapshot: Snapshot) -> list[str]:
+        return sorted(self._paste_chip_names(
+            snapshot,
+            set(),
+            elements=self._composer_scope_elements(snapshot),
+        ))
+
     @classmethod
     def _looks_like_paste_chip(cls, element: ElementRef, name: str) -> bool:
         role = (element.role or '').strip().lower()
@@ -227,13 +234,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         ]
         if snapshot.has('send_button'):
             blockers.append('composer_send_button_present')
-        chip_names = sorted(self._paste_chip_names(
-            snapshot,
-            set(),
-            elements=self._composer_scope_elements(snapshot),
-        ))
-        if chip_names:
-            blockers.append('composer_paste_chip_present:' + ', '.join(chip_names[:3]))
         return blockers
 
     def _composer_scope_elements(self, snapshot: Snapshot) -> list[ElementRef]:
@@ -872,22 +872,25 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         pasted = self.runtime.paste(request.message)
         verify_snap = self.runtime.wait_until(
             lambda: (
-                snap if (snap := self.runtime.snapshot()).has('send_button') else None
+                snap
+                if (
+                    (snap := self.runtime.snapshot()).has('send_button')
+                    or self._composer_paste_chip_names(snap)
+                )
+                else None
             ),
             timeout=8.0,
             interval=0.4,
         ) or self.runtime.snapshot()
-        # The "Send message" button only appears once the composer holds content,
-        # so prompt_ready is the reliable "text landed" signal. Do NOT gate on a
-        # char-count read of the composer: Claude's React contenteditable does
-        # not report its text reliably over AT-SPI, which false-negatived a paste
-        # that DID land and triggered a type_text fallback that DOUBLED the prompt
-        # (production-observed). One paste + Send-button-present is the contract.
-        prompt_ready = verify_snap.has('send_button')
+        paste_chip_names = self._composer_paste_chip_names(verify_snap)
+        # Long pasted messages can become a PASTED chip with empty composer text;
+        # that chip carries the prompt, so it is send-ready content.
+        prompt_ready = verify_snap.has('send_button') or bool(paste_chip_names)
         landed_chars, _ = self._prompt_text_status(request.message)
         verified = bool(pasted and prompt_ready)
         result.add_step('prompt', verified, 'Claude prompt entered',
                         landed_chars=landed_chars, expected_chars=len(request.message),
+                        paste_chip_names=paste_chip_names[:3],
                         snapshot=verify_snap.serializable())
         return verified
 
@@ -902,9 +905,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
         snap = self.runtime.snapshot()
+        paste_chips_before_click = self._composer_paste_chip_names(snap)
         send_button = self.find_first(snap, 'send_button')
         if not send_button:
             result.add_step('send', False, 'Claude send button not found',
+                            paste_chips_before_click=paste_chips_before_click[:3],
                             snapshot=snap.serializable())
             return False
         clicked = self.runtime.click(send_button)
@@ -934,6 +939,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
         verify_snap = self.runtime.snapshot()
+        paste_chips_after_click = self._composer_paste_chip_names(verify_snap)
         verify_blockers = self._send_blockers(verify_snap)
         if verify_blockers:
             send_blockers = verify_blockers
@@ -956,6 +962,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             url_before=before, url_after=result.session_url_after,
             stop_seen=stop_seen, message_landed=message_landed,
             send_blockers=send_blockers,
+            paste_chips_before_click=paste_chips_before_click[:3],
+            paste_chips_after_click=paste_chips_after_click[:3],
             url_changed=bool(url_changed), answer_thread=bool(answer_thread),
             snapshot=verify_snap.serializable(),
         )

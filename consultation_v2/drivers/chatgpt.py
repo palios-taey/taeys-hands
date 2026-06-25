@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 class ChatGPTConsultationDriver(BaseConsultationDriver):
     platform = 'chatgpt'
+    _AUTO_CHIP_ROLES = {'push button', 'list item', 'heading', 'panel'}
+    _AUTO_CHIP_IGNORED_NAMES = {
+        'Add files and more',
+        'Ask anything',
+        'Chat with ChatGPT',
+        'Send prompt',
+        'Start Voice',
+        'Start dictation',
+    }
     _RESPONSE_TEXT_ROLES = {
         'heading',
         'label',
@@ -690,6 +699,64 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             None,
         )
 
+    def _paste_chip_names(
+        self,
+        snapshot: Snapshot,
+        baseline_names: set[str],
+        elements: list[ElementRef] | None = None,
+    ) -> set[str]:
+        candidates = elements if elements is not None else self._snapshot_elements(snapshot)
+        return {
+            name
+            for element in candidates
+            if (name := (element.name or '').strip())
+            and name not in baseline_names
+            and self._looks_like_paste_chip(element, name)
+        }
+
+    @classmethod
+    def _looks_like_paste_chip(cls, element: ElementRef, name: str) -> bool:
+        role = (element.role or '').strip().lower()
+        if role not in cls._AUTO_CHIP_ROLES:
+            return False
+        if name in cls._AUTO_CHIP_IGNORED_NAMES:
+            return False
+        lower_name = name.lower()
+        failure_terms = (
+            'cannot',
+            'error',
+            'failed',
+            'not supported',
+            'too large',
+            'try again',
+            'unsupported',
+        )
+        if any(term in lower_name for term in failure_terms):
+            return False
+        attachment_terms = (
+            'attachment',
+            'content',
+            'markdown',
+            'package',
+            'paste',
+            'pasted',
+            'text',
+            'txt',
+        )
+        if any(term in lower_name for term in attachment_terms):
+            return True
+        if ',' in lower_name:
+            size_terms = (' bytes', ' kb', ' mb', ' lines', ' words')
+            return any(term in lower_name for term in size_terms)
+        return False
+
+    def _composer_paste_chip_names(self, snapshot: Snapshot) -> list[str]:
+        return sorted(self._paste_chip_names(
+            snapshot,
+            set(),
+            elements=self._composer_scope_elements(snapshot),
+        ))
+
     def _composer_scope_elements(self, snapshot: Snapshot) -> list[ElementRef]:
         root = self._composer_scope_root(snapshot)
         if root is not None:
@@ -1008,8 +1075,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         time.sleep(0.2)
         pasted = self.runtime.paste(request.message)
         verify_snap = self.runtime.snapshot()
+        paste_chip_names = self._composer_paste_chip_names(verify_snap)
         verified = bool(pasted)
-        result.add_step('prompt', verified, 'ChatGPT prompt entered', snapshot=verify_snap.serializable())
+        result.add_step(
+            'prompt',
+            verified,
+            'ChatGPT prompt entered',
+            paste_chip_names=paste_chip_names[:3],
+            snapshot=verify_snap.serializable(),
+        )
         return verified
 
     @staticmethod
@@ -1049,11 +1123,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
     def _send_button_readiness(self, snapshot: Snapshot) -> tuple[str | None, ElementRef | None, dict[str, object]]:
         send_key, send_button = self.find_first_any(snapshot, self._send_button_keys())
         states = self._element_state_set(send_button)
+        paste_chip_names = self._composer_paste_chip_names(snapshot)
+        has_coordinates = bool(send_button and send_button.x is not None and send_button.y is not None)
+        state_ready = 'enabled' in states
+        paste_chip_ready = bool(paste_chip_names)
         ready = bool(
             send_button
-            and send_button.x is not None
-            and send_button.y is not None
-            and 'enabled' in states
+            and has_coordinates
+            and (state_ready or paste_chip_ready)
         )
         return send_key, send_button, {
             'phase': 'send_button_ready',
@@ -1061,7 +1138,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'send_button': self._element_evidence(send_button),
             'states': sorted(states),
             'ready': ready,
-            'has_coordinates': bool(send_button and send_button.x is not None and send_button.y is not None),
+            'has_coordinates': has_coordinates,
+            'state_ready': state_ready,
+            'paste_chip_ready': paste_chip_ready,
+            'paste_chip_names': paste_chip_names[:3],
         }
 
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
