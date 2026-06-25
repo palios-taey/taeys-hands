@@ -415,7 +415,8 @@ workflow:
   defaults:
     model: pro
     mode: pro
-    tools: none
+    tools:
+      - web_search
   selection:
     menus:
       model:
@@ -520,8 +521,8 @@ workflow:
             path:
               - element: tool_more
                 action: hover
-        default_for_fresh: none
-        example_rationale: ChatGPT keeps its default tools state; explicit plus-menu tools remain opt-in.
+        default_for_fresh: web_search
+        example_rationale: Web access is enabled by default; Deep research and connectors remain opt-in.
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
