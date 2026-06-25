@@ -16,11 +16,13 @@ Contract (DRIVER_CONTRACT A-J / 100_TIMES):
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from urllib.parse import urlparse
 
 from consultation_v2 import display_readiness
 from consultation_v2.drivers.base import BaseConsultationDriver
+from consultation_v2.platforms_runtime import get_platform_display
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
 
 try:
@@ -546,6 +548,88 @@ class GrokConsultationDriver(BaseConsultationDriver):
     # ------------------------------------------------------------------
     # Step 7 — extract (scroll to bottom + Copy element action; validate length)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _conversation_title(window_title: str) -> str:
+        normalized = ' '.join(str(window_title or '').strip().lower().split())
+        normalized = normalized.replace('\u2014', '-').replace('\u2013', '-')
+        for suffix in (' - mozilla firefox', ' mozilla firefox'):
+            if normalized.endswith(suffix):
+                normalized = normalized[:-len(suffix)].strip()
+        return normalized.strip(' -')
+
+    def _grok_window_title(self) -> str:
+        display = get_platform_display(self.platform) or os.environ.get('DISPLAY', ':0')
+        env = dict(os.environ)
+        env['DISPLAY'] = display
+        try:
+            search = subprocess.run(
+                ['xdotool', 'search', '--class', 'firefox'],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            window_ids = [line.strip() for line in search.stdout.splitlines() if line.strip()]
+            for window_id in reversed(window_ids):
+                title = subprocess.run(
+                    ['xdotool', 'getwindowname', window_id],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if title.returncode == 0 and title.stdout.strip():
+                    return title.stdout.strip()
+        except Exception:
+            return ''
+        return ''
+
+    def _copy_buttons_ready_snapshot(
+        self,
+        copy_key: str,
+        timeout: float = 20.0,
+        interval: float = 0.4,
+    ) -> tuple[Snapshot, dict[str, object]]:
+        started = time.monotonic()
+        last_snapshot: Snapshot | None = None
+        last_title = ''
+        last_conversation_title = ''
+        last_copy_count = 0
+        samples: list[dict[str, object]] = []
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot, last_title, last_conversation_title, last_copy_count
+            snapshot = self.runtime.snapshot()
+            last_snapshot = snapshot
+            last_title = self._grok_window_title()
+            last_conversation_title = self._conversation_title(last_title)
+            generic_title = last_conversation_title == self.platform
+            last_copy_count = len((snapshot.mapped or {}).get(copy_key) or [])
+            samples.append({
+                'elapsed_seconds': round(time.monotonic() - started, 3),
+                'title': last_title,
+                'conversation_title': last_conversation_title,
+                'generic_title': generic_title,
+                'copy_button_count': last_copy_count,
+            })
+            if last_copy_count > 0 and last_conversation_title and not generic_title:
+                return snapshot
+            return None
+
+        matched = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
+        snapshot = matched if isinstance(matched, Snapshot) else last_snapshot or self.runtime.snapshot()
+        evidence = {
+            'copy_button_settle_timeout_seconds': timeout,
+            'copy_button_settle_interval_seconds': interval,
+            'copy_button_settle_elapsed_seconds': round(time.monotonic() - started, 3),
+            'title': last_title,
+            'conversation_title': last_conversation_title,
+            'generic_title': last_conversation_title == self.platform,
+            'copy_button_count': last_copy_count,
+            'settle_samples': samples[-8:],
+        }
+        return snapshot, evidence
+
     def extract_response(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         copy_key = self.cfg['workflow']['extract']['primary_key']
 
@@ -572,15 +656,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                 self.runtime.scroll_document_to_bottom(clicks=12, rounds=4, settle=0.4)
             )
 
-        snap = self.runtime.wait_until(
-            lambda: (
-                current
-                if (current := self.runtime.snapshot()).has(copy_key)
-                else None
-            ),
-            timeout=12,
-            interval=0.4,
-        ) or self.runtime.snapshot()
+        snap, copy_button_settle = self._copy_buttons_ready_snapshot(copy_key)
         copy_buttons = sorted(
             (snap.mapped or {}).get(copy_key) or [],
             key=lambda item: (
@@ -594,6 +670,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         if not copy_buttons:
             result.add_step('extract', False, 'Grok copy button not found',
                             bottom_evidence=bottom_evidence,
+                            copy_button_settle=copy_button_settle,
                             snapshot=snap.serializable())
             return False
 
@@ -653,6 +730,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
                     selected_index_from_bottom=index_from_bottom,
                     copy_button_count=len(copy_buttons),
                     bottom_evidence=bottom_evidence,
+                    copy_button_settle=copy_button_settle,
                     attempts=attempts,
                     preview=content[:200],
                 )
@@ -665,6 +743,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
             prompt_len=len(request.message),
             copy_button_count=len(copy_buttons),
             bottom_evidence=bottom_evidence,
+            copy_button_settle=copy_button_settle,
             attempts=attempts,
             snapshot=snap.serializable(),
         )
