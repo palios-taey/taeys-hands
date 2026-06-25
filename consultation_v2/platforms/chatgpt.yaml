@@ -415,8 +415,12 @@ workflow:
   defaults:
     model: pro
     mode: pro
-    tools:
-      - web_search
+    # Default tools are intentionally disabled: the ChatGPT "+" tools menu is
+    # currently AT-SPI-broken, and selecting web_search through it stalls the
+    # default consult before paste/send. Keep web_search opt-in via
+    # `--select tools=web_search`; re-enable this default only after the menu is
+    # reliably drivable.
+    tools: none
   selection:
     menus:
       model:
@@ -521,8 +525,10 @@ workflow:
             path:
               - element: tool_more
                 action: hover
-        default_for_fresh: web_search
-        example_rationale: Web access is enabled by default; Deep research and connectors remain opt-in.
+        # Keep fresh-chat default aligned with workflow.defaults.tools until
+        # the ChatGPT "+" tools menu is reliably AT-SPI-drivable.
+        default_for_fresh: none
+        example_rationale: Default to no tools because ChatGPT's + tools menu currently stalls default consults; web_search remains opt-in via explicit --select tools=web_search.
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
