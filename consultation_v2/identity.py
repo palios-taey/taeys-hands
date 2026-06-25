@@ -47,9 +47,6 @@ _IDENTITY_BASENAMES = (
     {os.path.basename(p) for p in _PLATFORM_IDENTITY.values()}
 )
 
-_CLAUDE_CHUNK_THRESHOLD_BYTES = 45_000
-_CLAUDE_CHUNK_TARGET_BYTES = 22_000
-
 _EXT_LANG = {
     '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
     '.yaml': 'yaml', '.yml': 'yaml', '.json': 'json', '.md': 'markdown',
@@ -125,74 +122,11 @@ def _identity_path(platform: str) -> str:
     return path
 
 
-def _split_utf8_bytes(data: bytes, target_bytes: int) -> List[Tuple[int, int, str]]:
-    chunks: List[Tuple[int, int, str]] = []
-    offset = 0
-    total = len(data)
-    while offset < total:
-        hard_end = min(offset + target_bytes, total)
-        end = hard_end
-        if hard_end < total:
-            preferred = data.rfind(b'\n', offset + int(target_bytes * 0.65), hard_end)
-            if preferred > offset:
-                end = preferred + 1
-        while end > offset:
-            try:
-                text = data[offset:end].decode('utf-8')
-                break
-            except UnicodeDecodeError:
-                end -= 1
-        else:
-            end = hard_end
-            while end < total:
-                try:
-                    text = data[offset:end].decode('utf-8')
-                    break
-                except UnicodeDecodeError:
-                    end += 1
-            else:
-                text = data[offset:total].decode('utf-8')
-                end = total
-        chunks.append((offset, end, text))
-        offset = end
-    return chunks
-
-
 def _write_package_chunks(platform: str, package_text: str, out_stem: str) -> List[str]:
-    package_bytes = package_text.encode('utf-8')
-    if platform != 'claude' or len(package_bytes) <= _CLAUDE_CHUNK_THRESHOLD_BYTES:
-        out_path = f"{out_stem}.md"
-        with open(out_path, 'w', encoding='utf-8') as handle:
-            handle.write(package_text)
-        return [out_path]
-
-    digest = hashlib.sha256(package_bytes).hexdigest()
-    chunks = _split_utf8_bytes(package_bytes, _CLAUDE_CHUNK_TARGET_BYTES)
-    paths: List[str] = []
-    total_chunks = len(chunks)
-    for index, (start, end, chunk_text) in enumerate(chunks, start=1):
-        out_path = f"{out_stem}_part{index:03d}of{total_chunks:03d}.md"
-        header = (
-            f"# Package for {platform} — chunk {index}/{total_chunks}\n\n"
-            "**Chunked package contract**: read every ordered chunk before answering. "
-            "The complete consultation packet is the exact concatenation of each "
-            "chunk body between the BEGIN/END markers.\n\n"
-            f"**Full packet sha256**: `{digest}`\n"
-            f"**Full packet bytes**: `{len(package_bytes)}`\n"
-            f"**This chunk byte range**: `{start}:{end}`\n\n"
-            f"<!-- BEGIN TAEY_PACKAGE_CHUNK {index}/{total_chunks} "
-            f"sha256={digest} bytes={start}:{end} -->\n"
-        )
-        footer = (
-            f"\n<!-- END TAEY_PACKAGE_CHUNK {index}/{total_chunks} "
-            f"sha256={digest} bytes={start}:{end} -->\n"
-        )
-        with open(out_path, 'w', encoding='utf-8') as handle:
-            handle.write(header)
-            handle.write(chunk_text)
-            handle.write(footer)
-        paths.append(out_path)
-    return paths
+    out_path = f"{out_stem}.md"
+    with open(out_path, 'w', encoding='utf-8') as handle:
+        handle.write(package_text)
+    return [out_path]
 
 
 def validate_caller_attachments(caller_attachments: List[str]) -> List[AttachmentProvenance]:
