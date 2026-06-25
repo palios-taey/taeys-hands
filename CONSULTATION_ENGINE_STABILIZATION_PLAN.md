@@ -43,5 +43,15 @@
 
 ### Task: all5-sweep - taeys-hands: each of the 5 platforms clears the bar — dispatch a plan, engine executes hands-off, full extract delivered to requester, zero manual recovery. Dispatch sequentially, monitors concurrent. This is DONE only when all 5 pass [priority: 40] [owner: taeys-hands] [depends: cg-extract-validate] [depends: ppx-f10-validate] [depends: grok-f7-validate] [depends: claude-validate] [ref: CONSULTATION_CONTRACT.md:1-56]
 
+## Phase: p6-jesse-defects - Jesse-flagged consult-engine defects (careers R2, 2026-06-24) [order: 9] [ref: consultation_v2/identity.py:45-195]
+
+### Task: defect-chunking-build - codex: REMOVE Claude file-chunking. identity.py:50-51 (_CLAUDE_CHUNK_THRESHOLD_BYTES=45000 / _CLAUDE_CHUNK_TARGET_BYTES=22000) + _write_package_chunks (161-195) split a Claude package >45KB into 22KB _partNNNofNNN.md parts; a 123KB careers package became 6 parts -> 6 attach ops, looks duplicated, and DEGRADES the answer (Claude mid-stream: 'only have chunk 6 in context'). Root-cause shape: DELETE the Claude-special branch in _write_package_chunks so it ALWAYS writes ONE file (Claude.ai accepts a large single .md fine); drop the threshold or raise it far above any real package. Jesse-flagged verbatim: 'there does not need to be chunking of files.' [priority: 16] [owner: taeys-hands-codex] [depends: cg-monitor-toolcall] [ref: consultation_v2/identity.py:45-195]
+
+### Task: defect-chunking-validate - taeys-hands: production-validate a LARGE-attach Claude consult (>45KB package) attaches as ONE file (not N parts) and Claude answers coherently hands-off (no chunk-reassembly confusion); my-fleet r5 + merge. No synthetic test. [priority: 17] [owner: taeys-hands] [depends: defect-chunking-build] [ref: consultation_v2/identity.py:45-195]
+
+### Task: defect-pastechip-build - codex: message text-OR-PASTED-chip send handling (Claude AND ChatGPT). When a long --message pasted into the composer auto-converts to a 'PASTED' attachment chip leaving composer text empty, the send step HANGS (careers-Claude stalled ~23min, never sent). FIX: treat 'message became a PASTED chip + empty composer' as a valid sent-ready state and submit (the chip carries the message), not wait for composer text. Apply to claude.py + chatgpt.py send. Sequenced after chunking-build (both touch claude.py). [priority: 16] [owner: taeys-hands-codex] [depends: defect-chunking-build] [ref: consultation_v2/drivers/claude.py:1-60] [ref: consultation_v2/drivers/chatgpt.py:300-540]
+
+### Task: defect-pastechip-validate - taeys-hands: production-validate a long-message Claude AND ChatGPT consult SENDS hands-off (no hang) whether the message lands as composer text or a PASTED chip; my-fleet r5 + merge. No synthetic test. [priority: 17] [owner: taeys-hands] [depends: defect-pastechip-build] [ref: consultation_v2/drivers/claude.py:1-60]
+
 ## User Stop Conditions
 - stop_when_all_ready_tasks_dispatched
