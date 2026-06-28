@@ -4,8 +4,10 @@ import os
 import time
 from urllib.parse import urlparse
 
-from consultation_v2.drivers.base import BaseConsultationDriver
-from consultation_v2.types import ConsultationRequest, ConsultationResult
+from consultation_v2.completion import COMPLETE, DEEP_MODES, CompletionDetector
+from consultation_v2.drivers.base import BaseConsultationDriver, DEEP_GENERATION_FLOOR_SECONDS
+from consultation_v2.stop_conditions import is_stop_condition
+from consultation_v2.types import ConsultationRequest, ConsultationResult, Snapshot
 
 
 class GeminiConsultationDriver(BaseConsultationDriver):
@@ -305,9 +307,209 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         found = self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
         return str(found) if found else None
 
-    # monitor_generation is inherited from BaseConsultationDriver — the shared
-    # stop-transition detector (consultation_v2.completion). deep_think /
-    # deep_research are deep modes (2 stop-gone cycles).
+    def monitor_generation(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        mode: str | None = None,
+        seed_stop_seen: bool = False,
+    ) -> bool:
+        detector_mode = self._monitor_detector_mode(request, mode)
+        if detector_mode != 'deep_think':
+            return super().monitor_generation(
+                request,
+                result,
+                mode=mode,
+                seed_stop_seen=seed_stop_seen,
+            )
+        return self._monitor_deep_think_generation(
+            request,
+            result,
+            detector_mode=detector_mode,
+            seed_stop_seen=seed_stop_seen,
+        )
+
+    def _monitor_detector_mode(
+        self,
+        request: ConsultationRequest,
+        mode: str | None = None,
+    ) -> str:
+        selected = mode if mode is not None else request.selection_value('mode', '')
+        return str(selected or '').strip().lower()
+
+    def _monitor_deep_think_generation(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        *,
+        detector_mode: str,
+        seed_stop_seen: bool = False,
+    ) -> bool:
+        detector = CompletionDetector(mode=detector_mode)
+        stop_key = self._stop_key()
+        completed = False
+        observed_stop = bool(seed_stop_seen)
+        intermediate_failed = False
+        answer_thread_lost = False
+        intermediate_actions: dict[str, int] = {}
+        terminal_snapshot: Snapshot | None = None
+        interim_ack_seen = False
+        interim_ack_blocking_cycles = 0
+        if seed_stop_seen:
+            detector.ever_seen_stop = True
+            detector.stop_was_visible = True
+
+        def _poll() -> bool:
+            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost
+            nonlocal terminal_snapshot, interim_ack_seen, interim_ack_blocking_cycles
+            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
+                result,
+                answer_url_predicate=self._is_answer_thread_url,
+            )
+            if thread_lost:
+                answer_thread_lost = True
+                terminal_snapshot = self.runtime.snapshot()
+                return True
+            if thread_restored:
+                return False
+            snap = self.runtime.snapshot()
+            stop_present = snap.has(stop_key)
+            observed_stop = observed_stop or stop_present
+            if stop_present:
+                detector.observe(stop_present=True)
+            handled, failed = self._handle_monitor_intermediate_state(
+                snap,
+                result,
+                intermediate_actions,
+            )
+            if handled:
+                self._reset_detector_after_intermediate(detector)
+                intermediate_failed = failed
+                terminal_snapshot = snap
+                return bool(failed)
+            if stop_present:
+                return False
+            verdict = detector.observe(stop_present=False)
+            if verdict != COMPLETE:
+                return False
+            ack_absent, _ack_evidence = self._interim_ack_absent(snap)
+            if not ack_absent:
+                interim_ack_seen = True
+                interim_ack_blocking_cycles += 1
+                return False
+            completed = True
+            terminal_snapshot = snap
+            return True
+
+        effective_timeout = float(request.timeout)
+        if detector_mode in DEEP_MODES:
+            effective_timeout = max(effective_timeout, DEEP_GENERATION_FLOOR_SECONDS)
+        self.runtime.wait_until(_poll, timeout=effective_timeout, interval=1.0)
+        verify_snap = self.wait_for_validation(
+            'response_complete',
+            timeout=5.0,
+            interval=0.5,
+        )
+        ack_absent, ack_evidence = self._interim_ack_absent(verify_snap)
+        if not ack_absent:
+            interim_ack_seen = True
+        if not observed_stop:
+            if answer_thread_lost:
+                result.add_step(
+                    'monitor', False,
+                    'gemini answer_thread_lost: monitor could not restore pinned answer thread',
+                    stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                    mode=detector_mode,
+                    stop_condition='answer_thread_lost',
+                    **ack_evidence,
+                    snapshot=verify_snap.serializable(),
+                )
+                return False
+            result.add_step(
+                'monitor', False,
+                'gemini monitor never observed Stop button after send',
+                stop_seen=False, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode,
+                **ack_evidence,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if answer_thread_lost:
+            result.add_step(
+                'monitor', False,
+                'gemini answer_thread_lost: monitor could not restore pinned answer thread',
+                stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode,
+                stop_condition='answer_thread_lost',
+                **ack_evidence,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        if intermediate_failed:
+            result.add_step(
+                'monitor', False,
+                'gemini monitor failed while disposing intermediate state',
+                stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
+                mode=detector_mode,
+                intermediate_actions=intermediate_actions,
+                **ack_evidence,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
+        stop_absent = self.validation_passes(verify_snap, 'response_complete')
+        verified = bool(completed and stop_absent and ack_absent)
+        stop_still_present = bool(verify_snap.has(stop_key))
+        stop_condition = (
+            'generation_stalled'
+            if (not verified and stop_still_present and is_stop_condition('generation_stalled'))
+            else None
+        )
+        if verified:
+            monitor_message = 'gemini Deep Think response completed after interim ACK cleared'
+        elif stop_condition == 'generation_stalled':
+            monitor_message = (
+                f'gemini generation_stalled: Stop still present after '
+                f'{effective_timeout:.0f}s (mode={detector_mode}) -- loud bound, not completion'
+            )
+        elif not ack_absent:
+            monitor_message = 'gemini Deep Think interim ACK still present after Stop-gone'
+        else:
+            monitor_message = 'gemini Deep Think response did not reach Stop-gone completion'
+        result.add_step(
+            'monitor', verified, monitor_message,
+            stop_seen=observed_stop,
+            seed_stop_seen=bool(seed_stop_seen),
+            mode=detector_mode,
+            stop_condition=stop_condition,
+            stop_absent=stop_absent,
+            interim_ack_seen=interim_ack_seen,
+            interim_ack_blocking_cycles=interim_ack_blocking_cycles,
+            terminal_snapshot_seen=terminal_snapshot is not None,
+            **ack_evidence,
+            snapshot=verify_snap.serializable(),
+        )
+        if verified:
+            self.checkpoint_run_state(
+                request, self.RUN_STATE_COMPLETION_OBSERVED,
+                result=result,
+                url=result.session_url_after or self.runtime.current_url() or '',
+            )
+        return verified
+
+    def _interim_ack_absent(self, snapshot: Snapshot) -> tuple[bool, dict[str, object]]:
+        key = self._deep_think_interim_ack_key()
+        present = snapshot.has(key)
+        return not present, {
+            'deep_think_interim_ack_key': key,
+            'deep_think_interim_ack_present': present,
+        }
+
+    def _deep_think_interim_ack_key(self) -> str:
+        monitor_cfg = (self.cfg.get('workflow') or {}).get('monitor') or {}
+        key = str(monitor_cfg.get('deep_think_interim_ack_key') or '').strip()
+        if not key:
+            raise ValueError('gemini deep_think_interim_ack_key must be configured')
+        return key
 
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
