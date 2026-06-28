@@ -178,6 +178,15 @@ tree:
     tool_deselect_deep_research:
       name: Deselect Deep research
       role: push button
+    # Gemini Deep Think interim ACK from the real Jun-14 AT-SPI dump:
+    # name "Deep Think Response In Progress", role link, states showing/focusable/enabled.
+    deep_think_interim_ack_placeholder:
+      name: Deep Think Response In Progress
+      role: link
+      states_include:
+      - showing
+      - focusable
+      - enabled
 workflow:
   defaults:
     model: null
@@ -236,6 +245,7 @@ workflow:
     post_send_key: start_research
   monitor:
     stop_key: stop_button
+    deep_think_interim_ack_key: deep_think_interim_ack_placeholder
   extract:
     primary_key: copy_button
     strategy: last_by_y
