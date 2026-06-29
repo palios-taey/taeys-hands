@@ -32,6 +32,19 @@ from consultation_v2.yaml_contract import load_platform_yaml
 # (FLOW Monitor Contract: stop-present = generating; the timeout is the LOUD
 # bound for a genuinely-stuck run, never a content/elapsed completion heuristic.)
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
+# Minimum raw AT-SPI node count for a document snapshot to be a FAITHFUL read of
+# the page (and therefore for a stop-ABSENT observation drawn from it to be
+# trustworthy). A loaded consultation page — nav, sidebar history, composer,
+# toolbar, rendered response — always scans into the hundreds of raw nodes; a
+# starved/degraded read under concurrent AT-SPI bus contention returns a
+# near-empty tree (zero / single-digit nodes). This floor sits in the wide empty
+# gap between the two, so it never clips a real generating-or-complete page while
+# always catching a degenerate read. It bounds only the absence interpretation:
+# a degraded tick is treated as 'unknown' (skipped, debounce not advanced), never
+# as stop-gone. Because the monitor's wall-clock effective_timeout still bounds
+# the loop, an over-conservative misfire can only degrade to a LOUD timeout —
+# never a silent false-complete and never an infinite wait.
+MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt — echo, not a response'
 
 
@@ -2466,8 +2479,15 @@ class BaseConsultationDriver(ABC):
         validated send. Without that proof, this monitor call must observe Stop
         itself before Stop-gone can complete.
         """
+        # The selected mode lives in request.selections['mode'] (read via
+        # selection_value); ConsultationRequest has no `.mode` attribute, so the
+        # prior getattr(request, 'mode', None) ALWAYS yielded None -> '' ->
+        # 'default'. That silently collapsed deep modes to required_stop_cycles=1
+        # AND dropped their DEEP_GENERATION_FLOOR_SECONDS floor below. Read the
+        # real selected mode so deep modes get their intended 2-cycle stop-gone
+        # debounce + deep timeout floor.
         detector_mode = (
-            (mode if mode is not None else getattr(request, 'mode', None)) or ''
+            (mode if mode is not None else request.selection_value('mode', None)) or ''
         ).strip().lower()
         detector = CompletionDetector(mode=detector_mode)
         stop_key = self._stop_key()
@@ -2503,6 +2523,19 @@ class BaseConsultationDriver(ABC):
                 intermediate_failed = failed
                 return bool(failed)
             if stop_present:
+                return False
+            # Stop-key absent on this scan. An ABSENCE is only real information
+            # when it comes from a FAITHFUL read of the page: under concurrent
+            # AT-SPI bus contention a starved read returns a near-empty tree in
+            # which stop_key is absent NOT because generation finished but because
+            # the read itself failed. Feeding that to the detector as stop-gone is
+            # the false-completion root cause (compounded by BUG1's lost deep
+            # debounce). A degraded read is therefore 'unknown', not 'gone': skip
+            # the tick (debounce counter untouched) and keep polling. stop_present
+            # is unaffected — a visible stop means generating regardless of tree
+            # size — and the wall-clock effective_timeout still bounds a
+            # genuinely-stuck run, so this adds no infinite wait.
+            if int(snap.raw_count or 0) < MONITOR_MIN_HEALTHY_RAW_COUNT:
                 return False
             verdict = detector.observe(stop_present=False)
             if verdict == COMPLETE:
