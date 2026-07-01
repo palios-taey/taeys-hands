@@ -7,7 +7,29 @@ from urllib.parse import urlparse
 from consultation_v2.completion import COMPLETE, DEEP_MODES, CompletionDetector
 from consultation_v2.drivers.base import BaseConsultationDriver, DEEP_GENERATION_FLOOR_SECONDS
 from consultation_v2.stop_conditions import is_stop_condition
-from consultation_v2.types import ConsultationRequest, ConsultationResult, Snapshot
+from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, Snapshot
+
+
+GEMINI_DEEP_THINK_MIN_REAL_ANSWER_CHARS = 160
+GEMINI_DEEP_THINK_INTERIM_MARKERS = (
+    "i'm on it",
+    "i’m on it",
+    'responses with deep think can take some time',
+    'deep think response in progress',
+    'generating your response',
+    'check back later',
+)
+GEMINI_DEEP_THINK_UI_TEXT = {
+    'copy',
+    'deep think',
+    'deselect deep think',
+    'microphone',
+    'new chat',
+    'send message',
+    'share & export',
+    'stop response',
+    'upload & tools',
+}
 
 
 class GeminiConsultationDriver(BaseConsultationDriver):
@@ -354,14 +376,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         intermediate_actions: dict[str, int] = {}
         terminal_snapshot: Snapshot | None = None
         interim_ack_seen = False
+        post_ack_stop_seen = False
         interim_ack_blocking_cycles = 0
-        if seed_stop_seen:
-            detector.ever_seen_stop = True
-            detector.stop_was_visible = True
+        terminal_answer_ready = False
+        terminal_answer_evidence: dict[str, object] = {}
 
         def _poll() -> bool:
-            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost
-            nonlocal terminal_snapshot, interim_ack_seen, interim_ack_blocking_cycles
+            nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, detector
+            nonlocal terminal_snapshot, interim_ack_seen, post_ack_stop_seen, interim_ack_blocking_cycles
+            nonlocal terminal_answer_ready, terminal_answer_evidence
             _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
                 result,
                 answer_url_predicate=self._is_answer_thread_url,
@@ -375,8 +398,6 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             snap = self.runtime.snapshot()
             stop_present = snap.has(stop_key)
             observed_stop = observed_stop or stop_present
-            if stop_present:
-                detector.observe(stop_present=True)
             handled, failed = self._handle_monitor_intermediate_state(
                 snap,
                 result,
@@ -387,18 +408,36 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 intermediate_failed = failed
                 terminal_snapshot = snap
                 return bool(failed)
+            ack_absent, _ack_evidence = self._interim_ack_absent(snap)
+            if not ack_absent:
+                interim_ack_seen = True
+                post_ack_stop_seen = False
+                interim_ack_blocking_cycles += 1
+                terminal_answer_ready = False
+                detector = CompletionDetector(mode=detector_mode)
+                return False
+            if interim_ack_seen and not post_ack_stop_seen:
+                if stop_present:
+                    post_ack_stop_seen = True
+                else:
+                    interim_ack_blocking_cycles += 1
+                    return False
             if stop_present:
+                detector.observe(stop_present=True)
                 return False
             verdict = detector.observe(stop_present=False)
             if verdict != COMPLETE:
                 return False
-            ack_absent, _ack_evidence = self._interim_ack_absent(snap)
-            if not ack_absent:
-                interim_ack_seen = True
+            answer_ready, answer_evidence = self._deep_think_real_answer_evidence(snap, request)
+            if not answer_ready:
                 interim_ack_blocking_cycles += 1
+                terminal_answer_ready = False
+                terminal_answer_evidence = answer_evidence
                 return False
             completed = True
             terminal_snapshot = snap
+            terminal_answer_ready = True
+            terminal_answer_evidence = answer_evidence
             return True
 
         effective_timeout = float(request.timeout)
@@ -413,6 +452,10 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         ack_absent, ack_evidence = self._interim_ack_absent(verify_snap)
         if not ack_absent:
             interim_ack_seen = True
+        verify_answer_ready, verify_answer_evidence = self._deep_think_real_answer_evidence(
+            verify_snap,
+            request,
+        )
         if not observed_stop:
             if answer_thread_lost:
                 result.add_step(
@@ -457,7 +500,16 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             )
             return False
         stop_absent = self.validation_passes(verify_snap, 'response_complete')
-        verified = bool(completed and stop_absent and ack_absent)
+        post_ack_gate_satisfied = bool(post_ack_stop_seen or not interim_ack_seen)
+        answer_ready = bool(terminal_answer_ready or verify_answer_ready)
+        answer_evidence = terminal_answer_evidence if terminal_answer_ready else verify_answer_evidence
+        verified = bool(
+            completed
+            and stop_absent
+            and ack_absent
+            and post_ack_gate_satisfied
+            and answer_ready
+        )
         stop_still_present = bool(verify_snap.has(stop_key))
         stop_condition = (
             'generation_stalled'
@@ -473,6 +525,10 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             )
         elif not ack_absent:
             monitor_message = 'gemini Deep Think interim ACK still present after Stop-gone'
+        elif interim_ack_seen and not post_ack_stop_seen:
+            monitor_message = 'gemini Deep Think interim ACK cleared before real generation Stop appeared'
+        elif not answer_ready:
+            monitor_message = 'gemini Deep Think terminal snapshot lacked real answer content'
         else:
             monitor_message = 'gemini Deep Think response did not reach Stop-gone completion'
         result.add_step(
@@ -483,7 +539,10 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             stop_condition=stop_condition,
             stop_absent=stop_absent,
             interim_ack_seen=interim_ack_seen,
+            post_ack_stop_seen=post_ack_stop_seen,
             interim_ack_blocking_cycles=interim_ack_blocking_cycles,
+            real_answer_ready=answer_ready,
+            real_answer_evidence=answer_evidence,
             terminal_snapshot_seen=terminal_snapshot is not None,
             **ack_evidence,
             snapshot=verify_snap.serializable(),
@@ -503,6 +562,75 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             'deep_think_interim_ack_key': key,
             'deep_think_interim_ack_present': present,
         }
+
+    def _deep_think_real_answer_evidence(
+        self,
+        snapshot: Snapshot,
+        request: ConsultationRequest,
+    ) -> tuple[bool, dict[str, object]]:
+        candidates: list[dict[str, object]] = []
+        interim_hits: list[dict[str, object]] = []
+        prompt_norm = self._normalized_text(request.message).lower()
+        for element in snapshot.unknown:
+            for field, text in self._deep_think_element_text_fields(element):
+                normalized = self._normalized_text(text)
+                if not normalized:
+                    continue
+                lowered = normalized.lower()
+                marker = self._deep_think_interim_marker(lowered)
+                if marker:
+                    interim_hits.append({
+                        'marker': marker,
+                        'field': field,
+                        'role': element.role,
+                        'chars': len(normalized),
+                        'preview': normalized[:160],
+                    })
+                    continue
+                if lowered in GEMINI_DEEP_THINK_UI_TEXT:
+                    continue
+                if self._deep_think_text_matches_prompt(normalized, prompt_norm):
+                    continue
+                candidates.append({
+                    'field': field,
+                    'role': element.role,
+                    'chars': len(normalized),
+                    'preview': normalized[:200],
+                })
+        best = max(candidates, key=lambda item: int(item['chars']), default=None)
+        best_chars = int(best['chars']) if best else 0
+        return best_chars >= GEMINI_DEEP_THINK_MIN_REAL_ANSWER_CHARS, {
+            'min_real_answer_chars': GEMINI_DEEP_THINK_MIN_REAL_ANSWER_CHARS,
+            'best_candidate': best,
+            'candidate_count': len(candidates),
+            'interim_hits': interim_hits[:5],
+            'unknown_count': len(snapshot.unknown),
+        }
+
+    @staticmethod
+    def _deep_think_element_text_fields(element: ElementRef) -> tuple[tuple[str, str], ...]:
+        return (
+            ('name', element.name or ''),
+            ('text', element.text or ''),
+            ('description', element.description or ''),
+        )
+
+    @staticmethod
+    def _deep_think_interim_marker(lowered_text: str) -> str:
+        for marker in GEMINI_DEEP_THINK_INTERIM_MARKERS:
+            if marker in lowered_text:
+                return marker
+        return ''
+
+    def _deep_think_text_matches_prompt(self, normalized: str, prompt_norm: str) -> bool:
+        if not prompt_norm:
+            return False
+        lowered = normalized.lower()
+        if len(lowered) >= 80 and lowered in prompt_norm:
+            return True
+        if len(prompt_norm) >= 80 and prompt_norm in lowered:
+            return True
+        return bool(self._prompt_echo_evidence(normalized, prompt_norm).get('is_echo'))
 
     def _deep_think_interim_ack_key(self) -> str:
         monitor_cfg = (self.cfg.get('workflow') or {}).get('monitor') or {}
