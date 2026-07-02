@@ -140,8 +140,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
             )
             raise
         else:
+            event = 'DONE' if bool(value) else 'FAILED'
             self._log_setup_progress(
-                'DONE',
+                event,
                 step_name,
                 timeout_seconds=timeout_seconds,
                 elapsed_seconds=time.monotonic() - started,
@@ -586,7 +587,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
         return True
 
     # ------------------------------------------------------------------
-    # Step 5 — send (exact Submit button coordinate-click; stop|URL gate)
+    # Step 5 — send (focused composer + Return; hard answer-thread URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         before = self.runtime.current_url() or result.session_url_before
@@ -600,21 +601,8 @@ class GrokConsultationDriver(BaseConsultationDriver):
         copy_key = self.cfg['workflow']['extract']['primary_key']
         pre_send_copy_baseline = self._copy_button_baseline(copy_key)
         self._pre_send_copy_button_baseline = pre_send_copy_baseline
-        send_key = self.cfg['workflow']['send']['send_key']
-        send_snapshot, send_button = self.wait_for_key(
-            send_key,
-            timeout=3.0,
-            interval=0.2,
-            scope='document',
-        )
-        if not send_button:
-            result.add_step('send', False, f'Grok send button {send_key!r} not found',
-                            snapshot=send_snapshot.serializable())
-            return False
-        if not self.runtime.click(send_button, strategy='coordinate_only'):
-            result.add_step('send', False, f'Grok send button {send_key!r} click failed',
-                            snapshot=send_snapshot.serializable(),
-                            send_button=send_button.serializable())
+        if not self.runtime.press('Return'):
+            result.add_step('send', False, 'Grok Return keypress failed')
             return False
 
         send_snap = self.wait_for_validation('send_fired', timeout=12.0, interval=0.5)
@@ -622,9 +610,36 @@ class GrokConsultationDriver(BaseConsultationDriver):
         # Carry the send-phase stop observation into the shared completion
         # detector (a fast reply can clear the stop button before monitor runs).
         self._send_stop_seen = bool(stop_seen)
-        answer_url = self._wait_for_send_answer_thread_url(timeout=30.0, interval=0.5)
-        result.session_url_after = answer_url or self.runtime.current_url() or before
+        post_send_timeout = 30.0
+        self._log_setup_progress(
+            'START',
+            'post-send-url',
+            timeout_seconds=post_send_timeout,
+        )
+        answer_url = self._wait_for_send_answer_thread_url(timeout=post_send_timeout, interval=0.5)
+        self._log_setup_progress(
+            'DONE' if answer_url else 'FAILED',
+            'post-send-url',
+            timeout_seconds=post_send_timeout,
+        )
+        current_url = self.runtime.current_url() or before
+        result.session_url_after = answer_url or current_url
         verify_snap = self.runtime.snapshot()
+        if not answer_url:
+            result.add_step(
+                'send',
+                False,
+                'Grok send did not create an answer-thread URL before the bounded post-send gate',
+                url_before=before,
+                url_after=current_url,
+                stop_seen=stop_seen,
+                answer_thread=False,
+                url_changed=not self._urls_equivalent(current_url, before),
+                answer_thread_timeout_seconds=post_send_timeout,
+                pre_send_copy_button_baseline=pre_send_copy_baseline,
+                snapshot=verify_snap.serializable(),
+            )
+            return False
 
         url_changed = bool(
             result.session_url_after
