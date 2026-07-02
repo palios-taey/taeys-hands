@@ -415,7 +415,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                     verify_change=bool(urls.get('verify_navigation')),
                 )
             else:
-                navigated = self._navigate_fresh_with_new_tab(target_url)
+                navigated = self.runtime.navigate(target_url, verify_change=True)
             snap = self.runtime.snapshot()
             clean_navigation = self._navigation_snapshot_clean(snap)
             navigated = bool(navigated and clean_navigation)
@@ -456,46 +456,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             return None
         separator = '&' if '?' in url else '?'
         return f'{url}{separator}taey_fresh={int(time.time() * 1000)}'
-
-    def _navigate_fresh_with_new_tab(self, target_url: str) -> bool:
-        self.runtime.close_stale_dialogs()
-        if not self.runtime.focus_firefox():
-            return False
-        time.sleep(0.2)
-        if not self.runtime.press('ctrl+t'):
-            return False
-        time.sleep(0.4)
-        if not self.runtime.focus_address_bar():
-            return False
-        if not self.runtime.press('ctrl+a'):
-            return False
-        time.sleep(0.1)
-        if not self.runtime.paste(target_url):
-            return False
-        time.sleep(0.2)
-        if not self.runtime.press('Return'):
-            return False
-        current, _settled_snapshot = self.runtime.wait_for_navigation_target_loaded(target_url)
-        if not self._url_matches_target(current, target_url):
-            return False
-        if not self._close_previous_tab_after_new_tab(target_url):
-            return False
-        current, _settled_snapshot = self.runtime.wait_for_navigation_target_loaded(target_url)
-        if not self._url_matches_target(current, target_url):
-            return False
-        self.runtime.press('Escape')
-        time.sleep(0.4)
-        return True
-
-    def _close_previous_tab_after_new_tab(self, target_url: str) -> bool:
-        if not self.runtime.press('ctrl+shift+Tab'):
-            return False
-        time.sleep(0.2)
-        if not self.runtime.press('ctrl+w'):
-            return False
-        time.sleep(0.8)
-        current = (self.runtime.current_url() or '').strip()
-        return self._url_matches_target(current, target_url)
 
     @staticmethod
     def _url_matches_target(current_url: str, target_url: str) -> bool:
