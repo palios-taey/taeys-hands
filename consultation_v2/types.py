@@ -174,6 +174,30 @@ class ElementRef:
         return payload
 
 
+class SnapshotDriftError(ValueError):
+    def __init__(self, key: str, items: List[ElementRef], selector: str) -> None:
+        count = len(items)
+        examples = '; '.join(self._describe(item) for item in items[:3])
+        if count > 3:
+            examples = f'{examples}; ...'
+        super().__init__(
+            f"snapshot key {key!r} matched {count} elements; Snapshot.{selector}() "
+            f"refuses silent selection. Disambiguate the YAML with a structural "
+            f"index/ordinal or split the element_map key. Matches: {examples}"
+        )
+        self.key = key
+        self.count = count
+        self.selector = selector
+        self.matches = list(items)
+
+    @staticmethod
+    def _describe(item: ElementRef) -> str:
+        return (
+            f"name={item.name!r} role={item.role!r} "
+            f"x={item.x!r} y={item.y!r} states={list(item.states)!r}"
+        )
+
+
 @dataclass(slots=True)
 class Snapshot:
     platform: str
@@ -186,12 +210,16 @@ class Snapshot:
 
     def first(self, key: str) -> Optional[ElementRef]:
         items = self.mapped.get(key) or []
+        if len(items) > 1:
+            raise SnapshotDriftError(key, items, 'first')
         return items[0] if items else None
 
     def last(self, key: str) -> Optional[ElementRef]:
         items = self.mapped.get(key) or []
         if not items:
             return None
+        if len(items) > 1:
+            raise SnapshotDriftError(key, items, 'last')
         return sorted(items, key=lambda item: (item.y or 0, item.x or 0))[-1]
 
     def has(self, key: str) -> bool:
