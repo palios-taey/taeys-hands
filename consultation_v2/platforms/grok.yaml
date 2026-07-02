@@ -1,5 +1,5 @@
 platform: grok
-click_strategy: xdotool_first
+click_strategy: coordinate_only
 urls:
   fresh: https://grok.com/
   verify_navigation: true
@@ -173,12 +173,16 @@ workflow:
         options:
           auto:
             element: model_auto
+            click_strategy: coordinate_only
           expert:
             element: model_expert
+            click_strategy: coordinate_only
           fast:
             element: model_fast
+            click_strategy: coordinate_only
           heavy:
             element: model_heavy
+            click_strategy: coordinate_only
         default_for_fresh: auto
         example_rationale: Use Auto when the caller wants Grok to choose between Fast and Expert for this consult.
   navigate:
