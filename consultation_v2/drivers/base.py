@@ -846,24 +846,6 @@ class BaseConsultationDriver(ABC):
                 )
                 return True
 
-        trigger_snapshot, trigger_active, trigger_labels = self._selection_trigger_already_reflects_option(
-            trigger_key,
-            option,
-            target_key,
-        )
-        if trigger_active and trigger_snapshot is not None:
-            result.add_step(
-                'select',
-                True,
-                f'{self.platform} {menu}={option} already active',
-                menu=menu,
-                option=option,
-                confirmation='persistent_trigger_label',
-                expected_labels=sorted(trigger_labels),
-                snapshot=trigger_snapshot.serializable(),
-            )
-            return True
-
         opened = self._open_selection_menu(trigger_key, first_key, scope, result)
         if opened is None:
             return False
@@ -963,22 +945,6 @@ class BaseConsultationDriver(ABC):
                 snapshot=active_snapshot.serializable(),
             )
             return active_present
-        persistent_snapshot, persistent_verified, persistent_labels = (
-            self._selection_persistent_trigger_matches(trigger_key, option, target)
-        )
-        if persistent_verified:
-            result.add_step(
-                'select',
-                True,
-                f'{self.platform} selected {menu}={option}',
-                menu=menu,
-                option=option,
-                active_state=active_state,
-                confirmation='persistent_trigger_label',
-                expected_labels=sorted(persistent_labels),
-                snapshot=persistent_snapshot.serializable(),
-            )
-            return True
         time.sleep(0.2)
         verify_opened = self._open_selection_menu(trigger_key, first_key, scope, result)
         if verify_opened is None:
@@ -1513,95 +1479,6 @@ class BaseConsultationDriver(ABC):
                 require_non_empty=True,
             )
         raise ValueError(f'Unknown selection snapshot scope {scope!r}')
-
-    def _selection_persistent_trigger_matches(
-        self,
-        trigger_key: str,
-        option: str,
-        selected_target: ElementRef,
-    ) -> tuple[Snapshot, bool, set[str]]:
-        labels = self._selection_persistent_labels(option, selected_target)
-        if trigger_key != 'model_selector' or not labels:
-            snapshot = self.runtime.snapshot()
-            return snapshot, False, labels
-        timeout = self._selection_settle_seconds()
-        deadline = time.time() + timeout
-        last_snapshot: Snapshot | None = None
-        while time.time() < deadline:
-            remaining = max(0.1, deadline - time.time())
-            last_snapshot = self.runtime.wait_for_stable_snapshot(
-                consecutive=2,
-                timeout=min(remaining, 0.8),
-                interval=0.2,
-                require_non_empty=True,
-            )
-            trigger = self.find_first(last_snapshot, trigger_key)
-            if trigger is not None and trigger.name.strip() in labels:
-                return last_snapshot, True, labels
-            time.sleep(0.2)
-        return last_snapshot or self.runtime.snapshot(), False, labels
-
-    def _selection_persistent_labels(self, option: str, selected_target: ElementRef) -> set[str]:
-        labels = {selected_target.name.strip()} if selected_target.name and selected_target.name.strip() else set()
-        if option:
-            labels.add(' '.join(part.capitalize() for part in option.split('_') if part))
-        return labels
-
-    def _selection_trigger_already_reflects_option(
-        self,
-        trigger_key: str,
-        option: str,
-        target_key: str,
-    ) -> tuple[Snapshot | None, bool, set[str]]:
-        labels = self._selection_trigger_label_candidates(option, target_key)
-        if trigger_key != 'model_selector' or not labels:
-            return None, False, labels
-        snapshot = self.runtime.wait_for_stable_snapshot(
-            consecutive=1,
-            timeout=max(self._selection_settle_seconds(), 0.8),
-            interval=0.2,
-            anchor_key=trigger_key,
-            require_non_empty=True,
-        )
-        trigger = self.find_first(snapshot, trigger_key)
-        if trigger is None:
-            return snapshot, False, labels
-        trigger_label = trigger.name or ''
-        return snapshot, self._selection_label_matches_any(trigger_label, labels), labels
-
-    def _selection_trigger_label_candidates(self, option: str, target_key: str) -> set[str]:
-        labels: set[str] = set()
-        option_label = ' '.join(part.capitalize() for part in option.split('_') if part)
-        if option_label:
-            labels.add(option_label)
-            labels.update(part for part in option_label.split() if len(part) > 2)
-        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
-        spec = element_map.get(target_key) if isinstance(element_map, dict) else {}
-        name = str(spec.get('name') or '').strip() if isinstance(spec, dict) else ''
-        if name:
-            labels.add(name)
-            for delimiter in (' For ', ' Most ', ' Fastest ', ' Default'):
-                if delimiter in name:
-                    labels.add(name.split(delimiter, 1)[0].strip())
-            first_word = name.split(maxsplit=1)[0].strip()
-            if len(first_word) > 2:
-                labels.add(first_word)
-        return {label for label in labels if self._selection_normalized_label(label)}
-
-    def _selection_label_matches_any(self, text: str, labels: set[str]) -> bool:
-        normalized_text = f' {self._selection_normalized_label(text)} '
-        if not normalized_text.strip():
-            return False
-        for label in labels:
-            normalized_label = self._selection_normalized_label(label)
-            if normalized_label and f' {normalized_label} ' in normalized_text:
-                return True
-        return False
-
-    @staticmethod
-    def _selection_normalized_label(value: str) -> str:
-        normalized = ''.join(ch.lower() if ch.isalnum() else ' ' for ch in value)
-        return ' '.join(normalized.split())
 
     def _selection_conformance_gate(
         self,
