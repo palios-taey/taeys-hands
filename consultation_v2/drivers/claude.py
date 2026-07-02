@@ -1024,7 +1024,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             nonlocal detector, completed, observed_stop, terminal_snapshot
             nonlocal continue_clicks, continue_click_failed
             nonlocal intermediate_failed, answer_thread_lost
-            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
+            _thread_ok, thread_lost = self._assert_monitor_answer_thread(
                 result,
                 step_name=step_name,
                 answer_url_predicate=self._is_answer_thread_url,
@@ -1033,8 +1033,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 answer_thread_lost = True
                 terminal_snapshot = self.runtime.snapshot()
                 return True
-            if thread_restored:
-                return False
             snap = self.runtime.snapshot()
             stop_present = self.snapshot_has_any(snap, stop_keys)
             observed_stop = observed_stop or stop_present
@@ -1107,7 +1105,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             result.add_step(
                 step_name,
                 False,
-                'Claude answer_thread_lost: monitor could not restore pinned answer thread',
+                'Claude answer_thread_lost: monitor left send-created answer thread',
                 stop_seen=observed_stop,
                 seed_stop_seen=bool(seed_stop_seen),
                 mode=detector_mode or 'default',

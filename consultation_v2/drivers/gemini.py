@@ -385,7 +385,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, detector
             nonlocal terminal_snapshot, interim_ack_seen, post_ack_stop_seen, interim_ack_blocking_cycles
             nonlocal terminal_answer_ready, terminal_answer_evidence
-            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
+            _thread_ok, thread_lost = self._assert_monitor_answer_thread(
                 result,
                 answer_url_predicate=self._is_answer_thread_url,
             )
@@ -393,8 +393,6 @@ class GeminiConsultationDriver(BaseConsultationDriver):
                 answer_thread_lost = True
                 terminal_snapshot = self.runtime.snapshot()
                 return True
-            if thread_restored:
-                return False
             snap = self.runtime.snapshot()
             stop_present = snap.has(stop_key)
             observed_stop = observed_stop or stop_present
@@ -460,7 +458,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
             if answer_thread_lost:
                 result.add_step(
                     'monitor', False,
-                    'gemini answer_thread_lost: monitor could not restore pinned answer thread',
+                    'gemini answer_thread_lost: monitor left send-created answer thread',
                     stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
                     mode=detector_mode,
                     stop_condition='answer_thread_lost',
@@ -480,7 +478,7 @@ class GeminiConsultationDriver(BaseConsultationDriver):
         if answer_thread_lost:
             result.add_step(
                 'monitor', False,
-                'gemini answer_thread_lost: monitor could not restore pinned answer thread',
+                'gemini answer_thread_lost: monitor left send-created answer thread',
                 stop_seen=observed_stop, seed_stop_seen=bool(seed_stop_seen),
                 mode=detector_mode,
                 stop_condition='answer_thread_lost',

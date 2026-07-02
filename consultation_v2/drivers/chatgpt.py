@@ -1385,15 +1385,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         def _poll() -> bool:
             nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, terminal_snapshot
             nonlocal stop_gone_without_complete_signal, generation_floor_y, complete_signal_y
-            _thread_ok, thread_lost, thread_restored = self._reassert_monitor_answer_thread(
+            _thread_ok, thread_lost = self._assert_monitor_answer_thread(
                 result,
                 answer_url_predicate=self._is_answer_thread_url,
             )
             if thread_lost:
                 answer_thread_lost = True
                 return True
-            if thread_restored:
-                return False
             stop_present, snap, stop_reading = self._read_stop_state(
                 stop_keys,
                 confirm_absence=detector.ever_seen_stop or observed_stop,
@@ -1454,7 +1452,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             result.add_step(
                 'monitor',
                 False,
-                'ChatGPT answer_thread_lost: monitor could not restore pinned answer thread',
+                'ChatGPT answer_thread_lost: monitor left send-created answer thread',
                 stop_seen=observed_stop,
                 mode=detector_mode or 'default',
                 stop_keys=stop_keys,

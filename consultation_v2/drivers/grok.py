@@ -486,7 +486,7 @@ class GrokConsultationDriver(BaseConsultationDriver):
     # Step 5 — send (re-focus composer the proven way + Return; stop|URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        before = result.session_url_before
+        before = self.runtime.current_url() or result.session_url_before
 
         # Re-focus the composer immediately before send (attach/paste steals
         # focus) the PROVEN way (coord-click + grab_focus), then submit with a
@@ -511,22 +511,48 @@ class GrokConsultationDriver(BaseConsultationDriver):
         # Carry the send-phase stop observation into the shared completion
         # detector (a fast reply can clear the stop button before monitor runs).
         self._send_stop_seen = bool(stop_seen)
-        after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
-        result.session_url_after = after or self.runtime.current_url() or before
+        answer_url = self._wait_for_send_answer_thread_url(timeout=30.0, interval=0.5)
+        result.session_url_after = answer_url or self.runtime.current_url() or before
         verify_snap = self.runtime.snapshot()
 
-        url_changed = bool(result.session_url_after and result.session_url_after != before)
+        url_changed = bool(
+            result.session_url_after
+            and not self._urls_equivalent(result.session_url_after, before)
+        )
+        answer_thread = self._is_answer_thread_url(result.session_url_after)
         is_new_session = request.session_url is None
         if is_new_session:
-            verified = bool(stop_seen and url_changed)
+            verified = bool(stop_seen and answer_thread and url_changed)
         else:
-            verified = bool(stop_seen and result.session_url_after)
+            verified = bool(stop_seen and answer_thread)
         result.add_step('send', verified, 'Grok send validated by Stop button and URL capture',
                         url_before=before, url_after=result.session_url_after,
                         stop_seen=stop_seen, url_changed=url_changed,
+                        answer_thread=answer_thread,
                         pre_send_copy_button_baseline=pre_send_copy_baseline,
                         snapshot=verify_snap.serializable())
         return verified
+
+    def _wait_for_send_answer_thread_url(
+        self,
+        *,
+        timeout: float,
+        interval: float,
+    ) -> str | None:
+        last_answer_url = ''
+
+        def _current_answer_thread() -> str | None:
+            nonlocal last_answer_url
+            current = (self.runtime.current_url() or '').strip()
+            if self._is_answer_thread_url(current):
+                if self._urls_equivalent(current, last_answer_url):
+                    return current
+                last_answer_url = current
+                return None
+            last_answer_url = ''
+            return None
+
+        return self.runtime.wait_until(_current_answer_thread, timeout=timeout, interval=interval)
 
     # ------------------------------------------------------------------
     # Step 6 — wait for completion — shared stop-transition detector
@@ -548,6 +574,15 @@ class GrokConsultationDriver(BaseConsultationDriver):
             request, result, mode=str(resolved_mode),
             seed_stop_seen=getattr(self, '_send_stop_seen', False),
         )
+
+    @staticmethod
+    def _is_answer_thread_url(url: str | None) -> bool:
+        parsed = urlparse((url or '').strip())
+        if parsed.netloc and parsed.netloc not in {'grok.com', 'www.grok.com'}:
+            return False
+        path = (parsed.path or '').rstrip('/')
+        parts = [part for part in path.split('/') if part]
+        return len(parts) >= 2 and parts[0] == 'c' and bool(parts[1])
 
     # ------------------------------------------------------------------
     # Step 7 — extract (scroll to bottom + Copy element action; validate length)
