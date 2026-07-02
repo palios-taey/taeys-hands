@@ -1753,8 +1753,9 @@ class BaseConsultationDriver(ABC):
     # replay it. The durable run-state record keyed by the request's STABLE
     # request_id is the duplicate-send guard: as the lifecycle progresses we
     # checkpoint the load-bearing milestones into it, and at the send seam we
-    # READ it first — if a prior run already captured a submitted-URL, we RESUME
-    # (re-attach to the existing chat URL) instead of sending again.
+    # READ it first. A prior submitted URL resumes directly. A prior
+    # setup_complete is quarantined as possibly-landed: verify/resume a live URL
+    # if one exists, otherwise fail closed instead of replaying Enter.
     #
     # This lives in the base driver, called from ONE seam in each platform
     # driver's run() (``guarded_send`` replaces the direct ``send_prompt`` call),
@@ -1860,13 +1861,28 @@ class BaseConsultationDriver(ABC):
         if self._is_unresumable_landed_send(prior, request):
             if not self._invalidate_unresumable_landed_send(prior, request, result):
                 return False
+        if self._is_setup_complete_send_quarantine(prior, request):
+            live_url = self._live_resumable_send_url()
+            if live_url:
+                return self._resume_possibly_landed_send(
+                    prior or {},
+                    request,
+                    result,
+                    live_url,
+                )
+            return self._fail_duplicate_send_risk(prior or {}, request, result)
 
         # setup_complete milestone: this run reached the pre-send boundary
         # (navigate + model/mode/tools + attach + prompt entry all validated)
         # with no proven prior send. Written AFTER the landed-send check so it
         # never overwrites a prior submitted record.
+        pre_send_url = self.runtime.current_url() or result.session_url_before or ''
         self.checkpoint_run_state(
-            request, self.RUN_STATE_SETUP_COMPLETE, result=result,
+            request,
+            self.RUN_STATE_SETUP_COMPLETE,
+            result=result,
+            pre_send_url=pre_send_url,
+            monitor_id=self._monitor_id(request),
         )
 
         # No proven prior send → perform the real irreversible send.
@@ -1911,6 +1927,83 @@ class BaseConsultationDriver(ABC):
             self.RUN_STATE_COMPLETION_OBSERVED,
             self.RUN_STATE_EXTRACTION_DONE,
         }
+
+    def _is_setup_complete_send_quarantine(
+        self,
+        prior: Optional[dict],
+        request: ConsultationRequest,
+    ) -> bool:
+        if not prior:
+            return False
+        if prior.get('prompt_hash') != request.prompt_hash():
+            return False
+        return prior.get('status') == self.RUN_STATE_SETUP_COMPLETE
+
+    def _live_resumable_send_url(self) -> str:
+        current_url = (self.runtime.current_url() or '').strip()
+        if self.is_resumable_session_url(current_url):
+            return current_url
+        return ''
+
+    def _resume_possibly_landed_send(
+        self,
+        prior: dict,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        live_url: str,
+    ) -> bool:
+        monitor_id = str(prior.get('monitor_id') or self._monitor_id(request))
+        self.checkpoint_run_state(
+            request,
+            self.RUN_STATE_SUBMITTED,
+            result=result,
+            url=live_url,
+            monitor_id=monitor_id,
+            side_effect_uncertain=True,
+            duplicate_send_quarantined=True,
+            prior_status=prior.get('status'),
+        )
+        resumed_prior = {
+            **prior,
+            'status': self.RUN_STATE_SUBMITTED,
+            'url': live_url,
+            'monitor_id': monitor_id,
+        }
+        result.add_step(
+            'duplicate_send_quarantine',
+            True,
+            f'{self.platform} prior setup_complete may have landed a send; '
+            f'resuming live answer thread instead of replaying Enter',
+            prior_status=prior.get('status'),
+            live_url=live_url,
+            duplicate_send_risk=True,
+            side_effect_uncertain=True,
+        )
+        return self._resume_landed_send(resumed_prior, request, result)
+
+    def _fail_duplicate_send_risk(
+        self,
+        prior: dict,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        current_url = (self.runtime.current_url() or '').strip()
+        result.session_url_after = current_url or result.session_url_after
+        result.add_step(
+            'send',
+            False,
+            f'{self.platform} duplicate_send_risk: prior setup_complete for this '
+            f'prompt means a send may already have landed, but no live resumable '
+            f'answer-thread URL could be verified; refusing to re-send',
+            stop_condition='duplicate_send_risk',
+            side_effect='side_effect_uncertain',
+            prior_status=prior.get('status'),
+            current_url=current_url,
+            pre_send_url=prior.get('pre_send_url'),
+            duplicate_send_risk=True,
+            side_effect_uncertain=True,
+        )
+        return False
 
     def _is_landed_send(
         self,
