@@ -16,7 +16,9 @@ Contract (DRIVER_CONTRACT A-J / 100_TIMES):
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
+import sys
 import time
 from urllib.parse import urlparse
 
@@ -29,6 +31,10 @@ try:
     from storage import neo4j_client
 except Exception:  # pragma: no cover - optional dependency in runtime
     neo4j_client = None
+
+
+class _GrokSetupStepTimeout(TimeoutError):
+    pass
 
 
 class GrokConsultationDriver(BaseConsultationDriver):
@@ -46,25 +52,113 @@ class GrokConsultationDriver(BaseConsultationDriver):
     ) -> bool:
         """LOCKED phase (FLOW §10): navigate → mode → attach → prompt →
         guarded send + monitor registration."""
-        if not self.runtime.switch():
+        if not self._run_setup_step('switch', self.runtime.switch):
             result.add_step('navigate', False, 'Could not switch to Grok window')
             return False
         result.session_url_before = self.runtime.current_url()
 
-        if not self.navigate(request, result):
+        if not self._run_setup_step('navigate', lambda: self.navigate(request, result)):
             return False
-        if not self.apply_selection_plan(request, result):
+        if not self._run_setup_step(
+            'mode-select',
+            lambda: self.apply_selection_plan(request, result),
+        ):
             return False
-        if not self.attach_files(request, result):
+        if not self._run_setup_step('attach', lambda: self.attach_files(request, result)):
             return False
-        if not self.enter_prompt(request, result):
+        if not self._run_setup_step('composer-find', lambda: self.enter_prompt(request, result)):
             return False
         # Idempotent send seam (FLOW §8): guarded_send reads durable run-state
         # first and RESUMES a landed send instead of re-sending; otherwise it
         # performs the real send via self.send_prompt and checkpoints submitted.
-        if not self.guarded_send(request, result):
+        if not self._run_setup_step('send', lambda: self.guarded_send(request, result)):
             return False
         return True
+
+    def _setup_step_timeout_seconds(self, step_name: str) -> float:
+        selection_timeout = max(self._selection_settle_seconds() * 4.0, 30.0)
+        return {
+            'switch': 10.0,
+            'navigate': max(self._fresh_chat_action_timeout() + 10.0, 40.0),
+            'new_chat': max(self._fresh_chat_action_timeout(), 20.0),
+            'page-ready': max(self._fresh_chat_action_timeout() + 10.0, 40.0),
+            'mode-select': selection_timeout,
+            'attach': max(self._attach_menu_timeout() + 60.0, 75.0),
+            'composer-find': 25.0,
+            'send': 75.0,
+        }.get(step_name, 30.0)
+
+    def _log_setup_progress(
+        self,
+        event: str,
+        step_name: str,
+        *,
+        timeout_seconds: float,
+        elapsed_seconds: float | None = None,
+    ) -> None:
+        parts = [
+            '[grok-setup]',
+            event,
+            step_name,
+            f'timeout={timeout_seconds:.1f}s',
+        ]
+        if elapsed_seconds is not None:
+            parts.append(f'elapsed={elapsed_seconds:.3f}s')
+        print(' '.join(parts), file=sys.stderr, flush=True)
+
+    def _run_setup_step(self, step_name: str, callback):
+        timeout_seconds = self._setup_step_timeout_seconds(step_name)
+        started = time.monotonic()
+        previous_handler = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+        def _on_timeout(_signum, _frame):
+            elapsed = time.monotonic() - started
+            self._log_setup_progress(
+                'TIMEOUT',
+                step_name,
+                timeout_seconds=timeout_seconds,
+                elapsed_seconds=elapsed,
+            )
+            raise _GrokSetupStepTimeout(
+                f'Grok setup step {step_name!r} exceeded {timeout_seconds:.1f}s'
+            )
+
+        self._log_setup_progress('START', step_name, timeout_seconds=timeout_seconds)
+        signal.signal(signal.SIGALRM, _on_timeout)
+        signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+        try:
+            value = callback()
+        except _GrokSetupStepTimeout:
+            raise
+        except Exception:
+            self._log_setup_progress(
+                'ERROR',
+                step_name,
+                timeout_seconds=timeout_seconds,
+                elapsed_seconds=time.monotonic() - started,
+            )
+            raise
+        else:
+            self._log_setup_progress(
+                'DONE',
+                step_name,
+                timeout_seconds=timeout_seconds,
+                elapsed_seconds=time.monotonic() - started,
+            )
+            return value
+        finally:
+            elapsed = time.monotonic() - started
+            signal.setitimer(signal.ITIMER_REAL, 0.0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            previous_remaining, previous_interval = previous_timer
+            if previous_remaining > 0.0:
+                restored_remaining = max(previous_remaining - elapsed, 0.001)
+                signal.setitimer(
+                    signal.ITIMER_REAL,
+                    restored_remaining,
+                    previous_interval,
+                )
 
     def monitor_and_extract(
         self, request: ConsultationRequest, result: ConsultationResult,
@@ -102,9 +196,9 @@ class GrokConsultationDriver(BaseConsultationDriver):
         result.add_step('navigate', True, 'Grok fresh session uses current page and in-page New Chat',
                         target_url=target_url, fresh_chat_required=True,
                         snapshot=snap.serializable())
-        if not self._trigger_new_chat(result, snap):
+        if not self._run_setup_step('new_chat', lambda: self._trigger_new_chat(result, snap)):
             return False
-        return self._wait_for_fresh_chat_ready(result)
+        return self._run_setup_step('page-ready', lambda: self._wait_for_fresh_chat_ready(result))
 
     def _trigger_new_chat(self, result: ConsultationResult, snapshot: Snapshot) -> bool:
         nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
