@@ -700,7 +700,7 @@ class ConsultationRuntime:
             if current:
                 last_current = current
             if (
-                int(last_snapshot.raw_count or 0) > 0
+                self._navigation_tree_ready(last_snapshot)
                 and current
                 and self._navigation_target_loaded(current, target_url)
             ):
@@ -708,14 +708,28 @@ class ConsultationRuntime:
             time.sleep(interval)
 
         raw_count = int(last_snapshot.raw_count or 0) if last_snapshot else 0
+        mapped_count = self._navigation_mapped_count(last_snapshot)
         logger.error(
             'navigate: target URL did not become ready after bounded tree settle '
-            '(target=%r current=%r raw_count=%s)',
+            '(target=%r current=%r raw_count=%s mapped_count=%s)',
             target_url,
             last_current,
             raw_count,
+            mapped_count,
         )
         return '', last_snapshot
+
+    @staticmethod
+    def _navigation_mapped_count(snapshot: Snapshot | None) -> int:
+        if snapshot is None:
+            return 0
+        return sum(len(items) for items in (snapshot.mapped or {}).values())
+
+    @classmethod
+    def _navigation_tree_ready(cls, snapshot: Snapshot | None) -> bool:
+        if snapshot is None:
+            return False
+        return int(snapshot.raw_count or 0) > 0 and cls._navigation_mapped_count(snapshot) > 0
 
     # ------------------------------------------------------------------
     # Navigation
@@ -792,17 +806,22 @@ class ConsultationRuntime:
         if not self._dismiss_address_bar():
             logger.error('navigate: address bar stayed focused after committed navigation')
             return False
+        current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         current = (current or self.current_url() or "").strip()
 
         # Defense: if the nav did not land on the target (still a stale thread,
-        # unchanged, or empty), return False so the driver STOPs instead of
-        # sending into a polluted composer. Single check — no retry.
-        if not current:
+        # unchanged, empty, or tree-unpopulated), return False so the driver STOPs
+        # instead of sending into a polluted composer. Single navigation action —
+        # no resend/retry.
+        if not current or not self._navigation_tree_ready(settled_snapshot):
             raw_count = int(settled_snapshot.raw_count or 0) if settled_snapshot else 0
+            mapped_count = self._navigation_mapped_count(settled_snapshot)
             logger.error(
-                'navigate: URL unreadable after bounded non-empty tree settle '
-                '(raw_count=%s)',
+                'navigate: target unreadable after post-dismiss bounded tree settle '
+                '(current=%r raw_count=%s mapped_count=%s)',
+                current,
                 raw_count,
+                mapped_count,
             )
             return False
         return self._navigation_target_loaded(current, url)
