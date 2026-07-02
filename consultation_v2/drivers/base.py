@@ -1208,7 +1208,10 @@ class BaseConsultationDriver(ABC):
                 )
                 return current_snapshot, None
             next_key = str(path[index + 1]['element']) if index + 1 < len(path) else target_key
-            current_snapshot, next_element = self._selection_wait_for_revealed_anchor(next_key, scope)
+            reveal_scope = 'menu_snapshot' if action.strip().lower() == 'hover' else scope
+            if reveal_scope == 'menu_snapshot':
+                time.sleep(0.15)
+            current_snapshot, next_element = self._selection_wait_for_revealed_anchor(next_key, reveal_scope)
             if next_element is None:
                 result.add_step(
                     'select',
