@@ -13,6 +13,7 @@ import os
 from dataclasses import replace
 
 from consultation_v2 import primitives
+from consultation_v2 import storage_policy
 from consultation_v2.identity import (
     IdentityError,
     build_inline_context,
@@ -60,6 +61,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
 
+    external_store_enabled = storage_policy.external_store_enabled(request)
     selection_record = []
     if has_selection_menus(request.platform):
         try:
@@ -192,29 +194,41 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
 
     # --- Phase 2: Create Plan in Neo4j ---
     plan_id = None
-    if not request.no_neo4j:
+    plan_create_error = None
+    if external_store_enabled:
         try:
             from storage import neo4j_client
-            plan_id = neo4j_client.create_plan(
-                platform=request.platform,
-                model='',
-                mode='',
-                tools=[],
-                selections={
-                    'choices': request.serializable_selections(),
-                    'plan': selection_record,
-                },
-                message=request.message,
-                attachment_path=consolidated_path or '\n'.join(request.attachments),
-                session=request.session_url or 'new',
-                requester=request.requester or 'unknown',
+            plan_id = storage_policy.run_bounded_store_call(
+                'Neo4j plan creation',
+                lambda: neo4j_client.create_plan(
+                    platform=request.platform,
+                    model='',
+                    mode='',
+                    tools=[],
+                    selections={
+                        'choices': request.serializable_selections(),
+                        'plan': selection_record,
+                    },
+                    message=request.message,
+                    attachment_path=consolidated_path or '\n'.join(request.attachments),
+                    session=request.session_url or 'new',
+                    requester=request.requester or 'unknown',
+                ),
             )
         except Exception as exc:
+            plan_create_error = str(exc)
             logger.error("Plan creation failed: %s", exc)
 
     # --- Phase 3: Run driver ---
     driver = _REGISTRY[request.platform]()
     result = driver.run(request)
+    if plan_create_error:
+        result.add_step(
+            'plan_store',
+            False,
+            'Neo4j plan creation failed; consultation continued',
+            error=plan_create_error,
+        )
     if result.ok and result.response_text and driver.reject_prompt_echo_response(
         request,
         result,
@@ -251,23 +265,38 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             logger.error("Run-state extraction_done checkpoint failed: %s", exc)
 
     # --- Phase 4: Complete Plan + notify + ingest ---
-    if plan_id and not request.no_neo4j:
+    if plan_id and external_store_enabled:
         try:
             from storage import neo4j_client
             status = 'completed' if result.ok else 'failed'
             step_audit = json.dumps([s.serializable() for s in result.steps],
                                      default=str)
-            neo4j_client.complete_plan(
-                plan_id=plan_id,
-                response_text=result.response_text or '',
-                extraction_method=_extraction_method(result),
-                status=status,
-                step_audit=step_audit,
+            storage_policy.run_bounded_store_call(
+                'Neo4j plan completion',
+                lambda: neo4j_client.complete_plan(
+                    plan_id=plan_id,
+                    response_text=result.response_text or '',
+                    extraction_method=_extraction_method(result),
+                    status=status,
+                    step_audit=step_audit,
+                ),
             )
             if result.storage.get('session_id'):
-                neo4j_client.link_plan_to_session(plan_id, result.storage['session_id'])
+                storage_policy.run_bounded_store_call(
+                    'Neo4j plan-session link',
+                    lambda: neo4j_client.link_plan_to_session(
+                        plan_id,
+                        result.storage['session_id'],
+                    ),
+                )
         except Exception as exc:
             logger.error("Plan completion failed: %s", exc)
+            result.add_step(
+                'plan_store',
+                False,
+                'Neo4j plan completion failed; consultation result still delivered locally',
+                error=str(exc),
+            )
 
     # Notify — recipient routed by outcome (Jesse standing directive: requesters
     # receive ONLY successful deliverables; the DRIVER/operator (taeys-hands)
@@ -386,17 +415,33 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if result.ok and result.response_text:
         try:
             from consultation_v2.ingest import auto_ingest
-            auto_ingest(
+            ingest_result = auto_ingest(
                 platform=request.platform,
                 content=result.response_text,
                 url=result.session_url_after,
                 session_id=result.storage.get('session_id'),
+                external_store_enabled=external_store_enabled,
             )
-            if plan_id:
+            result.add_step(
+                'ingest',
+                True,
+                'Consult response persisted locally; external ingest handled by storage policy',
+                ingest=ingest_result,
+            )
+            if plan_id and external_store_enabled and ingest_result.get('isma_triggered'):
                 from storage import neo4j_client
-                neo4j_client.mark_plan_ingested(plan_id)
+                storage_policy.run_bounded_store_call(
+                    'Neo4j mark plan ingested',
+                    lambda: neo4j_client.mark_plan_ingested(plan_id),
+                )
         except Exception as exc:
             logger.error("ISMA ingestion failed: %s", exc)
+            result.add_step(
+                'isma_ingest',
+                False,
+                'ISMA ingestion failed; consultation result still delivered locally',
+                error=str(exc),
+            )
 
     # --- Teardown (FLOW §8): a fully-delivered consultation is DONE. Clear the
     # durable run-state and deregister the monitor session so the request_id is

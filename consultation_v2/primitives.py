@@ -54,6 +54,7 @@ from storage.redis_pool import node_key, get_client, NODE_ID
 from .runtime import ConsultationRuntime  # interaction + observation primitives
 from .snapshot import matches_spec, build_snapshot, build_menu_snapshot  # match
 from .notify import push_notification  # fleet-notify transport
+from . import storage_policy
 from .types import ElementRef, Snapshot
 
 __all__ = [
@@ -307,7 +308,7 @@ def store_consultation(
     accepts (storage.neo4j_client.add_message) and is recorded on the user
     message. Returns ``{"stored": bool, "session_id": str|None, "error":
     str|None}`` and never raises (storage is optional per FLOW §12)."""
-    try:
+    def _write() -> Dict[str, Any]:
         from storage import neo4j_client
         session_id = neo4j_client.get_or_create_session(platform=platform, url=url)
         if session_id is None:
@@ -320,5 +321,11 @@ def store_consultation(
             session_id=session_id, role="assistant", content=response_text,
         )
         return {"stored": True, "session_id": session_id, "error": None}
+
+    try:
+        return storage_policy.run_bounded_store_call(
+            'Neo4j consultation store',
+            _write,
+        )
     except Exception as exc:  # storage is optional; surface as outcome, not raise
         return {"stored": False, "session_id": None, "error": str(exc)}

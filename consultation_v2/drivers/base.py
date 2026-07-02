@@ -16,6 +16,7 @@ from consultation_v2.completion import (
 )
 from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2 import primitives
+from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
@@ -2061,6 +2062,49 @@ class BaseConsultationDriver(ABC):
             response_text=response_text,
             attachments=attachments,
         )
+
+    def store_response_for_delivery(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        session_url: str,
+        *,
+        label: str,
+    ) -> bool:
+        if not storage_policy.external_store_enabled(request):
+            result.storage = storage_policy.disabled_record(request)
+            result.storage['url'] = session_url
+            result.add_step(
+                'store',
+                True,
+                f'{label} external storage skipped',
+                storage=result.storage,
+            )
+            return True
+
+        result.storage = self.store_consultation(
+            session_url,
+            request.message,
+            result.response_text,
+            attachments=request.attachments,
+        )
+        result.storage['url'] = session_url
+        if result.storage.get('stored'):
+            result.add_step(
+                'store',
+                True,
+                f'{label} response stored in external storage',
+                storage=result.storage,
+            )
+            return True
+
+        result.add_step(
+            'store',
+            False,
+            f'{label} external storage failed; delivering extracted response locally',
+            storage=result.storage,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Shared completion detection (single source of truth)

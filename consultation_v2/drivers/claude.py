@@ -16,12 +16,6 @@ from consultation_v2.types import (
     Snapshot,
 )
 
-try:
-    from storage import neo4j_client
-except Exception:  # pragma: no cover - optional dependency in runtime
-    neo4j_client = None
-
-
 class ClaudeConsultationDriver(BaseConsultationDriver):
     platform = 'claude'
     _AUTO_CHIP_ROLES = {'push button', 'list item', 'heading'}
@@ -1987,35 +1981,15 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def store_in_neo4j(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        if request.no_neo4j or neo4j_client is None:
-            result.storage = {'skipped': True, 'reason': 'Neo4j disabled or unavailable'}
-            result.add_step('store', True, 'Claude Neo4j storage skipped',
-                            storage=result.storage)
-            return True
-        try:
-            session_url = (
-                result.session_url_after
-                or result.session_url_before
-                or self.runtime.current_url()
-                or ''
-            )
-            session_id = neo4j_client.get_or_create_session(self.platform, session_url)
-            user_message_id = neo4j_client.add_message(
-                session_id, 'user', request.message, request.attachments,
-            )
-            assistant_message_id = neo4j_client.add_message(
-                session_id, 'assistant', result.response_text,
-                self.serialize_artifacts(result.extractions),
-            )
-            result.storage = {
-                'session_id': session_id,
-                'user_message_id': user_message_id,
-                'assistant_message_id': assistant_message_id,
-                'url': session_url,
-            }
-            result.add_step('store', True, 'Claude response stored in Neo4j',
-                            storage=result.storage)
-            return True
-        except Exception as exc:  # pragma: no cover - runtime dependent
-            result.add_step('store', False, f'Claude Neo4j storage failed: {exc}')
-            return False
+        session_url = (
+            result.session_url_after
+            or result.session_url_before
+            or self.runtime.current_url()
+            or ''
+        )
+        return self.store_response_for_delivery(
+            request,
+            result,
+            session_url,
+            label='Claude',
+        )

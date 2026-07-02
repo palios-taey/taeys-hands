@@ -20,6 +20,7 @@ from consultation_v2.planner import (
     selection_menus,
     selection_plan_record,
 )
+from consultation_v2 import storage_policy
 from consultation_v2.types import Choice, ConsultationRequest
 
 
@@ -41,7 +42,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--session-url', default=None)
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--output', default=None)
-    parser.add_argument('--no-neo4j', action='store_true')
+    parser.add_argument(
+        '--store',
+        action='store_true',
+        help='Opt in to external Neo4j/ISMA storage for this run. Default is local delivery only.',
+    )
+    parser.add_argument(
+        '--no-neo4j',
+        action='store_true',
+        help='Legacy explicit external-store disable; external storage is disabled by default.',
+    )
     parser.add_argument(
         '--dry-run',
         action='store_true',
@@ -228,6 +238,8 @@ def _request_record(request: ConsultationRequest) -> dict[str, Any]:
         'timeout': request.timeout,
         'output_path': request.output_path,
         'no_neo4j': request.no_neo4j,
+        'store_enabled': request.store_enabled,
+        'external_store_enabled': storage_policy.external_store_enabled(request),
         'no_identity': request.no_identity,
         'session_type': request.session_type,
         'purpose': request.purpose,
@@ -258,6 +270,7 @@ def main() -> int:
         timeout=args.timeout,
         output_path=args.output,
         no_neo4j=args.no_neo4j,
+        store_enabled=args.store,
         no_identity=args.no_identity,
         session_type=args.session_type,
         purpose=args.purpose,

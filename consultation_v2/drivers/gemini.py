@@ -751,28 +751,15 @@ class GeminiConsultationDriver(BaseConsultationDriver):
     def store_in_neo4j(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        if request.no_neo4j:
-            result.storage = {'skipped': True, 'reason': 'Neo4j disabled or unavailable'}
-            result.add_step('store', True, 'Gemini Neo4j storage skipped',
-                            storage=result.storage)
-            return True
         session_url = (
             result.session_url_after
             or result.session_url_before
             or self.runtime.current_url()
             or ''
         )
-        result.storage = self.store_consultation(
+        return self.store_response_for_delivery(
+            request,
+            result,
             session_url,
-            request.message,
-            result.response_text,
-            attachments=request.attachments,
+            label='Gemini',
         )
-        result.storage['url'] = session_url
-        if result.storage.get('stored'):
-            result.add_step('store', True, 'Gemini response stored in Neo4j',
-                            storage=result.storage)
-            return True
-        result.add_step('store', True, 'Gemini Neo4j storage skipped',
-                        storage=result.storage)
-        return True

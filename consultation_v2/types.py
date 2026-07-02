@@ -61,6 +61,7 @@ class ConsultationRequest:
     timeout: int = 3600
     output_path: Optional[str] = None
     no_neo4j: bool = False
+    store_enabled: bool = False
     no_identity: bool = False
     session_type: Optional[str] = None
     purpose: Optional[str] = None
@@ -268,6 +269,7 @@ class ConsultationResult:
                 'session_url': self.request.session_url,
                 'timeout': self.request.timeout,
                 'no_neo4j': self.request.no_neo4j,
+                'store_enabled': self.request.store_enabled,
                 'no_identity': self.request.no_identity,
                 'session_type': self.request.session_type,
                 'purpose': self.request.purpose,
