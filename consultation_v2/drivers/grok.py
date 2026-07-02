@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
-import sys
 import time
 from urllib.parse import urlparse
 
@@ -104,7 +103,12 @@ class GrokConsultationDriver(BaseConsultationDriver):
         ]
         if elapsed_seconds is not None:
             parts.append(f'elapsed={elapsed_seconds:.3f}s')
-        print(' '.join(parts), file=sys.stderr, flush=True)
+        payload = (' '.join(parts) + '\n').encode('utf-8', errors='replace')
+        os.write(2, payload)
+        try:
+            os.fsync(2)
+        except OSError:
+            pass
 
     def _run_setup_step(self, step_name: str, callback):
         timeout_seconds = self._setup_step_timeout_seconds(step_name)
