@@ -855,7 +855,18 @@ class BaseConsultationDriver(ABC):
             return False
         active_state = str(step['active_recognition'])
         if not active_element_key and self._selection_element_matches_active_recognition(target, active_state):
-            self.runtime.press('Escape')
+            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            if not closed:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} {menu}={option} active but menu did not close after Escape',
+                    menu=menu,
+                    option=option,
+                    active_state=active_state,
+                    snapshot=closed_snapshot.serializable(),
+                )
+                return False
             result.add_step(
                 'select',
                 True,
@@ -864,6 +875,7 @@ class BaseConsultationDriver(ABC):
                 option=option,
                 active_state=active_state,
                 snapshot=target_snapshot.serializable(),
+                closed_snapshot=closed_snapshot.serializable(),
             )
             return True
         target_snapshot, target = self._selection_wait_for_click_ready(
@@ -886,7 +898,19 @@ class BaseConsultationDriver(ABC):
             )
             return False
         if not active_element_key and self._selection_element_matches_active_recognition(target, active_state):
-            self.runtime.press('Escape')
+            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            if not closed:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} {menu}={option} active after settle but menu did not close after Escape',
+                    menu=menu,
+                    option=option,
+                    active_state=active_state,
+                    confirmation='post_settle_active_state',
+                    snapshot=closed_snapshot.serializable(),
+                )
+                return False
             result.add_step(
                 'select',
                 True,
@@ -896,6 +920,7 @@ class BaseConsultationDriver(ABC):
                 active_state=active_state,
                 confirmation='post_settle_active_state',
                 snapshot=target_snapshot.serializable(),
+                closed_snapshot=closed_snapshot.serializable(),
             )
             return True
         if not self.runtime.click(target, strategy=click_strategy):
@@ -1208,10 +1233,12 @@ class BaseConsultationDriver(ABC):
                 )
                 return current_snapshot, None
             next_key = str(path[index + 1]['element']) if index + 1 < len(path) else target_key
-            reveal_scope = 'menu_snapshot' if action.strip().lower() == 'hover' else scope
-            if reveal_scope == 'menu_snapshot':
+            normalized_action = action.strip().lower()
+            if normalized_action == 'hover':
                 time.sleep(0.15)
-            current_snapshot, next_element = self._selection_wait_for_revealed_anchor(next_key, reveal_scope)
+                current_snapshot, next_element = self._selection_wait_for_hover_revealed_anchor(next_key)
+            else:
+                current_snapshot, next_element = self._selection_wait_for_revealed_anchor(next_key, scope)
             if next_element is None:
                 result.add_step(
                     'select',
@@ -1236,6 +1263,33 @@ class BaseConsultationDriver(ABC):
                 snapshot=current_snapshot.serializable(),
             )
         return current_snapshot, target
+
+    def _selection_close_active_selection_menu(self) -> tuple[Snapshot, bool]:
+        closed_snapshot: Snapshot | None = None
+        for _ in range(3):
+            self.runtime.press('Escape')
+            closed_snapshot = self._selection_wait_for_menu_closed()
+            if int(closed_snapshot.raw_count or 0) == 0:
+                self._selection_menu_transition_seen = False
+                return closed_snapshot, True
+            time.sleep(0.1)
+        return closed_snapshot or self.runtime.menu_snapshot(), False
+
+    def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
+        timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        roles = ['menu item', 'radio menu item', 'check menu item', 'option']
+        while time.time() < deadline:
+            last_snapshot = self.runtime.app_root_snapshot(allowed_roles=roles)
+            element = self.find_first(last_snapshot, key)
+            if element is not None:
+                return last_snapshot, element
+            time.sleep(0.2)
+        fallback_snapshot, fallback_element = self._selection_wait_for_revealed_anchor(key, 'menu_snapshot')
+        if fallback_element is not None:
+            return fallback_snapshot, fallback_element
+        return last_snapshot or fallback_snapshot, self.find_first(last_snapshot or fallback_snapshot, key)
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
         timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
