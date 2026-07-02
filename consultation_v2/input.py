@@ -18,8 +18,8 @@ def _get_env() -> dict:
 
 
 def set_display(display: str):
-    os.environ['DISPLAY'] = display
-    _get_env()['DISPLAY'] = display
+    from consultation_v2.platforms_runtime import apply_display_environment
+    _get_env().update(apply_display_environment(display))
 
 
 def press_key(key: str, timeout: int = 10) -> bool:
@@ -195,6 +195,8 @@ def switch_to_platform(platform: str) -> bool:
         return False
 
     def _on_target(pid: int = None) -> bool:
+        if plat_display:
+            set_display(plat_display)
         firefox = atspi.find_firefox_for_platform(platform, pid=pid)
         if not firefox:
             return False

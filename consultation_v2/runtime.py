@@ -8,7 +8,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
-from consultation_v2.platforms_runtime import get_platform_display
+from consultation_v2.platforms_runtime import display_environment, get_platform_display
 from consultation_v2.tree import find_elements
 from .snapshot import build_app_root_snapshot, build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
@@ -43,12 +43,8 @@ class ConsultationRuntime:
         )
 
     def _dialog_env(self) -> dict:
-        env = dict(os.environ)
-        env.setdefault(
-            "DISPLAY",
-            get_platform_display(self.platform) or os.environ.get("DISPLAY", ":0"),
-        )
-        return env
+        display = get_platform_display(self.platform) or os.environ.get("DISPLAY", ":0")
+        return display_environment(display, base=os.environ)
 
     # ------------------------------------------------------------------
     # Stale file dialog cleanup

@@ -11,14 +11,18 @@ import os
 import re
 import subprocess
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from consultation_v2.platforms_runtime import (
+    configured_platforms,
+    display_environment,
+    get_machine_env_path,
+    get_platform_display,
+)
 from consultation_v2.yaml_contract import load_platform_yaml
 
 
-MACHINE_ENV = Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
 CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
 AT_SPI_ENV_KEYS = ('DISPLAY', 'AT_SPI_BUS_ADDRESS', 'DBUS_SESSION_BUS_ADDRESS')
 
@@ -27,46 +31,8 @@ def _sh(cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
 
-def _unquote(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-        return value[1:-1]
-    return value
-
-
-def _machine_display_records() -> dict[str, dict[str, str]]:
-    records: dict[str, dict[str, str]] = {}
-    try:
-        lines = MACHINE_ENV.read_text().splitlines()
-    except FileNotFoundError:
-        return records
-
-    pattern = re.compile(r'^TAEY_DISPLAY_(\d+)\s*=\s*(.+)$')
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        match = pattern.match(line)
-        if not match:
-            continue
-        display_num, raw_value = match.groups()
-        value = _unquote(raw_value)
-        parts = value.split(':', 2)
-        if len(parts) < 2:
-            continue
-        platform = parts[0].strip()
-        if not platform:
-            continue
-        records[platform] = {
-            'display': f':{display_num}',
-            'profile': parts[1].strip(),
-            'launch_url': parts[2].strip() if len(parts) > 2 else '',
-        }
-    return records
-
-
 def available_platforms() -> list[str]:
-    return sorted(platform for platform in _machine_display_records() if platform in CHAT_PLATFORMS)
+    return sorted(platform for platform in configured_platforms() if platform in CHAT_PLATFORMS)
 
 
 def display_for_platform(platform: str) -> str | None:
@@ -74,8 +40,7 @@ def display_for_platform(platform: str) -> str | None:
 
 
 def _display_for_platform(platform: str) -> str | None:
-    record = _machine_display_records().get(platform)
-    return record['display'] if record else None
+    return get_platform_display(platform)
 
 
 def _expected_host(platform: str) -> str | None:
@@ -105,9 +70,13 @@ def _live_bus(display: str) -> str | None:
 @contextmanager
 def _scoped_atspi_env(display: str, live_bus: str):
     saved = {key: os.environ.get(key) for key in AT_SPI_ENV_KEYS}
-    os.environ['DISPLAY'] = display
-    os.environ['AT_SPI_BUS_ADDRESS'] = live_bus
-    os.environ['DBUS_SESSION_BUS_ADDRESS'] = live_bus
+    scoped = display_environment(display, at_spi_bus=live_bus)
+    for key in AT_SPI_ENV_KEYS:
+        value = scoped.get(key)
+        if value:
+            os.environ[key] = value
+        else:
+            os.environ.pop(key, None)
     try:
         yield
     finally:
@@ -231,13 +200,14 @@ def check(platform: str) -> dict[str, Any]:
     resolutions: list[str] = []
 
     if not display:
+        machine_env = get_machine_env_path()
         return {
             'platform': platform,
             'display': None,
             'ready': False,
             'layer_failed': 'L1',
-            'issues': [f'L1: no TAEY_DISPLAY_N entry for {platform} in {MACHINE_ENV}'],
-            'resolutions': [f'Add {platform}:profile:url to a TAEY_DISPLAY_N entry in {MACHINE_ENV}'],
+            'issues': [f'L1: no TAEY_DISPLAY_N entry for {platform} in {machine_env}'],
+            'resolutions': [f'Add {platform}:profile:url to a TAEY_DISPLAY_N entry in {machine_env}'],
             'windows': None,
             'tabs': None,
             'url': None,

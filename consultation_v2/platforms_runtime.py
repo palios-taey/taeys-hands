@@ -1,8 +1,10 @@
 """Platform definitions: URL patterns, tab shortcuts, screen detection."""
 
 import os
+import re
 import subprocess
 from pathlib import Path
+from typing import Mapping
 
 
 def _detect_screen_size() -> tuple:
@@ -104,7 +106,9 @@ ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 #   2. TAEY_MACHINE_ENV or ~/.taey/machine.env TAEY_DISPLAY_N rows:
 #      TAEY_DISPLAY_2="chatgpt:ff-profile-chatgpt:https://chatgpt.com/"
 # If no source is configured, all platforms use the current DISPLAY.
-_PLATFORM_DISPLAYS: dict[str, str] = {}
+_PLATFORM_DISPLAYS: dict[str, list[str]] = {}
+_SELECTED_DISPLAY_ENV = 'TAEY_SELECTED_DISPLAY'
+_DISPLAY_ENV_KEYS = ('DISPLAY', 'AT_SPI_BUS_ADDRESS', 'DBUS_SESSION_BUS_ADDRESS')
 
 
 def _strip_env_value(value: str) -> str:
@@ -127,8 +131,28 @@ def _read_repo_dotenv_platform_displays() -> str:
     return ''
 
 
-def _parse_platform_display_pairs(raw: str) -> dict[str, str]:
-    displays: dict[str, str] = {}
+def _normalize_display(display: str | None) -> str | None:
+    value = str(display or '').strip()
+    if not value:
+        return None
+    display_num = value[1:] if value.startswith(':') else value
+    if not display_num.isdigit():
+        return None
+    return f':{display_num}'
+
+
+def _add_platform_display(displays: dict[str, list[str]], platform: str, display: str) -> None:
+    platform = platform.strip()
+    normalized = _normalize_display(display)
+    if not platform or not normalized:
+        return
+    bucket = displays.setdefault(platform, [])
+    if normalized not in bucket:
+        bucket.append(normalized)
+
+
+def _parse_platform_display_pairs(raw: str) -> dict[str, list[str]]:
+    displays: dict[str, list[str]] = {}
     for pair in raw.split(','):
         pair = pair.strip()
         if not pair:
@@ -140,18 +164,22 @@ def _parse_platform_display_pairs(raw: str) -> dict[str, str]:
         dnum = dnum.strip().lstrip(':')
         if not plat or not dnum.isdigit():
             raise RuntimeError(f"Malformed PLATFORM_DISPLAYS pair {pair!r}; expected platform:display")
-        displays[plat] = f':{dnum}'
+        _add_platform_display(displays, plat, f':{dnum}')
     return displays
 
 
-def _read_machine_env_platform_displays() -> dict[str, str]:
-    machine_env = Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
+def get_machine_env_path() -> Path:
+    return Path(os.environ.get('TAEY_MACHINE_ENV', '~/.taey/machine.env')).expanduser()
+
+
+def _read_machine_env_platform_displays() -> dict[str, list[str]]:
+    machine_env = get_machine_env_path()
     try:
         lines = machine_env.read_text().splitlines()
     except FileNotFoundError:
         return {}
 
-    displays: dict[str, str] = {}
+    displays: dict[str, list[str]] = {}
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith('#') or '=' not in stripped:
@@ -167,7 +195,7 @@ def _read_machine_env_platform_displays() -> dict[str, str]:
         parts = value.split(':', 2)
         if len(parts) != 3 or not parts[0].strip():
             raise RuntimeError(f"Malformed {key} in {machine_env}; expected platform:profile:url")
-        displays[parts[0].strip()] = f':{display_num}'
+        _add_platform_display(displays, parts[0].strip(), f':{display_num}')
     return displays
 
 
@@ -175,17 +203,102 @@ def _parse_platform_displays():
     raw = os.environ.get('PLATFORM_DISPLAYS', '').strip()
     if not raw:
         raw = _read_repo_dotenv_platform_displays()
-    if raw:
-        _PLATFORM_DISPLAYS.update(_parse_platform_display_pairs(raw))
-    else:
-        _PLATFORM_DISPLAYS.update(_read_machine_env_platform_displays())
+    parsed = _parse_platform_display_pairs(raw) if raw else _read_machine_env_platform_displays()
+    for platform, displays in parsed.items():
+        for display in displays:
+            _add_platform_display(_PLATFORM_DISPLAYS, platform, display)
+
+
+def _selected_display_env_key(platform: str) -> str:
+    safe_platform = re.sub(r'[^A-Z0-9]+', '_', platform.strip().upper()).strip('_')
+    return f'{_SELECTED_DISPLAY_ENV}_{safe_platform}' if safe_platform else _SELECTED_DISPLAY_ENV
+
+
+def _explicit_selected_display(platform: str, candidates: tuple[str, ...]) -> str | None:
+    for env_name in (_selected_display_env_key(platform), _SELECTED_DISPLAY_ENV):
+        value = _normalize_display(os.environ.get(env_name))
+        if not value:
+            continue
+        if candidates and value not in candidates:
+            raise RuntimeError(
+                f"{env_name}={value!r} is not configured for {platform}; "
+                f"candidates={list(candidates)!r}"
+            )
+        return value
+    return None
+
+
+def _current_display_if_candidate(candidates: tuple[str, ...]) -> str | None:
+    current = _normalize_display(os.environ.get('DISPLAY'))
+    if current and current in candidates:
+        return current
+    return None
+
+
+def get_platform_displays(platform: str) -> tuple[str, ...]:
+    """Return every dedicated display configured for a platform, in env order."""
+    return tuple(_PLATFORM_DISPLAYS.get(platform, ()))
+
+
+def configured_platforms() -> tuple[str, ...]:
+    return tuple(sorted(_PLATFORM_DISPLAYS))
+
+
+def set_platform_display(platform: str, display: str) -> str:
+    """Select one configured display for this process' platform route."""
+    candidates = get_platform_displays(platform)
+    normalized = _normalize_display(display)
+    if not normalized:
+        raise RuntimeError(f"Invalid display for {platform}: {display!r}")
+    if candidates and normalized not in candidates:
+        raise RuntimeError(
+            f"Display {normalized} is not configured for {platform}; "
+            f"candidates={list(candidates)!r}"
+        )
+    os.environ[_selected_display_env_key(platform)] = normalized
+    os.environ[_SELECTED_DISPLAY_ENV] = normalized
+    os.environ['DISPLAY'] = normalized
+    return normalized
+
+
+def select_platform_display(platform: str, is_available=None) -> str | None:
+    """Choose the display this process should use for a platform.
+
+    ``is_available`` is a caller-supplied predicate so the pre-import CLI wrapper
+    can check Redis locks without importing the full consultation runtime.
+    """
+    candidates = get_platform_displays(platform)
+    if not candidates:
+        return None
+
+    explicit = _explicit_selected_display(platform, candidates)
+    if explicit:
+        return set_platform_display(platform, explicit)
+
+    preferred = _current_display_if_candidate(candidates)
+    ordered = list(candidates)
+    if preferred:
+        ordered = [preferred] + [display for display in ordered if display != preferred]
+
+    for display in ordered:
+        if is_available is None or is_available(display):
+            return set_platform_display(platform, display)
+
+    return set_platform_display(platform, preferred or candidates[0])
 
 _parse_platform_displays()
 
 
 def get_platform_display(platform: str) -> str | None:
     """Return the dedicated display for a platform, or None for tab-switching mode."""
-    return _PLATFORM_DISPLAYS.get(platform)
+    candidates = get_platform_displays(platform)
+    if not candidates:
+        return None
+    return (
+        _explicit_selected_display(platform, candidates)
+        or _current_display_if_candidate(candidates)
+        or candidates[0]
+    )
 
 
 def get_display_bus(display: str) -> str | None:
@@ -250,3 +363,57 @@ def get_platform_firefox_pid(platform: str) -> int | None:
 def is_multi_display() -> bool:
     """True if platform-to-display routing is configured."""
     return bool(_PLATFORM_DISPLAYS)
+
+
+def get_display_dbus(display: str) -> str | None:
+    """Resolve the D-Bus session address for a display."""
+    normalized = _normalize_display(display)
+    if not normalized:
+        return None
+    bus_file = f'/tmp/dbus_session_bus_{normalized}'
+    try:
+        with open(bus_file) as f:
+            addr = f.read().strip() or None
+    except FileNotFoundError:
+        addr = None
+    if addr:
+        return addr
+    current = os.environ.get('DBUS_SESSION_BUS_ADDRESS')
+    if current:
+        return current
+    return f'unix:path=/run/user/{os.getuid()}/bus'
+
+
+def display_environment(
+    display: str,
+    *,
+    base: Mapping[str, str] | None = None,
+    at_spi_bus: str | None = None,
+) -> dict[str, str]:
+    """Return environment scoped to one X display and its AT-SPI bus."""
+    normalized = _normalize_display(display)
+    if not normalized:
+        raise RuntimeError(f"Invalid display: {display!r}")
+    env = dict(base or os.environ)
+    env['DISPLAY'] = normalized
+    bus = at_spi_bus or get_display_bus(normalized)
+    if bus:
+        env['AT_SPI_BUS_ADDRESS'] = bus
+    dbus = get_display_dbus(normalized)
+    if dbus:
+        env['DBUS_SESSION_BUS_ADDRESS'] = dbus
+    return env
+
+
+def apply_display_environment(display: str) -> dict[str, str]:
+    """Scope process env to one display and return the updated display keys."""
+    env = display_environment(display)
+    updated: dict[str, str] = {}
+    for key in _DISPLAY_ENV_KEYS:
+        value = env.get(key)
+        if value:
+            os.environ[key] = value
+            updated[key] = value
+        else:
+            os.environ.pop(key, None)
+    return updated

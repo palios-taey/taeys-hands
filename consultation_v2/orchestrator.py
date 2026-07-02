@@ -45,6 +45,15 @@ _REGISTRY = {
 }
 
 
+def _select_request_display(platform: str) -> str | None:
+    from consultation_v2.platforms_runtime import select_platform_display
+
+    return select_platform_display(
+        platform,
+        is_available=lambda display: not primitives.display_lock_held(display),
+    )
+
+
 def _inline_context_message(context: str, message: str) -> str:
     return (
         "Read the following identity/context packet before answering. It replaces "
@@ -81,6 +90,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # Before ANY interaction, verify the production display is readable and in
     # one-window/one-tab/right-host shape. Not-ready returns a failed result with
     # evidence; checker exceptions are intentionally not caught.
+    selected_display = _select_request_display(request.platform)
     from consultation_v2 import display_readiness
     readiness = display_readiness.check(request.platform)
     if not readiness['ready']:
@@ -102,7 +112,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     logger.info(
         'display readiness OK %s %s (windows=%s tabs=%s url=%s)',
         request.platform,
-        readiness.get('display'),
+        selected_display or readiness.get('display'),
         readiness.get('windows'),
         readiness.get('tabs'),
         readiness.get('url'),
