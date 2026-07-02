@@ -199,6 +199,7 @@ workflow:
     stop_key: stop_button
   monitor:
     stop_key: stop_button
+    generation_timeout: 3600
   extract:
     primary_key: copy_button
 validation:

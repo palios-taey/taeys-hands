@@ -245,6 +245,7 @@ workflow:
     post_send_key: start_research
   monitor:
     stop_key: stop_button
+    generation_timeout: 3600
     deep_think_interim_ack_key: deep_think_interim_ack_placeholder
   extract:
     primary_key: copy_button

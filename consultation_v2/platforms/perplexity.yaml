@@ -321,6 +321,7 @@ workflow:
     settle_redirects: true
   monitor:
     stop_key: stop_button
+    generation_timeout: 3600
   extract:
     primary_key: copy_contents_button
     strategy: last_by_y

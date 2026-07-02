@@ -549,6 +549,7 @@ workflow:
     stop_keys:
       - stop_streaming_button
       - stop_answering_button
+    generation_timeout: 3600
     sustained_stop_gone_cycles: 4
     post_complete_quiet_cycles: 8
     intermediate_states:

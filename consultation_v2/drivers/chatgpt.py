@@ -4,9 +4,10 @@ import os
 import time
 from typing import Optional
 
-from consultation_v2.completion import COMPLETE, CompletionDetector
-from consultation_v2.drivers.base import BaseConsultationDriver
+from consultation_v2.completion import COMPLETE, DEEP_MODES, CompletionDetector
+from consultation_v2.drivers.base import BaseConsultationDriver, DEEP_GENERATION_FLOOR_SECONDS
 from consultation_v2.snapshot import matches_spec
+from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2.types import (
     ConsultationRequest,
     ConsultationResult,
@@ -250,6 +251,24 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             return max(1, int(raw))
         except (TypeError, ValueError):
             return 8
+
+    def _effective_generation_timeout(
+        self,
+        request: ConsultationRequest,
+        detector_mode: str,
+    ) -> float:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        raw = monitor_cfg.get('generation_timeout', request.timeout)
+        try:
+            configured_timeout = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                'ChatGPT workflow.monitor.generation_timeout must be numeric seconds'
+            ) from exc
+        effective_timeout = max(float(request.timeout), configured_timeout)
+        if detector_mode in DEEP_MODES:
+            effective_timeout = max(effective_timeout, DEEP_GENERATION_FLOOR_SECONDS)
+        return effective_timeout
 
     @staticmethod
     def _element_y(element: ElementRef) -> int | None:
@@ -1436,7 +1455,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 return None
             return snap
 
-        self.runtime.wait_until(_poll, timeout=float(request.timeout), interval=1.0)
+        effective_timeout = self._effective_generation_timeout(request, detector_mode)
+        self.runtime.wait_until(_poll, timeout=effective_timeout, interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.wait_until(
             _verified_stop_absent_snapshot,
             timeout=5.0,
@@ -1498,11 +1518,20 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         )
         complete_signal_y = complete_signal_y if complete_signal_y is not None else final_signal_y
         verified = bool(completed and stop_absent and complete_signal_seen)
-        monitor_message = (
-            'ChatGPT response completed'
-            if verified else
-            'ChatGPT response did not reach Stop-gone completion'
+        stop_condition = (
+            'generation_stalled'
+            if (not verified and stop_present_final and is_stop_condition('generation_stalled'))
+            else None
         )
+        if verified:
+            monitor_message = 'ChatGPT response completed'
+        elif stop_condition == 'generation_stalled':
+            monitor_message = (
+                'ChatGPT generation_stalled: Stop still present after '
+                f'{effective_timeout:.0f}s (mode={detector_mode or "default"}) -- loud bound, not completion'
+            )
+        else:
+            monitor_message = 'ChatGPT response did not reach Stop-gone completion'
         result.add_step(
             'monitor',
             verified,
@@ -1523,6 +1552,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             stop_gone_without_complete_signal=stop_gone_without_complete_signal,
             stop_read_samples=stop_read_samples,
             last_stop_reading=last_stop_reading,
+            generation_timeout=effective_timeout,
+            stop_condition=stop_condition,
             snapshot=verify_snap.serializable(),
         )
         if verified:

@@ -5,9 +5,10 @@ import re
 import subprocess
 import time
 
-from consultation_v2.completion import COMPLETE, CompletionDetector
-from consultation_v2.drivers.base import BaseConsultationDriver
+from consultation_v2.completion import COMPLETE, DEEP_MODES, CompletionDetector
+from consultation_v2.drivers.base import BaseConsultationDriver, DEEP_GENERATION_FLOOR_SECONDS
 from consultation_v2.snapshot import matches_spec
+from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2.types import (
     ConsultationRequest,
     ConsultationResult,
@@ -372,6 +373,25 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
         keys = keys if isinstance(keys, list) else [keys]
         return tuple(str(key) for key in keys if isinstance(key, str) and key)
+
+    def _effective_generation_timeout(
+        self,
+        request: ConsultationRequest,
+        detector_mode: str,
+        timeout: float | None = None,
+    ) -> float:
+        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
+        raw = timeout if timeout is not None else monitor_cfg.get('generation_timeout', request.timeout)
+        try:
+            configured_timeout = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                'Claude workflow.monitor.generation_timeout must be numeric seconds'
+            ) from exc
+        effective_timeout = max(float(request.timeout), configured_timeout)
+        if detector_mode in DEEP_MODES:
+            effective_timeout = max(effective_timeout, DEEP_GENERATION_FLOOR_SECONDS)
+        return effective_timeout
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -1093,7 +1113,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return True
             return False
 
-        self.runtime.wait_until(_poll, timeout=float(timeout or request.timeout), interval=1.0)
+        effective_timeout = self._effective_generation_timeout(request, detector_mode, timeout)
+        self.runtime.wait_until(_poll, timeout=effective_timeout, interval=1.0)
         verify_snap = terminal_snapshot or self.runtime.snapshot()
         if answer_thread_lost:
             result.add_step(
@@ -1141,7 +1162,21 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             and not continue_present
             and not continue_click_failed
         )
-        monitor_message = message if verified else 'Claude response did not reach Stop-gone completion'
+        stop_still_present = self.snapshot_has_any(verify_snap, stop_keys)
+        stop_condition = (
+            'generation_stalled'
+            if (not verified and stop_still_present and is_stop_condition('generation_stalled'))
+            else None
+        )
+        if verified:
+            monitor_message = message
+        elif stop_condition == 'generation_stalled':
+            monitor_message = (
+                'Claude generation_stalled: Stop still present after '
+                f'{effective_timeout:.0f}s (mode={detector_mode or "default"}) -- loud bound, not completion'
+            )
+        else:
+            monitor_message = 'Claude response did not reach Stop-gone completion'
         result.add_step(
             step_name,
             verified,
@@ -1154,6 +1189,8 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             continue_clicks=continue_clicks,
             continue_present=continue_present,
             response_rendered=self._monitor_response_rendered(verify_snap),
+            generation_timeout=effective_timeout,
+            stop_condition=stop_condition,
             snapshot=verify_snap.serializable(),
         )
         if verified and checkpoint:
