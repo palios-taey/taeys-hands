@@ -458,7 +458,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         return f'{url}{separator}taey_fresh={int(time.time() * 1000)}'
 
     def _navigate_fresh_with_new_tab(self, target_url: str) -> bool:
-        before = self.runtime.current_url()
         self.runtime.close_stale_dialogs()
         if not self.runtime.focus_firefox():
             return False
@@ -476,11 +475,13 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         time.sleep(0.2)
         if not self.runtime.press('Return'):
             return False
-        self.runtime.wait_for_url_change(before, timeout=20.0, interval=0.5)
-        current = (self.runtime.current_url() or '').strip()
+        current, _settled_snapshot = self.runtime.wait_for_navigation_target_loaded(target_url)
         if not self._url_matches_target(current, target_url):
             return False
         if not self._close_previous_tab_after_new_tab(target_url):
+            return False
+        current, _settled_snapshot = self.runtime.wait_for_navigation_target_loaded(target_url)
+        if not self._url_matches_target(current, target_url):
             return False
         self.runtime.press('Escape')
         time.sleep(0.4)

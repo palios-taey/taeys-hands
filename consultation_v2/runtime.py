@@ -676,6 +676,47 @@ class ConsultationRuntime:
 
         return self.wait_until(changed, timeout=timeout, interval=interval)
 
+    def wait_for_navigation_target_loaded(
+        self,
+        target_url: str,
+        *,
+        timeout: float = 20.0,
+        interval: float = 0.5,
+    ) -> tuple[str, Snapshot | None]:
+        deadline = time.time() + timeout
+        last_snapshot: Snapshot | None = None
+        last_current = ''
+
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            last_snapshot = self.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(2.0, remaining),
+                interval=0.25,
+                require_non_empty=True,
+            )
+            snapshot_url = (last_snapshot.url or '').strip()
+            current = snapshot_url or (self.current_url() or '').strip()
+            if current:
+                last_current = current
+            if (
+                int(last_snapshot.raw_count or 0) > 0
+                and current
+                and self._navigation_target_loaded(current, target_url)
+            ):
+                return current, last_snapshot
+            time.sleep(interval)
+
+        raw_count = int(last_snapshot.raw_count or 0) if last_snapshot else 0
+        logger.error(
+            'navigate: target URL did not become ready after bounded tree settle '
+            '(target=%r current=%r raw_count=%s)',
+            target_url,
+            last_current,
+            raw_count,
+        )
+        return '', last_snapshot
+
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
@@ -747,24 +788,22 @@ class ConsultationRuntime:
                 logger.error('navigate: address bar stayed focused after committed navigation')
                 return False
             return True
-        self.wait_until(
-            lambda: (
-                current
-                if self._navigation_target_loaded((current := self.current_url() or ''), url)
-                else None
-            ),
-            timeout=20.0,
-            interval=0.5,
-        )
+        current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         if not self._dismiss_address_bar():
             logger.error('navigate: address bar stayed focused after committed navigation')
             return False
-        current = (self.current_url() or "").strip()
+        current = (current or self.current_url() or "").strip()
 
         # Defense: if the nav did not land on the target (still a stale thread,
         # unchanged, or empty), return False so the driver STOPs instead of
         # sending into a polluted composer. Single check — no retry.
         if not current:
+            raw_count = int(settled_snapshot.raw_count or 0) if settled_snapshot else 0
+            logger.error(
+                'navigate: URL unreadable after bounded non-empty tree settle '
+                '(raw_count=%s)',
+                raw_count,
+            )
             return False
         return self._navigation_target_loaded(current, url)
 
