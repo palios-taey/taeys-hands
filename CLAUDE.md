@@ -249,7 +249,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (2161 symbols, 4402 relationships, 185 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (3699 symbols, 6648 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
