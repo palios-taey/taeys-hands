@@ -72,6 +72,10 @@ __all__ = [
     "release_display_lock",
     "display_lock_held",
     # run-state (idempotency checkpoints)
+    "DeadSessionError",
+    "RUN_STATE_DEAD_SESSION",
+    "assert_session_not_dead",
+    "poison_dead_session",
     "write_run_state",
     "read_run_state",
     "clear_run_state",
@@ -204,6 +208,65 @@ def _run_state_key(request_id: str) -> str:
     return node_key(f"run_state:{request_id}")
 
 
+RUN_STATE_DEAD_SESSION = "dead_session"
+
+
+class DeadSessionError(RuntimeError):
+    """Raised when a caller tries to re-drive a terminal notified session."""
+
+
+def _state_marks_dead_session(state: Dict[str, Any]) -> bool:
+    return bool(state.get("dead_session")) or state.get("status") == RUN_STATE_DEAD_SESSION
+
+
+def _dead_session_message(request_id: str, record: Dict[str, Any]) -> str:
+    reason = record.get("dead_session_reason") or record.get("parked_reason") or "notified"
+    recipient = ""
+    evidence = record.get("notification_evidence")
+    if isinstance(evidence, dict) and evidence.get("recipient") is not None:
+        recipient = f" recipient={evidence.get('recipient')!r}"
+    return (
+        f"consultation session {request_id!r} is dead after notification "
+        f"({reason}){recipient}; refusing to re-drive it"
+    )
+
+
+def assert_session_not_dead(request_id: str) -> None:
+    record = read_run_state(request_id)
+    if record and _state_marks_dead_session(record):
+        raise DeadSessionError(_dead_session_message(request_id, record))
+
+
+def poison_dead_session(
+    request_id: str,
+    *,
+    reason: str,
+    notification_evidence: Dict[str, Any],
+    needs_attention: bool,
+    ttl: int = 7200,
+) -> bool:
+    """Persist a terminal poison record after notification/parking.
+
+    CONTRACT §3: once a result has been surfaced through NOTIFY (or parked
+    because notification could not be delivered), caller-level retry loops must
+    not be able to re-enter the driver and replay browser actions for the same
+    request id.
+    """
+    return write_run_state(
+        request_id,
+        {
+            "status": RUN_STATE_DEAD_SESSION,
+            "dead_session": True,
+            "dead_session_reason": reason,
+            "poisoned_at": datetime.now(timezone.utc).isoformat(),
+            "notification_evidence": dict(notification_evidence),
+            "needs_attention": needs_attention,
+            **({"parked_reason": reason} if needs_attention else {}),
+        },
+        ttl=ttl,
+    )
+
+
 def write_run_state(request_id: str, state: Dict[str, Any], ttl: int = 7200) -> bool:
     """Persist (merge) the durable run-state checkpoint for ``request_id``.
 
@@ -212,13 +275,16 @@ def write_run_state(request_id: str, state: Dict[str, Any], ttl: int = 7200) -> 
     ``monitor_id``); they are merged over any existing record and an
     ``updated_at`` timestamp is stamped. Merge (not overwrite) so an early
     ``submitted`` checkpoint is not lost when a later ``completed`` checkpoint
-    is written. Raises if Redis is unreachable."""
+    is written. Raises if Redis is unreachable, or if ``request_id`` has already
+    been poisoned by terminal notification evidence."""
     client = get_client()
     key = _run_state_key(request_id)
     existing_raw = client.get(key)
     record: Dict[str, Any] = {}
     if existing_raw:
         record = json.loads(existing_raw)
+    if _state_marks_dead_session(record) and not _state_marks_dead_session(state):
+        raise DeadSessionError(_dead_session_message(request_id, record))
     record.update(state)
     record["request_id"] = request_id
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -235,9 +301,19 @@ def read_run_state(request_id: str) -> Optional[Dict[str, Any]]:
     return json.loads(raw)
 
 
-def clear_run_state(request_id: str) -> bool:
-    """Remove the run-state record once the flow is fully done and delivered."""
+def clear_run_state(request_id: str, *, force: bool = False) -> bool:
+    """Remove a non-terminal run-state record.
+
+    Dead-session poison records are intentionally retained until TTL unless the
+    caller explicitly forces cleanup for maintenance/proof code.
+    """
     client = get_client()
+    if not force:
+        raw = client.get(_run_state_key(request_id))
+        if raw:
+            record = json.loads(raw)
+            if _state_marks_dead_session(record):
+                raise DeadSessionError(_dead_session_message(request_id, record))
     return bool(client.delete(_run_state_key(request_id)))
 
 

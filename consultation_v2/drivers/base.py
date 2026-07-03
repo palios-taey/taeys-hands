@@ -1697,6 +1697,9 @@ class BaseConsultationDriver(ABC):
     def read_run_state(self, request_id: str) -> Optional[dict]:
         return primitives.read_run_state(request_id)
 
+    def assert_session_not_dead(self, request_id: str) -> None:
+        primitives.assert_session_not_dead(request_id)
+
     def clear_run_state(self, request_id: str) -> bool:
         return primitives.clear_run_state(request_id)
 
@@ -2800,6 +2803,7 @@ class BaseConsultationDriver(ABC):
         The lock is released at the EXACT moment setup_and_send returns (the
         send-registered handoff) AND on any setup/send failure or exception
         (release-safe ``finally`` in ``_display_dispatch_lock``)."""
+        self.assert_session_not_dead(request.request_id())
         with pause_display_watchdog(self.platform, self._display()):
             result = self.result(request)
             if not self._gate_selection_plan(request, result):

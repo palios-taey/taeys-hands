@@ -69,6 +69,7 @@ def _inline_context_message(context: str, message: str) -> str:
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
+    primitives.assert_session_not_dead(request.request_id())
 
     external_store_enabled = storage_policy.external_store_enabled(request)
     selection_record = []
@@ -172,6 +173,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 attachments=package_paths,
                 caller_attachment_provenance=list(package.caller_provenance),
             )
+    primitives.assert_session_not_dead(request.request_id())
     if request.caller_attachment_provenance:
         try:
             # Key by the STABLE request_id (FLOW §8), NOT the consolidated-package
@@ -420,6 +422,16 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 reason='operator failure notification delivery failed',
                 preserve_extraction_done=False,
             )
+        else:
+            _write_notification_evidence(
+                request,
+                delivered=True,
+                recipient=operator,
+                plan_id=plan_id or 'unknown',
+                status='failed',
+                reason='operator failure notification delivered',
+                needs_attention=True,
+            )
 
     # ISMA ingestion (non-blocking)
     if result.ok and result.response_text:
@@ -453,24 +465,16 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 error=str(exc),
             )
 
-    # --- Teardown (FLOW §8): a fully-delivered consultation is DONE. Clear the
-    # durable run-state and deregister the monitor session so the request_id is
-    # free and a later, genuinely-new consultation with the same prompt is not
-    # mistaken for the landed one. We clear ONLY on a real delivery (ok +
-    # response): a FAILED run KEEPS its run-state so a re-run can RESUME the
-    # landed send (resume + re-extract) instead of re-sending the irreversible
-    # turn. monitor_id is derived from the same stable request_id the driver
-    # used to register, so deregistration targets the right session.
+    # --- Teardown (FLOW §8 / CONTRACT §3): a fully-delivered consultation is
+    # DONE, but the request_id remains poisoned by the notification evidence so
+    # caller-level retry wrappers cannot re-drive the terminal session. Only the
+    # monitor registration is removed here.
     if delivered and notification_delivered:
         monitor_id = f'{request.platform}:{request.request_id()}'
         try:
             primitives.deregister_monitor_session(monitor_id)
         except Exception as exc:
             logger.error("Monitor deregistration failed: %s", exc)
-        try:
-            primitives.clear_run_state(request.request_id())
-        except Exception as exc:
-            logger.error("Run-state clear failed: %s", exc)
 
     return result
 
@@ -545,19 +549,21 @@ def _write_notification_evidence(
     delivered: bool,
     recipient: str,
     plan_id: str,
+    status: str = 'completed',
+    reason: str = 'notification delivered',
+    needs_attention: bool = False,
 ) -> None:
     try:
-        primitives.write_run_state(
+        primitives.poison_dead_session(
             request_id=request.request_id(),
-            state={
-                'status': 'extraction_done',
-                'notification_evidence': {
-                    'delivered': delivered,
-                    'recipient': recipient,
-                    'plan_id': plan_id,
-                },
-                'needs_attention': False,
+            reason=reason,
+            notification_evidence={
+                'delivered': delivered,
+                'recipient': recipient,
+                'plan_id': plan_id,
+                'status': status,
             },
+            needs_attention=needs_attention,
         )
     except Exception as exc:
         logger.error("Run-state notification evidence checkpoint failed: %s", exc)
@@ -572,22 +578,20 @@ def _park_notification_failure(
     reason: str,
     preserve_extraction_done: bool,
 ) -> None:
-    state = {
-        'notification_evidence': {
-            'delivered': False,
-            'recipient': recipient,
-            'plan_id': plan_id,
-            'reason': reason,
-        },
-        'needs_attention': True,
-        'parked_reason': reason,
+    notification_evidence = {
+        'delivered': False,
+        'recipient': recipient,
+        'plan_id': plan_id,
+        'reason': reason,
     }
     if preserve_extraction_done:
-        state['status'] = 'extraction_done'
+        notification_evidence['prior_status'] = 'extraction_done'
     try:
-        primitives.write_run_state(
+        primitives.poison_dead_session(
             request_id=request.request_id(),
-            state=state,
+            reason=reason,
+            notification_evidence=notification_evidence,
+            needs_attention=True,
         )
     except Exception as exc:
         logger.error("Run-state notification failure park failed: %s", exc)
