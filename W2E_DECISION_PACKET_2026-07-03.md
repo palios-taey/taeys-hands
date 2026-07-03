@@ -27,6 +27,10 @@ Also for the fix scope (codex, 6SIGMA root-cause shape):
 - The YAML `tool_*` entries need remapping to whatever the fix shape locates/verifies (post-condition elements), removing the dead menu-item names.
 - Engine gains a shared `focus_and_key_open` primitive (grabFocus → verify FOCUSED → Atspi keyboard event → settle → verify new-node post-condition) in shared primitives, YAML-declared per trigger. No coordinates, no fuzzy names.
 
+## ADDENDUM (2026-07-03 ~18:00Z) — recommendation (a) PROVEN END-TO-END ON A REAL CONSULT
+The engine's ChatGPT attach failed on a real treasurer consult (tool_upload not found — this defect). Manual recovery executed the EXACT recommended shape, all pure AT-SPI, screenshot-verified at every step (qon_cg_rec0–8.png):
+grab_focus on attach_trigger (FOCUSED verified) → Atspi Space → menu opened → typeahead "Add photos" → menu filtered to exactly 1 item → Down+Enter → GTK file dialog → path via location bar → chip rendered (verified) → message typed → Enter → send landed (new /c/6a47f719, Stop appeared) → production monitor_generation completed on stop-gone → extract_primary 31,482 chars → delivered to requester. Zero coordinates, zero fuzzy matching. The typeahead+postcondition shape is production-viable as-is; codex should lift this sequence into the driver/YAML with the mapped post-condition gates described above.
+
 ## Status attached to this packet
 - **w1e-deliveryack: VALIDATED, merge-ready @ `31adc87c`** (branch `consult-engine-audit-fix-w1e-deliveryack-rebased`, sits on d9c1de09). Success-path: real Gemini DT consult delivered with structured evidence (delivered=true, notification consumed by requester). Park-path: unreachable-Redis notify returned delivered=false + durable `pending/*.json` + `needs_attention.jsonl`. Evidence in the task record + `/tmp/consult_pkgs/w1e_validation_evidence.json`.
 - w2a-settle-loader chain is now unblocked (w1e resolved).
