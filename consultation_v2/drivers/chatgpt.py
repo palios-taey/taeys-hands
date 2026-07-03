@@ -34,6 +34,37 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         'pinned conversation',
         'Open context menu for',
     )
+    _RESPONSE_TEXT_CONTROL_ROLES = {
+        'alert',
+        'check box',
+        'check menu item',
+        'combo box',
+        'entry',
+        'menu',
+        'menu bar',
+        'menu item',
+        'option',
+        'page tab',
+        'page tab list',
+        'push button',
+        'radio button',
+        'radio menu item',
+        'scroll bar',
+        'separator',
+        'toggle button',
+        'tool bar',
+    }
+    _RESPONSE_TEXT_IGNORED_NAMES = {
+        'Bad response',
+        'Copy response',
+        'Good response',
+        'More actions',
+        'Read aloud',
+        'Response actions',
+        'Share',
+        'Switch model',
+        'Your message actions',
+    }
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -1654,9 +1685,336 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             }
         return None
 
+    @staticmethod
+    def _chatgpt_int(value) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _chatgpt_action_specs(self) -> tuple[dict, dict, dict]:
+        element_map = self.cfg.get('tree', {}).get('element_map', {}) or {}
+        return (
+            element_map.get('user_message_actions_panel', {}) or {},
+            element_map.get('response_actions_panel', {}) or {},
+            element_map.get('copy_button', {}) or {},
+        )
+
+    def _chatgpt_is_response_action_element(self, element: dict) -> bool:
+        name = str(element.get('name') or '').strip()
+        role = str(element.get('role') or '').strip().lower()
+        if name in self._RESPONSE_TEXT_IGNORED_NAMES:
+            return True
+        user_actions_spec, response_actions_spec, copy_spec = self._chatgpt_action_specs()
+        return (
+            matches_spec(element, user_actions_spec)
+            or matches_spec(element, response_actions_spec)
+            or matches_spec(element, copy_spec)
+            or role in self._RESPONSE_TEXT_CONTROL_ROLES
+        )
+
+    def _chatgpt_node_text(self, obj) -> str:
+        text = ''
+        try:
+            text_iface = obj.get_text_iface()
+        except Exception:
+            text_iface = None
+        if text_iface is not None:
+            try:
+                count = text_iface.get_character_count()
+            except Exception:
+                count = -1
+            try:
+                text = text_iface.get_text(0, count if count and count > 0 else -1) or ''
+            except Exception:
+                text = ''
+        if not text:
+            try:
+                text = obj.get_name() or ''
+            except Exception:
+                text = ''
+        return self._normalized_text(text)
+
+    @staticmethod
+    def _chatgpt_compact_node_evidence(obj) -> dict[str, object]:
+        try:
+            name = obj.get_name() or ''
+        except Exception:
+            name = ''
+        try:
+            role = obj.get_role_name() or ''
+        except Exception:
+            role = ''
+        return {'name': name[:120], 'role': role}
+
+    def _chatgpt_append_text_chunk(
+        self,
+        chunks: list[str],
+        seen: list[str],
+        text: str,
+        *,
+        max_chars: int,
+    ) -> None:
+        normalized = self._normalized_text(text)
+        if not normalized or normalized in self._RESPONSE_TEXT_IGNORED_NAMES:
+            return
+        for previous in seen:
+            if normalized == previous:
+                return
+            if len(normalized) >= 80 and normalized in previous:
+                return
+            if len(previous) >= 80 and previous in normalized:
+                seen.remove(previous)
+                chunks[:] = [chunk for chunk in chunks if chunk != previous]
+                break
+        remaining = max_chars - sum(len(chunk) + 1 for chunk in chunks)
+        if remaining <= 0:
+            return
+        if len(normalized) > remaining:
+            normalized = normalized[:remaining].rstrip()
+        seen.append(normalized)
+        chunks.append(normalized)
+
+    def _chatgpt_collect_response_subtree_text(
+        self,
+        root,
+        *,
+        anchor_y: int | None,
+        action_y: int | None,
+        max_nodes: int = 900,
+        max_chars: int = 120000,
+    ) -> tuple[str, dict[str, object]]:
+        chunks: list[str] = []
+        seen: list[str] = []
+        visited: set[int] = set()
+        evidence: dict[str, object] = {
+            'nodes_seen': 0,
+            'chunks': 0,
+            'bounded_by_anchor_y': anchor_y,
+            'bounded_by_action_y': action_y,
+        }
+
+        user_actions_spec, response_actions_spec, copy_spec = self._chatgpt_action_specs()
+
+        def _traverse(obj, depth: int = 0) -> None:
+            if len(visited) >= max_nodes or sum(len(chunk) + 1 for chunk in chunks) >= max_chars:
+                return
+            identity = id(obj)
+            if identity in visited:
+                return
+            visited.add(identity)
+            try:
+                name = obj.get_name() or ''
+            except Exception:
+                name = ''
+            try:
+                role = obj.get_role_name() or ''
+            except Exception:
+                role = ''
+            role_lower = role.strip().lower()
+            element = {'name': name, 'role': role, 'atspi_obj': obj}
+            evidence['nodes_seen'] = int(evidence['nodes_seen']) + 1
+
+            rect = None if depth == 0 else self._screen_rect(obj)
+            if rect:
+                center_y = int(rect['y'] + rect['height'] // 2)
+                if anchor_y is not None and center_y <= anchor_y:
+                    return
+                if action_y is not None and center_y >= action_y + 80:
+                    return
+
+            if (
+                matches_spec(element, user_actions_spec)
+                or matches_spec(element, response_actions_spec)
+                or matches_spec(element, copy_spec)
+            ):
+                return
+
+            if name in self._RESPONSE_TEXT_IGNORED_NAMES:
+                return
+
+            if role_lower not in self._RESPONSE_TEXT_CONTROL_ROLES:
+                self._chatgpt_append_text_chunk(
+                    chunks,
+                    seen,
+                    self._chatgpt_node_text(obj),
+                    max_chars=max_chars,
+                )
+
+            try:
+                child_count = min(obj.get_child_count(), 220)
+            except Exception:
+                child_count = 0
+            for index in range(child_count):
+                try:
+                    child = obj.get_child_at_index(index)
+                except Exception:
+                    child = None
+                if child is not None:
+                    _traverse(child, depth + 1)
+
+        _traverse(root)
+        content = '\n'.join(chunks).strip()
+        evidence.update({
+            'chunks': len(chunks),
+            'characters': len(content),
+        })
+        return content, evidence
+
+    def _chatgpt_collect_response_band_text(
+        self,
+        elements: list[dict],
+        *,
+        anchor_y: int | None,
+        action_y: int | None,
+        max_chars: int = 120000,
+    ) -> tuple[str, dict[str, object]]:
+        chunks: list[str] = []
+        seen: list[str] = []
+        rows: list[tuple[int, int, str]] = []
+        for element in elements:
+            y = self._chatgpt_int(element.get('y'))
+            if y is None:
+                continue
+            if anchor_y is not None and y <= anchor_y:
+                continue
+            if action_y is not None and y >= action_y:
+                continue
+            if self._chatgpt_is_response_action_element(element):
+                continue
+            name = str(element.get('name') or '').strip()
+            text = str(element.get('text') or '').strip()
+            content = self._normalized_text(' '.join(part for part in (name, text) if part))
+            if not content:
+                continue
+            rows.append((y, self._chatgpt_int(element.get('x')) or 0, content))
+
+        for _y, _x, content in sorted(rows):
+            self._chatgpt_append_text_chunk(chunks, seen, content, max_chars=max_chars)
+        result = '\n'.join(chunks).strip()
+        return result, {
+            'source': 'document_element_band',
+            'rows': len(rows),
+            'chunks': len(chunks),
+            'characters': len(result),
+            'bounded_by_anchor_y': anchor_y,
+            'bounded_by_action_y': action_y,
+        }
+
+    def _chatgpt_fallback_prompt_contamination(
+        self,
+        content: str,
+        request: ConsultationRequest,
+    ) -> dict[str, object] | None:
+        content_norm = self._normalized_text(content)
+        prompt_norm = self._normalized_text(request.message)
+        if not content_norm or len(prompt_norm) < 120:
+            return None
+        if prompt_norm in content_norm:
+            return {'reason': 'full_prompt_present_in_fallback_text'}
+        prompt_prefix = prompt_norm[: min(500, len(prompt_norm))]
+        if len(prompt_prefix) >= 120 and prompt_prefix in content_norm[: max(2000, len(prompt_prefix) * 2)]:
+            return {'reason': 'prompt_prefix_present_in_fallback_text'}
+        return None
+
+    def _chatgpt_response_text_candidate_failure(
+        self,
+        content: str,
+        request: ConsultationRequest,
+    ) -> dict[str, object] | None:
+        prompt_contamination = self._chatgpt_fallback_prompt_contamination(content, request)
+        if prompt_contamination:
+            return prompt_contamination
+        echo = self._prompt_echo_evidence(content, request)
+        if echo.get('is_echo'):
+            return {'reason': 'prompt_echo', 'echo_guard': echo}
+        quality_failure = self._chatgpt_extract_quality_failure(content, request)
+        if quality_failure:
+            return quality_failure
+        return None
+
+    def _chatgpt_bounded_response_text_fallback(
+        self,
+        elements: list[dict],
+        target: dict[str, object] | None,
+        request: ConsultationRequest,
+        turn_correlation: dict[str, object] | None,
+    ) -> tuple[str, dict[str, object]]:
+        anchor_y = self._chatgpt_int((turn_correlation or {}).get('anchor_y'))
+        action_y = self._chatgpt_int((target or {}).get('y'))
+        evidence: dict[str, object] = {
+            'ok': False,
+            'source': 'chatgpt_bounded_response_text',
+            'anchor_y': anchor_y,
+            'action_y': action_y,
+            'copy_button': {
+                key: (target or {}).get(key)
+                for key in ('name', 'role', 'x', 'y')
+            } if target else None,
+            'candidates': [],
+        }
+        if not target or target.get('atspi_obj') is None:
+            evidence['reason'] = 'copy_button_atspi_object_missing'
+            return '', evidence
+
+        for depth, ancestor in enumerate(self._atspi_path_to_root(target.get('atspi_obj'))[1:], start=1):
+            if self._is_broad_scope_root(ancestor):
+                evidence['stopped_at_broad_root'] = self._chatgpt_compact_node_evidence(ancestor)
+                break
+            content, collect_evidence = self._chatgpt_collect_response_subtree_text(
+                ancestor,
+                anchor_y=anchor_y,
+                action_y=action_y,
+            )
+            failure = (
+                self._chatgpt_response_text_candidate_failure(content, request)
+                if content
+                else {'reason': 'empty_candidate'}
+            )
+            candidate = {
+                'source': 'copy_button_ancestor',
+                'depth': depth,
+                'node': self._chatgpt_compact_node_evidence(ancestor),
+                **collect_evidence,
+                'failure': failure,
+            }
+            if len(evidence['candidates']) < 8:
+                evidence['candidates'].append(candidate)
+            if content and not failure:
+                evidence.update({
+                    'ok': True,
+                    'reason': 'copy_button_ancestor_text',
+                    'selected': candidate,
+                })
+                return content, evidence
+
+        band_content, band_evidence = self._chatgpt_collect_response_band_text(
+            elements,
+            anchor_y=anchor_y,
+            action_y=action_y,
+        )
+        band_failure = (
+            self._chatgpt_response_text_candidate_failure(band_content, request)
+            if band_content
+            else {'reason': 'empty_candidate'}
+        )
+        band_candidate = {**band_evidence, 'failure': band_failure}
+        if len(evidence['candidates']) < 8:
+            evidence['candidates'].append(band_candidate)
+        if band_content and not band_failure:
+            evidence.update({
+                'ok': True,
+                'reason': 'document_element_band_text',
+                'selected': band_candidate,
+            })
+            return band_content, evidence
+
+        evidence['reason'] = 'no_bounded_response_text_candidate'
+        return '', evidence
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
-        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.atspi import find_firefox_for_platform, get_platform_document
         from consultation_v2.interact import atspi_click
         from consultation_v2.tree import find_elements as raw_find_elements
 
@@ -1670,6 +2028,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         last_snapshot = self.runtime.snapshot()
         last_scroll: dict[str, object] = {}
         last_copy_buttons: list[dict[str, object]] = []
+        last_document_elements: list[dict] = []
+        last_correlated_copy_button: dict[str, object] | None = None
+        last_turn_correlation: dict[str, object] | None = None
+        saw_empty_clipboard_from_copy_button = False
         attempts: list[dict[str, object]] = []
         for attempt in range(5):
             time.sleep(1.0)
@@ -1696,8 +2058,21 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 firefox.clear_cache_single()
             except Exception:
                 pass
+            document = get_platform_document(firefox, self.platform)
+            if not document:
+                attempts.append({
+                    'attempt': attempt + 1,
+                    'scroll': last_scroll,
+                    'reason': 'chatgpt_document_not_found',
+                })
+                continue
+            try:
+                document.clear_cache_single()
+            except Exception:
+                pass
             last_snapshot = self.runtime.snapshot()
-            all_elements = raw_find_elements(firefox, fence_after=[])
+            all_elements = raw_find_elements(document, fence_after=[])
+            last_document_elements = all_elements
             copy_buttons = [
                 element for element in all_elements
                 if matches_spec(element, copy_spec)
@@ -1733,6 +2108,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 continue
 
             target = correlated_copy_buttons[-1]
+            last_correlated_copy_button = target
+            last_turn_correlation = turn_correlation
             copy_button = {key: target.get(key) for key in ('name', 'role', 'x', 'y')}
             scrolled_button = self.runtime.scroll_element_into_view(ElementRef(
                 key='copy_button',
@@ -1771,6 +2148,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'quality_failure': quality_failure,
             }
             attempts.append(attempt_evidence)
+            if clicked and not content:
+                saw_empty_clipboard_from_copy_button = True
             if not clicked or not content or exact_prompt_echo:
                 continue
             if quality_failure:
@@ -1801,6 +2180,39 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 **attempt_evidence,
             )
             return True
+
+        if saw_empty_clipboard_from_copy_button:
+            fallback_content, fallback_evidence = self._chatgpt_bounded_response_text_fallback(
+                last_document_elements,
+                last_correlated_copy_button,
+                request,
+                last_turn_correlation,
+            )
+            if fallback_content and fallback_evidence.get('ok'):
+                if not self.set_response_text_if_not_prompt_echo(
+                    request,
+                    result,
+                    fallback_content,
+                    step='extract_primary',
+                    source='chatgpt_bounded_response_text',
+                    fallback=fallback_evidence,
+                    attempts=attempts,
+                ):
+                    return False
+                result.add_step(
+                    'extract_primary',
+                    True,
+                    f'ChatGPT response extracted from bounded response turn ({len(fallback_content)} chars)',
+                    source='chatgpt_bounded_response_text',
+                    fallback=fallback_evidence,
+                    attempts=attempts,
+                )
+                return True
+            attempts.append({
+                'attempt': 'bounded_response_text_fallback',
+                'reason': 'empty_copy_clipboard_fallback_failed',
+                'fallback': fallback_evidence,
+            })
 
         result.add_step(
             'extract_primary', False,
