@@ -1595,9 +1595,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         request: ConsultationRequest,
     ) -> tuple[list[dict], dict[str, object]]:
         prompt_norm = self._normalized_text(request.message).lower()
-        user_panel_spec = self.cfg.get('tree', {}).get('element_map', {}).get('user_message_actions_panel', {})
+        element_map = self.cfg.get('tree', {}).get('element_map', {}) or {}
+        user_panel_spec = element_map.get('user_message_actions_panel', {}) or {}
+        response_panel_spec = element_map.get('response_actions_panel', {}) or {}
         prompt_matches: list[dict[str, object]] = []
         user_action_panels: list[dict[str, object]] = []
+        response_action_panels: list[dict[str, object]] = []
 
         for element in elements:
             y = element.get('y')
@@ -1609,6 +1612,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             element_norm = self._normalized_text(' '.join(part for part in (name, text) if part)).lower()
             if matches_spec(element, user_panel_spec):
                 user_action_panels.append({'y': int(y), 'name': name, 'role': role})
+            if matches_spec(element, response_panel_spec):
+                response_action_panels.append({'y': int(y), 'name': name, 'role': role})
             if not (prompt_norm and element_norm):
                 continue
             prompt_seen = (
@@ -1633,12 +1638,16 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             anchor_y = max(int(item['y']) for item in user_action_panels)
 
         if anchor_y is None:
-            return [], {
-                'ok': False,
-                'reason': 'newest_user_turn_anchor_not_found',
+            assistant_candidates, assistant_anchor = self._chatgpt_latest_assistant_turn_copy_candidates(
+                copy_buttons,
+                response_action_panels,
+            )
+            assistant_anchor.update({
                 'prompt_text_matches': len(prompt_matches),
                 'user_message_action_panels': len(user_action_panels),
-            }
+                'response_action_panels': len(response_action_panels),
+            })
+            return assistant_candidates, assistant_anchor
 
         correlated = [
             button for button in copy_buttons
@@ -1650,7 +1659,66 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'anchor_y': anchor_y,
             'prompt_text_matches': len(prompt_matches),
             'user_message_action_panels': len(user_action_panels),
+            'response_action_panels': len(response_action_panels),
             'copy_buttons_after_anchor': len(correlated),
+        }
+
+    def _chatgpt_latest_assistant_turn_copy_candidates(
+        self,
+        copy_buttons: list[dict],
+        response_action_panels: list[dict[str, object]],
+    ) -> tuple[list[dict], dict[str, object]]:
+        copy_buttons_with_y = [
+            button for button in copy_buttons
+            if self._chatgpt_int(button.get('y')) is not None
+        ]
+        if not copy_buttons_with_y:
+            return [], {
+                'ok': False,
+                'reason': 'assistant_turn_copy_button_not_found',
+            }
+
+        sorted_buttons = sorted(
+            copy_buttons_with_y,
+            key=lambda button: self._chatgpt_int(button.get('y')) or 0,
+        )
+        button_ys = [self._chatgpt_int(button.get('y')) or 0 for button in sorted_buttons]
+        latest_copy_y = button_ys[-1]
+        previous_copy_ys = [y for y in button_ys[:-1] if y < latest_copy_y]
+        assistant_floor_y = max(previous_copy_ys) if previous_copy_ys else None
+
+        panel_ys = [
+            self._chatgpt_int(panel.get('y'))
+            for panel in response_action_panels
+            if self._chatgpt_int(panel.get('y')) is not None
+        ]
+        latest_panel_y = max(panel_ys) if panel_ys else None
+        if latest_panel_y is not None:
+            panel_buttons = [
+                button for button in sorted_buttons
+                if abs((self._chatgpt_int(button.get('y')) or 0) - latest_panel_y) <= 160
+            ]
+            if panel_buttons:
+                return panel_buttons, {
+                    'ok': True,
+                    'anchor_source': 'latest_response_actions_panel',
+                    'anchor_y': assistant_floor_y,
+                    'response_actions_y': latest_panel_y,
+                    'copy_buttons_near_response_actions': len(panel_buttons),
+                    'copy_buttons_total': len(sorted_buttons),
+                }
+
+        latest_buttons = [
+            button for button in sorted_buttons
+            if (self._chatgpt_int(button.get('y')) or 0) >= latest_copy_y - 40
+        ]
+        return latest_buttons, {
+            'ok': True,
+            'anchor_source': 'latest_assistant_copy_button',
+            'anchor_y': assistant_floor_y,
+            'copy_button_y': latest_copy_y,
+            'copy_buttons_in_latest_band': len(latest_buttons),
+            'copy_buttons_total': len(sorted_buttons),
         }
 
     def _chatgpt_extract_quality_failure(
