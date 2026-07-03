@@ -35,3 +35,12 @@ grab_focus on attach_trigger (FOCUSED verified) → Atspi Space → menu opened 
 - **w1e-deliveryack: VALIDATED, merge-ready @ `31adc87c`** (branch `consult-engine-audit-fix-w1e-deliveryack-rebased`, sits on d9c1de09). Success-path: real Gemini DT consult delivered with structured evidence (delivered=true, notification consumed by requester). Park-path: unreachable-Redis notify returned delivered=false + durable `pending/*.json` + `needs_attention.jsonl`. Evidence in the task record + `/tmp/consult_pkgs/w1e_validation_evidence.json`.
 - w2a-settle-loader chain is now unblocked (w1e resolved).
 - Wave-1 stale in_progress tasks (w1a, w2-chatgpt-mode-verify, w2-second-set-routing) closed with evidence — all fixes verified on main.
+
+## LIVE VALIDATION of codex f3306fad (2026-07-03 ~20:00Z) — mechanism PASSES, one postcondition locator wrong
+Ran a REAL attach+deep_research consult on :2 through the engine (codex branch consult-engine-audit-fix-w2e-typeahead-postcondition). Result (screenshot /tmp/consult_pkgs/w2eval_post_fail.png, step evidence w2eval_chatgpt_RESULT.json):
+- OPEN: `focus_and_key_open` succeeded — open_evidence ok=true, firefox_focused=true, element_focused=true, Space sent. Menu opened.
+- SELECT: Deep Research **engaged** (composer pill visibly showing "Deep research"). The typeahead worked.
+- FALSE-FAIL: select reported "did not expose mapped postcondition after typeahead" because the declared postcondition element `tool_deep_research_active` = {name "Deep research", role push button, scope base.composer} **does not exist** in this build — the DR-active composer pill is NAMELESS `section` nodes at (825,530)/(837,530), the SAME a11y-stripping as the menu items. Live scan: the only named DR-armed marker is **{name "Deep Research tabs", role "page tab list"}** at x810 y599 (present iff DR engaged; absent otherwise).
+- FIX (reported to codex/conductor): repoint `tool_deep_research_active` postcondition to `{name: "Deep Research tabs", role: page tab list}`. Leave open/typeahead untouched (proven). ATTACH path already correct — gates on `_file_dialog_open()` (GTK dialog = its mapped postcondition, proven manually earlier today). web_search postcondition unvalidated (no live marker captured) — opt-in/secondary, don't blind-fix.
+
+**Net: the approved mechanism is sound and live-proven; only the DR postcondition locator needs the exact-name correction above before re-validation + gated-PR merge.**
