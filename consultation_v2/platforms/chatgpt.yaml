@@ -453,6 +453,8 @@ workflow:
                 action: press
           pro_extended:
             element: model_pro_extended
+            active_trigger_names:
+              - Pro Extended
             path:
               - element: model_pro
                 action: hover

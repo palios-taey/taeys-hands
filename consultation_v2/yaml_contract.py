@@ -87,7 +87,13 @@ MENU_SELECT_VALUES = frozenset({'single', 'multi'})
 MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
 MENU_OPERATE_SCOPES = frozenset({'app_root_snapshot', 'menu_snapshot', 'snapshot'})
 MENU_CLICK_STRATEGIES = frozenset({'atspi_only', 'atspi_first', 'coordinate_only', 'xdotool_first'})
-MENU_OPTION_KEYS = frozenset({'element', 'path', 'active_element', 'click_strategy'})
+MENU_OPTION_KEYS = frozenset({
+    'element',
+    'path',
+    'active_element',
+    'active_trigger_names',
+    'click_strategy',
+})
 MENU_PATH_KEYS = frozenset({'element', 'action'})
 MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
 LEGACY_SELECTION_KEYS = frozenset({
@@ -918,6 +924,14 @@ def _validate_menu_option(
     ):
         _add(findings, lines, option_path + ('active_element',), 'active_element',
              'menu option active_element must name an element_map key')
+    active_trigger_names = option.get('active_trigger_names')
+    if active_trigger_names is not None and (
+        not isinstance(active_trigger_names, list)
+        or not active_trigger_names
+        or not all(isinstance(name, str) and name.strip() for name in active_trigger_names)
+    ):
+        _add(findings, lines, option_path + ('active_trigger_names',), 'active_trigger_names',
+             'menu option active_trigger_names must be a non-empty list of exact trigger names')
     click_strategy = option.get('click_strategy')
     if click_strategy is not None and click_strategy not in MENU_CLICK_STRATEGIES:
         _add(findings, lines, option_path + ('click_strategy',), 'click_strategy',
