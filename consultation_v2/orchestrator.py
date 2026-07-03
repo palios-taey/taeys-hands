@@ -20,7 +20,7 @@ from consultation_v2.identity import (
     consolidate_attachments,
     validate_caller_attachments,
 )
-from consultation_v2.notify import push_notification
+from consultation_v2.notify import NotificationDelivery, push_notification
 from consultation_v2.planner import (
     SelectionPlanError,
     build_selection_plan,
@@ -327,7 +327,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         # Success → deliver to the requester. With no requester, surface LOUDLY
         # rather than dropping (the GAIA->tutor orphan: result ready, nobody told).
         if request.requester:
-            notification_delivered = _push_notification_step(
+            notification_delivery = _push_notification_step(
                 result,
                 requester=request.requester,
                 recipient=None,
@@ -340,10 +340,11 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 purpose=request.purpose,
                 step_name='notify_requester',
             )
-            if notification_delivered:
+            notification_delivered = bool(notification_delivery)
+            if notification_delivery:
                 _write_notification_evidence(
                     request,
-                    delivered=True,
+                    delivery=notification_delivery,
                     recipient=request.requester,
                     plan_id=plan_id or 'unknown',
                 )
@@ -355,6 +356,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                     plan_id=plan_id or 'unknown',
                     reason='requester notification delivery failed',
                     preserve_extraction_done=True,
+                    delivery=notification_delivery,
                 )
                 _push_notification_step(
                     result,
@@ -421,11 +423,12 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 plan_id=plan_id or 'unknown',
                 reason='operator failure notification delivery failed',
                 preserve_extraction_done=False,
+                delivery=operator_notified,
             )
         else:
             _write_notification_evidence(
                 request,
-                delivered=True,
+                delivery=operator_notified,
                 recipient=operator,
                 plan_id=plan_id or 'unknown',
                 status='failed',
@@ -500,10 +503,10 @@ def _push_notification_step(
     output_path: str | None,
     purpose: str | None,
     step_name: str,
-) -> bool:
+) -> NotificationDelivery:
     target = recipient or requester
     try:
-        delivered = push_notification(
+        delivery = push_notification(
             requester=requester,
             platform=platform,
             status=status,
@@ -515,7 +518,15 @@ def _push_notification_step(
             output_path=output_path,
         )
     except Exception as exc:
-        delivered = False
+        delivery = NotificationDelivery(
+            delivered=False,
+            queued=False,
+            notification_id='',
+            recipient=target,
+            queue_key=f'taey:{target}:notifications',
+            attempts=0,
+            error=str(exc),
+        )
         result.add_step(
             step_name,
             False,
@@ -525,13 +536,13 @@ def _push_notification_step(
             plan_id=plan_id,
         )
         logger.error("Notification delivery to %s raised: %s", target, exc)
-        return False
+        return delivery
     result.add_step(
         step_name,
-        bool(delivered),
+        bool(delivery),
         (
-            f'Notification delivered to {target!r}'
-            if delivered else f'Notification delivery to {target!r} failed'
+            f'Notification queued to {target!r}'
+            if delivery else f'Notification enqueue to {target!r} failed'
         ),
         recipient=target,
         status=status,
@@ -539,14 +550,15 @@ def _push_notification_step(
         response_chars=len(response_text or ''),
         source_file=source_file or '',
         output_path=output_path or '',
+        notification_delivery=delivery.as_evidence(),
     )
-    return bool(delivered)
+    return delivery
 
 
 def _write_notification_evidence(
     request: ConsultationRequest,
     *,
-    delivered: bool,
+    delivery: NotificationDelivery,
     recipient: str,
     plan_id: str,
     status: str = 'completed',
@@ -558,10 +570,16 @@ def _write_notification_evidence(
             request_id=request.request_id(),
             reason=reason,
             notification_evidence={
-                'delivered': delivered,
+                'delivered': bool(delivery),
+                'queued': delivery.queued,
                 'recipient': recipient,
                 'plan_id': plan_id,
                 'status': status,
+                'notification_id': delivery.notification_id,
+                'queue_key': delivery.queue_key,
+                'queue_length': delivery.queue_length,
+                'attempts': delivery.attempts,
+                'consumption_verification': 'async_stuck_inbox_watchdog',
             },
             needs_attention=needs_attention,
         )
@@ -577,12 +595,17 @@ def _park_notification_failure(
     plan_id: str,
     reason: str,
     preserve_extraction_done: bool,
+    delivery: NotificationDelivery | None = None,
 ) -> None:
+    delivery_evidence = delivery.as_evidence() if delivery is not None else {}
     notification_evidence = {
         'delivered': False,
+        'queued': bool(delivery.queued) if delivery is not None else False,
         'recipient': recipient,
         'plan_id': plan_id,
         'reason': reason,
+        'delivery': delivery_evidence,
+        'local_log_path': delivery.local_log_path if delivery is not None else '',
     }
     if preserve_extraction_done:
         notification_evidence['prior_status'] = 'extraction_done'
@@ -601,4 +624,6 @@ def _park_notification_failure(
         f'Notification failure parked for attention: {reason}',
         recipient=recipient,
         plan_id=plan_id,
+        notification_delivery=delivery_evidence,
+        local_log_path=delivery.local_log_path if delivery is not None else '',
     )
