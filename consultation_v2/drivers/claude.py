@@ -1066,9 +1066,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 return False
 
             if not self.snapshot_has_any(continue_snap, stop_keys):
-                if not self._monitor_response_rendered(continue_snap):
-                    terminal_snapshot = continue_snap
-                    return False
                 completed = True
                 terminal_snapshot = continue_snap
                 return True
@@ -1146,10 +1143,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
             seed_stop_seen=bool(seed_stop_seen),
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
+            completion_gate='stop_gone_only',
+            positive_marker_gate=False,
             stop_gone_cycles=detector.stop_cycles,
             continue_clicks=continue_clicks,
             continue_present=continue_present,
-            response_rendered=self._monitor_response_rendered(verify_snap),
             generation_timeout=effective_timeout,
             stop_condition=stop_condition,
             snapshot=verify_snap.serializable(),
@@ -1162,9 +1160,6 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 url=result.session_url_after or self.runtime.current_url() or '',
             )
         return verified
-
-    def _monitor_response_rendered(self, snapshot: Snapshot) -> bool:
-        return bool(snapshot.has('copy_button'))
 
     def _scan_for_continue_button(self) -> tuple[Snapshot, ElementRef | None, bool]:
         self.runtime.press('ctrl+End')

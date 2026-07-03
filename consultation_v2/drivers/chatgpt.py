@@ -27,6 +27,13 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         'Start Voice',
         'Start dictation',
     }
+    _EXTRACT_CHROME_POLLUTION_MARKERS = (
+        'Firefox View',
+        'Bookmark this page',
+        'Show sidebar',
+        'pinned conversation',
+        'Open context menu for',
+    )
 
     # run() is the shared two-phase template on BaseConsultationDriver (FLOW §10):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
@@ -229,13 +236,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             ],
         }
 
-    def _complete_keys(self) -> tuple[str, ...]:
-        monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
-        extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
-        keys = monitor_cfg.get('complete_keys') or extract_cfg.get('primary_key') or ['copy_button']
-        keys = keys if isinstance(keys, list) else [keys]
-        return tuple(str(key) for key in keys if isinstance(key, str) and key)
-
     def _minimum_stop_gone_cycles(self) -> int:
         monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
         raw = monitor_cfg.get('sustained_stop_gone_cycles', 4)
@@ -269,38 +269,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if detector_mode in DEEP_MODES:
             effective_timeout = max(effective_timeout, DEEP_GENERATION_FLOOR_SECONDS)
         return effective_timeout
-
-    @staticmethod
-    def _element_y(element: ElementRef) -> int | None:
-        return int(element.y) if element.y is not None else None
-
-    def _bottom_action_row_y(
-        self,
-        snapshot: Snapshot,
-        action_keys: tuple[str, ...],
-    ) -> int | None:
-        items = [
-            item
-            for key in action_keys
-            for item in ((snapshot.mapped or {}).get(key) or [])
-            if item.y is not None
-        ]
-        if not items:
-            return None
-        return max(self._element_y(item) or 0 for item in items)
-
-    def _complete_signal_present(
-        self,
-        snapshot: Snapshot,
-        complete_keys: tuple[str, ...],
-        generation_floor_y: int | None,
-    ) -> tuple[bool, int | None]:
-        row_y = self._bottom_action_row_y(snapshot, complete_keys)
-        if row_y is None:
-            return False, None
-        if generation_floor_y is not None and row_y <= generation_floor_y + 8:
-            return False, row_y
-        return True, row_y
 
     def _send_button_keys(self) -> tuple[str, ...]:
         prompt_cfg = self.cfg.get('workflow', {}).get('prompt', {}) or {}
@@ -1152,8 +1120,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         full_timeout = max(120.0, configured_timeout)
         first_probe_timeout = min(12.0, full_timeout)
         stop_keys = self._stop_keys()
-        complete_keys = self._complete_keys()
-        self._generating_complete_row_y = None
         if request.attachments:
             upload_snap, upload_readiness, last_upload_snap = (
                 self._wait_for_attachment_upload_complete(
@@ -1217,11 +1183,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             )
             if stop_seen:
                 send_snap = stop_snap
-            if stop_seen:
-                self._generating_complete_row_y = self._bottom_action_row_y(
-                    send_snap,
-                    complete_keys,
-                )
             answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
             )
@@ -1298,16 +1259,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             self._minimum_stop_gone_cycles(),
         )
         stop_keys = self._stop_keys()
-        complete_keys = self._complete_keys()
         completed = False
         observed_stop = False
         intermediate_failed = False
         answer_thread_lost = False
         intermediate_actions: dict[str, int] = {}
         terminal_snapshot: Snapshot | None = None
-        stop_gone_without_complete_signal = 0
-        generation_floor_y = getattr(self, '_generating_complete_row_y', None)
-        complete_signal_y: int | None = None
         stop_read_samples: list[dict[str, object]] = []
         last_stop_reading: dict[str, object] = {}
         completion_quiet_samples: list[dict[str, object]] = []
@@ -1335,10 +1292,9 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         def _record_completion_quiet_reset(reason: str) -> None:
             completion_quiet_resets[reason] = completion_quiet_resets.get(reason, 0) + 1
 
-        def _confirm_completion_quiet_window() -> tuple[Snapshot | None, int | None, str]:
-            nonlocal observed_stop, intermediate_failed, generation_floor_y
+        def _confirm_completion_quiet_window() -> tuple[Snapshot | None, str]:
+            nonlocal observed_stop, intermediate_failed
             last_snapshot: Snapshot | None = None
-            last_signal_y: int | None = None
             for cycle in range(1, post_complete_quiet_cycles + 1):
                 time.sleep(1.0)
                 stop_present, snap, stop_reading = self._read_stop_state(
@@ -1349,16 +1305,12 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 observed_stop = observed_stop or stop_present
                 if stop_present:
                     detector.observe(stop_present=True)
-                    row_y = self._bottom_action_row_y(snap, complete_keys)
-                    if row_y is not None:
-                        generation_floor_y = max(generation_floor_y or row_y, row_y)
                     _record_completion_quiet_sample({
                         'cycle': cycle,
                         'stop_present': True,
-                        'complete_signal_present': False,
                         'reason': 'stop_reappeared',
                     })
-                    return None, None, 'stop_reappeared'
+                    return None, 'stop_reappeared'
 
                 handled, failed = self._handle_monitor_intermediate_state(
                     snap,
@@ -1372,32 +1324,20 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     _record_completion_quiet_sample({
                         'cycle': cycle,
                         'stop_present': False,
-                        'complete_signal_present': False,
                         'reason': reason,
                     })
-                    return None, None, reason
+                    return None, reason
 
-                complete_signal_present, signal_y = self._complete_signal_present(
-                    snap,
-                    complete_keys,
-                    generation_floor_y,
-                )
                 _record_completion_quiet_sample({
                     'cycle': cycle,
                     'stop_present': False,
-                    'complete_signal_present': bool(complete_signal_present),
-                    'complete_signal_y': signal_y,
-                    'reason': 'quiet' if complete_signal_present else 'complete_signal_missing',
+                    'reason': 'quiet',
                 })
-                if not complete_signal_present:
-                    return None, None, 'complete_signal_missing'
                 last_snapshot = snap
-                last_signal_y = signal_y
-            return last_snapshot, last_signal_y, 'quiet'
+            return last_snapshot, 'quiet'
 
         def _poll() -> bool:
             nonlocal completed, observed_stop, intermediate_failed, answer_thread_lost, terminal_snapshot
-            nonlocal stop_gone_without_complete_signal, generation_floor_y, complete_signal_y
             _thread_ok, thread_lost = self._assert_monitor_answer_thread(
                 result,
                 answer_url_predicate=self._is_answer_thread_url,
@@ -1411,10 +1351,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             )
             _record_stop_reading(stop_reading)
             observed_stop = observed_stop or stop_present
-            if stop_present:
-                row_y = self._bottom_action_row_y(snap, complete_keys)
-                if row_y is not None:
-                    generation_floor_y = max(generation_floor_y or row_y, row_y)
             handled, failed = self._handle_monitor_intermediate_state(
                 snap,
                 result,
@@ -1424,23 +1360,15 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 self._reset_detector_after_intermediate(detector)
                 intermediate_failed = failed
                 return bool(failed)
-            complete_signal_present, signal_y = self._complete_signal_present(
-                snap,
-                complete_keys,
-                generation_floor_y,
-            )
             verdict = detector.observe(stop_present=stop_present)
-            if verdict == COMPLETE and complete_signal_present:
-                quiet_snapshot, quiet_signal_y, quiet_reason = _confirm_completion_quiet_window()
+            if verdict == COMPLETE:
+                quiet_snapshot, quiet_reason = _confirm_completion_quiet_window()
                 if quiet_snapshot is not None:
                     completed = True
                     terminal_snapshot = quiet_snapshot
-                    complete_signal_y = quiet_signal_y
                     return True
                 _record_completion_quiet_reset(quiet_reason)
                 return False
-            if verdict == COMPLETE:
-                stop_gone_without_complete_signal += 1
             return False
 
         def _verified_stop_absent_snapshot() -> Snapshot | None:
@@ -1450,8 +1378,6 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             )
             _record_stop_reading(stop_reading)
             if stop_present:
-                return None
-            if not self._complete_signal_present(snap, complete_keys, generation_floor_y)[0]:
                 return None
             return snap
 
@@ -1511,13 +1437,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         if not stop_present_final:
             verify_snap = stop_verify_snap
         stop_absent = not stop_present_final
-        complete_signal_seen, final_signal_y = self._complete_signal_present(
-            verify_snap,
-            complete_keys,
-            generation_floor_y,
-        )
-        complete_signal_y = complete_signal_y if complete_signal_y is not None else final_signal_y
-        verified = bool(completed and stop_absent and complete_signal_seen)
+        verified = bool(completed and stop_absent)
         stop_condition = (
             'generation_stalled'
             if (not verified and stop_present_final and is_stop_condition('generation_stalled'))
@@ -1539,17 +1459,14 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             stop_seen=observed_stop,
             mode=detector_mode or 'default',
             stop_keys=stop_keys,
-            complete_keys=complete_keys,
-            complete_signal_seen=complete_signal_seen,
-            complete_signal_y=complete_signal_y,
-            generation_action_row_floor_y=generation_floor_y,
+            completion_gate='stop_gone_only',
+            positive_marker_gate=False,
             intermediate_actions=intermediate_actions,
             stop_gone_cycles=detector.stop_cycles,
             required_stop_gone_cycles=detector.required_stop_cycles,
             post_complete_quiet_cycles=post_complete_quiet_cycles,
             completion_quiet_resets=completion_quiet_resets,
             completion_quiet_samples=completion_quiet_samples,
-            stop_gone_without_complete_signal=stop_gone_without_complete_signal,
             stop_read_samples=stop_read_samples,
             last_stop_reading=last_stop_reading,
             generation_timeout=effective_timeout,
@@ -1705,6 +1622,38 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
             'copy_buttons_after_anchor': len(correlated),
         }
 
+    def _chatgpt_extract_quality_failure(
+        self,
+        content: str,
+        request: ConsultationRequest,
+    ) -> dict[str, object] | None:
+        normalized = self._normalized_text(content)
+        lowered = normalized.lower()
+        markers = [
+            marker for marker in self._EXTRACT_CHROME_POLLUTION_MARKERS
+            if marker.lower() in lowered
+        ]
+        if markers:
+            return {
+                'reason': 'browser_chrome_or_sidebar_pollution',
+                'markers': markers,
+            }
+
+        prompt = self._normalized_text(request.message)
+        word_count = len(normalized.split())
+        prompt_chars = len(prompt)
+        substantial_prompt = prompt_chars >= 1500 and any(
+            term in prompt.lower()
+            for term in ('audit', 'review', 'root cause', 'rca', 'verdict', 'validate')
+        )
+        if substantial_prompt and word_count < 35:
+            return {
+                'reason': 'short_fragment_for_substantial_prompt',
+                'word_count': word_count,
+                'prompt_chars': prompt_chars,
+            }
+        return None
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
         from consultation_v2.atspi import find_firefox_for_platform
@@ -1803,6 +1752,11 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 bool(content)
                 and self._normalized_text(content) == self._normalized_text(request.message)
             )
+            quality_failure = (
+                self._chatgpt_extract_quality_failure(content, request)
+                if content and not exact_prompt_echo
+                else None
+            )
             attempt_evidence = {
                 'attempt': attempt + 1,
                 'scroll': last_scroll,
@@ -1814,16 +1768,36 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 'characters': len(content),
                 'preview': content[:200],
                 'exact_prompt_echo': exact_prompt_echo,
+                'quality_failure': quality_failure,
             }
             attempts.append(attempt_evidence)
             if not clicked or not content or exact_prompt_echo:
                 continue
-            result.response_text = content
+            if quality_failure:
+                result.response_text = ''
+                result.add_step(
+                    'extract_primary',
+                    False,
+                    'ChatGPT copied response rejected by extract quality gate',
+                    source='chatgpt_copy_response_quality_gate',
+                    attempts=attempts,
+                    **quality_failure,
+                )
+                return False
+            if not self.set_response_text_if_not_prompt_echo(
+                request,
+                result,
+                content,
+                step='extract_primary',
+                source='chatgpt_copy_response',
+                **attempt_evidence,
+            ):
+                return False
             result.add_step(
                 'extract_primary',
                 True,
                 f'ChatGPT response copied from Copy response button ({len(content)} chars, attempt {attempt + 1})',
-                source='chatgpt_copy_response_simple',
+                source='chatgpt_copy_response',
                 **attempt_evidence,
             )
             return True
