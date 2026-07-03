@@ -1,9 +1,10 @@
 # PLATFORM_INDEPENDENCE_SPEC — per-platform driver + YAML + monitor
-v1 draft, 2026-07-03, taeys-hands (Fable). Jesse-directed architecture: "everyone needs their own YAML, their own driver and their own monitor... Each platform is completely independent."
-Status: DRAFT → DCM council review → conductor ratification. Gates all `consult-platform-independence` work.
+v2, 2026-07-03, taeys-hands (Fable). Jesse-directed architecture: "everyone needs their own YAML, their own driver and their own monitor... Each platform is completely independent."
+Status: v1 BLOCKED by full DCM council (8 block-concerns, log `/tmp/consult_pkgs/dcm_council_platform_independence.log` archived in evidence); v2 incorporates every required amendment → re-review → conductor ratification. Gates all `consult-platform-independence` work.
 
 ## 1. Why (Observed evidence, not opinion)
-The shared behavioral base couples all five platforms: one shared-monitor change (`e132bf15`, Jun-22) simultaneously broke Grok, Gemini DR, and Perplexity DR (`MONITOR_REGRESSION_ARCHAEOLOGY_2026-07-03.md`); the audit-fix plan had to serialize every `base.py` fix into a depends-chain because each touched all platforms. `drivers/base.py` is 2,856 lines of shared behavior — every line is shared blast-radius. After this spec, a change inside one platform package is **structurally incapable** of breaking another platform.
+The shared behavioral base couples all five platforms: one shared-monitor change (`e132bf15`, Jun-22) simultaneously broke Grok, Gemini DR, and Perplexity DR (`MONITOR_REGRESSION_ARCHAEOLOGY_2026-07-03.md`); the audit-fix plan had to serialize every `base.py` fix into a depends-chain because each touched all platforms. `drivers/base.py` is 2,856 lines of shared behavior — every line is shared blast-radius.
+**Precedent (council git-historian, Observed):** isolation was ALREADY achieved once — `90de2d6b` (2026-06-03) built an isolated grok driver with exact-match YAML and "no platform skip-hack" — and today's `drivers/grok.py:34` inherits `BaseConsultationDriver` again with **no revert commit**: isolation without a mechanical gate silently re-couples. Therefore the isolation lint is load-bearing and must land BEFORE the first package merges (§5, §6-order).
 
 ## 2. Target layout
 ```
@@ -12,48 +13,60 @@ consultation_v2/platforms/<p>/          # p ∈ {chatgpt, claude, gemini, grok, 
     monitor.py     # completion detection for THIS platform only
     <p>.yaml       # THIS platform's exact-match element_map/workflow/validation
 ```
-Five packages, five owners of their own behavior. **Duplication across packages is the intended shape** — if the same 40 lines of stop-gone debounce appear five times, that is five independently-editable copies, and a fix to one is a fix to one. DRY across platforms is explicitly rejected; it is the coupling that keeps breaking production.
+Five packages, five owners of their own behavior. **Duplication across packages is the intended shape** — five independently-editable copies; a fix to one is a fix to one. DRY across platforms is explicitly rejected: it is the coupling that keeps breaking production.
 
-## 3. monitor.py is per-platform CODE
-Everything that decides "this consult is complete / stalled / failed" lives in the platform package: stop-button element identity (from that platform's YAML), stop-gone debounce counts, deep-mode floors (e.g. DT/DR/heavy/pro-extended patience), interim-ACK guards (gemini), answer-thread assertion, exception-state mapping (rate_limited / content_filter / auth_wall / generation_stalled), degraded-read guards. No shared `CompletionDetector`, no inherited `monitor_generation`. A platform's monitor may only be edited in that platform's package.
+## 3. monitor.py is per-platform CODE — and an EXPLICIT, NAMED supersession of D2
+Everything that decides "complete / stalled / failed" lives in the platform package: stop-button identity (from that platform's YAML), stop-gone debounce, deep-mode floors, interim-ACK guards (gemini), answer-thread assertion, exception-state mapping (rate_limited / content_filter / auth_wall / generation_stalled), degraded-read guards.
+**Supersession record (council-required):** removing shared `completion.py` knowingly REVERSES D2 (`8c8d20c9`, 2026-06-15, "unify completion detection into one shared stop-transition detector"), which was itself a deliberate fix for five drifting detectors. We re-accept the drifting-detectors defect class **eyes-open**, in exchange for eliminating the cross-platform blast radius (e132bf15 class), with two mitigations: (a) the §6 guard-preservation checklist proves each package carries the detector logic at extraction time; (b) post-migration, detector drift within one package can only break that package. This trade is the architecture decision, named, not a silent undo.
 
-## 4. Shared code: the LEAF whitelist (exhaustive)
-A module is **leaf** iff it contains zero platform-conditional behavior (no `if platform == ...`, no per-platform constants, no completion/selection/extraction policy). Permitted imports for a platform package:
+## 4. Shared code: the LEAF whitelist (corrected per council ground-runner/blast-shield)
+A module is **leaf** iff it contains zero platform-conditional BEHAVIOR (no branches on platform identity, no per-platform policy). **Declared-registry carve-out:** pure DATA registries of platform identifiers and per-platform file/URL constants (`KNOWN_PLATFORMS`/`CHAT_PLATFORMS` in `yaml_contract.py`, the platform→IDENTITY-file map in `identity.py`, the platform list/alias map in `ingest.py`) are permitted in leaves and are exempt from §5.4 — data, not behavior.
 
-| Leaf module | Provides |
-|---|---|
-| `atspi.py` | bus/desktop plumbing, find_firefox, raw find_elements |
-| `input.py` | key/click/type/paste mechanics |
-| `clipboard.py` | clipboard read/write |
-| `tree.py` | tree walking |
-| `snapshot.py` | snapshot builders (document / app-root / menu scans) |
-| `runtime.py` | the mechanical action surface (click, paste, navigate, focus_and_key_open, scrolls, waits) |
-| `yaml_contract.py` | the fail-closed YAML loader + schema (loads any platform's YAML; contains no platform behavior) |
-| `types.py` | ConsultationRequest/Result/Snapshot/ElementRef/StepRecord |
-| `notify.py` | Redis notify + durable park (w1e shape) |
-| `identity.py` | FAMILY_KERNEL/IDENTITY packet consolidation |
-| `storage_policy.py`, `ingest.py` | store discipline (default-off, fail-loud) |
-| `stop_conditions.py` | the stop-condition enum (names only) |
+**Leaf (importable by platform packages):** `atspi.py`, `input.py`, `clipboard.py`, `tree.py`, `yaml_contract.py` (loader, fail-closed), `types.py`, `notify.py`, `identity.py`, `storage_policy.py`, `ingest.py`, `stop_conditions.py`.
 
-**Conditionally leaf (must be audited during migration):** `runtime.py`, `snapshot.py`, `planner.py`, `platforms_runtime.py`, `interact.py`, `primitives.py` — any platform-conditional branch found inside them is pushed DOWN into the owning platform package as part of that platform's migration task. `display_readiness.py` / `display_watchdog.py` are infra-side, out of scope.
+**NOT leaf — must be dispositioned during migration (each package task states its disposition):**
+- `runtime.py`, `snapshot.py` — mechanical action/scan surface; audit during grok extraction: any platform-conditional behavior found is pushed into packages; the residual mechanical core is then re-classified leaf by the grok PR (the pattern-setting review).
+- `platforms_runtime.py` — 13 platform conditionals (council-verified); its per-platform data (URL_PATTERNS, TAB_SHORTCUTS, display routing) SPLITS into the owning packages and/or the declared registry; module retires at decommission.
+- `planner.py`, `interact.py`, `primitives.py` — same audit rule as runtime.py.
+- `cli.py:172` / `orchestrator.py:147` `if platform=='chatgpt'` identity branch (council-observed) — pushed down into the chatgpt package as part of pkg-chatgpt; the orchestrator keeps zero platform branches (§7).
+- `display_readiness.py` / `display_watchdog.py` — infra-side, out of scope.
 
-**Removed from the live path at decommission:** `drivers/base.py` (behavioral base), `completion.py` (shared detector). Archived, not history-deleted.
+**Removed from the live path at decommission:** `drivers/base.py`, `completion.py` (per §3 supersession). Archived, not history-deleted.
 
-## 5. Banned (build-failing isolation lint)
+## 5. Banned (build-failing isolation lint — MUST be CI-live BEFORE the first package merges)
 1. `platforms/<a>/**` importing `platforms/<b>/**` for any a≠b.
 2. Any platform package importing `drivers.base` or `completion`.
-3. Any class in a platform package inheriting from a class defined outside that package (except `types.py` dataclasses).
-4. Any platform-name literal (`'chatgpt'`, `'gemini'`, …) appearing in a leaf module (drift back toward shared behavior).
-5. Existing lints keep applying inside each package: exact-match YAML, no `name_contains`/fuzzy/fallbacks, settle caps in the loader.
+3. Any class in a platform package inheriting from a class defined outside that package (except `types.py` dataclasses). *(Council-verified: the live coupling is pure inheritance — zero `platform ==` branches exist in base/runtime/snapshot/primitives/planner/interact/completion — so this rule is the load-bearing one.)*
+4. Any platform-conditional BRANCH in a leaf module (behavior, not the §4 declared-registry data carve-out).
+5. Existing lints keep applying inside each package: exact-match YAML, no fuzzy/fallbacks, settle caps in the loader.
+**Ordering (council-required):** the lint lands as its own task, CI-enforced and build-failing, and `pkg-grok` `depends:` on it. History (`90de2d6b` → silent re-coupling) is the proof this ordering is production-critical, not style.
 
-## 6. Migration rules (behavior-preserving; NO logic rewrites)
-- Source trees: **chatgpt** from branch `consult-engine-audit-fix-w2e-typeahead-postcondition` @`599074da` (absorbs the live-validated w2e fix); **claude** from `consult-engine-audit-fix-w2d-claude-blindcoord` @`a04da10a` (absorbs w2d); **gemini/grok/perplexity** from `main`.
-- Extraction = copy the platform's current effective behavior (its driver subclass + the base methods it actually uses + its slice of the shared monitor) into the package, resolving inheritance by inlining. Same runtime behavior before/after is the review criterion; improvements are separate later tasks.
-- Order: grok first (audit-clean, smallest) to establish the pattern; the other four copy the pattern. Packages are independent — no cross-platform ordering deps.
-- Each package lands on its own branch (`platform-independence-<p>`), merged by conductor via gated PR + r5 at the SHA a real production consult validated (validated-tree == merge-tree).
+## 6. Migration rules (behavior-preserving; NO logic rewrites) — with mechanical parity proof
+- Source trees (pinned; inline ONLY from these SHAs, never older method versions — protects deliberate reverts `a89566d0`/`6f1f8602`/`5b69a1e3`): **chatgpt** @`599074da`; **claude** @`a04da10a`; **gemini/grok/perplexity** from `main` at branch time.
+- Extraction = inline the platform's effective behavior (driver subclass + the base methods it actually reaches + its slice of monitor logic) into the package. Each PR attaches a **slice-diff artifact**: the inlined code diffed against the pinned source SHA's effective method bodies, byte-comparable.
+- **THE FIX LEDGER (council-required; the checklist every package must clear):** each guard below is either evidenced PRESENT in the package (file:line citation against the pinned source) or recorded ABSENT-BY-DESIGN with rationale in the PR. A happy-path consult alone NEVER closes a package task.
+  - `a4201f0c` anti-echo (reject_prompt_echo_response + evidence)
+  - `5746f250` duplicate-send quarantine (possibly-landed gate before any (re)send)
+  - `2ef15351` healthy-read gate on stop-absence (degraded-read guard) + thread-mode detector read
+  - `37bd3485` + `9c4e41b4` per-mode timeout floors + `generation_stalled` mapping
+  - `8caaf75e` scroll-to-absolute-bottom before extract
+  - `503a0c47` stop-gone + attach-verify send gates
+  - `420e0638` / `a21290a5` / `ac11bde2` Gemini interim-ACK gates (gemini package)
+  - `fea887b9` / `707e7eeb` Claude Max deep-mode gate (claude package)
+  - `c86bf4de` duplicate-exact-match (N>1 drift) guard
+  - `46fed0f5` / `fd875ed4` / `2f80f252` navigation settle chain
+  - `838421fd` dry-run dispatch guard
+  - DBus transient-retry + stop-gone debounce (base.py/completion.py slices)
+- Order: grok first (pattern-setter; also re-classifies the §4 conditionally-leaf residue). Packages otherwise independent — no cross-platform ordering deps.
+- Each package on branch `platform-independence-<p>`, merged by conductor via gated PR + r5 at the SHA a real production consult validated (validated-tree == merge-tree).
+- **Known-defect carry (council-required):** the chatgpt tree @`599074da` carries the DR-postcondition exact-name locator brittleness recorded in `010b7ed4`; pkg-chatgpt copies it faithfully (behavior-preserving) and a tracked follow-up task is created at migration time so its green validation is not read as defect-free.
 
-## 7. Entry contract (callers unchanged)
-`cli.py`/`orchestrator.py` keep the exact CLI surface (`--platform ... --message ... --attach ... --select ...`) and dispatch to `platforms/<p>.driver.run()`. The orchestrator retains only routing, identity consolidation, notify, and store policy — no per-platform behavior.
+## 7. Entry contract (callers unchanged; anti-echo gate survival)
+`cli.py`/`orchestrator.py` keep the exact CLI surface and dispatch to `platforms/<p>.driver.run()`. The orchestrator retains only routing, identity consolidation, notify, and store policy — zero platform branches (the chatgpt identity special-case moves into pkg-chatgpt per §4).
+**Delivery-gate survival (council red-team-required):** every package driver exposes the uniform delivery-gate method (`reject_prompt_echo_response`) as part of the entry contract; the orchestrator continues to invoke it before notify, and each package also enforces it at its own `run()` exit. The untrusted-extract → notify → fleet-Redis injection path stays double-gated; decommissioning base.py may not orphan this gate (lint 5.2 + entry-contract check both fail the build if a package lacks it).
 
-## 8. Validation oracle (per THE RULE / NO TESTS)
-Each package is done only when ONE real consult runs e2e on that platform's display (navigate → select → attach → send → per-platform monitor completion on stop-gone → extract → notify) with step evidence + screenshots. Executed by an Opus 4.8 subagent or CLI peer; Fable judges evidence only. Plan exit oracle: after decommission, a 5-platform fan-out (sequential sends) runs green without intervention on one tree.
+## 8. Validation oracle (per THE RULE / NO TESTS) — happy path AND guard parity
+A package is done only when BOTH hold:
+1. **Production consult:** ONE real consult runs e2e on that platform's display (navigate → select → attach → send → per-platform monitor completion on stop-gone → extract → notify) with step evidence + screenshots. Executed by an Opus 4.8 subagent or CLI peer; Fable judges evidence only.
+2. **Guard-preservation checklist (§6 ledger) complete** in the PR: every ledger item cited present (file:line vs pinned SHA) or absent-by-design with rationale — reviewed at the r5 gate.
+Plan exit oracle: after decommission, a 5-platform fan-out (sequential sends) runs green without intervention on one tree, and the isolation lint is green in CI.
