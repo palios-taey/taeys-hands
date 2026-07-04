@@ -238,8 +238,13 @@ tree:
       name: Stop response (Esc)
       role: push button
     copy_button:
-      name: Copy
       role: push button
+      match_strategy: name_agnostic_structural
+      structural:
+        after: copy_query_button
+        before: share_button
+        ordinal: first
+      reason: "Deep Research pages expose multiple exact Copy buttons; the response copy action is the first push button between Copy query and Share."
     copy_query_button:
       name: Copy query
       role: push button
