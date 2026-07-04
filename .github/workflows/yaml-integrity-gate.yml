@@ -9,6 +9,7 @@ on:
       - 'agent/**'
       - 'fix/**'
       - 'feat/**'
+      - 'platform-independence-*'
 
 jobs:
   consultation-v2-integrity:
@@ -30,3 +31,6 @@ jobs:
 
       - name: Run consultation_v2 contract gate
         run: python3 consultation_v2/validators/lint_consultation_v2_contract.py --all
+
+      - name: Run consultation_v2 platform isolation gate
+        run: python3 consultation_v2/validators/lint_platform_independence.py --all
