@@ -521,6 +521,16 @@ def _select_structural_between(
     if not bounded:
         return None
     bounded.sort(key=_position_key)
+    index = structural.get('index')
+    ordinal = str(structural.get('ordinal') or '').strip().lower()
+    if isinstance(index, int):
+        if 0 <= index < len(bounded):
+            return bounded[index]
+        return None
+    if ordinal == 'first':
+        return bounded[0]
+    if ordinal == 'last':
+        return bounded[-1]
     if after_pos is not None and before_pos is not None:
         midpoint_y = (after_pos[0] + before_pos[0]) / 2
         midpoint_x = (after_pos[1] + before_pos[1]) / 2

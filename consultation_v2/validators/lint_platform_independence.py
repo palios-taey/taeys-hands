@@ -37,6 +37,7 @@ LEAF_MODULES = (
     Path('consultation_v2/stop_conditions.py'),
     Path('consultation_v2/input.py'),
     Path('consultation_v2/atspi.py'),
+    Path('consultation_v2/platforms/_routing_core.py'),
 )
 FORBIDDEN_SHARED_MODULES = ('consultation_v2.drivers.base', 'consultation_v2.completion')
 DELIVERY_GATE = 'reject_prompt_echo_response'
