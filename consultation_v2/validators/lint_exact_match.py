@@ -18,8 +18,8 @@ Usage:
 Default paths: consultation_v2/platforms/*.yaml
 """
 import sys
-import glob
 import subprocess
+from pathlib import Path
 
 # Loose matchers that are FORBIDDEN (the structural exception uses 'structural:'
 # with exact role/parent/index, so '*_contains' keys are never legitimate).
@@ -37,7 +37,7 @@ def _staged_yaml() -> list:
 
 
 def _default_paths() -> list:
-    return sorted(glob.glob("consultation_v2/platforms/*.yaml"))
+    return sorted(str(path) for path in Path("consultation_v2/platforms").rglob("*.yaml"))
 
 
 def lint(paths: list) -> int:

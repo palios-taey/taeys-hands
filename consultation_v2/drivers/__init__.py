@@ -1,8 +1,8 @@
 from .chatgpt import ChatGPTConsultationDriver
 from .claude import ClaudeConsultationDriver
 from .gemini import GeminiConsultationDriver
-from .grok import GrokConsultationDriver
 from .perplexity import PerplexityConsultationDriver
+from consultation_v2.platforms.grok.driver import GrokConsultationDriver
 
 __all__ = [
     'ChatGPTConsultationDriver',

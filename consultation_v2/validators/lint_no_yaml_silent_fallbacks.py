@@ -88,7 +88,7 @@ def is_consultation_v2_python(path: Path) -> bool:
 
 
 def all_targets() -> list[Path]:
-    yaml_targets = sorted(Path("consultation_v2/platforms").glob("*.yaml"))
+    yaml_targets = sorted(Path("consultation_v2/platforms").rglob("*.yaml"))
     py_targets = sorted(p for p in Path("consultation_v2").rglob("*.py") if "__pycache__" not in p.parts)
     return yaml_targets + py_targets
 
