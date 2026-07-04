@@ -30,8 +30,8 @@ from consultation_v2.planner import (
 from consultation_v2.types import ConsultationRequest, ConsultationResult
 from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
 from consultation_v2.drivers.claude import ClaudeConsultationDriver
-from consultation_v2.drivers.gemini import GeminiConsultationDriver
 from consultation_v2.platforms.grok.driver import GrokConsultationDriver
+from consultation_v2.platforms.gemini.driver import GeminiConsultationDriver
 from consultation_v2.platforms.perplexity.driver import PerplexityConsultationDriver
 
 logger = logging.getLogger(__name__)

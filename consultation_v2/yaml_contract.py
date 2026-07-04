@@ -48,6 +48,7 @@ MATCH_SPEC_KEYS = frozenset({
     'reason',
 })
 MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
+STRUCTURAL_ORDINAL_VALUES = frozenset({'first', 'last'})
 STRUCTURAL_KEYS = frozenset({
     'after',
     'before',
@@ -382,12 +383,19 @@ def _validate_structural(
         ):
             _add(findings, lines, structural_path + ('container_path',), 'container_path',
                  'structural.container_path must be a non-empty list of exact container keys')
-    if 'index' in structural and not isinstance(structural['index'], int):
+    if (
+        'index' in structural
+        and (
+            isinstance(structural['index'], bool)
+            or not isinstance(structural['index'], int)
+            or structural['index'] < 0
+        )
+    ):
         _add(findings, lines, structural_path + ('index',), 'index',
-             'structural.index must be an integer')
-    if 'ordinal' in structural and structural['ordinal'] not in {'first', 'last'}:
+             'structural.index must be a non-negative integer')
+    if 'ordinal' in structural and structural['ordinal'] not in STRUCTURAL_ORDINAL_VALUES:
         _add(findings, lines, structural_path + ('ordinal',), 'ordinal',
-             'structural.ordinal must be first or last')
+             f'structural.ordinal must be one of {sorted(STRUCTURAL_ORDINAL_VALUES)}')
 
 
 def _validate_attributes(
