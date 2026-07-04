@@ -240,6 +240,9 @@ def platforms_dir() -> Path:
 def platform_yaml_path(platform: str) -> Path:
     if platform not in KNOWN_PLATFORMS:
         raise ValueError(f'Unsupported platform: {platform}')
+    packaged = platforms_dir() / platform / f'{platform}.yaml'
+    if packaged.exists():
+        return packaged
     return platforms_dir() / f'{platform}.yaml'
 
 
