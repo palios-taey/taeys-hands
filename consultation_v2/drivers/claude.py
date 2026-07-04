@@ -1181,9 +1181,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        from consultation_v2.atspi import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
+        from consultation_v2.platforms import routing as platform_routing
 
         if not self.reassert_captured_session_url(
             result,
@@ -1212,7 +1212,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         for attempt in range(5):
             time.sleep(2.0)
             scroll_ok = self.runtime.scroll_document_to_bottom(clicks=14, rounds=3, settle=0.5)
-            firefox = find_firefox_for_platform(self.platform)
+            firefox = platform_routing.find_firefox_for_platform(self.platform)
             if not firefox:
                 continue
             try:
@@ -1348,9 +1348,9 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         have nothing to capture. Once the toggle is present, every subsequent
         step is tree/clipboard validated and failures abort extraction.
         """
-        from consultation_v2.atspi import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
+        from consultation_v2.platforms import routing as platform_routing
 
         snap = self.runtime.snapshot()
         show_toggle = self.find_last(snap, 'show_thinking')
@@ -1388,7 +1388,7 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
                 )
                 return False
 
-        firefox = find_firefox_for_platform(self.platform)
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
         if not firefox:
             result.add_step('extract_thinking', False, 'Claude Firefox window not found for thinking extraction')
             return False
@@ -1563,11 +1563,11 @@ class ClaudeConsultationDriver(BaseConsultationDriver):
         expected_names: list[str],
         attempts: list[dict],
     ) -> dict | None:
-        from consultation_v2.atspi import find_firefox_for_platform
         from consultation_v2.interact import atspi_click
+        from consultation_v2.platforms import routing as platform_routing
         from consultation_v2.tree import find_elements as raw_find_elements
 
-        firefox = find_firefox_for_platform(self.platform)
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
         if not firefox:
             attempts.append({
                 'source': 'artifact_tree_copy_button',

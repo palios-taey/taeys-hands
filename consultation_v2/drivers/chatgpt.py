@@ -1548,10 +1548,10 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
         return None
 
     def _chatgpt_document(self):
-        from consultation_v2 import atspi as _atspi
+        from consultation_v2.platforms import routing as platform_routing
 
-        firefox = _atspi.find_firefox_for_platform(self.platform)
-        return _atspi.get_platform_document(firefox, self.platform) if firefox else None
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
+        return platform_routing.get_platform_document(firefox, self.platform) if firefox else None
 
     def _scroll_chatgpt_thread_to_bottom(self) -> dict:
         from consultation_v2 import input as _inp
@@ -2082,8 +2082,8 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
 
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
-        from consultation_v2.atspi import find_firefox_for_platform, get_platform_document
         from consultation_v2.interact import atspi_click
+        from consultation_v2.platforms import routing as platform_routing
         from consultation_v2.tree import find_elements as raw_find_elements
 
         if not self.reassert_captured_session_url(
@@ -2114,7 +2114,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                     snapshot=last_snapshot.serializable() if last_snapshot else {},
                 )
                 return False
-            firefox = find_firefox_for_platform(self.platform)
+            firefox = platform_routing.find_firefox_for_platform(self.platform)
             if not firefox:
                 attempts.append({
                     'attempt': attempt + 1,
@@ -2126,7 +2126,7 @@ class ChatGPTConsultationDriver(BaseConsultationDriver):
                 firefox.clear_cache_single()
             except Exception:
                 pass
-            document = get_platform_document(firefox, self.platform)
+            document = platform_routing.get_platform_document(firefox, self.platform)
             if not document:
                 attempts.append({
                     'attempt': attempt + 1,

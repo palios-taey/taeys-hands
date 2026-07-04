@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import yaml
 
 from consultation_v2 import atspi
+from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.tree import find_elements, find_menu_items
 
 from .types import ElementRef, Snapshot
@@ -637,14 +638,14 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
         desktop.clear_cache_single()
     except Exception:
         pass
-    firefox = atspi.find_firefox_for_platform(platform)
+    firefox = platform_routing.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
     try:
         firefox.clear_cache_single()
     except Exception:
         pass
-    doc = atspi.get_platform_document(firefox, platform)
+    doc = platform_routing.get_platform_document(firefox, platform)
     if not doc:
         # Document not found — page may have navigated (e.g., Perplexity Deep Research toggle).
         # Fall back to scanning from Firefox app root.
@@ -702,10 +703,10 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
         desktop.clear_cache_single()
     except Exception:
         pass
-    firefox = atspi.find_firefox_for_platform(platform)
+    firefox = platform_routing.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
-    doc = atspi.get_platform_document(firefox, platform)
+    doc = platform_routing.get_platform_document(firefox, platform)
     # NOTE: menu_snapshot is the post-click portal/dropdown scope. Keep the scan
     # rooted at Firefox, not the document, so React overlays outside the document
     # subtree are visible while browser chrome remains pruned below.
@@ -788,7 +789,7 @@ def build_app_root_snapshot(
     control, never as the general tree.
     """
     chrome_cfg = _load_firefox_chrome_filter()
-    firefox = atspi.find_firefox_for_platform(platform)
+    firefox = platform_routing.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
     elements = find_elements(firefox)

@@ -183,117 +183,28 @@ def focus_firefox(timeout: int = 5) -> bool:
         return False
 
 
-def switch_to_platform(platform: str) -> bool:
-    """Switch to a platform tab via Alt+N shortcut.
-    Multi-display mode: switches DISPLAY to the platform's dedicated display."""
-    from consultation_v2.platforms_runtime import (
-        TAB_SHORTCUTS, URL_PATTERNS, get_platform_display, get_platform_firefox_pid,
-    )
-    from consultation_v2 import atspi
-
-    if platform not in URL_PATTERNS:
+def focus_firefox_pid(pid: int | None, timeout: int = 5) -> bool:
+    """Activate a Firefox window by process id using raw X11 window operations."""
+    if not pid:
         return False
-
-    def _on_target(pid: int = None) -> bool:
-        if plat_display:
-            set_display(plat_display)
-        firefox = atspi.find_firefox_for_platform(platform, pid=pid)
-        if not firefox:
+    try:
+        r = subprocess.run(
+            ['xdotool', 'search', '--pid', str(pid), '--name', ''],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
+        )
+        wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
+        if not wids:
             return False
-        doc = atspi.get_platform_document(firefox, platform)
-        if not doc:
-            return False
-        try:
-            import gi
-            gi.require_version('Atspi', '2.0')
-            from gi.repository import Atspi as _A
-            return doc.get_state_set().contains(_A.StateType.SHOWING)
-        except Exception:
-            return False
-
-    # Multi-display mode: switch DISPLAY and focus the right Firefox window
-    plat_display = get_platform_display(platform)
-    if plat_display:
-        set_display(plat_display)
-        from consultation_v2.clipboard import set_display as clip_set_display
-        clip_set_display(plat_display)
-
-        def _focus_firefox_pid(pid: int | None) -> bool:
-            if not pid:
-                return False
-            try:
-                r = subprocess.run(
-                    ['xdotool', 'search', '--pid', str(pid), '--name', ''],
-                    env=_get_env(), capture_output=True, text=True, timeout=5,
-                )
-                wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
-                if not wids:
-                    return False
-                subprocess.run(
-                    ['xdotool', 'windowactivate', wids[-1]],
-                    env=_get_env(), capture_output=True, text=True, timeout=10,
-                )
-                time.sleep(0.3)
-                return True
-            except subprocess.TimeoutExpired:
-                logger.warning(f"Multi-display focus timed out for PID {pid}")
-            except Exception as e:
-                logger.warning(f"Multi-display focus failed for PID {pid}: {e}")
-            return False
-
-        ff_pid = get_platform_firefox_pid(platform)
-        if ff_pid:
-            if _focus_firefox_pid(ff_pid) and _on_target(pid=ff_pid):
-                return True
-        else:
-            logger.warning(f"No Firefox PID file for {platform}; falling back to AT-SPI discovery")
-
-        discovered_firefox = atspi.find_firefox_for_platform(platform)
-        discovered_pid = None
-        if discovered_firefox:
-            try:
-                discovered_pid = discovered_firefox.get_process_id()
-            except Exception:
-                discovered_pid = None
-
-            if discovered_pid and discovered_pid != ff_pid:
-                logger.warning(
-                    f"Stale Firefox PID {ff_pid} for {platform}; AT-SPI discovered PID {discovered_pid}"
-                )
-
-            if _focus_firefox_pid(discovered_pid) and _on_target(pid=discovered_pid):
-                return True
-            if focus_firefox() and _on_target(pid=discovered_pid):
-                return True
-
-        shortcut = TAB_SHORTCUTS.get(platform)
-        if shortcut:
-            press_key(shortcut)
-            time.sleep(0.5)
-            if _on_target(pid=discovered_pid or ff_pid):
-                return True
-        logger.warning(f"Could not switch to {platform} on dedicated display {plat_display}")
-        return _on_target(pid=discovered_pid or ff_pid)
-
-    if not focus_firefox():
-        return False
-
-    if _on_target():
+        subprocess.run(
+            ['xdotool', 'windowactivate', wids[-1]],
+            env=_get_env(), capture_output=True, text=True, timeout=10,
+        )
+        time.sleep(0.3)
         return True
-
-    shortcut = TAB_SHORTCUTS.get(platform)
-    if shortcut:
-        press_key(shortcut)
-        time.sleep(0.5)
-        return True
-
-    # No shortcut: Ctrl+Tab cycling
-    for _ in range(8):
-        press_key('ctrl+Tab')
-        time.sleep(0.4)
-        if _on_target():
-            return True
-    logger.warning(f"Could not switch to {platform}")
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Firefox PID focus timed out for PID {pid}")
+    except Exception as e:
+        logger.warning(f"Firefox PID focus failed for PID {pid}: {e}")
     return False
 
 

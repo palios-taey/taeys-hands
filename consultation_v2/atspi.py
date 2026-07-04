@@ -14,8 +14,6 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
-from consultation_v2.platforms_runtime import (URL_PATTERNS, _EXTRA_URL_PATTERNS)
-
 logger = logging.getLogger(__name__)
 
 
@@ -36,13 +34,11 @@ def detect_display() -> str:
     for num in range(100):
         if os.path.exists(f'/tmp/.X11-unix/X{num}'):
             return f':{num}'
-    raise RuntimeError("No X display detected — set DISPLAY env or start Xvfb")
+    raise RuntimeError("No X display detected - set DISPLAY env or start Xvfb")
 
 
-def find_firefox(platform: str = None):
-    """Find Firefox in AT-SPI desktop tree. Retries once with cache clear.
-    If platform is given and multiple Firefox instances exist, returns the
-    instance containing that platform's document (handles HMM bot profiles)."""
+def find_firefox():
+    """Find Firefox in the AT-SPI desktop tree. Retries once with cache clear."""
     for attempt in range(2):
         try:
             desktop = Atspi.get_desktop(0)
@@ -62,13 +58,6 @@ def find_firefox(platform: str = None):
                 return None
             if len(all_ff) == 1:
                 return all_ff[0]
-            # Multiple Firefox instances — need platform to disambiguate
-            if platform:
-                for ff in all_ff:
-                    doc = get_platform_document(ff, platform)
-                    if doc:
-                        return ff
-                logger.warning(f"No Firefox instance has {platform} document, returning first")
             return all_ff[0]
         except Exception as e:
             if attempt == 0:
@@ -100,30 +89,6 @@ def find_all_firefox(pid: int = None):
 
 
 
-def find_firefox_for_platform(platform: str, pid: int = None):
-    """Find the Firefox instance that has a document matching the given platform.
-    Handles multiple Firefox instances (parallel HMM mode).
-    If pid is given, restricts search to that process only.
-    Falls back to find_firefox() if only one instance exists.
-
-    Multi-display: per-display workers handle routing. Each worker has
-    the correct DISPLAY/AT-SPI bus, so this function always uses the
-    direct local AT-SPI path."""
-    all_ff = find_all_firefox(pid=pid)
-    if not all_ff:
-        return None
-    if len(all_ff) == 1:
-        return all_ff[0]
-    # Multiple Firefox instances — find the one with our platform's document
-    for ff in all_ff:
-        doc = get_platform_document(ff, platform)
-        if doc:
-            return ff
-    # None had the right document — fail, don't guess
-    logger.error(f"No Firefox instance has {platform} document")
-    return None
-
-
 def get_document_url(doc) -> str | None:
     """Extract DocURL from a document element."""
     try:
@@ -135,29 +100,12 @@ def get_document_url(doc) -> str | None:
     return None
 
 
-def detect_platform_from_url(url: str) -> str | None:
-    """Detect platform from URL. Checks specific patterns first."""
-    if not url:
-        return None
-    url_lower = url.lower()
-    for platform, pattern in _EXTRA_URL_PATTERNS.items():
-        if pattern in url_lower:
-            return platform
-    for platform, domain in URL_PATTERNS.items():
-        if domain in url_lower:
-            return platform
-    return None
-
-
-def get_platform_document(firefox, platform: str):
-    """Find the document web element for a platform by URL matching."""
-    if not firefox:
-        return None
-
+def document_web_elements(firefox, *, max_depth: int = 10) -> list:
+    """Return document-web descendants for a Firefox AT-SPI application root."""
     candidates = []
 
     def search(obj, depth=0):
-        if depth > 10:
+        if depth > max_depth:
             return
         try:
             if obj.get_role_name() == 'document web':
@@ -169,23 +117,9 @@ def get_platform_document(firefox, platform: str):
         except Exception:
             pass
 
-    search(firefox)
-
-    matches = [c for c in candidates if detect_platform_from_url(get_document_url(c)) == platform]
-    if not matches:
-        return None
-    if len(matches) == 1:
-        return matches[0]
-
-    # Prefer SHOWING (active tab)
-    for m in matches:
-        try:
-            if m.get_state_set().contains(Atspi.StateType.SHOWING):
-                return m
-        except Exception:
-            pass
-    matches.sort(key=lambda m: m.get_child_count(), reverse=True)
-    return matches[0]
+    if firefox:
+        search(firefox)
+    return candidates
 
 
 def is_file_dialog_open(firefox) -> bool:
