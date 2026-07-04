@@ -144,6 +144,10 @@ def _plan_menu(
     followup: bool,
     findings: list[str],
 ) -> list[dict[str, Any]]:
+    if followup and menu.get('resettable_on_followup') is not True:
+        findings.append(f'selection menu {menu_key!r} cannot be changed on follow-up sessions')
+        return []
+
     select_kind = str(menu.get('select') or '')
     options = menu.get('options') or {}
     value = choice.value
