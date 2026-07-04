@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
+from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.platforms_runtime import display_environment, get_platform_display
 from consultation_v2.tree import find_elements
 from .snapshot import build_app_root_snapshot, build_menu_snapshot, build_snapshot
@@ -152,11 +153,11 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def switch(self) -> bool:
-        if inp.switch_to_platform(self.platform):
+        if platform_routing.switch_to_platform(self.platform):
             return True
         # Fallback: if DISPLAY is already set correctly for this platform,
         # just verify Firefox is accessible on the current display
-        firefox = atspi.find_firefox_for_platform(self.platform)
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
         if firefox:
             return True
         return False
@@ -181,13 +182,13 @@ class ConsultationRuntime:
             _Atspi.get_desktop(0).clear_cache_single()
         except Exception:
             pass
-        firefox = atspi.find_firefox_for_platform(self.platform)
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
         if firefox is not None:
             try:
                 firefox.clear_cache_single()
             except Exception:
                 pass
-        doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
+        doc = platform_routing.get_platform_document(firefox, self.platform) if firefox else None
         if doc is not None:
             try:
                 doc.clear_cache_single()
@@ -372,7 +373,7 @@ class ConsultationRuntime:
         return clicked
 
     def _generic_popup_dismiss_control(self) -> dict | None:
-        firefox = atspi.find_firefox_for_platform(self.platform)
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
         if firefox is None:
             return None
         try:
@@ -534,8 +535,8 @@ class ConsultationRuntime:
             gi.require_version('Atspi', '2.0')
             from gi.repository import Atspi as _Atspi
 
-            firefox = atspi.find_firefox_for_platform(self.platform)
-            doc = atspi.get_platform_document(firefox, self.platform) if firefox else None
+            firefox = platform_routing.find_firefox_for_platform(self.platform)
+            doc = platform_routing.get_platform_document(firefox, self.platform) if firefox else None
             comp = doc.get_component_iface() if doc is not None else None
             rect = comp.get_extents(_Atspi.CoordType.SCREEN) if comp is not None else None
             if rect and rect.width > 0 and rect.height > 0:

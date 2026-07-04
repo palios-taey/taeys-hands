@@ -1,4 +1,4 @@
-"""Platform definitions: URL patterns, tab shortcuts, screen detection."""
+"""Shared display and screen runtime plumbing."""
 
 import os
 import re
@@ -51,53 +51,6 @@ class _LazyDim:
 
 SCREEN_WIDTH = _LazyDim(0)
 SCREEN_HEIGHT = _LazyDim(1)
-
-# Tab shortcuts. Dedicated-display deployments do not use tab switching;
-# TAEY_TAB_PROFILE keeps the legacy reduced-tab mode explicit when needed.
-_DEFAULT_TABS = {
-    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3',
-    'grok': 'alt+4', 'perplexity': 'alt+5', 'x_twitter': 'alt+6',
-}
-_WORKER_TABS = {
-    'chatgpt': 'alt+1', 'claude': 'alt+2', 'gemini': 'alt+3', 'grok': 'alt+4',
-}
-
-_TAB_PROFILE = os.environ.get('TAEY_TAB_PROFILE', 'default').strip().lower()
-if _TAB_PROFILE not in {'default', 'worker'}:
-    raise RuntimeError(f"Unsupported TAEY_TAB_PROFILE={_TAB_PROFILE!r}; expected default or worker")
-TAB_SHORTCUTS = _WORKER_TABS if _TAB_PROFILE == 'worker' else _DEFAULT_TABS
-
-# URL patterns for platform detection (order: specific first)
-_EXTRA_URL_PATTERNS = {'grok': 'x.com/i/grok'}
-URL_PATTERNS = {
-    'chatgpt': 'chatgpt.com', 'claude': 'claude.ai',
-    'gemini': 'gemini.google.com', 'grok': 'grok.com',
-    'perplexity': 'perplexity.ai', 'x_twitter': 'x.com',
-    'linkedin': 'linkedin.com',
-    # Treasurer-side platforms used by external automation.
-    'upwork': 'upwork.com',
-    'lesswrong': 'lesswrong.com',
-    'reddit': 'reddit.com',
-    'nvidia_forum': 'developer.nvidia.com',  # matches both forums.developer.nvidia.com and login on developer.nvidia.com
-    'ea_funds': 'effectivealtruism.org',
-    'paperform': 'paperform.co',  # EA Funds form host
-}
-
-BASE_URLS = {
-    'chatgpt': 'https://chatgpt.com/',
-    'claude': 'https://claude.ai/new',
-    'gemini': 'https://gemini.google.com/app',
-    'grok': 'https://grok.com/',
-    'perplexity': 'https://perplexity.ai/',
-    'x_twitter': '<AUXILIARY_URL>',
-    'linkedin': 'https://www.linkedin.com/feed/',
-    'reddit': '<AUXILIARY_URL>',
-    'nvidia_forum': '<AUXILIARY_URL>/',
-}
-
-CHAT_PLATFORMS = {'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'}
-SOCIAL_PLATFORMS = {'x_twitter', 'linkedin', 'reddit', 'nvidia_forum'}
-ALL_PLATFORMS = CHAT_PLATFORMS | SOCIAL_PLATFORMS
 
 # Multi-display support.
 # Sources, in precedence order:

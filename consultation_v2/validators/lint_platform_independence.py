@@ -35,6 +35,8 @@ LEAF_MODULES = (
     Path('consultation_v2/storage_policy.py'),
     Path('consultation_v2/ingest.py'),
     Path('consultation_v2/stop_conditions.py'),
+    Path('consultation_v2/input.py'),
+    Path('consultation_v2/atspi.py'),
 )
 FORBIDDEN_SHARED_MODULES = ('consultation_v2.drivers.base', 'consultation_v2.completion')
 DELIVERY_GATE = 'reject_prompt_echo_response'
@@ -305,6 +307,8 @@ def _scan_driver_entry_contract(package_dir: Path, root: Path) -> list[Finding]:
     package_name = package_dir.name
     display = _display_path(driver, root)
     if not driver.exists():
+        if (package_dir / 'routing.py').exists() and not (package_dir / f'{package_name}.yaml').exists():
+            return findings
         return [Finding(
             display, 1, 'package-driver-missing',
             'each platform package must expose driver.py with run() and reject_prompt_echo_response',
