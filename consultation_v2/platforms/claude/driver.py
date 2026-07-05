@@ -4430,7 +4430,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
         expected_names = self._artifact_names_from_response(result.response_text)
-        artifact_expected = self._artifact_expected(request, result, expected_names)
+        artifact_expected = bool(expected_names or self._response_expects_artifact(result.response_text))
         attempts: list[dict] = []
         self.runtime._sync_platform_io_display()
         copied = self._copy_artifact_from_tree_controls(
@@ -4620,35 +4620,6 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         lowered = ' '.join((text or '').lower().split())
         return any(phrase in lowered for phrase in cls._ARTIFACT_EXPECTED_PHRASES)
 
-    @classmethod
-    def _request_expects_artifact(cls, text: str) -> bool:
-        lowered = ' '.join((text or '').lower().split())
-        phrases = (
-            'markdown artifact',
-            'produce an artifact',
-            'produce a concise artifact',
-            'produce a concise markdown artifact',
-            'produce a markdown artifact',
-            'create an artifact',
-            'create a markdown artifact',
-            'put the real content in the artifact',
-            'put the real content in an artifact',
-        )
-        return any(phrase in lowered for phrase in phrases)
-
-    @classmethod
-    def _artifact_expected(
-        cls,
-        request: ConsultationRequest,
-        result: ConsultationResult,
-        expected_names: list[str],
-    ) -> bool:
-        return bool(
-            expected_names
-            or cls._response_expects_artifact(result.response_text)
-            or cls._request_expects_artifact(request.message)
-        )
-
     def _artifact_payload_from_clipboard(
         self,
         content: str,
@@ -4673,8 +4644,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         **metadata,
                     },
                 }
-        artifact_expected = self._artifact_expected(request, result, expected_names)
-        if artifact_expected and self._valid_artifact_text(stripped, request, result, expected_names):
+        if self._valid_artifact_text(stripped, request, result, expected_names):
             return {
                 'content': stripped,
                 'metadata': {
