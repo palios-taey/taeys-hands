@@ -16,7 +16,6 @@ from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.identity import (
     IdentityError,
-    build_inline_context,
     consolidate_attachments,
     validate_caller_attachments,
 )
@@ -54,16 +53,15 @@ def _select_request_display(platform: str) -> str | None:
     )
 
 
-def _inline_context_message(context: str, message: str) -> str:
-    return (
-        "Read the following identity/context packet before answering. It replaces "
-        "the usual ChatGPT attachment for this run.\n\n"
-        "<TAEY_INLINE_CONTEXT>\n"
-        f"{context}\n"
-        "</TAEY_INLINE_CONTEXT>\n\n"
-        "User request:\n"
-        f"{message}"
-    )
+def _prepare_platform_identity_request(
+    request: ConsultationRequest,
+    caller_attachments: list[str],
+) -> tuple[ConsultationRequest, dict[str, object]] | None:
+    driver_cls = _REGISTRY.get(request.platform)
+    prepare_identity = getattr(driver_cls, 'prepare_identity_request', None)
+    if callable(prepare_identity):
+        return prepare_identity(request, caller_attachments)
+    return None
 
 
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
@@ -144,19 +142,12 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             caller_attachment_provenance=provenance,
         )
     else:
-        if request.platform == 'chatgpt' and not request.session_url and not caller_attachments:
-            inline_context, provenance = build_inline_context(
-                platform=request.platform,
-                caller_attachments=[],
-            )
-            identity_mode = 'identity_inline'
-            consolidated_path = 'inline:chatgpt_identity_context'
-            request = replace(
-                request,
-                message=_inline_context_message(inline_context, request.message),
-                attachments=[],
-                caller_attachment_provenance=list(provenance),
-            )
+        prepared_identity = _prepare_platform_identity_request(request, caller_attachments)
+        if prepared_identity is not None:
+            request, identity = prepared_identity
+            identity_mode = str(identity.get('mode') or 'platform_identity')
+            package_paths = list(identity.get('package_paths') or [])
+            consolidated_path = str(identity.get('attachment_path') or '\n'.join(package_paths))
         else:
             package = consolidate_attachments(
                 platform=request.platform,

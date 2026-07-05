@@ -8,11 +8,10 @@ from typing import Any
 
 from consultation_v2.identity import (
     IdentityError,
-    build_inline_context,
     consolidate_attachments,
     validate_caller_attachments,
 )
-from consultation_v2.orchestrator import _inline_context_message, run_consultation
+from consultation_v2.orchestrator import _prepare_platform_identity_request, run_consultation
 from consultation_v2.planner import (
     SelectionPlanError,
     build_selection_plan,
@@ -169,27 +168,9 @@ def _resolve_identity_for_dry_run(
             },
         )
 
-    if request.platform == 'chatgpt' and not request.session_url and not caller_attachments:
-        inline_context, provenance = build_inline_context(
-            platform=request.platform,
-            caller_attachments=[],
-        )
-        return (
-            replace(
-                request,
-                message=_inline_context_message(inline_context, request.message),
-                attachments=[],
-                caller_attachment_provenance=list(provenance),
-            ),
-            {
-                'mode': 'identity_inline',
-                'package_paths': [],
-                'inline_context_chars': len(inline_context),
-                'caller_attachment_provenance': [
-                    item.serializable() for item in provenance
-                ],
-            },
-        )
+    prepared_identity = _prepare_platform_identity_request(request, caller_attachments)
+    if prepared_identity is not None:
+        return prepared_identity
 
     package = consolidate_attachments(
         platform=request.platform,

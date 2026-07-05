@@ -453,6 +453,79 @@ class ConsultationRuntime:
             )
         )
 
+    def focus_and_key_open(
+        self,
+        element: ElementRef,
+        *,
+        key: str = 'space',
+        settle: float = 0.3,
+    ) -> dict[str, Any]:
+        self._sync_platform_io_display()
+        evidence: dict[str, Any] = {
+            'ok': False,
+            'method': 'focus_and_key_open',
+            'key': key,
+            'element': {
+                'key': element.key,
+                'name': element.name,
+                'role': element.role,
+                'x': element.x,
+                'y': element.y,
+            },
+            'firefox_focused': False,
+            'grab_focus_called': False,
+            'element_focused': False,
+            'keyboard_event_sent': False,
+        }
+        firefox_focused = self.focus_firefox()
+        evidence['firefox_focused'] = bool(firefox_focused)
+        obj = getattr(element, 'atspi_obj', None)
+        if obj is None:
+            evidence['error'] = 'missing_atspi_object'
+            return evidence
+        try:
+            component = obj.get_component_iface()
+            if component is None:
+                evidence['error'] = 'missing_component_iface'
+                return evidence
+            component.grab_focus()
+            evidence['grab_focus_called'] = True
+        except Exception as exc:
+            evidence['error'] = f'grab_focus_failed:{type(exc).__name__}'
+            return evidence
+        time.sleep(0.1)
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+
+            focused = bool(obj.get_state_set().contains(_Atspi.StateType.FOCUSED))
+            evidence['element_focused'] = focused
+            if not focused or not firefox_focused:
+                evidence['error'] = 'element_not_focused' if not focused else 'firefox_not_focused'
+                return evidence
+            keyval = self._atspi_open_keyval(key)
+            sent = _Atspi.generate_keyboard_event(keyval, None, _Atspi.KeySynthType.SYM)
+            evidence['keyboard_event_sent'] = True if sent is None else bool(sent)
+        except Exception as exc:
+            evidence['error'] = f'keyboard_event_failed:{type(exc).__name__}'
+            return evidence
+        time.sleep(max(0.0, float(settle)))
+        evidence['ok'] = bool(evidence['keyboard_event_sent'])
+        return evidence
+
+    @staticmethod
+    def _atspi_open_keyval(key: str) -> int:
+        raw = key or ''
+        normalized = raw.strip().lower()
+        if raw == ' ' or normalized in {'space', 'spacebar'}:
+            return 0x0020
+        if normalized in {'return', 'enter'}:
+            return 0xff0d
+        if len(normalized) == 1:
+            return ord(normalized)
+        raise ValueError(f'Unsupported AT-SPI open key {key!r}')
+
     def hover(self, element: ElementRef, timeout: int = 5) -> bool:
         if element.x is None or element.y is None:
             return False
