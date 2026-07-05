@@ -29,6 +29,7 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
+MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 
 
 class _ClaudeInlineBase:

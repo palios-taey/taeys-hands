@@ -145,6 +145,7 @@ Observed basis: every row below is generated from `git log --follow --oneline <r
 | `consultation_v2/drivers/claude.py` | `d31f67a9` | fix: fence_after disabled for grok, mode-skip for all drivers, perplexity Return send | Retired to compatibility shim; behavior inlined into `consultation_v2/platforms/claude/driver.py::ClaudeConsultationDriver`. |
 | `consultation_v2/drivers/claude.py` | `f65d45fb` | fix: exact match YAMLs + strip all fallback logic from drivers | Retired to compatibility shim; behavior inlined into `consultation_v2/platforms/claude/driver.py::ClaudeConsultationDriver`. |
 | `consultation_v2/drivers/claude.py` | `f2175977` | feat: add consultation_v2 bundle (ChatGPT Pro ET implementation) | Retired to compatibility shim; behavior inlined into `consultation_v2/platforms/claude/driver.py::ClaudeConsultationDriver`. |
+| `consultation_v2/drivers/claude.py` | `5147b18d` | [codex] Extract Claude platform package | Retired to compatibility shim; behavior inlined into `consultation_v2/platforms/claude/driver.py::ClaudeConsultationDriver`. |
 | `consultation_v2/platforms/claude.yaml` | `a04da10a` | Remove Claude blind artifact coordinates | Moved to `consultation_v2/platforms/claude/claude.yaml`; w2d mapped artifact controls preserved; follow-up mode reset disabled per package-specific limitation. |
 | `consultation_v2/platforms/claude.yaml` | `4212d8ec` | Wire generation-stalled monitor timeout | Moved to `consultation_v2/platforms/claude/claude.yaml`; w2d mapped artifact controls preserved; follow-up mode reset disabled per package-specific limitation. |
 | `consultation_v2/platforms/claude.yaml` | `55b04b36` | Allow benign base conformance extras | Moved to `consultation_v2/platforms/claude/claude.yaml`; w2d mapped artifact controls preserved; follow-up mode reset disabled per package-specific limitation. |
@@ -209,6 +210,7 @@ Observed basis: every row below is generated from `git log --follow --oneline <r
 | `consultation_v2/planner.py` | `60f548b0` | Migrate Perplexity mode selection to shared plan | Shared planner retained; generic follow-up gate now rejects explicit selections for non-resettable menus. |
 | `consultation_v2/planner.py` | `ff99bf2e` | Migrate Gemini selection to shared plan | Shared planner retained; generic follow-up gate now rejects explicit selections for non-resettable menus. |
 | `consultation_v2/planner.py` | `f7e51f3e` | Implement plan-phase selection menus | Shared planner retained; generic follow-up gate now rejects explicit selections for non-resettable menus. |
+| `consultation_v2/planner.py` | `5147b18d` | [codex] Extract Claude platform package | Shared planner retained; generic follow-up gate now rejects explicit selections for non-resettable menus. |
 | `consultation_v2/orchestrator.py` | `31adc87c` | Rebase W1E notification delivery parking | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `d9c1de09` | Enforce dead session poison after notify | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `9761aee0` | Wire second consult display routing | Retained orchestrator entry point; Claude registry import now points at package driver. |
@@ -228,7 +230,13 @@ Observed basis: every row below is generated from `git log --follow --oneline <r
 | `consultation_v2/orchestrator.py` | `826cf48e` | fix(notify): stamp requester+purpose into completion payload; loud orphan warning | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `846879f4` | feat(v2): full consultation pipeline — plan, identity, extract, store, notify | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `f2175977` | feat: add consultation_v2 bundle (ChatGPT Pro ET implementation) | Retained orchestrator entry point; Claude registry import now points at package driver. |
+| `consultation_v2/orchestrator.py` | `5147b18d` | [codex] Extract Claude platform package | Retained orchestrator entry point; Claude registry import now points at package driver. |
+| `consultation_v2/orchestrator.py` | `2957c722` | [codex] Extract Gemini platform package (#9) | Retained orchestrator entry point; Claude registry import now points at package driver. |
+| `consultation_v2/orchestrator.py` | `c0f22ad5` | [codex] Extract Grok platform package (#6) | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/drivers/__init__.py` | `f2175977` | feat: add consultation_v2 bundle (ChatGPT Pro ET implementation) | Retained compatibility exports; Claude export now points at package driver. |
+| `consultation_v2/drivers/__init__.py` | `5147b18d` | [codex] Extract Claude platform package | Retained compatibility exports; Claude export now points at package driver. |
+| `consultation_v2/drivers/__init__.py` | `2957c722` | [codex] Extract Gemini platform package (#9) | Retained compatibility exports; Claude export now points at package driver. |
+| `consultation_v2/drivers/__init__.py` | `c0f22ad5` | [codex] Extract Grok platform package (#6) | Retained compatibility exports; Claude export now points at package driver. |
 | `consultation_v2/validators/lint_platform_independence.py` | `ddc55dc8` | [codex] Extract Perplexity platform package (#8) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
 | `consultation_v2/validators/lint_platform_independence.py` | `0aac0047` | Split platform routing out of shared input/atspi (#7) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
 | `consultation_v2/validators/lint_platform_independence.py` | `0f7cdc7a` | Platform-independence isolation lint + CI gate (spec v5.1 section 5) (#5) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
