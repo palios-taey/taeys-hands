@@ -12,7 +12,7 @@
 ### Task: fu-gemini-dr-start-research-send-gap - Fix Gemini DR "Start research" click not firing on send [priority: 20] [owner: taeys-hands-codex]
 - doge-runner 2026-07-05: on Gemini Deep Research, the engine generates the DR plan and empties the composer but FAILS to click the "Start research" button (the actual DR launch) → the DR never launches → the engine process exits at send-fail with no answer. Recovered manually via grab_focus + do_action on the "Start research" push button (screenshot-located). FIX: the gemini package send path must locate + click "Start research" reliably (focus composer first + wait for the button to enable, then do_action on the mapped element) so DR launches without manual intervention.
 
-### Task: fu-gemini-profile-aware-element-names - Profile-aware Gemini element names for 2-set parallelism [priority: 30] [owner: taeys-hands-codex] [depends: fu-gemini-dr-start-research-send-gap]
+### Task: fu-gemini-profile-aware-element-names - Profile-aware Gemini element names for 2-set parallelism [priority: 30] [owner: taeys-hands-codex]
 - The 2nd Gemini display-set profile (`ff-profile-mira-gemini-2`, :22, "Ultra" account) has a DIFFERENT model menu ("3.1 Pro"/"3.5 Thinking", NO "Deep Think") than the 1st profile — gemini.yaml element names don't match → select fails on :22, forcing all gemini lanes to :4. FIX: profile-aware element names (or a 2nd-profile YAML variant) so gemini runs on both display sets for full 2-set parallelism.
 
 ### Task: fu-routing-parent-pkg-error-translation - Fix routing.py error-translation for a missing PARENT pkg [priority: 40] [owner: taeys-hands-codex] [depends: fu-gemini-profile-aware-element-names]
