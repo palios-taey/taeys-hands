@@ -241,10 +241,10 @@ tree:
       role: push button
       match_strategy: name_agnostic_structural
       structural:
-        after: copy_query_button
-        before: share_button
+        after: download_button
+        before: more_actions
         ordinal: first
-      reason: "Deep Research pages expose multiple exact Copy buttons; the response copy action is the first push button between Copy query and Share."
+      reason: "Current Deep Research answer rows expose the response Copy action as a plain Copy push button between Download and More actions."
     copy_query_button:
       name: Copy query
       role: push button
@@ -272,6 +272,12 @@ tree:
     more_actions:
       name: More actions
       role: push button
+    export_markdown_item:
+      name: Export as Markdown
+      role: menu item
+    download_markdown_item:
+      name: Markdown
+      role: menu item
     thread_actions:
       name: Thread actions
       role: push button

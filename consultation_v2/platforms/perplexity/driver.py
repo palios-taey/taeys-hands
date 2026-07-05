@@ -12,6 +12,7 @@ import re
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, PerplexityCompletionDetector
@@ -3694,6 +3695,150 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         )
         return True
 
+    @staticmethod
+    def _markdown_download_dirs() -> tuple[Path, ...]:
+        paths = [Path.home() / 'Downloads']
+        xdg_download = os.environ.get('XDG_DOWNLOAD_DIR')
+        if xdg_download:
+            paths.append(Path(xdg_download).expanduser())
+        unique: list[Path] = []
+        seen = set()
+        for path in paths:
+            marker = str(path)
+            if marker not in seen:
+                seen.add(marker)
+                unique.append(path)
+        return tuple(unique)
+
+    def _markdown_download_state(self) -> dict[str, tuple[float, int]]:
+        state: dict[str, tuple[float, int]] = {}
+        for directory in self._markdown_download_dirs():
+            if not directory.exists():
+                continue
+            for path in directory.glob('*.md'):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                state[str(path)] = (float(stat.st_mtime), int(stat.st_size))
+        return state
+
+    def _read_new_markdown_download(
+        self,
+        before: dict[str, tuple[float, int]],
+        *,
+        timeout: float = 12.0,
+    ) -> tuple[str, dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        newest: Path | None = None
+        while time.monotonic() < deadline:
+            changed: list[Path] = []
+            for directory in self._markdown_download_dirs():
+                if not directory.exists():
+                    continue
+                for path in directory.glob('*.md'):
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    prior = before.get(str(path))
+                    current = (float(stat.st_mtime), int(stat.st_size))
+                    if prior != current and current[1] > 0:
+                        changed.append(path)
+            if changed:
+                newest = max(changed, key=lambda item: item.stat().st_mtime)
+                try:
+                    content = newest.read_text(errors='replace').strip()
+                except OSError:
+                    content = ''
+                if content:
+                    return content, {
+                        'download_path': str(newest),
+                        'download_characters': len(content),
+                    }
+            time.sleep(0.5)
+        return '', {
+            'download_path': str(newest) if newest else None,
+            'download_timeout': timeout,
+        }
+
+    def _activate_markdown_download_item(
+        self,
+        trigger_key: str,
+        item_key: str,
+    ) -> dict[str, object]:
+        snap = self.runtime.snapshot()
+        trigger = self.find_last(snap, trigger_key)
+        evidence: dict[str, object] = {
+            'trigger_key': trigger_key,
+            'item_key': item_key,
+            'trigger_found': bool(trigger),
+        }
+        if not trigger:
+            return evidence
+        evidence['trigger'] = {
+            'name': trigger.name,
+            'role': trigger.role,
+            'x': trigger.x,
+            'y': trigger.y,
+        }
+        self.runtime.scroll_element_into_view(trigger)
+        time.sleep(0.3)
+        evidence['trigger_clicked'] = bool(
+            self.runtime.click(trigger, strategy='coordinate_only')
+        )
+        time.sleep(0.8)
+        menu_snap = self.runtime.snapshot()
+        item = self.find_last(menu_snap, item_key)
+        evidence['item_found'] = bool(item)
+        if not item:
+            self.runtime.press('Escape')
+            time.sleep(0.3)
+            return evidence
+        evidence['item'] = {
+            'name': item.name,
+            'role': item.role,
+            'x': item.x,
+            'y': item.y,
+        }
+        evidence['item_clicked'] = bool(
+            self.runtime.click(item, strategy='coordinate_only')
+        )
+        if not evidence['item_clicked']:
+            self.runtime.press('Escape')
+            time.sleep(0.3)
+        return evidence
+
+    def _extract_via_markdown_download(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        attempts: list[dict[str, object]],
+    ) -> bool:
+        before = self._markdown_download_state()
+        for trigger_key, item_key in (
+            ('more_actions', 'export_markdown_item'),
+            ('download_button', 'download_markdown_item'),
+        ):
+            attempt = self._activate_markdown_download_item(trigger_key, item_key)
+            attempts.append(attempt)
+            if not attempt.get('item_clicked'):
+                continue
+            content, download_evidence = self._read_new_markdown_download(before)
+            attempt.update(download_evidence)
+            if not content:
+                continue
+            return self._accept_extracted_content(
+                content,
+                request,
+                result,
+                f'Perplexity response extracted via Markdown download ({len(content)} chars)',
+                target_key='markdown_download',
+                markdown_download_attempts=attempts,
+                **download_evidence,
+            )
+        return False
+
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -3736,6 +3881,13 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
 
         target = self.find_last(snap, target_key) if target_key else None
         if not target:
+            markdown_download_attempts: list[dict[str, object]] = []
+            if is_deep_research and self._extract_via_markdown_download(
+                request,
+                result,
+                markdown_download_attempts,
+            ):
+                return True
             result.add_step(
                 'extract_primary', False,
                 (
@@ -3745,6 +3897,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     else f'Perplexity required extraction target {target_key!r} not found'
                 ),
                 stop_condition='extraction_failed',
+                markdown_download_attempts=markdown_download_attempts,
                 snapshot=snap.serializable(),
             )
             return False
@@ -3812,6 +3965,14 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 **clipboard_poll,
             )
 
+        markdown_download_attempts: list[dict[str, object]] = []
+        if is_deep_research and self._extract_via_markdown_download(
+            request,
+            result,
+            markdown_download_attempts,
+        ):
+            return True
+
         result.add_step(
             'extract_primary', False,
             f'Perplexity copy target clicked but clipboard empty (button: {target.name!r})',
@@ -3821,6 +3982,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             document_scrolled=document_scrolled,
             target_refreshed=refreshed,
             clicked=bool(clicked),
+            markdown_download_attempts=markdown_download_attempts,
             **clipboard_poll,
             snapshot=snap.serializable(),
         )
