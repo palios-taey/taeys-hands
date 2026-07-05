@@ -4644,7 +4644,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         **metadata,
                     },
                 }
-        if expected_names and self._valid_artifact_text(stripped, request, result, expected_names):
+        if self._valid_artifact_text(stripped, request, result, expected_names):
             return {
                 'content': stripped,
                 'metadata': {
