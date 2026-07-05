@@ -129,16 +129,6 @@ validate_instance_args() {
     [[ "${start}" =~ ^[1-9][0-9]*$ ]] || die "--start-display must be a positive integer"
 }
 
-instance_platform_name() {
-    local name="$1"
-    local platform="$2"
-    if [[ "${name}" == "default" ]]; then
-        printf '%s\n' "${platform}"
-    else
-        printf '%s_%s\n' "${name}" "${platform}"
-    fi
-}
-
 instance_display_nums() {
     local start="$1"
     local idx
@@ -151,17 +141,16 @@ instance_display_nums() {
 emit_instance_rows() {
     local name="$1"
     local start="$2"
-    local idx display_num base_platform platform url profile
+    local idx display_num platform url profile
     validate_instance_args "${name}" "${start}"
     for idx in "${!DISPLAY_REGISTRY_PLATFORMS[@]}"; do
         display_num=$((start + idx))
-        base_platform="${DISPLAY_REGISTRY_PLATFORMS[$idx]}"
-        platform="$(instance_platform_name "${name}" "${base_platform}")"
+        platform="${DISPLAY_REGISTRY_PLATFORMS[$idx]}"
         url="${DISPLAY_REGISTRY_URLS[$idx]}"
         if [[ "${name}" == "default" ]]; then
-            profile="ff-profile-${base_platform}"
+            profile="ff-profile-${platform}"
         else
-            profile="ff-profile-${name}-${base_platform}"
+            profile="ff-profile-${name}-${platform}"
         fi
         printf 'TAEY_DISPLAY_%s="%s:%s:%s"\n' "${display_num}" "${platform}" "${profile}" "${url}"
     done
@@ -307,7 +296,6 @@ declare -a DISPLAY_NUMS=()
 declare -A DISPLAY_PLATFORM=()
 declare -A DISPLAY_PROFILE=()
 declare -A DISPLAY_URL=()
-declare -A SEEN_PLATFORM=()
 declare -A SEEN_PROFILE=()
 
 read_display_config() {
@@ -330,10 +318,8 @@ read_display_config() {
             *) die "${key} url must start with http:// or https://" ;;
         esac
         [[ "${url}" != *" "* && "${url}" != *$'\t'* && "${url}" != *"\""* && "${url}" != *"'"* ]] || die "${key} url contains unsupported whitespace or quotes"
-        [[ -z "${SEEN_PLATFORM[$platform]:-}" ]] || die "duplicate platform ${platform} in ${key} and ${SEEN_PLATFORM[$platform]}"
         [[ -z "${SEEN_PROFILE[$profile]:-}" ]] || die "duplicate profile ${profile} in ${key} and ${SEEN_PROFILE[$profile]}"
 
-        SEEN_PLATFORM["${platform}"]="${key}"
         SEEN_PROFILE["${profile}"]="${key}"
         DISPLAY_NUMS+=("${display_num}")
         DISPLAY_PLATFORM["${display_num}"]="${platform}"

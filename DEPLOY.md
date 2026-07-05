@@ -45,8 +45,9 @@ Required values:
 - `TAEY_VNC_PASSWORD`, unless installing with `--no-vnc`
 
 The installer fails loudly when a required variable, binary, malformed display
-row, duplicate platform, duplicate profile, or target display collision is
-found.
+row, duplicate profile, or target display collision is found. Multiple rows may
+use the same platform name; the consultation runtime treats them as a display
+pool and chooses an unlocked candidate.
 
 ## Add One Instance
 
@@ -69,9 +70,12 @@ In `--append-instance` mode, the installer scopes display-specific work to
 `20..24` in this example. It does not rewrite, restart, enable, or collision
 check unrelated existing display units.
 
-The host env rows generated for non-default instances use prefixed platform
-names such as `worker1_chatgpt`. That keeps one shared host machine env
-collision-free when several instances coexist.
+The host env rows generated for non-default instances keep canonical platform
+names such as `chatgpt` and `gemini`, while the Firefox profile names include
+the instance name. Duplicate platform rows are intentional: they let one shared
+host machine env expose several authenticated profiles for the same platform.
+At runtime, `scripts/run_consultation_v2.py` chooses a free display by checking
+the `taey:plan_active:{display}` lock.
 
 Use `--no-start` for a staged install:
 
@@ -88,11 +92,13 @@ Preview rows without editing the env:
 ## Runtime Env Per Driver Instance
 
 The consultation engine resolves `platform -> display` from
-`TAEY_MACHINE_ENV`, falling back to `~/.taey/machine.env`.
+`TAEY_MACHINE_ENV`, falling back to `~/.taey/machine.env`. When several rows use
+the same platform name, they form the candidate display pool for that platform.
 
-For a driver instance, use a separate env file with unprefixed platform names.
-That lets the normal CLI keep using `--platform chatgpt`, `--platform claude`,
-and so on even when the host env uses prefixed names to avoid collisions.
+For a fixed driver instance or a targeted smoke run, use a separate env file
+with only that instance's rows, or set `TAEY_SELECTED_DISPLAY_<PLATFORM>` to one
+configured display. The normal pooled CLI path should keep using `--platform
+chatgpt`, `--platform claude`, and so on.
 
 Example for `worker1` on displays `20..24`:
 
@@ -163,9 +169,10 @@ consultation while still allowing recovery after the guarded operation ends.
 
 - Allocate a unique contiguous display block per instance.
 - Keep one Firefox profile per display row.
-- Use prefixed platform names in the shared host env when several instances
-  coexist.
-- Use unprefixed platform names in each driver instance env.
+- Use canonical platform names in the shared host env when several instances
+  should form one lock-aware display pool.
+- Use a reduced env file or `TAEY_SELECTED_DISPLAY_<PLATFORM>` only when a run
+  must target one specific display.
 - Use `--append-instance NAME --start-display N` for new instances; use the
   no-arg installer only when intentionally regenerating the full machine set.
 

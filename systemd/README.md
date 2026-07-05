@@ -29,8 +29,9 @@ Required local values live in `~/.taey/machine.env`:
 - one or more `TAEY_DISPLAY_N="platform:profile:url"` rows
 
 The installer fails if a required dependency, path, variable, malformed display
-row, duplicate platform, duplicate profile, or unmanaged display collision is
-found.
+row, duplicate profile, or unmanaged display collision is found. Multiple rows
+may share a platform name; the runtime treats those rows as a candidate display
+pool and selects an unlocked display.
 
 ## Installer Options
 
@@ -52,10 +53,10 @@ Append a five-chat display set without hand-editing rows:
 ./scripts/install_machine_displays.sh --append-instance worker1 --start-display 20 --no-start
 ```
 
-The `default` instance preserves platform names `chatgpt`, `claude`,
-`gemini`, `grok`, and `perplexity`. Any other instance name prefixes platform
-names, for example `worker1_chatgpt`, so multiple display sets can coexist in
-one machine env without platform-key collisions.
+All generated instances preserve platform names `chatgpt`, `claude`, `gemini`,
+`grok`, and `perplexity`. Non-default instance names are applied to the Firefox
+profile names, so multiple display sets can coexist in one machine env as
+duplicate platform rows.
 
 Print the rows instead of editing `machine.env`:
 
