@@ -30,6 +30,7 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
+PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
 
 
 class _ClaudeInlineBase:

@@ -233,10 +233,12 @@ Observed basis: every row below is generated from `git log --follow --oneline <r
 | `consultation_v2/orchestrator.py` | `5147b18d` | [codex] Extract Claude platform package | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `2957c722` | [codex] Extract Gemini platform package (#9) | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/orchestrator.py` | `c0f22ad5` | [codex] Extract Grok platform package (#6) | Retained orchestrator entry point; Claude registry import now points at package driver. |
+| `consultation_v2/orchestrator.py` | `ddc55dc8` | [codex] Extract Perplexity platform package (#8) | Retained orchestrator entry point; Claude registry import now points at package driver. |
 | `consultation_v2/drivers/__init__.py` | `f2175977` | feat: add consultation_v2 bundle (ChatGPT Pro ET implementation) | Retained compatibility exports; Claude export now points at package driver. |
 | `consultation_v2/drivers/__init__.py` | `5147b18d` | [codex] Extract Claude platform package | Retained compatibility exports; Claude export now points at package driver. |
 | `consultation_v2/drivers/__init__.py` | `2957c722` | [codex] Extract Gemini platform package (#9) | Retained compatibility exports; Claude export now points at package driver. |
 | `consultation_v2/drivers/__init__.py` | `c0f22ad5` | [codex] Extract Grok platform package (#6) | Retained compatibility exports; Claude export now points at package driver. |
+| `consultation_v2/drivers/__init__.py` | `ddc55dc8` | [codex] Extract Perplexity platform package (#8) | Retained compatibility exports; Claude export now points at package driver. |
 | `consultation_v2/validators/lint_platform_independence.py` | `ddc55dc8` | [codex] Extract Perplexity platform package (#8) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
 | `consultation_v2/validators/lint_platform_independence.py` | `0aac0047` | Split platform routing out of shared input/atspi (#7) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
 | `consultation_v2/validators/lint_platform_independence.py` | `0f7cdc7a` | Platform-independence isolation lint + CI gate (spec v5.1 section 5) (#5) | Retained build gate; `_routing_core.py` remains in `LEAF_MODULES`. |
