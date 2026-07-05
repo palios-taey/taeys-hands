@@ -28,6 +28,9 @@ from consultation_v2.types import ConsultationRequest, ConsultationResult, Eleme
 from consultation_v2.yaml_contract import load_platform_yaml
 
 
+DEEP_GENERATION_FLOOR_SECONDS = 1800.0
+
+
 class _ClaudeInlineBase:
     platform: str
     _INTERACTIVE_UNKNOWN_ROLES = {
