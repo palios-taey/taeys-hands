@@ -3079,6 +3079,114 @@ class GeminiConsultationDriver(_GeminiInlineBase):
                         snapshot=verify_snap.serializable())
         return verified
 
+    @staticmethod
+    def _element_evidence(element: ElementRef | None) -> dict[str, object] | None:
+        if not element:
+            return None
+        return element.serializable()
+
+    @staticmethod
+    def _grab_focus(element: ElementRef | None) -> bool:
+        if not element or not element.atspi_obj:
+            return False
+        try:
+            component = element.atspi_obj.get_component_iface()
+            if not component:
+                return False
+            focused = bool(component.grab_focus())
+            time.sleep(0.15)
+            return focused
+        except Exception:
+            return False
+
+    @staticmethod
+    def _element_enabled(element: ElementRef | None) -> bool:
+        return bool(
+            element
+            and 'enabled' in {str(state).lower() for state in (element.states or [])}
+        )
+
+    def _focus_prompt_input(self) -> dict[str, object]:
+        snap = self.runtime.snapshot()
+        input_el = self.find_first(snap, 'input')
+        focused = self._grab_focus(input_el)
+        return {
+            'input_found': bool(input_el),
+            'input': self._element_evidence(input_el),
+            'input_focus_called': focused,
+        }
+
+    def _wait_for_start_research(
+        self,
+        *,
+        timeout: float = 180.0,
+        interval: float = 1.0,
+    ) -> tuple[Snapshot, ElementRef | None, dict[str, object]]:
+        last_snapshot: Snapshot | None = None
+        first_seen: dict[str, object] | None = None
+        last_seen: dict[str, object] | None = None
+        polls = 0
+
+        def _probe() -> ElementRef | None:
+            nonlocal last_snapshot, first_seen, last_seen, polls
+            polls += 1
+            last_snapshot = self.runtime.snapshot()
+            candidate = self.find_first(last_snapshot, 'start_research')
+            if candidate:
+                candidate_evidence = self._element_evidence(candidate)
+                if first_seen is None:
+                    first_seen = candidate_evidence
+                last_seen = candidate_evidence
+                if self._element_enabled(candidate):
+                    return candidate
+            return None
+
+        button = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
+        snapshot = last_snapshot or self.runtime.snapshot()
+        return snapshot, button if isinstance(button, ElementRef) else None, {
+            'target_key': 'start_research',
+            'required_states': ['enabled'],
+            'timeout': timeout,
+            'interval': interval,
+            'polls': polls,
+            'first_seen': first_seen,
+            'last_seen': last_seen,
+            'matched': isinstance(button, ElementRef),
+        }
+
+    def _launch_deep_research_from_plan(self) -> tuple[bool, dict[str, object]]:
+        evidence: dict[str, object] = {
+            'prompt_focus_before_start_research_wait': self._focus_prompt_input(),
+        }
+        wait_snapshot, start_button, wait_evidence = self._wait_for_start_research()
+        evidence['start_research_wait'] = wait_evidence
+        if not start_button:
+            evidence['snapshot'] = wait_snapshot.serializable()
+            return False, evidence
+
+        evidence['start_research'] = self._element_evidence(start_button)
+        evidence['start_research_focus_called'] = self._grab_focus(start_button)
+        clicked = self.runtime.click(start_button, strategy='atspi_only')
+        evidence['start_research_clicked'] = bool(clicked)
+        if clicked:
+            return True, evidence
+
+        # The plan card can replace the AT-SPI object during settle; reacquire
+        # the same exact key before treating the do_action failure as terminal.
+        refreshed_snapshot, refreshed_button = self.wait_for_key(
+            'start_research',
+            timeout=2.0,
+            interval=0.4,
+        )
+        evidence['refreshed_start_research'] = self._element_evidence(refreshed_button)
+        if refreshed_button and self._element_enabled(refreshed_button):
+            evidence['refreshed_start_research_focus_called'] = self._grab_focus(refreshed_button)
+            clicked = self.runtime.click(refreshed_button, strategy='atspi_only')
+            evidence['refreshed_start_research_clicked'] = bool(clicked)
+        if not clicked:
+            evidence['snapshot'] = refreshed_snapshot.serializable()
+        return bool(clicked), evidence
+
     def send_prompt(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
@@ -3109,29 +3217,14 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         # deep_research mode so single-step modes (deep_think/normal/…) are
         # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
         is_dr_send = str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research'
+        start_research_evidence: dict[str, object] = {}
         if is_dr_send:
-            start_button = self.runtime.wait_until(
-                lambda: self.find_first(self.runtime.snapshot(), 'start_research'),
-                timeout=180,
-                interval=1.5,
-            )
-            if not start_button:
-                result.add_step(
-                    'send', False,
-                    'Gemini Deep Research "Start research" never appeared after submit',
-                    snapshot=self.runtime.snapshot().serializable(),
-                )
-                return False
-            # Click via atspi_only (do_action): the React "Start research" button
-            # no-ops under atspi_first in practice (p8 2026-06-21: start_research
-            # returned clicked=True yet the research never started, so no stop
-            # button appeared and send-validation false-failed). A direct AT-SPI
-            # action reliably fires the research run.
-            post_send_clicked = self.runtime.click(start_button, strategy='atspi_only')
+            post_send_clicked, start_research_evidence = self._launch_deep_research_from_plan()
             if not post_send_clicked:
                 result.add_step(
-                    'send', False, 'Gemini "Start research" click failed',
-                    snapshot=self.runtime.snapshot().serializable(),
+                    'send', False,
+                    'Gemini Deep Research "Start research" did not launch',
+                    **start_research_evidence,
                 )
                 return False
             time.sleep(2.0)
@@ -3158,6 +3251,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             url_before=before,
             url_after=result.session_url_after,
             start_research_clicked=post_send_clicked,
+            start_research_evidence=start_research_evidence,
             stop_seen=stop_seen,
             url_changed=bool(url_changed),
             answer_thread=bool(answer_thread),
