@@ -85,8 +85,9 @@ MENU_KEYS = frozenset({
     'example_rationale',
 })
 MENU_SELECT_VALUES = frozenset({'single', 'multi'})
-MENU_OPERATE_KEYS = frozenset({'trigger', 'scope'})
+MENU_OPERATE_KEYS = frozenset({'trigger', 'scope', 'open_method', 'open_key', 'typeahead_submit_keys'})
 MENU_OPERATE_SCOPES = frozenset({'app_root_snapshot', 'menu_snapshot', 'snapshot'})
+MENU_OPERATE_OPEN_METHODS = frozenset({'click', 'focus_and_key_open'})
 MENU_CLICK_STRATEGIES = frozenset({'atspi_only', 'atspi_first', 'coordinate_only', 'xdotool_first'})
 MENU_OPTION_KEYS = frozenset({
     'element',
@@ -94,7 +95,10 @@ MENU_OPTION_KEYS = frozenset({
     'active_element',
     'active_trigger_names',
     'click_strategy',
+    'typeahead_label',
+    'postcondition',
 })
+MENU_POSTCONDITION_KEYS = frozenset({'element', 'scope', 'timeout_ms'})
 MENU_PATH_KEYS = frozenset({'element', 'action'})
 MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
 LEGACY_SELECTION_KEYS = frozenset({
@@ -907,6 +911,24 @@ def _validate_menu_operate(
     if scope not in MENU_OPERATE_SCOPES:
         _add(findings, lines, operate_path + ('scope',), 'scope',
              f'menu.operate.scope must be one of {sorted(MENU_OPERATE_SCOPES)}')
+    open_method = operate.get('open_method')
+    if open_method is not None and open_method not in MENU_OPERATE_OPEN_METHODS:
+        _add(findings, lines, operate_path + ('open_method',), 'open_method',
+             f'menu.operate.open_method must be one of {sorted(MENU_OPERATE_OPEN_METHODS)}')
+    open_key = operate.get('open_key')
+    if open_key is not None and (
+        not isinstance(open_key, str) or not open_key.strip()
+    ):
+        _add(findings, lines, operate_path + ('open_key',), 'open_key',
+             'menu.operate.open_key must be an exact non-empty key name')
+    submit_keys = operate.get('typeahead_submit_keys')
+    if submit_keys is not None and (
+        not isinstance(submit_keys, list)
+        or not submit_keys
+        or not all(isinstance(item, str) and item.strip() for item in submit_keys)
+    ):
+        _add(findings, lines, operate_path + ('typeahead_submit_keys',), 'typeahead_submit_keys',
+             'menu.operate.typeahead_submit_keys must be a non-empty list of exact key names')
 
 
 def _validate_menu_option(
@@ -947,6 +969,31 @@ def _validate_menu_option(
     if click_strategy is not None and click_strategy not in MENU_CLICK_STRATEGIES:
         _add(findings, lines, option_path + ('click_strategy',), 'click_strategy',
              f'menu option click_strategy must be one of {sorted(MENU_CLICK_STRATEGIES)}')
+    typeahead_label = option.get('typeahead_label')
+    if typeahead_label is not None and (
+        not isinstance(typeahead_label, str) or not typeahead_label.strip()
+    ):
+        _add(findings, lines, option_path + ('typeahead_label',), 'typeahead_label',
+             'menu option typeahead_label must be an exact non-empty string')
+    postcondition = option.get('postcondition')
+    if typeahead_label is not None:
+        _validate_menu_postcondition(
+            findings,
+            lines,
+            postcondition,
+            option_path + ('postcondition',),
+            element_map,
+            required=True,
+        )
+    elif postcondition is not None:
+        _validate_menu_postcondition(
+            findings,
+            lines,
+            postcondition,
+            option_path + ('postcondition',),
+            element_map,
+            required=False,
+        )
     path = option.get('path')
     if path is None:
         return
@@ -972,6 +1019,47 @@ def _validate_menu_option(
         if action not in MENU_PATH_ACTIONS:
             _add(findings, lines, step_path + ('action',), 'action',
                  f'menu path action must be one of {sorted(MENU_PATH_ACTIONS)}')
+
+
+def _validate_menu_postcondition(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    postcondition: object,
+    postcondition_path: tuple[str, ...],
+    element_map: dict[str, Any],
+    *,
+    required: bool,
+) -> None:
+    if not isinstance(postcondition, dict) or not postcondition:
+        if required:
+            _add(findings, lines, postcondition_path, 'postcondition',
+                 'menu option typeahead_label requires a mapped postcondition')
+        else:
+            _add(findings, lines, postcondition_path, 'postcondition',
+                 'menu option postcondition must be a mapping')
+        return
+    for raw_key in postcondition:
+        key_name = str(raw_key)
+        if key_name not in MENU_POSTCONDITION_KEYS:
+            _add(findings, lines, postcondition_path + (key_name,), key_name,
+                 'unsupported menu option postcondition key')
+    element = postcondition.get('element')
+    if not isinstance(element, str) or element not in element_map:
+        _add(findings, lines, postcondition_path + ('element',), 'element',
+             'menu option postcondition.element must name an element_map key')
+    scope = postcondition.get('scope')
+    if scope is not None and scope not in MENU_OPERATE_SCOPES:
+        _add(findings, lines, postcondition_path + ('scope',), 'scope',
+             f'menu option postcondition.scope must be one of {sorted(MENU_OPERATE_SCOPES)}')
+    timeout_ms = postcondition.get('timeout_ms')
+    if timeout_ms is not None:
+        try:
+            timeout = float(timeout_ms)
+        except (TypeError, ValueError):
+            timeout = 0.0
+        if timeout <= 0:
+            _add(findings, lines, postcondition_path + ('timeout_ms',), 'timeout_ms',
+                 'menu option postcondition.timeout_ms must be positive milliseconds')
 
 
 def _validate_identity_yaml(

@@ -373,6 +373,14 @@ tree:
       role: radio menu item
       scope: tools_menu
       active_state: checked
+    tool_deep_research_active:
+      name: Deep Research tabs
+      role: page tab list
+      scope: base.composer
+    tool_web_search_active:
+      name: Web search
+      role: push button
+      scope: base.composer
     tool_more:
       name: More
       role: menu item
@@ -494,14 +502,31 @@ workflow:
         resettable_on_followup: false
         operate:
           trigger: attach_trigger
-          scope: menu_snapshot
+          scope: app_root_snapshot
+          open_method: focus_and_key_open
+          open_key: space
+          typeahead_submit_keys:
+            - Down
+            - Return
         options:
           create_image:
             element: tool_create_image
           deep_research:
             element: tool_deep_research
+            active_element: tool_deep_research_active
+            typeahead_label: Deep research
+            postcondition:
+              element: tool_deep_research_active
+              scope: app_root_snapshot
+              timeout_ms: 6000
           web_search:
             element: tool_web_search
+            active_element: tool_web_search_active
+            typeahead_label: Web search
+            postcondition:
+              element: tool_web_search_active
+              scope: app_root_snapshot
+              timeout_ms: 6000
           github:
             element: tool_github
             path:
@@ -534,7 +559,12 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
-    open_method: keyboard_nav
+    open_method: focus_and_key_open
+    open_key: space
+    typeahead_label: Add photos
+    typeahead_submit_keys:
+      - Down
+      - Return
   prompt:
     input_keys:
       - input_chat_with_chatgpt
