@@ -27,7 +27,7 @@ from consultation_v2.planner import (
     selection_plan_record,
 )
 from consultation_v2.types import ConsultationRequest, ConsultationResult
-from consultation_v2.drivers.chatgpt import ChatGPTConsultationDriver
+from consultation_v2.platforms.chatgpt.driver import ChatGPTConsultationDriver
 from consultation_v2.platforms.claude.driver import ClaudeConsultationDriver
 from consultation_v2.platforms.grok.driver import GrokConsultationDriver
 from consultation_v2.platforms.gemini.driver import GeminiConsultationDriver
