@@ -120,6 +120,21 @@ tree:
       artifacts:
         expected:
           - artifacts_link
+          - artifact_copy_push_button
+          - artifact_copy_button
+          - artifact_copy_menu_item
+          - artifact_copy_contents_push_button
+          - artifact_copy_contents_button
+          - artifact_copy_contents_menu_item
+          - artifact_copy_artifact_push_button
+          - artifact_copy_artifact_button
+          - artifact_copy_artifact_menu_item
+          - artifact_copy_markdown_push_button
+          - artifact_copy_markdown_button
+          - artifact_copy_markdown_menu_item
+          - artifact_copy_markdown_title_push_button
+          - artifact_copy_markdown_title_button
+          - artifact_copy_markdown_title_menu_item
   element_map:
     home_link:
       name: Home
@@ -221,10 +236,94 @@ tree:
       name: Use caution before running this prompt. Malicious conversation content could trick Claude into attempting harmful actions or sharing your data.
       role: alert
       scope: send.blocked
+    claude_capacity_alert:
+      name: Due to unexpected capacity constraints, Claude is unable to respond to your message. Please try again soon.
+      role: alert
+      scope: response.exception
+    claude_capacity_alert_pro:
+      name: Due to unexpected capacity constraints, Claude is unable to respond to your message. Please try again soon. Or consider upgrading to Claude Pro.
+      role: alert
+      scope: response.exception
+    claude_session_limit_alert:
+      name: You've reached your session limit
+      role: alert
+      scope: response.exception
+    claude_hit_limit_alert:
+      name: You hit your limit
+      role: alert
+      scope: response.exception
+    claude_not_working_alert:
+      name: This isn't working right now. You can try again later.
+      role: alert
+      scope: response.exception
+    claude_chat_length_limit_alert:
+      name: Your message will exceed the length limit for this chat
+      role: alert
+      scope: response.exception
     copy_button:
       name: Copy
       role: push button
       scope: response.actions
+    artifact_copy_push_button:
+      name: Copy
+      role: push button
+      scope: artifacts
+    artifact_copy_button:
+      name: Copy
+      role: button
+      scope: artifacts
+    artifact_copy_menu_item:
+      name: Copy
+      role: menu item
+      scope: artifacts
+    artifact_copy_contents_push_button:
+      name: Copy contents
+      role: push button
+      scope: artifacts
+    artifact_copy_contents_button:
+      name: Copy contents
+      role: button
+      scope: artifacts
+    artifact_copy_contents_menu_item:
+      name: Copy contents
+      role: menu item
+      scope: artifacts
+    artifact_copy_artifact_push_button:
+      name: Copy artifact
+      role: push button
+      scope: artifacts
+    artifact_copy_artifact_button:
+      name: Copy artifact
+      role: button
+      scope: artifacts
+    artifact_copy_artifact_menu_item:
+      name: Copy artifact
+      role: menu item
+      scope: artifacts
+    artifact_copy_markdown_push_button:
+      name: Copy markdown
+      role: push button
+      scope: artifacts
+    artifact_copy_markdown_button:
+      name: Copy markdown
+      role: button
+      scope: artifacts
+    artifact_copy_markdown_menu_item:
+      name: Copy markdown
+      role: menu item
+      scope: artifacts
+    artifact_copy_markdown_title_push_button:
+      name: Copy Markdown
+      role: push button
+      scope: artifacts
+    artifact_copy_markdown_title_button:
+      name: Copy Markdown
+      role: button
+      scope: artifacts
+    artifact_copy_markdown_title_menu_item:
+      name: Copy Markdown
+      role: menu item
+      scope: artifacts
     retry_button:
       name: Retry
       role: push button
@@ -427,7 +526,8 @@ workflow:
         select: single
         active_recognition: checked
         must_choose: true
-        resettable_on_followup: true
+        # Claude follow-up sessions cannot safely re-drive the effort submenu.
+        resettable_on_followup: false
         operate:
           trigger: model_selector
           scope: app_root_snapshot
@@ -493,11 +593,57 @@ workflow:
     stop_keys:
       - stop_button
     generation_timeout: 3600
+    exception_states:
+      - name: rate_limited
+        detect:
+          - claude_capacity_alert
+          - claude_capacity_alert_pro
+          - claude_session_limit_alert
+          - claude_hit_limit_alert
+        disposition: notify_blocked
+        stop_condition: manual_recovery_required
+      - name: content_filter
+        detect:
+          - send_blocked_caution_banner
+        disposition: notify_blocked
+        stop_condition: manual_recovery_required
+      - name: send_blocked
+        detect:
+          - send_blocked_previous_message
+          - send_blocked_previous_message_curly
+        disposition: notify_blocked
+        stop_condition: manual_recovery_required
+      - name: network_error
+        detect:
+          - claude_not_working_alert
+        disposition: notify_blocked
+        stop_condition: manual_recovery_required
+      - name: quota_limit
+        detect:
+          - claude_chat_length_limit_alert
+        disposition: notify_blocked
+        stop_condition: manual_recovery_required
   extract:
     primary_key: copy_button
     strategy: last_by_y
   extra_extract:
     strategy: none
+    artifact_copy_keys:
+      - artifact_copy_push_button
+      - artifact_copy_button
+      - artifact_copy_menu_item
+      - artifact_copy_contents_push_button
+      - artifact_copy_contents_button
+      - artifact_copy_contents_menu_item
+      - artifact_copy_artifact_push_button
+      - artifact_copy_artifact_button
+      - artifact_copy_artifact_menu_item
+      - artifact_copy_markdown_push_button
+      - artifact_copy_markdown_button
+      - artifact_copy_markdown_menu_item
+      - artifact_copy_markdown_title_push_button
+      - artifact_copy_markdown_title_button
+      - artifact_copy_markdown_title_menu_item
 settle:
   default_ms: 1500
   navigate_ms: 3500
