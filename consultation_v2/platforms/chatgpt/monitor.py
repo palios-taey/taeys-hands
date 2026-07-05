@@ -1,4 +1,4 @@
-"""Shared completion detector for consultation_v2 drivers.
+"""ChatGPT package completion detector.
 
 SINGLE SOURCE OF TRUTH for "the response is done". Mirrors
 ``monitor/central.py::_detect_completion`` (the canonical detector) so the
@@ -39,13 +39,13 @@ DEEP_MODES: Set[str] = {
     "heavy",
 }
 
-# Verdicts returned by CompletionDetector.observe().
+# Verdicts returned by ChatGPTCompletionDetector.observe().
 PENDING = "pending"          # still generating / waiting for stop transition
 COMPLETE = "complete"        # stop seen then gone for required cycles
 
 
 @dataclass
-class CompletionDetector:
+class ChatGPTCompletionDetector:
     """Stateful stop-transition completion detector.
 
     Construct once per generation, then call :meth:`observe` with a fresh

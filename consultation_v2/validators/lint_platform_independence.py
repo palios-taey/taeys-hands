@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build gate for PLATFORM_INDEPENDENCE_SPEC section 5.
 
-The current tree has legacy flat YAML files under consultation_v2/platforms and
-no per-platform package directories yet. This lint is intentionally quiet until
-consultation_v2/platforms/<platform>/ packages appear, then fails package PRs
-that reintroduce shared-driver coupling or cross-platform imports.
+The final platform-independent tree has one package per chat platform under
+consultation_v2/platforms/<platform>/. This lint fails package PRs that
+reintroduce retired shared-driver coupling, cross-platform imports, or
+platform-specific branches in shared leaf modules.
 """
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ LEAF_MODULES = (
     Path('consultation_v2/atspi.py'),
     Path('consultation_v2/platforms/_routing_core.py'),
 )
-FORBIDDEN_SHARED_MODULES = ('consultation_v2.drivers.base', 'consultation_v2.completion')
 DELIVERY_GATE = 'reject_prompt_echo_response'
+MONITOR_EXPORT_NAMES = frozenset({'COMPLETE', 'DEEP_MODES', 'CompletionDetector'})
 
 
 @dataclass(frozen=True)
@@ -115,10 +115,6 @@ def _resolve_import_from(path: Path, root: Path, node: ast.ImportFrom) -> str:
     return '.'.join(parts)
 
 
-def _is_forbidden_shared_module(module: str) -> bool:
-    return any(module == forbidden or module.startswith(f'{forbidden}.') for forbidden in FORBIDDEN_SHARED_MODULES)
-
-
 def _platform_from_module(module: str, alias_name: str | None, platform_names: set[str]) -> str | None:
     parts = [part for part in module.split('.') if part]
     if len(parts) >= 3 and parts[:2] == ['consultation_v2', 'platforms'] and parts[2] in platform_names:
@@ -126,6 +122,30 @@ def _platform_from_module(module: str, alias_name: str | None, platform_names: s
     if parts == ['consultation_v2', 'platforms'] and alias_name in platform_names:
         return alias_name
     return None
+
+
+def _is_legacy_driver_namespace_import(module: str, alias_name: str | None) -> bool:
+    parts = [part for part in module.split('.') if part]
+    return (
+        len(parts) >= 2 and parts[:2] == ['consultation_v2', 'drivers']
+    ) or (
+        parts == ['consultation_v2'] and alias_name == 'drivers'
+    )
+
+
+def _is_shared_monitor_import(
+    module: str,
+    alias_names: list[str],
+    current_package: str,
+) -> bool:
+    parts = [part for part in module.split('.') if part]
+    if parts[:4] == ['consultation_v2', 'platforms', current_package, 'monitor']:
+        return False
+    if parts == ['consultation_v2'] and 'completion' in alias_names:
+        return True
+    if parts[:1] == ['consultation_v2'] and set(alias_names) & MONITOR_EXPORT_NAMES:
+        return True
+    return False
 
 
 def _dotted_name(node: ast.AST) -> str | None:
@@ -237,11 +257,10 @@ def _scan_package_imports(
                         f'platform package {current_package} must not import platform package {target_package}',
                         f'import {alias.name}',
                     ))
-                if _is_forbidden_shared_module(alias.name):
-                    label = 'package-shared-base-import' if 'drivers.base' in alias.name else 'package-shared-completion-import'
+                if _is_legacy_driver_namespace_import(alias.name, None):
                     findings.append(Finding(
-                        display, node.lineno, label,
-                        'platform packages must not import drivers.base or completion',
+                        display, node.lineno, 'package-legacy-driver-import',
+                        'platform packages must not import through the retired consultation_v2.drivers namespace',
                         f'import {alias.name}',
                     ))
         elif isinstance(node, ast.ImportFrom):
@@ -257,21 +276,22 @@ def _scan_package_imports(
                         _source_segment(_read(path), node),
                     ))
                     break
-            for alias in node.names:
-                if alias.name == '*':
-                    continue
-                full_name = f'{module}.{alias.name}' if module else alias.name
-                if _is_forbidden_shared_module(module) or _is_forbidden_shared_module(full_name):
-                    label = (
-                        'package-shared-base-import'
-                        if 'drivers.base' in module or 'drivers.base' in full_name
-                        else 'package-shared-completion-import'
-                    )
-                    findings.append(Finding(
-                        display, node.lineno, label,
-                        'platform packages must not import drivers.base or completion',
-                        _source_segment(_read(path), node),
-                    ))
+            alias_names = [alias.name for alias in node.names if alias.name != '*']
+            if _is_legacy_driver_namespace_import(module, None) or any(
+                _is_legacy_driver_namespace_import(module, alias_name)
+                for alias_name in alias_names
+            ):
+                findings.append(Finding(
+                    display, node.lineno, 'package-legacy-driver-import',
+                    'platform packages must not import through the retired consultation_v2.drivers namespace',
+                    _source_segment(_read(path), node),
+                ))
+            if _is_shared_monitor_import(module, alias_names, current_package):
+                findings.append(Finding(
+                    display, node.lineno, 'package-shared-monitor-import',
+                    'platform packages must import completion detector state from their own package monitor',
+                    _source_segment(_read(path), node),
+                ))
     return findings
 
 
@@ -497,10 +517,13 @@ def _write_self_test_fixture(root: Path) -> None:
         encoding='utf-8',
     )
     (chatgpt / 'driver.py').write_text(
+        "from consultation_v2 import completion as shared_monitor\n"
+        "from consultation_v2 import drivers as legacy_drivers\n"
         "from consultation_v2.platforms.claude.driver import ClaudeDriver\n"
-        "from consultation_v2.drivers.base import BaseConsultationDriver\n"
-        "from consultation_v2.completion import CompletionDetector\n\n"
-        "class ChatGPTDriver(BaseConsultationDriver):\n"
+        "\n"
+        "class ChatGPTDriver(ClaudeDriver):\n"
+        "    detector = shared_monitor.CompletionDetector\n"
+        "    legacy = legacy_drivers\n\n"
         "    def reject_prompt_echo_response(self, text):\n"
         "        return False\n\n"
         "    def run(self, request):\n"
@@ -544,10 +567,10 @@ def _print_findings(findings: list[Finding], package_count: int, leaf_count: int
 def _self_test() -> int:
     required_labels = {
         'package-cross-platform-import',
-        'package-shared-base-import',
-        'package-shared-completion-import',
+        'package-legacy-driver-import',
         'package-out-of-package-inheritance',
         'package-run-delivery-gate-not-invoked',
+        'package-shared-monitor-import',
         'package-yaml-yaml-settle-missing',
         'package-yaml-yaml-forbidden-name_contains',
         'leaf-platform-branch',

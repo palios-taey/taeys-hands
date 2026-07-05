@@ -254,6 +254,7 @@ def _step(
     because: str,
 ) -> dict[str, Any]:
     option = (menu.get('options') or {})[option_key]
+    postcondition = option.get('postcondition')
     return {
         'menu': menu_key,
         'option': option_key,
@@ -265,6 +266,8 @@ def _step(
         'element': option['element'],
         'active_element': option.get('active_element'),
         'active_trigger_names': list(option.get('active_trigger_names') or []),
+        'typeahead_label': option.get('typeahead_label'),
+        'postcondition': dict(postcondition) if isinstance(postcondition, dict) else {},
         'click_strategy': option.get('click_strategy'),
         'path': [dict(item) for item in option.get('path') or []],
         'skip': False,
