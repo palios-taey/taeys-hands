@@ -42,7 +42,8 @@ All operate on an `ElementRef`, a raw key/text, or a predicate — none branch o
 - `matches_spec()` — **the matcher. Surface stays shared; its BEHAVIOR must change in p0-yaml-schema** (see §3 — it currently accepts loose matchers, which is the leak).
 
 ### `consultation_v2/yaml_contract.py` — `load_platform_yaml(platform)` — agnostic loader ✓
-### `consultation_v2/drivers/base.py` — `BaseConsultationDriver` (`find_first`, `find_last`, `validation_passes`, `serialize_artifacts`) — shared base; `validation_passes` BEHAVIOR must change in p0-yaml-schema (§3).
+### Retired shared behavioral base
+`consultation_v2/drivers/base.py` and `consultation_v2/completion.py` are no longer live primitive surfaces. After the package-independence migration, each chat platform owns its lifecycle driver and completion detector under `consultation_v2/platforms/<platform>/driver.py` and `monitor.py`.
 
 ---
 
@@ -88,8 +89,8 @@ The "isolated" matcher itself invites loose matchers, so the YAMLs filled with t
 - `consultation_v2/snapshot.py:35-54` `matches_spec()` accepts `name_contains`, `name_not_contains`,
   `name_contains_all`, `name_pattern` (fnmatch **wildcards**), `names_any_of`, `role_contains`.
 - `consultation_v2/snapshot.py:75` `_is_excluded` accepts `name_contains` for the exclude set.
-- `consultation_v2/drivers/base.py:35` `validation_passes` matches via `url_contains`; `:56-79`
-  file-chip via substring `probe in name` (a contains, not a structural locator).
+- The retired `consultation_v2/drivers/base.py` used `url_contains` and file-chip substring probes.
+  That behavior is no longer shared; package drivers must keep exact/structural matching discipline locally.
 
 **p0-yaml-schema target shape (the lock this contract sets up):**
 - `matches_spec` accepts ONLY: exact `name` (verbatim) + exact `role` + `states_include`.
