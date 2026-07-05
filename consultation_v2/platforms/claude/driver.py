@@ -4097,7 +4097,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     def extract_primary(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.platforms.routing import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
 
@@ -4264,7 +4264,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         have nothing to capture. Once the toggle is present, every subsequent
         step is tree/clipboard validated and failures abort extraction.
         """
-        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.platforms.routing import find_firefox_for_platform
         from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.interact import atspi_click
 
@@ -4488,7 +4488,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         expected_names: list[str],
         attempts: list[dict],
     ) -> dict | None:
-        from consultation_v2.atspi import find_firefox_for_platform
+        from consultation_v2.platforms.routing import find_firefox_for_platform
         from consultation_v2.interact import atspi_click
         from consultation_v2.tree import find_elements as raw_find_elements
 
