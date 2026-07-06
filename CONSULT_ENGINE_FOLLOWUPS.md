@@ -18,7 +18,7 @@
 ### Task: fu-routing-parent-pkg-error-translation - Fix routing.py error-translation for a missing PARENT pkg [priority: 40] [owner: taeys-hands-codex]
 - routing.py:16-18 error-translation is broken for a missing PARENT package (exc.name is the parent → the teaching-RuntimeError branch is skipped, raw ModuleNotFoundError propagates). Still fail-loud + unreachable from prod, so cheap. FIX: handle the parent-pkg case in the error translation.
 
-### Task: fu-osresource-find-firefox-race - Per-package find-Firefox window/bus concurrency assertion [priority: 40] [owner: taeys-hands-codex] [depends: fu-routing-parent-pkg-error-translation]
+### Task: fu-osresource-find-firefox-race - Per-package find-Firefox window/bus concurrency assertion [priority: 40] [owner: taeys-hands-codex]
 - The shared `_routing_core` + AT-SPI/DBus bus + Firefox process tree are OS-level shared-mutable resources; per-package binding is CONFIG-level only (dedicated DISPLAY + PID file). Runtime serialization comes from the display-keyed dispatch lock (5de5c6dd), not the routing layer — lint-clean ≠ runtime-race-free under concurrent/rapid dispatch. FIX: add a per-package concurrency assertion that each find-Firefox binds its OWN window/bus (no cross-bind), exercised by concurrent/rapid-sequential dispatch across ≥2 packages.
 
 ## User Stop Conditions
