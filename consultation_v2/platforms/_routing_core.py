@@ -8,7 +8,11 @@ import time
 from dataclasses import dataclass
 
 from consultation_v2 import atspi, clipboard, input as input_core
-from consultation_v2.platforms_runtime import get_platform_display, get_platform_firefox_pid
+from consultation_v2.platforms_runtime import (
+    get_display_bus,
+    get_platform_display,
+    get_platform_firefox_pid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +62,71 @@ def get_document(spec: RouteSpec, firefox):
     return matches[0]
 
 
+def _normalize_display(display: str | None) -> str | None:
+    value = str(display or '').strip()
+    if not value:
+        return None
+    display_num = value[1:] if value.startswith(':') else value
+    if not display_num.isdigit():
+        return value
+    return f':{display_num}'
+
+
+def _assert_route_os_binding(spec: RouteSpec) -> None:
+    expected_display = _normalize_display(get_platform_display(spec.platform))
+    if not expected_display:
+        return
+
+    actual_display = _normalize_display(os.environ.get('DISPLAY'))
+    if actual_display != expected_display:
+        raise RuntimeError(
+            f"{spec.platform} route binding mismatch: expected DISPLAY "
+            f"{expected_display!r}, got {actual_display!r}"
+        )
+
+    expected_bus = get_display_bus(expected_display)
+    if not expected_bus:
+        raise RuntimeError(
+            f"{spec.platform} route binding mismatch: no AT-SPI bus for "
+            f"DISPLAY {expected_display!r}"
+        )
+
+    actual_bus = os.environ.get('AT_SPI_BUS_ADDRESS')
+    if actual_bus != expected_bus:
+        raise RuntimeError(
+            f"{spec.platform} route binding mismatch on DISPLAY "
+            f"{expected_display!r}: expected AT_SPI_BUS_ADDRESS "
+            f"{expected_bus!r}, got {actual_bus!r}"
+        )
+
+
+def _assert_firefox_process_binding(spec: RouteSpec, firefox, *, pid: int | None):
+    if firefox is None or pid is None:
+        return firefox
+    try:
+        actual_pid = firefox.get_process_id()
+    except Exception as exc:
+        raise RuntimeError(
+            f"{spec.platform} route binding mismatch: could not read Firefox PID"
+        ) from exc
+    if actual_pid != pid:
+        raise RuntimeError(
+            f"{spec.platform} route binding mismatch: expected Firefox PID "
+            f"{pid}, got {actual_pid}"
+        )
+    return firefox
+
+
 def find_firefox(spec: RouteSpec, *, pid: int | None = None):
+    _assert_route_os_binding(spec)
     all_firefox = atspi.find_all_firefox(pid=pid)
     if not all_firefox:
         return None
     if len(all_firefox) == 1:
-        return all_firefox[0]
+        return _assert_firefox_process_binding(spec, all_firefox[0], pid=pid)
     for firefox in all_firefox:
         if get_document(spec, firefox):
-            return firefox
+            return _assert_firefox_process_binding(spec, firefox, pid=pid)
     logger.error("No Firefox instance has %s document", spec.platform)
     return None
 
