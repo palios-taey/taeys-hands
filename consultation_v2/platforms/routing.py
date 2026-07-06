@@ -11,10 +11,11 @@ def _route_module(platform: str) -> ModuleType:
     if not platform_name.isidentifier() or platform_name.startswith('_'):
         raise RuntimeError(f'Invalid platform route name: {platform!r}')
     module_name = f'consultation_v2.platforms.{platform_name}.routing'
+    parent_module_name = module_name.rsplit('.', 1)[0]
     try:
         return import_module(module_name)
     except ModuleNotFoundError as exc:
-        if exc.name == module_name:
+        if exc.name in {parent_module_name, module_name}:
             raise RuntimeError(f'No package routing module for platform: {platform_name}') from exc
         raise
 
