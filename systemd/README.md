@@ -58,6 +58,10 @@ All generated instances preserve platform names `chatgpt`, `claude`, `gemini`,
 profile names, so multiple display sets can coexist in one machine env as
 duplicate platform rows.
 
+Gemini deep modes are pinned to `TAEY_GEMINI_PRIMARY_DISPLAY`, or to the first
+configured Gemini row when that variable is unset. Additional Gemini profiles
+are Pro/non-deep pool capacity unless separately validated for Deep Think.
+
 Print the rows instead of editing `machine.env`:
 
 ```bash

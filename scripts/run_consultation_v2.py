@@ -22,6 +22,27 @@ def _arg_value(argv: list[str], name: str) -> str | None:
     return None
 
 
+def _select_value(argv: list[str], menu: str) -> str | None:
+    for index, arg in enumerate(argv):
+        raw = None
+        if arg == '--select' and index + 1 < len(argv):
+            raw = argv[index + 1]
+        elif arg.startswith('--select='):
+            raw = arg.split('=', 1)[1]
+        if not raw or '=' not in raw:
+            continue
+        key, value = raw.split('=', 1)
+        if key.strip() != menu:
+            continue
+        value = value.strip()
+        if value.startswith('default:'):
+            return 'default'
+        if value.startswith('none:'):
+            return 'none'
+        return value
+    return None
+
+
 def _display_lock_free(display: str) -> bool:
     try:
         import redis
@@ -35,11 +56,47 @@ def _display_lock_free(display: str) -> bool:
         ) from exc
 
 
+def _gemini_requires_primary_display(argv: list[str]) -> bool:
+    mode = _select_value(argv, 'mode')
+    if mode in (None, 'default'):
+        return True
+    return mode in {'deep_think', 'deep_research'}
+
+
+def _select_gemini_primary_display() -> str | None:
+    from consultation_v2.platforms_runtime import (
+        get_platform_displays,
+        set_platform_display,
+    )
+
+    candidates = get_platform_displays('gemini')
+    if not candidates:
+        return None
+    primary = os.environ.get('TAEY_GEMINI_PRIMARY_DISPLAY') or candidates[0]
+    if primary and not primary.startswith(':'):
+        primary = f':{primary}'
+    if primary not in candidates:
+        raise RuntimeError(
+            f"TAEY_GEMINI_PRIMARY_DISPLAY={primary!r} is not configured for gemini; "
+            f"candidates={list(candidates)!r}"
+        )
+    if not _display_lock_free(primary):
+        raise RuntimeError(
+            f"Gemini deep mode requires primary display {primary}, but that display is locked"
+        )
+    return set_platform_display('gemini', primary)
+
+
 def _bind_display_env() -> None:
     from consultation_v2.platforms_runtime import display_environment, select_platform_display
 
-    platform = _arg_value(sys.argv[1:], '--platform')
-    if platform:
+    argv = sys.argv[1:]
+    platform = _arg_value(argv, '--platform')
+    if platform == 'gemini' and _gemini_requires_primary_display(argv):
+        display = _select_gemini_primary_display()
+        if display is None:
+            display = select_platform_display(platform, is_available=_display_lock_free)
+    elif platform:
         display = select_platform_display(platform, is_available=_display_lock_free)
     else:
         display = os.environ.get('DISPLAY', ':0')

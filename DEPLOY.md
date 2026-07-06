@@ -77,6 +77,13 @@ host machine env expose several authenticated profiles for the same platform.
 At runtime, `scripts/run_consultation_v2.py` chooses a free display by checking
 the `taey:plan_active:{display}` lock.
 
+Gemini deep modes are primary-display only. The wrapper routes default Gemini
+requests and `--select mode=deep_think` / `--select mode=deep_research` to
+`TAEY_GEMINI_PRIMARY_DISPLAY` when set, otherwise to the first configured
+Gemini row (`:4` on Mira). Additional Gemini profiles such as `:22` stay in the
+pool for Pro/non-deep runs, for example when the caller explicitly uses
+`--select mode=none`.
+
 Use `--no-start` for a staged install:
 
 ```bash
@@ -94,6 +101,11 @@ Preview rows without editing the env:
 The consultation engine resolves `platform -> display` from
 `TAEY_MACHINE_ENV`, falling back to `~/.taey/machine.env`. When several rows use
 the same platform name, they form the candidate display pool for that platform.
+
+For Gemini, deep modes are selection-aware: default Gemini requests and explicit
+`mode=deep_think` or `mode=deep_research` are pinned to
+`TAEY_GEMINI_PRIMARY_DISPLAY` or the first configured Gemini display. The second
+Gemini profile is therefore Pro/non-deep pool capacity, not a Deep Think target.
 
 For a fixed driver instance or a targeted smoke run, use a separate env file
 with only that instance's rows, or set `TAEY_SELECTED_DISPLAY_<PLATFORM>` to one
@@ -171,6 +183,8 @@ consultation while still allowing recovery after the guarded operation ends.
 - Keep one Firefox profile per display row.
 - Use canonical platform names in the shared host env when several instances
   should form one lock-aware display pool.
+- Keep Gemini deep modes on the primary Gemini display; auxiliary Gemini
+  profiles are for Pro/non-deep pool capacity unless separately validated.
 - Use a reduced env file or `TAEY_SELECTED_DISPLAY_<PLATFORM>` only when a run
   must target one specific display.
 - Use `--append-instance NAME --start-display N` for new instances; use the
