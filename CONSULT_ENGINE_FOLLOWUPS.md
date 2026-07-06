@@ -15,7 +15,7 @@
 ### Task: fu-gemini-profile-aware-element-names - Profile-aware Gemini element names for 2-set parallelism [priority: 30] [owner: taeys-hands-codex]
 - The 2nd Gemini display-set profile (`ff-profile-mira-gemini-2`, :22, "Ultra" account) has a DIFFERENT model menu ("3.1 Pro"/"3.5 Thinking", NO "Deep Think") than the 1st profile — gemini.yaml element names don't match → select fails on :22, forcing all gemini lanes to :4. FIX: profile-aware element names (or a 2nd-profile YAML variant) so gemini runs on both display sets for full 2-set parallelism.
 
-### Task: fu-routing-parent-pkg-error-translation - Fix routing.py error-translation for a missing PARENT pkg [priority: 40] [owner: taeys-hands-codex] [depends: fu-gemini-profile-aware-element-names]
+### Task: fu-routing-parent-pkg-error-translation - Fix routing.py error-translation for a missing PARENT pkg [priority: 40] [owner: taeys-hands-codex]
 - routing.py:16-18 error-translation is broken for a missing PARENT package (exc.name is the parent → the teaching-RuntimeError branch is skipped, raw ModuleNotFoundError propagates). Still fail-loud + unreachable from prod, so cheap. FIX: handle the parent-pkg case in the error translation.
 
 ### Task: fu-osresource-find-firefox-race - Per-package find-Firefox window/bus concurrency assertion [priority: 40] [owner: taeys-hands-codex] [depends: fu-routing-parent-pkg-error-translation]
