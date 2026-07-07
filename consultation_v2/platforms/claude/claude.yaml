@@ -648,6 +648,7 @@ settle:
   default_ms: 1500
   navigate_ms: 3500
   attach_ms: 2500
+  send_validation_ms: 90000
   rescan_attempts: 1
 extraction:
   assistant_text:

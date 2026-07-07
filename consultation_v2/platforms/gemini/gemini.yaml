@@ -257,7 +257,8 @@ workflow:
 settle:
   default_ms: 2000
   selection_ms: 8000
-  mode_picker_menu_ms: 1000
+  mode_picker_menu_ms: 3000
+  mode_picker_menu_reveal_ms: 20000
   navigate_ms: 4000
   attach_ms: 3000
   rescan_attempts: 1

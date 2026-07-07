@@ -3053,6 +3053,44 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             blockers.append('composer_send_button_present')
         return blockers
 
+    def _hard_send_blockers(self, blockers: list[str]) -> list[str]:
+        return [blocker for blocker in blockers if blocker in self._BLOCKED_SEND_KEYS]
+
+    def _send_validation_timeout_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('send_validation_ms', 90000) if isinstance(settle, dict) else 90000
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            seconds = 90.0
+        return min(max(seconds, 30.0), 180.0)
+
+    def _wait_for_send_validation_snapshot(
+        self,
+        stop_keys: tuple[str, ...],
+        *,
+        initial_stop_seen: bool,
+    ) -> tuple[Snapshot, list[str], bool]:
+        timeout = self._send_validation_timeout_seconds()
+        deadline = time.time() + timeout
+        stop_seen = bool(initial_stop_seen)
+        last_snapshot: Snapshot | None = None
+        last_blockers: list[str] = []
+        while time.time() < deadline:
+            last_snapshot = self.runtime.snapshot()
+            if self.snapshot_has_any(last_snapshot, stop_keys):
+                stop_seen = True
+            last_blockers = self._send_blockers(last_snapshot)
+            if self._hard_send_blockers(last_blockers) or not last_blockers:
+                return last_snapshot, last_blockers, stop_seen
+            time.sleep(0.8)
+        if last_snapshot is None:
+            last_snapshot = self.runtime.snapshot()
+            if self.snapshot_has_any(last_snapshot, stop_keys):
+                stop_seen = True
+            last_blockers = self._send_blockers(last_snapshot)
+        return last_snapshot, last_blockers, stop_seen
+
     def _composer_scope_elements(self, snapshot: Snapshot) -> list[ElementRef]:
         root = self._composer_scope_root(snapshot)
         if root is None:
@@ -3799,15 +3837,31 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         send_blockers = self._send_blockers(send_snap)
         after = self.runtime.wait_for_url_change(before, timeout=30.0, interval=1.0)
         result.session_url_after = after or self.runtime.current_url()
-        verify_snap = self.runtime.snapshot()
-        paste_chips_after_click = self._composer_paste_chip_names(verify_snap)
-        verify_blockers = self._send_blockers(verify_snap)
-        if verify_blockers:
-            send_blockers = verify_blockers
-        message_landed = bool(stop_seen and not send_blockers)
-        self._send_stop_seen = bool(message_landed)
-        url_changed = result.session_url_after and result.session_url_after != before
+        url_changed = bool(result.session_url_after and result.session_url_after != before)
         answer_thread = self._is_answer_thread_url(result.session_url_after)
+        verify_snap, verify_blockers, validation_stop_seen = self._wait_for_send_validation_snapshot(
+            stop_keys,
+            initial_stop_seen=stop_seen,
+        )
+        stop_seen = bool(stop_seen or validation_stop_seen)
+        paste_chips_after_click = self._composer_paste_chip_names(verify_snap)
+        hard_blockers = self._hard_send_blockers(verify_blockers)
+        if hard_blockers:
+            send_blockers = hard_blockers
+        elif not verify_blockers:
+            send_blockers = []
+        elif answer_thread and (stop_seen or (not request.session_url and url_changed)):
+            send_blockers = []
+        else:
+            send_blockers = verify_blockers
+        composer_probe_stale = bool(
+            verify_blockers
+            and not hard_blockers
+            and not send_blockers
+            and answer_thread
+        )
+        message_landed = bool((stop_seen or (not request.session_url and url_changed and answer_thread)) and not send_blockers)
+        self._send_stop_seen = bool(message_landed)
         is_new_session = not request.session_url
         if is_new_session:
             verified = bool(clicked and message_landed and url_changed and answer_thread)
@@ -3823,6 +3877,8 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             url_before=before, url_after=result.session_url_after,
             stop_seen=stop_seen, message_landed=message_landed,
             send_blockers=send_blockers,
+            verify_blockers=verify_blockers,
+            composer_probe_stale=bool(composer_probe_stale),
             paste_chips_before_click=paste_chips_before_click[:3],
             paste_chips_after_click=paste_chips_after_click[:3],
             url_changed=bool(url_changed), answer_thread=bool(answer_thread),

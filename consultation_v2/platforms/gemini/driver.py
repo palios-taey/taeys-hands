@@ -1357,7 +1357,7 @@ class _GeminiInlineBase:
         return last_snapshot or fallback_snapshot, self.find_first(last_snapshot or fallback_snapshot, key)
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        timeout = self._selection_revealed_anchor_timeout_seconds(key, scope)
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
@@ -1505,6 +1505,20 @@ class _GeminiInlineBase:
         except (TypeError, ValueError):
             seconds = 1.0
         return min(max(0.0, seconds), max(self._selection_settle_seconds(), 0.1))
+
+    def _selection_revealed_anchor_timeout_seconds(self, key: str, scope: str) -> float:
+        base_timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        if scope.strip().lower() != 'menu_snapshot':
+            return base_timeout
+        if key not in {'mode_fast', 'mode_thinking', 'mode_pro'}:
+            return base_timeout
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('mode_picker_menu_reveal_ms', 20000) if isinstance(settle, dict) else 20000
+        try:
+            configured = float(value) / 1000.0
+        except (TypeError, ValueError):
+            configured = 20.0
+        return max(base_timeout, min(max(1.0, configured), 60.0))
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
