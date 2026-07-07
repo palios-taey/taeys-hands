@@ -1115,6 +1115,7 @@ class _GeminiInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
+        self._selection_settle_after_menu_open(trigger_key, scope)
         snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
@@ -1208,6 +1209,13 @@ class _GeminiInlineBase:
                 return last_snapshot
             time.sleep(0.2)
         return last_snapshot or self.runtime.snapshot()
+
+    def _selection_settle_after_menu_open(self, trigger_key: str, scope: str) -> None:
+        if trigger_key != 'mode_picker' or scope.strip().lower() != 'menu_snapshot':
+            return
+        settle_seconds = self._selection_mode_picker_menu_settle_seconds()
+        if settle_seconds > 0:
+            time.sleep(settle_seconds)
 
     def _selection_base_snapshot_clean(self, snapshot: Snapshot, anchor_key: str) -> bool:
         if not snapshot.has(anchor_key):
@@ -1488,6 +1496,15 @@ class _GeminiInlineBase:
             return max(0.0, float(value) / 1000.0)
         except (TypeError, ValueError):
             return 0.8
+
+    def _selection_mode_picker_menu_settle_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('mode_picker_menu_ms', 1000) if isinstance(settle, dict) else 1000
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            seconds = 1.0
+        return min(max(0.0, seconds), max(self._selection_settle_seconds(), 0.1))
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
