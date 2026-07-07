@@ -247,6 +247,7 @@ settle:
   default_ms: 2000
   selection_ms: 8000
   navigate_ms: 4000
+  new_chat_ms: 60000
   attach_ms: 3000
   rescan_attempts: 1
 

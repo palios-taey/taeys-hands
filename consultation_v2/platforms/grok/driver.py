@@ -2888,11 +2888,13 @@ class GrokConsultationDriver(_GrokInlineBase):
 
     def _setup_step_timeout_seconds(self, step_name: str) -> float:
         selection_timeout = max(self._selection_settle_seconds() * 4.0, 30.0)
+        fresh_chat_timeout = self._fresh_chat_action_timeout()
+        new_chat_timeout = self._new_chat_action_timeout()
         return {
             'switch': 10.0,
-            'navigate': max(self._fresh_chat_action_timeout() + 10.0, 40.0),
-            'new_chat': max(self._fresh_chat_action_timeout(), 20.0),
-            'page-ready': max(self._fresh_chat_action_timeout() + 10.0, 40.0),
+            'navigate': max(new_chat_timeout + fresh_chat_timeout + 15.0, 90.0),
+            'new_chat': new_chat_timeout,
+            'page-ready': max(fresh_chat_timeout + 10.0, 40.0),
             'mode-select': selection_timeout,
             'attach': max(self._attach_menu_timeout() + 60.0, 75.0),
             'composer-find': 25.0,
@@ -3015,20 +3017,45 @@ class GrokConsultationDriver(_GrokInlineBase):
     def _trigger_new_chat(self, result: ConsultationResult, snapshot: Snapshot) -> bool:
         nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
         key = nav_cfg.get('new_chat_key') or nav_cfg.get('new_chat')
-        lookup_snapshot = snapshot
-        element = snapshot.first(key) if isinstance(key, str) else None
+        self._close_stale_new_chat_menu()
+        lookup_snapshot = self.runtime.snapshot()
+        if self._fresh_chat_snapshot_ready(lookup_snapshot):
+            result.add_step(
+                'new_chat',
+                True,
+                'Grok fresh chat already ready; skipped New Chat click',
+                action='already_ready',
+                key=key,
+                snapshot=lookup_snapshot.serializable(),
+            )
+            return True
+        element = lookup_snapshot.first(key) if isinstance(key, str) else None
 
+        fresh_chat_ready = object()
         if isinstance(key, str) and not element:
-            def _find_new_chat() -> ElementRef | None:
+            def _find_new_chat() -> object | ElementRef | None:
                 nonlocal lookup_snapshot
                 lookup_snapshot = self.runtime.snapshot()
+                if self._fresh_chat_snapshot_ready(lookup_snapshot):
+                    return fresh_chat_ready
                 return lookup_snapshot.first(key)
 
             element = self.runtime.wait_until(
                 _find_new_chat,
-                timeout=self._fresh_chat_action_timeout(),
+                timeout=self._new_chat_action_timeout(),
                 interval=0.4,
             )
+
+        if element is fresh_chat_ready:
+            result.add_step(
+                'new_chat',
+                True,
+                'Grok fresh chat became ready while waiting for New Chat',
+                action='already_ready',
+                key=key,
+                snapshot=lookup_snapshot.serializable(),
+            )
+            return True
 
         if isinstance(element, ElementRef):
             clicked = self.runtime.click(element)
@@ -3050,6 +3077,39 @@ class GrokConsultationDriver(_GrokInlineBase):
             snapshot=lookup_snapshot.serializable(),
         )
         return False
+
+    def _close_stale_new_chat_menu(self) -> None:
+        self.runtime.focus_firefox()
+        for _ in range(2):
+            self.runtime.press('Escape')
+            time.sleep(0.2)
+            if int(self.runtime.menu_snapshot().raw_count or 0) == 0:
+                return
+
+    def _fresh_chat_snapshot_ready(self, snapshot: Snapshot) -> bool:
+        nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
+        prompt_cfg = (self.cfg.get('workflow') or {}).get('prompt') or {}
+        input_key = nav_cfg.get('fresh_input_key') or prompt_cfg.get('input') or 'input'
+        input_el = snapshot.first(input_key) if isinstance(input_key, str) else None
+        input_states = self._state_set(input_el)
+        input_text, input_text_observed, input_text_source = self._input_text(input_el)
+        input_text_length = len(input_text)
+        input_observed_empty = bool(
+            input_text == ''
+            and (
+                input_text_observed
+                or (input_text_source == 'unobserved' and input_text_length == 0)
+            )
+        )
+        current_url = (self.runtime.current_url() or snapshot.url or '').strip()
+        return bool(
+            self._is_fresh_chat_url(current_url)
+            and not self._page_ready_missing_groups(snapshot, self._page_ready_key_groups())
+            and input_el is not None
+            and 'editable' in input_states
+            and input_observed_empty
+            and not snapshot.has('remove_attachment')
+        )
 
     def _wait_for_fresh_chat_ready(
         self,
@@ -3175,6 +3235,15 @@ class GrokConsultationDriver(_GrokInlineBase):
             + self._settle_seconds('', 2000),
             20.0,
         )
+
+    def _new_chat_action_timeout(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('new_chat_ms', 60000) if isinstance(settle, dict) else 60000
+        try:
+            configured = float(value) / 1000.0
+        except (TypeError, ValueError):
+            configured = 60.0
+        return min(max(configured, self._fresh_chat_action_timeout(), 20.0), 180.0)
 
     def _attach_menu_timeout(self) -> float:
         return max(self._settle_seconds('attach', 3000) + 1.0, 10.0)
