@@ -56,11 +56,15 @@ tree:
       states_include:
       - editable
     mode_picker:
+      names_any_of:
+        - Open mode picker, currently Flash
+        - Open mode picker, currently Pro
+        - Open mode picker, currently Thinking
       role: push button
       match_strategy: name_agnostic_structural
       structural:
         after: input
-      reason: Gemini's model picker visible name changes with the selected model; by live composer layout it is the only push button positioned after the prompt input (picker x>input x on the same composer row).
+      reason: Gemini's model picker visible name changes with the selected model; live labels are enumerated exactly, and the structural anchor prevents a stale enum from binding an unrelated push button.
     # Gemini merged "Tools" and the upload menu into one "Upload & tools"
     # button (UI 2026-05-21). Both keys reference the same live element.
     tools_button:
@@ -111,7 +115,7 @@ tree:
       role: push button
     microphone:
       name: Microphone
-      role: toggle button
+      role: push button
     new_chat:
       name: New chat
       role: push button

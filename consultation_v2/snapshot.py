@@ -429,6 +429,8 @@ def _resolve_structural_mappings(
                 states = {str(item).lower() for item in (element.get('states') or [])}
                 if needed_states and not needed_states.issubset(states):
                     continue
+                if not _matches_structural_exact_fields(element, spec):
+                    continue
                 candidates.append(element)
             selected = _select_structural_between(candidates, structural, mapped)
             if selected is None:
@@ -455,6 +457,8 @@ def _resolve_structural_mappings(
                 continue
             if structural.get('name_must_be_nonempty') and not (element.get('name') or '').strip():
                 continue
+            if not _matches_structural_exact_fields(element, spec):
+                continue
             obj = element.get('atspi_obj')
             ancestors = _atspi_ancestor_objects(obj)
             if not any(parent in ancestors for parent in parent_objects):
@@ -476,6 +480,18 @@ def _resolve_structural_mappings(
         mapped.setdefault(key, []).append(_to_ref(key, selected))
         structural_accounted.add(_element_identity(selected))
     return structural_accounted
+
+
+def _matches_structural_exact_fields(element: Dict[str, Any], spec: Dict[str, Any]) -> bool:
+    exact_keys = ('name', 'names_any_of', 'attributes', 'testid')
+    exact_spec = {key: spec[key] for key in exact_keys if key in spec}
+    if not exact_spec:
+        return True
+    if 'role' in spec:
+        exact_spec['role'] = spec['role']
+    if 'states_include' in spec:
+        exact_spec['states_include'] = spec['states_include']
+    return matches_spec(element, exact_spec)
 
 
 def _position_key(item: Dict[str, Any] | ElementRef) -> tuple[int, int]:
