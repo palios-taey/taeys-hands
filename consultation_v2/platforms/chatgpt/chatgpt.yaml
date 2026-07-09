@@ -216,6 +216,22 @@ tree:
       name: Add files and more
       role: push button
       scope: base.composer
+    attach_trigger_tooltip:
+      name: Add files and more @
+      role: tool tip
+      scope: base.composer
+    quick_action_create_image:
+      name: Create an image
+      role: push button
+      scope: base.composer
+    quick_action_write_or_edit:
+      name: Write or edit
+      role: push button
+      scope: base.composer
+    quick_action_look_something_up:
+      name: Look something up
+      role: push button
+      scope: base.composer
     input_chat_with_chatgpt:
       name: Chat with ChatGPT
       role: entry
