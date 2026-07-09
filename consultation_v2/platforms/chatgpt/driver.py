@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from contextlib import contextmanager
 from dataclasses import replace
@@ -30,6 +31,10 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
+BASE_CONFORMANCE_CLEAN_SNAPSHOTS = 2
+BASE_CONFORMANCE_SETTLE_FLOOR_SECONDS = 25.0
+BASE_CONFORMANCE_SETTLE_CEILING_SECONDS = 45.0
+CLEAN_COMPOSER_EMPTY_SNAPSHOTS = 2
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
 INLINE_IDENTITY_ATTACHMENT = 'inline:chatgpt_identity_context'
@@ -108,8 +113,14 @@ class _ChatGPTInlineBase:
         surface: str | None = None,
     ) -> bool:
         surface = surface or ('base' if self._uses_identity_schema() else None)
-        snap = snapshot or self._conformance_snapshot(surface)
-        discrepancies, missing, by_role = self._conformance_findings(snap, surface)
+        settle_evidence: dict[str, object] = {}
+        if snapshot is None and surface == 'base':
+            snap, discrepancies, missing, by_role, settle_evidence = (
+                self._settled_base_conformance_findings()
+            )
+        else:
+            snap = snapshot or self._conformance_snapshot(surface)
+            discrepancies, missing, by_role = self._conformance_findings(snap, surface)
         if not discrepancies and not missing:
             return True
         if discrepancies:
@@ -164,6 +175,7 @@ class _ChatGPTInlineBase:
                     missing=missing,
                     by_role=by_role,
                     snapshot=snap.serializable(),
+                    **settle_evidence,
                 )
         result.add_step(
             'tree_conformance',
@@ -178,6 +190,7 @@ class _ChatGPTInlineBase:
             missing=missing,
             by_role=by_role,
             snapshot=snap.serializable(),
+            **settle_evidence,
         )
         return False
 
@@ -234,6 +247,84 @@ class _ChatGPTInlineBase:
                 require_non_empty=True,
             )
         return self.runtime.snapshot()
+
+    def _settled_base_conformance_findings(
+        self,
+    ) -> tuple[Snapshot, list[dict[str, str | None]], list[dict[str, object]], dict[str, int], dict[str, object]]:
+        started = time.monotonic()
+        timeout = self._base_conformance_settle_seconds()
+        deadline = started + timeout
+        required_clean = self._base_conformance_clean_snapshots()
+        anchor_key = self._conformance_anchor_key('base')
+        clean_samples = 0
+        probes = 0
+        last_snapshot: Snapshot | None = None
+        last_findings: tuple[list[dict[str, str | None]], list[dict[str, object]], dict[str, int]] | None = None
+
+        while time.monotonic() < deadline:
+            remaining = max(0.1, deadline - time.monotonic())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(remaining, 1.2),
+                interval=0.2,
+                anchor_key=anchor_key,
+                require_non_empty=True,
+            )
+            probes += 1
+            last_findings = self._conformance_findings(last_snapshot, 'base')
+            discrepancies, missing, by_role = last_findings
+            if not discrepancies and not missing:
+                clean_samples += 1
+                if clean_samples >= required_clean:
+                    return last_snapshot, discrepancies, missing, by_role, {
+                        'base_conformance_clean_samples': clean_samples,
+                        'base_conformance_required_clean_samples': required_clean,
+                        'base_conformance_probes': probes,
+                        'base_conformance_elapsed_seconds': round(time.monotonic() - started, 3),
+                    }
+            else:
+                clean_samples = 0
+            time.sleep(0.2)
+
+        if last_snapshot is None or last_findings is None:
+            last_snapshot = self._conformance_snapshot('base')
+            last_findings = self._conformance_findings(last_snapshot, 'base')
+        discrepancies, missing, by_role = last_findings
+        return last_snapshot, discrepancies, missing, by_role, {
+            'base_conformance_clean_samples': clean_samples,
+            'base_conformance_required_clean_samples': required_clean,
+            'base_conformance_probes': probes,
+            'base_conformance_elapsed_seconds': round(time.monotonic() - started, 3),
+            'base_conformance_timeout_seconds': timeout,
+        }
+
+    def _base_conformance_clean_snapshots(self) -> int:
+        settle = self.cfg.get('settle') or {}
+        value = (
+            settle.get('base_conformance_clean_snapshots', BASE_CONFORMANCE_CLEAN_SNAPSHOTS)
+            if isinstance(settle, dict)
+            else BASE_CONFORMANCE_CLEAN_SNAPSHOTS
+        )
+        try:
+            return min(max(int(value), 2), 5)
+        except (TypeError, ValueError):
+            return BASE_CONFORMANCE_CLEAN_SNAPSHOTS
+
+    def _base_conformance_settle_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        candidates = [self._selection_settle_seconds()]
+        if isinstance(settle, dict):
+            for key in ('base_conformance_ms', 'clean_base_ms', 'navigate_ms', 'selection_ms', 'default_ms'):
+                value = settle.get(key)
+                try:
+                    candidates.append(max(0.0, float(value) / 1000.0))
+                except (TypeError, ValueError):
+                    continue
+        seconds = max(candidates or [0.0]) + 4.0
+        return min(
+            max(seconds, BASE_CONFORMANCE_SETTLE_FLOOR_SECONDS),
+            BASE_CONFORMANCE_SETTLE_CEILING_SECONDS,
+        )
 
     def _post_popup_recovery_findings(
         self,
@@ -402,7 +493,7 @@ class _ChatGPTInlineBase:
         *,
         timeout: float = 15.0,
     ) -> bool:
-        timeout = max(float(timeout), 15.0)
+        timeout = max(float(timeout), self._base_conformance_settle_seconds())
         groups = self._page_ready_key_groups()
         started = time.time()
         last_snapshot: Snapshot | None = None
@@ -1335,19 +1426,26 @@ class _ChatGPTInlineBase:
         return self.runtime.click(anchor)
 
     def _selection_wait_for_clean_base(self, anchor_key: str, *, timeout: float) -> Snapshot:
+        timeout = max(float(timeout), self._base_conformance_settle_seconds())
         deadline = time.time() + timeout
+        required_clean = self._base_conformance_clean_snapshots()
+        clean_samples = 0
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
             remaining = max(0.1, deadline - time.time())
             last_snapshot = self.runtime.wait_for_stable_snapshot(
                 consecutive=2,
-                timeout=min(remaining, 0.8),
+                timeout=min(remaining, 1.2),
                 interval=0.2,
                 anchor_key=anchor_key,
                 require_non_empty=True,
             )
             if self._selection_base_snapshot_clean(last_snapshot, anchor_key):
-                return last_snapshot
+                clean_samples += 1
+                if clean_samples >= required_clean:
+                    return last_snapshot
+            else:
+                clean_samples = 0
             time.sleep(0.2)
         return last_snapshot or self.runtime.snapshot()
 
@@ -3400,15 +3498,33 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         }
 
     def _bounded_composer_focus_target(self, snapshot: Snapshot, input_node) -> tuple[object | None, dict[str, object]]:
+        input_rect = self._screen_rect(input_node.atspi_obj) if input_node else None
         evidence: dict[str, object] = {
             'ok': False,
             'source': 'bounded_composer_ancestor',
             'input_node': self._element_evidence(input_node),
-            'input_rect': self._screen_rect(input_node.atspi_obj) if input_node else None,
+            'input_rect': input_rect,
         }
         if input_node is None or input_node.atspi_obj is None:
             evidence['reason'] = 'composer_input_missing'
             return None, evidence
+        if input_rect and int(input_rect.get('width') or 0) > 0 and int(input_rect.get('height') or 0) > 0:
+            x = int(input_rect['x'] + input_rect['width'] // 2)
+            y = int(input_rect['y'] + input_rect['height'] // 2)
+            target_evidence = {
+                'source': 'composer_input',
+                'depth': 0,
+                'broad': False,
+                'node': self._atspi_object_evidence(input_node.atspi_obj),
+            }
+            evidence.update({
+                'ok': True,
+                'reason': 'bounded_composer_input',
+                'target': target_evidence,
+                'click_point': {'x': x, 'y': y},
+                'checked_candidates': [target_evidence],
+            })
+            return input_node.atspi_obj, evidence
 
         seen: set[int] = set()
         candidates: list[tuple[str, int, object]] = []
@@ -3625,11 +3741,21 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                             snapshot=self.runtime.snapshot().serializable())
             return False
         time.sleep(0.8)
-        fresh_focus = self._focus_composer()
+        shortcut_library_windows_closed = self._close_firefox_library_windows()
+        if shortcut_library_windows_closed:
+            retry_focus = self._focus_composer()
+            if retry_focus is not None and self.runtime.press('ctrl+shift+o'):
+                fresh_focus = retry_focus
+                time.sleep(0.8)
+            else:
+                fresh_focus = None
+        else:
+            fresh_focus = self._focus_composer()
         if fresh_focus is None:
             result.add_step('clean_composer', False,
                             'ChatGPT fresh composer not focusable after New chat shortcut',
                             focus_node=self._element_evidence(initial_focus),
+                            browser_library_windows_closed=shortcut_library_windows_closed,
                             snapshot=self.runtime.snapshot().serializable())
             return False
         # Belt-and-suspenders: clear any draft the fresh chat restored, then
@@ -3668,13 +3794,27 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             return False
         time.sleep(0.3)
 
-        def _empty_fresh_composer():
-            snap = self.runtime.snapshot()
-            if self._bottommost_input(snap) and not self.snapshot_has_any(snap, self._send_button_keys()):
-                return snap
-            return None
-
-        verify_snap = self.runtime.wait_until(_empty_fresh_composer, timeout=5.0, interval=0.4)
+        verify_timeout = max(5.0, self._base_conformance_settle_seconds())
+        (
+            verify_snap,
+            empty_samples,
+            empty_probes,
+            empty_elapsed,
+        ) = self._wait_for_empty_fresh_composer(timeout=verify_timeout)
+        late_library_windows_closed = 0
+        if verify_snap is None:
+            late_library_windows_closed = self._close_firefox_library_windows()
+            if late_library_windows_closed:
+                retry_focus = self._focus_composer()
+                if retry_focus is not None and self.runtime.press('ctrl+shift+o'):
+                    fresh_focus = retry_focus
+                    time.sleep(0.8)
+                    (
+                        verify_snap,
+                        empty_samples,
+                        empty_probes,
+                        empty_elapsed,
+                    ) = self._wait_for_empty_fresh_composer(timeout=verify_timeout)
         if verify_snap is None:
             verify_snap = self.runtime.snapshot()
             result.add_step(
@@ -3685,14 +3825,94 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 send_button_present=self.snapshot_has_any(verify_snap, self._send_button_keys()),
                 focus_node=self._element_evidence(fresh_focus),
                 snapshot=verify_snap.serializable(),
+                empty_composer_clean_samples=empty_samples,
+                empty_composer_required_clean_samples=CLEAN_COMPOSER_EMPTY_SNAPSHOTS,
+                empty_composer_probes=empty_probes,
+                empty_composer_elapsed_seconds=round(empty_elapsed, 3),
+                empty_composer_timeout_seconds=verify_timeout,
+                browser_library_windows_closed=shortcut_library_windows_closed + late_library_windows_closed,
             )
             return False
+        late_library_windows_closed += self._close_firefox_library_windows()
         result.add_step('clean_composer', True,
                         'ChatGPT forced clean fresh chat via New chat shortcut',
                         shortcut='ctrl+shift+o',
                         focus_node=self._element_evidence(fresh_focus),
+                        empty_composer_clean_samples=empty_samples,
+                        empty_composer_required_clean_samples=CLEAN_COMPOSER_EMPTY_SNAPSHOTS,
+                        empty_composer_probes=empty_probes,
+                        empty_composer_elapsed_seconds=round(empty_elapsed, 3),
+                        browser_library_windows_closed=shortcut_library_windows_closed + late_library_windows_closed,
                         snapshot=verify_snap.serializable())
         return True
+
+    def _close_firefox_library_windows(self) -> int:
+        env = os.environ.copy()
+        env['DISPLAY'] = self._display()
+        try:
+            found = subprocess.run(
+                ['xdotool', 'search', '--onlyvisible', '--class', 'firefox'],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env=env,
+            )
+        except Exception:
+            return 0
+        closed = 0
+        for window_id in found.stdout.split():
+            try:
+                title = subprocess.run(
+                    ['xdotool', 'getwindowname', window_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    env=env,
+                ).stdout.strip()
+            except Exception:
+                continue
+            if title != 'Library':
+                continue
+            try:
+                subprocess.run(
+                    ['xdotool', 'windowclose', window_id],
+                    capture_output=True,
+                    timeout=3,
+                    env=env,
+                )
+                closed += 1
+            except Exception:
+                continue
+        if closed:
+            time.sleep(0.8)
+        return closed
+
+    def _wait_for_empty_fresh_composer(self, *, timeout: float) -> tuple[Snapshot | None, int, int, float]:
+        started = time.monotonic()
+        deadline = started + timeout
+        clean_samples = 0
+        probes = 0
+        last_snapshot: Snapshot | None = None
+        anchor_key = self._selection_base_anchor_key()
+
+        while time.monotonic() < deadline:
+            remaining = max(0.1, deadline - time.monotonic())
+            last_snapshot = self.runtime.wait_for_stable_snapshot(
+                consecutive=2,
+                timeout=min(remaining, 1.2),
+                interval=0.2,
+                anchor_key=anchor_key,
+                require_non_empty=True,
+            )
+            probes += 1
+            if self._bottommost_input(last_snapshot) and not self.snapshot_has_any(last_snapshot, self._send_button_keys()):
+                clean_samples += 1
+                if clean_samples >= CLEAN_COMPOSER_EMPTY_SNAPSHOTS:
+                    return last_snapshot, clean_samples, probes, time.monotonic() - started
+            else:
+                clean_samples = 0
+            time.sleep(0.2)
+        return None, clean_samples, probes, time.monotonic() - started
 
     # ------------------------------------------------------------------
     # File attachment
