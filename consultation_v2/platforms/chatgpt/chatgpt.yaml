@@ -621,6 +621,7 @@ workflow:
 settle:
   default_ms: 2000
   navigate_ms: 4000
+  base_conformance_ms: 45000
   attach_ms: 3500
   rescan_attempts: 1
 extraction:

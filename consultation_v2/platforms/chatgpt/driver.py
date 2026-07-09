@@ -3202,11 +3202,11 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
     def setup_and_send(
         self, request: ConsultationRequest, result: ConsultationResult,
     ) -> bool:
-        """LOCKED phase (FLOW §10): navigate → clean composer → mode → attach →
-        prompt → guarded send + monitor registration."""
+        """LOCKED phase (FLOW §10): navigate → page-ready → clean composer →
+        mode → attach → prompt → guarded send + monitor registration."""
         urls = self.cfg.get('urls', {})
         target_url = request.session_url or urls.get('fresh')
-        cleaned_before_ready = False
+        cleaned_fresh_chat = False
         if not self.runtime.switch():
             result.add_step('navigate', False, 'Could not switch to ChatGPT tab')
             return False
@@ -3217,16 +3217,18 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             result.add_step('navigate', navigated, 'Navigated to ChatGPT session target', target_url=target_url, snapshot=snap.serializable())
             if not navigated:
                 return False
+            if not self.wait_for_page_ready_after_navigation(result):
+                return False
             if not request.session_url:
                 if not self.clean_composer(request, result):
                     return False
-                cleaned_before_ready = True
-            if not self.wait_for_page_ready_after_navigation(result):
-                return False
+                cleaned_fresh_chat = True
+                if not self.wait_for_page_ready_after_navigation(result):
+                    return False
         if not self.tree_conformance_gate(result):
             return False
 
-        if not cleaned_before_ready and not self.clean_composer(request, result):
+        if not cleaned_fresh_chat and not self.clean_composer(request, result):
             return False
         if not self.apply_selection_plan(request, result):
             return False
