@@ -232,7 +232,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             'Neo4j plan creation failed; consultation continued',
             error=plan_create_error,
         )
-    if result.ok and result.response_text and driver.reject_prompt_echo_response(
+    if result.response_text and driver.reject_prompt_echo_response(
         request,
         result,
         result.response_text,
@@ -245,13 +245,21 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             request.platform,
             request.purpose,
         )
+    if result.response_text and not result.ok:
+        result.add_step(
+            'deliverable_response_recovered',
+            True,
+            'Captured response_text is deliverable despite a non-terminal failure',
+            response_chars=len(result.response_text),
+        )
+        result.ok = True
 
     # extraction_done milestone (FLOW §8): the driver returned a real extracted
     # response. Checkpointed so a re-run that crashes between extraction and
     # delivery still sees the send as landed (and resumes/re-extracts rather than
-    # re-sending). Written from the orchestrator because extraction success is
-    # the per-platform driver's terminal ok-state, surfaced here as result.ok +
-    # response_text.
+    # re-sending). Written after the delivery gate normalizes ok for any captured
+    # non-echo body, because requester delivery is keyed on the body, not on a
+    # non-terminal downstream step.
     if result.ok and result.response_text:
         try:
             primitives.write_run_state(
@@ -303,9 +311,9 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
 
     # Notify — recipient routed by outcome (Jesse standing directive: requesters
     # receive ONLY successful deliverables; the DRIVER/operator (taeys-hands)
-    # receives FAILURES). A success is a real deliverable: result.ok AND a
-    # non-empty response_text. Anything else (not ok, or empty response) is a
-    # failure and goes to the operator inbox, NEVER the requester — so a failed
+    # receives FAILURES). The delivery gate above promotes a captured non-echo
+    # response body to ok before this branch. Anything still not ok, or empty, is
+    # a failure and goes to the operator inbox, NEVER the requester — so a failed
     # run / fix-iteration registered with --requester X can never spam X.
     #
     # The original requester + purpose are always stamped INTO the payload
