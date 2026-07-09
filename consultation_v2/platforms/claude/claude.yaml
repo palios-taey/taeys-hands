@@ -195,6 +195,22 @@ tree:
       name: From Gmail
       role: push button
       scope: base.composer
+    surface_panel:
+      name: Surface
+      role: panel
+      scope: base.composer
+    chat_surface_toggle:
+      name: Chat
+      role: radio button
+      scope: base.composer
+    cowork_surface_toggle:
+      name: Cowork
+      role: radio button
+      scope: base.composer
+    buy_more_credit_state:
+      name: Buy more
+      role: push button
+      scope: base.credit_state
     research_mode:
       name: Research mode
       role: toggle button
