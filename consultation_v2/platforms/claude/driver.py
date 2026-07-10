@@ -1290,9 +1290,12 @@ class _ClaudeInlineBase:
         return last_snapshot or self.runtime.snapshot()
 
     def _selection_settle_after_menu_open(self, trigger_key: str, expected_key: str, scope: str) -> None:
+        # Any menu opened from the model_selector (the model menu AND the effort
+        # submenu) renders its radio items a beat after the trigger click, so the
+        # first post-open snapshot can miss model_opus/effort_* on a slow tree.
+        # Settle for either, not just the effort submenu.
         if (
             trigger_key != 'model_selector'
-            or expected_key != 'effort_menu'
             or scope.strip().lower() != 'app_root_snapshot'
         ):
             return
