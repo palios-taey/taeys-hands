@@ -514,8 +514,32 @@ class _PerplexityInlineBase:
         # Page readiness is narrower than base conformance: some platform
         # snapshots intentionally exclude sidebar/nav chrome, so this gate uses
         # only workflow controls required to interact with the composer.
+        # A mode-menu trigger button's accessible NAME is the CURRENTLY-selected
+        # mode (e.g. "Search" vs "Deep research"), so the trigger key only matches
+        # in the default state. When a mode is already selected, the button shows
+        # that option's active_element instead. Page-ready must accept EITHER, so
+        # each trigger group includes its options' active_elements as alternatives.
+        selection = (self.cfg.get('workflow') or {}).get('selection') or {}
+        menus = selection.get('menus') if isinstance(selection, dict) else None
+        trigger_alternatives: dict[str, tuple[str, ...]] = {}
+        if isinstance(menus, dict):
+            for menu_cfg in menus.values():
+                if not isinstance(menu_cfg, dict):
+                    continue
+                operate = menu_cfg.get('operate') or {}
+                trig = operate.get('trigger') if isinstance(operate, dict) else None
+                if not isinstance(trig, str):
+                    continue
+                alts: list[str] = [trig]
+                options = menu_cfg.get('options') or {}
+                if isinstance(options, dict):
+                    for opt in options.values():
+                        active = opt.get('active_element') if isinstance(opt, dict) else None
+                        if isinstance(active, str) and active.strip():
+                            alts.append(active.strip())
+                trigger_alternatives.setdefault(trig, tuple(alts))
         for key in self._selection_trigger_keys():
-            add_group((key,))
+            add_group(trigger_alternatives.get(key, (key,)))
 
         input_keys = self._workflow_prompt_keys(
             'input',
