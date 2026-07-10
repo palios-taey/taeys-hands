@@ -77,39 +77,19 @@ tree:
           - model_high
           - model_extra_high
           - model_pro
-          - model_gpt_5_5
-      model_menu.pro_hover:
+          - model_gpt_5_6_sol
+      model_menu.gpt_5_6_sol:
         expected:
           - model_instant
           - model_medium
           - model_high
           - model_extra_high
           - model_pro
-          - model_gpt_5_5
-          - model_pro_effort_options
-      model_menu.pro_effort:
-        expected:
-          - model_instant
-          - model_medium
-          - model_high
-          - model_extra_high
-          - model_pro
-          - model_gpt_5_5
-          - model_pro_effort_options
-          - model_pro_standard
-          - model_pro_extended
-      model_menu.gpt_5_5_legacy:
-        expected:
-          - model_instant
-          - model_medium
-          - model_high
-          - model_extra_high
-          - model_pro
-          - model_gpt_5_5
+          - model_gpt_5_6_sol
+          - model_gpt_5_6_sol_current
           - model_gpt_5_5_legacy_current
           - model_gpt_5_4
           - model_gpt_5_3
-          - model_gpt_4_5
           - model_o3
       tools_menu:
         expected:
@@ -232,6 +212,18 @@ tree:
       name: Look something up
       role: push button
       scope: base.composer
+    chat_surface_panel:
+      name: Select chat surface
+      role: panel
+      scope: base.composer
+    chat_surface_chat:
+      name: Chat
+      role: radio button
+      scope: base.composer
+    chat_surface_work:
+      name: Work
+      role: radio button
+      scope: base.composer
     input_chat_with_chatgpt:
       name: Chat with ChatGPT
       role: entry
@@ -285,7 +277,7 @@ tree:
       role: push button
       scope: connector_permission_modal
     model_instant:
-      name: Instant
+      name: Instant 5.5
       role: radio menu item
       scope: model_menu
       active_state: checked
@@ -310,61 +302,37 @@ tree:
       match_strategy: name_agnostic_structural
       structural:
         after: model_extra_high
-        before: model_gpt_5_5
-      reason: ChatGPT labels the top Pro row with the selected Pro effort
+        before: model_gpt_5_6_sol
+      reason: ChatGPT 5.6 exposes Pro as the top Pro row; nested Pro effort rows are no longer present.
       active_state: checked
-    model_gpt_5_5:
-      name: GPT-5.5
+    model_gpt_5_6_sol:
+      name: GPT-5.6 Sol
       role: menu item
       scope: model_menu
-    model_pro_effort_options:
-      name: Pro effort options
-      role: menu item
-      scope: model_menu.pro_hover
-    model_pro_standard:
+    model_gpt_5_6_sol_current:
+      name: GPT-5.6 Sol
       role: radio menu item
-      scope: model_menu.pro_effort
-      match_strategy: name_agnostic_structural
-      structural:
-        after: model_pro_effort_options
-      reason: ChatGPT can mirror selected effort labels into the top Pro row
-      active_state: checked
-    model_pro_extended:
-      role: radio menu item
-      scope: model_menu.pro_effort
-      match_strategy: name_agnostic_structural
-      structural:
-        after: model_pro_standard
-      reason: ChatGPT can mirror selected effort labels into the top Pro row
+      scope: model_menu.gpt_5_6_sol
       active_state: checked
     model_gpt_5_5_legacy_current:
       name: GPT-5.5
       role: radio menu item
-      scope: model_menu.gpt_5_5_legacy
+      scope: model_menu.gpt_5_6_sol
       active_state: checked
     model_gpt_5_4:
-      name: GPT-5.4
+      name: GPT-5.4 Leaving on July 23
       role: radio menu item
-      scope: model_menu.gpt_5_5_legacy
+      scope: model_menu.gpt_5_6_sol
       active_state: checked
     model_gpt_5_3:
       name: GPT-5.3
       role: radio menu item
-      scope: model_menu.gpt_5_5_legacy
-      active_state: checked
-    model_gpt_4_5:
-      role: radio menu item
-      scope: model_menu.gpt_5_5_legacy
-      match_strategy: name_agnostic_structural
-      structural:
-        after: model_gpt_5_3
-        before: model_o3
-      reason: GPT-4.5 label carries a time-varying leaving date
+      scope: model_menu.gpt_5_6_sol
       active_state: checked
     model_o3:
       name: o3
       role: radio menu item
-      scope: model_menu.gpt_5_5_legacy
+      scope: model_menu.gpt_5_6_sol
       active_state: checked
     tool_upload:
       name: Add photos & files Control U
@@ -469,45 +437,33 @@ workflow:
           pro:
             element: model_pro
           pro_standard:
-            element: model_pro_standard
-            path:
-              - element: model_pro
-                action: hover
-              - element: model_pro_effort_options
-                action: press
+            element: model_pro
           pro_extended:
-            element: model_pro_extended
-            active_trigger_names:
-              - Pro Extended
+            element: model_pro
+          gpt_5_6_sol:
+            element: model_gpt_5_6_sol_current
             path:
-              - element: model_pro
+              - element: model_gpt_5_6_sol
                 action: hover
-              - element: model_pro_effort_options
-                action: press
           gpt_5_5:
             element: model_gpt_5_5_legacy_current
             path:
-              - element: model_gpt_5_5
+              - element: model_gpt_5_6_sol
                 action: hover
           gpt_5_4:
             element: model_gpt_5_4
             path:
-              - element: model_gpt_5_5
+              - element: model_gpt_5_6_sol
                 action: hover
           gpt_5_3:
             element: model_gpt_5_3
             path:
-              - element: model_gpt_5_5
-                action: hover
-          gpt_4_5:
-            element: model_gpt_4_5
-            path:
-              - element: model_gpt_5_5
+              - element: model_gpt_5_6_sol
                 action: hover
           o3:
             element: model_o3
             path:
-              - element: model_gpt_5_5
+              - element: model_gpt_5_6_sol
                 action: hover
         default_for_fresh: pro_extended
         example_rationale: Use Pro Extended for high-stakes work that needs the deepest available reasoning.
