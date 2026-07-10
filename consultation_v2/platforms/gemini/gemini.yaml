@@ -193,8 +193,8 @@ tree:
       - enabled
 workflow:
   defaults:
-    model: null
-    mode: deep_think
+    model: pro
+    mode: deep_research
     tools: []
   selection:
     menus:
@@ -214,7 +214,7 @@ workflow:
           thinking:
             element: mode_thinking
         default_for_fresh: pro
-        example_rationale: Use Gemini 3.1 Pro before Deep Think so the consult does not silently run on Flash.
+        example_rationale: Use Gemini 3.1 Pro as the base model for Deep Research.
       mode:
         select: single
         active_recognition: checked
@@ -233,8 +233,8 @@ workflow:
           deep_research:
             element: tool_deep_research
             active_element: tool_deselect_deep_research
-        default_for_fresh: deep_think
-        example_rationale: Use Deep Think for substantive Gemini reasoning unless a research report is explicitly needed.
+        default_for_fresh: deep_research
+        example_rationale: Use Deep Research by default because Deep Think access is not available on the current Gemini plan.
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
