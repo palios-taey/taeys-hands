@@ -384,9 +384,9 @@ validation:
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
 #  - assistant_text: normal answer via the mapped `copy_button`.
-#  - research_report: Deep Research full report via the mapped
-#    `copy_contents_button` ("Copy contents" at the top of the report card) —
-#    the clean structured markdown. Production-proven on :6 (23.7k extracted).
+#  - research_report: Deep Research full report via the mapped report controls:
+#    first `copy_contents_button` ("Copy contents" at the top of the report card),
+#    then `copy_code` when the primary report content is a virtualized code block.
 #    Do NOT use the bottom icon-row `copy_button` (summary only) or
 #    `download_button` -> Markdown (transcript with hidden footnote refs); the
 #    report control is scrolled into view before activation.
@@ -405,6 +405,10 @@ extraction:
         element: copy_contents_button
       - action: copy_element
         element: copy_contents_button
+      - action: read_clipboard
+        validation: response_complete
+      - action: copy_element
+        element: copy_code
       - action: read_clipboard
         validation: response_complete
       - action: read_tree_text
