@@ -662,6 +662,8 @@ workflow:
       - artifact_copy_markdown_title_menu_item
 settle:
   default_ms: 1500
+  model_menu_ms: 1000
+  effort_menu_reveal_ms: 20000
   navigate_ms: 3500
   attach_ms: 2500
   send_validation_ms: 90000

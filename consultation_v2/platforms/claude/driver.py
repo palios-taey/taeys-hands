@@ -1187,6 +1187,7 @@ class _ClaudeInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
+        self._selection_settle_after_menu_open(trigger_key, expected_key, scope)
         snapshot, expected = self._selection_wait_for_revealed_anchor(expected_key, scope)
         if expected is None:
             result.add_step(
@@ -1287,6 +1288,26 @@ class _ClaudeInlineBase:
                 clean_samples = 0
             time.sleep(0.2)
         return last_snapshot or self.runtime.snapshot()
+
+    def _selection_settle_after_menu_open(self, trigger_key: str, expected_key: str, scope: str) -> None:
+        if (
+            trigger_key != 'model_selector'
+            or expected_key != 'effort_menu'
+            or scope.strip().lower() != 'app_root_snapshot'
+        ):
+            return
+        settle_seconds = self._selection_model_menu_settle_seconds()
+        if settle_seconds > 0:
+            time.sleep(settle_seconds)
+
+    def _selection_model_menu_settle_seconds(self) -> float:
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('model_menu_ms', 1000) if isinstance(settle, dict) else 1000
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            seconds = 1.0
+        return min(max(0.0, seconds), max(self._selection_settle_seconds(), 0.1))
 
     def _selection_base_snapshot_clean(self, snapshot: Snapshot, anchor_key: str) -> bool:
         if not snapshot.has(anchor_key):
@@ -1412,7 +1433,7 @@ class _ClaudeInlineBase:
         return closed_snapshot or self.runtime.menu_snapshot(), False
 
     def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        timeout = self._selection_hover_revealed_anchor_timeout_seconds(key)
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         roles = ['menu item', 'radio menu item', 'check menu item', 'option']
@@ -1567,6 +1588,18 @@ class _ClaudeInlineBase:
             return max(0.0, float(value) / 1000.0)
         except (TypeError, ValueError):
             return 0.8
+
+    def _selection_hover_revealed_anchor_timeout_seconds(self, key: str) -> float:
+        base_timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        if key not in {'effort_low', 'effort_medium', 'effort_high_default', 'effort_extra', 'effort_max'}:
+            return base_timeout
+        settle = self.cfg.get('settle') or {}
+        value = settle.get('effort_menu_reveal_ms', 20000) if isinstance(settle, dict) else 20000
+        try:
+            configured = float(value) / 1000.0
+        except (TypeError, ValueError):
+            configured = 20.0
+        return max(base_timeout, min(max(1.0, configured), 60.0))
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
