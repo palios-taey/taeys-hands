@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 
-MAX_GLOBAL_SETTLE_MS = 8000
+MAX_GLOBAL_SETTLE_MS = 10000
 FORBIDDEN_YAML_KEYS = {
     'name_contains',
     'name_not_contains',

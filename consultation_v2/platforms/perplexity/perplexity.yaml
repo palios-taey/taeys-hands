@@ -341,9 +341,9 @@ workflow:
     copy_contents_key: copy_contents_button
 settle:
   default_ms: 8000
-  navigate_ms: 3500
+  navigate_ms: 10000
   attach_ms: 2500
-  rescan_attempts: 1
+  rescan_attempts: 3
 
 validation:
   attach_success:
