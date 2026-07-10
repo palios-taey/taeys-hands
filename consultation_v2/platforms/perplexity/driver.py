@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -49,6 +50,12 @@ DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 # never a silent false-complete and never an infinite wait.
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
+PERPLEXITY_FILE_DIALOG_TITLE_PATTERNS = (
+    'File Upload - Perplexity',
+    'File Upload',
+    'Open File',
+    'Open',
+)
 
 
 class _PerplexityInlineBase:
@@ -3208,6 +3215,155 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
     # File attachment
     # ------------------------------------------------------------------
 
+    def _dialog_env(self) -> dict[str, str]:
+        env_factory = getattr(self.runtime, '_dialog_env', None)
+        if callable(env_factory):
+            return env_factory()
+        return {**os.environ, 'DISPLAY': self._display()}
+
+    @staticmethod
+    def _is_file_dialog_title(title: str) -> bool:
+        normalized = title.strip().lower()
+        return (
+            normalized == 'open'
+            or normalized == 'open file'
+            or normalized.startswith('file upload')
+        )
+
+    @staticmethod
+    def _xdotool_search(args: list[str], env: dict[str, str], timeout: int = 2) -> list[str]:
+        try:
+            result = subprocess.run(
+                ['xdotool', 'search', *args],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=env,
+            )
+        except Exception:
+            return []
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        return [wid for wid in result.stdout.strip().split() if wid]
+
+    @staticmethod
+    def _xdotool_window_name(window_id: str, env: dict[str, str]) -> str:
+        try:
+            result = subprocess.run(
+                ['xdotool', 'getwindowname', window_id],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env=env,
+            )
+        except Exception:
+            return ''
+        if result.returncode != 0:
+            return ''
+        return result.stdout.strip()
+
+    @staticmethod
+    def _activate_x_window(window_id: str, env: dict[str, str]) -> bool:
+        for command in ('windowactivate', 'windowfocus'):
+            try:
+                result = subprocess.run(
+                    ['xdotool', command, window_id],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    env=env,
+                )
+            except Exception:
+                continue
+            if result.returncode == 0 and 'error' not in (result.stderr or '').lower():
+                time.sleep(0.3)
+                return True
+        return False
+
+    def _focus_platform_firefox_for_attach(self, env: dict[str, str]) -> bool:
+        window_ids = self._xdotool_search(['--onlyvisible', '--class', 'Firefox'], env)
+        for window_id in reversed(window_ids):
+            title = self._xdotool_window_name(window_id, env)
+            if title.strip().lower() == 'firefox' or self._is_file_dialog_title(title):
+                continue
+            if self._activate_x_window(window_id, env):
+                return True
+        return False
+
+    def _find_perplexity_file_dialog_window(self, env: dict[str, str]) -> tuple[str, str] | None:
+        seen: set[str] = set()
+        for title_pattern in PERPLEXITY_FILE_DIALOG_TITLE_PATTERNS:
+            for search_args in (
+                ['--onlyvisible', '--name', title_pattern],
+                ['--name', title_pattern],
+            ):
+                for window_id in self._xdotool_search(search_args, env):
+                    if window_id in seen:
+                        continue
+                    seen.add(window_id)
+                    title = self._xdotool_window_name(window_id, env) or title_pattern
+                    if self._is_file_dialog_title(title):
+                        return window_id, title
+        return None
+
+    def _wait_for_perplexity_file_dialog_window(
+        self,
+        env: dict[str, str],
+        timeout: float,
+        interval: float = 0.25,
+    ) -> tuple[tuple[str, str] | None, float]:
+        started = time.monotonic()
+        deadline = started + max(float(timeout), 0.1)
+        while time.monotonic() < deadline:
+            found = self._find_perplexity_file_dialog_window(env)
+            if found is not None:
+                return found, round(time.monotonic() - started, 3)
+            time.sleep(interval)
+        return None, round(time.monotonic() - started, 3)
+
+    def _focus_perplexity_file_dialog_for_attach(
+        self,
+        timeout: float = 12.0,
+    ) -> tuple[bool, dict[str, object]]:
+        env = self._dialog_env()
+        firefox_focused = self._focus_platform_firefox_for_attach(env)
+        found, waited = self._wait_for_perplexity_file_dialog_window(env, timeout)
+        evidence: dict[str, object] = {
+            'firefox_focused_before_dialog_wait': firefox_focused,
+            'dialog_wait_seconds': waited,
+            'dialog_wait_timeout_seconds': timeout,
+        }
+        if found is None:
+            evidence['dialog_found'] = False
+            return False, evidence
+        window_id, title = found
+        activated = self._activate_x_window(window_id, env)
+        evidence.update({
+            'dialog_found': True,
+            'dialog_window_id': window_id,
+            'dialog_title': title,
+            'dialog_activated': activated,
+        })
+        if activated:
+            return True, evidence
+        runtime_focused = self.runtime.focus_file_dialog()
+        evidence['runtime_focus_file_dialog'] = runtime_focused
+        return runtime_focused, evidence
+
+    def _fail_attach_with_dialog_cleanup(
+        self,
+        result: ConsultationResult,
+        message: str,
+        *,
+        snapshot: Snapshot | None = None,
+        **evidence: object,
+    ) -> bool:
+        evidence['closed_orphan_file_dialogs'] = self.runtime.close_stale_dialogs()
+        if snapshot is not None:
+            evidence['snapshot'] = snapshot.serializable()
+        result.add_step('attach', False, message, **evidence)
+        return False
+
     def attach_files(
         self,
         request: ConsultationRequest,
@@ -3259,46 +3415,48 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 )
                 return False
             time.sleep(0.8)
-            if not self.runtime.focus_file_dialog():
-                result.add_step(
-                    'attach', False,
+            focused, dialog_evidence = self._focus_perplexity_file_dialog_for_attach()
+            if not focused:
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog did not focus for {abs_path}',
-                    snapshot=menu_snap.serializable(),
+                    snapshot=menu_snap,
+                    **dialog_evidence,
                 )
-                return False
             if not self.runtime.press('ctrl+l'):
-                result.add_step(
-                    'attach', False,
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog location shortcut failed for {abs_path}',
+                    **dialog_evidence,
                 )
-                return False
             time.sleep(0.2)
             if not self.runtime.press('ctrl+a'):
-                result.add_step(
-                    'attach', False,
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog select-all failed for {abs_path}',
+                    **dialog_evidence,
                 )
-                return False
             time.sleep(0.1)
             if not self.runtime.paste(abs_path):
-                result.add_step(
-                    'attach', False,
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog path paste failed for {abs_path}',
+                    **dialog_evidence,
                 )
-                return False
             time.sleep(0.2)
-            if not self.runtime.focus_file_dialog():
-                result.add_step(
-                    'attach', False,
+            focused, submit_dialog_evidence = self._focus_perplexity_file_dialog_for_attach()
+            if not focused:
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog lost focus before submit for {abs_path}',
+                    **submit_dialog_evidence,
                 )
-                return False
             if not self.runtime.press('Return'):
-                result.add_step(
-                    'attach', False,
+                return self._fail_attach_with_dialog_cleanup(
+                    result,
                     f'Perplexity file dialog submit failed for {abs_path}',
+                    **submit_dialog_evidence,
                 )
-                return False
             time.sleep(1.2)
             verify_snap = self.wait_for_validation(
                 'attach_success',
@@ -3314,6 +3472,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 snapshot=verify_snap.serializable(),
             )
             if not verified:
+                self.runtime.close_stale_dialogs()
                 return False
         if not request.attachments:
             result.add_step('attach', True, 'No Perplexity attachments requested')
