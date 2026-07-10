@@ -795,12 +795,17 @@ class _GeminiInlineBase:
     def apply_selection_plan(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         plan = self._current_selection_plan
         if plan is None:
-            result.add_step(
-                'selection_plan',
-                False,
-                'Selection plan missing before SELECT; driver.run must gate before browser action',
-            )
-            return False
+            try:
+                plan = build_selection_plan(request)
+            except SelectionPlanError as exc:
+                result.add_step(
+                    'selection_plan',
+                    False,
+                    'Selection plan rejected before SELECT',
+                    findings=list(exc.findings),
+                )
+                return False
+            self._current_selection_plan = plan
         self._selection_menu_transition_seen = False
         for step in plan:
             if step.get('skip'):
@@ -1696,6 +1701,26 @@ class _GeminiInlineBase:
             return False
         return True
 
+    def _resolved_selection_value(
+        self,
+        request: ConsultationRequest,
+        menu_key: str,
+        default: Any = None,
+    ) -> Any:
+        plan = self._current_selection_plan or []
+        for step in reversed(plan):
+            if str(step.get('menu') or '') != menu_key:
+                continue
+            if step.get('skip'):
+                return 'none'
+            option = step.get('option')
+            if option is not None:
+                return option
+            value = step.get('value')
+            if value is not None:
+                return value
+        return request.selection_value(menu_key, default)
+
     def serialize_artifacts(self, artifacts: Iterable[ExtractedArtifact]) -> List[str]:
         return [json.dumps(artifact.serializable(), sort_keys=True) for artifact in artifacts]
 
@@ -2173,7 +2198,7 @@ class _GeminiInlineBase:
             'platform': self.platform,
             'url': url,
             'requester': request.requester or 'unknown',
-            'mode': str(request.selection_value('mode', '') or ''),
+            'mode': str(self._resolved_selection_value(request, 'mode', '') or ''),
             'timeout': request.timeout,
             'request_id': request.request_id(),
             'prompt_hash': request.prompt_hash(),
@@ -3247,7 +3272,10 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         # report. Generous timeout: plan generation can take ~1 min. Gated on the
         # deep_research mode so single-step modes (deep_think/normal/…) are
         # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
-        is_dr_send = str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research'
+        is_dr_send = (
+            str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+            == 'deep_research'
+        )
         start_research_evidence: dict[str, object] = {}
         if is_dr_send:
             post_send_clicked, start_research_evidence = self._launch_deep_research_from_plan()
@@ -3320,7 +3348,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             return super().monitor_generation(
                 request,
                 result,
-                mode=mode,
+                mode=detector_mode,
                 seed_stop_seen=seed_stop_seen,
             )
         return self._monitor_deep_think_generation(
@@ -3335,7 +3363,10 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         request: ConsultationRequest,
         mode: str | None = None,
     ) -> str:
-        selected = mode if mode is not None else request.selection_value('mode', '')
+        selected = (
+            mode if mode is not None
+            else self._resolved_selection_value(request, 'mode', '')
+        )
         return str(selected or '').strip().lower()
 
     def _monitor_deep_think_generation(
@@ -3629,7 +3660,10 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         # full report is copied via the panel's "Share & Export" -> "Copy" (a
         # menu item in the popover), NOT the chat-bubble Copy push button.
         # Proven 2026-06-15: 36KB report via this path vs 89 chars via the bubble.
-        if str(request.selection_value('mode', '') or '').strip().lower() == 'deep_research':
+        if (
+            str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+            == 'deep_research'
+        ):
             # Resolve Share & Export from a LIVE app-root scan (no cache-clear) so
             # the atspi_obj is fresh — a stale snapshot ref do_action's True but
             # doesn't open the popover (p8 2026-06-21). atspi_only = do_action(0)
@@ -3713,7 +3747,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        mode = str(request.selection_value('mode', '') or '').strip().lower()
+        mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
         # For Deep Research, extract_primary already captured the full report via
         # Share & Export -> Copy; re-running that path here would only duplicate it.
         if mode == 'deep_research':
