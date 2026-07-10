@@ -456,10 +456,9 @@ tree:
       scope: model_more_menu
       active_state: checked
     model_fable:
-      # Needs live :3 confirmation; last audit saw this disabled/unavailable.
-      name: Fable 5Currently unavailable For your toughest challenges
+      name: Fable 5 Included until July 12 For your toughest challenges
       role: radio menu item
-      scope: model_more_menu
+      scope: model_menu
     effort_menu:
       # Needs live :3 confirmation; Claude labels this row with dynamic effort text.
       role: menu item
@@ -533,9 +532,6 @@ workflow:
                 action: click
           fable:
             element: model_fable
-            path:
-              - element: model_more
-                action: click
         default_for_fresh: opus
         example_rationale: Use Opus for deep synthesis, complex audits, and high-stakes mission work.
       mode:
