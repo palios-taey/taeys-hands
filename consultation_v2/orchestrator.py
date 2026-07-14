@@ -128,7 +128,23 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     consolidated_path = ''
     package_paths = []
     identity_mode = 'identity_consolidated'
-    if request.no_identity:
+    if request.no_identity and not request.attach_identity:
+        raise IdentityError(
+            'no_identity and attach_identity=False are mutually exclusive; use '
+            'one explicit identity mode for this consultation.'
+        )
+    if not request.attach_identity:
+        provenance = (
+            validate_caller_attachments(caller_attachments)
+            if caller_attachments else []
+        )
+        identity_mode = 'identity_attachment_skipped'
+        request = replace(
+            request,
+            attachments=caller_attachments,
+            caller_attachment_provenance=provenance,
+        )
+    elif request.no_identity:
         if not caller_attachments:
             raise IdentityError(
                 '--no-identity requires at least one --attach file; refusing to '

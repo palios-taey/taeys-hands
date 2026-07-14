@@ -63,6 +63,7 @@ class ConsultationRequest:
     no_neo4j: bool = False
     store_enabled: bool = False
     no_identity: bool = False
+    attach_identity: bool = True
     session_type: Optional[str] = None
     purpose: Optional[str] = None
     requester: Optional[str] = None
@@ -133,7 +134,16 @@ class ConsultationRequest:
         which irreversible turn this is."""
         session_target = self.session_url or 'new'
         seed = f'{self.platform}\x1f{session_target}\x1f{self.prompt_hash()}'
-        if self.no_identity:
+        if not self.attach_identity:
+            provenance = self.caller_attachment_provenance or []
+            if provenance:
+                attachment_seed = '\x1e'.join(
+                    f'{prov.path}\x1d{prov.sha256}' for prov in provenance
+                )
+            else:
+                attachment_seed = '\x1e'.join(self.attachments)
+            seed = f'{seed}\x1fidentity_attachment_skipped\x1f{attachment_seed}'
+        elif self.no_identity:
             provenance = self.caller_attachment_provenance or []
             if provenance:
                 attachment_seed = '\x1e'.join(
@@ -299,6 +309,7 @@ class ConsultationResult:
                 'no_neo4j': self.request.no_neo4j,
                 'store_enabled': self.request.store_enabled,
                 'no_identity': self.request.no_identity,
+                'attach_identity': self.request.attach_identity,
                 'session_type': self.request.session_type,
                 'purpose': self.request.purpose,
             },
