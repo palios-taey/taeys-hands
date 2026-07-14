@@ -2958,11 +2958,16 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             )
             if not navigated:
                 return False
+        if not self._dismiss_computer_onboarding(result):
+            return False
+        if target_url:
             if not self.wait_for_page_ready_after_navigation(result):
                 return False
         if not self._wait_for_prompt_ready(result):
             return False
         if not self.apply_selection_plan(request, result):
+            return False
+        if not self._dismiss_computer_onboarding(result):
             return False
         if request.selection_list('connectors'):
             if not self.toggle_connectors(request, result):
@@ -3018,6 +3023,168 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             ),
             input_key=input_key,
             snapshot=snap.serializable(),
+        )
+        return verified
+
+    def _computer_onboarding_cfg(self) -> dict[str, Any]:
+        workflow = self.cfg.get('workflow') or {}
+        onboarding = workflow.get('onboarding') if isinstance(workflow, dict) else None
+        cfg = onboarding.get('computer_setup') if isinstance(onboarding, dict) else None
+        if not isinstance(cfg, dict):
+            raise ValueError('Perplexity YAML workflow.onboarding.computer_setup is required')
+        return cfg
+
+    def _computer_onboarding_keys(self, cfg: dict[str, Any], name: str) -> list[str]:
+        raw_keys = cfg.get(name)
+        if not isinstance(raw_keys, list) or not raw_keys:
+            raise ValueError(
+                f'Perplexity YAML workflow.onboarding.computer_setup.{name} '
+                'must be a non-empty key list'
+            )
+        element_map = (self.cfg.get('tree') or {}).get('element_map') or {}
+        keys: list[str] = []
+        for raw_key in raw_keys:
+            key = str(raw_key).strip() if isinstance(raw_key, str) else ''
+            if not key:
+                continue
+            if key not in element_map:
+                raise ValueError(
+                    f'Perplexity onboarding key {key!r} is not declared in tree.element_map'
+                )
+            keys.append(key)
+        if not keys:
+            raise ValueError(
+                f'Perplexity YAML workflow.onboarding.computer_setup.{name} '
+                'must contain at least one declared element key'
+            )
+        return keys
+
+    @staticmethod
+    def _computer_onboarding_dismiss_keys(cfg: dict[str, Any]) -> list[str]:
+        raw_keys = cfg.get('dismiss_keys')
+        if not isinstance(raw_keys, list) or not raw_keys:
+            raise ValueError(
+                'Perplexity YAML workflow.onboarding.computer_setup.dismiss_keys '
+                'must be a non-empty key list'
+            )
+        keys = [
+            str(raw_key).strip()
+            for raw_key in raw_keys
+            if isinstance(raw_key, str) and raw_key.strip()
+        ]
+        if not keys:
+            raise ValueError(
+                'Perplexity YAML workflow.onboarding.computer_setup.dismiss_keys '
+                'must contain at least one key chord'
+            )
+        return keys
+
+    @staticmethod
+    def _computer_onboarding_timeout_seconds(
+        cfg: dict[str, Any],
+        name: str,
+        default_ms: int,
+    ) -> float:
+        value = cfg.get(name, default_ms)
+        try:
+            seconds = float(int(value)) / 1000.0
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'Perplexity YAML workflow.onboarding.computer_setup.{name} '
+                'must be integer milliseconds'
+            ) from exc
+        return max(seconds, 0.1)
+
+    @staticmethod
+    def _snapshot_has_all(snapshot: Snapshot, keys: Iterable[str]) -> bool:
+        return all(snapshot.has(key) for key in keys)
+
+    def _dismiss_computer_onboarding(
+        self,
+        result: ConsultationResult,
+        *,
+        initial_snapshot: Snapshot | None = None,
+    ) -> bool:
+        cfg = self._computer_onboarding_cfg()
+        marker_keys = self._computer_onboarding_keys(cfg, 'markers')
+        standard_keys = self._computer_onboarding_keys(cfg, 'standard_composer')
+        dismiss_keys = self._computer_onboarding_dismiss_keys(cfg)
+        detect_timeout = self._computer_onboarding_timeout_seconds(
+            cfg, 'detect_timeout_ms', 6000
+        )
+        settle_timeout = self._computer_onboarding_timeout_seconds(
+            cfg, 'settle_ms', 8000
+        )
+        last_snapshot = initial_snapshot
+
+        def classify(snapshot: Snapshot) -> str | None:
+            if self.snapshot_has_any(snapshot, marker_keys):
+                return 'onboarding'
+            if self._snapshot_has_all(snapshot, standard_keys):
+                return 'standard'
+            return None
+
+        observed = classify(last_snapshot) if last_snapshot is not None else None
+        if observed is None:
+            def probe() -> str | None:
+                nonlocal last_snapshot
+                last_snapshot = self.runtime.snapshot()
+                return classify(last_snapshot)
+
+            observed = self.runtime.wait_until(
+                probe,
+                timeout=detect_timeout,
+                interval=0.4,
+            )
+        if observed != 'onboarding':
+            return True
+
+        before_snapshot = last_snapshot or self.runtime.snapshot()
+        self.runtime.focus_firefox()
+        pressed: list[str] = []
+        failed: list[str] = []
+        for dismiss_key in dismiss_keys:
+            if self.runtime.press(dismiss_key):
+                pressed.append(dismiss_key)
+            else:
+                failed.append(dismiss_key)
+            time.sleep(0.2)
+
+        final_snapshot: Snapshot | None = None
+
+        def standard_probe() -> Snapshot | None:
+            nonlocal final_snapshot
+            final_snapshot = self.runtime.snapshot()
+            if self._snapshot_has_all(final_snapshot, standard_keys):
+                return final_snapshot
+            return None
+
+        restored = self.runtime.wait_until(
+            standard_probe,
+            timeout=settle_timeout,
+            interval=0.4,
+        )
+        snapshot = (
+            restored
+            if isinstance(restored, Snapshot)
+            else (final_snapshot or self.runtime.snapshot())
+        )
+        verified = isinstance(restored, Snapshot)
+        result.add_step(
+            'computer_onboarding',
+            verified,
+            (
+                'Dismissed Perplexity Computer onboarding; standard composer restored'
+                if verified else
+                'Perplexity Computer onboarding did not restore the standard composer'
+            ),
+            marker_keys=marker_keys,
+            standard_keys=standard_keys,
+            dismiss_keys=dismiss_keys,
+            pressed_keys=pressed,
+            failed_keys=failed,
+            before_snapshot=before_snapshot.serializable(),
+            snapshot=snapshot.serializable(),
         )
         return verified
 

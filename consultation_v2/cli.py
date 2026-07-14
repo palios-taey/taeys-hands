@@ -61,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Attach only caller-provided files; do not prepend FAMILY_KERNEL or platform IDENTITY.',
     )
+    parser.add_argument(
+        '--skip-identity-attachment',
+        action='store_true',
+        help='Send the prompt without an identity package; caller attachments, if any, are still attached.',
+    )
     parser.add_argument('--session-type', default=None)
     parser.add_argument('--purpose', default=None)
     parser.add_argument('--requester', default=None,
@@ -146,6 +151,30 @@ def _resolve_identity_for_dry_run(
     request: ConsultationRequest,
 ) -> tuple[ConsultationRequest, dict[str, Any]]:
     caller_attachments = list(request.attachments)
+    if request.no_identity and not request.attach_identity:
+        raise IdentityError(
+            'no_identity and attach_identity=False are mutually exclusive; use '
+            'one explicit identity mode for this consultation.'
+        )
+    if not request.attach_identity:
+        provenance = (
+            validate_caller_attachments(caller_attachments)
+            if caller_attachments else []
+        )
+        return (
+            replace(
+                request,
+                attachments=caller_attachments,
+                caller_attachment_provenance=provenance,
+            ),
+            {
+                'mode': 'identity_attachment_skipped',
+                'package_paths': caller_attachments,
+                'caller_attachment_provenance': [
+                    item.serializable() for item in provenance
+                ],
+            },
+        )
     if request.no_identity:
         if not caller_attachments:
             raise IdentityError(
@@ -222,6 +251,7 @@ def _request_record(request: ConsultationRequest) -> dict[str, Any]:
         'store_enabled': request.store_enabled,
         'external_store_enabled': storage_policy.external_store_enabled(request),
         'no_identity': request.no_identity,
+        'attach_identity': request.attach_identity,
         'session_type': request.session_type,
         'purpose': request.purpose,
         'requester': request.requester,
@@ -240,6 +270,8 @@ def main() -> int:
         selections = parse_select_args(args.platform, list(args.select or []))
     except ValueError as exc:
         parser.error(str(exc))
+    if args.no_identity and args.skip_identity_attachment:
+        parser.error('--no-identity and --skip-identity-attachment are mutually exclusive')
     if args.no_identity and not args.attach:
         parser.error('--no-identity requires at least one --attach file')
     request = ConsultationRequest(
@@ -253,6 +285,7 @@ def main() -> int:
         no_neo4j=args.no_neo4j,
         store_enabled=args.store,
         no_identity=args.no_identity,
+        attach_identity=not args.skip_identity_attachment,
         session_type=args.session_type,
         purpose=args.purpose,
         requester=args.requester,
