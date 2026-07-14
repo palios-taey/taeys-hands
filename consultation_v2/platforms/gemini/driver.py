@@ -2980,6 +2980,8 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             return False
         if not self.enter_prompt(request, result):
             return False
+        if not self._ensure_non_deep_research_tool_state(request, result):
+            return False
         # Idempotent send seam (FLOW §8): guarded_send reads durable run-state
         # first and RESUMES a landed send instead of re-sending; otherwise it
         # performs the real send via self.send_prompt and checkpoints submitted.
@@ -3135,6 +3137,130 @@ class GeminiConsultationDriver(_GeminiInlineBase):
                         snapshot=verify_snap.serializable())
         return verified
 
+    def _resolved_mode_is_deep_research(self, request: ConsultationRequest) -> bool:
+        mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+        if mode != 'deep_research':
+            return False
+
+        requested_mode = (
+            request.selection_value('mode', None)
+            if 'mode' in (request.selections or {})
+            else None
+        )
+        if str(requested_mode or '').strip().lower() in {'deep_research', 'default'}:
+            return True
+
+        requested_model = (
+            request.selection_value('model', None)
+            if 'model' in (request.selections or {})
+            else None
+        )
+        if str(requested_model or '').strip().lower() in {'fast', 'pro', 'thinking'}:
+            return False
+        return True
+
+    def _resolved_mode_label(self, request: ConsultationRequest) -> str:
+        mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+        if mode == 'deep_research' and not self._resolved_mode_is_deep_research(request):
+            return 'none'
+        return mode
+
+    def _wait_for_deep_research_inactive(
+        self,
+        *,
+        timeout: float = 6.0,
+        interval: float = 0.4,
+    ) -> Snapshot:
+        last_snapshot: Snapshot | None = None
+
+        def _probe() -> Snapshot | None:
+            nonlocal last_snapshot
+            last_snapshot = self.runtime.snapshot()
+            if not self.validation_passes(last_snapshot, 'deep_research_active'):
+                return last_snapshot
+            return None
+
+        matched = self.runtime.wait_until(_probe, timeout=timeout, interval=interval)
+        if isinstance(matched, Snapshot):
+            return matched
+        return last_snapshot or self.runtime.snapshot()
+
+    def _deep_research_deselect_evidence(self, request: ConsultationRequest) -> dict[str, object]:
+        return {
+            'mode': self._resolved_mode_label(request),
+            'resolved_mode': self._resolved_selection_value(request, 'mode', ''),
+            'requested_model': (
+                request.selection_value('model', None)
+                if 'model' in (request.selections or {})
+                else None
+            ),
+            'requested_mode': (
+                request.selection_value('mode', None)
+                if 'mode' in (request.selections or {})
+                else None
+            ),
+        }
+
+    def _ensure_non_deep_research_tool_state(
+        self, request: ConsultationRequest, result: ConsultationResult
+    ) -> bool:
+        if self._resolved_mode_is_deep_research(request):
+            return True
+
+        evidence = self._deep_research_deselect_evidence(request)
+        initial_snap = self.runtime.snapshot()
+        active_before = self.validation_passes(initial_snap, 'deep_research_active')
+        deselect = self.find_first(initial_snap, 'tool_deselect_deep_research')
+        if not deselect:
+            result.add_step(
+                'deep_research_deselect',
+                not active_before,
+                (
+                    'Gemini Deep Research already inactive for non-Deep-Research send'
+                    if not active_before
+                    else 'Gemini Deep Research active indicator was not mapped for deselect'
+                ),
+                **evidence,
+                active_before=active_before,
+                deselect_present=False,
+                active_after=active_before,
+                snapshot=initial_snap.serializable(),
+            )
+            return not active_before
+
+        clicked = self.runtime.click(deselect, strategy='atspi_first')
+        if not clicked:
+            result.add_step(
+                'deep_research_deselect',
+                False,
+                'Gemini Deep Research deselect click failed for non-Deep-Research send',
+                **evidence,
+                active_before=active_before,
+                deselect_present=True,
+                active_after=active_before,
+                snapshot=initial_snap.serializable(),
+            )
+            return False
+
+        verify_snap = self._wait_for_deep_research_inactive()
+        active_after = self.validation_passes(verify_snap, 'deep_research_active')
+        result.add_step(
+            'deep_research_deselect',
+            not active_after,
+            (
+                'Gemini Deep Research deselected for non-Deep-Research send'
+                if not active_after
+                else 'Gemini Deep Research stayed active after deselect click'
+            ),
+            **evidence,
+            active_before=active_before,
+            deselect_present=True,
+            clicked=True,
+            active_after=active_after,
+            snapshot=verify_snap.serializable(),
+        )
+        return not active_after
+
     @staticmethod
     def _element_evidence(element: ElementRef | None) -> dict[str, object] | None:
         if not element:
@@ -3272,10 +3398,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         # report. Generous timeout: plan generation can take ~1 min. Gated on the
         # deep_research mode so single-step modes (deep_think/normal/…) are
         # unaffected. (Jesse 2026-06-15: prior runs harvested only the plan.)
-        is_dr_send = (
-            str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
-            == 'deep_research'
-        )
+        is_dr_send = self._resolved_mode_is_deep_research(request)
         start_research_evidence: dict[str, object] = {}
         if is_dr_send:
             post_send_clicked, start_research_evidence = self._launch_deep_research_from_plan()
@@ -3365,7 +3488,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
     ) -> str:
         selected = (
             mode if mode is not None
-            else self._resolved_selection_value(request, 'mode', '')
+            else self._resolved_mode_label(request)
         )
         return str(selected or '').strip().lower()
 
@@ -3660,10 +3783,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         # full report is copied via the panel's "Share & Export" -> "Copy" (a
         # menu item in the popover), NOT the chat-bubble Copy push button.
         # Proven 2026-06-15: 36KB report via this path vs 89 chars via the bubble.
-        if (
-            str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
-            == 'deep_research'
-        ):
+        if self._resolved_mode_is_deep_research(request):
             # Resolve Share & Export from a LIVE app-root scan (no cache-clear) so
             # the atspi_obj is fresh — a stale snapshot ref do_action's True but
             # doesn't open the popover (p8 2026-06-21). atspi_only = do_action(0)
@@ -3747,7 +3867,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+        mode = self._resolved_mode_label(request)
         # For Deep Research, extract_primary already captured the full report via
         # Share & Export -> Copy; re-running that path here would only duplicate it.
         if mode == 'deep_research':
