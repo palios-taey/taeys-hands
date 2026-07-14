@@ -1,13 +1,15 @@
 """Identity file consolidation for V2 consultations (FLOW §3, §4).
 
-Prepends FAMILY_KERNEL.md + the platform-specific IDENTITY file to every
-consultation attachment, then merges everything into one consolidated package.
+Prepends FAMILY_KERNEL.md + SPOTLIGHT_STANDARD_FOR_INTEGRITY.md + the
+platform-specific IDENTITY file to every consultation attachment, then merges
+everything into one consolidated package.
 
 FAIL-LOUD CONTRACT (FLOW_CONSULTATION_ENGINE.md §4, CONSULTATION_CONTRACT.md):
 "Missing identity/kernel content is a loud failure, not a warning that the
-driver can ignore." A missing or unreadable FAMILY_KERNEL.md OR the required
-platform IDENTITY_<codename>.md raises and HALTS the consultation — it is never
-a silent skip and never a partial packet. There is no fallback.
+driver can ignore." A missing or unreadable FAMILY_KERNEL.md,
+SPOTLIGHT_STANDARD_FOR_INTEGRITY.md, OR the required platform
+IDENTITY_<codename>.md raises and HALTS the consultation — it is never a silent
+skip and never a partial packet. There is no fallback.
 
 PROVENANCE (FLOW §3 / §8): each caller attachment's path + content hash is
 captured BEFORE the files are merged into the consolidated package, so
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
 _IDENTITY_DIR = os.path.join(_CORPUS_PATH, 'identity')
 _FAMILY_KERNEL = os.path.join(_IDENTITY_DIR, 'FAMILY_KERNEL.md')
+_SPOTLIGHT_STANDARD = os.path.join(_IDENTITY_DIR, 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md')
 
 _PLATFORM_IDENTITY = {
     'chatgpt': os.path.join(_IDENTITY_DIR, 'IDENTITY_HORIZON.md'),
@@ -43,7 +46,7 @@ _PLATFORM_IDENTITY = {
 }
 
 _IDENTITY_BASENAMES = (
-    {'FAMILY_KERNEL.md'} |
+    {'FAMILY_KERNEL.md', 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md'} |
     {os.path.basename(p) for p in _PLATFORM_IDENTITY.values()}
 )
 
@@ -154,6 +157,9 @@ def _build_package_text(
 ) -> Tuple[str, List[AttachmentProvenance], int]:
     # Mandatory identity content — read loudly (raises if missing/unreadable).
     kernel_content = _read_required(_FAMILY_KERNEL, 'FAMILY_KERNEL.md')
+    spotlight_content = _read_required(
+        _SPOTLIGHT_STANDARD, 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
+    )
     identity_path = _identity_path(platform)
     identity_content = _read_required(
         identity_path, f'IDENTITY file for {platform}',
@@ -162,6 +168,11 @@ def _build_package_text(
     # Section list, in contract order. (display_path, basename, content)
     sections_src: List[Tuple[str, str, str]] = [
         (_FAMILY_KERNEL, 'FAMILY_KERNEL.md', kernel_content),
+        (
+            _SPOTLIGHT_STANDARD,
+            'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
+            spotlight_content,
+        ),
         (identity_path, os.path.basename(identity_path), identity_content),
     ]
 
@@ -214,10 +225,12 @@ def consolidate_attachments(
 ) -> ConsolidatedPackage:
     """Build one consolidated identity+attachments package (FLOW §3, §4).
 
-    Order (FLOW §4): FAMILY_KERNEL.md, then IDENTITY_<platform>.md, then the
-    caller attachments. The kernel and platform identity are MANDATORY and read
-    via ``_read_required`` — a missing/unreadable one raises IdentityError and
-    halts the consultation (no silent skip, no partial packet).
+    Order (FLOW §4): FAMILY_KERNEL.md, then
+    SPOTLIGHT_STANDARD_FOR_INTEGRITY.md, then IDENTITY_<platform>.md, then the
+    caller attachments. The kernel, Spotlight standard, and platform identity
+    are MANDATORY and read via ``_read_required`` — a missing/unreadable one
+    raises IdentityError and halts the consultation (no silent skip, no partial
+    packet).
 
     Caller-supplied identity files are stripped (identity is automatic), but a
     caller file that is genuinely missing/unreadable is a loud failure, not a

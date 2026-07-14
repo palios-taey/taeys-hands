@@ -14,7 +14,7 @@ Uses the Linux accessibility API (AT-SPI) to interact with web applications in F
 `consultation_v2/` is the only live consultation engine.
 
 1. The request is mapped to a platform/model/mode/tools selection.
-2. `consultation_v2.identity` prepends `FAMILY_KERNEL.md` and the platform `IDENTITY_*.md` file, then consolidates caller attachments into one package.
+2. `consultation_v2.identity` prepends `FAMILY_KERNEL.md`, `SPOTLIGHT_STANDARD_FOR_INTEGRITY.md`, and the platform `IDENTITY_*.md` file, then consolidates caller attachments into one package.
 3. The platform driver reads `consultation_v2/platforms/<platform>.yaml`; drivers contain shared control flow and no hardcoded element names.
 4. Every setup action is validated against the AT-SPI tree. If the tree cannot validate the action after the configured settle/rescan window, the run fails loudly.
 5. Send is validated by the stop button appearing, and new sessions also require URL capture/change.
@@ -64,7 +64,7 @@ scripts/run_consultation_v2.py  # CLI entrypoint
 consultation_v2/                # sole live consultation engine
   runtime.py                    # shared AT-SPI/input primitives
   snapshot.py                   # tree snapshot + YAML mapping
-  identity.py                   # FAMILY_KERNEL + IDENTITY consolidation
+  identity.py                   # FAMILY_KERNEL + Spotlight + IDENTITY consolidation
   completion.py                 # stop-button completion detector
   notify.py                     # Redis notification output
   drivers/                      # platform drivers
