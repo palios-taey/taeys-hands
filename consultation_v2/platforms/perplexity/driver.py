@@ -20,7 +20,7 @@ from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, P
 from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2 import primitives
 from consultation_v2 import storage_policy
-from consultation_v2.display_readiness import display_for_platform
+from consultation_v2.display_readiness import _viewable_windows, display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.runtime import ConsultationRuntime
@@ -3306,6 +3306,70 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 return True
         return False
 
+    @staticmethod
+    def _x_window_geometry(window_id: str, env: dict[str, str]) -> tuple[int, int] | None:
+        try:
+            result = subprocess.run(
+                ['xwininfo', '-id', window_id],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env=env,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0 or 'IsViewable' not in result.stdout:
+            return None
+        width_match = re.search(r'Width:\s*(\d+)', result.stdout)
+        height_match = re.search(r'Height:\s*(\d+)', result.stdout)
+        if not width_match or not height_match:
+            return None
+        width = int(width_match.group(1))
+        height = int(height_match.group(1))
+        if width <= 100 or height <= 100:
+            return None
+        return width, height
+
+    def _visible_firefox_windows(self, env: dict[str, str]) -> list[dict[str, object]]:
+        windows: list[dict[str, object]] = []
+        for window_id in self._xdotool_search(['--class', 'firefox'], env):
+            geometry = self._x_window_geometry(window_id, env)
+            if geometry is None:
+                continue
+            width, height = geometry
+            windows.append({
+                'id': window_id,
+                'title': self._xdotool_window_name(window_id, env),
+                'width': width,
+                'height': height,
+                'area': width * height,
+            })
+        return windows
+
+    def _visible_firefox_window_count(self, env: dict[str, str]) -> int:
+        display = env.get('DISPLAY') or self._display()
+        try:
+            return _viewable_windows(display)
+        except Exception:
+            return len(self._visible_firefox_windows(env))
+
+    @staticmethod
+    def _close_x_window(window_id: str, env: dict[str, str]) -> bool:
+        try:
+            result = subprocess.run(
+                ['xdotool', 'windowclose', window_id],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                env=env,
+            )
+        except Exception:
+            return False
+        if result.returncode == 0:
+            time.sleep(0.3)
+            return True
+        return False
+
     def _focus_platform_firefox_for_attach(self, env: dict[str, str]) -> bool:
         window_ids = self._xdotool_search(['--onlyvisible', '--class', 'Firefox'], env)
         for window_id in reversed(window_ids):
@@ -3971,6 +4035,79 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             'download_timeout': timeout,
         }
 
+    @staticmethod
+    def _markdown_download_answer_region(content: str) -> str:
+        text = (content or '').strip()
+        if not text:
+            return ''
+        probe = text[:5000].lower()
+        if (
+            'r2cdn.perplexity.ai/pplx-full-logo' not in probe
+            or 'perplexity deep research request' not in probe
+            or '## output contract' not in probe
+        ):
+            return text
+        contract_pos = probe.find('## output contract')
+        search_start = contract_pos if contract_pos >= 0 else 0
+        markers = (
+            '\nI now have all the information I need.',
+            '\nI have all the information I need.',
+            '\nI now have the information I need.',
+            '\n***\n\n# ',
+        )
+        starts = [
+            pos + (1 if marker.startswith('\n') else 0)
+            for marker in markers
+            if (pos := text.find(marker, search_start)) >= 0
+        ]
+        if not starts:
+            return text
+        return text[min(starts):].strip()
+
+    def _cleanup_markdown_download_popup(
+        self,
+        baseline_window_ids: set[str],
+        *,
+        timeout: float = 3.0,
+    ) -> tuple[bool, dict[str, object]]:
+        env = self._dialog_env()
+        baseline = {str(window_id) for window_id in baseline_window_ids if window_id}
+        windows = self._visible_firefox_windows(env)
+        evidence: dict[str, object] = {
+            'markdown_download_baseline_firefox_window_ids': sorted(baseline),
+            'markdown_download_visible_firefox_windows_before_cleanup': len(windows),
+            'markdown_download_firefox_windows_before_cleanup': windows,
+        }
+        if len(windows) > 1:
+            candidates = [window for window in windows if str(window.get('id') or '') not in baseline]
+            if not candidates:
+                keep = max(windows, key=lambda window: int(window.get('area') or 0))
+                candidates = [window for window in windows if window is not keep]
+            closed: list[str] = []
+            failed: list[str] = []
+            for window in sorted(candidates, key=lambda item: int(item.get('area') or 0)):
+                window_id = str(window.get('id') or '')
+                if not window_id:
+                    continue
+                if self._close_x_window(window_id, env):
+                    closed.append(window_id)
+                else:
+                    failed.append(window_id)
+            evidence['markdown_download_popup_closed_window_ids'] = closed
+            evidence['markdown_download_popup_close_failed_window_ids'] = failed
+        else:
+            evidence['markdown_download_popup_closed_window_ids'] = []
+            evidence['markdown_download_popup_close_failed_window_ids'] = []
+
+        deadline = time.monotonic() + max(float(timeout), 0.1)
+        visible_after = self._visible_firefox_window_count(env)
+        while visible_after != 1 and time.monotonic() < deadline:
+            time.sleep(0.25)
+            visible_after = self._visible_firefox_window_count(env)
+        evidence['markdown_download_visible_firefox_windows_after_cleanup'] = visible_after
+        evidence['markdown_download_popup_cleanup_timeout_seconds'] = timeout
+        return visible_after == 1, evidence
+
     def _activate_markdown_download_item(
         self,
         trigger_key: str,
@@ -4024,6 +4161,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         result: ConsultationResult,
         attempts: list[dict[str, object]],
     ) -> bool:
+        env = self._dialog_env()
+        baseline_windows = self._visible_firefox_windows(env)
+        baseline_window_ids = {str(window.get('id') or '') for window in baseline_windows}
         before = self._markdown_download_state()
         for trigger_key, item_key in (
             ('more_actions', 'export_markdown_item'),
@@ -4035,8 +4175,33 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 continue
             content, download_evidence = self._read_new_markdown_download(before)
             attempt.update(download_evidence)
+            cleanup_ok, cleanup_evidence = self._cleanup_markdown_download_popup(
+                baseline_window_ids,
+            )
+            download_evidence.update(cleanup_evidence)
+            attempt.update(cleanup_evidence)
+            if not cleanup_ok:
+                result.add_step(
+                    'extract_primary', False,
+                    'Perplexity Markdown download left extra visible Firefox windows open',
+                    target_key='markdown_download',
+                    markdown_download_attempts=attempts,
+                    **download_evidence,
+                )
+                return False
             if not content:
                 continue
+            answer_region = self._markdown_download_answer_region(content)
+            if not answer_region:
+                continue
+            if answer_region != content:
+                download_evidence.update(
+                    markdown_download_stripped_echo=True,
+                    markdown_download_raw_characters=len(content),
+                    markdown_download_answer_characters=len(answer_region),
+                )
+                attempt.update(download_evidence)
+            content = answer_region
             return self._accept_extracted_content(
                 content,
                 request,
@@ -4074,6 +4239,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         #     intro stub there, so report-card MUST win when both are present)
         #   - inline answer (no report-card) -> copy_button (the inline answer is the
         #     full content)
+        # Observed DR sub-shapes:
+        #   - Zapier b2a1859e: copy_contents_button never renders; Markdown export
+        #     is the extraction path.
+        #   - Cursor 92b7d26b: copy_contents_button can render late; during the
+        #     90s window copy_button may be present but produce an empty clipboard,
+        #     so empty copy_button must continue to Markdown export.
         report_card_readiness: dict[str, object] | None = None
         if is_deep_research:
             snap, target_key, target, report_card_readiness = self._deep_research_copy_target()
@@ -4175,6 +4346,16 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             )
 
         markdown_download_attempts: list[dict[str, object]] = []
+        if is_deep_research:
+            markdown_download_attempts.append({
+                'fallback_after_target_key': target_key,
+                'fallback_reason': 'empty_clipboard',
+                'deep_research_render_shape': (
+                    'copy_button_empty_clipboard_after_copy_contents_timeout'
+                    if target_key == 'copy_button'
+                    else 'copy_contents_empty_clipboard'
+                ),
+            })
         if is_deep_research and self._extract_via_markdown_download(
             request,
             result,
