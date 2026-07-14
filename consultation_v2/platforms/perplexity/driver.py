@@ -49,6 +49,8 @@ DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 # the loop, an over-conservative misfire can only degrade to a LOUD timeout -
 # never a silent false-complete and never an infinite wait.
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
+DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS = 90.0
+DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS = 1.0
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
 PERPLEXITY_FILE_DIALOG_TITLE_PATTERNS = (
     'File Upload - Perplexity',
@@ -3849,6 +3851,30 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         ).strip().lower()
         return default_mode == 'deep_research'
 
+    def _deep_research_copy_target(
+        self,
+    ) -> tuple[Snapshot, str | None, ElementRef | None, dict[str, object]]:
+        started = time.monotonic()
+        snap, report_target = self.wait_for_key(
+            'copy_contents_button',
+            timeout=DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS,
+            interval=DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS,
+            select='last',
+        )
+        readiness: dict[str, object] = {
+            'waited_for': 'copy_contents_button',
+            'timeout_seconds': DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS,
+            'interval_seconds': DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS,
+            'elapsed_seconds': round(time.monotonic() - started, 3),
+            'matched': bool(report_target),
+        }
+        if report_target:
+            readiness['selected'] = 'copy_contents_button'
+            return snap, 'copy_contents_button', report_target, readiness
+        inline_target = self.find_last(snap, 'copy_button')
+        readiness['selected'] = 'copy_button' if inline_target else None
+        return snap, 'copy_button' if inline_target else None, inline_target, readiness
+
     def _accept_extracted_content(
         self,
         content: str,
@@ -4027,42 +4053,38 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        # Wait for response to fully render.
-        time.sleep(2.0)
+        is_deep_research = self._is_deep_research(request)
+        if not is_deep_research:
+            # Wait for non-Deep-Research responses to finish exposing their action row.
+            time.sleep(2.0)
         if not self._ensure_answer_thread(result):
             return False
 
-        is_deep_research = self._is_deep_research(request)
         if not is_deep_research:
             self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
 
-        # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
-        # copy buttons. Raw find_elements bypasses cache clearing and misses
-        # elements after the long monitor polling phase.
-        snap = self.runtime.snapshot()
-
         # Deep Research renders in one of several mapped output shapes; extract via
-        # the control actually PRESENT (observe-then-dispatch, mapped states - NOT a
-        # fallback-on-action-miss chain). The previous code hardcoded
+        # the report-card readiness signal before considering inline fallback. The
+        # previous code hardcoded
         # copy_contents_button for ALL deep_research and FALSE-FAILED when DR rendered
         # the inline-answer shape (p8 2026-06-21: copy_button held the full 13998-char
-        # answer). Selection by presence:
+        # answer). Selection:
         #   - report-card present -> copy_contents_button (full report; preferred - the
         #     bottom copy_button is also present on a report-card but yields only the
         #     intro stub there, so report-card MUST win when both are present)
         #   - inline answer (no report-card) -> copy_button (the inline answer is the
         #     full content)
+        report_card_readiness: dict[str, object] | None = None
         if is_deep_research:
-            if self.find_last(snap, 'copy_contents_button'):
-                target_key = 'copy_contents_button'
-            elif self.find_last(snap, 'copy_button'):
-                target_key = 'copy_button'
-            else:
-                target_key = None
+            snap, target_key, target, report_card_readiness = self._deep_research_copy_target()
         else:
+            # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
+            # copy buttons. Raw find_elements bypasses cache clearing and misses
+            # elements after the long monitor polling phase.
+            snap = self.runtime.snapshot()
             target_key = 'copy_button'
+            target = self.find_last(snap, target_key)
 
-        target = self.find_last(snap, target_key) if target_key else None
         if not target:
             markdown_download_attempts: list[dict[str, object]] = []
             if is_deep_research and self._extract_via_markdown_download(
@@ -4081,6 +4103,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 ),
                 stop_condition='extraction_failed',
                 markdown_download_attempts=markdown_download_attempts,
+                report_card_readiness=report_card_readiness,
                 snapshot=snap.serializable(),
             )
             return False
@@ -4113,6 +4136,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     scrolled_into_view=scrolled_into_view,
                     document_scrolled=document_scrolled,
                     target_refreshed=refreshed,
+                    report_card_readiness=report_card_readiness,
                     snapshot=snap.serializable(),
                 )
                 return False
@@ -4130,6 +4154,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 scrolled_into_view=scrolled_into_view,
                 document_scrolled=document_scrolled,
                 target_refreshed=refreshed,
+                report_card_readiness=report_card_readiness,
                 snapshot=snap.serializable(),
             )
             return False
@@ -4145,6 +4170,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 scrolled_into_view=scrolled_into_view,
                 document_scrolled=document_scrolled,
                 target_refreshed=refreshed,
+                report_card_readiness=report_card_readiness,
                 **clipboard_poll,
             )
 
@@ -4166,6 +4192,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             target_refreshed=refreshed,
             clicked=bool(clicked),
             markdown_download_attempts=markdown_download_attempts,
+            report_card_readiness=report_card_readiness,
             **clipboard_poll,
             snapshot=snap.serializable(),
         )
