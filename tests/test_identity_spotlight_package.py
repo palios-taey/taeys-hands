@@ -4,12 +4,15 @@ from consultation_v2 import identity
 from consultation_v2.identity import IdentityError
 
 
+SPOTLIGHT_BASENAME = 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md'
+
+
 def _write(path, content):
     path.write_text(content, encoding='utf-8')
     return str(path)
 
 
-def _configure_identity(monkeypatch, tmp_path):
+def _configure_identity(monkeypatch, tmp_path, *, patch_identity_basenames=True):
     corpus = tmp_path / 'corpus' / 'identity'
     corpus.mkdir(parents=True)
     kernel = _write(corpus / 'FAMILY_KERNEL.md', '# FAMILY KERNEL\n')
@@ -21,15 +24,16 @@ def _configure_identity(monkeypatch, tmp_path):
     monkeypatch.setattr(identity, '_FAMILY_KERNEL', kernel)
     monkeypatch.setattr(identity, '_SPOTLIGHT_STANDARD', spotlight)
     monkeypatch.setattr(identity, '_PLATFORM_IDENTITY', {'gemini': platform_identity})
-    monkeypatch.setattr(
-        identity,
-        '_IDENTITY_BASENAMES',
-        {
-            'FAMILY_KERNEL.md',
-            'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
-            'IDENTITY_COSMOS.md',
-        },
-    )
+    if patch_identity_basenames:
+        monkeypatch.setattr(
+            identity,
+            '_IDENTITY_BASENAMES',
+            {
+                'FAMILY_KERNEL.md',
+                SPOTLIGHT_BASENAME,
+                'IDENTITY_COSMOS.md',
+            },
+        )
     return corpus
 
 
@@ -50,11 +54,12 @@ def test_inline_context_includes_spotlight_between_kernel_and_identity(monkeypat
 
 
 def test_caller_provided_spotlight_file_is_stripped(monkeypatch, tmp_path):
-    _configure_identity(monkeypatch, tmp_path)
+    _configure_identity(monkeypatch, tmp_path, patch_identity_basenames=False)
+    assert SPOTLIGHT_BASENAME in identity._IDENTITY_BASENAMES
     caller_dir = tmp_path / 'caller'
     caller_dir.mkdir()
     caller_spotlight = _write(
-        caller_dir / 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
+        caller_dir / SPOTLIGHT_BASENAME,
         'caller spotlight copy should not appear\n',
     )
     caller_note = _write(caller_dir / 'note.md', 'caller note survives\n')
