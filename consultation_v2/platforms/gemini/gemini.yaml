@@ -145,12 +145,15 @@ tree:
       role: menu item
     # The model menu prefixes "Selected " onto the ACTIVE model, so a single
     # exact name can't click Pro FROM Flash (when Flash is active the Pro item
-    # is "3.1 Pro Advanced math and code", NO "Selected"). names_any_of matches
-    # Pro in either state (enumerated-exact, contract-allowed).
+    # is "3.1 Pro Advanced math and code", NO "Selected"). Gemini also ships
+    # the same labels with "&" in place of "and". names_any_of matches Pro in
+    # either state and UI variant (enumerated-exact, contract-allowed).
     mode_pro:
       names_any_of:
         - "3.1 Pro Advanced math and code"
         - "Selected 3.1 Pro Advanced math and code"
+        - "3.1 Pro Advanced math & code"
+        - "Selected 3.1 Pro Advanced math & code"
       role: menu item
     # BUG 2 FIX: all tool items are check menu item, not menu item
     # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
@@ -209,10 +212,16 @@ workflow:
         options:
           fast:
             element: mode_fast
+            active_trigger_names:
+              - Open mode picker, currently Flash
           pro:
             element: mode_pro
+            active_trigger_names:
+              - Open mode picker, currently Pro
           thinking:
             element: mode_thinking
+            active_trigger_names:
+              - Open mode picker, currently Thinking
         default_for_fresh: pro
         example_rationale: Use Gemini 3.1 Pro as the base model for Deep Research.
       mode:
