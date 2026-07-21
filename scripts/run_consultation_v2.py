@@ -7,6 +7,7 @@ connection for the process lifetime, so the env must be correct before the
 import chain reaches `from gi.repository import Atspi`.
 """
 import os
+import signal
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -114,5 +115,11 @@ _bind_display_env()
 from consultation_v2.cli import main
 
 
+def _exit_on_sigterm(signum, _frame) -> None:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    raise SystemExit(128 + int(signum))
+
+
 if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     raise SystemExit(main())
