@@ -4231,6 +4231,37 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return text
         return text[min(starts):].strip()
 
+    @staticmethod
+    def _merge_deep_research_sources(
+        body: str,
+        markdown: str,
+    ) -> tuple[str, dict[str, object]]:
+        citation_ids = {
+            int(value)
+            for value in re.findall(r'(?<!\^)\[([0-9]+)\]', body or '')
+        }
+        sources = {
+            int(source_id): url.rstrip()
+            for source_id, url in re.findall(
+                r'^\[\^([0-9]+)\]:\s+(https?://\S+)\s*$',
+                markdown or '',
+                flags=re.MULTILINE,
+            )
+        }
+        missing_ids = sorted(citation_ids - sources.keys())
+        evidence: dict[str, object] = {
+            'citation_ids': sorted(citation_ids),
+            'markdown_source_ids': sorted(sources),
+            'missing_source_ids': missing_ids,
+        }
+        if not citation_ids or missing_ids:
+            return '', evidence
+        source_lines = [f'{source_id}. {sources[source_id]}' for source_id in sorted(citation_ids)]
+        merged = f'{body.rstrip()}\n\n## Sources\n\n' + '\n'.join(source_lines)
+        evidence['merged_source_urls'] = len(source_lines)
+        evidence['merged_characters'] = len(merged)
+        return merged, evidence
+
     def _cleanup_markdown_download_popup(
         self,
         baseline_window_ids: set[str],
@@ -4327,6 +4358,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
         attempts: list[dict[str, object]],
+        *,
+        base_content: str | None = None,
     ) -> bool:
         env = self._dialog_env()
         baseline_windows = self._visible_firefox_windows(env)
@@ -4369,12 +4402,25 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 )
                 attempt.update(download_evidence)
             content = answer_region
+            target_key = 'markdown_download'
+            message = f'Perplexity response extracted via Markdown download ({len(content)} chars)'
+            if base_content is not None:
+                content, merge_evidence = self._merge_deep_research_sources(base_content, content)
+                download_evidence.update(merge_evidence)
+                attempt.update(merge_evidence)
+                if not content:
+                    continue
+                target_key = 'copy_contents_with_markdown_sources'
+                message = (
+                    'Perplexity report body extracted via Copy contents with '
+                    f'Markdown Sources ({len(content)} chars)'
+                )
             return self._accept_extracted_content(
                 content,
                 request,
                 result,
-                f'Perplexity response extracted via Markdown download ({len(content)} chars)',
-                target_key='markdown_download',
+                message,
+                target_key=target_key,
                 markdown_download_attempts=attempts,
                 **download_evidence,
             )
@@ -4395,17 +4441,13 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         if not is_deep_research:
             self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
 
-        # Deep Research renders in one of several mapped output shapes; extract via
-        # the report-card readiness signal before considering inline fallback. The
-        # previous code hardcoded
-        # copy_contents_button for ALL deep_research and FALSE-FAILED when DR rendered
-        # the inline-answer shape (p8 2026-06-21: copy_button held the full 13998-char
-        # answer). Selection:
-        #   - report-card present -> copy_contents_button (full report; preferred - the
-        #     bottom copy_button is also present on a report-card but yields only the
-        #     intro stub there, so report-card MUST win when both are present)
-        #   - inline answer (no report-card) -> copy_button (the inline answer is the
-        #     full content)
+        # Deep Research renders in one of several mapped output shapes. The report
+        # card's Copy contents control carries the full report body but omits its
+        # separately rendered Sources widget; Markdown export carries the source map
+        # but can omit the detailed report sections.
+        # Selection:
+        #   - report-card present -> copy_contents_button body + Markdown source map
+        #   - inline answer (no report-card) -> copy_button
         # Observed DR sub-shapes:
         #   - Zapier b2a1859e: copy_contents_button never renders; Markdown export
         #     is the extraction path.
@@ -4413,6 +4455,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         #     90s window copy_button may be present but produce an empty clipboard,
         #     so empty copy_button must continue to Markdown export.
         report_card_readiness: dict[str, object] | None = None
+        markdown_download_attempts: list[dict[str, object]] = []
         if is_deep_research:
             snap, target_key, target, report_card_readiness = self._deep_research_copy_target()
         else:
@@ -4424,7 +4467,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             target = self.find_last(snap, target_key)
 
         if not target:
-            markdown_download_attempts: list[dict[str, object]] = []
             if is_deep_research and self._extract_via_markdown_download(
                 request,
                 result,
@@ -4474,6 +4516,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     scrolled_into_view=scrolled_into_view,
                     document_scrolled=document_scrolled,
                     target_refreshed=refreshed,
+                    markdown_download_attempts=markdown_download_attempts,
                     report_card_readiness=report_card_readiness,
                     snapshot=snap.serializable(),
                 )
@@ -4492,6 +4535,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 scrolled_into_view=scrolled_into_view,
                 document_scrolled=document_scrolled,
                 target_refreshed=refreshed,
+                markdown_download_attempts=markdown_download_attempts,
                 report_card_readiness=report_card_readiness,
                 snapshot=snap.serializable(),
             )
@@ -4499,6 +4543,28 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         content, clipboard_poll = self._read_clipboard_until_nonempty()
 
         if content:
+            if is_deep_research and target_key == 'copy_contents_button':
+                step_count_before_markdown = len(result.steps)
+                if self._extract_via_markdown_download(
+                    request,
+                    result,
+                    markdown_download_attempts,
+                    base_content=content,
+                ):
+                    return True
+                if any(not step.success for step in result.steps[step_count_before_markdown:]):
+                    return False
+                result.add_step(
+                    'extract_primary',
+                    False,
+                    'Perplexity report body citations could not be resolved to Markdown source URLs',
+                    stop_condition='extraction_failed',
+                    target_key=target_key,
+                    markdown_download_attempts=markdown_download_attempts,
+                    report_card_readiness=report_card_readiness,
+                    snapshot=snap.serializable(),
+                )
+                return False
             return self._accept_extracted_content(
                 content,
                 request,
@@ -4508,11 +4574,11 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 scrolled_into_view=scrolled_into_view,
                 document_scrolled=document_scrolled,
                 target_refreshed=refreshed,
+                markdown_download_attempts=markdown_download_attempts,
                 report_card_readiness=report_card_readiness,
                 **clipboard_poll,
             )
 
-        markdown_download_attempts: list[dict[str, object]] = []
         if is_deep_research:
             markdown_download_attempts.append({
                 'fallback_after_target_key': target_key,
