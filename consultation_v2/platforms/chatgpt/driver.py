@@ -4478,16 +4478,13 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 send_snap = stop_snap
             answer_url = self._wait_for_answer_thread_url(
                 timeout=30.0 if stop_seen else 5.0,
+                previous_url=before,
+                require_change=not bool(request.session_url),
             )
-            after = answer_url or self.runtime.wait_for_url_change(
-                before,
-                timeout=5.0,
-                interval=1.0,
-            )
-            result.session_url_after = after or self.runtime.current_url() or before
+            result.session_url_after = answer_url or before
             url_changed = bool(result.session_url_after and result.session_url_after != before)
             answer_thread = bool(self._is_answer_thread_url(result.session_url_after))
-            url_landed = bool(answer_thread and (url_changed or request.session_url))
+            url_landed = bool(answer_url and answer_thread and (url_changed or request.session_url))
             prompt_still_staged = False
             if attempt == 1 and not stop_seen and not url_landed:
                 prompt_still_staged = self.snapshot_has_any(self.runtime.snapshot(), self._send_button_keys())
@@ -4780,10 +4777,37 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
     def is_resumable_session_url(self, url: str | None) -> bool:
         return self._is_answer_thread_url(url)
 
-    def _wait_for_answer_thread_url(self, *, timeout: float = 12.0) -> str | None:
+    def _wait_for_answer_thread_url(
+        self,
+        *,
+        timeout: float = 12.0,
+        previous_url: str | None = None,
+        require_change: bool = False,
+    ) -> str | None:
+        last_canonical_url = ''
+        stable_samples = 0
+
         def _current_answer_url() -> str | None:
+            nonlocal last_canonical_url, stable_samples
             current = (self.runtime.current_url() or '').strip()
-            return current if self._is_answer_thread_url(current) else None
+            canonical = bool(
+                self._is_answer_thread_url(current)
+                and '/c/WEB:' not in current
+                and not (
+                    require_change
+                    and self._urls_equivalent(current, previous_url)
+                )
+            )
+            if not canonical:
+                last_canonical_url = ''
+                stable_samples = 0
+                return None
+            if self._urls_equivalent(current, last_canonical_url):
+                stable_samples += 1
+            else:
+                last_canonical_url = current
+                stable_samples = 1
+            return current if stable_samples >= 2 else None
 
         return self.runtime.wait_until(_current_answer_url, timeout=timeout, interval=0.5)
 
