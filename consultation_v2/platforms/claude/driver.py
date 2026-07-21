@@ -910,7 +910,6 @@ class _ClaudeInlineBase:
             active_snapshot, active_present, trigger_name = self._selection_wait_for_active_trigger(
                 trigger_key,
                 active_trigger_names,
-                timeout=0.8,
             )
             if active_present:
                 result.add_step(

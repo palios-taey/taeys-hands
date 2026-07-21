@@ -561,6 +561,8 @@ workflow:
                 action: hover
           extended_thinking:
             element: effort_extra
+            active_trigger_names:
+              - 'Model: Opus 4.8 Extra'
             path:
               - element: effort_menu
                 action: hover
