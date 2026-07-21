@@ -3447,6 +3447,95 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
     # releases it before monitor_and_extract so monitoring runs concurrently.
 
+    @staticmethod
+    def _visible_attachment_removals(snapshot: Snapshot) -> list[ElementRef]:
+        return [
+            element
+            for element in (snapshot.mapped.get('remove_attachment') or [])
+            if 'showing' in {str(state).lower() for state in (element.states or [])}
+        ]
+
+    def _clear_stale_fresh_attachments(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        if request.session_url:
+            return True
+
+        snapshot = self.runtime.snapshot()
+        controls = self._visible_attachment_removals(snapshot)
+        removed: list[str] = []
+        for _ in range(len(controls)):
+            target = controls[0]
+            before_count = len(controls)
+            filename = str(target.description or '').strip()
+            if not self.runtime.click(target):
+                result.add_step(
+                    'clean_composer',
+                    False,
+                    'Claude stale attachment removal click failed',
+                    file=filename,
+                    remaining=before_count,
+                    snapshot=snapshot.serializable(),
+                )
+                return False
+
+            def _removal_landed() -> Snapshot | None:
+                candidate = self.runtime.snapshot()
+                return (
+                    candidate
+                    if len(self._visible_attachment_removals(candidate)) < before_count
+                    else None
+                )
+
+            settled = self.runtime.wait_until(
+                _removal_landed,
+                timeout=5.0,
+                interval=0.3,
+            )
+            if not isinstance(settled, Snapshot):
+                snapshot = self.runtime.snapshot()
+                result.add_step(
+                    'clean_composer',
+                    False,
+                    'Claude stale attachment remained after removal click',
+                    file=filename,
+                    remaining=len(self._visible_attachment_removals(snapshot)),
+                    snapshot=snapshot.serializable(),
+                )
+                return False
+            removed.append(filename)
+            snapshot = settled
+            controls = self._visible_attachment_removals(snapshot)
+
+        snapshot = self.runtime.wait_for_stable_snapshot(
+            consecutive=2,
+            timeout=3.0,
+            interval=0.3,
+            anchor_key='input',
+            require_non_empty=True,
+        )
+        controls = self._visible_attachment_removals(snapshot)
+        if controls:
+            result.add_step(
+                'clean_composer',
+                False,
+                'Claude fresh composer still contains stale attachments',
+                removed=removed,
+                remaining=len(controls),
+                snapshot=snapshot.serializable(),
+            )
+            return False
+        result.add_step(
+            'clean_composer',
+            True,
+            'Claude fresh composer has no stale attachments',
+            removed=removed,
+            snapshot=snapshot.serializable(),
+        )
+        return True
+
     def setup_and_send(
         self, request: ConsultationRequest, result: ConsultationResult,
     ) -> bool:
@@ -3479,6 +3568,8 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 return False
             if not self.wait_for_page_ready_after_navigation(result):
                 return False
+        if not self._clear_stale_fresh_attachments(request, result):
+            return False
         if not self.tree_conformance_gate(result):
             return False
         pre_attach_for_research = 'research' in request.selection_list('tools')

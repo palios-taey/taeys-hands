@@ -187,6 +187,10 @@ tree:
       name: Write your prompt to Claude
       role: entry
       scope: base.composer
+    remove_attachment:
+      name: Remove
+      role: push button
+      scope: base.composer
     toggle_menu:
       name: Add files, connectors, and more
       role: push button
