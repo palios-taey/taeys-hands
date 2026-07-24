@@ -33,6 +33,9 @@ from consultation_v2.platforms.grok.monitor import COMPLETE, DEEP_MODES, GrokCom
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
+SETUP_RENDER_WAIT_FLOOR_SECONDS = 45.0
+SETUP_RENDER_WAIT_MULTIPLIER = 6.0
+SETUP_RENDER_WAIT_CEILING_SECONDS = 90.0
 
 
 class _GrokInlineBase:
@@ -1318,7 +1321,7 @@ class _GrokInlineBase:
         return closed_snapshot or self.runtime.menu_snapshot(), False
 
     def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        timeout = self._selection_render_wait_timeout_seconds()
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         roles = ['menu item', 'radio menu item', 'check menu item', 'option']
@@ -1334,7 +1337,7 @@ class _GrokInlineBase:
         return last_snapshot or fallback_snapshot, self.find_first(last_snapshot or fallback_snapshot, key)
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        timeout = self._selection_render_wait_timeout_seconds()
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
@@ -1473,6 +1476,15 @@ class _GrokInlineBase:
             return max(0.0, float(value) / 1000.0)
         except (TypeError, ValueError):
             return 0.8
+
+    def _selection_render_wait_timeout_seconds(self) -> float:
+        return min(
+            max(
+                self._selection_settle_seconds() * SETUP_RENDER_WAIT_MULTIPLIER,
+                SETUP_RENDER_WAIT_FLOOR_SECONDS,
+            ),
+            SETUP_RENDER_WAIT_CEILING_SECONDS,
+        )
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
@@ -2887,7 +2899,10 @@ class GrokConsultationDriver(_GrokInlineBase):
         return True
 
     def _setup_step_timeout_seconds(self, step_name: str) -> float:
-        selection_timeout = max(self._selection_settle_seconds() * 4.0, 30.0)
+        selection_timeout = max(
+            self._selection_render_wait_timeout_seconds() + self._selection_settle_seconds(),
+            60.0,
+        )
         fresh_chat_timeout = self._fresh_chat_action_timeout()
         new_chat_timeout = self._new_chat_action_timeout()
         return {

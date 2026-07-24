@@ -52,6 +52,9 @@ MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS = 90.0
 DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS = 1.0
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
+SETUP_RENDER_WAIT_FLOOR_SECONDS = 45.0
+SETUP_RENDER_WAIT_MULTIPLIER = 6.0
+SETUP_RENDER_WAIT_CEILING_SECONDS = 90.0
 PERPLEXITY_FILE_DIALOG_TITLE_PATTERNS = (
     'File Upload - Perplexity',
     'File Upload',
@@ -1367,7 +1370,7 @@ class _PerplexityInlineBase:
         return closed_snapshot or self.runtime.menu_snapshot(), False
 
     def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        timeout = self._selection_render_wait_timeout_seconds()
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         roles = ['menu item', 'radio menu item', 'check menu item', 'option']
@@ -1383,7 +1386,7 @@ class _PerplexityInlineBase:
         return last_snapshot or fallback_snapshot, self.find_first(last_snapshot or fallback_snapshot, key)
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        timeout = self._selection_render_wait_timeout_seconds()
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
@@ -1522,6 +1525,15 @@ class _PerplexityInlineBase:
             return max(0.0, float(value) / 1000.0)
         except (TypeError, ValueError):
             return 0.8
+
+    def _selection_render_wait_timeout_seconds(self) -> float:
+        return min(
+            max(
+                self._selection_settle_seconds() * SETUP_RENDER_WAIT_MULTIPLIER,
+                SETUP_RENDER_WAIT_FLOOR_SECONDS,
+            ),
+            SETUP_RENDER_WAIT_CEILING_SECONDS,
+        )
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
@@ -3010,7 +3022,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         input_key = str(self.cfg['workflow']['prompt']['input'])
         snap, input_el = self.wait_for_key(
             input_key,
-            timeout=max(self._mode_settle_timeout(), 8.0),
+            timeout=self._prompt_ready_render_wait_timeout_seconds(),
             interval=0.4,
         )
         verified = input_el is not None
@@ -3196,6 +3208,15 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return max(float(int(settle['default_ms'])) / 1000.0, 0.1)
         except (TypeError, ValueError) as exc:
             raise ValueError('Perplexity YAML settle.default_ms must be integer milliseconds') from exc
+
+    def _prompt_ready_render_wait_timeout_seconds(self) -> float:
+        return min(
+            max(
+                self._mode_settle_timeout() * SETUP_RENDER_WAIT_MULTIPLIER,
+                SETUP_RENDER_WAIT_FLOOR_SECONDS,
+            ),
+            SETUP_RENDER_WAIT_CEILING_SECONDS,
+        )
 
     # ------------------------------------------------------------------
     # Connector toggles

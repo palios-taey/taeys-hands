@@ -34,6 +34,9 @@ BASE_CONFORMANCE_SETTLE_FLOOR_SECONDS = 25.0
 BASE_CONFORMANCE_SETTLE_CEILING_SECONDS = 45.0
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
+SETUP_RENDER_WAIT_FLOOR_SECONDS = 45.0
+SETUP_RENDER_WAIT_MULTIPLIER = 6.0
+SETUP_RENDER_WAIT_CEILING_SECONDS = 90.0
 
 
 class _ClaudeInlineBase:
@@ -1451,7 +1454,7 @@ class _ClaudeInlineBase:
         return last_snapshot or fallback_snapshot, self.find_first(last_snapshot or fallback_snapshot, key)
 
     def _selection_wait_for_revealed_anchor(self, key: str, scope: str) -> tuple[Snapshot, ElementRef | None]:
-        timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
+        timeout = self._selection_render_wait_timeout_seconds()
         deadline = time.time() + timeout
         last_snapshot: Snapshot | None = None
         while time.time() < deadline:
@@ -1592,7 +1595,7 @@ class _ClaudeInlineBase:
             return 0.8
 
     def _selection_hover_revealed_anchor_timeout_seconds(self, key: str) -> float:
-        base_timeout = max(self._selection_settle_seconds() + 0.5, 2.0)
+        base_timeout = self._selection_render_wait_timeout_seconds()
         if key not in {'effort_low', 'effort_medium', 'effort_high_default', 'effort_extra', 'effort_max'}:
             return base_timeout
         settle = self.cfg.get('settle') or {}
@@ -1601,7 +1604,16 @@ class _ClaudeInlineBase:
             configured = float(value) / 1000.0
         except (TypeError, ValueError):
             configured = 20.0
-        return max(base_timeout, min(max(1.0, configured), 60.0))
+        return max(base_timeout, min(max(1.0, configured), SETUP_RENDER_WAIT_CEILING_SECONDS))
+
+    def _selection_render_wait_timeout_seconds(self) -> float:
+        return min(
+            max(
+                self._selection_settle_seconds() * SETUP_RENDER_WAIT_MULTIPLIER,
+                SETUP_RENDER_WAIT_FLOOR_SECONDS,
+            ),
+            SETUP_RENDER_WAIT_CEILING_SECONDS,
+        )
 
     def _selection_element_has_state(self, element: ElementRef, state: str) -> bool:
         expected = state.strip().lower()
