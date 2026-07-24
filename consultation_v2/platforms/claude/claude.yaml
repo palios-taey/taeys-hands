@@ -445,12 +445,12 @@ tree:
       role: menu item
       scope: toggle_menu
     model_opus:
-      name: Opus 4.8 For complex tasks
+      name: Opus 5 For complex tasks
       role: radio menu item
       scope: model_menu
       active_state: checked
     model_sonnet:
-      name: Sonnet 4.6 Most efficient for everyday tasks
+      name: Sonnet 5 Most efficient for everyday tasks
       role: radio menu item
       scope: model_more_menu
       active_state: checked
