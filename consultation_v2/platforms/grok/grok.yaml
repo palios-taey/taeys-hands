@@ -112,15 +112,15 @@ tree:
       role: menu item
       scope: menu_snapshot
     model_fast:
-      name: "Fast Powered by Grok 4.3"
+      name: "Fast Quick responses · Grok 4.5"
       role: menu item
       scope: menu_snapshot
     model_expert:
-      name: "Expert Powered by Grok 4.3"
+      name: "Expert Thinks hard · Grok 4.5"
       role: menu item
       scope: menu_snapshot
     model_heavy:
-      name: "Heavy Team of Experts"
+      name: "Heavy Team of Experts · Grok 4.5"
       role: menu item
       scope: menu_snapshot
     # --- attach dropdown item (menu_snapshot after clicking Attach) ---
@@ -214,19 +214,19 @@ validation:
       - selected
   fast_active:
     indicators:
-    - name: "Fast Powered by Grok 4.3"
+    - name: "Fast Quick responses · Grok 4.5"
       role: menu item
       states_include:
       - selected
   expert_active:
     indicators:
-    - name: "Expert Powered by Grok 4.3"
+    - name: "Expert Thinks hard · Grok 4.5"
       role: menu item
       states_include:
       - selected
   heavy_active:
     indicators:
-    - name: "Heavy Team of Experts"
+    - name: "Heavy Team of Experts · Grok 4.5"
       role: menu item
       states_include:
       - selected
