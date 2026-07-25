@@ -48,6 +48,9 @@ DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 # never a silent false-complete and never an infinite wait.
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt — echo, not a response'
+SETUP_RENDER_WAIT_FLOOR_SECONDS = 45.0
+SETUP_RENDER_WAIT_MULTIPLIER = 6.0
+SETUP_RENDER_WAIT_CEILING_SECONDS = 90.0
 
 
 class _GeminiInlineBase:
@@ -1511,6 +1514,15 @@ class _GeminiInlineBase:
             seconds = 1.0
         return min(max(0.0, seconds), max(self._selection_settle_seconds(), 0.1))
 
+    def _selection_render_wait_timeout_seconds(self) -> float:
+        return min(
+            max(
+                self._selection_settle_seconds() * SETUP_RENDER_WAIT_MULTIPLIER,
+                SETUP_RENDER_WAIT_FLOOR_SECONDS,
+            ),
+            SETUP_RENDER_WAIT_CEILING_SECONDS,
+        )
+
     def _selection_revealed_anchor_timeout_seconds(self, key: str, scope: str) -> float:
         base_timeout = max(self._selection_settle_seconds() + 1.0, 5.0)
         if scope.strip().lower() != 'menu_snapshot':
@@ -1605,7 +1617,7 @@ class _GeminiInlineBase:
     ) -> tuple[Snapshot, bool, str | None]:
         expected = {name for name in active_trigger_names if name}
         wait_seconds = (
-            max(self._selection_settle_seconds() + 1.0, 6.0)
+            self._selection_render_wait_timeout_seconds()
             if timeout is None
             else max(float(timeout), 0.1)
         )

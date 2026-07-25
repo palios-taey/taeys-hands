@@ -1695,7 +1695,7 @@ class _ClaudeInlineBase:
     ) -> tuple[Snapshot, bool, str | None]:
         expected = {name for name in active_trigger_names if name}
         wait_seconds = (
-            max(self._selection_settle_seconds() + 1.0, 6.0)
+            self._selection_render_wait_timeout_seconds()
             if timeout is None
             else max(float(timeout), 0.1)
         )
