@@ -16,6 +16,7 @@ tree:
     - name: Recents
       role: push button
   menu_snapshot_scan: document_menu_roles
+  menu_snapshot_max_depth: 30
   menu_snapshot_roles:
     - menu item
     - radio menu item
@@ -566,7 +567,7 @@ workflow:
           extended_thinking:
             element: effort_extra
             active_trigger_names:
-              - 'Model: Opus 4.8 Extra'
+              - 'Model: Opus 5 Extra'
             path:
               - element: effort_menu
                 action: hover
