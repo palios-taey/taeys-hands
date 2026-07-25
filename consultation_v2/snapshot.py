@@ -15,6 +15,7 @@ from .yaml_contract import load_platform_yaml
 
 
 _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
+_MENU_SNAPSHOT_MAX_DEPTH = 25
 _FORBIDDEN_MATCHER_KEYS = {
     'name_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
     'name_not_contains',  # lint-allow: exact-only matcher rejects legacy matcher grammar
@@ -403,6 +404,15 @@ def _menu_snapshot_filtered(
     ]
 
 
+def _menu_snapshot_max_depth(tree_cfg: Dict[str, Any]) -> int:
+    value = tree_cfg.get('menu_snapshot_max_depth', _MENU_SNAPSHOT_MAX_DEPTH)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError('tree.menu_snapshot_max_depth must be an integer')
+    if value < 0:
+        raise ValueError('tree.menu_snapshot_max_depth must be non-negative')
+    return value
+
+
 def _resolve_structural_mappings(
     element_map: Dict[str, Any],
     elements: List[Dict[str, Any]],
@@ -719,6 +729,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     chrome_cfg = _load_firefox_chrome_filter()
     tree_cfg = dict(cfg.get('tree') or {})
     prune_subtree_specs = _subtree_prune_specs(tree_cfg)
+    menu_snapshot_max_depth = _menu_snapshot_max_depth(tree_cfg)
     # Clear desktop cache to discover new portal documents that appeared
     # since the last scan (dropdowns, overlays, file dialogs).
     try:
@@ -754,6 +765,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
         scan_root = firefox
         elements = find_elements(
             scan_root,
+            max_depth=menu_snapshot_max_depth,
             fence_after=[],
             prune_subtree_roles=chrome_cfg.get('subtree_roles') or [],
             prune_subtree_specs=prune_subtree_specs,
@@ -780,7 +792,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     # misses Opus/Sonnet/Extended-thinking items that live in separate containers).
     # Since find_menu_items returns non-empty, the old fallback never fired and
     # those items were silently dropped. Now we always merge both sources.
-    elements = find_elements(firefox)
+    elements = find_elements(firefox, max_depth=menu_snapshot_max_depth)
     _EXTRA_ROLES = menu_snapshot_roles or (_MENU_ROLES | {'entry', 'push button', 'toggle button'})
     extra = [
         e for e in _menu_snapshot_filtered(elements, tree_cfg)
@@ -814,11 +826,14 @@ def build_app_root_snapshot(
     are captured. Noisy (no prune) — use ONLY to resolve a specific popover
     control, never as the general tree.
     """
+    cfg = load_platform_yaml(platform)
+    tree_cfg = dict(cfg.get('tree') or {})
+    menu_snapshot_max_depth = _menu_snapshot_max_depth(tree_cfg)
     chrome_cfg = _load_firefox_chrome_filter()
     firefox = platform_routing.find_firefox_for_platform(platform)
     if not firefox:
         raise RuntimeError(f'Firefox not found for {platform}')
-    elements = find_elements(firefox)
+    elements = find_elements(firefox, max_depth=menu_snapshot_max_depth)
     if allowed_roles:
         role_filter = _role_set(allowed_roles)
         elements = [
