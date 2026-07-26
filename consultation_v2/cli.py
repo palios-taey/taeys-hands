@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import nullcontext
 from dataclasses import replace
-from pathlib import Path
 from typing import Any
 
 from consultation_v2.identity import (
@@ -12,6 +12,12 @@ from consultation_v2.identity import (
     validate_caller_attachments,
 )
 from consultation_v2.orchestrator import _prepare_platform_identity_request, run_consultation
+from consultation_v2.output_contract import (
+    OutputContractError,
+    reserve_output_targets,
+    write_consultation_outputs,
+    write_dry_run_output,
+)
 from consultation_v2.planner import (
     SelectionPlanError,
     build_selection_plan,
@@ -40,7 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument('--session-url', default=None)
     parser.add_argument('--timeout', type=int, default=3600)
-    parser.add_argument('--output', default=None)
+    parser.add_argument(
+        '--output',
+        default=None,
+        help=(
+            'Unique per-run serialized result path. Existing result or .txt '
+            'response sibling paths fail before browser contact.'
+        ),
+    )
     parser.add_argument(
         '--store',
         action='store_true',
@@ -290,23 +303,36 @@ def main() -> int:
         purpose=args.purpose,
         requester=args.requester,
     )
-    if args.dry_run:
-        try:
-            payload = _dry_run_payload(request)
-        except (IdentityError, SelectionPlanError, ValueError) as exc:
-            parser.error(str(exc))
-        if args.output:
-            Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True))
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
+    output_context = (
+        reserve_output_targets(args.output)
+        if args.output
+        else nullcontext(None)
+    )
+    try:
+        with output_context as output_targets:
+            if args.dry_run:
+                try:
+                    payload = _dry_run_payload(request)
+                except (IdentityError, SelectionPlanError, ValueError) as exc:
+                    parser.error(str(exc))
+                if output_targets is not None:
+                    write_dry_run_output(output_targets, payload)
+                print(json.dumps(payload, indent=2, sort_keys=True))
+                return 0
 
-    result = run_consultation(request)
-    payload = result.serializable()
-    if args.output:
-        Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True))
-    else:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-    return 0 if result.ok else 1
+            result = run_consultation(request)
+            payload = result.serializable()
+            if output_targets is not None:
+                write_consultation_outputs(
+                    output_targets,
+                    payload,
+                    result.response_text,
+                )
+            else:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0 if result.ok else 1
+    except OutputContractError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == '__main__':

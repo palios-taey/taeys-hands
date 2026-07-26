@@ -151,6 +151,43 @@ def validate_caller_attachments(caller_attachments: List[str]) -> List[Attachmen
     return provenance
 
 
+def assert_caller_attachment_delivery(
+    caller_attachments: List[str],
+    delivery_attachments: List[str],
+    caller_provenance: List[AttachmentProvenance],
+) -> None:
+    if not caller_attachments:
+        return
+    expected = validate_caller_attachments(caller_attachments)
+    expected_provenance = [
+        (os.path.realpath(item.path), item.sha256)
+        for item in expected
+    ]
+    delivered_provenance = [
+        (os.path.realpath(item.path), item.sha256)
+        for item in caller_provenance
+    ]
+    if delivered_provenance != expected_provenance:
+        raise IdentityError(
+            'Caller attachment provenance does not match the explicit '
+            '--attach inputs; consultation halted before browser contact.'
+        )
+    if not delivery_attachments:
+        raise IdentityError(
+            'Explicit --attach inputs produced an empty browser attachment '
+            'list; consultation halted before browser contact.'
+        )
+    missing = [
+        path for path in delivery_attachments
+        if not os.path.isfile(path)
+    ]
+    if missing:
+        raise IdentityError(
+            'Prepared browser attachments are missing before delivery: '
+            + ', '.join(repr(path) for path in missing)
+        )
+
+
 def _build_package_text(
     platform: str,
     caller_attachments: List[str],

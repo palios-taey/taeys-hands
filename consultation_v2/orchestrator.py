@@ -16,6 +16,7 @@ from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.identity import (
     IdentityError,
+    assert_caller_attachment_delivery,
     consolidate_attachments,
     validate_caller_attachments,
 )
@@ -180,6 +181,11 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 attachments=package_paths,
                 caller_attachment_provenance=list(package.caller_provenance),
             )
+    assert_caller_attachment_delivery(
+        caller_attachments,
+        list(request.attachments),
+        list(request.caller_attachment_provenance),
+    )
     primitives.assert_session_not_dead(request.request_id())
     if request.caller_attachment_provenance:
         try:
