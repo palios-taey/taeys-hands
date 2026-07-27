@@ -13,18 +13,18 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, PerplexityCompletionDetector
 from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2 import primitives
 from consultation_v2 import storage_policy
-from consultation_v2.display_readiness import _viewable_windows, display_for_platform
+from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
+from consultation_v2.taey_extract import TaeyConsultExtractionError, extract_with_taey
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -49,8 +49,6 @@ DEEP_GENERATION_FLOOR_SECONDS = 1800.0
 # the loop, an over-conservative misfire can only degrade to a LOUD timeout -
 # never a silent false-complete and never an infinite wait.
 MONITOR_MIN_HEALTHY_RAW_COUNT = 25
-DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS = 90.0
-DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS = 1.0
 PROMPT_ECHO_FAILURE_MESSAGE = 'extracted text matches prompt - echo, not a response'
 SETUP_RENDER_WAIT_FLOOR_SECONDS = 45.0
 SETUP_RENDER_WAIT_MULTIPLIER = 6.0
@@ -3494,70 +3492,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 return True
         return False
 
-    @staticmethod
-    def _x_window_geometry(window_id: str, env: dict[str, str]) -> tuple[int, int] | None:
-        try:
-            result = subprocess.run(
-                ['xwininfo', '-id', window_id],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                env=env,
-            )
-        except Exception:
-            return None
-        if result.returncode != 0 or 'IsViewable' not in result.stdout:
-            return None
-        width_match = re.search(r'Width:\s*(\d+)', result.stdout)
-        height_match = re.search(r'Height:\s*(\d+)', result.stdout)
-        if not width_match or not height_match:
-            return None
-        width = int(width_match.group(1))
-        height = int(height_match.group(1))
-        if width <= 100 or height <= 100:
-            return None
-        return width, height
-
-    def _visible_firefox_windows(self, env: dict[str, str]) -> list[dict[str, object]]:
-        windows: list[dict[str, object]] = []
-        for window_id in self._xdotool_search(['--class', 'firefox'], env):
-            geometry = self._x_window_geometry(window_id, env)
-            if geometry is None:
-                continue
-            width, height = geometry
-            windows.append({
-                'id': window_id,
-                'title': self._xdotool_window_name(window_id, env),
-                'width': width,
-                'height': height,
-                'area': width * height,
-            })
-        return windows
-
-    def _visible_firefox_window_count(self, env: dict[str, str]) -> int:
-        display = env.get('DISPLAY') or self._display()
-        try:
-            return _viewable_windows(display)
-        except Exception:
-            return len(self._visible_firefox_windows(env))
-
-    @staticmethod
-    def _close_x_window(window_id: str, env: dict[str, str]) -> bool:
-        try:
-            result = subprocess.run(
-                ['xdotool', 'windowclose', window_id],
-                capture_output=True,
-                text=True,
-                timeout=3,
-                env=env,
-            )
-        except Exception:
-            return False
-        if result.returncode == 0:
-            time.sleep(0.3)
-            return True
-        return False
-
     def _focus_platform_firefox_for_attach(self, env: dict[str, str]) -> bool:
         window_ids = self._xdotool_search(['--onlyvisible', '--class', 'Firefox'], env)
         for window_id in reversed(window_ids):
@@ -4103,30 +4037,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         ).strip().lower()
         return default_mode == 'deep_research'
 
-    def _deep_research_copy_target(
-        self,
-    ) -> tuple[Snapshot, str | None, ElementRef | None, dict[str, object]]:
-        started = time.monotonic()
-        snap, report_target = self.wait_for_key(
-            'copy_contents_button',
-            timeout=DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS,
-            interval=DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS,
-            select='last',
-        )
-        readiness: dict[str, object] = {
-            'waited_for': 'copy_contents_button',
-            'timeout_seconds': DEEP_RESEARCH_REPORT_CARD_READINESS_SECONDS,
-            'interval_seconds': DEEP_RESEARCH_REPORT_CARD_READINESS_INTERVAL_SECONDS,
-            'elapsed_seconds': round(time.monotonic() - started, 3),
-            'matched': bool(report_target),
-        }
-        if report_target:
-            readiness['selected'] = 'copy_contents_button'
-            return snap, 'copy_contents_button', report_target, readiness
-        inline_target = self.find_last(snap, 'copy_button')
-        readiness['selected'] = 'copy_button' if inline_target else None
-        return snap, 'copy_button' if inline_target else None, inline_target, readiness
-
     def _accept_extracted_content(
         self,
         content: str,
@@ -4156,305 +4066,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         )
         return True
 
-    @staticmethod
-    def _markdown_download_dirs() -> tuple[Path, ...]:
-        paths = [Path.home() / 'Downloads']
-        xdg_download = os.environ.get('XDG_DOWNLOAD_DIR')
-        if xdg_download:
-            paths.append(Path(xdg_download).expanduser())
-        unique: list[Path] = []
-        seen = set()
-        for path in paths:
-            marker = str(path)
-            if marker not in seen:
-                seen.add(marker)
-                unique.append(path)
-        return tuple(unique)
-
-    def _markdown_download_state(self) -> dict[str, tuple[float, int]]:
-        state: dict[str, tuple[float, int]] = {}
-        for directory in self._markdown_download_dirs():
-            if not directory.exists():
-                continue
-            for path in directory.glob('*.md'):
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                state[str(path)] = (float(stat.st_mtime), int(stat.st_size))
-        return state
-
-    def _read_new_markdown_download(
-        self,
-        before: dict[str, tuple[float, int]],
-        *,
-        timeout: float = 12.0,
-    ) -> tuple[str, dict[str, object]]:
-        deadline = time.monotonic() + timeout
-        newest: Path | None = None
-        while time.monotonic() < deadline:
-            changed: list[Path] = []
-            for directory in self._markdown_download_dirs():
-                if not directory.exists():
-                    continue
-                for path in directory.glob('*.md'):
-                    try:
-                        stat = path.stat()
-                    except OSError:
-                        continue
-                    prior = before.get(str(path))
-                    current = (float(stat.st_mtime), int(stat.st_size))
-                    if prior != current and current[1] > 0:
-                        changed.append(path)
-            if changed:
-                newest = max(changed, key=lambda item: item.stat().st_mtime)
-                try:
-                    content = newest.read_text(errors='replace').strip()
-                except OSError:
-                    content = ''
-                if content:
-                    return content, {
-                        'download_path': str(newest),
-                        'download_characters': len(content),
-                    }
-            time.sleep(0.5)
-        return '', {
-            'download_path': str(newest) if newest else None,
-            'download_timeout': timeout,
-        }
-
-    @staticmethod
-    def _markdown_download_answer_region(content: str) -> str:
-        text = (content or '').strip()
-        if not text:
-            return ''
-        probe = text[:5000].lower()
-        if (
-            'r2cdn.perplexity.ai/pplx-full-logo' not in probe
-            or 'perplexity deep research request' not in probe
-            or '## output contract' not in probe
-        ):
-            return text
-        contract_pos = probe.find('## output contract')
-        search_start = contract_pos if contract_pos >= 0 else 0
-        markers = (
-            '\nI now have all the information I need.',
-            '\nI have all the information I need.',
-            '\nI now have the information I need.',
-            '\n***\n\n# ',
-        )
-        starts = [
-            pos + (1 if marker.startswith('\n') else 0)
-            for marker in markers
-            if (pos := text.find(marker, search_start)) >= 0
-        ]
-        if not starts:
-            return text
-        return text[min(starts):].strip()
-
-    @staticmethod
-    def _merge_deep_research_sources(
-        body: str,
-        markdown: str,
-    ) -> tuple[str, dict[str, object]]:
-        citation_ids = {
-            int(value)
-            for value in re.findall(r'(?<!\^)\[([0-9]+)\]', body or '')
-        }
-        sources = {
-            int(source_id): url.rstrip()
-            for source_id, url in re.findall(
-                r'^\[\^([0-9]+)\]:\s+(https?://\S+)\s*$',
-                markdown or '',
-                flags=re.MULTILINE,
-            )
-        }
-        missing_ids = sorted(citation_ids - sources.keys())
-        evidence: dict[str, object] = {
-            'citation_ids': sorted(citation_ids),
-            'markdown_source_ids': sorted(sources),
-            'missing_source_ids': missing_ids,
-        }
-        if not citation_ids or missing_ids:
-            return '', evidence
-        source_lines = [f'{source_id}. {sources[source_id]}' for source_id in sorted(citation_ids)]
-        merged = f'{body.rstrip()}\n\n## Sources\n\n' + '\n'.join(source_lines)
-        evidence['merged_source_urls'] = len(source_lines)
-        evidence['merged_characters'] = len(merged)
-        return merged, evidence
-
-    def _cleanup_markdown_download_popup(
-        self,
-        baseline_window_ids: set[str],
-        *,
-        timeout: float = 3.0,
-    ) -> tuple[bool, dict[str, object]]:
-        env = self._dialog_env()
-        baseline = {str(window_id) for window_id in baseline_window_ids if window_id}
-        self.runtime.press('Escape')
-        time.sleep(0.3)
-        windows = self._visible_firefox_windows(env)
-        evidence: dict[str, object] = {
-            'markdown_download_baseline_firefox_window_ids': sorted(baseline),
-            'markdown_download_popup_escape_sent': True,
-            'markdown_download_visible_firefox_windows_before_cleanup': len(windows),
-            'markdown_download_firefox_windows_before_cleanup': windows,
-        }
-        if len(windows) > 1:
-            candidates = [window for window in windows if str(window.get('id') or '') not in baseline]
-            if not candidates:
-                keep = max(windows, key=lambda window: int(window.get('area') or 0))
-                candidates = [window for window in windows if window is not keep]
-            closed: list[str] = []
-            failed: list[str] = []
-            for window in sorted(candidates, key=lambda item: int(item.get('area') or 0)):
-                window_id = str(window.get('id') or '')
-                if not window_id:
-                    continue
-                if self._close_x_window(window_id, env):
-                    closed.append(window_id)
-                else:
-                    failed.append(window_id)
-            evidence['markdown_download_popup_closed_window_ids'] = closed
-            evidence['markdown_download_popup_close_failed_window_ids'] = failed
-        else:
-            evidence['markdown_download_popup_closed_window_ids'] = []
-            evidence['markdown_download_popup_close_failed_window_ids'] = []
-
-        deadline = time.monotonic() + max(float(timeout), 0.1)
-        visible_after = self._visible_firefox_window_count(env)
-        while visible_after != 1 and time.monotonic() < deadline:
-            time.sleep(0.25)
-            visible_after = self._visible_firefox_window_count(env)
-        evidence['markdown_download_visible_firefox_windows_after_cleanup'] = visible_after
-        evidence['markdown_download_popup_cleanup_timeout_seconds'] = timeout
-        return visible_after == 1, evidence
-
-    def _activate_markdown_download_item(
-        self,
-        trigger_key: str,
-        item_key: str,
-    ) -> dict[str, object]:
-        snap = self.runtime.snapshot()
-        trigger = self.find_last(snap, trigger_key)
-        evidence: dict[str, object] = {
-            'trigger_key': trigger_key,
-            'item_key': item_key,
-            'trigger_found': bool(trigger),
-        }
-        if not trigger:
-            return evidence
-        evidence['trigger'] = {
-            'name': trigger.name,
-            'role': trigger.role,
-            'x': trigger.x,
-            'y': trigger.y,
-        }
-        self.runtime.scroll_element_into_view(trigger)
-        time.sleep(0.3)
-        evidence['trigger_clicked'] = bool(
-            self.runtime.click(trigger, strategy='coordinate_only')
-        )
-        menu_snap = self.runtime.wait_for_stable_menu_snapshot(
-            consecutive=1,
-            timeout=2.0,
-            interval=0.2,
-            anchor_key=item_key,
-            require_non_empty=True,
-        )
-        item = self.find_last(menu_snap, item_key)
-        evidence['item_found'] = bool(item)
-        if not item:
-            self.runtime.press('Escape')
-            time.sleep(0.3)
-            return evidence
-        evidence['item'] = {
-            'name': item.name,
-            'role': item.role,
-            'x': item.x,
-            'y': item.y,
-        }
-        evidence['item_clicked'] = bool(
-            self.runtime.click(item, strategy='coordinate_only')
-        )
-        if not evidence['item_clicked']:
-            self.runtime.press('Escape')
-            time.sleep(0.3)
-        return evidence
-
-    def _extract_via_markdown_download(
-        self,
-        request: ConsultationRequest,
-        result: ConsultationResult,
-        attempts: list[dict[str, object]],
-        *,
-        base_content: str | None = None,
-    ) -> bool:
-        env = self._dialog_env()
-        baseline_windows = self._visible_firefox_windows(env)
-        baseline_window_ids = {str(window.get('id') or '') for window in baseline_windows}
-        before = self._markdown_download_state()
-        for trigger_key, item_key in (
-            ('more_actions', 'export_markdown_item'),
-            ('download_button', 'download_markdown_item'),
-        ):
-            attempt = self._activate_markdown_download_item(trigger_key, item_key)
-            attempts.append(attempt)
-            if not attempt.get('item_clicked'):
-                continue
-            content, download_evidence = self._read_new_markdown_download(before)
-            attempt.update(download_evidence)
-            cleanup_ok, cleanup_evidence = self._cleanup_markdown_download_popup(
-                baseline_window_ids,
-            )
-            download_evidence.update(cleanup_evidence)
-            attempt.update(cleanup_evidence)
-            if not cleanup_ok:
-                result.add_step(
-                    'extract_primary', False,
-                    'Perplexity Markdown download left extra visible Firefox windows open',
-                    target_key='markdown_download',
-                    markdown_download_attempts=attempts,
-                    **download_evidence,
-                )
-                return False
-            if not content:
-                continue
-            answer_region = self._markdown_download_answer_region(content)
-            if not answer_region:
-                continue
-            if answer_region != content:
-                download_evidence.update(
-                    markdown_download_stripped_echo=True,
-                    markdown_download_raw_characters=len(content),
-                    markdown_download_answer_characters=len(answer_region),
-                )
-                attempt.update(download_evidence)
-            content = answer_region
-            target_key = 'markdown_download'
-            message = f'Perplexity response extracted via Markdown download ({len(content)} chars)'
-            if base_content is not None:
-                content, merge_evidence = self._merge_deep_research_sources(base_content, content)
-                download_evidence.update(merge_evidence)
-                attempt.update(merge_evidence)
-                if not content:
-                    continue
-                target_key = 'copy_contents_with_markdown_sources'
-                message = (
-                    'Perplexity report body extracted via Copy contents with '
-                    f'Markdown Sources ({len(content)} chars)'
-                )
-            return self._accept_extracted_content(
-                content,
-                request,
-                result,
-                message,
-                target_key=target_key,
-                markdown_download_attempts=attempts,
-                **download_evidence,
-            )
-        return False
-
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -4467,91 +4078,76 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         if not self._ensure_answer_thread(result):
             return False
 
-        if not is_deep_research:
-            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
-
-        # Deep Research renders in one of several mapped output shapes. The report
-        # card's Copy contents control carries the full report body but omits its
-        # separately rendered Sources widget; Markdown export carries the source map
-        # but can omit the detailed report sections.
-        # Selection:
-        #   - report-card present -> copy_contents_button body + Markdown source map
-        #   - inline answer (no report-card) -> copy_button
-        # Observed DR sub-shapes:
-        #   - Zapier b2a1859e: copy_contents_button never renders; Markdown export
-        #     is the extraction path.
-        #   - Cursor 92b7d26b: copy_contents_button can render late; during the
-        #     90s window copy_button may be present but produce an empty clipboard,
-        #     so empty copy_button must continue to Markdown export.
-        report_card_readiness: dict[str, object] | None = None
-        markdown_download_attempts: list[dict[str, object]] = []
         if is_deep_research:
-            snap, target_key, target, report_card_readiness = self._deep_research_copy_target()
-        else:
-            # Use snapshot (which clears AT-SPI cache via build_snapshot) to find
-            # copy buttons. Raw find_elements bypasses cache clearing and misses
-            # elements after the long monitor polling phase.
-            snap = self.runtime.snapshot()
-            target_key = 'copy_button'
-            target = self.find_last(snap, target_key)
-
-        if not target:
-            if is_deep_research and self._extract_via_markdown_download(
+            display = self._display()
+            try:
+                extraction = extract_with_taey(
+                    platform=self.platform,
+                    display=display,
+                )
+            except TaeyConsultExtractionError as exc:
+                result.add_step(
+                    'extract_primary',
+                    False,
+                    f'Perplexity Taey consult extraction failed: {exc}',
+                    stop_condition='extraction_failed',
+                    target_key='taey_consult_extract',
+                    display=display,
+                )
+                return False
+            content = str(extraction.get('content') or '')
+            extraction_evidence = {
+                key: extraction.get(key)
+                for key in (
+                    'body_control',
+                    'body_characters',
+                    'source_count',
+                    'expected_source_count',
+                    'citation_ids',
+                    'missing',
+                    'missing_source_ids',
+                    'capture_root',
+                    'turns',
+                    'model',
+                    'endpoint',
+                    'tool_schema_sha256',
+                    'system_prompt_path',
+                    'system_prompt_sha256',
+                    'act_path',
+                    'actions',
+                )
+            }
+            return self._accept_extracted_content(
+                content,
                 request,
                 result,
-                markdown_download_attempts,
-            ):
-                return True
-            result.add_step(
-                'extract_primary', False,
                 (
-                    'Perplexity Deep Research: no mapped extraction control present '
-                    '(neither copy_contents_button report-card nor copy_button inline answer)'
-                    if is_deep_research
-                    else f'Perplexity required extraction target {target_key!r} not found'
+                    'Perplexity Deep Research extracted by the Taey consult seat '
+                    f"({extraction.get('body_characters')} body chars, "
+                    f"{extraction.get('source_count')}/"
+                    f"{extraction.get('expected_source_count')} sources)"
                 ),
+                target_key='taey_consult_extract',
+                display=display,
+                taey_consult_extract=extraction_evidence,
+            )
+
+        self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+        snap = self.runtime.snapshot()
+        target_key = 'copy_button'
+        target = self.find_last(snap, target_key)
+        if not target:
+            result.add_step(
+                'extract_primary',
+                False,
+                f'Perplexity required extraction target {target_key!r} not found',
                 stop_condition='extraction_failed',
-                markdown_download_attempts=markdown_download_attempts,
-                report_card_readiness=report_card_readiness,
                 snapshot=snap.serializable(),
             )
             return False
 
-        # Perplexity's DR Copy / "Copy contents" returns an EMPTY clipboard if
-        # action-clicked while OFF-SCREEN. Make the pre-copy scroll load-bearing
-        # for the report control, then rescan so the clicked AT-SPI object is the
-        # visible post-scroll element rather than the stale pre-scroll ref.
         scrolled_into_view = bool(self.runtime.scroll_element_into_view(target))
-        document_scrolled = False
-        refreshed = False
-        if target_key == 'copy_contents_button':
-            if not scrolled_into_view:
-                document_scrolled = bool(
-                    self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
-                )
-            post_scroll_snap = self.runtime.snapshot()
-            refreshed_target = self.find_last(post_scroll_snap, target_key)
-            if refreshed_target:
-                target = refreshed_target
-                snap = post_scroll_snap
-                refreshed = True
-            if not (scrolled_into_view or document_scrolled):
-                result.add_step(
-                    'extract_primary',
-                    False,
-                    'Perplexity copy_contents_button could not be scrolled into view before copy',
-                    stop_condition='extraction_failed',
-                    target_key=target_key,
-                    scrolled_into_view=scrolled_into_view,
-                    document_scrolled=document_scrolled,
-                    target_refreshed=refreshed,
-                    markdown_download_attempts=markdown_download_attempts,
-                    report_card_readiness=report_card_readiness,
-                    snapshot=snap.serializable(),
-                )
-                return False
         time.sleep(0.5)
-        # Clear clipboard, click via AT-SPI action, read clipboard
         self.runtime.write_clipboard('')
         time.sleep(0.3)
         clicked = self.runtime.click(target, strategy='atspi_only')
@@ -4562,38 +4158,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 stop_condition='extraction_failed',
                 target_key=target_key,
                 scrolled_into_view=scrolled_into_view,
-                document_scrolled=document_scrolled,
-                target_refreshed=refreshed,
-                markdown_download_attempts=markdown_download_attempts,
-                report_card_readiness=report_card_readiness,
                 snapshot=snap.serializable(),
             )
             return False
         content, clipboard_poll = self._read_clipboard_until_nonempty()
 
         if content:
-            if is_deep_research and target_key == 'copy_contents_button':
-                step_count_before_markdown = len(result.steps)
-                if self._extract_via_markdown_download(
-                    request,
-                    result,
-                    markdown_download_attempts,
-                    base_content=content,
-                ):
-                    return True
-                if any(not step.success for step in result.steps[step_count_before_markdown:]):
-                    return False
-                result.add_step(
-                    'extract_primary',
-                    False,
-                    'Perplexity report body citations could not be resolved to Markdown source URLs',
-                    stop_condition='extraction_failed',
-                    target_key=target_key,
-                    markdown_download_attempts=markdown_download_attempts,
-                    report_card_readiness=report_card_readiness,
-                    snapshot=snap.serializable(),
-                )
-                return False
             return self._accept_extracted_content(
                 content,
                 request,
@@ -4601,41 +4171,17 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 f'Perplexity response extracted via {target.name!r} ({len(content)} chars)',
                 target_key=target_key,
                 scrolled_into_view=scrolled_into_view,
-                document_scrolled=document_scrolled,
-                target_refreshed=refreshed,
-                markdown_download_attempts=markdown_download_attempts,
-                report_card_readiness=report_card_readiness,
                 **clipboard_poll,
             )
 
-        if is_deep_research:
-            markdown_download_attempts.append({
-                'fallback_after_target_key': target_key,
-                'fallback_reason': 'empty_clipboard',
-                'deep_research_render_shape': (
-                    'copy_button_empty_clipboard_after_copy_contents_timeout'
-                    if target_key == 'copy_button'
-                    else 'copy_contents_empty_clipboard'
-                ),
-            })
-        if is_deep_research and self._extract_via_markdown_download(
-            request,
-            result,
-            markdown_download_attempts,
-        ):
-            return True
-
         result.add_step(
-            'extract_primary', False,
+            'extract_primary',
+            False,
             f'Perplexity copy target clicked but clipboard empty (button: {target.name!r})',
             stop_condition='extraction_failed',
             target_key=target_key,
             scrolled_into_view=scrolled_into_view,
-            document_scrolled=document_scrolled,
-            target_refreshed=refreshed,
             clicked=bool(clicked),
-            markdown_download_attempts=markdown_download_attempts,
-            report_card_readiness=report_card_readiness,
             **clipboard_poll,
             snapshot=snap.serializable(),
         )

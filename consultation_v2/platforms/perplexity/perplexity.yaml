@@ -274,12 +274,6 @@ tree:
     more_actions:
       name: More actions
       role: push button
-    export_markdown_item:
-      name: Export as Markdown
-      role: menu item
-    download_markdown_item:
-      name: Markdown
-      role: menu item
     thread_actions:
       name: Thread actions
       role: push button
@@ -397,12 +391,8 @@ validation:
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
 #  - assistant_text: normal answer via the mapped `copy_button`.
-#  - research_report: Deep Research full report via the mapped report controls:
-#    first `copy_contents_button` ("Copy contents" at the top of the report card),
-#    then `copy_code` when the primary report content is a virtualized code block.
-#    Do NOT use the bottom icon-row `copy_button` (summary only) or
-#    `download_button` -> Markdown (transcript with hidden footnote refs); the
-#    report control is scrolled into view before activation.
+#  - Deep Research extraction is owned by the driver's closed Taey consult seat,
+#    which captures the citation-bearing body and complete source panel together.
 # ============================================================================
 extraction:
   assistant_text:
@@ -411,18 +401,4 @@ extraction:
         element: copy_button
         select: last
       - action: read_clipboard
-        validation: response_complete
-  research_report:
-    steps:
-      - action: scroll_into_view
-        element: copy_contents_button
-      - action: copy_element
-        element: copy_contents_button
-      - action: read_clipboard
-        validation: response_complete
-      - action: copy_element
-        element: copy_code
-      - action: read_clipboard
-        validation: response_complete
-      - action: read_tree_text
         validation: response_complete
