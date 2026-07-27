@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--display',
         required=True,
-        choices=[':2', ':3', ':4', ':5', ':6'],
+        choices=[':2', ':3', ':4', ':5', ':6', ':20', ':21', ':22', ':23', ':24'],
     )
     parser.add_argument('--output', required=True)
     parser.add_argument('--capture-root', default=None)

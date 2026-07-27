@@ -17,12 +17,19 @@ import urllib.request
 from consultation_v2 import clipboard
 
 
-CONSULT_DISPLAYS = frozenset({':2', ':3', ':4', ':5', ':6'})
+CONSULT_DISPLAYS = frozenset({
+    ':2', ':3', ':4', ':5', ':6',
+    ':20', ':21', ':22', ':23', ':24',
+})
 DEFAULT_ACT_PATH = Path('/home/mira/treasurer/scripts/loop/act.py')
 DEFAULT_SYSTEM_PROMPT_PATH = Path('/home/mira/data/corpus/layer_1/SYSTEM_PROMPT.md')
 DEFAULT_EP3_BASE = 'http://10.0.0.197:8000/v1'
 DEFAULT_EP3_MODEL = 'ep3'
 MAX_TURNS = 12
+PRE_EXECUTION_REJECTION = (
+    'PRE_EXECUTION_CONTRACT_REJECTED; nothing executed; re-emit one '
+    'consult_extract_action call that follows the exact-name requirements'
+)
 SOURCE_CONTROL_PATTERN = re.compile(r'^\s*([0-9]+)\s+sources\s*$', re.IGNORECASE)
 BODY_CITATION_PATTERN = re.compile(r'(?<!\^)\[([0-9]+)\]')
 INTERACTIVE_ROLES = frozenset({
@@ -50,7 +57,8 @@ def consult_extract_action_tool() -> dict[str, object]:
             'name': 'consult_extract_action',
             'description': (
                 'Perform one named accessibility action on the completed consult. '
-                'Use find before click and finish only after body and sources were captured.'
+                'Use find before click and finish only after a citation-bearing body '
+                'and all sources were captured.'
             ),
             'parameters': {
                 'type': 'object',
@@ -205,6 +213,7 @@ class TaeyConsultExtractionSeat:
             'Taey system prompt',
         )
         self.body = ''
+        self.body_control = ''
         self.sources: list[dict[str, object]] = []
         self.expected_source_count = 0
         self.actions: list[dict[str, object]] = []
@@ -369,9 +378,24 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 'finish requires name="" and contains=false'
             )
+        if action == 'find' and name in {'Copy', 'Copy contents'} and contains:
+            raise TaeyConsultExtractionError(
+                f'find for {name!r} must use contains=false so Copy query and '
+                'other controls cannot satisfy it'
+            )
         if action == 'click' and contains:
             raise TaeyConsultExtractionError(
                 'click requires an exact accessible name from a prior find'
+            )
+        if (
+            action == 'click'
+            and name not in {'Copy', 'Copy contents'}
+            and SOURCE_CONTROL_PATTERN.fullmatch(name) is None
+        ):
+            raise TaeyConsultExtractionError(
+                'consult extraction click is restricted to exact "Copy", '
+                'exact "Copy contents", or the exact "N sources" name '
+                'returned by find'
             )
         return action, name, contains
 
@@ -516,6 +540,11 @@ class TaeyConsultExtractionSeat:
             int(value)
             for value in BODY_CITATION_PATTERN.findall(self.body)
         })
+        if not citation_ids:
+            raise TaeyConsultExtractionError(
+                f'{self.body_control or "body"} clipboard has no numeric citation '
+                'markers; it is not the complete Deep Research report'
+            )
         source_ids = set(range(1, len(self.sources) + 1))
         missing = sorted(set(citation_ids) - source_ids)
         if missing:
@@ -534,6 +563,7 @@ class TaeyConsultExtractionSeat:
             'ok': True,
             'content': content,
             'body': self.body,
+            'body_control': self.body_control,
             'body_characters': len(self.body),
             'sources': list(self.sources),
             'source_count': len(self.sources),
@@ -563,15 +593,13 @@ class TaeyConsultExtractionSeat:
             }
         elif action == 'click':
             source_match = SOURCE_CONTROL_PATTERN.fullmatch(name)
-            if name != 'Copy' and source_match is None:
-                raise TaeyConsultExtractionError(
-                    'consult extraction click is restricted to exact "Copy" or '
-                    'the exact "N sources" name returned by find'
-                )
-            if name == 'Copy' and not clipboard.write(''):
-                raise TaeyConsultExtractionError(
-                    'could not clear clipboard before the Copy action'
-                )
+            if name in {'Copy', 'Copy contents'}:
+                try:
+                    clipboard.clear()
+                except Exception as exc:
+                    raise TaeyConsultExtractionError(
+                        f'could not clear clipboard before the Copy action: {exc}'
+                    ) from exc
             clicked = bool(
                 self.act.click(
                     name,
@@ -589,18 +617,24 @@ class TaeyConsultExtractionSeat:
                 'action': action,
                 'name': name,
             }
-            if name == 'Copy':
+            if name in {'Copy', 'Copy contents'}:
                 body = self._read_clipboard_until_nonempty()
                 if not body:
                     raise TaeyConsultExtractionError(
-                        'Copy action landed but the clipboard body stayed empty'
+                        f'{name} action landed but the clipboard body stayed empty'
                     )
                 self.body = body
+                self.body_control = name
                 result.update(
                     capture='body',
+                    body_control=name,
                     body=body,
                     body_characters=len(body),
                     body_sha256=_sha256_text(body),
+                    citation_ids=sorted({
+                        int(value)
+                        for value in BODY_CITATION_PATTERN.findall(body)
+                    }),
                 )
             else:
                 expected_count = int(source_match.group(1))
@@ -623,6 +657,10 @@ class TaeyConsultExtractionSeat:
             'body_characters': len(self.body),
             'source_count': len(self.sources),
         }
+        if action == 'find':
+            action_record['found'] = result.get('found')
+        if result.get('capture'):
+            action_record['capture'] = result.get('capture')
         self.actions.append(action_record)
         self._append_turn_log({'event': 'action', **action_record})
         return result
@@ -632,13 +670,16 @@ class TaeyConsultExtractionSeat:
             f'Extract the completed Perplexity Deep Research answer on consult display '
             f'{self.display}. Use consult_extract_action only. Execute this observed '
             'sequence one action per turn: find the exact response Copy push button; '
-            'click the exact Copy name and read the returned clipboard body; find a '
-            'push button whose accessible name contains " sources"; click the exact '
-            'N sources name returned by find and read the returned complete source '
-            'panel; then finish with name="" and contains=false. Never click '
-            'Download, Copy contents, or coordinates. Do not finish until the tool '
-            'reports a non-empty body, source_count equals expected_source_count, '
-            'and missing=[].'
+            'click the exact Copy name and inspect the returned clipboard body. A '
+            'complete report body contains numeric [N] citation markers. If Copy '
+            'returns a short recap with citation_ids=[], find and click the exact '
+            'Copy contents push button instead, then use that citation-bearing body. '
+            'Next find a push button whose accessible name contains " sources"; '
+            'click the exact N sources name returned by find and read the returned '
+            'complete source panel; then finish with name="" and contains=false. '
+            'Never click Download or coordinates. Do not finish until the body has '
+            'numeric citation IDs, source_count equals expected_source_count, and '
+            'missing=[].'
         )
         overlay = (
             '\n\nCONSULT EXTRACTION SEAT: The sole callable tool is '
@@ -650,9 +691,44 @@ class TaeyConsultExtractionSeat:
             {'role': 'system', 'content': self.system_prompt + overlay},
             {'role': 'user', 'content': task},
         ]
+        pre_execution_retry_used = False
         for turn in range(1, MAX_TURNS + 1):
             message = self._message(self._call_taey(messages, turn))
             call_id, arguments = self._arguments(message)
+            try:
+                self._normalized_action(arguments)
+            except TaeyConsultExtractionError as exc:
+                if pre_execution_retry_used:
+                    raise TaeyConsultExtractionError(
+                        f'Taey repeated an invalid pre-execution action: {exc}'
+                    ) from exc
+                pre_execution_retry_used = True
+                rejection = {
+                    'ok': False,
+                    'executed': False,
+                    'error': str(exc),
+                    'instruction': PRE_EXECUTION_REJECTION,
+                }
+                self._append_turn_log({
+                    'event': 'pre_execution_rejection',
+                    'turn': turn,
+                    'arguments': dict(arguments),
+                    'error': str(exc),
+                })
+                messages.extend([
+                    message,
+                    {
+                        'role': 'tool',
+                        'tool_call_id': call_id or f'consult_extract_action_{turn}',
+                        'content': json.dumps(
+                            rejection,
+                            ensure_ascii=True,
+                            sort_keys=True,
+                            separators=(',', ':'),
+                        ),
+                    },
+                ])
+                continue
             result = self._execute(arguments)
             if arguments.get('action') == 'finish':
                 result.update(
