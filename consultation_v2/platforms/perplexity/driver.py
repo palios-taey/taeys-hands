@@ -4291,9 +4291,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
     ) -> tuple[bool, dict[str, object]]:
         env = self._dialog_env()
         baseline = {str(window_id) for window_id in baseline_window_ids if window_id}
+        self.runtime.press('Escape')
+        time.sleep(0.3)
         windows = self._visible_firefox_windows(env)
         evidence: dict[str, object] = {
             'markdown_download_baseline_firefox_window_ids': sorted(baseline),
+            'markdown_download_popup_escape_sent': True,
             'markdown_download_visible_firefox_windows_before_cleanup': len(windows),
             'markdown_download_firefox_windows_before_cleanup': windows,
         }
