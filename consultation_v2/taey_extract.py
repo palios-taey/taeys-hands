@@ -30,8 +30,15 @@ PRE_EXECUTION_REJECTION = (
     'PRE_EXECUTION_CONTRACT_REJECTED; nothing executed; re-emit one '
     'consult_extract_action call that follows the exact-name requirements'
 )
-SOURCE_CONTROL_PATTERN = re.compile(r'^\s*([0-9]+)\s+sources\s*$', re.IGNORECASE)
+SOURCE_CONTROL_PATTERN = re.compile(r'^\s*([0-9]+)\s+sources?\s*$', re.IGNORECASE)
 BODY_CITATION_PATTERN = re.compile(r'(?<!\^)\[([0-9]+)\]')
+MARKDOWN_CITATION_PATTERN = re.compile(r'\[\^([0-9]+(?:_[0-9]+)*)\]')
+MARKDOWN_SOURCE_DEFINITION_PATTERN = re.compile(
+    r'^\[\^([0-9]+(?:_[0-9]+)*)\]:\s+(.+?)\s*$'
+)
+FILE_SOURCE_CONTROL_PATTERN = re.compile(r'^\s*Files\s+([0-9]+)\s*$', re.IGNORECASE)
+MARKDOWN_EXPORT_NAME = 'Export as Markdown'
+OVERFLOW_CONTROL_NAMES = ('Session actions', '...')
 INTERACTIVE_ROLES = frozenset({
     'check box',
     'combo box',
@@ -48,6 +55,24 @@ INTERACTIVE_ROLES = frozenset({
 
 class TaeyConsultExtractionError(RuntimeError):
     pass
+
+
+class TaeyConsultControlError(TaeyConsultExtractionError):
+    pass
+
+
+class TaeyConsultStateError(TaeyConsultExtractionError):
+    def __init__(self, required_action: dict[str, object]) -> None:
+        self.required_action = dict(required_action)
+        super().__init__(
+            'action is out of phase; nothing executed; required_action='
+            + json.dumps(
+                self.required_action,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(',', ':'),
+            )
+        )
 
 
 def consult_extract_action_tool() -> dict[str, object]:
@@ -72,14 +97,15 @@ def consult_extract_action_tool() -> dict[str, object]:
                     'name': {
                         'type': 'string',
                         'description': (
-                            'Accessible push-button name. Use an empty string for finish.'
+                            'Exact accessible control name, or a substring for find. '
+                            'Use an empty string for finish.'
                         ),
                     },
                     'contains': {
                         'type': 'boolean',
                         'description': (
                             'For find only: match name as a substring. Click always requires '
-                            'the exact name returned by find. Use false for finish.'
+                            'the exact name returned by a successful find. Use false for finish.'
                         ),
                     },
                 },
@@ -99,6 +125,59 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def _citation_ids(value: str) -> list[int]:
+    identifiers = {
+        int(item)
+        for item in BODY_CITATION_PATTERN.findall(value or '')
+    }
+    for token in MARKDOWN_CITATION_PATTERN.findall(value or ''):
+        source_id = token.rsplit('_', 1)[-1]
+        if source_id.isdigit():
+            identifiers.add(int(source_id))
+    return sorted(identifiers)
+
+
+def _without_markdown_source_definitions(value: str) -> str:
+    kept: list[str] = []
+    previous_blank = False
+    for line in (value or '').splitlines():
+        if MARKDOWN_SOURCE_DEFINITION_PATTERN.fullmatch(line.strip()):
+            continue
+        blank = not line.strip()
+        if blank and previous_blank:
+            continue
+        kept.append(line)
+        previous_blank = blank
+    return '\n'.join(kept).strip()
+
+
+def _markdown_sources(value: str) -> list[dict[str, object]]:
+    definitions: dict[int, str] = {}
+    for line in (value or '').splitlines():
+        match = MARKDOWN_SOURCE_DEFINITION_PATTERN.fullmatch(line.strip())
+        if match is None:
+            continue
+        source_id = int(match.group(1).rsplit('_', 1)[-1])
+        target = match.group(2).strip()
+        previous = definitions.get(source_id)
+        if previous is not None and previous != target:
+            raise TaeyConsultExtractionError(
+                f'Markdown export has conflicting definitions for source {source_id}'
+            )
+        definitions[source_id] = target
+    sources: list[dict[str, object]] = []
+    for source_id, target in sorted(definitions.items()):
+        parsed = urllib.parse.urlsplit(target)
+        is_url = parsed.scheme in {'http', 'https'} and bool(parsed.netloc)
+        sources.append({
+            'index': source_id,
+            'url': target if is_url else '',
+            'title': target[:240],
+            'kind': 'url' if is_url else 'file',
+        })
+    return sources
 
 
 def _required_text(path: Path, label: str) -> str:
@@ -216,6 +295,14 @@ class TaeyConsultExtractionSeat:
         self.body_control = ''
         self.sources: list[dict[str, object]] = []
         self.expected_source_count = 0
+        self.body_citation_ids: list[int] = []
+        self.found_controls: set[tuple[str, str]] = set()
+        self.copy_contents_checked = False
+        self.markdown_export_checked = False
+        self.overflow_checked: set[str] = set()
+        self.markdown_sources: list[dict[str, object]] = []
+        self.download_path = ''
+        self.download_sha256 = ''
         self.actions: list[dict[str, object]] = []
         self.capture_root.mkdir(parents=True, exist_ok=True)
         self.turn_log_path = self.capture_root / 'turns.jsonl'
@@ -389,15 +476,115 @@ class TaeyConsultExtractionSeat:
             )
         if (
             action == 'click'
-            and name not in {'Copy', 'Copy contents'}
+            and name not in {
+                'Copy',
+                'Copy contents',
+                MARKDOWN_EXPORT_NAME,
+                *OVERFLOW_CONTROL_NAMES,
+            }
             and SOURCE_CONTROL_PATTERN.fullmatch(name) is None
         ):
             raise TaeyConsultExtractionError(
                 'consult extraction click is restricted to exact "Copy", '
-                'exact "Copy contents", or the exact "N sources" name '
-                'returned by find'
+                'exact "Copy contents", an exact answer-overflow control, exact '
+                '"Export as Markdown", or the exact "N sources" name '
+                'returned by a successful find'
             )
         return action, name, contains
+
+    @staticmethod
+    def _control_role(name: str) -> str:
+        return 'menu item' if name == MARKDOWN_EXPORT_NAME else 'push button'
+
+    def _validated_action(
+        self,
+        arguments: dict[str, object],
+    ) -> tuple[str, str, bool, str]:
+        action, name, contains = self._normalized_action(arguments)
+        required = self._required_action()
+        if arguments != required:
+            raise TaeyConsultStateError(required)
+        role = self._control_role(name)
+        if action == 'click' and (name, role) not in self.found_controls:
+            raise TaeyConsultExtractionError(
+                f'click requires a live successful find for exact {name!r} '
+                f'with role {role!r}; nothing executed'
+            )
+        return action, name, contains, role
+
+    def _required_action(self) -> dict[str, object]:
+        if not self.body:
+            copy_contents = ('Copy contents', 'push button')
+            if not self.copy_contents_checked:
+                return {
+                    'action': 'find',
+                    'name': 'Copy contents',
+                    'contains': False,
+                }
+            if copy_contents in self.found_controls:
+                return {
+                    'action': 'click',
+                    'name': 'Copy contents',
+                    'contains': False,
+                }
+            markdown_export = (MARKDOWN_EXPORT_NAME, 'menu item')
+            if not self.markdown_export_checked:
+                return {
+                    'action': 'find',
+                    'name': MARKDOWN_EXPORT_NAME,
+                    'contains': False,
+                }
+            if markdown_export in self.found_controls:
+                return {
+                    'action': 'click',
+                    'name': MARKDOWN_EXPORT_NAME,
+                    'contains': False,
+                }
+            found_overflow = [
+                name
+                for name in OVERFLOW_CONTROL_NAMES
+                if (name, 'push button') in self.found_controls
+            ]
+            if len(found_overflow) > 1:
+                raise TaeyConsultControlError(
+                    f'multiple answer overflow controls were found: {found_overflow}'
+                )
+            if found_overflow:
+                return {
+                    'action': 'click',
+                    'name': found_overflow[0],
+                    'contains': False,
+                }
+            for overflow_name in OVERFLOW_CONTROL_NAMES:
+                if overflow_name not in self.overflow_checked:
+                    return {
+                        'action': 'find',
+                        'name': overflow_name,
+                        'contains': False,
+                    }
+            raise TaeyConsultControlError(
+                'Copy contents and Export as Markdown are absent, and no supported '
+                f'answer overflow control was found: {list(OVERFLOW_CONTROL_NAMES)}'
+            )
+        if self.sources:
+            return {'action': 'finish', 'name': '', 'contains': False}
+        found_sources = sorted(
+            name
+            for name, role in self.found_controls
+            if role == 'push button'
+            and SOURCE_CONTROL_PATTERN.fullmatch(name) is not None
+        )
+        if len(found_sources) > 1:
+            raise TaeyConsultExtractionError(
+                f'multiple source controls were found: {found_sources}'
+            )
+        if found_sources:
+            return {
+                'action': 'click',
+                'name': found_sources[0],
+                'contains': False,
+            }
+        return {'action': 'find', 'name': ' source', 'contains': True}
 
     @staticmethod
     def _serializable_found(found: object) -> dict[str, object] | None:
@@ -485,6 +672,34 @@ class TaeyConsultExtractionSeat:
             walk(root, 0)
         return sources
 
+    @staticmethod
+    def _source_file_counts(roots: list[object]) -> set[int]:
+        counts: set[int] = set()
+
+        def walk(node: object, depth: int) -> None:
+            if depth > 20:
+                return
+            try:
+                role = node.get_role_name() or ''
+                name = (node.get_name() or '').strip()
+                match = (
+                    FILE_SOURCE_CONTROL_PATTERN.fullmatch(name)
+                    if role == 'push button'
+                    else None
+                )
+                if match is not None:
+                    counts.add(int(match.group(1)))
+                for index in range(node.get_child_count()):
+                    child = node.get_child_at_index(index)
+                    if child is not None:
+                        walk(child, depth + 1)
+            except Exception:
+                return
+
+        for root in roots:
+            walk(root, 0)
+        return counts
+
     def _capture_sources_panel(
         self,
         expected_count: int,
@@ -493,12 +708,21 @@ class TaeyConsultExtractionSeat:
     ) -> list[dict[str, object]]:
         deadline = time.monotonic() + timeout
         last_count = 0
+        last_file_count = 0
         while time.monotonic() < deadline:
             candidates: list[list[dict[str, object]]] = []
+            file_panels = 0
             for anchor in self._find_named_nodes('Sources', 'push button'):
-                sources = self._source_links(self._following_siblings(anchor))
+                roots = self._following_siblings(anchor)
+                sources = self._source_links(roots)
                 if sources:
                     candidates.append(sources)
+                file_counts = self._source_file_counts(roots)
+                last_file_count = max(
+                    [last_file_count, *file_counts],
+                )
+                if expected_count in file_counts:
+                    file_panels += 1
             exact = [items for items in candidates if len(items) == expected_count]
             if len(exact) == 1:
                 return exact[0]
@@ -506,10 +730,27 @@ class TaeyConsultExtractionSeat:
                 raise TaeyConsultExtractionError(
                     'multiple Sources panels exposed the expected source count'
                 )
+            if file_panels > 1:
+                raise TaeyConsultExtractionError(
+                    'multiple Sources panels exposed the expected file count'
+                )
+            if file_panels == 1:
+                source_ids = [
+                    int(item['index'])
+                    for item in self.markdown_sources
+                ]
+                expected_ids = list(range(1, expected_count + 1))
+                if source_ids != expected_ids:
+                    raise TaeyConsultExtractionError(
+                        'Sources panel file count does not match the Markdown export '
+                        f'definitions: panel={expected_count}, definitions={source_ids}'
+                    )
+                return list(self.markdown_sources)
             last_count = max((len(items) for items in candidates), default=0)
             time.sleep(0.25)
         raise TaeyConsultExtractionError(
-            f'Sources panel exposed {last_count}/{expected_count} source links'
+            f'Sources panel exposed {last_count}/{expected_count} source links '
+            f'and Files {last_file_count}'
         )
 
     @staticmethod
@@ -522,10 +763,93 @@ class TaeyConsultExtractionSeat:
             time.sleep(0.2)
         return ''
 
+    @staticmethod
+    def _markdown_download_state() -> dict[str, tuple[int, int]]:
+        directory = Path.home() / 'Downloads'
+        if not directory.is_dir():
+            raise TaeyConsultExtractionError(
+                f'Perplexity Markdown download directory is unavailable: {directory}'
+            )
+        state: dict[str, tuple[int, int]] = {}
+        for path in directory.glob('*.md'):
+            try:
+                stat = path.stat()
+            except OSError as exc:
+                raise TaeyConsultExtractionError(
+                    f'could not stat Markdown download candidate {path}: {exc}'
+                ) from exc
+            state[str(path)] = (int(stat.st_mtime_ns), int(stat.st_size))
+        return state
+
+    @staticmethod
+    def _read_new_markdown_download(
+        before: dict[str, tuple[int, int]],
+        *,
+        timeout: float = 15.0,
+    ) -> tuple[str, dict[str, object]]:
+        directory = Path.home() / 'Downloads'
+        deadline = time.monotonic() + timeout
+        stable: dict[str, tuple[int, int]] = {}
+        changed_paths: set[str] = set()
+        while time.monotonic() < deadline:
+            ready: list[tuple[Path, str, bytes, tuple[int, int]]] = []
+            for path in directory.glob('*.md'):
+                try:
+                    stat = path.stat()
+                    current = (int(stat.st_mtime_ns), int(stat.st_size))
+                except OSError as exc:
+                    raise TaeyConsultExtractionError(
+                        f'could not inspect Markdown download candidate {path}: {exc}'
+                    ) from exc
+                if before.get(str(path)) == current or current[1] <= 0:
+                    continue
+                changed_paths.add(str(path))
+                try:
+                    raw_bytes = path.read_bytes()
+                except OSError as exc:
+                    raise TaeyConsultExtractionError(
+                        f'could not read Markdown download candidate {path}: {exc}'
+                    ) from exc
+                raw = raw_bytes.decode('utf-8', errors='replace')
+                if (
+                    'r2cdn.perplexity.ai/pplx-full-logo' not in raw[:500]
+                    or not _citation_ids(raw)
+                    or not any(
+                        MARKDOWN_SOURCE_DEFINITION_PATTERN.fullmatch(line.strip())
+                        for line in raw.splitlines()
+                    )
+                ):
+                    stable[str(path)] = current
+                    continue
+                if stable.get(str(path)) == current:
+                    ready.append((path, raw, raw_bytes, current))
+                stable[str(path)] = current
+            if len(ready) > 1:
+                raise TaeyConsultExtractionError(
+                    'multiple new Perplexity Markdown exports appeared: '
+                    + ', '.join(str(item[0]) for item in ready)
+                )
+            if len(ready) == 1:
+                path, raw, raw_bytes, _ = ready[0]
+                body = _without_markdown_source_definitions(raw)
+                return body, {
+                    'download_path': str(path),
+                    'download_characters': len(raw),
+                    'download_body_characters': len(body),
+                    'download_sha256': hashlib.sha256(raw_bytes).hexdigest(),
+                    'citation_ids': _citation_ids(raw),
+                    'markdown_sources': _markdown_sources(raw),
+                }
+            time.sleep(0.25)
+        raise TaeyConsultExtractionError(
+            'Perplexity Export as Markdown produced no unique complete download; '
+            f'changed candidates={sorted(changed_paths)}'
+        )
+
     def _finish(self) -> dict[str, object]:
         if not self.body:
             raise TaeyConsultExtractionError(
-                'Taey attempted finish before the Copy clipboard body was captured'
+                'Taey attempted finish before a full report body was captured'
             )
         if self.expected_source_count <= 0:
             raise TaeyConsultExtractionError(
@@ -536,13 +860,10 @@ class TaeyConsultExtractionSeat:
                 f'Taey attempted finish with {len(self.sources)}/'
                 f'{self.expected_source_count} sources'
             )
-        citation_ids = sorted({
-            int(value)
-            for value in BODY_CITATION_PATTERN.findall(self.body)
-        })
+        citation_ids = sorted(set(self.body_citation_ids) | set(_citation_ids(self.body)))
         if not citation_ids:
             raise TaeyConsultExtractionError(
-                f'{self.body_control or "body"} clipboard has no numeric citation '
+                f'{self.body_control or "body"} has no source citation '
                 'markers; it is not the complete Deep Research report'
             )
         source_ids = set(range(1, len(self.sources) + 1))
@@ -555,7 +876,7 @@ class TaeyConsultExtractionSeat:
             self.body.rstrip()
             + '\n\n## Sources\n\n'
             + '\n'.join(
-                f"{item['index']}. {item['url']}"
+                f"{item['index']}. {item['url'] or item['title']}"
                 for item in self.sources
             )
         )
@@ -565,6 +886,7 @@ class TaeyConsultExtractionSeat:
             'body': self.body,
             'body_control': self.body_control,
             'body_characters': len(self.body),
+            'body_sha256': _sha256_text(self.body),
             'sources': list(self.sources),
             'source_count': len(self.sources),
             'expected_source_count': self.expected_source_count,
@@ -573,26 +895,48 @@ class TaeyConsultExtractionSeat:
             'missing_source_ids': missing,
             'capture_root': str(self.capture_root),
             'actions': list(self.actions),
+            'download_path': self.download_path or None,
+            'download_sha256': self.download_sha256 or None,
         }
 
     def _execute(self, arguments: dict[str, object]) -> dict[str, object]:
-        action, name, contains = self._normalized_action(arguments)
+        action, name, contains, role = self._validated_action(arguments)
         if action == 'find':
             found = self.act.find(
                 name,
-                role='push button',
+                role=role,
                 display=self.display,
                 contains=contains,
             )
+            serialized = self._serializable_found(found)
+            if serialized is not None:
+                self.found_controls.add((
+                    str(serialized['name']),
+                    str(serialized['role']),
+                ))
+            elif not contains:
+                self.found_controls.discard((name, role))
+            if name == 'Copy contents' and not contains:
+                self.copy_contents_checked = True
+            if name == MARKDOWN_EXPORT_NAME and not contains:
+                self.markdown_export_checked = True
+            if name in OVERFLOW_CONTROL_NAMES and not contains:
+                self.overflow_checked.add(name)
             result = {
                 'ok': bool(found),
                 'action': action,
                 'query': name,
+                'role': role,
                 'contains': contains,
-                'found': self._serializable_found(found),
+                'found': serialized,
             }
         elif action == 'click':
             source_match = SOURCE_CONTROL_PATTERN.fullmatch(name)
+            download_before = (
+                self._markdown_download_state()
+                if name == MARKDOWN_EXPORT_NAME
+                else None
+            )
             if name in {'Copy', 'Copy contents'}:
                 try:
                     clipboard.clear()
@@ -603,20 +947,25 @@ class TaeyConsultExtractionSeat:
             clicked = bool(
                 self.act.click(
                     name,
-                    role='push button',
+                    role=role,
                     display=self.display,
                     contains=False,
                 )
             )
+            self.found_controls.discard((name, role))
             if not clicked:
                 raise TaeyConsultExtractionError(
-                    f'act.click({name!r}) returned a non-success value'
+                    f'act.click({name!r}, role={role!r}) returned a non-success value'
                 )
             result = {
                 'ok': True,
                 'action': action,
                 'name': name,
+                'role': role,
             }
+            if name in OVERFLOW_CONTROL_NAMES:
+                self.markdown_export_checked = False
+                self.found_controls.discard((MARKDOWN_EXPORT_NAME, 'menu item'))
             if name in {'Copy', 'Copy contents'}:
                 body = self._read_clipboard_until_nonempty()
                 if not body:
@@ -625,18 +974,34 @@ class TaeyConsultExtractionSeat:
                     )
                 self.body = body
                 self.body_control = name
+                self.body_citation_ids = _citation_ids(body)
                 result.update(
                     capture='body',
                     body_control=name,
                     body=body,
                     body_characters=len(body),
                     body_sha256=_sha256_text(body),
-                    citation_ids=sorted({
-                        int(value)
-                        for value in BODY_CITATION_PATTERN.findall(body)
-                    }),
+                    citation_ids=list(self.body_citation_ids),
                 )
-            else:
+            elif name == MARKDOWN_EXPORT_NAME:
+                body, download_evidence = self._read_new_markdown_download(
+                    download_before or {},
+                )
+                self.body = body
+                self.body_control = name
+                self.body_citation_ids = list(download_evidence['citation_ids'])
+                self.markdown_sources = list(download_evidence['markdown_sources'])
+                self.download_path = str(download_evidence['download_path'])
+                self.download_sha256 = str(download_evidence['download_sha256'])
+                result.update(
+                    capture='body',
+                    body_control=name,
+                    body=body,
+                    body_characters=len(body),
+                    body_sha256=_sha256_text(body),
+                    **download_evidence,
+                )
+            elif source_match is not None:
                 expected_count = int(source_match.group(1))
                 sources = self._capture_sources_panel(expected_count)
                 self.expected_source_count = expected_count
@@ -650,6 +1015,8 @@ class TaeyConsultExtractionSeat:
                 )
         else:
             result = self._finish()
+        if action != 'finish':
+            result['required_next_action'] = self._required_action()
         action_record = {
             'turn': len(self.actions) + 1,
             'arguments': dict(arguments),
@@ -668,24 +1035,29 @@ class TaeyConsultExtractionSeat:
     def run(self) -> dict[str, object]:
         task = (
             f'Extract the completed Perplexity Deep Research answer on consult display '
-            f'{self.display}. Use consult_extract_action only. Execute this observed '
-            'sequence one action per turn: find the exact response Copy push button; '
-            'click the exact Copy name and inspect the returned clipboard body. A '
-            'complete report body contains numeric [N] citation markers. If Copy '
-            'returns a short recap with citation_ids=[], find and click the exact '
-            'Copy contents push button instead, then use that citation-bearing body. '
-            'Next find a push button whose accessible name contains " sources"; '
+            f'{self.display}. Use consult_extract_action only, one action per turn. '
+            'First find the exact Copy contents push button. If found, click it. If '
+            'absent, find the exact Export as Markdown menu item to detect an already '
+            'open menu. If absent, find the exact Session actions push button (the '
+            'accessible name of the top visual ellipsis); only if absent, find the '
+            'exact "..." push button. Click the exact overflow name returned, then '
+            'find and click the exact Export as Markdown menu item; the harness '
+            'returns the complete exported body and citations. Do not use plain Copy '
+            'or Download. Next find a push button whose accessible name contains '
+            '" source"; '
             'click the exact N sources name returned by find and read the returned '
             'complete source panel; then finish with name="" and contains=false. '
-            'Never click Download or coordinates. Do not finish until the body has '
-            'numeric citation IDs, source_count equals expected_source_count, and '
-            'missing=[].'
+            'Never click a control after its find returned ok=false. Never click '
+            'coordinates. Follow required_next_action exactly whenever the harness '
+            'returns it. Do not finish until citation_ids is non-empty, '
+            'source_count equals expected_source_count, and missing=[].'
         )
         overlay = (
             '\n\nCONSULT EXTRACTION SEAT: The sole callable tool is '
             'consult_extract_action. It is the harness binding of canonical act.find '
             'and act.click; do not emit shell commands or prose. One tool call per '
-            'turn. Accessible names, never coordinates.'
+            'turn. Accessible names, never coordinates. The harness state machine '
+            'is authoritative: emit required_next_action exactly.'
         )
         messages: list[dict[str, object]] = [
             {'role': 'system', 'content': self.system_prompt + overlay},
@@ -696,7 +1068,41 @@ class TaeyConsultExtractionSeat:
             message = self._message(self._call_taey(messages, turn))
             call_id, arguments = self._arguments(message)
             try:
-                self._normalized_action(arguments)
+                self._validated_action(arguments)
+            except TaeyConsultControlError:
+                raise
+            except TaeyConsultStateError as exc:
+                rejection = {
+                    'ok': False,
+                    'executed': False,
+                    'error': str(exc),
+                    'instruction': (
+                        'Emit exactly required_action on the next turn; do not repeat '
+                        'the rejected action'
+                    ),
+                    'required_action': exc.required_action,
+                }
+                self._append_turn_log({
+                    'event': 'state_rejection',
+                    'turn': turn,
+                    'arguments': dict(arguments),
+                    'error': str(exc),
+                    'required_action': exc.required_action,
+                })
+                messages.extend([
+                    message,
+                    {
+                        'role': 'tool',
+                        'tool_call_id': call_id or f'consult_extract_action_{turn}',
+                        'content': json.dumps(
+                            rejection,
+                            ensure_ascii=True,
+                            sort_keys=True,
+                            separators=(',', ':'),
+                        ),
+                    },
+                ])
+                continue
             except TaeyConsultExtractionError as exc:
                 if pre_execution_retry_used:
                     raise TaeyConsultExtractionError(

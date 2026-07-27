@@ -4107,6 +4107,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     'missing',
                     'missing_source_ids',
                     'capture_root',
+                    'download_path',
+                    'download_sha256',
                     'turns',
                     'model',
                     'endpoint',
