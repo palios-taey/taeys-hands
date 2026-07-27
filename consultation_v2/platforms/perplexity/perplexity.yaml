@@ -260,6 +260,8 @@ tree:
     download_button:
       name: Download
       role: push button
+      states_include:
+      - showing
     rewrite_thread:
       name: Rewrite Thread
       role: push button
