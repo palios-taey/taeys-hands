@@ -4355,8 +4355,13 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         evidence['trigger_clicked'] = bool(
             self.runtime.click(trigger, strategy='coordinate_only')
         )
-        time.sleep(0.8)
-        menu_snap = self.runtime.snapshot()
+        menu_snap = self.runtime.wait_for_stable_menu_snapshot(
+            consecutive=1,
+            timeout=2.0,
+            interval=0.2,
+            anchor_key=item_key,
+            require_non_empty=True,
+        )
         item = self.find_last(menu_snap, item_key)
         evidence['item_found'] = bool(item)
         if not item:
