@@ -85,16 +85,26 @@ def clear():
 
 
 def write(text: str) -> bool:
-    """Write text to clipboard via xclip."""
+    """Write text to clipboard via xsel."""
     env = _get_env()
     try:
         r = subprocess.run(
-            ['xclip', '-selection', 'clipboard'],
-            input=text, capture_output=True, text=True, timeout=3.0, env=env,
+            ['xsel', '--clipboard', '--input'],
+            input=text.encode('utf-8'),
+            capture_output=True,
+            timeout=3.0,
+            env=env,
         )
-        return r.returncode == 0
-    except Exception:
+    except subprocess.TimeoutExpired:
+        logger.error("Clipboard write timed out")
         return False
+    except Exception as e:
+        logger.error(f"Clipboard write failed: {e}")
+        return False
+    if r.returncode != 0:
+        logger.error(f"Clipboard write failed: {r.stderr.decode(errors='replace')}")
+        return False
+    return True
 
 
 def write_marker(marker: str):

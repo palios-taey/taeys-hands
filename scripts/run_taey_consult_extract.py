@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='Run Taey in the closed consult-extraction seat.',
+        description='Run Taey in the closed full-consult or extraction-only seat.',
     )
     parser.add_argument('--platform', required=True, choices=['perplexity'])
     parser.add_argument(
@@ -26,6 +26,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--capture-root', default=None)
     parser.add_argument('--endpoint', default=None)
     parser.add_argument('--model', default=None)
+    parser.add_argument('--attach', default=None)
+    parser.add_argument('--prompt', default=None)
+    parser.add_argument(
+        '--completion-timeout',
+        type=float,
+        default=3600.0,
+    )
     return parser
 
 
@@ -40,16 +47,27 @@ def _bind_display(display: str) -> None:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if (args.attach is None) != (args.prompt is None):
+        raise RuntimeError('--attach and --prompt must be supplied together')
     _bind_display(args.display)
-    from consultation_v2.taey_extract import extract_with_taey
+    from consultation_v2.taey_extract import consult_with_taey, extract_with_taey
 
-    result = extract_with_taey(
-        platform=args.platform,
-        display=args.display,
-        endpoint=args.endpoint,
-        model=args.model,
-        capture_root=args.capture_root,
-    )
+    common = {
+        'platform': args.platform,
+        'display': args.display,
+        'endpoint': args.endpoint,
+        'model': args.model,
+        'capture_root': args.capture_root,
+    }
+    if args.attach is not None:
+        result = consult_with_taey(
+            **common,
+            attachment_path=args.attach,
+            framing_prompt=args.prompt,
+            completion_timeout=args.completion_timeout,
+        )
+    else:
+        result = extract_with_taey(**common)
     output = Path(args.output).expanduser().resolve()
     if output.exists():
         raise RuntimeError(f'refusing to overwrite existing output: {output}')
@@ -64,6 +82,7 @@ def main() -> int:
         'source_count': result.get('source_count'),
         'expected_source_count': result.get('expected_source_count'),
         'missing_source_ids': result.get('missing_source_ids'),
+        'consultation': result.get('consultation'),
         'output': str(output),
         'capture_root': result.get('capture_root'),
     }, sort_keys=True))

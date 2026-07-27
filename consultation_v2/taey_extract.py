@@ -26,6 +26,9 @@ DEFAULT_SYSTEM_PROMPT_PATH = Path('/home/mira/data/corpus/layer_1/SYSTEM_PROMPT.
 DEFAULT_EP3_BASE = 'http://10.0.0.197:8000/v1'
 DEFAULT_EP3_MODEL = 'ep3'
 MAX_TURNS = 12
+MAX_FULL_CONSULT_TURNS = 40
+MAX_FRAMING_PROMPT_CHARACTERS = 600
+DEFAULT_COMPLETION_TIMEOUT_SECONDS = 3600.0
 PRE_EXECUTION_REJECTION = (
     'PRE_EXECUTION_CONTRACT_REJECTED; nothing executed; re-emit one '
     'consult_extract_action call that follows the exact-name requirements'
@@ -39,6 +42,14 @@ MARKDOWN_SOURCE_DEFINITION_PATTERN = re.compile(
 FILE_SOURCE_CONTROL_PATTERN = re.compile(r'^\s*Files\s+([0-9]+)\s*$', re.IGNORECASE)
 MARKDOWN_EXPORT_NAME = 'Export as Markdown'
 OVERFLOW_CONTROL_NAMES = ('Session actions', '...')
+ATTACH_TRIGGER_NAME = 'Add files or tools'
+UPLOAD_FILE_NAME = 'Upload files or images'
+COMPOSER_CONTROL_NAME = '\ufffc'
+DEEP_RESEARCH_NAME = 'Deep research'
+SEARCH_MODE_NAME = 'Search'
+SUBMIT_CONTROL_NAME = 'Submit'
+STOP_CONTROL_NAME = 'Stop response (Esc)'
+ATTACHMENT_PATH_SENTINEL = 'attachment path'
 INTERACTIVE_ROLES = frozenset({
     'check box',
     'combo box',
@@ -81,9 +92,10 @@ def consult_extract_action_tool() -> dict[str, object]:
         'function': {
             'name': 'consult_extract_action',
             'description': (
-                'Perform one named accessibility action on the completed consult. '
-                'Use find before click and finish only after a citation-bearing body '
-                'and all sources were captured.'
+                'Perform one state-bound action in the closed consultation seat. '
+                'The harness owns the file path and short prompt; never emit their '
+                'contents. Use find before control activation and finish only after '
+                'a citation-bearing body and all sources were captured.'
             ),
             'parameters': {
                 'type': 'object',
@@ -92,7 +104,17 @@ def consult_extract_action_tool() -> dict[str, object]:
                 'properties': {
                     'action': {
                         'type': 'string',
-                        'enum': ['find', 'click', 'finish'],
+                        'enum': [
+                            'find',
+                            'click',
+                            'activate',
+                            'focus',
+                            'key',
+                            'paste_path',
+                            'paste_prompt',
+                            'wait_complete',
+                            'finish',
+                        ],
                     },
                     'name': {
                         'type': 'string',
@@ -226,7 +248,16 @@ def _load_act(path: Path) -> ModuleType:
         raise TaeyConsultExtractionError(
             f'canonical act.py import failed: {type(exc).__name__}: {exc}'
         ) from exc
-    for name in ('find', 'click', 'firefox_app', 'prune_inactive_document'):
+    for name in (
+        'find',
+        'click',
+        'do',
+        'key',
+        'paste_into',
+        'current_url_atspi',
+        'firefox_app',
+        'prune_inactive_document',
+    ):
         if not callable(getattr(module, name, None)):
             raise TaeyConsultExtractionError(
                 f'canonical act.py does not expose required callable {name!r}'
@@ -245,6 +276,9 @@ class TaeyConsultExtractionSeat:
         act_path: str | Path | None = None,
         system_prompt_path: str | Path | None = None,
         capture_root: str | Path | None = None,
+        attachment_path: str | Path | None = None,
+        framing_prompt: str | None = None,
+        completion_timeout: float = DEFAULT_COMPLETION_TIMEOUT_SECONDS,
     ) -> None:
         self.platform = str(platform or '').strip().lower()
         if self.platform != 'perplexity':
@@ -291,6 +325,71 @@ class TaeyConsultExtractionSeat:
             self.system_prompt_path,
             'Taey system prompt',
         )
+        supplied_attachment = attachment_path is not None
+        supplied_prompt = framing_prompt is not None
+        if supplied_attachment != supplied_prompt:
+            raise TaeyConsultExtractionError(
+                'full consult requires both attachment_path and framing_prompt'
+            )
+        self.full_consult = supplied_attachment and supplied_prompt
+        self.attachment_path: Path | None = None
+        self.attachment_sha256 = ''
+        self.framing_prompt = ''
+        self.framing_prompt_sha256 = ''
+        if self.full_consult:
+            raw_attachment = Path(str(attachment_path)).expanduser()
+            if not raw_attachment.is_absolute():
+                raise TaeyConsultExtractionError(
+                    'full consult attachment_path must be absolute'
+                )
+            self.attachment_path = raw_attachment.resolve()
+            if not self.attachment_path.is_file():
+                raise TaeyConsultExtractionError(
+                    f'full consult attachment is unavailable: {self.attachment_path}'
+                )
+            try:
+                attachment_bytes = self.attachment_path.read_bytes()
+            except OSError as exc:
+                raise TaeyConsultExtractionError(
+                    f'full consult attachment could not be read: {exc}'
+                ) from exc
+            if not attachment_bytes:
+                raise TaeyConsultExtractionError('full consult attachment is empty')
+            self.attachment_sha256 = hashlib.sha256(attachment_bytes).hexdigest()
+            self.framing_prompt = str(framing_prompt or '').strip()
+            if not self.framing_prompt:
+                raise TaeyConsultExtractionError(
+                    'full consult framing prompt is empty'
+                )
+            if len(self.framing_prompt) > MAX_FRAMING_PROMPT_CHARACTERS:
+                raise TaeyConsultExtractionError(
+                    'full consult framing prompt exceeds '
+                    f'{MAX_FRAMING_PROMPT_CHARACTERS} characters'
+                )
+            prompt_bytes = self.framing_prompt.encode('utf-8')
+            if attachment_bytes.strip() == prompt_bytes.strip():
+                raise TaeyConsultExtractionError(
+                    'full consult framing prompt must not inline the attachment'
+                )
+            attachment_text = attachment_bytes.decode('utf-8', errors='ignore').strip()
+            if (
+                len(attachment_text) >= 80
+                and attachment_text[:200] in self.framing_prompt
+            ):
+                raise TaeyConsultExtractionError(
+                    'full consult framing prompt contains attachment content'
+                )
+            self.framing_prompt_sha256 = _sha256_text(self.framing_prompt)
+        try:
+            self.completion_timeout = float(completion_timeout)
+        except (TypeError, ValueError) as exc:
+            raise TaeyConsultExtractionError(
+                'full consult completion_timeout must be numeric'
+            ) from exc
+        if not 30.0 <= self.completion_timeout <= 7200.0:
+            raise TaeyConsultExtractionError(
+                'full consult completion_timeout must be between 30 and 7200 seconds'
+            )
         self.body = ''
         self.body_control = ''
         self.sources: list[dict[str, object]] = []
@@ -303,6 +402,25 @@ class TaeyConsultExtractionSeat:
         self.markdown_sources: list[dict[str, object]] = []
         self.download_path = ''
         self.download_sha256 = ''
+        self.attach_trigger_focused = False
+        self.attach_trigger_activated = False
+        self.upload_control_clicked = False
+        self.dialog_location_opened = False
+        self.dialog_path_selected = False
+        self.attachment_path_pasted = False
+        self.attachment_submitted = False
+        self.attachment_verified = False
+        self.prompt_entered = False
+        self.mode_checked = False
+        self.mode_menu_opened = False
+        self.mode_selected = False
+        self.mode_active = False
+        self.submitted = False
+        self.consult_completed = False
+        self.browser_url_before_dialog = ''
+        self.session_url_before = ''
+        self.session_url_after = ''
+        self.completion_evidence: dict[str, object] = {}
         self.actions: list[dict[str, object]] = []
         self.capture_root.mkdir(parents=True, exist_ok=True)
         self.turn_log_path = self.capture_root / 'turns.jsonl'
@@ -453,47 +571,67 @@ class TaeyConsultExtractionSeat:
         action = str(arguments.get('action') or '').strip()
         name = str(arguments.get('name') or '').strip()
         contains = arguments.get('contains')
-        if action not in {'find', 'click', 'finish'}:
+        supported_actions = {
+            'find',
+            'click',
+            'activate',
+            'focus',
+            'key',
+            'paste_path',
+            'paste_prompt',
+            'wait_complete',
+            'finish',
+        }
+        if action not in supported_actions:
             raise TaeyConsultExtractionError(
-                f'unsupported consult extraction action {action!r}'
+                f'unsupported consultation action {action!r}'
             )
         if not isinstance(contains, bool):
             raise TaeyConsultExtractionError('contains must be a boolean')
-        if action in {'find', 'click'} and not name:
+        if action in {
+            'find',
+            'click',
+            'activate',
+            'focus',
+            'key',
+            'paste_path',
+            'paste_prompt',
+        } and not name:
             raise TaeyConsultExtractionError(f'{action} requires a non-empty name')
-        if action == 'finish' and (name or contains):
+        if action in {'wait_complete', 'finish'} and (name or contains):
             raise TaeyConsultExtractionError(
-                'finish requires name="" and contains=false'
+                f'{action} requires name="" and contains=false'
             )
         if action == 'find' and name in {'Copy', 'Copy contents'} and contains:
             raise TaeyConsultExtractionError(
                 f'find for {name!r} must use contains=false so Copy query and '
                 'other controls cannot satisfy it'
             )
-        if action == 'click' and contains:
+        if action != 'find' and contains:
             raise TaeyConsultExtractionError(
-                'click requires an exact accessible name from a prior find'
+                f'{action} requires contains=false'
             )
-        if (
-            action == 'click'
-            and name not in {
-                'Copy',
-                'Copy contents',
-                MARKDOWN_EXPORT_NAME,
-                *OVERFLOW_CONTROL_NAMES,
-            }
-            and SOURCE_CONTROL_PATTERN.fullmatch(name) is None
-        ):
+        if action == 'key' and name not in {'ctrl+l', 'ctrl+a', 'Return'}:
             raise TaeyConsultExtractionError(
-                'consult extraction click is restricted to exact "Copy", '
-                'exact "Copy contents", an exact answer-overflow control, exact '
-                '"Export as Markdown", or the exact "N sources" name '
-                'returned by a successful find'
+                f'consultation key action is restricted, got {name!r}'
+            )
+        if action == 'paste_path' and name != ATTACHMENT_PATH_SENTINEL:
+            raise TaeyConsultExtractionError(
+                f'paste_path requires name={ATTACHMENT_PATH_SENTINEL!r}'
             )
         return action, name, contains
 
-    @staticmethod
-    def _control_role(name: str) -> str:
+    def _control_role(self, action: str, name: str) -> str:
+        if name == COMPOSER_CONTROL_NAME:
+            return 'entry'
+        if name == DEEP_RESEARCH_NAME:
+            if self.mode_menu_opened and not self.mode_selected:
+                return 'radio menu item'
+            return 'toggle button'
+        if name == SEARCH_MODE_NAME:
+            return 'toggle button'
+        if name == UPLOAD_FILE_NAME:
+            return 'menu item'
         return 'menu item' if name == MARKDOWN_EXPORT_NAME else 'push button'
 
     def _validated_action(
@@ -504,15 +642,135 @@ class TaeyConsultExtractionSeat:
         required = self._required_action()
         if arguments != required:
             raise TaeyConsultStateError(required)
-        role = self._control_role(name)
-        if action == 'click' and (name, role) not in self.found_controls:
+        role = self._control_role(action, name)
+        if (
+            action in {'click', 'activate', 'focus', 'paste_prompt'}
+            and (name, role) not in self.found_controls
+        ):
             raise TaeyConsultExtractionError(
-                f'click requires a live successful find for exact {name!r} '
+                f'{action} requires a live successful find for exact {name!r} '
                 f'with role {role!r}; nothing executed'
             )
         return action, name, contains, role
 
     def _required_action(self) -> dict[str, object]:
+        if self.full_consult and not self.consult_completed:
+            return self._required_full_consult_action()
+        return self._required_extraction_action()
+
+    def _required_full_consult_action(self) -> dict[str, object]:
+        attach_trigger = (ATTACH_TRIGGER_NAME, 'push button')
+        if not self.attach_trigger_focused:
+            if attach_trigger in self.found_controls:
+                return {
+                    'action': 'focus',
+                    'name': ATTACH_TRIGGER_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': ATTACH_TRIGGER_NAME,
+                'contains': False,
+            }
+        if not self.attach_trigger_activated:
+            return {'action': 'key', 'name': 'Return', 'contains': False}
+        upload_control = (UPLOAD_FILE_NAME, 'menu item')
+        if not self.upload_control_clicked:
+            if upload_control in self.found_controls:
+                return {
+                    'action': 'click',
+                    'name': UPLOAD_FILE_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': UPLOAD_FILE_NAME,
+                'contains': False,
+            }
+        if not self.dialog_location_opened:
+            return {'action': 'key', 'name': 'ctrl+l', 'contains': False}
+        if not self.dialog_path_selected:
+            return {'action': 'key', 'name': 'ctrl+a', 'contains': False}
+        if not self.attachment_path_pasted:
+            return {
+                'action': 'paste_path',
+                'name': ATTACHMENT_PATH_SENTINEL,
+                'contains': False,
+            }
+        if not self.attachment_submitted:
+            return {'action': 'key', 'name': 'Return', 'contains': False}
+        if not self.attachment_verified:
+            return {
+                'action': 'find',
+                'name': self.attachment_path.name if self.attachment_path else '',
+                'contains': True,
+            }
+        composer = (COMPOSER_CONTROL_NAME, 'entry')
+        if not self.prompt_entered:
+            if composer in self.found_controls:
+                return {
+                    'action': 'paste_prompt',
+                    'name': COMPOSER_CONTROL_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': COMPOSER_CONTROL_NAME,
+                'contains': False,
+            }
+        if not self.mode_active:
+            deep_toggle = (DEEP_RESEARCH_NAME, 'toggle button')
+            if not self.mode_checked:
+                return {
+                    'action': 'find',
+                    'name': DEEP_RESEARCH_NAME,
+                    'contains': False,
+                }
+            if deep_toggle in self.found_controls:
+                raise TaeyConsultControlError(
+                    'Deep research toggle was found but not recognized as active'
+                )
+            search_toggle = (SEARCH_MODE_NAME, 'toggle button')
+            if not self.mode_menu_opened:
+                if search_toggle in self.found_controls:
+                    return {
+                        'action': 'click',
+                        'name': SEARCH_MODE_NAME,
+                        'contains': False,
+                    }
+                return {
+                    'action': 'find',
+                    'name': SEARCH_MODE_NAME,
+                    'contains': False,
+                }
+            deep_option = (DEEP_RESEARCH_NAME, 'radio menu item')
+            if deep_option in self.found_controls:
+                return {
+                    'action': 'click',
+                    'name': DEEP_RESEARCH_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': DEEP_RESEARCH_NAME,
+                'contains': False,
+            }
+        submit = (SUBMIT_CONTROL_NAME, 'push button')
+        if not self.submitted:
+            if submit in self.found_controls:
+                return {
+                    'action': 'activate',
+                    'name': SUBMIT_CONTROL_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': SUBMIT_CONTROL_NAME,
+                'contains': False,
+            }
+        return {'action': 'wait_complete', 'name': '', 'contains': False}
+
+    def _required_extraction_action(self) -> dict[str, object]:
         if not self.body:
             copy_contents = ('Copy contents', 'push button')
             if not self.copy_contents_checked:
@@ -595,6 +853,127 @@ class TaeyConsultExtractionSeat:
             'role': str(found.get('role') or ''),
             'states': sorted(str(value) for value in (found.get('states') or [])),
         }
+
+    def _find_full_consult_control(
+        self,
+        name: str,
+        role: str,
+        contains: bool,
+        *,
+        timeout: float = 15.0,
+    ) -> object:
+        deadline = time.monotonic() + timeout
+        roles = (role,)
+        if (
+            self.attachment_path is not None
+            and name == self.attachment_path.name
+            and contains
+        ):
+            roles = ('push button', 'section', 'link', 'heading')
+        while time.monotonic() < deadline:
+            for candidate_role in roles:
+                found = self.act.find(
+                    name,
+                    role=candidate_role,
+                    display=self.display,
+                    contains=contains,
+                )
+                if found:
+                    return found
+            time.sleep(0.3)
+        return None
+
+    def _current_url(self) -> str:
+        value = self.act.current_url_atspi(self.display)
+        if not isinstance(value, dict) or not value.get('ok'):
+            return ''
+        return str(value.get('url') or '').strip()
+
+    def _wait_for_full_consult_completion(self) -> dict[str, object]:
+        started = time.monotonic()
+        deadline = started + self.completion_timeout
+        stop_seen = False
+        last_url = ''
+        last_source_name = ''
+        last_body_control = ''
+        while time.monotonic() < deadline:
+            last_url = self._current_url()
+            stop = self.act.find(
+                STOP_CONTROL_NAME,
+                role='push button',
+                display=self.display,
+                contains=False,
+                must_show=False,
+                scroll=False,
+            )
+            stop_seen = stop_seen or bool(stop)
+            source = self.act.find(
+                ' source',
+                role='push button',
+                display=self.display,
+                contains=True,
+                must_show=False,
+                scroll=False,
+            )
+            source_name = (
+                str(source.get('name') or '').strip()
+                if isinstance(source, dict)
+                else ''
+            )
+            if SOURCE_CONTROL_PATTERN.fullmatch(source_name):
+                last_source_name = source_name
+            copy_contents = self.act.find(
+                'Copy contents',
+                role='push button',
+                display=self.display,
+                contains=False,
+                must_show=False,
+                scroll=False,
+            )
+            session_actions = self.act.find(
+                'Session actions',
+                role='push button',
+                display=self.display,
+                contains=False,
+                must_show=False,
+                scroll=False,
+            )
+            last_body_control = (
+                'Copy contents'
+                if copy_contents
+                else 'Session actions' if session_actions else ''
+            )
+            landed = (
+                '/search/' in last_url
+                and not stop
+                and bool(last_source_name)
+                and bool(last_body_control)
+                and (
+                    stop_seen
+                    or (
+                        bool(self.session_url_before)
+                        and last_url != self.session_url_before
+                    )
+                )
+            )
+            if landed:
+                time.sleep(1.0)
+                return {
+                    'completed': True,
+                    'elapsed_seconds': round(time.monotonic() - started, 3),
+                    'stop_seen': stop_seen,
+                    'session_url_before': self.session_url_before,
+                    'session_url_after': last_url,
+                    'source_control': last_source_name,
+                    'body_control': last_body_control,
+                }
+            time.sleep(1.0)
+        raise TaeyConsultExtractionError(
+            'Perplexity full consult did not expose a completed citation/source '
+            f'surface within {self.completion_timeout:.1f}s; stop_seen={stop_seen}, '
+            f'url={last_url!r}, source={last_source_name!r}, '
+            f'body_control={last_body_control!r}'
+        )
 
     def _find_named_nodes(self, name: str, role: str) -> list[object]:
         app = self.act.firefox_app()
@@ -880,7 +1259,7 @@ class TaeyConsultExtractionSeat:
                 for item in self.sources
             )
         )
-        return {
+        result: dict[str, object] = {
             'ok': True,
             'content': content,
             'body': self.body,
@@ -898,9 +1277,31 @@ class TaeyConsultExtractionSeat:
             'download_path': self.download_path or None,
             'download_sha256': self.download_sha256 or None,
         }
+        if self.full_consult:
+            result['consultation'] = {
+                'attachment_path': str(self.attachment_path),
+                'attachment_sha256': self.attachment_sha256,
+                'attachment_verified': self.attachment_verified,
+                'framing_prompt_characters': len(self.framing_prompt),
+                'framing_prompt_sha256': self.framing_prompt_sha256,
+                'mode': DEEP_RESEARCH_NAME,
+                'mode_active': self.mode_active,
+                'submitted': self.submitted,
+                'completed': self.consult_completed,
+                'browser_url_before_dialog': self.browser_url_before_dialog,
+                'session_url_before': self.session_url_before,
+                'session_url_after': self.session_url_after,
+                'completion': dict(self.completion_evidence),
+            }
+        return result
 
-    def _execute(self, arguments: dict[str, object]) -> dict[str, object]:
-        action, name, contains, role = self._validated_action(arguments)
+    def _execute_extraction_action(
+        self,
+        action: str,
+        name: str,
+        contains: bool,
+        role: str,
+    ) -> dict[str, object]:
         if action == 'find':
             found = self.act.find(
                 name,
@@ -1015,6 +1416,226 @@ class TaeyConsultExtractionSeat:
                 )
         else:
             result = self._finish()
+        return result
+
+    def _execute_full_consult_action(
+        self,
+        action: str,
+        name: str,
+        contains: bool,
+        role: str,
+    ) -> dict[str, object]:
+        if action == 'find':
+            found = self._find_full_consult_control(name, role, contains)
+            serialized = self._serializable_found(found)
+            if serialized is not None:
+                control_name = (
+                    str(serialized['name'])
+                    if contains
+                    else name
+                )
+                self.found_controls.add((control_name, role))
+            elif not contains:
+                self.found_controls.discard((name, role))
+            if (
+                self.attachment_path is not None
+                and name == self.attachment_path.name
+                and contains
+                and serialized is not None
+            ):
+                self.attachment_verified = True
+            if name == DEEP_RESEARCH_NAME and role == 'toggle button':
+                self.mode_checked = True
+                self.mode_active = serialized is not None
+            return {
+                'ok': serialized is not None,
+                'action': action,
+                'query': name,
+                'role': role,
+                'contains': contains,
+                'found': serialized,
+            }
+        if action == 'focus':
+            found = self.act.find(
+                name,
+                role=role,
+                display=self.display,
+                contains=False,
+                must_show=True,
+                scroll=True,
+            )
+            node = found.get('node') if isinstance(found, dict) else None
+            component = node.get_component_iface() if node is not None else None
+            focused = bool(component and component.grab_focus())
+            if not focused:
+                raise TaeyConsultExtractionError(
+                    f'could not focus exact {name!r} control; nothing else executed'
+                )
+            self.attach_trigger_focused = True
+            return {
+                'ok': True,
+                'action': action,
+                'name': name,
+                'role': role,
+            }
+        if action in {'click', 'activate'}:
+            actuator = self.act.do if action == 'activate' else self.act.click
+            before_url = ''
+            if name in {UPLOAD_FILE_NAME, SUBMIT_CONTROL_NAME}:
+                before_url = self._current_url()
+                if not before_url.startswith(('http://', 'https://')):
+                    raise TaeyConsultExtractionError(
+                        f'could not read the browser URL before activating {name!r}; '
+                        'nothing executed'
+                    )
+            acted = bool(
+                actuator(
+                    name,
+                    role=role,
+                    display=self.display,
+                    contains=False,
+                )
+            )
+            self.found_controls.discard((name, role))
+            if not acted:
+                raise TaeyConsultExtractionError(
+                    f'act.{actuator.__name__}({name!r}, role={role!r}) '
+                    'returned a non-success value'
+                )
+            if name == UPLOAD_FILE_NAME:
+                self.browser_url_before_dialog = before_url
+                self.upload_control_clicked = True
+                time.sleep(1.0)
+            elif name == SEARCH_MODE_NAME:
+                self.mode_menu_opened = True
+                self.found_controls.discard((
+                    DEEP_RESEARCH_NAME,
+                    'radio menu item',
+                ))
+            elif name == DEEP_RESEARCH_NAME and role == 'radio menu item':
+                self.mode_selected = True
+                self.mode_menu_opened = False
+                self.mode_checked = False
+                self.found_controls.discard((
+                    DEEP_RESEARCH_NAME,
+                    'toggle button',
+                ))
+            elif name == SUBMIT_CONTROL_NAME:
+                self.session_url_before = before_url
+                self.submitted = True
+            return {
+                'ok': True,
+                'action': action,
+                'name': name,
+                'role': role,
+            }
+        if action == 'key':
+            pressed = bool(self.act.key(name, display=self.display))
+            if not pressed:
+                raise TaeyConsultExtractionError(
+                    f'act.key({name!r}) returned a non-success value'
+                )
+            if name == 'ctrl+l':
+                self.dialog_location_opened = True
+            elif name == 'ctrl+a':
+                self.dialog_path_selected = True
+            elif name == 'Return':
+                if (
+                    self.attach_trigger_focused
+                    and not self.attach_trigger_activated
+                ):
+                    self.attach_trigger_activated = True
+                    self.found_controls.discard((UPLOAD_FILE_NAME, 'menu item'))
+                else:
+                    self.attachment_submitted = True
+                    time.sleep(1.0)
+            return {'ok': True, 'action': action, 'name': name}
+        if action == 'paste_path':
+            if self.attachment_path is None:
+                raise TaeyConsultExtractionError(
+                    'paste_path is unavailable without an attachment'
+                )
+            path_text = str(self.attachment_path)
+            if not clipboard.write(path_text):
+                raise TaeyConsultExtractionError(
+                    'attachment path could not be staged on the clipboard'
+                )
+            staged = clipboard.read()
+            if staged != path_text:
+                raise TaeyConsultExtractionError(
+                    'attachment path clipboard verification failed'
+                )
+            if not self.act.key('ctrl+v', display=self.display):
+                raise TaeyConsultExtractionError(
+                    'attachment path paste key returned a non-success value'
+                )
+            browser_url_after_paste = self._current_url()
+            if browser_url_after_paste != self.browser_url_before_dialog:
+                raise TaeyConsultExtractionError(
+                    'file chooser focus proof failed after path paste; refusing to '
+                    f'press Return; browser_url_before={self.browser_url_before_dialog!r}, '
+                    f'browser_url_after={browser_url_after_paste!r}'
+                )
+            self.attachment_path_pasted = True
+            return {
+                'ok': True,
+                'action': action,
+                'name': name,
+                'attachment_characters': len(path_text),
+                'attachment_sha256': self.attachment_sha256,
+            }
+        if action == 'paste_prompt':
+            pasted = bool(
+                self.act.paste_into(
+                    name,
+                    self.framing_prompt,
+                    role=role,
+                    display=self.display,
+                    contains=False,
+                    clear=True,
+                    verify=True,
+                )
+            )
+            if not pasted:
+                raise TaeyConsultExtractionError(
+                    'short framing prompt paste verification failed'
+                )
+            self.prompt_entered = True
+            return {
+                'ok': True,
+                'action': action,
+                'name': name,
+                'role': role,
+                'framing_prompt_characters': len(self.framing_prompt),
+                'framing_prompt_sha256': self.framing_prompt_sha256,
+            }
+        if action == 'wait_complete':
+            evidence = self._wait_for_full_consult_completion()
+            self.consult_completed = True
+            self.session_url_after = str(evidence['session_url_after'])
+            self.completion_evidence = evidence
+            self.found_controls.clear()
+            return {'ok': True, 'action': action, **evidence}
+        raise TaeyConsultExtractionError(
+            f'action {action!r} is unavailable before consult completion'
+        )
+
+    def _execute(self, arguments: dict[str, object]) -> dict[str, object]:
+        action, name, contains, role = self._validated_action(arguments)
+        if self.full_consult and not self.consult_completed:
+            result = self._execute_full_consult_action(
+                action,
+                name,
+                contains,
+                role,
+            )
+        else:
+            result = self._execute_extraction_action(
+                action,
+                name,
+                contains,
+                role,
+            )
         if action != 'finish':
             result['required_next_action'] = self._required_action()
         action_record = {
@@ -1033,9 +1654,7 @@ class TaeyConsultExtractionSeat:
         return result
 
     def run(self) -> dict[str, object]:
-        task = (
-            f'Extract the completed Perplexity Deep Research answer on consult display '
-            f'{self.display}. Use consult_extract_action only, one action per turn. '
+        extraction_task = (
             'First find the exact Copy contents push button. If found, click it. If '
             'absent, find the exact Export as Markdown menu item to detect an already '
             'open menu. If absent, find the exact Session actions push button (the '
@@ -1044,27 +1663,56 @@ class TaeyConsultExtractionSeat:
             'find and click the exact Export as Markdown menu item; the harness '
             'returns the complete exported body and citations. Do not use plain Copy '
             'or Download. Next find a push button whose accessible name contains '
-            '" source"; '
-            'click the exact N sources name returned by find and read the returned '
-            'complete source panel; then finish with name="" and contains=false. '
-            'Never click a control after its find returned ok=false. Never click '
+            '" source"; click the exact N sources name returned by find and read the '
+            'complete source panel; then finish with name="" and contains=false.'
+        )
+        if self.full_consult:
+            task = (
+                f'Run one complete Perplexity Deep Research consultation on display '
+                f'{self.display} with consult_extract_action only, one action per '
+                'turn. The harness owns one validated attachment named '
+                f'{self.attachment_path.name!r} at SHA256 '
+                f'{self.attachment_sha256}; never request, reproduce, or paste its '
+                'contents into the composer. The harness also owns a short framing '
+                f'prompt of {len(self.framing_prompt)} characters at SHA256 '
+                f'{self.framing_prompt_sha256}; use paste_prompt without emitting its '
+                'text. Find and focus Add files or tools, activate it with Return, '
+                'then use Upload files or images and the file '
+                'chooser ctrl+l, ctrl+a, paste_path, Return, and verify the filename '
+                'chip. '
+                'Then find the composer and paste_prompt. Verify Deep research is '
+                'active; if its active toggle is absent, open Search and activate the '
+                'Deep research radio menu item, then verify the active toggle. Find '
+                'and activate Submit, wait_complete, and only then extract. '
+                + extraction_task
+            )
+        else:
+            task = (
+                f'Extract the completed Perplexity Deep Research answer on consult '
+                f'display {self.display}. Use consult_extract_action only, one action '
+                'per turn. '
+                + extraction_task
+            )
+        task += (
+            ' Never click a control after its find returned ok=false. Never click '
             'coordinates. Follow required_next_action exactly whenever the harness '
-            'returns it. Do not finish until citation_ids is non-empty, '
-            'source_count equals expected_source_count, and missing=[].'
+            'returns it. Do not finish until citation_ids is non-empty, source_count '
+            'equals expected_source_count, and missing=[].'
         )
         overlay = (
-            '\n\nCONSULT EXTRACTION SEAT: The sole callable tool is '
-            'consult_extract_action. It is the harness binding of canonical act.find '
-            'and act.click; do not emit shell commands or prose. One tool call per '
-            'turn. Accessible names, never coordinates. The harness state machine '
-            'is authoritative: emit required_next_action exactly.'
+            '\n\nCLOSED CONSULTATION SEAT: The sole callable tool is '
+            'consult_extract_action. It is the harness binding of canonical act.py '
+            'operations; do not emit shell commands, file contents, prompt text, or '
+            'prose. One tool call per turn. Accessible names, never coordinates. The '
+            'harness state machine is authoritative: emit required_next_action exactly.'
         )
         messages: list[dict[str, object]] = [
             {'role': 'system', 'content': self.system_prompt + overlay},
             {'role': 'user', 'content': task},
         ]
         pre_execution_retry_used = False
-        for turn in range(1, MAX_TURNS + 1):
+        max_turns = MAX_FULL_CONSULT_TURNS if self.full_consult else MAX_TURNS
+        for turn in range(1, max_turns + 1):
             message = self._message(self._call_taey(messages, turn))
             call_id, arguments = self._arguments(message)
             try:
@@ -1163,7 +1811,7 @@ class TaeyConsultExtractionSeat:
                 },
             ])
         raise TaeyConsultExtractionError(
-            f'Taey consult extraction exhausted {MAX_TURNS} turns'
+            f'Taey consultation seat exhausted {max_turns} turns'
         )
 
 
@@ -1181,4 +1829,27 @@ def extract_with_taey(
         endpoint=endpoint,
         model=model,
         capture_root=capture_root,
+    ).run()
+
+
+def consult_with_taey(
+    *,
+    platform: str,
+    display: str,
+    attachment_path: str | Path,
+    framing_prompt: str,
+    endpoint: str | None = None,
+    model: str | None = None,
+    capture_root: str | Path | None = None,
+    completion_timeout: float = DEFAULT_COMPLETION_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    return TaeyConsultExtractionSeat(
+        platform=platform,
+        display=display,
+        endpoint=endpoint,
+        model=model,
+        capture_root=capture_root,
+        attachment_path=attachment_path,
+        framing_prompt=framing_prompt,
+        completion_timeout=completion_timeout,
     ).run()
