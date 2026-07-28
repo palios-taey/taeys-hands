@@ -999,6 +999,43 @@ class TaeyConsultExtractionSeat:
             f'answer_surface_seen={answer_surface_seen}'
         )
 
+    def _reset_to_neutral(self) -> dict[str, object]:
+        previous_url = self._current_url()
+        if not self._answer_thread_identity(previous_url):
+            raise TaeyConsultExtractionError(
+                'refusing post-consult reset outside a Perplexity answer thread; '
+                f'current_url={previous_url!r}'
+            )
+        new_thread = self.act.find(
+            NEW_THREAD_NAME,
+            role='link',
+            display=self.display,
+            contains=False,
+            must_show=True,
+            scroll=False,
+        )
+        if not new_thread:
+            raise TaeyConsultExtractionError(
+                'Perplexity exact New link is unavailable for post-consult reset'
+            )
+        clicked = bool(self.act.click(
+            NEW_THREAD_NAME,
+            role='link',
+            display=self.display,
+            contains=False,
+        ))
+        if not clicked:
+            raise TaeyConsultExtractionError(
+                'Perplexity exact New link click failed during post-consult reset'
+            )
+        fresh = self._wait_for_fresh_thread(previous_url)
+        return {
+            **fresh,
+            'control': NEW_THREAD_NAME,
+            'role': 'link',
+            'clicked': True,
+        }
+
     def _assert_bound_answer_thread(self) -> None:
         if not self.full_consult:
             return
@@ -1993,6 +2030,7 @@ class TaeyConsultExtractionSeat:
                     result['finish_reason'] = (
                         'deterministic_after_complete_source_capture'
                     )
+                result['neutral_reset'] = self._reset_to_neutral()
                 result.update(
                     turns=turn,
                     model=self.model,

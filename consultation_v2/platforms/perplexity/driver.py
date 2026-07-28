@@ -2943,6 +2943,67 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
     # it holds the DISPLAY-scoped dispatch lock across setup_and_send (below) and
     # releases it before monitor_and_extract so monitoring runs concurrently.
 
+    def _neutral_composer_evidence(self, target_url: str) -> dict[str, object]:
+        current_url = (self.runtime.current_url() or '').strip()
+        snapshot = self.runtime.snapshot()
+        normalized_current = current_url.rstrip('/').lower()
+        normalized_target = str(target_url or '').strip().rstrip('/').lower()
+        input_ready = self.find_first(snapshot, 'input') is not None
+        attach_ready = self.find_first(snapshot, 'attach_trigger') is not None
+        stop_absent = self.find_first(snapshot, 'stop_button') is None
+        report_absent = self.find_first(snapshot, 'copy_contents_button') is None
+        ready = bool(
+            normalized_current
+            and normalized_current == normalized_target
+            and input_ready
+            and attach_ready
+            and stop_absent
+            and report_absent
+        )
+        return {
+            'ready': ready,
+            'current_url': current_url,
+            'input_ready': input_ready,
+            'attach_ready': attach_ready,
+            'stop_absent': stop_absent,
+            'report_absent': report_absent,
+            'snapshot': snapshot,
+        }
+
+    def _open_neutral_composer(
+        self,
+        target_url: str,
+        *,
+        timeout: float = 15.0,
+    ) -> tuple[dict[str, object], Snapshot]:
+        evidence = self._neutral_composer_evidence(target_url)
+        snapshot = evidence.pop('snapshot')
+        if evidence['ready'] or not self._is_answer_thread_url(
+            str(evidence['current_url'])
+        ):
+            evidence['new_thread_attempted'] = False
+            return evidence, snapshot
+        new_thread = self.find_first(snapshot, 'new_thread_link')
+        evidence.update(
+            new_thread_attempted=True,
+            new_thread_found=new_thread is not None,
+            new_thread_clicked=False,
+        )
+        if new_thread is None:
+            return evidence, snapshot
+        evidence['new_thread_clicked'] = bool(self.runtime.click(new_thread))
+        if not evidence['new_thread_clicked']:
+            return evidence, snapshot
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            current = self._neutral_composer_evidence(target_url)
+            snapshot = current.pop('snapshot')
+            evidence.update(current)
+            if evidence['ready']:
+                return evidence, snapshot
+            time.sleep(0.3)
+        return evidence, snapshot
+
     def setup_and_send(
         self, request: ConsultationRequest, result: ConsultationResult,
     ) -> bool:
@@ -2955,15 +3016,38 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return False
         result.session_url_before = self.runtime.current_url()
         if target_url:
-            navigated = self.runtime.navigate(
-                target_url,
-                verify_change=bool(urls.get('verify_navigation')),
-            )
-            snap = self.runtime.snapshot()
+            if request.session_url:
+                neutral = {'ready': False, 'new_thread_attempted': False}
+                neutral_snapshot = None
+            else:
+                neutral, neutral_snapshot = self._open_neutral_composer(
+                    target_url
+                )
+            if neutral['ready']:
+                navigated = True
+                snap = neutral_snapshot
+                message = (
+                    'Perplexity neutral composer already ready; skipped '
+                    'redundant address-bar navigation'
+                )
+            elif neutral['new_thread_attempted']:
+                navigated = False
+                snap = neutral_snapshot
+                message = (
+                    'Perplexity exact New link did not expose a neutral composer'
+                )
+            else:
+                navigated = self.runtime.navigate(
+                    target_url,
+                    verify_change=bool(urls.get('verify_navigation')),
+                )
+                snap = self.runtime.snapshot()
+                message = 'Navigated to Perplexity session target'
             result.add_step(
                 'navigate', navigated,
-                'Navigated to Perplexity session target',
+                message,
                 target_url=target_url,
+                neutral=neutral,
                 snapshot=snap.serializable(),
             )
             if not navigated:
@@ -4117,6 +4201,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     'system_prompt_sha256',
                     'act_path',
                     'actions',
+                    'neutral_reset',
                 )
             }
             return self._accept_extracted_content(

@@ -71,6 +71,9 @@ tree:
     new_thread:
       name: New thread Ctrl I
       role: push button
+    new_thread_link:
+      name: New
+      role: link
     dictation:
       name: Dictation
       role: push button
