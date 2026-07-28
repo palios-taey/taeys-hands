@@ -42,6 +42,7 @@ MARKDOWN_SOURCE_DEFINITION_PATTERN = re.compile(
 FILE_SOURCE_CONTROL_PATTERN = re.compile(r'^\s*Files\s+([0-9]+)\s*$', re.IGNORECASE)
 MARKDOWN_EXPORT_NAME = 'Export as Markdown'
 OVERFLOW_CONTROL_NAMES = ('Session actions', '...')
+NEW_THREAD_NAME = 'New'
 ATTACH_TRIGGER_NAME = 'Add files or tools'
 UPLOAD_FILE_NAME = 'Upload files or images'
 COMPOSER_CONTROL_NAME = '\ufffc'
@@ -420,6 +421,9 @@ class TaeyConsultExtractionSeat:
         self.markdown_source_definition_count = 0
         self.download_path = ''
         self.download_sha256 = ''
+        self.initial_session_url = ''
+        self.fresh_thread_url = ''
+        self.fresh_thread_opened = False
         self.attach_trigger_focused = False
         self.attach_trigger_activated = False
         self.upload_control_clicked = False
@@ -642,6 +646,8 @@ class TaeyConsultExtractionSeat:
     def _control_role(self, action: str, name: str) -> str:
         if name == COMPOSER_CONTROL_NAME:
             return 'entry'
+        if name == NEW_THREAD_NAME:
+            return 'link'
         if name == DEEP_RESEARCH_NAME:
             if self.mode_menu_opened and not self.mode_selected:
                 return 'radio menu item'
@@ -677,6 +683,19 @@ class TaeyConsultExtractionSeat:
         return self._required_extraction_action()
 
     def _required_full_consult_action(self) -> dict[str, object]:
+        new_thread = (NEW_THREAD_NAME, 'link')
+        if not self.fresh_thread_opened:
+            if new_thread in self.found_controls:
+                return {
+                    'action': 'click',
+                    'name': NEW_THREAD_NAME,
+                    'contains': False,
+                }
+            return {
+                'action': 'find',
+                'name': NEW_THREAD_NAME,
+                'contains': False,
+            }
         attach_trigger = (ATTACH_TRIGGER_NAME, 'push button')
         if not self.attach_trigger_focused:
             if attach_trigger in self.found_controls:
@@ -907,6 +926,97 @@ class TaeyConsultExtractionSeat:
             return ''
         return str(value.get('url') or '').strip()
 
+    @staticmethod
+    def _answer_thread_identity(url: str) -> str:
+        parsed = urllib.parse.urlsplit(str(url or '').strip())
+        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+            return ''
+        path = parsed.path.rstrip('/')
+        if not path.startswith('/search/'):
+            return ''
+        return urllib.parse.urlunsplit((
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            path,
+            '',
+            '',
+        ))
+
+    def _wait_for_fresh_thread(
+        self,
+        previous_url: str,
+        *,
+        timeout: float = 15.0,
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + timeout
+        last_url = ''
+        composer_seen = False
+        answer_surface_seen = False
+        while time.monotonic() < deadline:
+            last_url = self._current_url()
+            parsed = urllib.parse.urlsplit(last_url)
+            composer = self.act.find(
+                COMPOSER_CONTROL_NAME,
+                role='entry',
+                display=self.display,
+                contains=False,
+                must_show=True,
+                scroll=False,
+            )
+            answer_surface = self.act.find(
+                ' source',
+                role='push button',
+                display=self.display,
+                contains=True,
+                must_show=False,
+                scroll=False,
+            )
+            composer_seen = composer_seen or bool(composer)
+            answer_surface_seen = answer_surface_seen or bool(answer_surface)
+            clean_url = (
+                parsed.scheme in {'http', 'https'}
+                and parsed.netloc.lower() == 'www.perplexity.ai'
+                and not self._answer_thread_identity(last_url)
+            )
+            left_previous_thread = (
+                not self._answer_thread_identity(previous_url)
+                or self._answer_thread_identity(previous_url)
+                != self._answer_thread_identity(last_url)
+            )
+            if clean_url and left_previous_thread and composer and not answer_surface:
+                return {
+                    'opened': True,
+                    'previous_url': previous_url,
+                    'fresh_thread_url': last_url,
+                    'composer_seen': True,
+                    'answer_surface_absent': True,
+                }
+            time.sleep(0.3)
+        raise TaeyConsultExtractionError(
+            'Perplexity New did not expose a clean fresh composer; '
+            f'previous_url={previous_url!r}, url={last_url!r}, '
+            f'composer_seen={composer_seen}, '
+            f'answer_surface_seen={answer_surface_seen}'
+        )
+
+    def _assert_bound_answer_thread(self) -> None:
+        if not self.full_consult:
+            return
+        expected = self._answer_thread_identity(self.session_url_after)
+        current_url = self._current_url()
+        current = self._answer_thread_identity(current_url)
+        if (
+            not self.fresh_thread_opened
+            or not expected
+            or current != expected
+        ):
+            raise TaeyConsultExtractionError(
+                'refusing extraction outside the answer thread created by this '
+                f'fresh consult; expected={self.session_url_after!r}, '
+                f'current={current_url!r}, '
+                f'fresh_thread_opened={self.fresh_thread_opened}'
+            )
+
     def _wait_for_full_consult_completion(self) -> dict[str, object]:
         started = time.monotonic()
         deadline = started + self.completion_timeout
@@ -1135,8 +1245,23 @@ class TaeyConsultExtractionSeat:
                 last_file_count = max(
                     [last_file_count, *file_counts],
                 )
-                if accepted_panel_counts.intersection(file_counts):
-                    file_panels += 1
+                for file_count in file_counts:
+                    panel_count = len(sources) + file_count
+                    if (
+                        panel_count == expected_count
+                        and file_count == 1
+                        and self.attachment_path is not None
+                    ):
+                        candidates.append([
+                            *sources,
+                            {
+                                'index': len(sources) + 1,
+                                'url': '',
+                                'title': self.attachment_path.name,
+                            },
+                        ])
+                    elif file_count in accepted_panel_counts:
+                        file_panels += 1
             exact = [
                 items
                 for items in candidates
@@ -1333,8 +1458,14 @@ class TaeyConsultExtractionSeat:
                 'submitted': self.submitted,
                 'completed': self.consult_completed,
                 'browser_url_before_dialog': self.browser_url_before_dialog,
+                'initial_session_url': self.initial_session_url,
+                'fresh_thread_url': self.fresh_thread_url,
+                'fresh_thread_opened': self.fresh_thread_opened,
                 'session_url_before': self.session_url_before,
                 'session_url_after': self.session_url_after,
+                'answer_thread_identity': self._answer_thread_identity(
+                    self.session_url_after
+                ),
                 'completion': dict(self.completion_evidence),
             }
         return result
@@ -1346,6 +1477,7 @@ class TaeyConsultExtractionSeat:
         contains: bool,
         role: str,
     ) -> dict[str, object]:
+        self._assert_bound_answer_thread()
         if action == 'find':
             found = self.act.find(
                 name,
@@ -1531,7 +1663,7 @@ class TaeyConsultExtractionSeat:
         if action in {'click', 'activate'}:
             actuator = self.act.do if action == 'activate' else self.act.click
             before_url = ''
-            if name in {UPLOAD_FILE_NAME, SUBMIT_CONTROL_NAME}:
+            if name in {NEW_THREAD_NAME, UPLOAD_FILE_NAME, SUBMIT_CONTROL_NAME}:
                 before_url = self._current_url()
                 if not before_url.startswith(('http://', 'https://')):
                     raise TaeyConsultExtractionError(
@@ -1552,7 +1684,17 @@ class TaeyConsultExtractionSeat:
                     f'act.{actuator.__name__}({name!r}, role={role!r}) '
                     'returned a non-success value'
                 )
-            if name == UPLOAD_FILE_NAME:
+            action_evidence: dict[str, object] = {}
+            if name == NEW_THREAD_NAME:
+                fresh_evidence = self._wait_for_fresh_thread(before_url)
+                self.initial_session_url = before_url
+                self.fresh_thread_url = str(
+                    fresh_evidence['fresh_thread_url']
+                )
+                self.fresh_thread_opened = True
+                self.found_controls.clear()
+                action_evidence['fresh_thread'] = fresh_evidence
+            elif name == UPLOAD_FILE_NAME:
                 self.browser_url_before_dialog = before_url
                 self.upload_control_clicked = True
                 time.sleep(1.0)
@@ -1578,6 +1720,7 @@ class TaeyConsultExtractionSeat:
                 'action': action,
                 'name': name,
                 'role': role,
+                **action_evidence,
             }
         if action == 'key':
             pressed = bool(self.act.key(name, display=self.display))
@@ -1714,7 +1857,7 @@ class TaeyConsultExtractionSeat:
             'returns the complete exported body and citations. Do not use plain Copy '
             'or Download. Next find a push button whose accessible name contains '
             '" source"; click the exact N sources name returned by find and read the '
-            'complete source panel; then finish with name="" and contains=false.'
+            'complete source panel; the harness then validates and finalizes.'
         )
         if self.full_consult:
             task = (
@@ -1726,7 +1869,9 @@ class TaeyConsultExtractionSeat:
                 'contents into the composer. The harness also owns a short framing '
                 f'prompt of {len(self.framing_prompt)} characters at SHA256 '
                 f'{self.framing_prompt_sha256}; use paste_prompt without emitting its '
-                'text. Find and focus Add files or tools, activate it with Return, '
+                'text. First find and click the exact New link; the harness must '
+                'prove a clean fresh composer before attachment. Then find and focus '
+                'Add files or tools, activate it with Return, '
                 'then use Upload files or images and the file '
                 'chooser ctrl+l, ctrl+a, paste_path, Return, and verify the filename '
                 'chip. '
@@ -1734,6 +1879,9 @@ class TaeyConsultExtractionSeat:
                 'active; if its active toggle is absent, open Search and activate the '
                 'Deep research radio menu item, then verify the active toggle. Find '
                 'and activate Submit, wait_complete, and only then extract. '
+                'The harness binds extraction to the answer-thread URL created by '
+                'that submission and refuses any other thread. After complete source '
+                'capture, the harness validates and finalizes deterministically. '
                 + extraction_task
             )
         else:
@@ -1834,7 +1982,17 @@ class TaeyConsultExtractionSeat:
                 ])
                 continue
             result = self._execute(arguments)
-            if arguments.get('action') == 'finish':
+            deterministic_finish = (
+                arguments.get('action') != 'finish'
+                and result.get('required_next_action')
+                == {'action': 'finish', 'name': '', 'contains': False}
+            )
+            if arguments.get('action') == 'finish' or deterministic_finish:
+                if deterministic_finish:
+                    result = self._finish()
+                    result['finish_reason'] = (
+                        'deterministic_after_complete_source_capture'
+                    )
                 result.update(
                     turns=turn,
                     model=self.model,
