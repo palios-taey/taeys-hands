@@ -175,20 +175,36 @@ def _without_markdown_source_definitions(value: str) -> str:
     return '\n'.join(kept).strip()
 
 
-def _markdown_sources(value: str) -> list[dict[str, object]]:
+def _markdown_sources(
+    value: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int]:
     definitions: dict[int, str] = {}
+    conflicts: list[dict[str, object]] = []
+    conflict_keys: set[tuple[int, str]] = set()
+    definition_count = 0
     for line in (value or '').splitlines():
         match = MARKDOWN_SOURCE_DEFINITION_PATTERN.fullmatch(line.strip())
         if match is None:
             continue
+        definition_count += 1
         source_id = int(match.group(1).rsplit('_', 1)[-1])
         target = match.group(2).strip()
         previous = definitions.get(source_id)
-        if previous is not None and previous != target:
-            raise TaeyConsultExtractionError(
-                f'Markdown export has conflicting definitions for source {source_id}'
-            )
-        definitions[source_id] = target
+        if previous is None:
+            definitions[source_id] = target
+            continue
+        if previous == target:
+            continue
+        conflict_key = (source_id, target)
+        if conflict_key in conflict_keys:
+            continue
+        conflict_keys.add(conflict_key)
+        conflicts.append({
+            'source_id': source_id,
+            'kept_definition': previous,
+            'ignored_definition': target,
+            'resolution': 'first_definition_kept',
+        })
     sources: list[dict[str, object]] = []
     for source_id, target in sorted(definitions.items()):
         parsed = urllib.parse.urlsplit(target)
@@ -199,7 +215,7 @@ def _markdown_sources(value: str) -> list[dict[str, object]]:
             'title': target[:240],
             'kind': 'url' if is_url else 'file',
         })
-    return sources
+    return sources, conflicts, definition_count
 
 
 def _required_text(path: Path, label: str) -> str:
@@ -400,6 +416,8 @@ class TaeyConsultExtractionSeat:
         self.markdown_export_checked = False
         self.overflow_checked: set[str] = set()
         self.markdown_sources: list[dict[str, object]] = []
+        self.markdown_source_conflicts: list[dict[str, object]] = []
+        self.markdown_source_definition_count = 0
         self.download_path = ''
         self.download_sha256 = ''
         self.attach_trigger_focused = False
@@ -1088,6 +1106,23 @@ class TaeyConsultExtractionSeat:
         deadline = time.monotonic() + timeout
         last_count = 0
         last_file_count = 0
+        accepted_panel_counts = {expected_count}
+        if self.markdown_source_definition_count > 0:
+            accepted_panel_counts.add(self.markdown_source_definition_count)
+
+        def retained_markdown_sources() -> list[dict[str, object]]:
+            source_ids = [
+                int(item['index'])
+                for item in self.markdown_sources
+            ]
+            expected_ids = list(range(1, expected_count + 1))
+            if source_ids != expected_ids:
+                raise TaeyConsultExtractionError(
+                    'Sources panel does not match the retained Markdown export '
+                    f'definitions: expected={expected_ids}, definitions={source_ids}'
+                )
+            return list(self.markdown_sources)
+
         while time.monotonic() < deadline:
             candidates: list[list[dict[str, object]]] = []
             file_panels = 0
@@ -1100,11 +1135,17 @@ class TaeyConsultExtractionSeat:
                 last_file_count = max(
                     [last_file_count, *file_counts],
                 )
-                if expected_count in file_counts:
+                if accepted_panel_counts.intersection(file_counts):
                     file_panels += 1
-            exact = [items for items in candidates if len(items) == expected_count]
+            exact = [
+                items
+                for items in candidates
+                if len(items) in accepted_panel_counts
+            ]
             if len(exact) == 1:
-                return exact[0]
+                if len(exact[0]) == expected_count:
+                    return exact[0]
+                return retained_markdown_sources()
             if len(exact) > 1:
                 raise TaeyConsultExtractionError(
                     'multiple Sources panels exposed the expected source count'
@@ -1114,17 +1155,7 @@ class TaeyConsultExtractionSeat:
                     'multiple Sources panels exposed the expected file count'
                 )
             if file_panels == 1:
-                source_ids = [
-                    int(item['index'])
-                    for item in self.markdown_sources
-                ]
-                expected_ids = list(range(1, expected_count + 1))
-                if source_ids != expected_ids:
-                    raise TaeyConsultExtractionError(
-                        'Sources panel file count does not match the Markdown export '
-                        f'definitions: panel={expected_count}, definitions={source_ids}'
-                    )
-                return list(self.markdown_sources)
+                return retained_markdown_sources()
             last_count = max((len(items) for items in candidates), default=0)
             time.sleep(0.25)
         raise TaeyConsultExtractionError(
@@ -1211,13 +1242,22 @@ class TaeyConsultExtractionSeat:
             if len(ready) == 1:
                 path, raw, raw_bytes, _ = ready[0]
                 body = _without_markdown_source_definitions(raw)
+                (
+                    markdown_sources,
+                    markdown_source_conflicts,
+                    markdown_source_definition_count,
+                ) = _markdown_sources(raw)
                 return body, {
                     'download_path': str(path),
                     'download_characters': len(raw),
                     'download_body_characters': len(body),
                     'download_sha256': hashlib.sha256(raw_bytes).hexdigest(),
                     'citation_ids': _citation_ids(raw),
-                    'markdown_sources': _markdown_sources(raw),
+                    'markdown_sources': markdown_sources,
+                    'markdown_source_conflicts': markdown_source_conflicts,
+                    'markdown_source_definition_count': (
+                        markdown_source_definition_count
+                    ),
                 }
             time.sleep(0.25)
         raise TaeyConsultExtractionError(
@@ -1276,6 +1316,10 @@ class TaeyConsultExtractionSeat:
             'actions': list(self.actions),
             'download_path': self.download_path or None,
             'download_sha256': self.download_sha256 or None,
+            'markdown_source_conflicts': list(self.markdown_source_conflicts),
+            'markdown_source_definition_count': (
+                self.markdown_source_definition_count
+            ),
         }
         if self.full_consult:
             result['consultation'] = {
@@ -1392,6 +1436,12 @@ class TaeyConsultExtractionSeat:
                 self.body_control = name
                 self.body_citation_ids = list(download_evidence['citation_ids'])
                 self.markdown_sources = list(download_evidence['markdown_sources'])
+                self.markdown_source_conflicts = list(
+                    download_evidence['markdown_source_conflicts']
+                )
+                self.markdown_source_definition_count = int(
+                    download_evidence['markdown_source_definition_count']
+                )
                 self.download_path = str(download_evidence['download_path'])
                 self.download_sha256 = str(download_evidence['download_sha256'])
                 result.update(
