@@ -286,6 +286,39 @@ workflow:
     model: null
     mode: deep_research
     tools: []
+  full_consult:
+    steps:
+      new_thread:
+        elements:
+          - new_thread_link
+      attach_trigger:
+        elements:
+          - attach_trigger
+      upload_item:
+        elements:
+          - upload_files_item
+      composer_input:
+        elements:
+          - input
+      submit:
+        elements:
+          - submit_button
+      completion:
+        elements:
+          - stop_button
+      copy_response:
+        elements:
+          - copy_contents_button
+    attachment_present:
+      filename_roles:
+        - push button
+        - section
+        - link
+        - heading
+    mode:
+      active: deep_research_toggle
+      trigger: search_mode_trigger
+      option: deep_research
   selection:
     menus:
       mode:

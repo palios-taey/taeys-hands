@@ -16,7 +16,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Run Taey in the closed full-consult or extraction-only seat.',
     )
-    parser.add_argument('--platform', required=True, choices=['perplexity'])
+    parser.add_argument(
+        '--platform',
+        required=True,
+        choices=['chatgpt', 'claude', 'gemini', 'grok', 'perplexity'],
+    )
     parser.add_argument(
         '--display',
         required=True,

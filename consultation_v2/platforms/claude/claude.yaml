@@ -141,9 +141,9 @@ tree:
       name: Home
       role: link
       scope: base.sidebar
-    new_chat_link:
-      name: New chat
-      role: link
+    new_chat:
+      name: New
+      role: push button
       scope: base.sidebar
     search_link:
       name: Search
@@ -253,6 +253,10 @@ tree:
       name: Your previous message wasn’t sent. You can try again.
       role: alert
       scope: send.blocked
+    network_connection_alert:
+      name: Warning We couldn’t connect to Claude. Please check your network connection and try again. Close
+      role: list item
+      scope: response.exception
     send_blocked_caution_banner:
       name: Use caution before running this prompt. Malicious conversation content could trick Claude into attempting harmful actions or sharing your data.
       role: alert
@@ -512,6 +516,35 @@ workflow:
     mode: extended_thinking
     tools:
       - web_search
+  full_consult:
+    steps:
+      new_thread:
+        elements:
+          - new_chat
+      attach_trigger:
+        elements:
+          - toggle_menu
+      upload_item:
+        elements:
+          - upload_files_item
+      composer_input:
+        elements:
+          - input
+      submit:
+        elements:
+          - send_button
+      completion:
+        elements:
+          - stop_button
+      copy_response:
+        elements:
+          - copy_button
+        pick: last_by_y
+    attachment_present:
+      elements:
+        - remove_attachment
+    failures:
+      - network_connection_alert
   selection:
     menus:
       model:
