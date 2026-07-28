@@ -118,7 +118,7 @@ tree:
       role: push button
     new_chat:
       name: New chat
-      role: push button
+      role: link
     # BUG 4 FIX: exact AT-SPI name for upload dropdown item
     upload_files_item:
       name: "Upload files. Documents, data, code files"
@@ -199,6 +199,36 @@ workflow:
     model: pro
     mode: deep_research
     tools: []
+  full_consult:
+    steps:
+      new_thread:
+        elements:
+          - new_chat
+      attach_trigger:
+        elements:
+          - upload_menu
+      upload_item:
+        elements:
+          - upload_files_item
+      composer_input:
+        elements:
+          - input
+        paste_strategy: focus_and_paste
+      submit:
+        elements:
+          - send_button
+        action: activate
+      completion:
+        elements:
+          - stop_button
+      copy_response:
+        elements:
+          - copy_button
+        action: activate
+    attachment_present:
+      filename_value: stem
+      filename_roles:
+        - section
   selection:
     menus:
       model:
@@ -247,7 +277,8 @@ workflow:
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
-    open_method: atspi_menu
+    open_method: focus_and_key_open
+    open_key: space
   prompt:
     input: input
     send_button: send_button

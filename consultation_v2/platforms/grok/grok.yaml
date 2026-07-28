@@ -153,6 +153,34 @@ workflow:
     model: null
     mode: null
     tools: []
+  full_consult:
+    steps:
+      new_thread:
+        elements:
+          - new_chat
+      attach_trigger:
+        elements:
+          - attach_trigger
+      upload_item:
+        elements:
+          - upload_files_item
+      composer_input:
+        elements:
+          - input
+      submit:
+        elements:
+          - send_button
+      completion:
+        elements:
+          - stop_button
+      copy_response:
+        elements:
+          - copy_button
+        pick: last_by_y
+        settle_seconds: 1.0
+    attachment_present:
+      elements:
+        - remove_attachment
   # Compatibility alias for older contract checks; the driver reads the same
   # mapping from workflow.selection.mode_targets.
   mode_targets:

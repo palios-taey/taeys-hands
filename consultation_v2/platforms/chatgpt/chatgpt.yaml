@@ -413,6 +413,35 @@ workflow:
     # `--select tools=web_search`; re-enable this default only after the menu is
     # reliably drivable.
     tools: none
+  full_consult:
+    steps:
+      new_thread:
+        elements:
+          - new_chat_shortcut
+      attach_trigger:
+        elements:
+          - attach_trigger
+      upload_item:
+        elements:
+          - tool_upload
+      composer_input:
+        elements:
+          - input_chat_with_chatgpt
+          - input_ask_anything
+      submit:
+        elements:
+          - send_button
+      completion:
+        elements:
+          - stop_streaming_button
+          - stop_answering_button
+      copy_response:
+        elements:
+          - copy_button
+    attachment_present:
+      filename_roles:
+        - push button
+        - panel
   selection:
     menus:
       model:
