@@ -48,7 +48,6 @@ MARKDOWN_SOURCE_DEFINITION_PATTERN = re.compile(
 FILE_SOURCE_CONTROL_PATTERN = re.compile(r'^\s*Files\s+([0-9]+)\s*$', re.IGNORECASE)
 MARKDOWN_EXPORT_NAME = 'Export as Markdown'
 OVERFLOW_CONTROL_NAMES = ('Session actions', '...')
-ATTACHMENT_PATH_SENTINEL = 'attachment path'
 FULL_CONSULT_REQUIRED_STEPS = frozenset({
     'new_thread',
     'attach_trigger',
@@ -131,7 +130,8 @@ def consult_extract_action_tool() -> dict[str, object]:
                         'description': (
                             'The required semantic step supplied by the harness, a '
                             'legacy exact accessible name for extraction-only mode, '
-                            'or an empty string for wait_complete and finish.'
+                            'or an empty string for paste_path, wait_complete, and '
+                            'finish. paste_path ignores this field.'
                         ),
                     },
                     'contains': {
@@ -1071,7 +1071,6 @@ class TaeyConsultExtractionSeat:
             'focus',
             'key',
             'typeahead',
-            'paste_path',
             'paste_prompt',
         } and not name:
             raise TaeyConsultExtractionError(f'{action} requires a non-empty name')
@@ -1105,10 +1104,8 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 'typeahead is restricted to semantic step upload_item'
             )
-        if action == 'paste_path' and name != ATTACHMENT_PATH_SENTINEL:
-            raise TaeyConsultExtractionError(
-                f'paste_path requires name={ATTACHMENT_PATH_SENTINEL!r}'
-            )
+        if action == 'paste_path':
+            name = ''
         return action, name, contains
 
     def _control_role(self, action: str, name: str) -> str:
@@ -1152,7 +1149,12 @@ class TaeyConsultExtractionSeat:
     ) -> tuple[str, str, bool, str]:
         action, name, contains = self._normalized_action(arguments)
         required = self._required_action()
-        if arguments != required:
+        normalized_arguments = {
+            'action': action,
+            'name': name,
+            'contains': contains,
+        }
+        if normalized_arguments != required:
             raise TaeyConsultStateError(required)
         role = (
             self._control_role(action, name)
@@ -1271,7 +1273,7 @@ class TaeyConsultExtractionSeat:
         if not self.attachment_path_pasted:
             return {
                 'action': 'paste_path',
-                'name': ATTACHMENT_PATH_SENTINEL,
+                'name': '',
                 'contains': False,
             }
         if not self.attachment_submitted:
