@@ -442,6 +442,9 @@ workflow:
       filename_roles:
         - push button
         - panel
+    select_mode:
+      - menu: model
+        option: pro
   selection:
     menus:
       model:

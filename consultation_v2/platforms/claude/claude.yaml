@@ -543,6 +543,11 @@ workflow:
     attachment_present:
       elements:
         - remove_attachment
+    select_mode:
+      - menu: model
+        option: opus
+      - menu: mode
+        option: extended_thinking
     failures:
       - network_connection_alert
   selection:

@@ -181,6 +181,9 @@ workflow:
     attachment_present:
       elements:
         - remove_attachment
+    select_mode:
+      - menu: model
+        option: heavy
   # Compatibility alias for older contract checks; the driver reads the same
   # mapping from workflow.selection.mode_targets.
   mode_targets:

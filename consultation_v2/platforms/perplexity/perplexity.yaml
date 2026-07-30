@@ -321,6 +321,9 @@ workflow:
         - section
         - link
         - heading
+    select_mode:
+      - menu: mode
+        option: deep_research
     mode:
       active: deep_research_toggle
       trigger: search_mode_trigger

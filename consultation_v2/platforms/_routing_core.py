@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 import time
 from dataclasses import dataclass
 
@@ -11,7 +12,7 @@ from consultation_v2 import atspi, clipboard, input as input_core
 from consultation_v2.platforms_runtime import (
     get_display_bus,
     get_platform_display,
-    get_platform_firefox_pid,
+    get_platform_displays,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 class RouteSpec:
     platform: str
     url_patterns: tuple[str, ...]
+    displays: tuple[str, ...] = ()
     extra_url_patterns: tuple[str, ...] = ()
     default_tab_shortcut: str | None = None
     worker_tab_shortcut: str | None = None
@@ -72,8 +74,46 @@ def _normalize_display(display: str | None) -> str | None:
     return f':{display_num}'
 
 
+def route_display(spec: RouteSpec) -> str | None:
+    actual_display = _normalize_display(os.environ.get('DISPLAY'))
+    configured = tuple(
+        display
+        for display in (
+            _normalize_display(value)
+            for value in get_platform_displays(spec.platform)
+        )
+        if display
+    )
+    declared = tuple(
+        display
+        for display in (
+            _normalize_display(value)
+            for value in spec.displays
+        )
+        if display
+    )
+    explicitly_configured = bool(
+        str(os.environ.get('PLATFORM_DISPLAYS') or '').strip()
+    )
+    candidates = tuple(dict.fromkeys(
+        configured
+        if explicitly_configured and configured
+        else configured + declared
+    ))
+    if actual_display and actual_display in candidates:
+        return actual_display
+    configured_display = _normalize_display(
+        get_platform_display(spec.platform)
+    )
+    if configured_display:
+        return configured_display
+    if declared:
+        return declared[0]
+    return actual_display
+
+
 def _assert_route_os_binding(spec: RouteSpec) -> None:
-    expected_display = _normalize_display(get_platform_display(spec.platform))
+    expected_display = route_display(spec)
     if not expected_display:
         return
 
@@ -98,6 +138,13 @@ def _assert_route_os_binding(spec: RouteSpec) -> None:
             f"{expected_display!r}: expected AT_SPI_BUS_ADDRESS "
             f"{expected_bus!r}, got {actual_bus!r}"
         )
+
+
+def _display_firefox_pid(display: str) -> int | None:
+    try:
+        return int(Path(f'/tmp/firefox_pid_{display}').read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _assert_firefox_process_binding(spec: RouteSpec, firefox, *, pid: int | None):
@@ -156,12 +203,12 @@ def _document_showing(spec: RouteSpec, *, display: str | None, pid: int | None) 
 
 
 def switch_to_platform(spec: RouteSpec) -> bool:
-    display = get_platform_display(spec.platform)
+    display = route_display(spec)
     if display:
         input_core.set_display(display)
         clipboard.set_display(display)
 
-        firefox_pid = get_platform_firefox_pid(spec.platform)
+        firefox_pid = _display_firefox_pid(display)
         if firefox_pid:
             if input_core.focus_firefox_pid(firefox_pid) and _document_showing(
                 spec, display=display, pid=firefox_pid,
