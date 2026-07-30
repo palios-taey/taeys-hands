@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
 import time
-from types import ModuleType
 import urllib.parse
 import urllib.request
 
 from consultation_v2 import clipboard
+from consultation_v2.seat_actions import SeatActions
 from consultation_v2.snapshot import (
     build_app_root_snapshot,
     build_menu_snapshot,
@@ -27,9 +26,6 @@ CONSULT_DISPLAYS = frozenset({
     ':2', ':3', ':4', ':5', ':6',
     ':20', ':21', ':22', ':23', ':24',
 })
-DEFAULT_ACT_PATH = Path('/home/mira/treasurer/scripts/loop/act.py')
-DEFAULT_SYSTEM_PROMPT_PATH = Path('/home/mira/data/corpus/layer_1/SYSTEM_PROMPT.md')
-DEFAULT_EP3_BASE = 'http://10.0.0.197:8000/v1'
 DEFAULT_EP3_MODEL = 'ep3'
 MAX_TURNS = 12
 MAX_FULL_CONSULT_TURNS = 40
@@ -243,8 +239,12 @@ def _required_text(path: Path, label: str) -> str:
     return value
 
 
-def _endpoint(base: str) -> str:
+def _endpoint(base: str | None) -> str:
     value = str(base or '').strip().rstrip('/')
+    if not value:
+        raise TaeyConsultExtractionError(
+            'TAEY_CONSULT_ENDPOINT is required when endpoint is not supplied'
+        )
     parsed = urllib.parse.urlsplit(value)
     if (
         parsed.scheme not in {'http', 'https'}
@@ -255,7 +255,7 @@ def _endpoint(base: str) -> str:
         or parsed.fragment
     ):
         raise TaeyConsultExtractionError(
-            'TAEY_CONSULT_EP3_BASE must be an absolute HTTP(S) URL'
+            'TAEY_CONSULT_ENDPOINT must be an absolute HTTP(S) URL'
         )
     if value.endswith('/chat/completions'):
         return value
@@ -264,35 +264,19 @@ def _endpoint(base: str) -> str:
     return value + '/v1/chat/completions'
 
 
-def _load_act(path: Path) -> ModuleType:
-    if not path.is_file():
-        raise TaeyConsultExtractionError(f'canonical act.py is unavailable at {path}')
-    spec = importlib.util.spec_from_file_location('_taey_consult_act', path)
-    if spec is None or spec.loader is None:
-        raise TaeyConsultExtractionError(f'could not load canonical act.py from {path}')
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
+def _system_prompt_path(value: str | Path | None) -> Path:
+    if value is not None and str(value).strip():
+        return Path(value).expanduser().resolve()
+    corpus_path = str(os.environ.get('TAEY_CORPUS_PATH') or '').strip()
+    if not corpus_path:
         raise TaeyConsultExtractionError(
-            f'canonical act.py import failed: {type(exc).__name__}: {exc}'
-        ) from exc
-    for name in (
-        'find',
-        'click',
-        'do',
-        'key',
-        'paste_into',
-        'current_url_atspi',
-        'firefox_app',
-        'node_label',
-        'prune_inactive_document',
-    ):
-        if not callable(getattr(module, name, None)):
-            raise TaeyConsultExtractionError(
-                f'canonical act.py does not expose required callable {name!r}'
-            )
-    return module
+            'TAEY_CORPUS_PATH is required when system_prompt_path is not supplied'
+        )
+    return (
+        Path(corpus_path).expanduser().resolve()
+        / 'layer_1'
+        / 'SYSTEM_PROMPT.md'
+    )
 
 
 def _full_consult_contract(
@@ -573,7 +557,6 @@ class TaeyConsultExtractionSeat:
         display: str,
         endpoint: str | None = None,
         model: str | None = None,
-        act_path: str | Path | None = None,
         system_prompt_path: str | Path | None = None,
         capture_root: str | Path | None = None,
         attachment_path: str | Path | None = None,
@@ -596,9 +579,7 @@ class TaeyConsultExtractionSeat:
             )
         self.endpoint = _endpoint(
             endpoint
-            or os.environ.get('TAEY_CONSULT_EP3_BASE')
-            or os.environ.get('APPLYMACHINE_EP3_BASE')
-            or DEFAULT_EP3_BASE
+            or os.environ.get('TAEY_CONSULT_ENDPOINT')
         )
         self.model = str(
             model
@@ -608,24 +589,15 @@ class TaeyConsultExtractionSeat:
         ).strip()
         if not self.model:
             raise TaeyConsultExtractionError('Taey consult extraction model is empty')
-        self.act_path = Path(
-            act_path
-            or os.environ.get('TAEY_CONSULT_ACT_PATH')
-            or DEFAULT_ACT_PATH
-        ).expanduser().resolve()
-        self.system_prompt_path = Path(
-            system_prompt_path
-            or os.environ.get('TAEY_CONSULT_SYSTEM_PROMPT')
-            or DEFAULT_SYSTEM_PROMPT_PATH
-        ).expanduser().resolve()
+        self.system_prompt_path = _system_prompt_path(system_prompt_path)
         self.capture_root = (
             Path(capture_root).expanduser().resolve()
             if capture_root
             else Path(tempfile.mkdtemp(prefix='taey_consult_extract_'))
         )
         self._prepare_display_environment()
-        self.act = _load_act(self.act_path)
         self.runtime = ConsultationRuntime(self.platform)
+        self.act = SeatActions(self.display, self.runtime)
         self.system_prompt = _required_text(
             self.system_prompt_path,
             'Taey system prompt',
@@ -965,7 +937,7 @@ class TaeyConsultExtractionSeat:
         if not action_name:
             raise TaeyConsultExtractionError(
                 f'{self.platform} structural control {element_key!r} resolved '
-                'without a canonical act.py action label'
+                'without a seat action label'
             )
         return {
             'node': node,
@@ -3173,8 +3145,8 @@ class TaeyConsultExtractionSeat:
             )
         overlay = (
             '\n\nCLOSED CONSULTATION SEAT: The sole callable tool is '
-            'consult_extract_action. It is the harness binding of canonical act.py '
-            'operations; do not emit shell commands, file contents, prompt text, or '
+            'consult_extract_action. It is the harness binding of this public repo\'s '
+            'seat-action operations; do not emit shell commands, file contents, prompt text, or '
             'prose. One tool call per turn. Accessible names, never coordinates. The '
             'harness state machine is authoritative: emit required_next_action exactly.'
         )
@@ -3283,7 +3255,7 @@ class TaeyConsultExtractionSeat:
                     ).hexdigest(),
                     system_prompt_path=str(self.system_prompt_path),
                     system_prompt_sha256=_sha256_text(self.system_prompt),
-                    act_path=str(self.act_path),
+                    action_backend='consultation_v2.seat_actions.SeatActions',
                 )
                 return result
             messages.extend([

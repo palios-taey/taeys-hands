@@ -127,3 +127,19 @@ def has_state(element: Dict, state: Atspi.StateType) -> bool:
 def strip_atspi_obj(elements: List[Dict]) -> List[Dict]:
     """Strip atspi_obj for JSON serialization (D-Bus proxies can't serialize)."""
     return [{k: v for k, v in e.items() if k != 'atspi_obj'} for e in elements]
+
+
+def atspi_activate(element: Dict) -> bool:
+    obj = element.get('atspi_obj')
+    if is_defunct(element):
+        return False
+    try:
+        action = obj.get_action_iface()
+        if not action or action.get_n_actions() <= 0:
+            return False
+        for index in range(action.get_n_actions()):
+            if action.get_action_name(index) == 'activate':
+                return bool(action.do_action(index))
+        return bool(action.do_action(0))
+    except Exception:
+        return False
