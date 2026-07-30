@@ -314,7 +314,7 @@ workflow:
           - stop_button
       copy_response:
         elements:
-          - copy_contents_button
+          - copy_button
     attachment_present:
       filename_roles:
         - push button
