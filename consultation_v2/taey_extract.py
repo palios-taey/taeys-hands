@@ -1799,7 +1799,7 @@ class TaeyConsultExtractionSeat:
         path_evidence = [
             self._actuate_mode_element(
                 trigger,
-                strategy='atspi_only',
+                strategy=self.runtime.click_strategy,
             )
         ]
         path = tuple(step.get('path') or ())
