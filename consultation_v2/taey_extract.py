@@ -2093,7 +2093,10 @@ class TaeyConsultExtractionSeat:
     def _wait_for_full_consult_completion(self) -> dict[str, object]:
         started = time.monotonic()
         deadline = started + self.completion_timeout
-        stop_seen = False
+        stop_seen_before_wait = bool(
+            self.completion_evidence.get('stop_seen_after_action')
+        )
+        stop_seen = stop_seen_before_wait
         last_url = ''
         last_response_control: dict[str, object] | None = None
         ready_cycles = 0
@@ -2140,6 +2143,7 @@ class TaeyConsultExtractionSeat:
                     'completed': True,
                     'elapsed_seconds': round(time.monotonic() - started, 3),
                     'stop_seen': stop_seen,
+                    'stop_seen_before_wait': stop_seen_before_wait,
                     'session_url_before': self.session_url_before,
                     'session_url_after': last_url,
                     'response_control': self._serializable_found(
@@ -2776,6 +2780,21 @@ class TaeyConsultExtractionSeat:
                 self.submitted = True
             elif name == 'post_submit':
                 self.post_submitted = True
+            if name in {'submit', 'post_submit'}:
+                completion_control = self._find_semantic_control(
+                    'completion',
+                    must_show=False,
+                    scroll=False,
+                )
+                serialized_completion = self._serializable_found(
+                    completion_control
+                )
+                self.completion_evidence = {
+                    'semantic_step': name,
+                    'stop_seen_after_action': completion_control is not None,
+                    'completion_control_after_action': serialized_completion,
+                }
+                action_evidence.update(self.completion_evidence)
             return {
                 'ok': True,
                 'action': action,
