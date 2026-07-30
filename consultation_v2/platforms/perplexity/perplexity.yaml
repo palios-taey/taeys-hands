@@ -314,13 +314,16 @@ workflow:
           - stop_button
       copy_response:
         elements:
-          - copy_contents_button
+          - copy_button
     attachment_present:
       filename_roles:
         - push button
         - section
         - link
         - heading
+    select_mode:
+      - menu: mode
+        option: deep_research
     mode:
       active: deep_research_toggle
       trigger: search_mode_trigger

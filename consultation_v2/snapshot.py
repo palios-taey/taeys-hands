@@ -533,6 +533,10 @@ def _select_structural_between(
         return None
     after_ref = _anchor_ref(mapped, structural.get('after'), last=True)
     before_ref = _anchor_ref(mapped, structural.get('before'), last=False)
+    if isinstance(structural.get('after'), str) and after_ref is None:
+        return None
+    if isinstance(structural.get('before'), str) and before_ref is None:
+        return None
     after_pos = _position_key(after_ref) if after_ref is not None else None
     before_pos = _position_key(before_ref) if before_ref is not None else None
 

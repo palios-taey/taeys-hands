@@ -508,3 +508,25 @@ def compute_structure_hash(elements: List[Dict], screen_height: int = 1080,
         pairs.append(f"{role}@{e.get('y', 0) // band_height}")
     pairs.sort()
     return hashlib.sha256("|".join(pairs).encode()).hexdigest()[:16]
+
+
+def node_label(node: Any, max_chars: int = 700) -> str:
+    name = (node.get_name() or '').strip()
+    if name:
+        return name
+    try:
+        count = Atspi.Text.get_character_count(node)
+        if count and 0 < count <= max_chars:
+            return (Atspi.Text.get_text(node, 0, count) or '').strip()
+    except Exception:
+        pass
+    return ''
+
+
+def prune_inactive_document(role: str, node: Any) -> bool:
+    if role != 'document web':
+        return False
+    try:
+        return not node.get_state_set().contains(Atspi.StateType.SHOWING)
+    except Exception:
+        return True

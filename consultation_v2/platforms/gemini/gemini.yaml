@@ -218,17 +218,27 @@ workflow:
         elements:
           - send_button
         action: activate
+      post_submit:
+        elements:
+          - start_research
       completion:
         elements:
           - stop_button
       copy_response:
         elements:
-          - copy_button
+          - share_export
+          - copy_content_item
+        sequence: true
         action: activate
     attachment_present:
       filename_value: stem
       filename_roles:
         - section
+    select_mode:
+      - menu: model
+        option: pro
+      - menu: mode
+        option: deep_research
   selection:
     menus:
       model:

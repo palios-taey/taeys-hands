@@ -32,5 +32,9 @@ def get_platform_document(firefox, platform: str):
     return _route_module(platform).get_document(firefox)
 
 
+def get_platform_display(platform: str) -> str | None:
+    return _route_module(platform).route_display()
+
+
 def platform_url_matches(platform: str, url: str | None) -> bool:
     return bool(_route_module(platform).url_matches(url))

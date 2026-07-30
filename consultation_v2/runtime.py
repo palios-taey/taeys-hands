@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterable, Optional
 from consultation_v2 import atspi, clipboard, input as inp
 from consultation_v2.interact import atspi_click
 from consultation_v2.platforms import routing as platform_routing
-from consultation_v2.platforms_runtime import display_environment, get_platform_display
+from consultation_v2.platforms_runtime import display_environment
 from consultation_v2.tree import find_elements
 from .snapshot import build_app_root_snapshot, build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
@@ -44,7 +44,10 @@ class ConsultationRuntime:
         )
 
     def _dialog_env(self) -> dict:
-        display = get_platform_display(self.platform) or os.environ.get("DISPLAY", ":0")
+        display = (
+            platform_routing.get_platform_display(self.platform)
+            or os.environ.get("DISPLAY", ":0")
+        )
         return display_environment(display, base=os.environ)
 
     # ------------------------------------------------------------------
@@ -163,7 +166,7 @@ class ConsultationRuntime:
         return False
 
     def _sync_platform_io_display(self) -> None:
-        display = get_platform_display(self.platform)
+        display = platform_routing.get_platform_display(self.platform)
         if not display:
             return
         inp.set_display(display)

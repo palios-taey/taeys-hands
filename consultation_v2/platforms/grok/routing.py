@@ -4,6 +4,7 @@ from consultation_v2.platforms._routing_core import (
     RouteSpec,
     find_firefox as _find_firefox,
     get_document as _get_document,
+    route_display as _route_display,
     switch_to_platform as _switch_to_platform,
     url_matches as _url_matches,
 )
@@ -11,6 +12,7 @@ from consultation_v2.platforms._routing_core import (
 _SPEC = RouteSpec(
     platform='grok',
     url_patterns=('grok.com',),
+    displays=(':5', ':23'),
     extra_url_patterns=('x.com/i/grok',),
     default_tab_shortcut='alt+4',
     worker_tab_shortcut='alt+4',
@@ -23,6 +25,10 @@ def url_matches(url: str | None) -> bool:
 
 def get_document(firefox):
     return _get_document(_SPEC, firefox)
+
+
+def route_display() -> str | None:
+    return _route_display(_SPEC)
 
 
 def find_firefox(*, pid: int | None = None):

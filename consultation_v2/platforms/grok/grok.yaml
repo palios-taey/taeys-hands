@@ -73,7 +73,7 @@ tree:
       name: "Submit"
       role: push button
     copy_button:
-      name: Copy
+      name: "Copy response"
       role: push button
     regenerate:
       name: Regenerate
@@ -181,6 +181,9 @@ workflow:
     attachment_present:
       elements:
         - remove_attachment
+    select_mode:
+      - menu: model
+        option: heavy
   # Compatibility alias for older contract checks; the driver reads the same
   # mapping from workflow.selection.mode_targets.
   mode_targets:
@@ -379,8 +382,8 @@ imagine:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-# assistant_text via the mapped `copy_button` after scroll-to-bottom (wired in
-# V2; clipboard length > prompt validates). Grok generated-image download
+# assistant_text via the exact response-action `copy_button` after
+# scroll-to-bottom. Grok generated-image download
 # (downloaded_file) lives only on the out-of-scope `imagine:` surface and is
 # NOT executed by V2 — deliberately NOT declared here. NOTE for downstream:
 # Grok's response text + chip are AT-SPI-blind in some states; the runtime

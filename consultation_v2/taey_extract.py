@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
 import time
-from types import ModuleType
 import urllib.parse
 import urllib.request
 
 from consultation_v2 import clipboard
+from consultation_v2.seat_actions import SeatActions
 from consultation_v2.snapshot import (
     build_app_root_snapshot,
     build_menu_snapshot,
@@ -27,9 +26,6 @@ CONSULT_DISPLAYS = frozenset({
     ':2', ':3', ':4', ':5', ':6',
     ':20', ':21', ':22', ':23', ':24',
 })
-DEFAULT_ACT_PATH = Path('/home/mira/treasurer/scripts/loop/act.py')
-DEFAULT_SYSTEM_PROMPT_PATH = Path('/home/mira/data/corpus/layer_1/SYSTEM_PROMPT.md')
-DEFAULT_EP3_BASE = 'http://10.0.0.197:8000/v1'
 DEFAULT_EP3_MODEL = 'ep3'
 MAX_TURNS = 12
 MAX_FULL_CONSULT_TURNS = 40
@@ -121,6 +117,7 @@ def consult_extract_action_tool() -> dict[str, object]:
                             'typeahead',
                             'paste_path',
                             'paste_prompt',
+                            'select_mode',
                             'wait_complete',
                             'finish',
                         ],
@@ -131,7 +128,8 @@ def consult_extract_action_tool() -> dict[str, object]:
                             'The required semantic step supplied by the harness, a '
                             'legacy exact accessible name for extraction-only mode, '
                             'or an empty string for paste_path, wait_complete, and '
-                            'finish. paste_path ignores this field.'
+                            'finish. paste_path ignores this field; select_mode uses '
+                            'the exact select_mode semantic name.'
                         ),
                     },
                     'contains': {
@@ -241,8 +239,12 @@ def _required_text(path: Path, label: str) -> str:
     return value
 
 
-def _endpoint(base: str) -> str:
+def _endpoint(base: str | None) -> str:
     value = str(base or '').strip().rstrip('/')
+    if not value:
+        raise TaeyConsultExtractionError(
+            'TAEY_CONSULT_ENDPOINT is required when endpoint is not supplied'
+        )
     parsed = urllib.parse.urlsplit(value)
     if (
         parsed.scheme not in {'http', 'https'}
@@ -253,7 +255,7 @@ def _endpoint(base: str) -> str:
         or parsed.fragment
     ):
         raise TaeyConsultExtractionError(
-            'TAEY_CONSULT_EP3_BASE must be an absolute HTTP(S) URL'
+            'TAEY_CONSULT_ENDPOINT must be an absolute HTTP(S) URL'
         )
     if value.endswith('/chat/completions'):
         return value
@@ -262,35 +264,19 @@ def _endpoint(base: str) -> str:
     return value + '/v1/chat/completions'
 
 
-def _load_act(path: Path) -> ModuleType:
-    if not path.is_file():
-        raise TaeyConsultExtractionError(f'canonical act.py is unavailable at {path}')
-    spec = importlib.util.spec_from_file_location('_taey_consult_act', path)
-    if spec is None or spec.loader is None:
-        raise TaeyConsultExtractionError(f'could not load canonical act.py from {path}')
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
+def _system_prompt_path(value: str | Path | None) -> Path:
+    if value is not None and str(value).strip():
+        return Path(value).expanduser().resolve()
+    corpus_path = str(os.environ.get('TAEY_CORPUS_PATH') or '').strip()
+    if not corpus_path:
         raise TaeyConsultExtractionError(
-            f'canonical act.py import failed: {type(exc).__name__}: {exc}'
-        ) from exc
-    for name in (
-        'find',
-        'click',
-        'do',
-        'key',
-        'paste_into',
-        'current_url_atspi',
-        'firefox_app',
-        'node_label',
-        'prune_inactive_document',
-    ):
-        if not callable(getattr(module, name, None)):
-            raise TaeyConsultExtractionError(
-                f'canonical act.py does not expose required callable {name!r}'
-            )
-    return module
+            'TAEY_CORPUS_PATH is required when system_prompt_path is not supplied'
+        )
+    return (
+        Path(corpus_path).expanduser().resolve()
+        / 'layer_1'
+        / 'SYSTEM_PROMPT.md'
+    )
 
 
 def _full_consult_contract(
@@ -449,6 +435,91 @@ def _full_consult_contract(
                 raise TaeyConsultExtractionError(
                     f'{platform} full-consult mode references unknown element {value!r}'
                 )
+    raw_select_mode = full_consult.get('select_mode')
+    if not isinstance(raw_select_mode, list) or not raw_select_mode:
+        raise TaeyConsultExtractionError(
+            f'{platform} workflow.full_consult.select_mode must be a non-empty list'
+        )
+    selection = workflow.get('selection') or {}
+    menus = selection.get('menus') if isinstance(selection, dict) else None
+    if not isinstance(menus, dict):
+        raise TaeyConsultExtractionError(
+            f'{platform} workflow.selection.menus must be a mapping'
+        )
+    select_mode: list[dict[str, object]] = []
+    for index, raw_selection in enumerate(raw_select_mode):
+        if (
+            not isinstance(raw_selection, dict)
+            or set(raw_selection) != {'menu', 'option'}
+        ):
+            raise TaeyConsultExtractionError(
+                f'{platform} full-consult select_mode[{index}] must declare '
+                'exactly menu/option'
+            )
+        menu_key = raw_selection.get('menu')
+        option_key = raw_selection.get('option')
+        menu = menus.get(menu_key) if isinstance(menu_key, str) else None
+        options = menu.get('options') if isinstance(menu, dict) else None
+        option = (
+            options.get(option_key)
+            if isinstance(options, dict) and isinstance(option_key, str)
+            else None
+        )
+        operate = menu.get('operate') if isinstance(menu, dict) else None
+        if not isinstance(option, dict) or not isinstance(operate, dict):
+            raise TaeyConsultExtractionError(
+                f'{platform} full-consult select_mode[{index}] references '
+                f'unknown selection {menu_key!r}={option_key!r}'
+            )
+        trigger = operate.get('trigger')
+        target = option.get('element')
+        active_element = option.get('active_element')
+        path = option.get('path') or []
+        referenced_elements = [trigger, target, active_element]
+        referenced_elements.extend(
+            step.get('element')
+            for step in path
+            if isinstance(step, dict)
+        )
+        if not all(
+            value is None
+            or isinstance(value, str) and value in element_map
+            for value in referenced_elements
+        ):
+            raise TaeyConsultExtractionError(
+                f'{platform} full-consult select_mode[{index}] references '
+                'an unknown element_map key'
+            )
+        select_mode.append({
+            'menu': str(menu_key),
+            'option': str(option_key),
+            'trigger': str(trigger),
+            'target': str(target),
+            'scope': str(operate.get('scope') or 'snapshot'),
+            'active_recognition': str(
+                menu.get('active_recognition') or ''
+            ),
+            'active_element': (
+                str(active_element)
+                if isinstance(active_element, str)
+                else ''
+            ),
+            'active_trigger_names': tuple(
+                str(value)
+                for value in (option.get('active_trigger_names') or ())
+            ),
+            'click_strategy': str(
+                option.get('click_strategy') or 'atspi_only'
+            ),
+            'path': tuple(
+                {
+                    'element': str(step.get('element') or ''),
+                    'action': str(step.get('action') or ''),
+                }
+                for step in path
+                if isinstance(step, dict)
+            ),
+        })
     failures = full_consult.get('failures') or []
     if (
         not isinstance(failures, list)
@@ -469,6 +540,7 @@ def _full_consult_contract(
             'filename_value': filename_value,
         },
         'mode': dict(mode),
+        'select_mode': tuple(select_mode),
         'failures': tuple(str(value) for value in failures),
     }, {
         str(key): dict(value)
@@ -485,7 +557,6 @@ class TaeyConsultExtractionSeat:
         display: str,
         endpoint: str | None = None,
         model: str | None = None,
-        act_path: str | Path | None = None,
         system_prompt_path: str | Path | None = None,
         capture_root: str | Path | None = None,
         attachment_path: str | Path | None = None,
@@ -508,9 +579,7 @@ class TaeyConsultExtractionSeat:
             )
         self.endpoint = _endpoint(
             endpoint
-            or os.environ.get('TAEY_CONSULT_EP3_BASE')
-            or os.environ.get('APPLYMACHINE_EP3_BASE')
-            or DEFAULT_EP3_BASE
+            or os.environ.get('TAEY_CONSULT_ENDPOINT')
         )
         self.model = str(
             model
@@ -520,24 +589,15 @@ class TaeyConsultExtractionSeat:
         ).strip()
         if not self.model:
             raise TaeyConsultExtractionError('Taey consult extraction model is empty')
-        self.act_path = Path(
-            act_path
-            or os.environ.get('TAEY_CONSULT_ACT_PATH')
-            or DEFAULT_ACT_PATH
-        ).expanduser().resolve()
-        self.system_prompt_path = Path(
-            system_prompt_path
-            or os.environ.get('TAEY_CONSULT_SYSTEM_PROMPT')
-            or DEFAULT_SYSTEM_PROMPT_PATH
-        ).expanduser().resolve()
+        self.system_prompt_path = _system_prompt_path(system_prompt_path)
         self.capture_root = (
             Path(capture_root).expanduser().resolve()
             if capture_root
             else Path(tempfile.mkdtemp(prefix='taey_consult_extract_'))
         )
         self._prepare_display_environment()
-        self.act = _load_act(self.act_path)
         self.runtime = ConsultationRuntime(self.platform)
+        self.act = SeatActions(self.display, self.runtime)
         self.system_prompt = _required_text(
             self.system_prompt_path,
             'Taey system prompt',
@@ -636,10 +696,8 @@ class TaeyConsultExtractionSeat:
         self.attachment_submitted = False
         self.attachment_verified = False
         self.prompt_entered = False
-        self.mode_checked = False
-        self.mode_menu_opened = False
         self.mode_selected = False
-        self.mode_active = not bool(self.full_consult_contract['mode'])
+        self.mode_evidence: list[dict[str, object]] = []
         self.submitted = False
         self.post_submitted = False
         self.consult_completed = False
@@ -800,10 +858,6 @@ class TaeyConsultExtractionSeat:
                     return ()
                 return (str(elements[self.copy_response_index]),)
             return tuple(str(value) for value in elements)
-        mode = self.full_consult_contract['mode']
-        if isinstance(mode, dict) and step.startswith('mode_'):
-            element_key = mode.get(step.removeprefix('mode_'))
-            return (str(element_key),) if element_key else ()
         if step == 'attachment_present':
             attachment_present = self.full_consult_contract['attachment_present']
             if isinstance(attachment_present, dict):
@@ -883,7 +937,7 @@ class TaeyConsultExtractionSeat:
         if not action_name:
             raise TaeyConsultExtractionError(
                 f'{self.platform} structural control {element_key!r} resolved '
-                'without a canonical act.py action label'
+                'without a seat action label'
             )
         return {
             'node': node,
@@ -1055,6 +1109,7 @@ class TaeyConsultExtractionSeat:
             'typeahead',
             'paste_path',
             'paste_prompt',
+            'select_mode',
             'wait_complete',
             'finish',
         }
@@ -1072,6 +1127,7 @@ class TaeyConsultExtractionSeat:
             'key',
             'typeahead',
             'paste_prompt',
+            'select_mode',
         } and not name:
             raise TaeyConsultExtractionError(f'{action} requires a non-empty name')
         if action in {'wait_complete', 'finish'} and (name or contains):
@@ -1103,6 +1159,10 @@ class TaeyConsultExtractionSeat:
         if action == 'typeahead' and name != 'upload_item':
             raise TaeyConsultExtractionError(
                 'typeahead is restricted to semantic step upload_item'
+            )
+        if action == 'select_mode' and name != 'select_mode':
+            raise TaeyConsultExtractionError(
+                'select_mode is restricted to semantic step select_mode'
             )
         if action == 'paste_path':
             name = ''
@@ -1296,35 +1356,10 @@ class TaeyConsultExtractionSeat:
                 'name': 'composer_input',
                 'contains': False,
             }
-        mode = self.full_consult_contract['mode']
-        if isinstance(mode, dict) and mode and not self.mode_active:
-            if not self.mode_checked:
-                return {
-                    'action': 'find',
-                    'name': 'mode_active',
-                    'contains': False,
-                }
-            if not self.mode_menu_opened:
-                if self._stored_semantic_control('mode_trigger') is not None:
-                    return {
-                        'action': 'click',
-                        'name': 'mode_trigger',
-                        'contains': False,
-                    }
-                return {
-                    'action': 'find',
-                    'name': 'mode_trigger',
-                    'contains': False,
-                }
-            if self._stored_semantic_control('mode_option') is not None:
-                return {
-                    'action': 'click',
-                    'name': 'mode_option',
-                    'contains': False,
-                }
+        if not self.mode_selected:
             return {
-                'action': 'find',
-                'name': 'mode_option',
+                'action': 'select_mode',
+                'name': 'select_mode',
                 'contains': False,
             }
         if not self.submitted:
@@ -1569,6 +1604,318 @@ class TaeyConsultExtractionSeat:
             'scope': str(found.get('scope') or ''),
         }
 
+    def _mode_element_control(
+        self,
+        element_key: str,
+    ) -> dict[str, object] | None:
+        spec = self.element_map.get(element_key)
+        if not isinstance(spec, dict):
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode element {element_key!r} is unavailable'
+            )
+        scope = str(spec.get('scope') or 'snapshot')
+        if scope == 'app_root_snapshot':
+            _, _, snapshot = build_app_root_snapshot(self.platform)
+        elif scope == 'menu_snapshot' or scope.endswith('_menu'):
+            _, _, snapshot = build_menu_snapshot(self.platform)
+        else:
+            _, _, snapshot = build_snapshot(self.platform)
+        refs = list(snapshot.mapped.get(element_key) or ())
+        if not refs:
+            return None
+        ref = refs[0]
+        name = str(ref.name or self.act.node_label(ref.atspi_obj) or '').strip()
+        if not name:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode element {element_key!r} resolved '
+                'without an actionable exact label'
+            )
+        return {
+            'element_key': element_key,
+            'element_ref': ref,
+            'name': name,
+            'role': str(ref.role or ''),
+            'scope': scope,
+            'states': set(ref.states or ()),
+        }
+
+    def _wait_for_mode_element(
+        self,
+        element_key: str,
+        *,
+        timeout: float = 6.0,
+    ) -> dict[str, object] | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            found = self._mode_element_control(element_key)
+            if found is not None:
+                return found
+            time.sleep(0.2)
+        return None
+
+    def _actuate_mode_element(
+        self,
+        found: dict[str, object],
+        *,
+        action: str = 'click',
+        strategy: str = 'atspi_only',
+    ) -> dict[str, object]:
+        element_ref = found.get('element_ref')
+        if element_ref is None:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode element '
+                f'{found.get("element_key")!r} has no live element reference'
+            )
+        if action == 'hover':
+            acted = bool(self.runtime.hover(element_ref))
+        elif action in {'click', 'press'}:
+            acted = bool(self.runtime.click(element_ref, strategy=strategy))
+        else:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode path action {action!r} is unsupported'
+            )
+        if not acted:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode element '
+                f'{found.get("element_key")!r} {action} failed'
+            )
+        return {
+            'element': str(found.get('element_key') or ''),
+            'control_name': str(found.get('name') or ''),
+            'role': str(found.get('role') or ''),
+            'scope': str(found.get('scope') or ''),
+            'action': action,
+            'strategy': strategy if action != 'hover' else 'atspi_hover',
+        }
+
+    @staticmethod
+    def _mode_target_is_active(
+        found: dict[str, object],
+        recognition: str,
+    ) -> bool:
+        normalized = recognition.strip().lower()
+        if normalized in {'click_only', 'selected_name_prefix'}:
+            return False
+        states = {
+            str(value).strip().lower()
+            for value in (found.get('states') or ())
+        }
+        return normalized in states
+
+    def _mode_active_evidence(
+        self,
+        step: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object] | None:
+        trigger_names = {
+            str(value)
+            for value in (step.get('active_trigger_names') or ())
+        }
+        if trigger_names:
+            trigger = self._wait_for_mode_element(
+                str(step['trigger']),
+                timeout=timeout,
+            )
+            trigger_name = str((trigger or {}).get('name') or '')
+            if trigger_name in trigger_names:
+                return {
+                    'confirmation': 'active_trigger_name',
+                    'element': str(step['trigger']),
+                    'control_name': trigger_name,
+                    'states': sorted(
+                        str(value)
+                        for value in ((trigger or {}).get('states') or ())
+                    ),
+                }
+        active_element = str(step.get('active_element') or '')
+        if active_element:
+            active = self._wait_for_mode_element(
+                active_element,
+                timeout=timeout,
+            )
+            if active is not None:
+                return {
+                    'confirmation': 'active_element_present',
+                    'element': active_element,
+                    'control_name': str(active.get('name') or ''),
+                    'states': sorted(
+                        str(value)
+                        for value in (active.get('states') or ())
+                    ),
+                }
+        return None
+
+    def _close_mode_menu(self, *, timeout: float = 5.0) -> None:
+        self.runtime.press('Escape')
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            _, _, snapshot = build_menu_snapshot(self.platform)
+            if int(snapshot.raw_count or 0) == 0:
+                return
+            time.sleep(0.2)
+        raise TaeyConsultExtractionError(
+            f'{self.platform} mode menu did not close after selection'
+        )
+
+    def _open_mode_selection(
+        self,
+        step: dict[str, object],
+    ) -> tuple[dict[str, object], list[dict[str, object]]]:
+        trigger_key = str(step['trigger'])
+        trigger = self._wait_for_mode_element(trigger_key)
+        if trigger is None:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode trigger {trigger_key!r} was not found'
+            )
+        path_evidence = [
+            self._actuate_mode_element(
+                trigger,
+                strategy=self.runtime.click_strategy,
+            )
+        ]
+        path = tuple(step.get('path') or ())
+        for path_step in path:
+            if not isinstance(path_step, dict):
+                raise TaeyConsultExtractionError(
+                    f'{self.platform} mode path entry is not a mapping'
+                )
+            element_key = str(path_step.get('element') or '')
+            path_control = self._wait_for_mode_element(element_key)
+            if path_control is None:
+                raise TaeyConsultExtractionError(
+                    f'{self.platform} mode path element {element_key!r} '
+                    'was not found'
+                )
+            path_evidence.append(
+                self._actuate_mode_element(
+                    path_control,
+                    action=str(path_step.get('action') or ''),
+                    strategy='atspi_only',
+                )
+            )
+            time.sleep(0.2)
+        target_key = str(step['target'])
+        target = self._wait_for_mode_element(target_key)
+        if target is None:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode target {target_key!r} was not found'
+            )
+        return target, path_evidence
+
+    def _select_mode_step(
+        self,
+        step: dict[str, object],
+    ) -> dict[str, object]:
+        menu = str(step['menu'])
+        option = str(step['option'])
+        active = self._mode_active_evidence(step, timeout=0.8)
+        if active is not None:
+            return {
+                'menu': menu,
+                'option': option,
+                'selected': True,
+                'already_active': True,
+                **active,
+            }
+        target, path_evidence = self._open_mode_selection(step)
+        recognition = str(step.get('active_recognition') or '')
+        if self._mode_target_is_active(target, recognition):
+            self._close_mode_menu()
+            return {
+                'menu': menu,
+                'option': option,
+                'selected': True,
+                'already_active': True,
+                'confirmation': 'menu_active_state',
+                'active_state': recognition,
+                'target': str(step['target']),
+                'states': sorted(
+                    str(value)
+                    for value in (target.get('states') or ())
+                ),
+                'path': path_evidence,
+            }
+        click_strategy = str(step.get('click_strategy') or 'atspi_only')
+        click_evidence = self._actuate_mode_element(
+            target,
+            strategy=click_strategy,
+        )
+        time.sleep(0.3)
+        active = self._mode_active_evidence(step, timeout=8.0)
+        if active is not None:
+            self.runtime.press('Escape')
+            return {
+                'menu': menu,
+                'option': option,
+                'selected': True,
+                'already_active': False,
+                **active,
+                'path': path_evidence,
+                'selection': click_evidence,
+            }
+        if recognition == 'click_only':
+            self._close_mode_menu()
+            return {
+                'menu': menu,
+                'option': option,
+                'selected': True,
+                'already_active': False,
+                'confirmation': 'click_only_menu_closed',
+                'path': path_evidence,
+                'selection': click_evidence,
+            }
+        verified_target, verification_path = self._open_mode_selection(step)
+        verified = self._mode_target_is_active(
+            verified_target,
+            recognition,
+        )
+        self._close_mode_menu()
+        if not verified:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} mode selection {menu}={option} did not '
+                f'expose required active state {recognition!r}'
+            )
+        return {
+            'menu': menu,
+            'option': option,
+            'selected': True,
+            'already_active': False,
+            'confirmation': 'menu_active_state',
+            'active_state': recognition,
+            'target': str(step['target']),
+            'states': sorted(
+                str(value)
+                for value in (verified_target.get('states') or ())
+            ),
+            'path': path_evidence,
+            'selection': click_evidence,
+            'verification_path': verification_path,
+        }
+
+    def _execute_select_mode(self) -> dict[str, object]:
+        self.mode_evidence = []
+        for step in self.full_consult_contract['select_mode']:
+            if not isinstance(step, dict):
+                raise TaeyConsultExtractionError(
+                    f'{self.platform} normalized select_mode step is invalid'
+                )
+            self.mode_evidence.append(self._select_mode_step(step))
+        self.mode_selected = True
+        return {
+            'ok': True,
+            'action': 'select_mode',
+            'semantic_step': 'select_mode',
+            'mode_selections': [
+                {
+                    'menu': str(item.get('menu') or ''),
+                    'option': str(item.get('option') or ''),
+                }
+                for item in self.mode_evidence
+            ],
+            'mode_evidence': list(self.mode_evidence),
+        }
+
     def _current_url(self) -> str:
         return str(self.runtime.current_url() or '').strip()
 
@@ -1718,7 +2065,10 @@ class TaeyConsultExtractionSeat:
     def _wait_for_full_consult_completion(self) -> dict[str, object]:
         started = time.monotonic()
         deadline = started + self.completion_timeout
-        stop_seen = False
+        stop_seen_before_wait = bool(
+            self.completion_evidence.get('stop_seen_after_action')
+        )
+        stop_seen = stop_seen_before_wait
         last_url = ''
         last_response_control: dict[str, object] | None = None
         ready_cycles = 0
@@ -1765,6 +2115,7 @@ class TaeyConsultExtractionSeat:
                     'completed': True,
                     'elapsed_seconds': round(time.monotonic() - started, 3),
                     'stop_seen': stop_seen,
+                    'stop_seen_before_wait': stop_seen_before_wait,
                     'session_url_before': self.session_url_before,
                     'session_url_after': last_url,
                     'response_control': self._serializable_found(
@@ -2104,14 +2455,16 @@ class TaeyConsultExtractionSeat:
                     'mode': (
                         ((self.cfg.get('workflow') or {}).get('defaults') or {})
                         .get('mode')
-                        if self.full_consult_contract['mode']
-                        else None
                     ),
-                    'mode_active': (
-                        self.mode_active
-                        if self.full_consult_contract['mode']
-                        else None
-                    ),
+                    'mode_active': self.mode_selected,
+                    'mode_selections': [
+                        {
+                            'menu': str(step.get('menu') or ''),
+                            'option': str(step.get('option') or ''),
+                        }
+                        for step in self.full_consult_contract['select_mode']
+                    ],
+                    'mode_evidence': list(self.mode_evidence),
                     'submitted': self.submitted,
                     'completed': self.consult_completed,
                     'browser_url_before_dialog': self.browser_url_before_dialog,
@@ -2327,9 +2680,6 @@ class TaeyConsultExtractionSeat:
                 self.found_controls.discard((name, role))
             if name == 'attachment_present' and serialized is not None:
                 self.attachment_verified = True
-            if name == 'mode_active':
-                self.mode_checked = True
-                self.mode_active = serialized is not None
             return {
                 'ok': serialized is not None,
                 'action': action,
@@ -2342,6 +2692,8 @@ class TaeyConsultExtractionSeat:
                 'contains': contains,
                 'found': serialized,
             }
+        if action == 'select_mode':
+            return self._execute_select_mode()
         if action == 'focus':
             found = self._stored_semantic_control(name)
             node = found.get('node') if isinstance(found, dict) else None
@@ -2395,18 +2747,38 @@ class TaeyConsultExtractionSeat:
                         'file dialog'
                     )
                 self.upload_control_clicked = True
-            elif name == 'mode_trigger':
-                self.mode_menu_opened = True
-            elif name == 'mode_option':
-                self.mode_selected = True
-                self.mode_menu_opened = False
-                self.mode_checked = False
-                self._forget_semantic_control('mode_active')
             elif name == 'submit':
                 self.session_url_before = before_url
                 self.submitted = True
             elif name == 'post_submit':
                 self.post_submitted = True
+            if name in {'submit', 'post_submit'}:
+                completion_probe_started = time.monotonic()
+                completion_control = None
+                while (
+                    completion_control is None
+                    and time.monotonic() - completion_probe_started < 10.0
+                ):
+                    completion_control = self._find_semantic_control(
+                        'completion',
+                        must_show=False,
+                        scroll=False,
+                    )
+                    if completion_control is None:
+                        time.sleep(0.25)
+                serialized_completion = self._serializable_found(
+                    completion_control
+                )
+                self.completion_evidence = {
+                    'semantic_step': name,
+                    'stop_seen_after_action': completion_control is not None,
+                    'completion_control_after_action': serialized_completion,
+                    'completion_probe_elapsed_seconds': round(
+                        time.monotonic() - completion_probe_started,
+                        3,
+                    ),
+                }
+                action_evidence.update(self.completion_evidence)
             return {
                 'ok': True,
                 'action': action,
@@ -2735,8 +3107,8 @@ class TaeyConsultExtractionSeat:
                 f'{self.display} with consult_extract_action only, one action per '
                 'turn. Use only the platform-agnostic semantic names supplied by '
                 'required_next_action: new_thread, attach_trigger, upload_item, '
-                'attachment_present, composer_input, mode_active, mode_trigger, '
-                'mode_option, submit, post_submit, completion, and copy_response. '
+                'attachment_present, composer_input, select_mode, submit, '
+                'post_submit, completion, and copy_response. '
                 'The harness resolves those names through the platform YAML and '
                 'executes the exact live AT-SPI control. It owns one validated '
                 'attachment named '
@@ -2773,8 +3145,8 @@ class TaeyConsultExtractionSeat:
             )
         overlay = (
             '\n\nCLOSED CONSULTATION SEAT: The sole callable tool is '
-            'consult_extract_action. It is the harness binding of canonical act.py '
-            'operations; do not emit shell commands, file contents, prompt text, or '
+            'consult_extract_action. It is the harness binding of this public repo\'s '
+            'seat-action operations; do not emit shell commands, file contents, prompt text, or '
             'prose. One tool call per turn. Accessible names, never coordinates. The '
             'harness state machine is authoritative: emit required_next_action exactly.'
         )
@@ -2883,7 +3255,7 @@ class TaeyConsultExtractionSeat:
                     ).hexdigest(),
                     system_prompt_path=str(self.system_prompt_path),
                     system_prompt_sha256=_sha256_text(self.system_prompt),
-                    act_path=str(self.act_path),
+                    action_backend='consultation_v2.seat_actions.SeatActions',
                 )
                 return result
             messages.extend([
