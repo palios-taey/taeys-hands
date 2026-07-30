@@ -111,3 +111,4 @@ AGENTS.md
 # Per-machine local config — live source is ~/.taey/machine.env (never commit real hosts)
 configs/*.machine.env
 .stale-archive/
+.consult-work/
