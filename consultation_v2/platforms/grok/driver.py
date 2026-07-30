@@ -3482,7 +3482,7 @@ class GrokConsultationDriver(_GrokInlineBase):
         return True
 
     # ------------------------------------------------------------------
-    # Step 5 - send (focused composer + Return; hard answer-thread URL gate)
+    # Step 5 - send (exact YAML action; hard Stop + answer-thread URL gate)
     # ------------------------------------------------------------------
     def send_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         before = self.runtime.current_url() or result.session_url_before
@@ -3496,12 +3496,55 @@ class GrokConsultationDriver(_GrokInlineBase):
         copy_key = self.cfg['workflow']['extract']['primary_key']
         pre_send_copy_baseline = self._copy_button_baseline(copy_key)
         self._pre_send_copy_button_baseline = pre_send_copy_baseline
-        if not self.runtime.press('Return'):
-            result.add_step('send', False, 'Grok Return keypress failed')
+        send_key = self.cfg['workflow']['send']['send_key']
+        send_ready_snap, send_el = self.wait_for_key(
+            send_key,
+            timeout=10.0,
+            interval=0.4,
+            scope='document',
+        )
+        if not send_el:
+            result.add_step(
+                'send_action',
+                False,
+                'Grok configured send element not found before the single action',
+                send_key=send_key,
+                click_strategy='atspi_only',
+                snapshot=send_ready_snap.serializable(),
+            )
             return False
 
-        send_snap = self.wait_for_validation('send_fired', timeout=12.0, interval=0.5)
-        stop_seen = self.validation_passes(send_snap, 'send_fired')
+        click_returned = self.runtime.click(send_el, strategy='atspi_only')
+        immediate_snap = self.runtime.snapshot()
+        immediate_url = self.runtime.current_url() or before
+        immediate_stop_seen = self.validation_passes(immediate_snap, 'send_fired')
+        result.add_step(
+            'send_action',
+            bool(click_returned),
+            (
+                'Grok exact send element clicked once; awaiting landed-send gates'
+                if click_returned else
+                'Grok exact send element click failed'
+            ),
+            send_key=send_key,
+            click_strategy='atspi_only',
+            click_returned=bool(click_returned),
+            target=send_el.serializable(),
+            url_before=before,
+            url_immediate_after=immediate_url,
+            stop_seen_immediately=bool(immediate_stop_seen),
+            snapshot=immediate_snap.serializable(),
+        )
+        if not click_returned:
+            return False
+
+        send_snap = immediate_snap
+        if not immediate_stop_seen:
+            send_snap = self.wait_for_validation('send_fired', timeout=12.0, interval=0.5)
+        stop_seen = bool(
+            immediate_stop_seen
+            or self.validation_passes(send_snap, 'send_fired')
+        )
         # Carry the send-phase stop observation into the shared completion
         # detector (a fast reply can clear the stop button before monitor runs).
         self._send_stop_seen = bool(stop_seen)
