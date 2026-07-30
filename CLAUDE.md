@@ -7,6 +7,24 @@
 
 ---
 
+## CURRENT OPERATING MODEL (2026-07-30 — supersedes any older "adoption / product for Claude Code users" framing)
+
+Canonical: `the-conductor/TAEY_PRODUCTION_PUBLIC_MANDATE.md`. What follows is the taeys-hands-seat statement of it.
+
+- **Taey is the customer — the only one.** There is no Claude Code user-adoption goal. This consult engine is PRODUCTION INFRASTRUCTURE *for Taey*. Taey lives on the Thors, trains on the Sparks, and *utilizes* the consult engine (with these Claude Code seats, the orchestrator, notify, ISMA) as a component of its own system. Docs here are written FOR Taey as the consumer.
+- **The PRIORITY:** enable **Taey** and **training development** — get Taey **using its own production infrastructure** (this engine) and **understanding it**. That is the point of the work, not the tooling for its own sake.
+- **Everything runs from PUBLIC production repos.** A released Taey + the public repos = a working system. `consultation_v2` is a Taey-used production system, so this repo is PUBLIC. Local specifics (IPs/hosts) are env-configurable (`fleet.env` + committed `.example`, fail-loud on a missing var — never silent-default). File paths are fine *only if they resolve for a downloaded Taey* — i.e. point into a public repo that ships, never a private repo or an operator-local dir.
+- **Disconnection, not cleanup, for private repos.** A pointer (in a prompt, doc, config, or YAML) into a private repo or an untracked local path is a **DISCONNECTION VIOLATION** — it fails SILENTLY: a downloaded Taey follows it, finds nothing, and proceeds without the knowledge. Resolve every pointer to public-reachable content or remove it.
+- **The four steps for this repo:** CLEAN → PUBLIC → MAP → CONNECT-TO-TAEY → VALIDATE-IN-PRODUCTION. Public-clean bar: NO secrets / private info / training data (tree AND history); IPs env-configurable; file paths fine (fix any gate that flags `/home/mira/...` — the gate's job is secrets/private/training-data, not paths). **Done = commit SHA + the capability map + a live production observation** — never a self-report.
+- **The canonical dispatch surface is `scripts/run_consultation_v2.py`** (the only live engine; README/DEPLOY document it). Do NOT hand-build a driver around it with `act.py` — that ad-hoc-driver-beside-the-working-engine is the exact anti-pattern recorded in `CAPABILITY_GAPS.md`. If the CLI fails, report the exact command+error and STOP; fix the engine, don't route around it. Taey drives consults through the documented seat interface (`run_taey_consult_extract.py`) — that IS the connect-to-Taey.
+
+## USE GIT (Full Git Master) + LOCAL CLEANLINESS — emphasize HEAVILY (Jesse-directed; the #1 source of confusion)
+
+- **USE GIT, always.** Commit work — the running system must BE a committed artifact, never a live uncommitted delta. Push after committing (public repo; publish is Jesse-auth-gated). `git fetch` and verify topology BEFORE any branch/worktree/merge (a stale ahead/behind reading is a real trap — it caused the 2026-06-14 mess). The **live checkout is SACRED**: never `git checkout` another branch in a tree a service serves from — use a worktree (peers work in `/home/mira/.peer-worktrees/`). create→work→land→REMOVE worktree + delete merged branch, in one unit. A truly-diverged / unrelated-history `main` is a **FULL-STOP surface-to-Jesse** condition — never autonomous force-push or bulk-delete. Every "done" = SHA + gate + real production observation.
+- **LOCAL REPO CLEANLINESS is not optional.** ONE production tree per surface (`/home/mira/taeys-hands`) — no duplicate/stale sibling repos (they make an agent grep, find something plausible, and build a parallel path). Keep the working tree clean (0 dirty or committed-with-intent). Everything non-production `.bak`'d to `/home/mira/recovery/` and cleared from the working area so there is **zero confusion about what is production** — for the fleet AND for a downloaded Taey. **Never destroy — archive first, delete only after verifying the archive.** `.gitignore` generated/runtime junk; do not track it.
+
+---
+
 ## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
 
 ### 1. YAML = exact AT-SPI truth
@@ -249,7 +267,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (3699 symbols, 6648 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (6211 symbols, 13443 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
