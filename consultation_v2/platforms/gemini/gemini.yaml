@@ -226,7 +226,9 @@ workflow:
           - stop_button
       copy_response:
         elements:
-          - copy_button
+          - share_export
+          - copy_content_item
+        sequence: true
         action: activate
     attachment_present:
       filename_value: stem
