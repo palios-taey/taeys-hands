@@ -971,15 +971,6 @@ class TaeyConsultExtractionSeat:
             }
         if pick == 'last_by_y':
             scope = str(spec.get('scope') or 'snapshot')
-            if (
-                scroll
-                and scope == 'snapshot'
-                and not self.runtime.scroll_document_to_bottom()
-            ):
-                raise TaeyConsultExtractionError(
-                    f'{self.platform} could not scroll before resolving '
-                    f'last_by_y control {element_key!r}'
-                )
             if scope == 'menu_snapshot' or scope.endswith('_menu'):
                 _, _, snapshot = build_menu_snapshot(self.platform)
             elif scope == 'app_root_snapshot':
