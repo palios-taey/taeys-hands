@@ -3212,10 +3212,10 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         last_snapshot = initial_snapshot
 
         def classify(snapshot: Snapshot) -> str | None:
-            if self.snapshot_has_any(snapshot, marker_keys):
-                return 'onboarding'
             if self._snapshot_has_all(snapshot, standard_keys):
                 return 'standard'
+            if self.snapshot_has_any(snapshot, marker_keys):
+                return 'onboarding'
             return None
 
         observed = classify(last_snapshot) if last_snapshot is not None else None
@@ -3231,6 +3231,21 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 interval=0.4,
             )
         if observed != 'onboarding':
+            snapshot = last_snapshot or self.runtime.snapshot()
+            present_marker_keys = [
+                key for key in marker_keys if snapshot.has(key)
+            ]
+            if observed == 'standard' and present_marker_keys:
+                result.add_step(
+                    'computer_onboarding',
+                    True,
+                    'Perplexity Computer checklist coexists with the standard composer',
+                    marker_keys=marker_keys,
+                    present_marker_keys=present_marker_keys,
+                    standard_keys=standard_keys,
+                    standard_composer_ready=True,
+                    snapshot=snapshot.serializable(),
+                )
             return True
 
         before_snapshot = last_snapshot or self.runtime.snapshot()

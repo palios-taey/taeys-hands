@@ -83,6 +83,12 @@ tree:
     computer_ready:
       name: "Your Computer is ready"
       role: push button
+    computer_personalize:
+      name: Personalize Computer
+      role: push button
+    computer_notifications:
+      name: Turn on notifications
+      role: push button
     notifications:
       name: Notifications
       role: push button
@@ -344,6 +350,8 @@ workflow:
     computer_setup:
       markers:
       - computer_ready
+      - computer_personalize
+      - computer_notifications
       standard_composer:
       - input
       - attach_trigger
