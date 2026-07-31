@@ -19,6 +19,7 @@ from consultation_v2.snapshot import (
     build_snapshot,
 )
 from consultation_v2.runtime import ConsultationRuntime
+from consultation_v2.types import ElementRef
 from consultation_v2.yaml_contract import CHAT_PLATFORMS, load_platform_yaml
 
 
@@ -111,6 +112,7 @@ def consult_extract_action_tool() -> dict[str, object]:
                             'find',
                             'click',
                             'activate',
+                            'focus_and_key',
                             'focus',
                             'key',
                             'navigate',
@@ -324,6 +326,7 @@ def _full_consult_contract(
                 'pick',
                 'paste_strategy',
                 'action',
+                'key',
                 'settle_seconds',
             }
         )
@@ -378,10 +381,22 @@ def _full_consult_contract(
                 f'paste strategy {paste_strategy!r}'
             )
         action = raw_step.get('action', 'click')
-        if action not in {'click', 'activate'}:
+        if action not in {'click', 'activate', 'focus_and_key'}:
             raise TaeyConsultExtractionError(
                 f'{platform} full-consult step {step_name!r} has unsupported '
                 f'action {action!r}'
+            )
+        key = raw_step.get('key')
+        if action == 'focus_and_key':
+            if key not in {'space', 'Return'}:
+                raise TaeyConsultExtractionError(
+                    f'{platform} full-consult step {step_name!r} '
+                    f'focus_and_key requires key space or Return'
+                )
+        elif key is not None:
+            raise TaeyConsultExtractionError(
+                f'{platform} full-consult step {step_name!r} declares key '
+                f'without focus_and_key action'
             )
         settle_seconds = raw_step.get('settle_seconds', 0.3)
         if (
@@ -398,6 +413,7 @@ def _full_consult_contract(
             'pick': pick,
             'paste_strategy': paste_strategy,
             'action': action,
+            'key': key,
             'settle_seconds': float(settle_seconds),
         }
     attachment_present = full_consult.get('attachment_present') or {}
@@ -1105,6 +1121,7 @@ class TaeyConsultExtractionSeat:
             'find',
             'click',
             'activate',
+            'focus_and_key',
             'focus',
             'key',
             'navigate',
@@ -1125,6 +1142,7 @@ class TaeyConsultExtractionSeat:
             'find',
             'click',
             'activate',
+            'focus_and_key',
             'focus',
             'key',
             'navigate',
@@ -1225,11 +1243,24 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultStateError(required)
         role = (
             self._control_role(action, name)
-            if action in {'find', 'click', 'activate', 'focus', 'paste_prompt'}
+            if action in {
+                'find',
+                'click',
+                'activate',
+                'focus_and_key',
+                'focus',
+                'paste_prompt',
+            }
             else ''
         )
         if (
-            action in {'click', 'activate', 'focus', 'paste_prompt'}
+            action in {
+                'click',
+                'activate',
+                'focus_and_key',
+                'focus',
+                'paste_prompt',
+            }
             and (name, role) not in self.found_controls
         ):
             raise TaeyConsultExtractionError(
@@ -1575,11 +1606,54 @@ class TaeyConsultExtractionSeat:
                     f'{self.platform} semantic step {step!r} disappeared '
                     'after scroll; nothing activated'
                 )
-            strategy = 'atspi_only' if action == 'activate' else None
-            acted = bool(
-                self.runtime.click(refreshed_ref, strategy=strategy)
+            if action == 'focus_and_key':
+                key = str(step_cfg.get('key') or '')
+                evidence = self.runtime.focus_and_key_open(
+                    refreshed_ref,
+                    key=key,
+                    settle=settle_seconds,
+                )
+                acted = bool(evidence.get('ok'))
+                actuator_name = 'runtime.focus_and_key_open'
+            else:
+                acted = bool(
+                    self.runtime.click(refreshed_ref, strategy='atspi_only')
+                )
+                actuator_name = 'runtime.click'
+        elif action == 'focus_and_key':
+            steps = self.full_consult_contract['steps']
+            step_cfg = steps.get(step) if isinstance(steps, dict) else None
+            key = (
+                str(step_cfg.get('key') or '')
+                if isinstance(step_cfg, dict)
+                else ''
             )
-            actuator_name = 'runtime.click'
+            element = ElementRef(
+                key=str(found.get('element_key') or ''),
+                name=control_name,
+                role=role,
+                x=(
+                    int(found['x'])
+                    if isinstance(found.get('x'), (int, float))
+                    else None
+                ),
+                y=(
+                    int(found['y'])
+                    if isinstance(found.get('y'), (int, float))
+                    else None
+                ),
+                states=[
+                    str(value) for value in (found.get('states') or ())
+                ],
+                atspi_obj=found.get('node'),
+            )
+            evidence = self.runtime.focus_and_key_open(
+                element,
+                key=key,
+                settle=0.3,
+            )
+            acted = bool(evidence.get('ok'))
+            actuator_name = 'runtime.focus_and_key_open'
         else:
             actuator = self.act.do if action == 'activate' else self.act.click
             acted = bool(
@@ -2716,7 +2790,7 @@ class TaeyConsultExtractionSeat:
                 'control_name': str(found.get('name') or ''),
                 'role': str(found.get('role') or ''),
             }
-        if action in {'click', 'activate'}:
+        if action in {'click', 'activate', 'focus_and_key'}:
             before_url = ''
             if name in {'attach_trigger', 'upload_item', 'submit'}:
                 before_url = self._current_url()

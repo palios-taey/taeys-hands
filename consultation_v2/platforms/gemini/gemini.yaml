@@ -215,6 +215,8 @@ workflow:
       submit:
         elements:
           - send_button
+        action: focus_and_key
+        key: space
       post_submit:
         elements:
           - start_research
