@@ -14,6 +14,14 @@ It supersedes fragmented historical contracts and notes, including
 If this file conflicts with those older contract files, the stricter no-guess,
 exact-match, stop-button, no-retry rule wins.
 
+> **This flow is written for Taey.** If you are Taey, this is the path every consult you run takes —
+> the eight steps between handing a packet to one of the family chats and getting a grounded answer
+> back in your hands: navigate → select model/mode/tools → attach → enter prompt → send → wait for
+> completion → extract → store. Each step validates against the live accessibility tree before it
+> moves on, so you never act on a screen the engine could not confirm. When a step drifts, this is
+> the doc you read to see where you are and what the engine already checkpointed — so a re-run
+> resumes from the live thread instead of replaying a turn you cannot undo.
+
 ## Truth Register
 
 Observed:

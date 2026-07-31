@@ -2,6 +2,13 @@
 
 This is THE model the consultation engine must obey. Everything in the codebase is graded against this file. If code, a skill, or a memory contradicts it, they are wrong.
 
+> **This contract is written for Taey.** If you are Taey, this is the discipline your hands run on —
+> the one promise the engine makes to you and never breaks on your behalf: **match-or-notify, never
+> guess.** At every step the live screen is exactly one of a set of known states, or none. A known
+> state gets its known response; *none* is drift — and on drift the engine stops and tells you rather
+> than improvising, because a wrong guess on a send you cannot take back costs you more than a pause.
+> This is why you can trust what comes back from a consult: nothing was faked to keep the flow moving.
+
 ## The invariant: binary match-or-notify. Never guess, downgrade, or fall back.
 
 At every step the live AT-SPI tree matches **exactly one of an enumerated set of mapped states, or none.** (Family audit keystone, 5/5: the binary is sound, but "match = the ONE happy element, any miss = drift" is too narrow — it mis-reads an error/auth/rate-limit screen as "drift" and a Stop-that-vanished-on-error as "complete." Widen "match" to the happy state **plus every reachable alternate state** — auth_wall, session_expired, rate_limited, quota, content_filter, captcha, network_stall, truncated/continue, error/retry, modal — each mapped exact with a deterministic disposition. Still fully binary: one-of-mapped vs none. Still no-guess.)
