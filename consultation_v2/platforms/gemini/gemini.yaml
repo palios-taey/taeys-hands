@@ -166,6 +166,7 @@ tree:
     tool_deep_research:
       name: Deep research
       role: check menu item
+      scope: tools_menu
     # BUG 5 FIX: three new tool entries present in live AT-SPI scan
     tool_create_video:
       name: Create video
@@ -201,9 +202,6 @@ workflow:
     tools: []
   full_consult:
     steps:
-      new_thread:
-        elements:
-          - new_chat
       attach_trigger:
         elements:
           - upload_menu

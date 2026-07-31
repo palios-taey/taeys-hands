@@ -415,9 +415,6 @@ workflow:
     tools: none
   full_consult:
     steps:
-      new_thread:
-        elements:
-          - new_chat_shortcut
       attach_trigger:
         elements:
           - attach_trigger

@@ -45,7 +45,6 @@ FILE_SOURCE_CONTROL_PATTERN = re.compile(r'^\s*Files\s+([0-9]+)\s*$', re.IGNOREC
 MARKDOWN_EXPORT_NAME = 'Export as Markdown'
 OVERFLOW_CONTROL_NAMES = ('Session actions', '...')
 FULL_CONSULT_REQUIRED_STEPS = frozenset({
-    'new_thread',
     'attach_trigger',
     'upload_item',
     'composer_input',
@@ -114,6 +113,7 @@ def consult_extract_action_tool() -> dict[str, object]:
                             'activate',
                             'focus',
                             'key',
+                            'navigate',
                             'typeahead',
                             'paste_path',
                             'paste_prompt',
@@ -685,6 +685,7 @@ class TaeyConsultExtractionSeat:
         self.initial_session_url = ''
         self.fresh_thread_url = ''
         self.fresh_thread_opened = False
+        self.fresh_thread_evidence: dict[str, object] = {}
         self.attach_trigger_focused = False
         self.attach_trigger_activated = False
         self.upload_typeahead_entered = False
@@ -1106,6 +1107,7 @@ class TaeyConsultExtractionSeat:
             'activate',
             'focus',
             'key',
+            'navigate',
             'typeahead',
             'paste_path',
             'paste_prompt',
@@ -1125,6 +1127,7 @@ class TaeyConsultExtractionSeat:
             'activate',
             'focus',
             'key',
+            'navigate',
             'typeahead',
             'paste_prompt',
             'select_mode',
@@ -1159,6 +1162,10 @@ class TaeyConsultExtractionSeat:
         if action == 'typeahead' and name != 'upload_item':
             raise TaeyConsultExtractionError(
                 'typeahead is restricted to semantic step upload_item'
+            )
+        if action == 'navigate' and name != 'new_thread':
+            raise TaeyConsultExtractionError(
+                'navigate is restricted to semantic step new_thread'
             )
         if action == 'select_mode' and name != 'select_mode':
             raise TaeyConsultExtractionError(
@@ -1240,14 +1247,8 @@ class TaeyConsultExtractionSeat:
 
     def _required_full_consult_action(self) -> dict[str, object]:
         if not self.fresh_thread_opened:
-            if self._stored_semantic_control('new_thread') is not None:
-                return {
-                    'action': 'click',
-                    'name': 'new_thread',
-                    'contains': False,
-                }
             return {
-                'action': 'find',
+                'action': 'navigate',
                 'name': 'new_thread',
                 'contains': False,
             }
@@ -2025,23 +2026,9 @@ class TaeyConsultExtractionSeat:
                 'completed answer thread; '
                 f'current_url={previous_url!r}'
             )
-        new_thread = self._find_full_consult_control(
-            'new_thread',
-            must_show=True,
-            scroll=False,
-        )
-        if not new_thread:
-            raise TaeyConsultExtractionError(
-                f'{self.platform} configured new_thread control is unavailable '
-                'for post-consult reset'
-            )
-        self.full_consult_found['new_thread'] = new_thread
-        control = self._actuate_semantic_control('new_thread', 'click')
-        fresh = self._wait_for_fresh_thread(previous_url)
         return {
-            **fresh,
-            **control,
-            'clicked': True,
+            **self._navigate_fresh_thread(),
+            'semantic_step': 'new_thread',
         }
 
     def _assert_bound_answer_thread(self) -> None:
@@ -2471,6 +2458,7 @@ class TaeyConsultExtractionSeat:
                     'initial_session_url': self.initial_session_url,
                     'fresh_thread_url': self.fresh_thread_url,
                     'fresh_thread_opened': self.fresh_thread_opened,
+                    'fresh_thread': dict(self.fresh_thread_evidence),
                     'session_url_before': self.session_url_before,
                     'session_url_after': self.session_url_after,
                     'answer_thread_identity': self._answer_thread_identity(
@@ -2692,6 +2680,22 @@ class TaeyConsultExtractionSeat:
                 'contains': contains,
                 'found': serialized,
             }
+        if action == 'navigate':
+            fresh_evidence = self._navigate_fresh_thread()
+            self.fresh_thread_evidence = dict(fresh_evidence)
+            self.initial_session_url = str(fresh_evidence['previous_url'])
+            self.fresh_thread_url = str(
+                fresh_evidence['fresh_thread_url']
+            )
+            self.fresh_thread_opened = True
+            self.found_controls.clear()
+            self.full_consult_found.clear()
+            return {
+                'ok': True,
+                'action': action,
+                'semantic_step': name,
+                'fresh_thread': fresh_evidence,
+            }
         if action == 'select_mode':
             return self._execute_select_mode()
         if action == 'focus':
@@ -2713,7 +2717,7 @@ class TaeyConsultExtractionSeat:
             }
         if action in {'click', 'activate'}:
             before_url = ''
-            if name in {'new_thread', 'attach_trigger', 'upload_item', 'submit'}:
+            if name in {'attach_trigger', 'upload_item', 'submit'}:
                 before_url = self._current_url()
                 if not self._normalized_session_url(before_url):
                     raise TaeyConsultExtractionError(
@@ -2722,17 +2726,7 @@ class TaeyConsultExtractionSeat:
                     )
             control = self._actuate_semantic_control(name, action)
             action_evidence: dict[str, object] = {}
-            if name == 'new_thread':
-                fresh_evidence = self._wait_for_fresh_thread(before_url)
-                self.initial_session_url = before_url
-                self.fresh_thread_url = str(
-                    fresh_evidence['fresh_thread_url']
-                )
-                self.fresh_thread_opened = True
-                self.found_controls.clear()
-                self.full_consult_found.clear()
-                action_evidence['fresh_thread'] = fresh_evidence
-            elif name == 'attach_trigger':
+            if name == 'attach_trigger':
                 self.attach_trigger_activated = True
                 if self.runtime.focus_file_dialog():
                     self.browser_url_before_dialog = before_url
@@ -3117,7 +3111,7 @@ class TaeyConsultExtractionSeat:
                 'contents into the composer. The harness also owns a short framing '
                 f'prompt of {len(self.framing_prompt)} characters at SHA256 '
                 f'{self.framing_prompt_sha256}; use paste_prompt without emitting its '
-                'text. Begin by finding new_thread. The harness must prove a clean '
+                'text. Begin with navigate new_thread. The harness must prove a clean '
                 'fresh composer before attachment. Follow each returned '
                 'required_next_action exactly through file selection, verified '
                 'attachment presence, prompt entry, configured mode, submission, '
@@ -3274,6 +3268,79 @@ class TaeyConsultExtractionSeat:
         raise TaeyConsultExtractionError(
             f'Taey consultation seat exhausted {max_turns} turns'
         )
+
+    def _clear_fresh_composer(self) -> dict[str, object]:
+        composer = self._find_full_consult_control(
+            'composer_input',
+            timeout=10.0,
+            must_show=True,
+            scroll=False,
+        )
+        node = composer.get('node') if isinstance(composer, dict) else None
+        component = node.get_component_iface() if node is not None else None
+        if not component or not component.grab_focus():
+            raise TaeyConsultExtractionError(
+                f'{self.platform} fresh composer could not be focused for hygiene'
+            )
+        if (
+            not self.act.key('ctrl+a', display=self.display)
+            or not self.act.key('Delete', display=self.display)
+        ):
+            raise TaeyConsultExtractionError(
+                f'{self.platform} fresh composer could not be cleared'
+            )
+        try:
+            clipboard.clear()
+        except Exception as exc:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} clipboard could not be cleared before '
+                f'fresh-composer verification: {exc}'
+            ) from exc
+        if (
+            not self.act.key('ctrl+a', display=self.display)
+            or not self.act.key('ctrl+c', display=self.display)
+        ):
+            raise TaeyConsultExtractionError(
+                f'{self.platform} fresh composer could not be copied for '
+                'empty-draft verification'
+            )
+        copied = (clipboard.read() or '').strip()
+        if copied:
+            raise TaeyConsultExtractionError(
+                f'{self.platform} fresh composer retained {len(copied)} '
+                'characters after clear'
+            )
+        return {
+            'composer_cleared': True,
+            'composer_draft_absent': True,
+            'composer_clipboard_characters': 0,
+        }
+
+    def _navigate_fresh_thread(self) -> dict[str, object]:
+        previous_url = self._current_url()
+        if not self._normalized_session_url(previous_url):
+            raise TaeyConsultExtractionError(
+                f'could not read the browser URL before {self.platform} '
+                'fresh-thread navigation'
+            )
+        target_url = str((self.cfg.get('urls') or {}).get('fresh') or '').strip()
+        if not self._normalized_session_url(target_url):
+            raise TaeyConsultExtractionError(
+                f'{self.platform} urls.fresh is not an absolute HTTP(S) URL'
+            )
+        if not self.runtime.navigate(target_url):
+            raise TaeyConsultExtractionError(
+                f'{self.platform} fresh-thread navigation failed'
+            )
+        self._wait_for_fresh_thread(previous_url)
+        clean = self._clear_fresh_composer()
+        verified = self._wait_for_fresh_thread(previous_url)
+        return {
+            **verified,
+            **clean,
+            'target_url': target_url,
+            'navigated': True,
+        }
 
 
 def extract_with_taey(

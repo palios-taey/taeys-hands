@@ -518,9 +518,6 @@ workflow:
       - web_search
   full_consult:
     steps:
-      new_thread:
-        elements:
-          - new_chat
       attach_trigger:
         elements:
           - toggle_menu

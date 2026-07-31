@@ -294,9 +294,6 @@ workflow:
     tools: []
   full_consult:
     steps:
-      new_thread:
-        elements:
-          - new_thread_link
       attach_trigger:
         elements:
           - attach_trigger
