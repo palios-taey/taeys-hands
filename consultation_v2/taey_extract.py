@@ -2078,9 +2078,13 @@ class TaeyConsultExtractionSeat:
         self,
         previous_url: str,
         *,
-        timeout: float = 30.0,
+        timeout: float | None = None,
+        require_attachment_absent: bool = False,
     ) -> dict[str, object]:
-        deadline = time.monotonic() + timeout
+        settle = self.cfg.get('settle') or {}
+        configured_timeout = float(settle.get('new_chat_ms') or 30000) / 1000.0
+        wait_timeout = configured_timeout if timeout is None else float(timeout)
+        deadline = time.monotonic() + wait_timeout
         last_url = ''
         composer_seen = False
         answer_surface_seen = False
@@ -2131,13 +2135,34 @@ class TaeyConsultExtractionSeat:
                 or self._answer_thread_identity(previous_url)
                 != self._answer_thread_identity(last_url)
             )
+            composer_focusable = bool(
+                composer
+                and 'focusable' in {
+                    str(state).lower()
+                    for state in (composer.get('states') or ())
+                }
+            )
+            fresh_surface_ready = bool(
+                composer
+                and (
+                    self.platform == 'claude'
+                    and composer_focusable
+                    and (
+                        not require_attachment_absent
+                        or not attachment
+                    )
+                    or (
+                        self.platform != 'claude'
+                        and not answer_surface
+                        and not completion_control
+                        and not attachment
+                    )
+                )
+            )
             if (
                 clean_url
                 and left_previous_thread
-                and composer
-                and not answer_surface
-                and not completion_control
-                and not attachment
+                and fresh_surface_ready
                 and not failure
             ):
                 return {
@@ -2145,9 +2170,10 @@ class TaeyConsultExtractionSeat:
                     'previous_url': previous_url,
                     'fresh_thread_url': last_url,
                     'composer_seen': True,
-                    'answer_surface_absent': True,
-                    'completion_control_absent': True,
-                    'attachment_absent': True,
+                    'composer_focusable': composer_focusable,
+                    'answer_surface_absent': not bool(answer_surface),
+                    'completion_control_absent': not bool(completion_control),
+                    'attachment_absent': not bool(attachment),
                 }
             time.sleep(0.3)
         raise TaeyConsultExtractionError(
@@ -2158,8 +2184,61 @@ class TaeyConsultExtractionSeat:
             f'answer_surface_seen={answer_surface_seen}, '
             f'completion_control_seen={completion_control_seen}, '
             f'attachment_seen={attachment_seen}, '
+            f'require_attachment_absent={require_attachment_absent}, '
             f'failure_seen={self._serializable_found(failure_seen)!r}'
         )
+
+    def _mapped_attachment_controls(self) -> list[ElementRef]:
+        attachment_present = self.full_consult_contract['attachment_present']
+        element_keys = (
+            tuple(attachment_present.get('elements') or ())
+            if isinstance(attachment_present, dict)
+            else ()
+        )
+        if not element_keys:
+            return []
+        _, _, snapshot = build_snapshot(self.platform)
+        controls: list[ElementRef] = []
+        for element_key in element_keys:
+            controls.extend(snapshot.mapped.get(str(element_key)) or ())
+        return [
+            control
+            for control in controls
+            if 'showing' in {
+                str(state).lower()
+                for state in (control.states or ())
+            }
+        ]
+
+    def _clear_stale_fresh_attachments(self) -> dict[str, object]:
+        controls = self._mapped_attachment_controls()
+        seen = len(controls)
+        removed = 0
+        while controls:
+            target = controls[0]
+            before_count = len(controls)
+            if not self.runtime.click(target):
+                raise TaeyConsultExtractionError(
+                    f'{self.platform} stale fresh attachment removal failed; '
+                    f'remaining={before_count}'
+                )
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                controls = self._mapped_attachment_controls()
+                if len(controls) < before_count:
+                    break
+                time.sleep(0.3)
+            if len(controls) >= before_count:
+                raise TaeyConsultExtractionError(
+                    f'{self.platform} stale fresh attachment remained after '
+                    f'removal; remaining={before_count}'
+                )
+            removed += before_count - len(controls)
+        return {
+            'stale_attachments_seen': seen,
+            'stale_attachments_removed': removed,
+            'attachment_absent_after_cleanup': True,
+        }
 
     def _reset_to_neutral(self) -> dict[str, object]:
         previous_url = self._current_url()
@@ -3477,10 +3556,15 @@ class TaeyConsultExtractionSeat:
                 f'{self.platform} fresh-thread navigation failed'
             )
         self._wait_for_fresh_thread(previous_url)
+        attachment_cleanup = self._clear_stale_fresh_attachments()
         clean = self._clear_fresh_composer()
-        verified = self._wait_for_fresh_thread(previous_url)
+        verified = self._wait_for_fresh_thread(
+            previous_url,
+            require_attachment_absent=True,
+        )
         return {
             **verified,
+            **attachment_cleanup,
             **clean,
             'target_url': target_url,
             'navigated': True,
