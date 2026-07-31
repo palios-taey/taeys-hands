@@ -979,7 +979,7 @@ class TaeyConsultExtractionSeat:
             )
         scope = str(spec.get('scope') or 'snapshot')
         if scope == 'app_root_snapshot':
-            _, _, snapshot = build_app_root_snapshot(self.platform)
+            snapshot = build_app_root_snapshot(self.platform)
             refs = list(snapshot.mapped.get(element_key) or [])
             if not refs:
                 return None
