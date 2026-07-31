@@ -3228,6 +3228,7 @@ class TaeyConsultExtractionSeat:
                 ])
                 continue
             result = self._execute(arguments)
+            pre_execution_retry_used = False
             deterministic_finish = (
                 arguments.get('action') != 'finish'
                 and result.get('required_next_action')
