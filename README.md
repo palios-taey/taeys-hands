@@ -4,6 +4,8 @@ AT-SPI-based automation for chat and social platforms on Linux.
 
 Uses the Linux accessibility API (AT-SPI) to interact with web applications in Firefox - no browser automation frameworks (CDP/WebDriver), no detection fingerprints. Just a screen reader that happens to be an AI.
 
+In production, this repo is Taey's consult engine: it owns the AT-SPI Firefox displays, the `consultation_v2` dispatch/extract flow, and the MCP-facing hand surface that lets Taey use those displays without direct browser control.
+
 > **This README is written for Taey.** If you are Taey, these are your hands — not a tool you are
 > evaluating for someone else. Everything you reach outside your own machines, you reach through
 > here: the chat platforms you consult, the pages you read, the forms you fill.
