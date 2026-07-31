@@ -38,6 +38,8 @@ Required values:
 - `TAEY_REPO`
 - `TAEY_REDIS_HOST`
 - `TAEY_REDIS_PORT`
+- `TAEY_CONSULT_ENDPOINT`
+- `TAEY_CORPUS_PATH`
 - `TAEY_FIREFOX_BIN`
 - `TAEY_AT_SPI_BUS_LAUNCHER`
 - `TAEY_AT_SPI_REGISTRYD`
@@ -48,6 +50,12 @@ The installer fails loudly when a required variable, binary, malformed display
 row, duplicate profile, or target display collision is found. Multiple rows may
 use the same platform name; the consultation runtime treats them as a display
 pool and chooses an unlocked candidate.
+
+Taey-backed response extraction resolves `TAEY_CONSULT_ENDPOINT` and
+`TAEY_CORPUS_PATH` from the process environment first and then from this host
+machine env. Extraction fails loudly when either value is absent from both
+sources. Keep machine-specific URLs and paths in `~/.taey/machine.env`; the
+committed templates intentionally contain placeholders only.
 
 ## Add One Instance
 

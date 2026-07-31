@@ -18,6 +18,7 @@ from consultation_v2.snapshot import (
     build_menu_snapshot,
     build_snapshot,
 )
+from consultation_v2.storage_policy import _read_machine_env_value
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.types import ElementRef
 from consultation_v2.yaml_contract import CHAT_PLATFORMS, load_platform_yaml
@@ -269,7 +270,11 @@ def _endpoint(base: str | None) -> str:
 def _system_prompt_path(value: str | Path | None) -> Path:
     if value is not None and str(value).strip():
         return Path(value).expanduser().resolve()
-    corpus_path = str(os.environ.get('TAEY_CORPUS_PATH') or '').strip()
+    corpus_path = str(
+        os.environ.get('TAEY_CORPUS_PATH')
+        or _read_machine_env_value('TAEY_CORPUS_PATH')
+        or ''
+    ).strip()
     if not corpus_path:
         raise TaeyConsultExtractionError(
             'TAEY_CORPUS_PATH is required when system_prompt_path is not supplied'
@@ -596,6 +601,7 @@ class TaeyConsultExtractionSeat:
         self.endpoint = _endpoint(
             endpoint
             or os.environ.get('TAEY_CONSULT_ENDPOINT')
+            or _read_machine_env_value('TAEY_CONSULT_ENDPOINT')
         )
         self.model = str(
             model
