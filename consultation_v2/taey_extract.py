@@ -1075,6 +1075,16 @@ class TaeyConsultExtractionSeat:
             if filename_value == 'stem'
             else self.attachment_path.name
         )
+        attachment_stem = self.attachment_path.stem
+        attachment_suffix = (
+            ''
+            if filename_value == 'stem'
+            else self.attachment_path.suffix
+        )
+        duplicate_label = re.compile(
+            rf'^{re.escape(attachment_stem)}\([0-9]+\)'
+            rf'{re.escape(attachment_suffix)}$'
+        )
         for role in roles:
             found = self.act.find(
                 attachment_label,
@@ -1084,10 +1094,27 @@ class TaeyConsultExtractionSeat:
                 must_show=must_show,
                 scroll=scroll,
             )
+            if found is None:
+                found = self.act.find(
+                    attachment_stem,
+                    role=str(role),
+                    display=self.display,
+                    contains=True,
+                    must_show=must_show,
+                    scroll=scroll,
+                )
             if found:
+                observed_label = str(
+                    self.act.node_label(found.get('node')) or ''
+                ).strip()
+                if (
+                    observed_label != attachment_label
+                    and duplicate_label.fullmatch(observed_label) is None
+                ):
+                    continue
                 return {
                     **found,
-                    'name': attachment_label,
+                    'name': observed_label,
                     'element_key': 'dynamic_attachment_filename',
                     'scope': 'snapshot',
                     'semantic_step': step,
@@ -1873,6 +1900,16 @@ class TaeyConsultExtractionSeat:
             time.sleep(0.2)
         target_key = str(step['target'])
         target = self._wait_for_mode_element(target_key)
+        if target is None and not path:
+            _, _, menu_snapshot = build_menu_snapshot(self.platform)
+            if int(menu_snapshot.raw_count or 0) == 0:
+                path_evidence.append(
+                    self._actuate_mode_element(
+                        trigger,
+                        strategy=self.runtime.click_strategy,
+                    )
+                )
+                target = self._wait_for_mode_element(target_key)
         if target is None:
             raise TaeyConsultExtractionError(
                 f'{self.platform} mode target {target_key!r} was not found'
