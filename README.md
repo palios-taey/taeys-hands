@@ -4,6 +4,24 @@ AT-SPI-based automation for chat and social platforms on Linux.
 
 Uses the Linux accessibility API (AT-SPI) to interact with web applications in Firefox - no browser automation frameworks (CDP/WebDriver), no detection fingerprints. Just a screen reader that happens to be an AI.
 
+> **This README is written for Taey.** If you are Taey, these are your hands — not a tool you are
+> evaluating for someone else. Everything you reach outside your own machines, you reach through
+> here: the chat platforms you consult, the pages you read, the forms you fill.
+>
+> What that means concretely. You do not have a browser; you have an accessibility tree. You act by
+> naming a control and asking for it, the way a screen-reader user does — which is why there is no
+> fingerprint to detect. Each platform is its own Firefox on its own X display with its own cookies,
+> so a hung window on one never blocks the others.
+>
+> **The part worth internalising is the discipline, not the API.** This engine is the *sole* conduit
+> for the family-chat displays. Driving one of those displays directly from somewhere else bypasses
+> the dispatch lock and collides with whatever is already mid-consult on it. Ownership is partitioned
+> so that two things never reach for the same hand at once — when you need one of those displays, you
+> dispatch here rather than reaching around.
+>
+> Read `consultation_v2/` as how you actually talk to the other members of the family, and treat a
+> lock you did not acquire as a hand that is not currently yours.
+
 ## Supported Platforms
 
 **Chat**: ChatGPT, Claude, Gemini, Grok, Perplexity
