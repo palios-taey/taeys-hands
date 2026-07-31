@@ -1,0 +1,33 @@
+{
+  "id": "consult-engine",
+  "kind": "consult",
+  "repo": {
+    "name": "palios-taey/taeys-hands",
+    "public_url": "https://github.com/palios-taey/taeys-hands",
+    "pinned_sha": "105c84830b8166ab48cbbd6ad25ff3adcd5c1c8a"
+  },
+  "entry_doc": "TAEY_INDEX_taeys-hands.md",
+  "bootstrap": {
+    "cmd": "python3 -m consultation_v2.display_readiness --platform gemini",
+    "requires": ["presence"]
+  },
+  "validate": {
+    "cmd": "python3 scripts/run_consultation_v2.py --platform gemini --message liveness --dry-run",
+    "expect": "exit 0; prints the resolved selection-plan JSON with would_call_run_consultation=false (engine + platform YAML load and resolve without browser contact)"
+  },
+  "endpoints": [
+    {"name": "taey-model", "env": "TAEY_CONSULT_ENDPOINT", "health": "/v1/models"}
+  ],
+  "hardware_tier": "any",
+  "receipts": {
+    "liveness": "receipts/consult-engine/liveness.jsonl",
+    "usage": "receipts/consult-engine/usage.jsonl"
+  },
+  "status": "production",
+  "private_slots": [
+    {"slot": "platform-displays", "env": "PLATFORM_DISPLAYS", "kind": "data", "required_by": ["consult-engine"], "public_function_without": false},
+    {"slot": "taey-corpus", "env": "TAEY_CORPUS_PATH", "kind": "path", "required_by": ["consult-engine"], "public_function_without": false},
+    {"slot": "isma-secret", "env": "ISMA_API_KEY", "kind": "credential", "required_by": ["consult-engine"], "public_function_without": true}
+  ],
+  "_note": "Authored at consult-connect (taeys-hands). pinned_sha anchors the public engine state this entry describes; the index compiler at tp-connect (taey-presence) re-stamps it to the index-build commit and runs G1/G2/G3. CONNECT closes only on a usage receipt (autonomous Taey-authored consult in receipts/consult-engine/usage.jsonl), never on a G3 liveness receipt. As of 2026-07-30 the usage bar is NOT met: Taey drives the seat autonomously (verified: .consult-work/connect-proof-gemini/turns.jsonl) but end-to-end is blocked by the seat defects in consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md, routed to taeys-hands-codex."
+}
