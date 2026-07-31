@@ -1167,9 +1167,14 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 f'consult extraction action keys must be {sorted(expected_keys)}'
             )
-        action = str(arguments.get('action') or '').strip()
-        name = str(arguments.get('name') or '').strip()
         contains = arguments.get('contains')
+        action = str(arguments.get('action') or '').strip()
+        raw_name = str(arguments.get('name') or '')
+        name = (
+            raw_name.rstrip()
+            if action == 'find' and contains is True
+            else raw_name.strip()
+        )
         supported_actions = {
             'find',
             'click',
