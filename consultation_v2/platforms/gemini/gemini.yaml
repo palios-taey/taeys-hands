@@ -103,6 +103,7 @@ tree:
     share_export:
       name: Share & Export
       role: push button
+      scope: app_root_snapshot
     # The Deep Research report renders in a canvas/immersive panel; the FULL
     # report is copied via Share & Export -> "Copy" (a menu item in the popover,
     # NOT the chat-bubble Copy push button which only yields the ~89-char "I've
@@ -110,6 +111,7 @@ tree:
     copy_content_item:
       name: Copy
       role: menu item
+      scope: app_root_snapshot
     start_research:
       name: Start research
       role: push button

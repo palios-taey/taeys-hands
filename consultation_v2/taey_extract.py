@@ -977,6 +977,27 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 f'{self.platform} element_map key {element_key!r} is unavailable'
             )
+        scope = str(spec.get('scope') or 'snapshot')
+        if scope == 'app_root_snapshot':
+            _, _, snapshot = build_app_root_snapshot(self.platform)
+            refs = list(snapshot.mapped.get(element_key) or [])
+            if not refs:
+                return None
+            ref = refs[0]
+            found = {
+                'node': ref.atspi_obj,
+                'name': ref.name,
+                'role': ref.role,
+                'states': set(ref.states or []),
+                'element_ref': ref,
+            }
+            if not self._states_satisfy(found, spec):
+                return None
+            return {
+                **found,
+                'element_key': element_key,
+                'scope': scope,
+            }
         if isinstance(spec.get('structural'), dict):
             found = self._mapped_structural_control(element_key, spec)
             if found is None or not self._states_satisfy(found, spec):
@@ -987,7 +1008,6 @@ class TaeyConsultExtractionSeat:
                 'scope': str(spec.get('scope') or 'snapshot'),
             }
         if pick == 'last_by_y':
-            scope = str(spec.get('scope') or 'snapshot')
             if scope == 'menu_snapshot' or scope.endswith('_menu'):
                 _, _, snapshot = build_menu_snapshot(self.platform)
             elif scope == 'app_root_snapshot':
