@@ -1575,8 +1575,9 @@ class TaeyConsultExtractionSeat:
                     f'{self.platform} semantic step {step!r} disappeared '
                     'after scroll; nothing activated'
                 )
+            strategy = 'atspi_only' if action == 'activate' else None
             acted = bool(
-                self.runtime.click(refreshed_ref, strategy='atspi_only')
+                self.runtime.click(refreshed_ref, strategy=strategy)
             )
             actuator_name = 'runtime.click'
         else:
