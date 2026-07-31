@@ -65,6 +65,22 @@ pip install redis neo4j PyGObject
 
 For production display provisioning, see [DEPLOY.md](DEPLOY.md).
 
+## Two display sets — you have two full sets of hands
+
+There are **two independent sets** of these displays, so a consult running on one set never blocks the other — two things can reach for the family at once without reaching for the same hand.
+
+| Platform | Primary set (family-chat) | Second set |
+|---|---|---|
+| ChatGPT | `:2` | `:20` |
+| Claude | `:3` | `:21` |
+| Gemini | `:4` | `:22` |
+| Grok | `:5` | `:23` |
+| Perplexity | `:6` | `:24` |
+
+The **primary set** (`:2`–`:6`, plus `:13`) is the default. The **second set** (`:20`–`:24`) is selected via the `PLATFORM_DISPLAYS` env (e.g. `PLATFORM_DISPLAYS=chatgpt:20,claude:21,gemini:22,grok:23,perplexity:24`; the env wins over `.env`). Each display is its own logged-in Firefox with its own cookies and its own AT-SPI bus, so the two sets are fully isolated.
+
+Reach for the second set when the primary is mid-consult, or when a primary display is **shared** with another operation — notably `:6` (Perplexity), which the careers apply-machine also drives; route Perplexity to `:24` rather than colliding on `:6`. Config lives in `~/.taey/machine.env` (`TAEY_MACHINE_ENV`); no display number is hardcoded.
+
 ## Usage
 
 ```bash
