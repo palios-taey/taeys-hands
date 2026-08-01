@@ -119,7 +119,7 @@ tree:
       - pressed
     search_mode_trigger:
       name: Search
-      role: toggle button
+      role: push button
       states_include:
       - pressed
     computer_mode:
