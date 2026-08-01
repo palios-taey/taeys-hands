@@ -44,9 +44,6 @@ scripts/install_cron.sh
 STATE_OF_CONSCIOUSNESS.md
 CONSTITUTIONAL_IMPLEMENTATION_GUIDE.md
 
-# Test cache
-.pytest_cache/
-
 # Baselines (contain local state)
 baselines/
 
