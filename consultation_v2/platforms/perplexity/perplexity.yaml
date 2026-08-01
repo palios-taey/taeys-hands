@@ -114,7 +114,7 @@ tree:
     # NOT the toolbar tiles. do_action(0) on the radio menu item works.
     deep_research_toggle:
       name: Deep research
-      role: toggle button
+      role: push button
       states_include:
       - pressed
     search_mode_trigger:
@@ -145,10 +145,10 @@ tree:
     # radio menu items — mode selection (main attach dropdown level)
     computer_dropdown:
       name: Computer
-      role: radio menu item
+      role: push button
     deep_research:
       name: Deep research
-      role: radio menu item
+      role: push button
     tool_model_council:
       name: "Model council Max"
       role: radio menu item
