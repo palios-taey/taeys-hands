@@ -109,13 +109,13 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 
 - **Verify before reporting.** NEVER say "sent" or "running" without confirming output files exist and contain expected content.
 - **First error = full stop.** Do not retry. Do not patch. Diagnose root cause.
-- **Look at the screen.** When any UI op fails: `DISPLAY=:X scrot /tmp/screenshot.png` then read the image. BEFORE debugging code.
+- **THE TREE IS THE SOURCE OF TRUTH — do NOT look at the screen (Jesse-canonical 2026-08-01).** Everything is in the AT-SPI tree. Screenshots are the RARE exception, only when the tree genuinely cannot be figured out — and even then it is *likely a FILTER* (the scan/scope is excluding an element), NOT a need for pixels. Never reach for the screen for anything the tree can answer, which is almost everything. Taey should not have to look at screens.
 - **Know your branch — consultation_v2 LIVES ON `main` now.** The driver-architecture V2 engine is the production code on `main` (reconciled 2026-06-14; the old primitive-runner `origin/main` and the `consultation-v2-isolated-drivers` session branch are archived as `archived/*` tags).
 - **NEVER build on a stale base (git-master).** Before committing substantial work to ANY feature branch: `git fetch origin && git rev-list --count HEAD..origin/main`. If non-trivial → STOP, rebase onto current `origin/main` FIRST. And NEVER assume which line is canonical — `origin/main` can be stale/divergent; verify tip dates + which line the fleet actually runs before trusting it (this exact assumption caused the 2026-06-14 mess). Invoke the git-master skill before any branch/worktree/merge/cleanup op.
 - **Use production scripts.** Never launch Firefox/bots/tests manually.
 - **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
-- **Screenshot before AND after EVERY action.** When debugging, take a screenshot before and after each click/keypress. Then scan AT-SPI and compare against the screenshot. If they don't match, the AT-SPI tree needs refreshing. This is how you determine if the issue is code, timing, or tree staleness.
-- **This is faster.** More steps but every step moves forward with certainty. Guessing leads to wrong fixes that break working code, which costs 10x more time. The Grok attach debug proved this: 4 screenshots + 1 AT-SPI check = root cause found in minutes. Without screenshots, I spent hours on wrong assumptions (dropdown staying open, Escape fixes, etc.) that were all wrong. Slow is fast.
+- **RUTHLESS YAML RECONCILIATION — anything unknown must become known: FILTER OUT, UPDATE, or ADD (Jesse-canonical 2026-08-01).** Read the TREE before and after every action and validate the step against it. Every discrepancy between tree and YAML is resolved, never worked around: a tree element with no mapping → filter it out (noise) or add it; a YAML entry that does not match the tree → UPDATE it to the tree's current name/role/scope. Absolute focus on keeping the YAML equal to the tree. There is NO "instability" to theorize about and no accusing the platform — the tree states exactly what is there at each moment; make the YAML equal that.
+- **Manual, step-by-step, human pace — LEAN + 6SIGMA (Jesse-canonical 2026-08-01; no automation now).** Taey operates the surface BY HAND: one action, validated against the tree, then the next — roughly human pace or slower, which is fine. LEAN (one step fully done before the next), 6SIGMA (root-cause every failure, zero defects). Taey learns the system by operating it manually and only then earns automating it. Do NOT build or run automated flows to paper over a surface that has not been mastered manually first.
 
 ---
 
@@ -267,7 +267,7 @@ Targets: `conductor`, `taeys-hands`, `weaver`, `tutor`, `infra`, `taey`
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **taeys-hands** (6211 symbols, 13443 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **taeys-hands** (6290 symbols, 13670 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
