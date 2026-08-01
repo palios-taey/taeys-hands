@@ -3,7 +3,7 @@
 Phase 1: Consolidate attachments (FAMILY_KERNEL + platform identity + caller files)
 Phase 2: Create Plan record in Neo4j (pre-flight)
 Phase 3: Run the platform driver (navigate → mode → attach → send → monitor → extract → store)
-Phase 4: Complete Plan record + notify requester + ingest into ISMA
+Phase 4: Complete Plan record + notify requester + ingest + provenance emit
 """
 from __future__ import annotations
 
@@ -67,6 +67,7 @@ def _prepare_platform_identity_request(
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
+    caller_request = request
     primitives.assert_session_not_dead(request.request_id())
 
     external_store_enabled = storage_policy.external_store_enabled(request)
@@ -291,7 +292,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
         except Exception as exc:
             logger.error("Run-state extraction_done checkpoint failed: %s", exc)
 
-    # --- Phase 4: Complete Plan + notify + ingest ---
+    # --- Phase 4: Complete Plan + notify + ingest + provenance emit ---
     if plan_id and external_store_enabled:
         try:
             from storage import neo4j_client
@@ -482,6 +483,15 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 'ISMA ingestion failed; consultation result still delivered locally',
                 error=str(exc),
             )
+
+    if result.ok and result.response_text:
+        from consultation_v2.provenance_emit import emit_consult_completed
+
+        emit_consult_completed(
+            caller_request=caller_request,
+            rendered_request=request,
+            result=result,
+        )
 
     # --- Teardown (FLOW §8 / CONTRACT §3): a fully-delivered consultation is
     # DONE, but the request_id remains poisoned by the notification evidence so

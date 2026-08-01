@@ -57,6 +57,13 @@ machine env. Extraction fails loudly when either value is absent from both
 sources. Keep machine-specific URLs and paths in `~/.taey/machine.env`; the
 committed templates intentionally contain placeholders only.
 
+Successful-consult provenance emission is opt-in through
+`TAEY_CONSULT_EVENT_EMIT_ENABLED`. When enabled,
+`TAEY_ORCHESTRATOR_BASE_URL` is required and must be an absolute HTTP(S) base
+URL. Missing or malformed configuration fails loudly; a configured ingress
+that is temporarily unavailable is recorded on the result without failing the
+already-captured consultation.
+
 ## Add One Instance
 
 Pick a contiguous unused display block. A 5-chat instance uses exactly five
