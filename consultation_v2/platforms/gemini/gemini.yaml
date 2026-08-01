@@ -111,7 +111,7 @@ tree:
     copy_content_item:
       name: Copy
       role: menu item
-      scope: app_root_snapshot
+      scope: snapshot
     start_research:
       name: Start research
       role: push button
