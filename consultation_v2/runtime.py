@@ -142,6 +142,25 @@ class ConsultationRuntime:
                 return r.stdout.strip().split()[0], title
         return None
 
+    def file_dialog_has_focus(self) -> bool:
+        """Return whether the recognized file dialog is the active X11 window."""
+        env = self._dialog_env()
+        found = self._file_dialog_window(env)
+        if found is None:
+            return False
+        window_id, _ = found
+        try:
+            active = subprocess.run(
+                ["xdotool", "getactivewindow"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env=env,
+            )
+        except Exception:
+            return False
+        return active.returncode == 0 and active.stdout.strip() == window_id
+
     def _file_dialog_focus_timeout_seconds(self) -> float:
         settle = self.cfg.get('settle') or {}
         value = settle.get('file_dialog_focus_ms', 5000) if isinstance(settle, dict) else 5000

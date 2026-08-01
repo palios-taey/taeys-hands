@@ -3104,12 +3104,9 @@ class TaeyConsultExtractionSeat:
                 raise TaeyConsultExtractionError(
                     'attachment path paste key returned a non-success value'
                 )
-            browser_url_after_paste = self._current_url()
-            if browser_url_after_paste != self.browser_url_before_dialog:
+            if not self.runtime.file_dialog_has_focus():
                 raise TaeyConsultExtractionError(
-                    'file chooser focus proof failed after path paste; refusing to '
-                    f'press Return; browser_url_before={self.browser_url_before_dialog!r}, '
-                    f'browser_url_after={browser_url_after_paste!r}'
+                    'file chooser lost focus after path paste; refusing to press Return'
                 )
             self.attachment_path_pasted = True
             return {
@@ -3118,6 +3115,7 @@ class TaeyConsultExtractionSeat:
                 'name': name,
                 'attachment_characters': len(path_text),
                 'attachment_sha256': self.attachment_sha256,
+                'file_dialog_focus_verified': True,
             }
         if action == 'paste_prompt':
             found = self._stored_semantic_control(name)
