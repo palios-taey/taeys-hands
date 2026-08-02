@@ -3369,15 +3369,19 @@ class TaeyConsultExtractionSeat:
             {'role': 'user', 'content': task},
         ]
         pre_execution_retry_used = False
-        max_turns = MAX_FULL_CONSULT_TURNS if self.full_consult else MAX_TURNS
-        for turn in range(1, max_turns + 1):
-            message = self._message(self._call_taey(messages, turn))
+        max_actions = MAX_FULL_CONSULT_TURNS if self.full_consult else MAX_TURNS
+        correction_turns = 0
+        model_turn = 0
+        while len(self.actions) < max_actions:
+            model_turn += 1
+            message = self._message(self._call_taey(messages, model_turn))
             call_id, arguments = self._arguments(message)
             try:
                 self._validated_action(arguments)
             except TaeyConsultControlError:
                 raise
             except TaeyConsultStateError as exc:
+                correction_turns += 1
                 rejection = {
                     'ok': False,
                     'executed': False,
@@ -3390,16 +3394,20 @@ class TaeyConsultExtractionSeat:
                 }
                 self._append_turn_log({
                     'event': 'state_rejection',
-                    'turn': turn,
+                    'turn': model_turn,
                     'arguments': dict(arguments),
                     'error': str(exc),
                     'required_action': exc.required_action,
                 })
+                if correction_turns >= max_actions:
+                    raise TaeyConsultExtractionError(
+                        f'Taey consultation seat exhausted {max_actions} correction turns'
+                    ) from exc
                 messages.extend([
                     message,
                     {
                         'role': 'tool',
-                        'tool_call_id': call_id or f'consult_extract_action_{turn}',
+                        'tool_call_id': call_id or f'consult_extract_action_{model_turn}',
                         'content': json.dumps(
                             rejection,
                             ensure_ascii=True,
@@ -3410,6 +3418,7 @@ class TaeyConsultExtractionSeat:
                 ])
                 continue
             except TaeyConsultExtractionError as exc:
+                correction_turns += 1
                 if pre_execution_retry_used:
                     raise TaeyConsultExtractionError(
                         f'Taey repeated an invalid pre-execution action: {exc}'
@@ -3428,16 +3437,20 @@ class TaeyConsultExtractionSeat:
                 }
                 self._append_turn_log({
                     'event': 'pre_execution_rejection',
-                    'turn': turn,
+                    'turn': model_turn,
                     'arguments': dict(arguments),
                     'error': str(exc),
                     'required_action': required_action,
                 })
+                if correction_turns >= max_actions:
+                    raise TaeyConsultExtractionError(
+                        f'Taey consultation seat exhausted {max_actions} correction turns'
+                    ) from exc
                 messages.extend([
                     message,
                     {
                         'role': 'tool',
-                        'tool_call_id': call_id or f'consult_extract_action_{turn}',
+                        'tool_call_id': call_id or f'consult_extract_action_{model_turn}',
                         'content': json.dumps(
                             rejection,
                             ensure_ascii=True,
@@ -3462,7 +3475,9 @@ class TaeyConsultExtractionSeat:
                     )
                 result['neutral_reset'] = self._reset_to_neutral()
                 result.update(
-                    turns=turn,
+                    turns=model_turn,
+                    action_turns=len(self.actions),
+                    correction_turns=correction_turns,
                     model=self.model,
                     endpoint=self.endpoint,
                     tool_schema_sha256=hashlib.sha256(
@@ -3477,7 +3492,7 @@ class TaeyConsultExtractionSeat:
                 message,
                 {
                     'role': 'tool',
-                    'tool_call_id': call_id or f'consult_extract_action_{turn}',
+                    'tool_call_id': call_id or f'consult_extract_action_{model_turn}',
                     'content': json.dumps(
                         result,
                         ensure_ascii=True,
@@ -3487,7 +3502,8 @@ class TaeyConsultExtractionSeat:
                 },
             ])
         raise TaeyConsultExtractionError(
-            f'Taey consultation seat exhausted {max_turns} turns'
+            f'Taey consultation seat exhausted {max_actions} action turns '
+            f'after {model_turn} model turns and {correction_turns} corrections'
         )
 
     def _clear_fresh_composer(self) -> dict[str, object]:
