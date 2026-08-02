@@ -44,6 +44,11 @@ def _select_value(argv: list[str], menu: str) -> str | None:
     return None
 
 
+def _lock_policy(argv: list[str]) -> str:
+    value = _arg_value(argv, '--lock-policy')
+    return value if value in {'careers', 'discretionary'} else 'careers'
+
+
 def _display_lock_free(display: str) -> bool:
     try:
         import redis
@@ -52,6 +57,14 @@ def _display_lock_free(display: str) -> bool:
         client = redis.Redis(host=host, port=port, decode_responses=True, socket_timeout=2.0)
         return not bool(client.exists(f'taey:plan_active:{display}'))
     except Exception as exc:
+        if _lock_policy(sys.argv[1:]) == 'careers':
+            print(
+                f'careers display-lock preflight unavailable for {display}: {exc}; '
+                'continuing to the auditable entrypoint lock',
+                file=sys.stderr,
+                flush=True,
+            )
+            return True
         raise RuntimeError(
             f'Redis display-lock check failed before browser import for {display}: {exc}'
         ) from exc
@@ -81,10 +94,6 @@ def _select_gemini_primary_display() -> str | None:
             f"TAEY_GEMINI_PRIMARY_DISPLAY={primary!r} is not configured for gemini; "
             f"candidates={list(candidates)!r}"
         )
-    if not _display_lock_free(primary):
-        raise RuntimeError(
-            f"Gemini deep mode requires primary display {primary}, but that display is locked"
-        )
     return set_platform_display('gemini', primary)
 
 
@@ -93,12 +102,14 @@ def _bind_display_env() -> None:
 
     argv = sys.argv[1:]
     platform = _arg_value(argv, '--platform')
+    lock_policy = _lock_policy(argv)
+    availability = _display_lock_free if lock_policy == 'discretionary' else None
     if platform == 'gemini' and _gemini_requires_primary_display(argv):
         display = _select_gemini_primary_display()
         if display is None:
-            display = select_platform_display(platform, is_available=_display_lock_free)
+            display = select_platform_display(platform, is_available=availability)
     elif platform:
-        display = select_platform_display(platform, is_available=_display_lock_free)
+        display = select_platform_display(platform, is_available=availability)
     else:
         display = os.environ.get('DISPLAY', ':0')
     if not display:

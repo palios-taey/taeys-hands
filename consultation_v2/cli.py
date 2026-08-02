@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from consultation_v2.display_lock import (
+    CAREERS_POLICY,
+    LOCK_POLICIES,
+    display_lock_ttl,
+    entrypoint_display_lock,
+    resolve_lock_policy,
+)
 from consultation_v2.identity import (
     IdentityError,
     consolidate_attachments,
@@ -70,6 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--purpose', default=None)
     parser.add_argument('--requester', default=None,
                         help='Node ID of the requester (for notifications)')
+    parser.add_argument(
+        '--lock-policy',
+        choices=sorted(LOCK_POLICIES),
+        default=None,
+        help=(
+            'Per-display contention policy. Omitted deterministic runs default '
+            'to careers so an ambiguous invocation cannot strand a target.'
+        ),
+    )
     return parser
 
 
@@ -300,7 +317,21 @@ def main() -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
-    result = run_consultation(request)
+    lock_policy = resolve_lock_policy(args.lock_policy, default=CAREERS_POLICY)
+    display = str(os.environ.get('DISPLAY') or ':0')
+    with entrypoint_display_lock(
+        display=display,
+        policy=lock_policy,
+        request_id=request.request_id(),
+        entrypoint='scripts/run_consultation_v2.py',
+        payload={
+            'platform': request.platform,
+            'purpose': request.purpose or '',
+            'requester': request.requester or '',
+        },
+        ttl=display_lock_ttl(request.timeout),
+    ):
+        result = run_consultation(request)
     payload = result.serializable()
     if args.output:
         Path(args.output).write_text(json.dumps(payload, indent=2, sort_keys=True))

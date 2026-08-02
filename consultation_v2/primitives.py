@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from redis.exceptions import WatchError
 
@@ -71,6 +73,8 @@ __all__ = [
     "acquire_display_lock",
     "release_display_lock",
     "display_lock_held",
+    "display_lock_record",
+    "allow_display_lock_bypass",
     # run-state (idempotency checkpoints)
     "DeadSessionError",
     "RUN_STATE_DEAD_SESSION",
@@ -104,6 +108,12 @@ def _display(display: str | None = None) -> str:
 
 def _plan_lock_key(display: str | None = None) -> str:
     return f"taey:plan_active:{_display(display)}"
+
+
+_PROCESS_DISPLAY_LOCKS: Dict[str, Dict[str, Any]] = {}
+_DISPLAY_LOCK_BYPASSES: Dict[str, int] = {}
+_DISPLAY_LOCK_STATE_GUARD = threading.RLock()
+_DISPLAY_LOCK_BYPASS_PREFIX = "display-lock-bypass:"
 
 
 def _process_starttime(pid: int) -> str | None:
@@ -145,53 +155,121 @@ def acquire_display_lock(
     lock that cannot be taken is a loud failure, never a silent "proceed without
     the lock".
 
-    Acquisition is a single Redis SET NX claim. If any holder key already
-    exists, this dispatcher refuses the display; acquire never deletes or
-    replaces another holder's lock.
+    The first process-local acquisition is a Redis SET NX claim. Nested callers
+    in the same process share that owner token and increment a local depth;
+    another holder is never deleted or replaced.
     """
-    client = get_client()
-    key = _plan_lock_key(display)
-    owner_token = str((payload or {}).get("owner_token") or uuid.uuid4())
-    record = _lock_record(owner_token, payload)
-    body = json.dumps(record)
-    return owner_token if client.set(key, body, ex=ttl, nx=True) else None
+    target_display = _display(display)
+    with _DISPLAY_LOCK_STATE_GUARD:
+        if _DISPLAY_LOCK_BYPASSES.get(target_display, 0) > 0:
+            return f"{_DISPLAY_LOCK_BYPASS_PREFIX}{os.getpid()}:{target_display}"
+        owned = _PROCESS_DISPLAY_LOCKS.get(target_display)
+        if owned:
+            if (
+                owned.get("holder_pid") == os.getpid()
+                and owned.get("holder_starttime") == _process_starttime(os.getpid())
+            ):
+                owned["depth"] = int(owned["depth"]) + 1
+                return str(owned["owner_token"])
+            _PROCESS_DISPLAY_LOCKS.pop(target_display, None)
+        client = get_client()
+        key = _plan_lock_key(target_display)
+        owner_token = str((payload or {}).get("owner_token") or uuid.uuid4())
+        record = _lock_record(owner_token, payload)
+        body = json.dumps(record)
+        if not client.set(key, body, ex=ttl, nx=True):
+            return None
+        _PROCESS_DISPLAY_LOCKS[target_display] = {
+            "owner_token": owner_token,
+            "depth": 1,
+            "holder_pid": record["holder_pid"],
+            "holder_starttime": record["holder_starttime"],
+        }
+        return owner_token
 
 
 def release_display_lock(owner_token: str | None, display: str | None = None) -> bool:
-    """Release the DISPLAY-scoped dispatch lock (send complete / step failed).
-    Returns True only if the lock still belongs to ``owner_token`` and was
-    removed. Never deletes a lock owned by another dispatch."""
+    """Release one acquisition level of the DISPLAY-scoped dispatch lock.
+    Returns True when this owner released a nested level or removed the Redis
+    claim. Never deletes a lock owned by another dispatch."""
     if not owner_token:
         return False
-    client = get_client()
-    key = _plan_lock_key(display)
-    while True:
-        with client.pipeline() as pipe:
-            try:
-                pipe.watch(key)
-                raw = pipe.get(key)
-                if not raw:
-                    pipe.unwatch()
-                    return False
+    if owner_token.startswith(_DISPLAY_LOCK_BYPASS_PREFIX):
+        return False
+    target_display = _display(display)
+    with _DISPLAY_LOCK_STATE_GUARD:
+        owned = _PROCESS_DISPLAY_LOCKS.get(target_display)
+        if owned and owned.get("owner_token") == owner_token:
+            depth = int(owned.get("depth") or 0)
+            if depth > 1:
+                owned["depth"] = depth - 1
+                return True
+        client = get_client()
+        key = _plan_lock_key(target_display)
+        while True:
+            with client.pipeline() as pipe:
                 try:
-                    record = json.loads(raw)
-                except json.JSONDecodeError:
-                    record = {}
-                if record.get("owner_token") != owner_token:
-                    pipe.unwatch()
-                    return False
-                pipe.multi()
-                pipe.delete(key)
-                removed = pipe.execute()[0]
-                return bool(removed)
-            except WatchError:
-                continue
+                    pipe.watch(key)
+                    raw = pipe.get(key)
+                    if not raw:
+                        pipe.unwatch()
+                        _PROCESS_DISPLAY_LOCKS.pop(target_display, None)
+                        return False
+                    try:
+                        record = json.loads(raw)
+                    except json.JSONDecodeError:
+                        record = {}
+                    if record.get("owner_token") != owner_token:
+                        pipe.unwatch()
+                        _PROCESS_DISPLAY_LOCKS.pop(target_display, None)
+                        return False
+                    pipe.multi()
+                    pipe.delete(key)
+                    removed = pipe.execute()[0]
+                    _PROCESS_DISPLAY_LOCKS.pop(target_display, None)
+                    return bool(removed)
+                except WatchError:
+                    continue
 
 
 def display_lock_held(display: str | None = None) -> bool:
     """True if the DISPLAY-scoped dispatch lock is currently held."""
     client = get_client()
     return bool(client.exists(_plan_lock_key(display)))
+
+
+def display_lock_record(display: str | None = None) -> Optional[Dict[str, Any]]:
+    client = get_client()
+    key = _plan_lock_key(display)
+    raw = client.get(key)
+    if not raw:
+        return None
+    try:
+        record = json.loads(raw)
+    except json.JSONDecodeError:
+        record = {"unparseable_value": raw}
+    if not isinstance(record, dict):
+        record = {"unparseable_value": raw}
+    record["ttl_seconds"] = client.ttl(key)
+    return record
+
+
+@contextmanager
+def allow_display_lock_bypass(display: str | None = None) -> Iterator[None]:
+    target_display = _display(display)
+    with _DISPLAY_LOCK_STATE_GUARD:
+        _DISPLAY_LOCK_BYPASSES[target_display] = (
+            _DISPLAY_LOCK_BYPASSES.get(target_display, 0) + 1
+        )
+    try:
+        yield
+    finally:
+        with _DISPLAY_LOCK_STATE_GUARD:
+            remaining = _DISPLAY_LOCK_BYPASSES.get(target_display, 0) - 1
+            if remaining > 0:
+                _DISPLAY_LOCK_BYPASSES[target_display] = remaining
+            else:
+                _DISPLAY_LOCK_BYPASSES.pop(target_display, None)
 
 
 # ---------------------------------------------------------------------------
