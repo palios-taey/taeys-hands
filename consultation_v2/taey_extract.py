@@ -784,12 +784,23 @@ class TaeyConsultExtractionSeat:
             'stream': False,
             'max_tokens': 900,
         }
+        request_body = _canonical_bytes(payload)
         request = urllib.request.Request(
             self.endpoint,
-            data=json.dumps(payload).encode('utf-8'),
+            data=request_body,
             headers={'Content-Type': 'application/json'},
         )
+        request_path = self.capture_root / f'request_{turn:04d}.json'
         raw_path = self.capture_root / f'generation_{turn:04d}.json'
+        try:
+            with request_path.open('xb') as handle:
+                handle.write(request_body)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as exc:
+            raise TaeyConsultExtractionError(
+                f'Taey inference request could not be made durable: {exc}'
+            ) from exc
         started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=600) as response:
@@ -817,7 +828,7 @@ class TaeyConsultExtractionSeat:
             'event': 'generation',
             'turn': turn,
             'elapsed_seconds': round(time.monotonic() - started, 3),
-            'request_sha256': hashlib.sha256(_canonical_bytes(payload)).hexdigest(),
+            'request_sha256': hashlib.sha256(request_body).hexdigest(),
             'response_sha256': hashlib.sha256(raw).hexdigest(),
         })
         return result
