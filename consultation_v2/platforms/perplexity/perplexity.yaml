@@ -271,6 +271,9 @@ tree:
       role: push button
       states_include:
       - showing
+    download_markdown_item:
+      name: Markdown
+      role: menu item
     rewrite_thread:
       name: Rewrite Thread
       role: push button

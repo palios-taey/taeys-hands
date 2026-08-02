@@ -6,6 +6,7 @@ in this package.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, PerplexityCompletionDetector
@@ -24,7 +26,6 @@ from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
-from consultation_v2.taey_extract import TaeyConsultExtractionError, extract_with_taey
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -4142,6 +4143,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
         message: str,
+        *,
+        source: str = 'perplexity_copy_response',
         **evidence: object,
     ) -> bool:
         step_evidence = dict(evidence)
@@ -4154,7 +4157,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             result,
             content,
             step='extract_primary',
-            source='perplexity_copy_response',
+            source=source,
             **step_evidence,
         ):
             return False
@@ -4164,6 +4167,251 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             **step_evidence,
         )
         return True
+
+    @staticmethod
+    def _markdown_download_dirs() -> tuple[Path, ...]:
+        candidates = [Path.home() / 'Downloads']
+        configured = str(os.environ.get('XDG_DOWNLOAD_DIR') or '').strip()
+        if configured:
+            candidates.append(Path(configured).expanduser())
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            marker = str(candidate)
+            if marker not in seen:
+                seen.add(marker)
+                unique.append(candidate)
+        return tuple(unique)
+
+    def _markdown_download_state(self) -> dict[str, tuple[int, int]]:
+        state: dict[str, tuple[int, int]] = {}
+        available = False
+        for directory in self._markdown_download_dirs():
+            if not directory.is_dir():
+                continue
+            available = True
+            for path in directory.glob('*.md'):
+                try:
+                    stat = path.stat()
+                except OSError as exc:
+                    raise OSError(
+                        f'could not stat Markdown download candidate {path}: {exc}'
+                    ) from exc
+                state[str(path)] = (int(stat.st_mtime_ns), int(stat.st_size))
+        if not available:
+            raise OSError(
+                'Perplexity Markdown download directory is unavailable: '
+                + ', '.join(str(path) for path in self._markdown_download_dirs())
+            )
+        return state
+
+    def _read_new_markdown_download(
+        self,
+        before: dict[str, tuple[int, int]],
+        *,
+        timeout: float = 15.0,
+    ) -> tuple[str, dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        stable: dict[str, tuple[int, int]] = {}
+        changed_paths: set[str] = set()
+        rejected_paths: set[str] = set()
+        while time.monotonic() < deadline:
+            ready: list[
+                tuple[
+                    Path,
+                    str,
+                    bytes,
+                    list[tuple[str, str]],
+                    list[tuple[str, str]],
+                ]
+            ] = []
+            for directory in self._markdown_download_dirs():
+                if not directory.is_dir():
+                    continue
+                for path in directory.glob('*.md'):
+                    try:
+                        stat = path.stat()
+                        current = (int(stat.st_mtime_ns), int(stat.st_size))
+                    except OSError as exc:
+                        raise OSError(
+                            f'could not inspect Markdown download candidate {path}: {exc}'
+                        ) from exc
+                    if before.get(str(path)) == current or current[1] <= 0:
+                        continue
+                    changed_paths.add(str(path))
+                    try:
+                        raw_bytes = path.read_bytes()
+                    except OSError as exc:
+                        raise OSError(
+                            f'could not read Markdown download candidate {path}: {exc}'
+                        ) from exc
+                    raw = raw_bytes.decode('utf-8', errors='replace').strip()
+                    definitions = re.findall(
+                        r'^\[\^([0-9]+)\]:\s+(.+?)\s*$',
+                        raw,
+                        flags=re.MULTILINE,
+                    )
+                    source_urls = [
+                        (source_id, value)
+                        for source_id, value in definitions
+                        if re.match(r'^https?://\S+$', value)
+                    ]
+                    if not raw or not definitions or not source_urls:
+                        stable[str(path)] = current
+                        rejected_paths.add(str(path))
+                        continue
+                    if stable.get(str(path)) == current:
+                        ready.append((
+                            path,
+                            raw,
+                            raw_bytes,
+                            definitions,
+                            source_urls,
+                        ))
+                    stable[str(path)] = current
+            if len(ready) > 1:
+                return '', {
+                    'download_error': 'multiple complete Markdown downloads appeared',
+                    'download_candidates': sorted(str(item[0]) for item in ready),
+                    'download_timeout_seconds': timeout,
+                }
+            if len(ready) == 1:
+                path, raw, raw_bytes, definitions, source_urls = ready[0]
+                body = '\n'.join(
+                    line
+                    for line in raw.splitlines()
+                    if not re.fullmatch(r'\[\^[0-9]+\]:\s+.+?\s*', line)
+                )
+                citation_ids = sorted({
+                    int(value)
+                    for value in re.findall(r'\[\^([0-9]+)\]', body)
+                })
+                source_ids = {int(item[0]) for item in definitions}
+                source_url_ids = {int(item[0]) for item in source_urls}
+                return raw, {
+                    'download_path': str(path),
+                    'download_characters': len(raw),
+                    'download_sha256': hashlib.sha256(raw_bytes).hexdigest(),
+                    'citation_ids': citation_ids,
+                    'markdown_source_ids': sorted(source_ids),
+                    'markdown_source_definition_count': len(definitions),
+                    'markdown_source_url_count': len({item[1] for item in source_urls}),
+                    'markdown_non_url_source_ids': sorted(source_ids - source_url_ids),
+                    'markdown_non_url_source_count': len(source_ids - source_url_ids),
+                }
+            time.sleep(0.25)
+        return '', {
+            'download_error': 'no unique complete Markdown download appeared',
+            'download_changed_candidates': sorted(changed_paths),
+            'download_rejected_candidates': sorted(rejected_paths),
+            'download_timeout_seconds': timeout,
+        }
+
+    def _extract_deep_research_markdown(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        try:
+            before = self._markdown_download_state()
+        except OSError as exc:
+            result.add_step(
+                'extract_primary',
+                False,
+                f'Perplexity Markdown download baseline failed: {exc}',
+                stop_condition='extraction_failed',
+                target_key='download_markdown_item',
+            )
+            return False
+
+        snap = self.runtime.snapshot()
+        trigger = self.find_last(snap, 'download_button')
+        if not trigger:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity Deep Research Download control not found',
+                stop_condition='extraction_failed',
+                target_key='download_button',
+                snapshot=snap.serializable(),
+            )
+            return False
+        scrolled_into_view = bool(self.runtime.scroll_element_into_view(trigger))
+        time.sleep(0.3)
+        if not self.runtime.click(trigger, strategy='coordinate_only'):
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity Deep Research Download control click failed',
+                stop_condition='extraction_failed',
+                target_key='download_button',
+                scrolled_into_view=scrolled_into_view,
+                snapshot=snap.serializable(),
+            )
+            return False
+
+        menu = self.runtime.wait_for_stable_menu_snapshot(
+            consecutive=1,
+            timeout=3.0,
+            interval=0.2,
+            anchor_key='download_markdown_item',
+            require_non_empty=True,
+        )
+        item = self.find_last(menu, 'download_markdown_item')
+        if not item:
+            self.runtime.press('Escape')
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity Download menu did not expose the Markdown item',
+                stop_condition='extraction_failed',
+                target_key='download_markdown_item',
+                menu_snapshot=menu.serializable(),
+            )
+            return False
+        if not self.runtime.click(item, strategy='coordinate_only'):
+            self.runtime.press('Escape')
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity Download -> Markdown item click failed',
+                stop_condition='extraction_failed',
+                target_key='download_markdown_item',
+                menu_snapshot=menu.serializable(),
+            )
+            return False
+
+        try:
+            content, download_evidence = self._read_new_markdown_download(before)
+        except OSError as exc:
+            content = ''
+            download_evidence = {'download_error': str(exc)}
+        finally:
+            self.runtime.press('Escape')
+            time.sleep(0.3)
+        if not content:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity Download -> Markdown produced no complete source-bearing file',
+                stop_condition='extraction_failed',
+                target_key='download_markdown_item',
+                scrolled_into_view=scrolled_into_view,
+                download_popup_escape_sent=True,
+                **download_evidence,
+            )
+            return False
+        return self._accept_extracted_content(
+            content,
+            request,
+            result,
+            f'Perplexity Deep Research extracted via Markdown download ({len(content)} chars)',
+            source='perplexity_deep_research_markdown_download',
+            target_key='download_markdown_item',
+            scrolled_into_view=scrolled_into_view,
+            download_popup_escape_sent=True,
+            **download_evidence,
+        )
 
     def extract_primary(
         self,
@@ -4178,61 +4426,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return False
 
         if is_deep_research:
-            display = self._display()
-            try:
-                extraction = extract_with_taey(
-                    platform=self.platform,
-                    display=display,
-                )
-            except TaeyConsultExtractionError as exc:
-                result.add_step(
-                    'extract_primary',
-                    False,
-                    f'Perplexity Taey consult extraction failed: {exc}',
-                    stop_condition='extraction_failed',
-                    target_key='taey_consult_extract',
-                    display=display,
-                )
-                return False
-            content = str(extraction.get('content') or '')
-            extraction_evidence = {
-                key: extraction.get(key)
-                for key in (
-                    'body_control',
-                    'body_characters',
-                    'source_count',
-                    'expected_source_count',
-                    'citation_ids',
-                    'missing',
-                    'missing_source_ids',
-                    'capture_root',
-                    'download_path',
-                    'download_sha256',
-                    'turns',
-                    'model',
-                    'endpoint',
-                    'tool_schema_sha256',
-                    'system_prompt_path',
-                    'system_prompt_sha256',
-                    'act_path',
-                    'actions',
-                    'neutral_reset',
-                )
-            }
-            return self._accept_extracted_content(
-                content,
-                request,
-                result,
-                (
-                    'Perplexity Deep Research extracted by the Taey consult seat '
-                    f"({extraction.get('body_characters')} body chars, "
-                    f"{extraction.get('source_count')}/"
-                    f"{extraction.get('expected_source_count')} sources)"
-                ),
-                target_key='taey_consult_extract',
-                display=display,
-                taey_consult_extract=extraction_evidence,
-            )
+            # The DR action-row Copy is only a thin summary; Markdown is the
+            # source-bearing report artifact and therefore the only valid DR path.
+            return self._extract_deep_research_markdown(request, result)
 
         self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
         snap = self.runtime.snapshot()
