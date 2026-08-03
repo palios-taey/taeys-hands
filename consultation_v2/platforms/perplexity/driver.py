@@ -2952,7 +2952,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         input_ready = self.find_first(snapshot, 'input') is not None
         attach_ready = self.find_first(snapshot, 'attach_trigger') is not None
         stop_absent = self.find_first(snapshot, 'stop_button') is None
-        report_absent = self.find_first(snapshot, 'copy_contents_button') is None
+        report_absent = self.find_first(snapshot, 'copy_button') is None
         ready = bool(
             normalized_current
             and normalized_current == normalized_target
