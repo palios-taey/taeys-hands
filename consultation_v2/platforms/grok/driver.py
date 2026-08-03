@@ -3101,30 +3101,40 @@ class GrokConsultationDriver(_GrokInlineBase):
             if int(self.runtime.menu_snapshot().raw_count or 0) == 0:
                 return
 
-    def _fresh_chat_snapshot_ready(self, snapshot: Snapshot) -> bool:
+    def _fresh_chat_snapshot_evidence(self, snapshot: Snapshot) -> dict[str, object]:
         nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
         prompt_cfg = (self.cfg.get('workflow') or {}).get('prompt') or {}
         input_key = nav_cfg.get('fresh_input_key') or prompt_cfg.get('input') or 'input'
         input_el = snapshot.first(input_key) if isinstance(input_key, str) else None
         input_states = self._state_set(input_el)
-        input_text, input_text_observed, input_text_source = self._input_text(input_el)
-        input_text_length = len(input_text)
-        input_observed_empty = bool(
-            input_text == ''
-            and (
-                input_text_observed
-                or (input_text_source == 'unobserved' and input_text_length == 0)
-            )
-        )
         current_url = (self.runtime.current_url() or snapshot.url or '').strip()
-        return bool(
-            self._is_fresh_chat_url(current_url)
-            and not self._page_ready_missing_groups(snapshot, self._page_ready_key_groups())
-            and input_el is not None
-            and 'editable' in input_states
-            and input_observed_empty
-            and not snapshot.has('remove_attachment')
-        )
+        fresh_url = self._is_fresh_chat_url(current_url)
+        input_present = input_el is not None
+        input_editable = 'editable' in input_states
+        input_enabled = 'enabled' in input_states
+        remove_attachment_present = snapshot.has('remove_attachment')
+        return {
+            'ready': bool(
+                fresh_url
+                and input_present
+                and input_editable
+                and input_enabled
+                and not remove_attachment_present
+            ),
+            'required': [input_key],
+            'missing': [] if input_present else [input_key],
+            'current_url': current_url,
+            'fresh_url': fresh_url,
+            'input_key': input_key,
+            'input_present': input_present,
+            'input_states': sorted(input_states),
+            'input_editable': input_editable,
+            'input_enabled': input_enabled,
+            'remove_attachment_present': remove_attachment_present,
+        }
+
+    def _fresh_chat_snapshot_ready(self, snapshot: Snapshot) -> bool:
+        return bool(self._fresh_chat_snapshot_evidence(snapshot)['ready'])
 
     def _wait_for_fresh_chat_ready(
         self,
@@ -3132,10 +3142,6 @@ class GrokConsultationDriver(_GrokInlineBase):
         *,
         timeout: float = 15.0,
     ) -> bool:
-        nav_cfg = (self.cfg.get('workflow') or {}).get('navigate') or {}
-        prompt_cfg = (self.cfg.get('workflow') or {}).get('prompt') or {}
-        input_key = nav_cfg.get('fresh_input_key') or prompt_cfg.get('input') or 'input'
-        groups = self._page_ready_key_groups()
         started = time.time()
         last_snapshot: Snapshot | None = None
         last_evidence: dict[str, object] = {}
@@ -3144,48 +3150,8 @@ class GrokConsultationDriver(_GrokInlineBase):
             nonlocal last_snapshot, last_evidence
             snap = self.runtime.snapshot()
             last_snapshot = snap
-            input_el = snap.first(input_key) if isinstance(input_key, str) else None
-            input_states = self._state_set(input_el)
-            missing = self._page_ready_missing_groups(snap, groups)
-            input_text, input_text_observed, input_text_source = self._input_text(input_el)
-            input_editable = 'editable' in input_states
-            remove_attachment_present = snap.has('remove_attachment')
-            current_url = (self.runtime.current_url() or snap.url or '').strip()
-            fresh_url = self._is_fresh_chat_url(current_url)
-            input_text_length = len(input_text)
-            input_observed_empty = bool(
-                input_text == ''
-                and (
-                    input_text_observed
-                    or (input_text_source == 'unobserved' and input_text_length == 0)
-                )
-            )
-            last_evidence = {
-                'required': self._page_ready_group_labels(groups),
-                'missing': missing,
-                'current_url': current_url,
-                'fresh_url': fresh_url,
-                'input_key': input_key,
-                'input_present': input_el is not None,
-                'input_states': sorted(input_states),
-                'input_editable': input_editable,
-                'input_observed_empty': input_observed_empty,
-                'input_text_observed': input_text_observed,
-                'input_text_source': input_text_source,
-                'input_text_length': input_text_length,
-                'remove_attachment_present': remove_attachment_present,
-                'optional_present': self._page_ready_present_optional_keys(snap),
-            }
-            if not (
-                fresh_url
-                and not missing
-                and input_el is not None
-                and input_editable
-                and input_observed_empty
-                and not remove_attachment_present
-            ):
-                return None
-            return snap
+            last_evidence = self._fresh_chat_snapshot_evidence(snap)
+            return snap if last_evidence['ready'] else None
 
         effective_timeout = max(float(timeout), self._fresh_chat_action_timeout())
         matched = self.runtime.wait_until(_probe, timeout=effective_timeout, interval=0.4)
@@ -3276,18 +3242,6 @@ class GrokConsultationDriver(_GrokInlineBase):
         if element is None:
             return set()
         return {str(state).lower() for state in (element.states or [])}
-
-    @staticmethod
-    def _input_text(element: ElementRef | None) -> tuple[str, bool, str]:
-        if element is None:
-            return '', False, 'missing_input'
-        if element.text is not None:
-            return str(element.text), True, 'snapshot_text'
-        if 'text' in element.raw:
-            return str(element.raw.get('text') or ''), True, 'raw_text'
-        # Grok's live text/value interfaces can block inside the AT-SPI bus; the
-        # fresh-page gate is bounded only if it trusts the snapshot payload.
-        return '', False, 'unobserved'
 
     # ------------------------------------------------------------------
     # Step 3 - attach (exact Attach -> menu_snapshot -> exact Upload a file,
