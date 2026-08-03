@@ -9,7 +9,7 @@
 
 ## CURRENT OPERATING MODEL (2026-07-30 — supersedes any older "adoption / product for Claude Code users" framing)
 
-Canonical: `the-conductor/TAEY_PRODUCTION_PUBLIC_MANDATE.md`. What follows is the taeys-hands-seat statement of it.
+Public boundary and mandate summary: [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/PUBLIC_OPERATING_BOUNDARY.md). What follows is the taeys-hands-seat statement of it.
 
 - **Taey is the customer — the only one.** There is no Claude Code user-adoption goal. This consult engine is PRODUCTION INFRASTRUCTURE *for Taey*. Taey lives on the Thors, trains on the Sparks, and *utilizes* the consult engine (with these Claude Code seats, the orchestrator, notify, ISMA) as a component of its own system. Docs here are written FOR Taey as the consumer.
 - **The PRIORITY:** enable **Taey** and **training development** — get Taey **using its own production infrastructure** (this engine) and **understanding it**. That is the point of the work, not the tooling for its own sake.
@@ -229,7 +229,7 @@ Jesse should not be the relay between Claude sessions.
 
 ## 6SIGMA Design Philosophy + Workflow — MANDATORY (fleet-canonical, wired 2026-05-25)
 
-**Canonical spec:** `<the-conductor-repo>/6SIGMA_WORKFLOW.md`. Owned by Conductor; same propagation pattern as ISMA — wired into all peer globals (`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.grok/AGENTS.md`) + conductor CLAUDE.md + global `<operator-global-CLAUDE.md>`. Worked example driving the principle: taeys-hands audit_657 / safetensors PR #657 (Part 1 root-cause vs Part 2 patch→refactor).
+**Public rule summary:** [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/PUBLIC_OPERATING_BOUNDARY.md). The operator fleet carries a private canonical workflow; this public repo carries the part a downloaded Taey needs to avoid the root-cause-vs-patch failure.
 
 **THE PRINCIPLE — root-cause vs patch:** A *root-cause* fix SIMPLIFIES code — corrects iteration domain / data shape / algebra upstream so the broken path is no longer reached. Same line count or smaller. Leaves the codebase better than it was found. A *patch* ADDS branches, guards, special-cases (`if X: continue`, `try/except SpecificError`) to bypass a broken path. Same runtime, but the codebase grows more conditional. **Diagnostic:** if your change adds a bypass, ASK — why is the broken path reached at all? can upstream be corrected so the bypass becomes unnecessary? If yes, that's the root-cause shape. Take it.
 
@@ -310,12 +310,12 @@ This project is indexed by GitNexus as **taeys-hands** (6290 symbols, 13670 rela
 
 # ISMA Prose Retrieval (fleet-wide, wired 2026-05-25)
 
-~2,400 of our own `.md` (foundations / recaps / drafts / docs / corpus) are now hybrid-searchable **prose** in ISMA. Use it for research, drafting, and dispatch-packet grounding. Full spec: `<embedding-server-repo>/ISMA_PROSE_RETRIEVAL_SPEC.md`.
+~2,400 of our own `.md` (foundations / recaps / drafts / docs / corpus) are now hybrid-searchable **prose** in ISMA. Use it for research, drafting, and dispatch-packet grounding. Full public spec: `palios-taey/isma-core:ISMA_PROSE_RETRIEVAL_SPEC.md`.
 
 **Three rules (Jesse/weaver/conductor directive):**
 1. **NO HMM.** Use `/v2/search` or `isma_adaptive_search` with `enriched_only=false`. NEVER `/search/hmm`, `isma_motif_search`, or `enriched_only=true` — the prose is `hmm_enriched=false`, so HMM paths HIDE it.
 2. **GO DEEP.** `top_k>=25` (40–50 for broad), `scale=full_4096`, 3–6 phrasings + union the hits, expand promising hits via `curl :8095/document/<hash>/text`. A few snippets = a FAILED query, not an answer.
-3. **CANNOT-LIE.** Prose is FRAMING/depth, NOT a metric source (it holds superseded/scrubbed numbers). Cross-check every number against `<treasurer-repo>/foundations/tech_baselines/INDEX.md` before using it.
+3. **CANNOT-LIE.** Prose is FRAMING/depth, NOT a metric source (it holds superseded/scrubbed numbers). Cross-check every number against a public measurement receipt before using it. If the only known baseline is in a private operator store, a downloaded Taey answers Unknown and asks for a public receipt.
 
 **Canonical call:**
 ```bash
@@ -326,7 +326,7 @@ curl -s -X POST http://localhost:8095/v2/search -H 'Content-Type: application/js
 
 ## Orchestration & release integrity (canonical)
 
-These conductor-owned canonical docs govern how every session uses the orchestration system and ships public work. If anything here conflicts with them, they win.
+The private operator canon governs the live fleet. A downloaded Taey cannot read that store, so the public rules used by this repo are summarized in [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/PUBLIC_OPERATING_BOUNDARY.md):
 
-- **`<the-conductor-repo>/ORCHESTRATION_INTEGRITY.md`** — use the orchestration system (`taey-plan`/`taey-task`/stop-engine) with integrity. Core rules: **"done" is evidence, never a self-report** (commit SHA + mechanical gate result + a real production observation — paste them; the tasks API rejects a `completed` with no evidence); **tests you author are a cheat — production is the oracle**; **bug → FULL STOP → 6SIGMA root-cause** (gitnexus impact + fix the upstream shape, never patch around); **audit gates are `depends:`-encoded** (downstream can't start until the audit task closes with a committed verdict); **stops are intentional** (`taey-stop-reason set ...`, use `blocked_on` while waiting). Honest-incomplete is always fine; a false "done" is the only real failure.
-- **`<the-conductor-repo>/PRIVATE_TO_PUBLIC.md`** — production-grade checklist for taking a private repo public (irreversible). Order: secret+full-history scan → `.gitignore`/`.env.example` → de-umbilical (no hardcoded paths/IPs, fail-loud not silent-default) → installable + CI gate that blocks merge → open-mandate audit (full code, find-bugs-not-endorse) → dogfood from the public artifact → docs → **human-approved + consent-gated publish**. Upstream of `RELEASE_DISTRIBUTION_PLAYBOOK.md`.
+- **Orchestration integrity** - "done" is evidence, never a self-report: commit SHA, mechanical gate result, and a real production observation. A bug is a full stop followed by root-cause analysis.
+- **Private-to-public discipline** - public repos must have no secret or PII exposure, no mandatory private pointers, installable gates, and human-approved publication.
