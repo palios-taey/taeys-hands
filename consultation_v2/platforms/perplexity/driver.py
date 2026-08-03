@@ -4256,7 +4256,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                         for source_id, value in definitions
                         if re.match(r'^https?://\S+$', value)
                     ]
-                    if not raw or not definitions or not source_urls:
+                    if not raw or not definitions:
                         stable[str(path)] = current
                         rejected_paths.add(str(path))
                         continue
@@ -4324,6 +4324,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             )
             return False
 
+        scrolled_to_bottom = bool(
+            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+        )
         snap = self.runtime.snapshot()
         trigger = self.find_last(snap, 'download_button')
         if not trigger:
@@ -4333,6 +4336,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 'Perplexity Deep Research Download control not found',
                 stop_condition='extraction_failed',
                 target_key='download_button',
+                scrolled_to_bottom=scrolled_to_bottom,
                 snapshot=snap.serializable(),
             )
             return False
@@ -4345,6 +4349,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 'Perplexity Deep Research Download control click failed',
                 stop_condition='extraction_failed',
                 target_key='download_button',
+                scrolled_to_bottom=scrolled_to_bottom,
                 scrolled_into_view=scrolled_into_view,
                 snapshot=snap.serializable(),
             )
@@ -4396,6 +4401,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 'Perplexity Download -> Markdown produced no complete source-bearing file',
                 stop_condition='extraction_failed',
                 target_key='download_markdown_item',
+                scrolled_to_bottom=scrolled_to_bottom,
                 scrolled_into_view=scrolled_into_view,
                 download_popup_escape_sent=True,
                 **download_evidence,
@@ -4408,6 +4414,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             f'Perplexity Deep Research extracted via Markdown download ({len(content)} chars)',
             source='perplexity_deep_research_markdown_download',
             target_key='download_markdown_item',
+            scrolled_to_bottom=scrolled_to_bottom,
             scrolled_into_view=scrolled_into_view,
             download_popup_escape_sent=True,
             **download_evidence,
