@@ -691,6 +691,8 @@ class TaeyConsultExtractionSeat:
             )
         self.body = ''
         self.body_control = ''
+        self.extractions: list[dict[str, object]] = []
+        self.extraction_steps: list[dict[str, object]] = []
         self.sources: list[dict[str, object]] = []
         self.expected_source_count = 0
         self.body_citation_ids: list[int] = []
@@ -1341,7 +1343,7 @@ class TaeyConsultExtractionSeat:
     def _required_action(self) -> dict[str, object]:
         if self.full_consult and not self.consult_completed:
             return self._required_full_consult_action()
-        if self.full_consult:
+        if self.full_consult or self.platform == 'claude':
             return self._required_full_consult_extraction_action()
         return self._required_extraction_action()
 
@@ -2640,19 +2642,95 @@ class TaeyConsultExtractionSeat:
             f'changed candidates={sorted(changed_paths)}'
         )
 
+    def _extract_claude_artifacts(self) -> None:
+        from consultation_v2.platforms.claude.driver import (
+            ClaudeConsultationDriver,
+        )
+        from consultation_v2.types import ConsultationRequest
+
+        expected_names = ClaudeConsultationDriver._artifact_names_from_response(
+            self.body
+        )
+        artifact_expected = bool(
+            expected_names
+            or ClaudeConsultationDriver._response_expects_artifact(self.body)
+        )
+        if not artifact_expected:
+            return
+
+        driver = ClaudeConsultationDriver()
+        driver.runtime = self.runtime
+        current_url = self._current_url()
+        if not driver._is_answer_thread_url(current_url):
+            raise TaeyConsultExtractionError(
+                'refusing Claude artifact extraction outside an answer thread; '
+                f'current_url={current_url!r}'
+            )
+        request = ConsultationRequest(
+            platform=self.platform,
+            message=self.framing_prompt if self.full_consult else '',
+            attachments=(
+                [str(self.attachment_path)]
+                if self.full_consult and self.attachment_path is not None
+                else []
+            ),
+        )
+        result = driver.result(request)
+        result.response_text = self.body
+        result.session_url_after = current_url
+        extracted = driver.extract_additional(request, result)
+        self.extraction_steps.extend(
+            step.serializable()
+            for step in result.steps
+        )
+        if not extracted:
+            failure = next(
+                (
+                    step.message
+                    for step in reversed(result.steps)
+                    if not step.success and step.message
+                ),
+                'Claude driver returned no artifact extraction evidence',
+            )
+            raise TaeyConsultExtractionError(failure)
+        self.extractions.extend(
+            artifact.serializable()
+            for artifact in result.extractions
+        )
+
+    def _assembled_response_content(self) -> str:
+        sections = [self.body.rstrip()]
+        for artifact in self.extractions:
+            name = str(artifact.get('name') or 'claude_artifact')
+            kind = str(artifact.get('kind') or 'artifact')
+            content = str(artifact.get('content') or '').strip()
+            if not content:
+                raise TaeyConsultExtractionError(
+                    f'Claude extracted {kind} {name!r} with empty content'
+                )
+            sections.append(
+                f'## Extracted {kind}: `{name}`\n\n{content}'
+            )
+        return '\n\n'.join(sections)
+
     def _finish(self) -> dict[str, object]:
         if not self.body:
             raise TaeyConsultExtractionError(
                 'Taey attempted finish before a full report body was captured'
             )
-        if self.full_consult:
-            return {
+        if self.full_consult or self.platform == 'claude':
+            content = self._assembled_response_content()
+            result: dict[str, object] = {
                 'ok': True,
-                'content': self.body,
+                'content': content,
+                'content_characters': len(content),
+                'content_sha256': _sha256_text(content),
                 'body': self.body,
                 'body_control': self.body_control,
                 'body_characters': len(self.body),
                 'body_sha256': _sha256_text(self.body),
+                'extractions': list(self.extractions),
+                'extraction_steps': list(self.extraction_steps),
                 'sources': [],
                 'source_count': 0,
                 'expected_source_count': 0,
@@ -2665,7 +2743,9 @@ class TaeyConsultExtractionSeat:
                 'download_sha256': None,
                 'markdown_source_conflicts': [],
                 'markdown_source_definition_count': 0,
-                'consultation': {
+            }
+            if self.full_consult:
+                result['consultation'] = {
                     'platform': self.platform,
                     'attachment_path': str(self.attachment_path),
                     'attachment_sha256': self.attachment_sha256,
@@ -2698,8 +2778,8 @@ class TaeyConsultExtractionSeat:
                         self.session_url_after
                     ),
                     'completion': dict(self.completion_evidence),
-                },
-            }
+                }
+            return result
         if self.expected_source_count <= 0:
             raise TaeyConsultExtractionError(
                 'Taey attempted finish before clicking the N sources control'
@@ -3262,7 +3342,9 @@ class TaeyConsultExtractionSeat:
             self.body = body
             self.body_control = str(control['control_name'])
             self.body_citation_ids = _citation_ids(body)
-            return {
+            if self.platform == 'claude':
+                self._extract_claude_artifacts()
+            result = {
                 'ok': True,
                 'action': action,
                 **control,
@@ -3271,6 +3353,13 @@ class TaeyConsultExtractionSeat:
                 'body_characters': len(body),
                 'body_sha256': _sha256_text(body),
             }
+            if self.extractions:
+                result.update(
+                    capture='body_and_artifacts',
+                    extraction_count=len(self.extractions),
+                    extractions=list(self.extractions),
+                )
+            return result
         return self._finish()
 
     def _execute(self, arguments: dict[str, object]) -> dict[str, object]:
@@ -3282,7 +3371,7 @@ class TaeyConsultExtractionSeat:
                 contains,
                 role,
             )
-        elif self.full_consult:
+        elif self.full_consult or self.platform == 'claude':
             result = self._execute_full_consult_extraction_action(
                 action,
                 name,
@@ -3351,6 +3440,18 @@ class TaeyConsultExtractionSeat:
                 'that submission and refuses any other thread. Finish only after '
                 'the configured copy_response action returns a non-empty body.'
             )
+        elif self.platform == 'claude':
+            task = (
+                f'Extract the completed Claude answer on consult display '
+                f'{self.display}. Use consult_extract_action only, one action per '
+                'turn. Use only the platform-agnostic copy_response semantic name '
+                'supplied by required_next_action. The harness resolves it through '
+                'the Claude YAML, copies the answer cover note, and invokes the '
+                'Claude driver artifact extraction path when that note indicates '
+                'an artifact. Finish only after the configured copy_response '
+                'action returns a non-empty body and any indicated artifact has '
+                'been captured.'
+            )
         else:
             task = (
                 f'Extract the completed Perplexity Deep Research answer on consult '
@@ -3363,7 +3464,7 @@ class TaeyConsultExtractionSeat:
             'coordinates. Follow required_next_action exactly whenever the harness '
             'returns it.'
         )
-        if not self.full_consult:
+        if not self.full_consult and self.platform == 'perplexity':
             task += (
                 ' Do not finish until citation_ids is non-empty, source_count equals '
                 'expected_source_count, and missing=[].'
@@ -3483,6 +3584,8 @@ class TaeyConsultExtractionSeat:
                     result = self._finish()
                     result['finish_reason'] = (
                         'deterministic_after_complete_source_capture'
+                        if self.platform == 'perplexity'
+                        else 'deterministic_after_complete_response_capture'
                     )
                 result['neutral_reset'] = self._reset_to_neutral()
                 result.update(
