@@ -2284,6 +2284,60 @@ class TaeyConsultExtractionSeat:
                 f'fresh_thread_opened={self.fresh_thread_opened}'
             )
 
+    def _perplexity_deep_research_completion_surface(
+        self,
+    ) -> dict[str, object] | None:
+        from consultation_v2.platforms.routing import (
+            find_firefox_for_platform,
+        )
+        from consultation_v2.tree import find_elements as raw_find_elements
+
+        spec = self.element_map.get('download_button')
+        if not isinstance(spec, dict):
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research has no configured Download control'
+            )
+        exact_names = self._spec_exact_names(spec)
+        role = str(spec.get('role') or '')
+        if not exact_names or not role:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research Download control is not exact'
+            )
+        firefox = find_firefox_for_platform(self.platform)
+        if firefox is None:
+            raise TaeyConsultExtractionError(
+                'could not scan the Perplexity Deep Research report surface'
+            )
+        tree = self.cfg.get('tree') or {}
+        fence_after = (
+            list(tree.get('fence_after') or [])
+            if isinstance(tree, dict)
+            else []
+        )
+        matches = [
+            element
+            for element in raw_find_elements(firefox, fence_after=fence_after)
+            if str(element.get('name') or '') in exact_names
+            and str(element.get('role') or '') == role
+        ]
+        if len(matches) > 1:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research exposed multiple exact Download '
+                f'controls; count={len(matches)}'
+            )
+        if not matches:
+            return None
+        found = matches[0]
+        return {
+            'node': found.get('atspi_obj'),
+            'name': str(found.get('name') or ''),
+            'role': str(found.get('role') or ''),
+            'states': set(found.get('states') or []),
+            'element_key': 'download_button',
+            'scope': 'raw_snapshot',
+            'semantic_step': 'copy_response',
+        }
+
     def _wait_for_full_consult_completion(self) -> dict[str, object]:
         started = time.monotonic()
         deadline = started + self.completion_timeout
@@ -2308,11 +2362,18 @@ class TaeyConsultExtractionSeat:
                 scroll=False,
             )
             stop_seen = stop_seen or bool(stop)
-            response_control = self._find_semantic_control(
-                'copy_response',
-                must_show=False,
-                scroll=False,
-            )
+            if self.platform == 'perplexity':
+                response_control = (
+                    self._perplexity_deep_research_completion_surface()
+                    if stop is None
+                    else None
+                )
+            else:
+                response_control = self._find_semantic_control(
+                    'copy_response',
+                    must_show=False,
+                    scroll=False,
+                )
             if response_control is not None:
                 last_response_control = response_control
             landed = (
@@ -2642,6 +2703,111 @@ class TaeyConsultExtractionSeat:
             f'changed candidates={sorted(changed_paths)}'
         )
 
+    def _extract_perplexity_deep_research(self) -> dict[str, object]:
+        from consultation_v2.platforms.perplexity.driver import (
+            PerplexityConsultationDriver,
+        )
+        from consultation_v2.types import ConsultationRequest
+
+        self._assert_bound_answer_thread()
+        driver = PerplexityConsultationDriver()
+        driver.runtime = self.runtime
+        current_url = self._current_url()
+        request = ConsultationRequest(
+            platform=self.platform,
+            message=self.framing_prompt,
+            attachments=(
+                [str(self.attachment_path)]
+                if self.attachment_path is not None
+                else []
+            ),
+            session_url=current_url,
+        )
+        result = driver.result(request)
+        result.session_url_after = current_url
+        extracted = driver.extract_primary(request, result)
+        serialized_steps = [step.serializable() for step in result.steps]
+        self.extraction_steps.extend(serialized_steps)
+        if not extracted or not result.response_text.strip():
+            failure = next(
+                (
+                    step.message
+                    for step in reversed(result.steps)
+                    if not step.success and step.message
+                ),
+                'Perplexity driver returned no Deep Research Markdown',
+            )
+            raise TaeyConsultExtractionError(failure)
+        success = next(
+            (
+                step
+                for step in reversed(result.steps)
+                if step.step == 'extract_primary' and step.success
+            ),
+            None,
+        )
+        if success is None:
+            raise TaeyConsultExtractionError(
+                'Perplexity driver returned content without extraction evidence'
+            )
+        download_path = str(success.evidence.get('download_path') or '')
+        download_sha256 = str(success.evidence.get('download_sha256') or '')
+        if not download_path or not download_sha256:
+            raise TaeyConsultExtractionError(
+                'Perplexity driver returned Deep Research content without '
+                'download provenance'
+            )
+
+        raw = result.response_text.strip()
+        body = _without_markdown_source_definitions(raw)
+        sources, conflicts, definition_count = _markdown_sources(raw)
+        citation_ids = _citation_ids(body)
+        source_ids = {
+            int(source['index'])
+            for source in sources
+        }
+        missing_source_ids = sorted(set(citation_ids) - source_ids)
+        if not body:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research Markdown has no report body'
+            )
+        if not citation_ids:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research Markdown has no source citations'
+            )
+        if not sources:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research Markdown has no source definitions'
+            )
+        if missing_source_ids:
+            raise TaeyConsultExtractionError(
+                'Perplexity Deep Research Markdown is missing cited source '
+                f'definitions {missing_source_ids}'
+            )
+
+        self.body = body
+        self.body_control = 'Download -> Markdown'
+        self.body_citation_ids = citation_ids
+        self.sources = sources
+        self.expected_source_count = len(sources)
+        self.markdown_sources = sources
+        self.markdown_source_conflicts = conflicts
+        self.markdown_source_definition_count = definition_count
+        self.download_path = download_path
+        self.download_sha256 = download_sha256
+        return {
+            'capture': 'body',
+            'body_control': self.body_control,
+            'body_characters': len(body),
+            'body_sha256': _sha256_text(body),
+            'source_count': len(sources),
+            'citation_ids': citation_ids,
+            'missing_source_ids': missing_source_ids,
+            'download_path': download_path,
+            'download_sha256': download_sha256,
+            'driver_steps': serialized_steps,
+        }
+
     def _extract_claude_artifacts(self) -> None:
         from consultation_v2.platforms.claude.driver import (
             ClaudeConsultationDriver,
@@ -2797,7 +2963,45 @@ class TaeyConsultExtractionSeat:
                 'Taey attempted finish before a full report body was captured'
             )
         if self.full_consult or self.platform == 'claude':
-            content = self._assembled_response_content()
+            source_bearing = self.full_consult and self.platform == 'perplexity'
+            citation_ids = sorted(
+                set(self.body_citation_ids) | set(_citation_ids(self.body))
+            )
+            missing_source_ids: list[int] = []
+            if source_bearing:
+                if self.expected_source_count <= 0 or not self.sources:
+                    raise TaeyConsultExtractionError(
+                        'Perplexity Deep Research finish has no Markdown sources'
+                    )
+                if len(self.sources) != self.expected_source_count:
+                    raise TaeyConsultExtractionError(
+                        'Perplexity Deep Research finish has '
+                        f'{len(self.sources)}/{self.expected_source_count} sources'
+                    )
+                if not citation_ids:
+                    raise TaeyConsultExtractionError(
+                        'Perplexity Deep Research finish has no source citations'
+                    )
+                source_ids = {
+                    int(source['index'])
+                    for source in self.sources
+                }
+                missing_source_ids = sorted(set(citation_ids) - source_ids)
+                if missing_source_ids:
+                    raise TaeyConsultExtractionError(
+                        'Perplexity Deep Research finish is missing cited sources '
+                        f'{missing_source_ids}'
+                    )
+                content = (
+                    self.body.rstrip()
+                    + '\n\n## Sources\n\n'
+                    + '\n'.join(
+                        f"{item['index']}. {item['url'] or item['title']}"
+                        for item in self.sources
+                    )
+                )
+            else:
+                content = self._assembled_response_content()
             result: dict[str, object] = {
                 'ok': True,
                 'content': content,
@@ -2809,18 +3013,28 @@ class TaeyConsultExtractionSeat:
                 'body_sha256': _sha256_text(self.body),
                 'extractions': list(self.extractions),
                 'extraction_steps': list(self.extraction_steps),
-                'sources': [],
-                'source_count': 0,
-                'expected_source_count': 0,
-                'citation_ids': _citation_ids(self.body),
-                'missing': [],
-                'missing_source_ids': [],
+                'sources': list(self.sources) if source_bearing else [],
+                'source_count': len(self.sources) if source_bearing else 0,
+                'expected_source_count': (
+                    self.expected_source_count if source_bearing else 0
+                ),
+                'citation_ids': citation_ids,
+                'missing': missing_source_ids,
+                'missing_source_ids': missing_source_ids,
                 'capture_root': str(self.capture_root),
                 'actions': list(self.actions),
-                'download_path': None,
-                'download_sha256': None,
-                'markdown_source_conflicts': [],
-                'markdown_source_definition_count': 0,
+                'download_path': self.download_path or None,
+                'download_sha256': self.download_sha256 or None,
+                'markdown_source_conflicts': (
+                    list(self.markdown_source_conflicts)
+                    if source_bearing
+                    else []
+                ),
+                'markdown_source_definition_count': (
+                    self.markdown_source_definition_count
+                    if source_bearing
+                    else 0
+                ),
             }
             if self.full_consult:
                 result['consultation'] = {
@@ -3353,11 +3567,19 @@ class TaeyConsultExtractionSeat:
             }
         if action == 'wait_complete':
             evidence = self._wait_for_full_consult_completion()
-            self.consult_completed = True
             self.session_url_after = str(evidence['session_url_after'])
+            extraction: dict[str, object] = {}
+            if self.platform == 'perplexity':
+                extraction = self._extract_perplexity_deep_research()
+            self.consult_completed = True
             self.completion_evidence = evidence
             self.found_controls.clear()
-            return {'ok': True, 'action': action, **evidence}
+            return {
+                'ok': True,
+                'action': action,
+                **evidence,
+                **extraction,
+            }
         raise TaeyConsultExtractionError(
             f'action {action!r} is unavailable before consult completion'
         )
