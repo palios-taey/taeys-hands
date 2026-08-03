@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import time
 from typing import List, Tuple
 
@@ -55,6 +56,20 @@ _EXT_LANG = {
     '.yaml': 'yaml', '.yml': 'yaml', '.json': 'json', '.md': 'markdown',
     '.sh': 'bash', '.toml': 'toml',
 }
+
+_NAMED_INPUT_EXTENSIONS = frozenset({
+    '.csv', '.json', '.jsonl', '.log', '.md', '.py', '.sh', '.toml',
+    '.tsv', '.txt', '.yaml', '.yml',
+})
+_BACKTICK_VALUE = re.compile(r'`([^`]+)`')
+_BARE_INPUT_PATH = re.compile(
+    r'(?<![\w:/.-])('
+    r'(?:~?/|\.{1,2}/)?(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+/?'
+    r'|[A-Za-z0-9_.-]+\.(?:csv|json|jsonl|log|md|py|sh|toml|tsv|txt|yaml|yml)'
+    r'|[A-Za-z0-9_.-]+/'
+    r')(?![\w/.-])',
+    re.IGNORECASE,
+)
 
 
 class IdentityError(RuntimeError):
@@ -110,6 +125,191 @@ def _read_caller_file(path: str) -> Tuple[str, str]:
     return data.decode('utf-8', errors='replace'), digest
 
 
+def _expand_caller_attachments(
+    caller_attachments: List[str],
+) -> Tuple[List[Tuple[str, str]], List[str]]:
+    expanded: List[Tuple[str, str]] = []
+    attached_directories: List[str] = []
+    for attachment in caller_attachments:
+        if not os.path.isdir(attachment):
+            expanded.append((attachment, os.path.basename(attachment)))
+            continue
+        root = os.path.normpath(attachment)
+        root_name = os.path.basename(root)
+        walk_errors: List[OSError] = []
+        directory_files: List[Tuple[str, str]] = []
+        for current, dirnames, filenames in os.walk(
+            root,
+            onerror=walk_errors.append,
+        ):
+            dirnames.sort()
+            for filename in sorted(filenames):
+                path = os.path.join(current, filename)
+                if not os.path.isfile(path):
+                    continue
+                relative = os.path.relpath(path, root).replace(os.sep, '/')
+                directory_files.append((path, f'{root_name}/{relative}'))
+        if walk_errors:
+            detail = '; '.join(str(exc) for exc in walk_errors)
+            raise IdentityError(
+                f"Caller attachment directory at {attachment!r} is unreadable: "
+                f"{detail}. Consultation halted (no partial directory bundle)."
+            )
+        if not directory_files:
+            raise IdentityError(
+                f"Caller attachment directory at {attachment!r} contains no "
+                "regular files. Consultation halted (no empty directory bundle)."
+            )
+        expanded.extend(directory_files)
+        attached_directories.append(attachment)
+    return expanded, attached_directories
+
+
+def _normalized_manifest_input(value: str) -> str | None:
+    candidate = value.strip().strip('`\'"*')
+    candidate = candidate.rstrip('.,;:)')
+    if not candidate or candidate.lower().startswith(('http://', 'https://')):
+        return None
+    is_directory = candidate.endswith('/')
+    normalized = candidate.replace('\\', '/').rstrip('/')
+    if not normalized:
+        return None
+    extension = os.path.splitext(os.path.basename(normalized))[1].lower()
+    if extension not in _NAMED_INPUT_EXTENSIONS and not candidate.endswith('/'):
+        return None
+    return normalized + '/' if is_directory else normalized
+
+
+def _available_context_named_inputs(content: str) -> set[str]:
+    lines = content.splitlines()
+    named: set[str] = set()
+    first_content = next(
+        (index for index, line in enumerate(lines) if line.strip()),
+        None,
+    )
+    if first_content is None or lines[first_content].strip() != '---':
+        return named
+    front_matter_end = next(
+        (
+            index
+            for index in range(first_content + 1, len(lines))
+            if lines[index].strip() == '---'
+        ),
+        None,
+    )
+    if front_matter_end is None:
+        return named
+    front_matter = lines[first_content + 1:front_matter_end]
+    for index, line in enumerate(front_matter):
+        header = re.match(r'^(\s*)available_context_inventory\s*:', line, re.IGNORECASE)
+        if header is None:
+            continue
+        header_indent = len(header.group(1))
+        for inventory_line in front_matter[index + 1:]:
+            stripped = inventory_line.strip()
+            indent = len(inventory_line) - len(inventory_line.lstrip())
+            if stripped and indent <= header_indent and not stripped.startswith('-'):
+                break
+            if (
+                not re.search(r'\bincluded\b', stripped, re.IGNORECASE)
+                or re.search(r'\bexcluded\b', stripped, re.IGNORECASE)
+                or re.search(r'\bincluded\s+(?:in\s+)?§', stripped, re.IGNORECASE)
+            ):
+                continue
+            candidates = list(_BACKTICK_VALUE.findall(stripped))
+            without_urls = re.sub(r'https?://\S+', '', stripped, flags=re.IGNORECASE)
+            candidates.extend(_BARE_INPUT_PATH.findall(without_urls))
+            for candidate in candidates:
+                normalized = _normalized_manifest_input(candidate)
+                if normalized:
+                    named.add(normalized)
+    return named
+
+
+def _panel_named_inputs(content: str) -> set[str]:
+    named: set[str] = set()
+    for match in re.finditer(r'^\s*panel inputs\b[^\r\n]*', content, re.IGNORECASE | re.MULTILINE):
+        line = match.group(0)
+        included = re.search(r'\bincl\.\s*(.+?)\)', line, re.IGNORECASE)
+        values = _BACKTICK_VALUE.findall(included.group(1) if included else line.split(':', 1)[-1])
+        for value in values:
+            normalized = _normalized_manifest_input(value)
+            if normalized:
+                named.add(normalized)
+    return named
+
+
+def _attachment_input_keys(
+    file_sections: List[Tuple[str, str]],
+    attached_directories: List[str],
+    automatic_files: List[str] | None = None,
+) -> set[str]:
+    keys: set[str] = set()
+    for path, display_name in file_sections:
+        for value in (path, display_name, os.path.basename(path)):
+            normalized = value.replace('\\', '/').rstrip('/').casefold()
+            if normalized:
+                keys.add(normalized)
+                keys.add(os.path.basename(normalized))
+    for path in automatic_files or []:
+        normalized = path.replace('\\', '/').rstrip('/').casefold()
+        if normalized:
+            keys.add(normalized)
+            keys.add(os.path.basename(normalized))
+    for path in attached_directories:
+        normalized = path.replace('\\', '/').rstrip('/').casefold()
+        if normalized:
+            keys.add(normalized + '/')
+            keys.add(os.path.basename(normalized) + '/')
+    return keys
+
+
+def _manifest_input_is_attached(value: str, attached: set[str]) -> bool:
+    expected = value.replace('\\', '/').casefold()
+    if expected.endswith('/'):
+        return expected in attached
+    if '/' not in expected:
+        return expected in attached
+    return expected in attached or any(
+        candidate.endswith('/' + expected)
+        for candidate in attached
+    )
+
+
+def _assert_named_inputs_attached(
+    caller_sections: List[Tuple[str, str, str]],
+    attached_directories: List[str],
+    automatic_files: List[str] | None = None,
+) -> None:
+    required_by_source: List[Tuple[str, set[str]]] = []
+    for path, _, content in caller_sections:
+        required = _panel_named_inputs(content) | _available_context_named_inputs(content)
+        if required:
+            required_by_source.append((path, required))
+    if not required_by_source:
+        return
+    attached = _attachment_input_keys(
+        [(path, display_name) for path, display_name, _ in caller_sections],
+        attached_directories,
+        automatic_files,
+    )
+    missing_by_source: List[str] = []
+    for source, required in required_by_source:
+        missing = sorted(
+            value
+            for value in required
+            if not _manifest_input_is_attached(value, attached)
+        )
+        if missing:
+            missing_by_source.append(f'{source}: {", ".join(missing)}')
+    if missing_by_source:
+        raise IdentityError(
+            'Attachment manifest gate failed; named inputs are absent from the '
+            'packet: ' + '; '.join(missing_by_source) +
+            '. Consultation halted before send.'
+        )
+
+
 def _identity_path(platform: str) -> str:
     """Resolve the required platform IDENTITY file path or raise loudly.
 
@@ -145,9 +345,12 @@ def validate_caller_attachments(caller_attachments: List[str]) -> List[Attachmen
     strip identity basenames or merge anything into a new package.
     """
     provenance: List[AttachmentProvenance] = []
+    caller_sections: List[Tuple[str, str, str]] = []
     for attachment in caller_attachments:
-        _, digest = _read_caller_file(attachment)
+        content, digest = _read_caller_file(attachment)
         provenance.append(AttachmentProvenance(path=attachment, sha256=digest))
+        caller_sections.append((attachment, os.path.basename(attachment), content))
+    _assert_named_inputs_attached(caller_sections, [])
     return provenance
 
 
@@ -179,14 +382,25 @@ def _build_package_text(
     # Caller attachments: strip caller-provided identity files (identity is
     # automatic), then read + hash the remainder BEFORE merging (provenance).
     provenance: List[AttachmentProvenance] = []
-    for attachment in caller_attachments:
+    caller_sections: List[Tuple[str, str, str]] = []
+    expanded_attachments, attached_directories = _expand_caller_attachments(
+        caller_attachments,
+    )
+    for attachment, display_name in expanded_attachments:
         basename = os.path.basename(attachment)
         if basename in _IDENTITY_BASENAMES:
             logger.warning("Stripped caller identity file: %s", basename)
             continue
         content, digest = _read_caller_file(attachment)
         provenance.append(AttachmentProvenance(path=attachment, sha256=digest))
-        sections_src.append((attachment, basename, content))
+        caller_sections.append((attachment, display_name, content))
+        sections_src.append((attachment, display_name, content))
+
+    _assert_named_inputs_attached(
+        caller_sections,
+        attached_directories,
+        [_FAMILY_KERNEL, _SPOTLIGHT_STANDARD, identity_path],
+    )
 
     sections = [f"# Package for {platform}\n\n**Files**: {len(sections_src)}\n"]
     for display_path, basename, content in sections_src:
