@@ -23,6 +23,7 @@ jobs:
 
           readonly ONE_MIB=1048576
           ROOT_MD_ALLOWLIST=$(cat <<'ALLOWLIST'
+          100_TIMES.md
           CLAUDE.md
           CONSULTATION_CONTRACT.md
           CONTRIBUTING.md
