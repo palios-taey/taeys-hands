@@ -2646,17 +2646,11 @@ class TaeyConsultExtractionSeat:
         from consultation_v2.platforms.claude.driver import (
             ClaudeConsultationDriver,
         )
+        from consultation_v2.platforms.routing import (
+            find_firefox_for_platform,
+        )
+        from consultation_v2.tree import find_elements as raw_find_elements
         from consultation_v2.types import ConsultationRequest
-
-        expected_names = ClaudeConsultationDriver._artifact_names_from_response(
-            self.body
-        )
-        artifact_expected = bool(
-            expected_names
-            or ClaudeConsultationDriver._response_expects_artifact(self.body)
-        )
-        if not artifact_expected:
-            return
 
         driver = ClaudeConsultationDriver()
         driver.runtime = self.runtime
@@ -2666,6 +2660,66 @@ class TaeyConsultExtractionSeat:
                 'refusing Claude artifact extraction outside an answer thread; '
                 f'current_url={current_url!r}'
             )
+        firefox = find_firefox_for_platform(self.platform)
+        if firefox is None:
+            raise TaeyConsultExtractionError(
+                'could not scan the Claude answer thread for artifact controls'
+            )
+        elements = raw_find_elements(firefox, fence_after=[])
+        screen_width, _ = driver._screen_size()
+        artifact_controls = driver._artifact_copy_candidates(
+            elements,
+            screen_width,
+        )
+        if not artifact_controls:
+            return
+        artifact_control_evidence = [
+            driver._element_evidence(control)
+            for control in artifact_controls[:8]
+        ]
+        expected_names = ClaudeConsultationDriver._artifact_names_from_response(
+            self.body
+        )
+
+        completion_started = time.monotonic()
+        completion_deadline = completion_started + self.completion_timeout
+        stop_absent_cycles = 0
+        stop_seen_during_gate = False
+        while time.monotonic() < completion_deadline:
+            stop = self._find_semantic_control(
+                'completion',
+                must_show=False,
+                scroll=False,
+            )
+            if stop is None:
+                stop_absent_cycles += 1
+                if stop_absent_cycles >= 2:
+                    break
+            else:
+                stop_seen_during_gate = True
+                stop_absent_cycles = 0
+            time.sleep(1.0)
+        else:
+            raise TaeyConsultExtractionError(
+                'Claude artifact generation did not reach debounced completion '
+                f'within {self.completion_timeout:.1f}s; '
+                f'stop_seen_during_gate={stop_seen_during_gate}'
+            )
+
+        self.extraction_steps.append({
+            'step': 'claude_artifact_completion',
+            'success': True,
+            'message': 'Claude artifact generation reached debounced completion',
+            'evidence': {
+                'elapsed_seconds': round(
+                    time.monotonic() - completion_started,
+                    3,
+                ),
+                'stop_absent_cycles': stop_absent_cycles,
+                'stop_seen_during_gate': stop_seen_during_gate,
+                'artifact_controls': artifact_control_evidence,
+            },
+        })
         request = ConsultationRequest(
             platform=self.platform,
             message=self.framing_prompt if self.full_consult else '',
@@ -2675,27 +2729,51 @@ class TaeyConsultExtractionSeat:
                 else []
             ),
         )
-        result = driver.result(request)
-        result.response_text = self.body
-        result.session_url_after = current_url
-        extracted = driver.extract_additional(request, result)
-        self.extraction_steps.extend(
-            step.serializable()
-            for step in result.steps
-        )
-        if not extracted:
+        max_extract_attempts = 5
+        retry_settle_seconds = 2.0
+        failure = 'Claude driver returned no artifact extraction evidence'
+        for attempt in range(1, max_extract_attempts + 1):
+            current_url = self._current_url()
+            if not driver._is_answer_thread_url(current_url):
+                raise TaeyConsultExtractionError(
+                    'refusing Claude artifact extraction outside an answer thread; '
+                    f'current_url={current_url!r}'
+                )
+            result = driver.result(request)
+            result.response_text = self.body
+            result.session_url_after = current_url
+            extracted = driver.extract_additional(request, result)
+            for step in result.steps:
+                serialized = step.serializable()
+                serialized['evidence'] = {
+                    **dict(serialized.get('evidence') or {}),
+                    'seat_attempt': attempt,
+                }
+                self.extraction_steps.append(serialized)
+            nonempty_extractions = [
+                artifact
+                for artifact in result.extractions
+                if str(artifact.content or '').strip()
+            ]
+            if extracted and nonempty_extractions:
+                self.extractions.extend(
+                    artifact.serializable()
+                    for artifact in nonempty_extractions
+                )
+                return
             failure = next(
                 (
                     step.message
                     for step in reversed(result.steps)
                     if not step.success and step.message
                 ),
-                'Claude driver returned no artifact extraction evidence',
+                failure,
             )
-            raise TaeyConsultExtractionError(failure)
-        self.extractions.extend(
-            artifact.serializable()
-            for artifact in result.extractions
+            if attempt < max_extract_attempts:
+                time.sleep(retry_settle_seconds)
+        raise TaeyConsultExtractionError(
+            f'{failure}; debounced completion confirmed and artifact extraction '
+            f'exhausted {max_extract_attempts} attempts'
         )
 
     def _assembled_response_content(self) -> str:
