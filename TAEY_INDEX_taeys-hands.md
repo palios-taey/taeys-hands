@@ -5,7 +5,7 @@ PROCESS:   Family-Chat consultation — hand a packet to the AI Chats (Gaia/Clau
 PLAN:      /home/mira/taeys-hands/FLOW_CONSULTATION_ENGINE.md  (8-step flow, 742 lines)
            /home/mira/taeys-hands/CONSULTATION_CONTRACT.md     (contract, 56 lines)
            /home/mira/taeys-hands/100_TIMES.md                 (recurring failure rules, 102 lines)
-           [all three stat-verified present 2026-07-28; the consultation_v2/ copies are DEAD — do not cite them]
+           [all three stat-verified present on this branch 2026-08-03; root 100_TIMES.md restored from docs/archive/100_TIMES.md; the consultation_v2/ copies are DEAD — do not cite them]
 LAUNCH:    Taey drives (preferred): python3 /home/mira/taeys-hands/scripts/run_taey_consult_extract.py
              --platform <p> --display :N --model ep3 --attach <abs file> --prompt "<=600 chars, must NOT inline the attachment>"
              one platform at a time, staggered. Displays: :2 ChatGPT, :3 Claude, :4 Gemini, :5 Grok, :6 Perplexity.
