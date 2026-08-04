@@ -4,8 +4,11 @@ Status: **BLOCKED — zero trajectories admitted.**
 
 This inventory records the evidence gap without publishing private topology,
 operator paths, application identities, or raw UI values. The associated
-capture queue is blocked on `p0-ui-supervised-seat-build`,
-`private-capture-boundary`, and the `PR70-task-chain`.
+capture queue is blocked on the exact tracker tasks
+`taey-training-program::p0-ui-supervised-seat-build` and
+`taey-training-program::p0-ui-capture-privacy-boundary`. The build task depends
+on the reviewed `taey-training-program::p0-ui-supervised-seat-design`; design
+completion cannot substitute for implementation.
 
 No browser was opened, no display was bound, no live accessibility tree was
 read, and no UI action or model generation was performed while producing this
@@ -96,12 +99,23 @@ complete cycles, each proving:
 1. the exact canonical model request includes the live `ui_action` schema;
 2. the raw model response proposes exactly one `ui_action` call;
 3. a supervisor approval receipt binds the proposal hash, current revision,
-   ref, operation, effect class, and one-use capability;
-4. the approved call executes exactly once and its exact result bytes are
-   persisted;
-5. the next model request exposes only `observe` or `verify`;
-6. the exact read result contains a fresh revision and refs; and
-7. the next action is independently proposed from that new result.
+   ref, operation, effect class, both process incarnation IDs, and one-use
+   capability;
+4. `approval_spent` and `execution_started` are immutably fsynced before the
+   AT-SPI call, and an explicit outcome follows;
+5. only an observed, durably recorded success reaches `needs_verify`; crash,
+   timeout, false, stale, replay, or lost outcome is terminal and never retried;
+6. the next model request exposes only `observe` or `verify`;
+7. the exact fresh post-action observation and verification verdict bind the
+   before revision, action, result, and after revision; and
+8. the next action is independently proposed from that new result.
+
+Taey must choose every read, action, and validation call. Supervisor approval
+is only an authority/safety verdict on the immutable proposal; it cannot select
+or edit a ref, operation, order, argument, or next action. Confusion and failure
+are exact terminal captures. A corrected attempt starts a new session with
+explicit non-prescriptive feedback and new incarnation/causal IDs; the prior
+session remains immutable.
 
 Rejected, failed, stale-ref, unverified-terminal, synthesized, or
 generated-but-not-executed events are excluded. A missing receipt ends the
@@ -112,14 +126,24 @@ capture; no builder may reconstruct it.
 The canonical seat is entirely public:
 
 - `palios-taey/taeys-hands` owns accessibility observation, public projection,
-  refs, revisions, live action schema, approval validation, and one execution.
+  policy-authored safe labels, refs, revisions, live action schema, approval
+  validation, durable pre-effect spend/start, and one execution. Runtime
+  accessible names never enter the public projection or persistent receipt.
 - `palios-taey/taey-presence` owns exact model request/response capture,
-  proposal state, supervisor approval/rejection, and the visible transcript.
+  complete settings/tool declarations, proposal state, supervisor
+  approval/rejection, process-incarnation binding, and the visible transcript.
 
 Private ATS code is an optional adapter and trace source only. Public code must
 not import it, assume its filesystem layout, or expose its identities. An
 adapter may cross the boundary only through the versioned public contract and
 opaque receipt hashes.
+
+Exact artifacts are written only after a pre-persistence privacy gate, under a
+mandatory absolute external root outside every public repository. The root and
+session directories must be nonsymlink mode-`0700` directories; immutable
+files must be created once as mode `0600` with exclusive/no-follow semantics,
+then file- and directory-fsynced. Missing or unsafe configuration fails before
+network or UI effects.
 
 ## Ref pseudonymization order
 
@@ -142,6 +166,7 @@ application identities never cross the boundary.
 
 All five requested capture shapes remain in
 `docs/UI_SFT_SUPERVISED_CAPTURE_QUEUE_2026-08-04.jsonl` with status `blocked`.
-No canonical SFT batch is emitted. The queue cannot fire until the three named
-blockers are cleared and the production walk yields an exact, contiguous,
-supervisor-approved receipt chain.
+No canonical SFT batch is emitted. The queue cannot fire until the two named
+canonical tasks are evidence-closed and the production walk yields an exact,
+contiguous, restart-safe, supervisor-approved receipt chain with fresh
+post-action observation and verification verdict.
