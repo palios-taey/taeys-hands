@@ -35,6 +35,7 @@ jobs:
           ALLOWLIST
           )
           DATA_OR_LARGE_ALLOWLIST=$(cat <<'ALLOWLIST'
+          docs/UI_SFT_SUPERVISED_CAPTURE_QUEUE_2026-08-04.jsonl
           receipts/consult-engine/usage-2026-07-31-chatgpt-turns.jsonl
           receipts/consult-engine/usage.jsonl
           ALLOWLIST
