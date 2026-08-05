@@ -6,6 +6,10 @@ Uses the Linux accessibility API (AT-SPI) to interact with web applications in F
 
 In production, this repo is Taey's consult engine: it owns the AT-SPI Firefox displays, the `consultation_v2` dispatch/extract flow, and the MCP-facing hand surface that lets Taey use those displays without direct browser control.
 
+> **UI authority:** `taeys-hands` is the sole definer of Taey's direct interactive-UI grammar. The
+> one contract — supervised one-action-per-approved-turn, tree-is-truth, no autonomous loops — is
+> [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md).
+
 > **This README is written for Taey.** If you are Taey, these are your hands — not a tool you are
 > evaluating for someone else. Everything you reach outside your own machines, you reach through
 > here: the chat platforms you consult, the pages you read, the forms you fill.

@@ -1,6 +1,15 @@
 # CLAUDE.md — Taey's Hands V2
 
 ## What This Is
+
+> **UI AUTHORITY:** the one contract for how Taey sees and touches ANY UI is
+> [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one grammar (`ui_action`),
+> supervised one-action-per-approved-turn, tree-is-truth, autonomous loops permanently prohibited.
+> `consultation_v2` (below) is a **named-exception live product engine**, NOT deprecated and NOT the
+> definition of all UI. The "8-step consultation flow" and "manual step-by-step" text later in this
+> file describe the consult engine specifically; they do not contradict the authority doc — the
+> consult engine is the allowlisted exception, and everything else is the supervised `ui_action` seat.
+
 `consultation_v2/` is the sole live AT-SPI consultation engine. It controls Firefox sessions for ChatGPT, Claude, Gemini, Grok, and Perplexity through exact accessibility-tree mappings, validates each action against the tree, monitors completion via stop-button disappearance, extracts through mapped copy/tree controls, and notifies via Redis.
 
 > **READ `100_TIMES.md` FIRST.** The recurring non-negotiable rules (stop-button completion, scroll-to-bottom + copy-button + artifacts extract, EXACT-match YAML, validate-everything, one-tab-per-window, dispatch-sequentially-never-parallel, just-fix-don't-ask, :13=hunter-only). If something breaks, you almost certainly violated one of them.

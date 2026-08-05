@@ -1,7 +1,14 @@
-# Public supervised Taey UI seat — implementation plan
+# Public supervised Taey UI seat — implementation plan + protocol spec
 
-Status: **documents-first plan; implementation blocked pending adversarial
-review.**
+Status: **IMPLEMENTED and merged on `main`** (2026-08-04) — the seat, contract, receipts, per-platform
+policy, runner, and design-rule gate landed via PRs #22–#25 (`consultation_v2/supervised_ui_seat.py`,
+`supervised_ui_contract.py`, `supervised_ui_receipts.py`, `platforms/<p>/supervised_ui.yaml`,
+`scripts/run_supervised_ui_seat.py`, `validators/validate_supervised_ui_design_rules.py`). This
+document remains the authoritative **protocol spec** (state machine, exact model request, receipt
+chain, production-walk gates). The **production validation walk (below) is the outstanding gate** —
+the code merge is not the production oracle; a real supervised trajectory with a complete immutable
+receipt chain is still required before capture releases. Canonical UI authority + grammar:
+[`UI_INTERACTION_AUTHORITY.md`](UI_INTERACTION_AUTHORITY.md).
 
 The minimum seat performs one model request, accepts exactly one proposed tool
 call, pauses for an explicit supervisor decision, executes at most that one

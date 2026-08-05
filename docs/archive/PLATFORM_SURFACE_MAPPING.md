@@ -1,3 +1,10 @@
+> ⛔ **SUPERSEDED / ARCHIVED (2026-08-04, UI consolidation).** This document is **NON-EXECUTABLE
+> historical material.** It teaches "reusable ordered click-sequences" and "the screen is ground
+> truth" — **both are wrong under current doctrine.** The one authority for how Taey sees and touches
+> a UI is [`../UI_INTERACTION_AUTHORITY.md`](../UI_INTERACTION_AUTHORITY.md): the tree is truth (not
+> the screen), and Taey elects ONE state-bound `ui_action` per approved turn (no click-sequences, no
+> autonomous loops). Kept only for diagnosis/correction-training reference. Do not follow its steps.
+
 # Platform Surface Mapping — reliable AT-SPI maps for edit/act surfaces
 
 *Reusable methodology for mapping ANY web app's edit/act surfaces (forms, dialogs, composers, action buttons) to deterministic AT-SPI locators + safe click-sequences — the same discipline the `consultation_v2/` Chat engine uses, generalized for LinkedIn / Sales Nav / Upwork / future sites.*
