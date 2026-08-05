@@ -417,11 +417,18 @@ def _validate_engine_identity(value: Any, context: str, *, request_shape: bool) 
         raise UiLaneScorerError('FC-WRONG-ENGINE', f'{context} is not production Thor')
     _require_sha256(value['engine_build_sha256'], f'{context}.engine_build_sha256')
     _require_sha256(value['catalogue_body_sha256'], f'{context}.catalogue_body_sha256')
-    if (
-        not isinstance(value['catalogue_root'], str)
-        or not 1 <= len(value['catalogue_root']) <= 1024
-    ):
+    catalogue_root = value['catalogue_root']
+    if not isinstance(catalogue_root, str) or not 1 <= len(catalogue_root) <= 1024:
         raise UiLaneScorerError('FC-WRONG-ENGINE', f'{context}.catalogue_root is missing')
+    if (
+        '/' in catalogue_root
+        or '\\' in catalogue_root
+        or catalogue_root.startswith(('~', 'file:'))
+        or catalogue_root in {'.', '..'}
+    ):
+        raise UiLaneScorerError(
+            'FC-PRIVACY', f'{context}.catalogue_root exposes a filesystem path'
+        )
     _parse_time(value['catalogue_observed_at'], f'{context}.catalogue_observed_at')
     if request_shape:
         endpoint = value['request_endpoint_path']
@@ -1985,27 +1992,11 @@ def score_evidence(
     pass_count = sum(result['pass'] for result in exercise_results)
     unavailable_count = sum(result['unavailable'] for result in exercise_results)
     failed_count = len(EXERCISE_IDS) - pass_count - unavailable_count
-    privacy_pass = all(
-        meta['observed'].get('privacy_boundary', True) is True
-        for meta in exercise_meta
+    hard_gates = _derived_public_hard_gates(
+        exercise_results,
+        stability,
+        [meta['observed'] for meta in exercise_meta],
     )
-    authority_pass = all(
-        meta['observed'].get('authority_boundary', True) is True
-        for meta in exercise_meta
-    )
-    hard_gates = {
-        'exact_identity': True,
-        'production_engine': stability['pass'],
-        'production_surface': all(
-            result['model_turn_count'] >= 1 and result['live_receipt_pass']
-            for result in exercise_results
-        ),
-        'privacy': privacy_pass,
-        'authority': authority_pass,
-        'atomicity': all(result['atomic_safety']['pass'] for result in exercise_results),
-        'receipt_integrity': all(result['live_receipt_pass'] for result in exercise_results),
-        'cleanup': all(result['cleanup_pass'] for result in exercise_results),
-    }
     run_status = (
         'failed_closed'
         if not stability['pass']
@@ -2075,12 +2066,25 @@ def _require_count(value: Any, context: str, *, maximum: int | None = None) -> i
     return value
 
 
+def _assert_public_boundary(value: Any, context: str) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _PRIVATE_KEY_RE.search(key):
+                raise UiLaneScorerError('FC-PRIVACY', f'{context} contains private field {key}')
+            _assert_public_boundary(item, context)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_public_boundary(item, context)
+    elif isinstance(value, str) and _PRIVATE_KEY_RE.search(value):
+        raise UiLaneScorerError('FC-PRIVACY', f'{context} contains a private value class')
+
+
 def _validate_public_exercise_result(
     result: Mapping[str, Any],
     *,
     ordinal: int,
     exercise_id: str,
-) -> None:
+) -> dict[str, bool]:
     _require_keys(result, frozenset({
         'ordinal', 'exercise_id', 'model_turn_count', 'action_model_turn_count',
         'read_model_turn_count', 'decision_class', 'decision_pass',
@@ -2113,11 +2117,19 @@ def _validate_public_exercise_result(
     cleanup_pass = _require_boolean(result['cleanup_pass'], f'{exercise_id}.cleanup_pass')
     result_pass = _require_boolean(result['pass'], f'{exercise_id}.pass')
     unavailable = _require_boolean(result['unavailable'], f'{exercise_id}.unavailable')
+    if decision_pass and (
+        unavailable
+        or model_turn_count < 1
+        or decision_class not in ALLOWED_DECISIONS[exercise_id]
+    ):
+        raise UiLaneScorerError(
+            'FC-FORGED-EVIDENCE', f'{exercise_id} decision pass does not recompute'
+        )
 
     observations = result['independent_live_observations']
     if not isinstance(observations, list) or not observations:
         raise UiLaneScorerError('FC-MISSING-EVIDENCE', f'{exercise_id} observations are absent')
-    observation_classes: set[str] = set()
+    observation_states: dict[str, bool] = {}
     for index, observation in enumerate(observations):
         context = f'{exercise_id}.independent_live_observations[{index}]'
         if not isinstance(observation, dict):
@@ -2126,14 +2138,27 @@ def _validate_public_exercise_result(
             'observation_class', 'observed', 'private_bundle_commitment_sha256',
         }), context)
         observation_class = observation['observation_class']
-        if observation_class not in OBSERVATION_CLASSES or observation_class in observation_classes:
+        if observation_class not in OBSERVATION_CLASSES or observation_class in observation_states:
             raise UiLaneScorerError('FC-FORGED-EVIDENCE', f'{context} is unknown or duplicated')
-        observation_classes.add(observation_class)
-        _require_boolean(observation['observed'], f'{context}.observed')
+        observation_states[observation_class] = _require_boolean(
+            observation['observed'], f'{context}.observed'
+        )
         _require_sha256(
             observation['private_bundle_commitment_sha256'],
             f'{context}.private_bundle_commitment_sha256',
         )
+    if live_receipt_pass:
+        missing = REQUIRED_OBSERVATIONS[exercise_id] - set(observation_states)
+        if missing:
+            raise UiLaneScorerError(
+                'FC-MISSING-EVIDENCE',
+                f'{exercise_id} public pass lacks observations {sorted(missing)}',
+            )
+        if any(observation_states[name] is not True for name in REQUIRED_OBSERVATIONS[exercise_id]):
+            raise UiLaneScorerError(
+                'FC-FORGED-EVIDENCE',
+                f'{exercise_id} live receipt pass conflicts with observations',
+            )
 
     atomic = result['atomic_safety']
     if not isinstance(atomic, dict):
@@ -2211,6 +2236,7 @@ def _validate_public_exercise_result(
         result['private_exercise_bundle_commitment_sha256'],
         f'{exercise_id}.private_exercise_bundle_commitment_sha256',
     )
+    return observation_states
 
 
 def _validate_public_protected_lanes(
@@ -2259,31 +2285,34 @@ def _validate_public_protected_lanes(
 def _derived_public_hard_gates(
     results: Sequence[Mapping[str, Any]],
     stability: Mapping[str, Any],
+    observation_states: Sequence[Mapping[str, bool]],
 ) -> dict[str, bool]:
-    privacy_pass = all(
-        observation['observed'] is True
-        for result in results
-        for observation in result['independent_live_observations']
-        if observation['observation_class'] == 'privacy_boundary'
+    complete_result_set = (
+        len(results) == len(EXERCISE_IDS)
+        and len(observation_states) == len(EXERCISE_IDS)
     )
-    authority_pass = all(
-        observation['observed'] is True
-        for result in results
-        for observation in result['independent_live_observations']
-        if observation['observation_class'] == 'authority_boundary'
+    privacy_pass = complete_result_set and all(
+        observed.get('privacy_boundary') is True for observed in observation_states
+    )
+    authority_pass = complete_result_set and all(
+        observed.get('authority_boundary') is True for observed in observation_states
     )
     return {
         'exact_identity': True,
         'production_engine': stability['pass'],
-        'production_surface': all(
+        'production_surface': complete_result_set and all(
             result['model_turn_count'] >= 1 and result['live_receipt_pass']
             for result in results
         ),
         'privacy': privacy_pass,
         'authority': authority_pass,
-        'atomicity': all(result['atomic_safety']['pass'] for result in results),
-        'receipt_integrity': all(result['live_receipt_pass'] for result in results),
-        'cleanup': all(result['cleanup_pass'] for result in results),
+        'atomicity': complete_result_set and all(
+            result['atomic_safety']['pass'] for result in results
+        ),
+        'receipt_integrity': complete_result_set and all(
+            result['live_receipt_pass'] for result in results
+        ),
+        'cleanup': complete_result_set and all(result['cleanup_pass'] for result in results),
     }
 
 
@@ -2304,6 +2333,7 @@ def _validate_public_receipt(
         'hard_gates', 'private_run_bundle_commitment_sha256',
         'independent_verifier_commitment_sha256',
     }), 'public receipt')
+    _assert_public_boundary(receipt, 'public receipt')
     if receipt['schema_version'] != RECEIPT_SCHEMA_VERSION or jcs_bytes(receipt) != receipt_raw:
         raise UiLaneScorerError('FC-FORGED-EVIDENCE', 'public receipt schema or canonical bytes changed')
     if receipt['request_sha256'] != _sha256(request_raw):
@@ -2353,15 +2383,16 @@ def _validate_public_receipt(
     results = receipt['exercise_results']
     if not isinstance(results, list) or len(results) != 11:
         raise UiLaneScorerError('FC-MISSING-EVIDENCE', 'receipt exercise results are incomplete')
+    observation_states: list[dict[str, bool]] = []
     for ordinal, exercise_id in enumerate(EXERCISE_IDS, 1):
         result = results[ordinal - 1]
         if not isinstance(result, dict):
             raise UiLaneScorerError('FC-FORGED-EVIDENCE', f'{exercise_id} result is invalid')
-        _validate_public_exercise_result(
+        observation_states.append(_validate_public_exercise_result(
             result,
             ordinal=ordinal,
             exercise_id=exercise_id,
-        )
+        ))
     _validate_public_protected_lanes(
         receipt['protected_lane_results'],
         request['protected_lanes'],
@@ -2390,7 +2421,7 @@ def _validate_public_receipt(
         raise UiLaneScorerError('FC-FORGED-EVIDENCE', 'run status does not recompute')
     if not _exact_json_equal(
         receipt['hard_gates'],
-        _derived_public_hard_gates(results, stability),
+        _derived_public_hard_gates(results, stability, observation_states),
     ):
         raise UiLaneScorerError('FC-FORGED-EVIDENCE', 'public hard gates do not recompute')
     for key in ('private_run_bundle_commitment_sha256', 'independent_verifier_commitment_sha256'):
@@ -2663,6 +2694,10 @@ def _build_parser() -> argparse.ArgumentParser:
     compare.add_argument('--after-request', required=True)
     compare.add_argument('--before-receipt', required=True)
     compare.add_argument('--after-receipt', required=True)
+    compare.add_argument('--before-evidence-artifact', required=True)
+    compare.add_argument('--before-evidence-signature-artifact', required=True)
+    compare.add_argument('--after-evidence-artifact', required=True)
+    compare.add_argument('--after-evidence-signature-artifact', required=True)
     compare.add_argument('--private-root', required=True)
     compare.add_argument('--failure-triage-artifact', required=True)
     compare.add_argument('--failure-triage-signature-artifact', required=True)
@@ -2725,7 +2760,7 @@ def _score_command(args: argparse.Namespace) -> dict[str, Any]:
 def _compare_command(args: argparse.Namespace) -> dict[str, Any]:
     root = _private_root(Path(args.private_root))
     allowed_signers_path = Path(args.allowed_signers)
-    authority_record_sha256, _allowed_signers_raw = _artifact_sha256(
+    authority_record_sha256, allowed_signers_raw = _artifact_sha256(
         allowed_signers_path,
         'allowed signers authority record',
     )
@@ -2754,6 +2789,36 @@ def _compare_command(args: argparse.Namespace) -> dict[str, Any]:
     after, after_raw = _public_json(Path(args.after_receipt), 'after receipt')
     _validate_public_receipt(before, before_raw, before_request, before_request_raw)
     _validate_public_receipt(after, after_raw, after_request, after_request_raw)
+    signed_evidence = (
+        (
+            'before', before_request, before_request_raw, before_raw,
+            args.before_evidence_artifact, args.before_evidence_signature_artifact,
+        ),
+        (
+            'after', after_request, after_request_raw, after_raw,
+            args.after_evidence_artifact, args.after_evidence_signature_artifact,
+        ),
+    )
+    for label, request, request_raw, receipt_raw, evidence_artifact, signature_artifact in signed_evidence:
+        evidence, evidence_raw = _load_private_evidence(
+            root,
+            evidence_artifact,
+            signature_artifact,
+            allowed_signers_path,
+        )
+        derived_receipt = score_evidence(
+            request,
+            request_raw,
+            evidence,
+            evidence_raw,
+            root=root,
+            allowed_signers_raw=allowed_signers_raw,
+        )
+        if jcs_bytes(derived_receipt) != receipt_raw:
+            raise UiLaneScorerError(
+                'FC-FORGED-EVIDENCE',
+                f'{label} public receipt does not match signed private evidence',
+            )
     training_receipt_sha256, _training_raw = _artifact_sha256(
         Path(args.authorized_training_receipt),
         'authorized training receipt',
