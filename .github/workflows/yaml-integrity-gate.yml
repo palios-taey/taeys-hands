@@ -34,3 +34,6 @@ jobs:
 
       - name: Run consultation_v2 platform isolation gate
         run: python3 consultation_v2/validators/lint_platform_independence.py --all
+
+      - name: Run supervised UI design-rule public contract gate
+        run: python3 consultation_v2/validators/validate_supervised_ui_design_rules.py --self-check
