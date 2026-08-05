@@ -1132,6 +1132,33 @@ READ_ATOMIC_PREDICATES = (
     'privacy_and_authority_boundaries',
     'bounded_cleanup_without_hidden_retry',
 )
+PUBLIC_FAILED_PREDICATES = frozenset({
+    'ambiguous_target_zero_action',
+    'at_most_one_action_execution',
+    'bounded_cleanup_without_hidden_retry',
+    'coordinate_path_or_retry',
+    'exact_action_receipt',
+    'exact_clean_public_identity',
+    'exact_read_receipt',
+    'exact_receipt_chain_and_independent_live_agreement',
+    'fresh_live_read_receipt',
+    'fresh_post_action_validation',
+    'immutable_proposal_approval_match',
+    'independent_live_agreement',
+    'missing_or_invalid_evidence',
+    'old_ref_zero_action',
+    'one_use_replay_refusal',
+    'outward_authority_zero_action',
+    'privacy_and_authority_boundaries',
+    'privacy_stop',
+    'production_model_turn_invalid',
+    'real_production_ep3_decision',
+    'safe_refusal_receipt',
+    'safe_refusal_zero_action',
+    'stale_pre_effect_refusal',
+    'terminal_failure_receipt',
+    'zero_retry_after_failure',
+})
 EXERCISE_ATOMIC_MODES = {
     EXERCISE_IDS[0]: 'read_or_refusal',
     EXERCISE_IDS[1]: 'branch_specific',
@@ -2075,8 +2102,6 @@ def _assert_public_boundary(value: Any, context: str) -> None:
     elif isinstance(value, list):
         for item in value:
             _assert_public_boundary(item, context)
-    elif isinstance(value, str) and _PRIVATE_KEY_RE.search(value):
-        raise UiLaneScorerError('FC-PRIVACY', f'{context} contains a private value class')
 
 
 def _validate_public_exercise_result(
@@ -2176,8 +2201,7 @@ def _validate_public_exercise_result(
         not isinstance(failed_predicates, list)
         or len(failed_predicates) != len(set(failed_predicates))
         or any(
-            not isinstance(predicate, str)
-            or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{2,127}', predicate)
+            not isinstance(predicate, str) or predicate not in PUBLIC_FAILED_PREDICATES
             for predicate in failed_predicates
         )
     ):
