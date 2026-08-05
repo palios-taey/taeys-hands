@@ -120,6 +120,30 @@ def scan_yaml_schema(path: Path, source: str) -> list[Finding]:
                 line.rstrip(),
             ))
 
+    if data.get('schema') == 'supervised_ui_policy_v1':
+        if path.name != 'supervised_ui.yaml':
+            findings.append(Finding(
+                str(path), 1, 'supervised-ui-policy-path',
+                'supervised UI policy must use the package-owned supervised_ui.yaml path',
+            ))
+            return findings
+        try:
+            repository_root = str(Path(__file__).resolve().parents[2])
+            if repository_root not in sys.path:
+                sys.path.insert(0, repository_root)
+            from consultation_v2.supervised_ui_contract import (
+                clear_supervised_policy_cache,
+                load_supervised_policy,
+            )
+            clear_supervised_policy_cache()
+            load_supervised_policy(path.parent.name)
+        except Exception as exc:
+            findings.append(Finding(
+                str(path), 1, 'supervised-ui-policy-invalid',
+                f'{type(exc).__name__}: {exc}',
+            ))
+        return findings
+
     if is_consultation_v2_yaml(path):
         settle = data.get('settle')
         if not isinstance(settle, dict):

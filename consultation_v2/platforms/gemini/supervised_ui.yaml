@@ -1,0 +1,14 @@
+schema: supervised_ui_policy_v1
+controls:
+  input:
+    control_id: prompt_composer
+    label: Prompt composer
+    role: entry
+    operations:
+      - focus
+    effect_class: local
+    postconditions:
+      focus:
+        states_include:
+          - focused
+        states_exclude: []
