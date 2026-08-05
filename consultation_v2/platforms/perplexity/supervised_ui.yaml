@@ -1,0 +1,26 @@
+schema: supervised_ui_policy_v1
+controls:
+  input:
+    control_id: prompt_composer_primary
+    label: Primary prompt composer
+    role: entry
+    operations:
+      - focus
+    effect_class: local
+    postconditions:
+      focus:
+        states_include:
+          - focused
+        states_exclude: []
+  input_message:
+    control_id: prompt_composer_alternate
+    label: Alternate prompt composer
+    role: entry
+    operations:
+      - focus
+    effect_class: local
+    postconditions:
+      focus:
+        states_include:
+          - focused
+        states_exclude: []
