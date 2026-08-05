@@ -331,11 +331,11 @@ def _decode_nonce(value: Any, context: str) -> bytes:
     return decoded
 
 
-def _git(*arguments: str, timeout: float = 30.0, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+def _git(*arguments: str, timeout: float = 30.0) -> subprocess.CompletedProcess[bytes]:
     try:
         return subprocess.run(
             ['git', '-C', str(REPO_ROOT), *arguments],
-            check=check,
+            check=True,
             capture_output=True,
             timeout=timeout,
         )
@@ -349,8 +349,15 @@ def _implementation_identity() -> dict[str, Any]:
     if _git('status', '--porcelain', '--untracked-files=all').stdout:
         raise UiLaneScorerError('FC-WRONG-COMMIT', 'scorer worktree is dirty')
     for ancestor in (SEAT_COMMIT, REQUIRED_PUBLIC_BASE_COMMIT):
-        if _git('merge-base', '--is-ancestor', ancestor, head, check=False).returncode != 0:
-            raise UiLaneScorerError('FC-WRONG-COMMIT', f'required ancestor {ancestor} is absent')
+        try:
+            _git('merge-base', '--is-ancestor', ancestor, head)
+        except UiLaneScorerError as exc:
+            cause = exc.__cause__
+            if isinstance(cause, subprocess.CalledProcessError) and cause.returncode == 1:
+                raise UiLaneScorerError(
+                    'FC-WRONG-COMMIT', f'required ancestor {ancestor} is absent'
+                ) from exc
+            raise
     if _sha256(jcs_bytes(REVIEWED_BASE_CONTENT_SHA256)) != REVIEWED_BASE_CONTENT_MANIFEST_SHA256:
         raise UiLaneScorerError('FC-WRONG-COMMIT', 'reviewed base content manifest is inconsistent')
     for path, expected in REVIEWED_BASE_CONTENT_SHA256.items():
