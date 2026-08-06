@@ -77,6 +77,42 @@ governance decision, never inferred from convenience**.
 | CLI/model invents a multi-action driver, loop, fallback chain, retry, or hidden sequence | **Prohibited** |
 | A surface earns broader automation via measured production history | **Separate governance decision; never inferred** |
 
+## Grammar lanes — one direct grammar, and what is NOT it (read before authoring SFT)
+
+There is **one direct interactive-UI grammar: `ui_action`** (`consultation_v2/supervised_ui_contract.py`,
+`build_live_ui_action_schema`). Everything below is a **distinct lane or an adapter/implementation
+detail — NOT interchangeable with `ui_action`, and NOT relabeled as it.** Training them together as
+different spellings of "using a UI" is the exact confusion this consolidation exists to prevent.
+
+| Tool / vocabulary | Lane | Trained as `ui_action`? |
+|---|---|---|
+| **`ui_action`** (supervised seat) | THE direct interactive-UI grammar Taey elects | **YES — this is the one grammar.** |
+| **`consult_extract_action`** (`consultation_v2/taey_extract.py`) | The **consultation ENGINE's** driving tool (Family-chat consults on :2–:6). A named-exception mature-engine adapter. | **NO.** Its own labeled lane (`surface: consult_action`). Same safety principles (observe → one action → verify, no autonomous loop) but a **different target format** — keep it explicitly separate. |
+| `act.py`, `tree_view.py` (treasurer) | Low-level AT-SPI primitives / adapter | NO — adapter impl, not a model-facing grammar. |
+| ATS 9-function facade (apply-machine) | ATS adapter | NO — its concepts inform the contract; it is not a second direct grammar. |
+| CLI commands | operator tooling | NO. |
+
+**Consequence for the SFT rewrite:** consult-seat pairs captured as `surface: consult_action` (e.g. the
+Taey-seat walk corpus) are **consultation-engine driving pairs, not `ui_action` pairs** — they are NOT
+converted to `ui_action`; they remain their own named-exception lane. Only genuine supervised-seat
+`ui_action` trajectories are `ui_action` targets.
+
+## Training-source gate — what the live SFT-authoring context must reject
+
+Before a UI record enters SFT authoring or ordinary retrieval, reject:
+
+- any document marked **superseded / historical / archived** (e.g. anything under `docs/archive/`);
+- any **raw UI script or CLI runbook** presented as a model target;
+- any path that **bypasses the canonical contract** (coordinate clicks, autonomous loops, hidden
+  fallbacks);
+- any surface map carrying **domain-private facts**;
+- any record **without the surface-pack digest and exact contract version**;
+- **failed / rejected / stale actions presented as right-way completions** (executed-accepted only;
+  see the corpus disposition invariant).
+
+Archived material is kept for **diagnosis / correction-training** only — never in ordinary
+SFT-authoring context.
+
 ## Tree is truth
 
 Operate from the AT-SPI tree, never the screen. The tree is the source of truth; a screenshot is a
