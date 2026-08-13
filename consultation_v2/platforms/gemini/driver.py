@@ -3034,11 +3034,24 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             upload_item = self.find_first(menu_snap, 'upload_files_item')
             trigger_states = {str(state).lower() for state in (getattr(trigger, 'states', None) or [])}
             if not upload_item and 'expanded' not in trigger_states:
-                clicked = self.runtime.click(trigger, strategy='atspi_first')
-                open_attempts.append({'strategy': 'atspi_first', 'clicked': bool(clicked)})
-                if not clicked:
+                attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+                open_method = str(attachment_cfg.get('open_method') or '').strip().lower()
+                if open_method != 'focus_and_key_open':
                     result.add_step('attach', False,
-                                    f'Gemini upload menu trigger click failed for {abs_path}',
+                                    'Gemini attachment requires focus_and_key_open upload menu activation',
+                                    open_method=open_method,
+                                    snapshot=snap.serializable())
+                    return False
+                open_evidence = self.runtime.focus_and_key_open(
+                    trigger,
+                    key=str(attachment_cfg.get('open_key') or 'space'),
+                    settle=0.3,
+                )
+                open_attempts.append(open_evidence)
+                if not open_evidence.get('ok'):
+                    result.add_step('attach', False,
+                                    f'Gemini upload menu focus+key open failed for {abs_path}',
+                                    open_evidence=open_evidence,
                                     snapshot=snap.serializable())
                     return False
                 menu_snap, upload_item = self.wait_for_key(
