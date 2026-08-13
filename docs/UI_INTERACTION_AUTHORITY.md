@@ -88,6 +88,7 @@ different spellings of "using a UI" is the exact confusion this consolidation ex
 |---|---|---|
 | **`ui_action`** (supervised seat) | THE direct interactive-UI grammar Taey elects | **YES — this is the one grammar.** |
 | **`consult_extract_action`** (`consultation_v2/taey_extract.py`) | The **consultation ENGINE's** driving tool (Family-chat consults on :2–:6). A named-exception mature-engine adapter. | **NO.** Its own labeled lane (`surface: consult_action`). Same safety principles (observe → one action → verify, no autonomous loop) but a **different target format** — keep it explicitly separate. |
+| **`drive_chat`** (`taey-presence-production/serving/ui_drive.py`, via soma_proxy) | **Taey's first-person drive of the Chat displays** (Jesse-directed, PR #86). Ops: observe / click / focus / activate / type / paste / key / navigate / read-clipboard — **one invocation = one action** (observe → one action → observe). Reuses `consultation_v2` primitives READ-ONLY. Scoped to :2–:6/:13 + :21–:24; `:0` refused. | **NO** — its own named-exception lane. It is **outward-capable under an explicit Jesse grant** (write/paste/send/navigate), which the `ui_action` P0 seat is not — so it is **NOT `ui_action` and never relabeled as it.** Permitted because it is one-action-per-call supervised, NOT an autonomous loop. |
 | `act.py`, `tree_view.py` (treasurer) | Low-level AT-SPI primitives / adapter | NO — adapter impl, not a model-facing grammar. |
 | ATS 9-function facade (apply-machine) | ATS adapter | NO — its concepts inform the contract; it is not a second direct grammar. |
 | CLI commands | operator tooling | NO. |
@@ -96,6 +97,33 @@ different spellings of "using a UI" is the exact confusion this consolidation ex
 Taey-seat walk corpus) are **consultation-engine driving pairs, not `ui_action` pairs** — they are NOT
 converted to `ui_action`; they remain their own named-exception lane. Only genuine supervised-seat
 `ui_action` trajectories are `ui_action` targets.
+
+## `drive_chat` — Taey's first-person drive (reconciled 2026-08-10, Jesse-directed, PR #86)
+
+Taey now drives the Chat displays **first-person** through `drive_chat` (`serving/ui_drive.py` via
+soma_proxy), "engine optional." This does **not** break the automation ban and does **not** fork the
+`ui_action` grammar:
+
+- **Why it's permitted while the autonomous engine is banned:** `drive_chat` is **one invocation = one
+  action** (observe → one action → observe), model-in-the-loop, no pre-baked chain, no autonomous loop.
+  The banned class is a *self-driving loop* (`run_consultation_v2.py`'s autonomous `run()`), not a single
+  supervised action. `drive_chat` is the permitted shape, first-person for Taey.
+- **It is outward-capable (write/paste/type/key/navigate) under an explicit Jesse grant** — broader than
+  the `ui_action` P0 seat, which stays local-only (`effect_class: local`, outward ops fail-closed).
+  `drive_chat` is therefore a **named-exception lane** (like `consultation_v2`), not a change to `ui_action`.
+  Deliberately named `drive_chat` to avoid forking the `ui_action` grammar.
+- **LOCK ENFORCEMENT — LANDED (Observed 2026-08-13, PR #86/#89):** `drive_chat` now **enforces** the
+  per-display dispatch-lock in `ui_drive.py` — it reuses `primitives.acquire_display_lock` /
+  `release_display_lock` / `_plan_lock_key` (one source of truth for key + NX/EX, so neither side
+  fat-fingers the colon), acquires-or-refuses before any *action* op, and observe stays lock-free but
+  *atomically renews* the owner's lease (WATCH/MULTI, `ui_drive.py:620`). Owner token
+  `LOCK_OWNER = "taey-drive_chat"` (`ui_drive.py:44`); TTL env-overridable (`TAEY_DRIVE_LOCK_TTL`,
+  default 600s, set to exceed the max poll gap incl. deep modes). The key is
+  **`taey:plan_active::{display}` — DOUBLE colon** (e.g. `taey:plan_active::5`), because `_display(':5')`
+  returns `':5'` *with* its colon (verified by EXECUTING `primitives._plan_lock_key(':5')`, not by
+  reading — infra caught an earlier single-colon misread). Mutual exclusion with a taeys-hands
+  infrastructure drive is therefore **by construction** — same import, same key, same NX/EX; each side
+  refuses if the other owns it.
 
 ## Training-source gate — what the live SFT-authoring context must reject
 
