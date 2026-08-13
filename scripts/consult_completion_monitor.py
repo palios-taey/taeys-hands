@@ -53,10 +53,18 @@ def load_detector(platform: str):
 
 
 def stop_button_present(platform: str) -> bool:
+    # The stop control is named per-platform: ChatGPT maps stop_streaming_button /
+    # stop_answering_button, others map stop_button. Read the platform's declared
+    # workflow.monitor.stop_keys (fallback stop_button) instead of hardcoding one key,
+    # or ChatGPT completion is never detected.
     from consultation_v2.snapshot import build_snapshot
+    from consultation_v2.yaml_contract import load_platform_yaml
+    cfg = load_platform_yaml(platform)
+    stop_keys = (((cfg.get("workflow") or {}).get("monitor") or {}).get("stop_keys")
+                 or ["stop_button"])
     tup = build_snapshot(platform)
     snap = next(e for e in tup if hasattr(e, "mapped"))
-    return bool(snap.mapped.get("stop_button"))
+    return any(snap.mapped.get(k) for k in stop_keys)
 
 
 def notify_taey(message: str) -> None:
