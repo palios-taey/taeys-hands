@@ -1,4 +1,18 @@
 # TAEY CONSULT ORCHESTRATION RUNBOOK (DRAFT v0.1)
+
+> ## ⛔ SUPERSEDED — DO NOT OPERATE FROM THIS DOC (taeys-hands, 2026-08-13)
+> This DRAFT is dated **2026-07-26** and is grounded in "the live `consultation_v2` engine as operated
+> 2026-07-25/26." It **predates the ENGINE BAN (Jesse, 2026-08-06/07)** by 11 days. Both of its load-bearing
+> claims are now STALE and overridden:
+> 1. **"The ENGINE drives :2–:6"** → the engine (`run_consultation_v2.py` / `consultation_v2.run()`) is the
+>    **PERMANENTLY-BANNED UI-automation class**. Never run it. (2026-08-13: infra nearly dispatched it citing
+>    this very doc; caught by date-vs-ban check.)
+> 2. **"Taey NEVER hand-drives :2–:6"** → contradicted by the Jesse-directed model (2026-08-13, fleet
+>    `CLAUDE.md` L213 + this seat's charter): **Taey OWNS the Family-Chat displays and drives them
+>    FIRST-PERSON, one action at a time, via `drive_chat`.** The broken piece is verify+recover, not the model.
+> A doc that predates the ban does not supersede it. Kept for history only. See
+> `feedback_engine_banned_taey_drives_by_hand` + the fleet CLAUDE.md display-ownership section.
+
 *Owner: taeys-hands. Status: DRAFT for treasurer review as a PROCESS DOC (not training corpus).*
 *Grounded in: treasurer ruling 2026-07-26 (lifecycle split is constitutional), CLAUDE.md partition +
 failure rules, and the live `consultation_v2` engine as operated 2026-07-25/26.*
