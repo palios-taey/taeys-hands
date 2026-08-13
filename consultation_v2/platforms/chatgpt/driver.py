@@ -5536,12 +5536,27 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         from consultation_v2 import input as _inp
         from consultation_v2.interact import atspi_click
 
+        def _clipboard_observation(value: str | None) -> dict[str, object]:
+            return {
+                'readable': value is not None,
+                'characters': len(value or ''),
+                'preview': (value or '')[:200],
+            }
+
         sentinel_written = clipboard.write(sentinel)
-        sentinel_staged = bool(sentinel_written and clipboard.read() == sentinel)
+        clipboard_before = clipboard.read() if sentinel_written else None
+        sentinel_staged = bool(sentinel_written and clipboard_before == sentinel)
         evidence: dict[str, object] = {
+            'clicked_element': {
+                key: target.get(key) for key in ('name', 'role', 'y')
+            },
             'activation': None,
             'sentinel_written': bool(sentinel_written),
             'sentinel_staged': sentinel_staged,
+            'clipboard_before': _clipboard_observation(clipboard_before),
+            'clipboard_after_atspi': _clipboard_observation(None),
+            'clipboard_after_pointer': _clipboard_observation(None),
+            'clipboard_after': _clipboard_observation(clipboard_before),
             'atspi_clicked': False,
             'atspi_clipboard_changed': False,
             'pointer_clicked': False,
@@ -5587,6 +5602,8 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         )
         evidence.update({
             'activation': activation,
+            'clipboard_after_atspi': _clipboard_observation(clipboard_after_atspi),
+            'clipboard_after_pointer': _clipboard_observation(clipboard_after_pointer),
             'atspi_clicked': bool(atspi_clicked),
             'atspi_clipboard_changed': atspi_clipboard_changed,
             'pointer_clicked': pointer_clicked,
@@ -5598,6 +5615,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             if pointer_clipboard_changed
             else clipboard_after_atspi
         )
+        evidence['clipboard_after'] = _clipboard_observation(clipboard_value)
         content = (clipboard_value or '').strip() if clipboard_changed else ''
         return content, evidence
 
@@ -5615,10 +5633,6 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         last_snapshot = self.runtime.snapshot()
         last_scroll: dict[str, object] = {}
         last_copy_buttons: list[dict[str, object]] = []
-        last_document_elements: list[dict] = []
-        last_correlated_copy_button: dict[str, object] | None = None
-        last_turn_correlation: dict[str, object] | None = None
-        saw_empty_clipboard_from_copy_button = False
         attempts: list[dict[str, object]] = []
         for attempt in range(5):
             time.sleep(1.0)
@@ -5665,7 +5679,6 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 copy_spec,
                 request,
             )
-            last_document_elements = all_elements
             copy_buttons = [
                 element for element in all_elements
                 if matches_spec(element, copy_spec)
@@ -5703,8 +5716,6 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 continue
 
             target = correlated_copy_buttons[-1]
-            last_correlated_copy_button = target
-            last_turn_correlation = turn_correlation
             copy_button = {key: target.get(key) for key in ('name', 'role', 'x', 'y')}
             scrolled_button = self.runtime.scroll_element_into_view(ElementRef(
                 key='copy_button',
@@ -5746,9 +5757,34 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 'quality_failure': quality_failure,
             }
             attempts.append(attempt_evidence)
-            if clicked and not content:
-                saw_empty_clipboard_from_copy_button = True
             if not clicked or not content or exact_prompt_echo:
+                fallback_content, fallback_evidence = self._chatgpt_bounded_response_text_fallback(
+                    all_elements,
+                    target,
+                    request,
+                    turn_correlation,
+                )
+                attempt_evidence['tree_fallback'] = fallback_evidence
+                if fallback_content and fallback_evidence.get('ok'):
+                    if not self.set_response_text_if_not_prompt_echo(
+                        request,
+                        result,
+                        fallback_content,
+                        step='extract_primary',
+                        source='chatgpt_bounded_response_text',
+                        fallback=fallback_evidence,
+                        attempts=attempts,
+                    ):
+                        return False
+                    result.add_step(
+                        'extract_primary',
+                        True,
+                        f'ChatGPT response extracted from bounded response turn ({len(fallback_content)} chars)',
+                        source='chatgpt_bounded_response_text',
+                        fallback=fallback_evidence,
+                        attempts=attempts,
+                    )
+                    return True
                 continue
             if quality_failure:
                 result.response_text = ''
@@ -5779,42 +5815,9 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             )
             return True
 
-        if saw_empty_clipboard_from_copy_button:
-            fallback_content, fallback_evidence = self._chatgpt_bounded_response_text_fallback(
-                last_document_elements,
-                last_correlated_copy_button,
-                request,
-                last_turn_correlation,
-            )
-            if fallback_content and fallback_evidence.get('ok'):
-                if not self.set_response_text_if_not_prompt_echo(
-                    request,
-                    result,
-                    fallback_content,
-                    step='extract_primary',
-                    source='chatgpt_bounded_response_text',
-                    fallback=fallback_evidence,
-                    attempts=attempts,
-                ):
-                    return False
-                result.add_step(
-                    'extract_primary',
-                    True,
-                    f'ChatGPT response extracted from bounded response turn ({len(fallback_content)} chars)',
-                    source='chatgpt_bounded_response_text',
-                    fallback=fallback_evidence,
-                    attempts=attempts,
-                )
-                return True
-            attempts.append({
-                'attempt': 'bounded_response_text_fallback',
-                'reason': 'empty_copy_clipboard_fallback_failed',
-                'fallback': fallback_evidence,
-            })
-
         result.add_step(
             'extract_primary', False,
-            'ChatGPT Copy response button did not yield non-empty response text',
+            'ChatGPT Copy response and bounded tree extraction did not yield response text',
             attempts=attempts,
             last_scroll=last_scroll,
             copy_buttons=last_copy_buttons,
