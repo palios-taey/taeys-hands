@@ -5527,10 +5527,82 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             'hover_attempts': hover_attempts,
         }
 
-    def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+    def _activate_chatgpt_copy_response(
+        self,
+        target: dict,
+        sentinel: str,
+    ) -> tuple[str, dict[str, object]]:
         from consultation_v2 import clipboard
-        from consultation_v2.platforms import routing as platform_routing
+        from consultation_v2 import input as _inp
         from consultation_v2.interact import atspi_click
+
+        sentinel_written = clipboard.write(sentinel)
+        sentinel_staged = bool(sentinel_written and clipboard.read() == sentinel)
+        evidence: dict[str, object] = {
+            'activation': None,
+            'sentinel_written': bool(sentinel_written),
+            'sentinel_staged': sentinel_staged,
+            'atspi_clicked': False,
+            'atspi_clipboard_changed': False,
+            'pointer_clicked': False,
+            'pointer_clipboard_changed': False,
+            'clipboard_changed': False,
+        }
+        if not sentinel_staged:
+            evidence['reason'] = 'clipboard_sentinel_staging_failed'
+            return '', evidence
+
+        time.sleep(0.2)
+        atspi_clicked = atspi_click(target)
+        time.sleep(1.0)
+        clipboard_after_atspi = clipboard.read()
+        atspi_clipboard_changed = bool(
+            clipboard_after_atspi is not None
+            and clipboard_after_atspi != sentinel
+        )
+        pointer_clicked = False
+        clipboard_after_pointer = None
+        pointer_clipboard_changed = False
+        if not atspi_clipboard_changed:
+            x = self._chatgpt_int(target.get('x'))
+            y = self._chatgpt_int(target.get('y'))
+            if x is not None and y is not None:
+                pointer_clicked = bool(_inp.click_at(x, y))
+                time.sleep(1.0)
+                clipboard_after_pointer = clipboard.read()
+                pointer_clipboard_changed = bool(
+                    clipboard_after_pointer is not None
+                    and clipboard_after_pointer != sentinel
+                )
+
+        clipboard_changed = bool(
+            atspi_clipboard_changed or pointer_clipboard_changed
+        )
+        activation = (
+            'atspi'
+            if atspi_clipboard_changed
+            else 'pointer'
+            if pointer_clipboard_changed
+            else None
+        )
+        evidence.update({
+            'activation': activation,
+            'atspi_clicked': bool(atspi_clicked),
+            'atspi_clipboard_changed': atspi_clipboard_changed,
+            'pointer_clicked': pointer_clicked,
+            'pointer_clipboard_changed': pointer_clipboard_changed,
+            'clipboard_changed': clipboard_changed,
+        })
+        clipboard_value = (
+            clipboard_after_pointer
+            if pointer_clipboard_changed
+            else clipboard_after_atspi
+        )
+        content = (clipboard_value or '').strip() if clipboard_changed else ''
+        return content, evidence
+
+    def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        from consultation_v2.platforms import routing as platform_routing
         from consultation_v2.tree import find_elements as raw_find_elements
 
         if not self.reassert_captured_session_url(
@@ -5643,11 +5715,12 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 states=list(target.get('states') or []),
                 atspi_obj=target.get('atspi_obj'),
             ))
-            clipboard.write('')
-            time.sleep(0.2)
-            clicked = atspi_click(target)
-            time.sleep(1.0)
-            content = (clipboard.read() or '').strip()
+            sentinel = f'taey-chatgpt-copy-proof-{request.prompt_hash()[:16]}-{attempt + 1}'
+            content, activation_evidence = self._activate_chatgpt_copy_response(
+                target,
+                sentinel,
+            )
+            clicked = bool(activation_evidence.get('clipboard_changed'))
             exact_prompt_echo = (
                 bool(content)
                 and self._normalized_text(content) == self._normalized_text(request.message)
@@ -5666,6 +5739,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 'copy_button': copy_button,
                 'button_scrolled_to_anywhere': bool(scrolled_button),
                 'clicked': bool(clicked),
+                **activation_evidence,
                 'characters': len(content),
                 'preview': content[:200],
                 'exact_prompt_echo': exact_prompt_echo,
