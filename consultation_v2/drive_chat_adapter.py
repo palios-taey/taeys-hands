@@ -1,18 +1,18 @@
-"""Mapped scroll and extraction reads for the supervised ``drive_chat`` lane.
+"""One-process adapters for the supervised ``drive_chat`` lane.
 
 Import this module only after the caller has bound ``DISPLAY`` and the AT-SPI
-bus.  The caller continues to own display locking, flat observation, actions,
-and JSON serialization.
+bus.  The caller continues to own display locking and JSON serialization.
 """
 
 from __future__ import annotations
 
+import importlib
+from pathlib import Path
 from typing import Any
 
-from .platforms.routing import find_firefox_for_platform
 from .runtime import ConsultationRuntime
-from .snapshot import matches_spec
-from .tree import find_elements
+from .types import ConsultationRequest, ConsultationResult
+from .yaml_contract import CHAT_PLATFORMS
 
 
 _SCROLL_CLICKS = 14
@@ -22,6 +22,33 @@ _SCROLL_SETTLE_SECONDS = 0.5
 
 class DriveChatAdapterError(RuntimeError):
     pass
+
+
+def _driver(platform: str):
+    if platform not in CHAT_PLATFORMS:
+        raise DriveChatAdapterError(f'Unsupported chat platform: {platform!r}')
+    module = importlib.import_module(f'.platforms.{platform}.driver', package='consultation_v2')
+    candidates = [
+        candidate
+        for candidate in vars(module).values()
+        if (
+            isinstance(candidate, type)
+            and candidate.__module__ == module.__name__
+            and candidate.__name__.endswith('ConsultationDriver')
+            and getattr(candidate, 'platform', None) == platform
+        )
+    ]
+    if len(candidates) != 1:
+        raise DriveChatAdapterError(
+            f'{platform}: expected one built consultation driver, found {len(candidates)}'
+        )
+    return candidates[0]()
+
+
+def _failure(platform: str, operation: str, result: ConsultationResult) -> DriveChatAdapterError:
+    failed_steps = [step for step in result.steps if not step.success]
+    detail = failed_steps[-1].message if failed_steps else 'driver returned false without evidence'
+    return DriveChatAdapterError(f'{platform}: {operation} failed: {detail}')
 
 
 def _scroll(runtime: ConsultationRuntime) -> None:
@@ -47,55 +74,45 @@ def scroll(platform: str) -> dict[str, Any]:
     }
 
 
-def extract(platform: str) -> dict[str, Any]:
-    runtime = ConsultationRuntime(platform)
-    extract_cfg = runtime.cfg.get('workflow', {}).get('extract') or {}
-    element_key = extract_cfg.get('primary_key')
-    strategy = extract_cfg.get('strategy')
-    element_map = runtime.cfg.get('tree', {}).get('element_map') or {}
-    spec = element_map.get(element_key) if element_key else None
-
-    if not element_key or not isinstance(spec, dict):
-        raise DriveChatAdapterError(
-            f'{platform}: workflow.extract.primary_key does not resolve to an element_map entry'
-        )
-    if strategy != 'last_by_y':
-        raise DriveChatAdapterError(
-            f'{platform}: unsupported workflow.extract.strategy {strategy!r}'
-        )
-    if 'structural' in spec:
-        raise DriveChatAdapterError(
-            f'{platform}: extraction control {element_key!r} requires structural resolution'
-        )
-
-    _scroll(runtime)
-    firefox = find_firefox_for_platform(platform)
-    if firefox is None:
-        raise DriveChatAdapterError(f'{platform}: Firefox not found after scroll')
-    try:
-        firefox.clear_cache_single()
-    except Exception:
-        pass
-
-    elements = find_elements(firefox, fence_after=[])
-    candidates = [
-        element
-        for element in elements
-        if element.get('y') is not None and matches_spec(element, spec)
-    ]
-    if not candidates:
-        raise DriveChatAdapterError(
-            f'{platform}: mapped extraction control {element_key!r} not found after scroll'
-        )
-
-    target = dict(max(candidates, key=lambda item: (item.get('y') or 0, item.get('x') or 0)))
-    target.setdefault('states', [])
-    target.setdefault('text', '')
-    target['element_key'] = element_key
-    target['match_count'] = len(candidates)
-    target['selection'] = strategy
-    target['scroll_ok'] = True
-    return target
+def extract(platform: str, prompt: str = '') -> dict[str, Any]:
+    driver = _driver(platform)
+    request = ConsultationRequest(platform=platform, message=prompt)
+    result = driver.result(request)
+    result.session_url_after = driver.runtime.current_url()
+    if not driver.extract_primary(request, result):
+        raise _failure(platform, 'extract_primary', result)
+    if not driver.extract_additional(request, result):
+        raise _failure(platform, 'extract_additional', result)
+    return {
+        'platform': platform,
+        'extracted': True,
+        'response_text': result.response_text,
+        'artifacts': [artifact.serializable() for artifact in result.extractions],
+        'steps': [step.serializable() for step in result.steps],
+        'session_url': result.session_url_after,
+    }
 
 
-__all__ = ['DriveChatAdapterError', 'extract', 'scroll']
+def attach(platform: str, path: str) -> dict[str, Any]:
+    attachment = Path(path).expanduser().resolve()
+    if not attachment.is_file():
+        raise DriveChatAdapterError(f'{platform}: attachment is not a file: {attachment}')
+    driver = _driver(platform)
+    request = ConsultationRequest(
+        platform=platform,
+        message='',
+        attachments=[str(attachment)],
+        attach_identity=False,
+    )
+    result = driver.result(request)
+    if not driver.attach_files(request, result):
+        raise _failure(platform, 'attach', result)
+    return {
+        'platform': platform,
+        'attached': True,
+        'path': str(attachment),
+        'steps': [step.serializable() for step in result.steps],
+    }
+
+
+__all__ = ['DriveChatAdapterError', 'attach', 'extract', 'scroll']
