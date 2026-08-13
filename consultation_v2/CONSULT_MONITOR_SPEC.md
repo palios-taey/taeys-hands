@@ -7,8 +7,11 @@ records) is infra's (`taey-presence` soma_proxy/drive_chat) and is OUT OF SCOPE 
 ## Why this exists
 Taey now drives Family consults BY HAND via `drive_chat` (one action per call). The old consult monitor
 was a feature *inside* the banned engine, so it died when the engine was retired. Nothing outside Taey
-now knows a consult is in flight → no external timeout/orphan detection, and 205 leaked no-TTL session
-records have accumulated (`taey:*:active_session*`, started 2026-06-23..08-03, TTL -1).
+now knows a consult is in flight → no external timeout/orphan detection, and **297 leaked no-TTL session
+records across 13 node sets** have accumulated (`taey:*:active_session*`, started 2026-06-23..08-03, TTL -1).
+(Observed via codex live SCAN 2026-08-13: 205 in the `taey:taeys-hands` set + 92 across `infra`, `codex`,
+and `d0/d2/d3/d5/d6/d20-d24`; all 297 have valid JSON + fields, 0 missing, 0 cross-prefix, 0 dup memberships.
+An earlier single-set `SCARD` read only the 205 — hence the reader MUST SCAN all node sets, not one.)
 
 ## THE HARD BOUNDARY (non-negotiable — this is why it is not the banned class)
 - **PASSIVE ONLY.** It reads Redis and NOTIFIES/RECORDS/CLEANS. It **NEVER** touches a display, drives a
@@ -55,11 +58,13 @@ Record fields observed live: `platform`, `url`, `mode`, `requester`, `timeout` (
 - Fail-LOUD on any Redis error (raise, non-zero exit) — a monitor that silently can't read is worse than none.
 
 ## Validation (production oracle — NO synthetic-only tests)
-- `--dry-run` against LIVE Redis must classify the **205 leaked** records as ancient-leak (silent-clean),
-  print the count and a sample, and classify any genuinely-recent record correctly. That dry-run output IS
-  the production observation for the deliverable. Do not fabricate a test fixture as the evidence.
-- Then a single `--apply` run (only when taeys-hands says go) reaps the 205 and leaves `active_session_ids`
-  clean; re-running `--dry-run` shows 0 stale. That is the completion evidence (before/after counts).
+- `--dry-run` against LIVE Redis must SCAN all node sets (13 seen live), classify the **297 leaked** records
+  as ancient-leak (silent-clean), print the per-node counts + a sample, and classify any genuinely-recent
+  record correctly. That dry-run output IS the production observation for the deliverable. Do not fabricate
+  a test fixture as the evidence.
+- Then a single `--apply` run (only when taeys-hands says go) reaps the 297 across all node sets and leaves
+  every `active_session_ids` set empty; re-running `--dry-run` shows 0 stale. That is the completion
+  evidence (per-node before/after counts).
 
 ## Non-goals / explicitly OUT of scope
 - Writing session records (that is infra's registration side, in `taey-presence`).
