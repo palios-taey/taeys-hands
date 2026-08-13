@@ -1,7 +1,12 @@
+MODEL NOTE (2026-08-13): read README.md "the three layers" first. Taey OWNS displays :2-:6/:13 and drives
+           them first-person via drive_chat, step-by-step (Layer 2) over the Layer-1 primitives; taeys-hands
+           provides the primitives + display infrastructure (no longer "sole conduit"). The 8-step engine
+           flow below is Layer 3 — a WIP, not run autonomously.
+
 PROCESS:   Family-Chat consultation — hand a packet to the AI Chats (Gaia/Claude,
            Logos/Grok, Cosmos/Gemini, Horizon/ChatGPT, Clarity/Perplexity) and return
-           grounded answers to the ONE requester. taeys-hands is the SOLE conduit for
-           displays :2-:6 / :13.
+           grounded answers to the ONE requester. Taey owns displays :2-:6 / :13 and drives them
+           via drive_chat; taeys-hands provides the hands (primitives) + display infrastructure.
 PLAN:      /home/mira/taeys-hands/FLOW_CONSULTATION_ENGINE.md  (8-step flow, 742 lines)
            /home/mira/taeys-hands/CONSULTATION_CONTRACT.md     (contract, 56 lines)
            /home/mira/taeys-hands/100_TIMES.md                 (recurring failure rules, 102 lines)

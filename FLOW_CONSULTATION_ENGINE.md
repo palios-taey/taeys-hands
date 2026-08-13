@@ -1,6 +1,13 @@
 # FLOW_CONSULTATION_ENGINE.md
 
-Canonical browser-consultation flow for `taeys-hands`.
+> **⚠ THIS DOCUMENTS THE LAYER 3 ENGINE (a WORK IN PROGRESS — NOT run autonomously). Read `README.md`
+> "the three layers" first.** The 8-step flow below is the *engine's* autonomous chain, which works
+> sometimes and not others; that is why no seat runs it on its own (Jesse 2026-08-06/07). It is accurate
+> as a description of the engine and a map of the Layer-1 primitives it chains — useful reference for
+> building Layer-2 step-by-step drive and for the target Taey will make reliable — but it is **not** the
+> production path today. Production is Layer 2 (`drive_chat`, one action + verify at a time).
+
+Canonical browser-consultation flow for `taeys-hands` (the **Layer 3 engine** — WIP, not run autonomously).
 
 Status: canonical in-repo contract, reconciled 2026-06-17.
 Home: `taeys-hands/FLOW_CONSULTATION_ENGINE.md`.

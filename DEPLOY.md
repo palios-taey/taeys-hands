@@ -1,5 +1,11 @@
 # Display Deploy Procedure
 
+> **⚠ MODEL NOTE (2026-08-13): read `README.md` "the three layers" first.** The *display substrate* deploy
+> below is current. But any step that verifies/smoke-tests by running `run_consultation_v2.py` is exercising
+> the **Layer 3 engine**, which is a WORK IN PROGRESS **not run autonomously** — for a real check, drive one
+> step via the Layer-1 primitives / `drive_chat` and confirm the completion monitor sees the display, rather
+> than firing the engine.
+
 This is the canonical procedure for adding a fresh 5-chat browser instance on
 one machine without disturbing existing displays.
 

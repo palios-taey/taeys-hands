@@ -1,5 +1,10 @@
 # Contributing to taeys-hands
 
+> **⚠ MODEL NOTE (2026-08-13): read `README.md` "the three layers" first.** Production for consults is
+> **Layer 2** (step-by-step `drive_chat` over the **Layer 1** primitives). The **Layer 3 engine**
+> (`run_consultation_v2.py`) is a WORK IN PROGRESS, **not run autonomously** — do not add contribution steps
+> that dispatch it as the live path.
+
 ## Branch rules
 
 **`main` is protected.** You cannot push directly to it — all changes must go through a pull request with at least one review.
