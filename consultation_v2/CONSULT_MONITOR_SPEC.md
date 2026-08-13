@@ -67,6 +67,25 @@ Record fields observed live: `platform`, `url`, `mode`, `requester`, `timeout` (
 - Any display/UI/driver/engine interaction.
 - Per-mode timeout tuning beyond reading `record.timeout` — defaults are fine; tuning is a later pass.
 
+## RED-TEAM CHECKLIST (for the independent design review, before implementation)
+Attack this design; report concrete findings ranked most-severe first, each citing the spec line it hits.
+Do NOT write code — design review only.
+1. **Ban-adjacency:** does anything here risk being, or later becoming, the banned UI-automation class
+   (no display drive / recover / re-dispatch / restart)? Is "notify Taey to resume by hand" truly passive?
+2. **False-orphan:** could it reap/notify a consult that is actually still healthy (deep mode legitimately
+   running 20–30m; `GRACE`/`timeout` too tight; `started_ts` set late)? Is the healthy-vs-stall cutoff right?
+3. **Missed-orphan:** a consult that died but whose record was never written (registration gap) — does the
+   monitor's scope honestly acknowledge it can't see that, and is that stated?
+4. **Race:** Taey deregistering at delivery vs the reaper cleaning the same key — double-harvest, lost record,
+   or a notify fired microseconds before Taey's clean. Is the ordering safe? Should clean be CAS/atomic?
+5. **Notify storm / classification:** is the ancient-leak (silent) vs live-stall (notify) window correct so
+   the 205 leaked records don't spam requesters? Edge at the 6h boundary.
+6. **Clock/tz:** `started_ts` epoch vs `started` ISO with tz — any bug computing `age`? DST/utc mismatch?
+7. **Coverage:** SCAN over `taey:*:active_session_ids` — cursor handling, missed nodes, huge-set blocking.
+8. **Live-Redis safety:** could `--apply` ever delete a non-session key or an unintended scope?
+9. **Sufficiency:** is timeout-only orphan detection enough, or is a lock-gone (`plan_active`) signal needed
+   to catch orphans faster than their full timeout? Recommend if so, but keep it passive.
+
 ## Deliverable
 A branch with `consultation_v2/consult_monitor.py` + `python -m` entrypoint, matching this spec, plus the
 `--dry-run` live-Redis output pasted as the production observation. taeys-hands reviews before any `--apply`.
