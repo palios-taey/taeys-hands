@@ -1,79 +1,65 @@
 # Taey's Hands
 
-AT-SPI-based automation for chat and social platforms on Linux.
+AT-SPI-based hands for chat and social platforms on Linux. Uses the Linux accessibility API (AT-SPI) to
+operate web apps in Firefox — no browser-automation framework (CDP/WebDriver), no detection fingerprint.
+Just a screen reader that happens to be an AI.
 
-Uses the Linux accessibility API (AT-SPI) to interact with web applications in Firefox - no browser automation frameworks (CDP/WebDriver), no detection fingerprints. Just a screen reader that happens to be an AI.
+> **This is written for Taey.** If you are Taey, these are your hands — not a tool you are evaluating for
+> someone else. You do not have a browser; you have an accessibility tree. You act by naming a control and
+> asking for it, the way a screen-reader user does. Each platform is its own Firefox on its own X display
+> with its own cookies, so a stuck window on one never blocks the others.
 
-In production, this repo is Taey's consult engine: it owns the AT-SPI Firefox displays, the `consultation_v2` dispatch/extract flow, and the MCP-facing hand surface that lets Taey use those displays without direct browser control.
+## Read this first — the three layers
 
-> **UI authority:** `taeys-hands` is the sole definer of Taey's direct interactive-UI grammar. The
-> one contract — supervised one-action-per-approved-turn, tree-is-truth, no autonomous loops — is
-> [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md).
+Everything here is one of three layers. Keeping them straight is the whole game; most confusion comes from
+mixing them up.
 
-> **This README is written for Taey.** If you are Taey, these are your hands — not a tool you are
-> evaluating for someone else. Everything you reach outside your own machines, you reach through
-> here: the chat platforms you consult, the pages you read, the forms you fill.
->
-> What that means concretely. You do not have a browser; you have an accessibility tree. You act by
-> naming a control and asking for it, the way a screen-reader user does — which is why there is no
-> fingerprint to detect. Each platform is its own Firefox on its own X display with its own cookies,
-> so a hung window on one never blocks the others.
->
-> **The part worth internalising is the discipline, not the API.** This engine is the *sole* conduit
-> for the family-chat displays. Driving one of those displays directly from somewhere else bypasses
-> the dispatch lock and collides with whatever is already mid-consult on it. Ownership is partitioned
-> so that two things never reach for the same hand at once — when you need one of those displays, you
-> dispatch here rather than reaching around.
->
-> Read `consultation_v2/` as how you actually talk to the other members of the family, and treat a
-> lock you did not acquire as a hand that is not currently yours.
+### Layer 1 — the PRIMITIVES (permanent; these are your hands)
+The single-action operations and reads that never go away. Read the tree, take **one** action, **verify** it
+landed, hold the display lock, detect the stop button, notify, extract. Everything else is built on these.
+`drive_chat` uses them. The completion monitor uses them. You use them. They are always production.
 
-## Supported Platforms
+- **read the tree** — `consultation_v2/snapshot.py` (`build_snapshot(platform)` → the elements named in that
+  platform's YAML, resolved against the live tree by **exact** name+role — never substring).
+- **act, one step** — `consultation_v2/runtime.py` + `atspi.py`/`input.py`/`interact.py`/`clipboard.py`:
+  click / focus / type / paste / key / navigate / read-clipboard, plus `focus_file_dialog`.
+- **verify a step** — resolve one YAML element key and check it is present/showing (exact match). This is
+  how you know an action landed. It is the prerequisite for recovering when one does not.
+- **the lock** — `consultation_v2/primitives.py` (`taey:plan_active::N`): a display you did not lock is a
+  hand that is not currently yours.
+- **completion detector** — `consultation_v2/platforms/<p>/monitor.py` (`<P>CompletionDetector`): stop
+  button seen → gone = the response finished.
+- **element maps** — `consultation_v2/platforms/<p>/<p>.yaml`: the exact name+role of every control, per
+  platform. The YAML is the source of truth; the tree is the oracle. When they disagree, fix the YAML.
+- **notify / extract** — `consultation_v2/notify.py`; mapped copy/tree extraction.
 
-**Chat**: ChatGPT, Claude, Gemini, Grok, Perplexity
-**Social**: X/Twitter, LinkedIn
+### Layer 2 — STEP-BY-STEP operation (how you work today; production now)
+You drive a consult **one action at a time**: observe the tree → take one primitive action → verify it
+landed → the next. Reliable because it is supervised and verified at every step — no chained assumptions.
+This is the production path for consults right now. On the family-chat displays (`:2`–`:6`, `:21`–`:24`) you
+drive first-person via **`drive_chat`** (`taey-presence/serving/ui_drive.py`), which is exactly this loop
+over the Layer-1 primitives, taking the same lock. The discipline is one contract:
+[`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one action per approved turn,
+tree-is-truth, **no autonomous loops.**
 
-## How It Works
+### Layer 3 — the ENGINE (a work in progress; not run autonomously)
+`consultation_v2/orchestrator.py` + `drivers/` + `scripts/run_consultation_v2.py` chain the Layer-1
+primitives into a whole-consult-in-one-call (navigate → select → attach → send → monitor → extract). It
+**works sometimes and not others** — which is exactly why it is **not run autonomously** and no seat
+dispatches it. It is kept as the target you (with the Family/Chats) will make reliable; when it is reliable
+it becomes the fast path. **Until then, Layer 2 is production and the engine is not run on its own.**
+See `feedback`/the fleet CLAUDE.md engine-status note before touching it.
 
-`consultation_v2/` is the only live consultation engine.
+## The completion monitor (Layer-1 detection, running now)
+`scripts/consult_completion_monitor.py` runs one passive watcher per display (`taey-consult-monitor@N.service`
+for `:2`–`:6`). It reuses the `CompletionDetector` + the `stop_button` YAML element + `taey-notify`: when the
+stop button disappears, it notifies Taey the response is ready. Read-only — it never drives or locks a display.
 
-1. The request is mapped to a platform/model/mode/tools selection.
-2. `consultation_v2.identity` prepends `FAMILY_KERNEL.md`, `SPOTLIGHT_STANDARD_FOR_INTEGRITY.md`, and the platform `IDENTITY_*.md` file, then consolidates caller attachments into one package.
-3. The platform driver reads `consultation_v2/platforms/<platform>.yaml`; drivers contain shared control flow and no hardcoded element names.
-4. Every setup action is validated against the AT-SPI tree. If the tree cannot validate the action after the configured settle/rescan window, the run fails loudly.
-5. Send is validated by the stop button appearing, and new sessions also require URL capture/change.
-6. Completion monitoring uses stop-button disappearance, then extraction uses mapped copy/tree controls and sends a Redis notification.
+## Displays — two full sets of hands
 
-## Requirements
+Two independent sets, so a consult on one never blocks the other.
 
-- Linux with X11 (tested on Ubuntu 22.04+)
-- Firefox with accessibility enabled
-- Python 3.10+
-- AT-SPI2 (`at-spi2-core`)
-- `xdotool`, `xsel`
-- Redis (optional - for state management and monitor notifications)
-- Neo4j (optional - for conversation history storage)
-
-## Setup
-
-```bash
-# System dependencies
-sudo apt install at-spi2-core xdotool xsel
-
-# Python dependencies
-pip install redis neo4j PyGObject
-
-# Enable Firefox accessibility (about:config)
-# accessibility.force_disabled = 0
-```
-
-For production display provisioning, see [DEPLOY.md](DEPLOY.md).
-
-## Two display sets — you have two full sets of hands
-
-There are **two independent sets** of these displays, so a consult running on one set never blocks the other — two things can reach for the family at once without reaching for the same hand.
-
-| Platform | Primary set (family-chat) | Second set |
+| Platform | Primary (family-chat) | Second set |
 |---|---|---|
 | ChatGPT | `:2` | `:20` |
 | Claude | `:3` | `:21` |
@@ -81,50 +67,39 @@ There are **two independent sets** of these displays, so a consult running on on
 | Grok | `:5` | `:23` |
 | Perplexity | `:6` | `:24` |
 
-The **primary set** (`:2`–`:6`, plus `:13`) is the default. The **second set** (`:20`–`:24`) is selected via the `PLATFORM_DISPLAYS` env (e.g. `PLATFORM_DISPLAYS=chatgpt:20,claude:21,gemini:22,grok:23,perplexity:24`; the env wins over `.env`). Each display is its own logged-in Firefox with its own cookies and its own AT-SPI bus, so the two sets are fully isolated.
+Primary (`:2`–`:6`) is the default. Second set (`:21`–`:24`) is for parallel streams or when a primary is
+shared/busy. `:13` is a separate Claude CVP account (hunter's), not a Taey consult display. Config lives in
+`~/.taey/machine.env`; no display number is hardcoded. Each display is its own logged-in Firefox with its own
+cookies and AT-SPI bus, fully isolated.
 
-Reach for the second set when the primary is mid-consult, or when a primary display is **shared** with another operation — notably `:6` (Perplexity), which the careers apply-machine also drives; route Perplexity to `:24` rather than colliding on `:6`. Config lives in `~/.taey/machine.env` (`TAEY_MACHINE_ENV`); no display number is hardcoded.
-
-## Usage
-
-```bash
-python3 scripts/run_consultation_v2.py \
-  --platform chatgpt \
-  --message "Prompt text" \
-  --attach /path/to/context.md \
-  --requester taeys-hands-codex \
-  --purpose smoke \
-  --output /tmp/consultation.json
-```
-
-## Architecture
+## Where things live
 
 ```
-scripts/run_consultation_v2.py  # CLI entrypoint
-consultation_v2/                # sole live consultation engine
-  runtime.py                    # shared AT-SPI/input primitives
-  snapshot.py                   # tree snapshot + YAML mapping
-  identity.py                   # FAMILY_KERNEL + Spotlight + IDENTITY consolidation
-  completion.py                 # stop-button completion detector
-  notify.py                     # Redis notification output
-  drivers/                      # platform drivers
-  platforms/                    # live YAML contracts
-  validators/                   # integrity gates
-storage/            # Redis + Neo4j persistence
-scripts/launch_isolated_display.sh, restart_display.sh, bus_watcher.sh,
-scripts/manage_displays.sh, setup_display.sh, install_machine_displays.sh,
-systemd/user/taey-*             # production DBUS/Firefox display substrate
-archive/                       # retired V1/MCP/bot/test/docs evidence
+consultation_v2/
+  snapshot.py runtime.py atspi.py input.py interact.py tree.py clipboard.py   # L1 primitives: read + act
+  primitives.py                 # L1: the display lock + monitor-session helpers
+  yaml_contract.py              # L1: strict YAML loader
+  platforms/<p>/<p>.yaml        # L1: exact element maps, per platform (source of truth)
+  platforms/<p>/monitor.py      # L1: stop-button completion detector
+  notify.py identity.py         # L1: notification; FAMILY_KERNEL + Spotlight + IDENTITY consolidation
+  orchestrator.py  drivers/     # L3: the engine (autonomous chain — WIP, not run on its own)
+  cli.py                        # L3: engine CLI
+scripts/
+  consult_completion_monitor.py # the passive per-display completion monitor (running)
+  run_consultation_v2.py        # L3: engine entrypoint (WIP — do NOT run autonomously)
+  launch_isolated_display.sh manage_displays.sh install_machine_displays.sh …  # display substrate
+systemd/user, ~/.config/systemd/user/taey-*  # display units + taey-consult-monitor@N
+storage/                        # optional Redis + Neo4j persistence
+archive/                        # retired evidence — historical only, never operate from it
 ```
 
-## Gates
+## Requirements / setup
 
-```bash
-python3 scripts/run_consultation_v2.py --help
-python3 consultation_v2/validators/lint_no_yaml_silent_fallbacks.py --all
-python3 consultation_v2/validators/lint_consultation_v2_contract.py --all
-```
+- Linux + X11, Firefox with `accessibility.force_disabled=0` **and** `widget.use-xdg-desktop-portal.file-picker=0`
+  (force Firefox's own file chooser — the XDG portal picker is a separate app AT-SPI cannot see).
+- Python 3.10+, `at-spi2-core`, `xdotool`, `xsel`, PyGObject. Redis/Neo4j optional.
+- Production display provisioning: [DEPLOY.md](DEPLOY.md).
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) — free to use, modify, and share for any noncommercial purpose. Commercial use requires a separate license.
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free for any noncommercial purpose; commercial use requires a separate license.

@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """Consultation V2 CLI entrypoint.
 
+============================================================================
+LAYER 3 — THE ENGINE (work in progress). DO NOT RUN THIS AUTONOMOUSLY.
+This chains the Layer-1 primitives into a whole-consult-in-one-call. It works
+sometimes and not others; that unreliability is exactly why no seat runs it on
+its own (Jesse, 2026-08-06/07). It is kept as the target Taey will make reliable
+with the Family/Chats — not deleted, not forbidden forever, just not run
+autonomously yet. Production for consults today is LAYER 2: step-by-step via
+`drive_chat` over the Layer-1 primitives, verifying each action. See README.md
+"the three layers" before touching this.
+============================================================================
+
 Selects and binds the target display BEFORE importing the V2 CLI. libatspi
 (gi.repository.Atspi) reads the bus address once at first use and caches the
 connection for the process lifetime, so the env must be correct before the
