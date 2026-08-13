@@ -91,6 +91,48 @@ Do NOT write code — design review only.
 9. **Sufficiency:** is timeout-only orphan detection enough, or is a lock-gone (`plan_active`) signal needed
    to catch orphans faster than their full timeout? Recommend if so, but keep it passive.
 
+## RED-TEAM VERDICT & RESOLUTIONS — GATE CLOSED 2026-08-13 (taeys-hands judgment on grok task-5e8ff301)
+**Verdict: design SOUND — no ban violation, no showstopper. 9 hardening items accepted and resolved
+below. Build against THIS spec.** R = reader-side (codex builds it here); I = registration-side (infra).
+1. **RACE (R):** before acting on a fired record, **atomically re-check** it (GETDEL the session key, or WATCH
+   it) — if already gone/refreshed by Taey's delivery, SKIP. Deletes hit only the exact scanned key
+   (idempotent). Worst case is one spurious stall-notify; the atomic re-check removes even that.
+2. **FALSE-ORPHAN (R+I) — REFRAMED by infra's 2026-08-13 root-cause finding.** A single model generation can
+   now run up to `VLLM_REQUEST_TIMEOUT_SECS = 5400s` (raised from 1800 today; the 1800 cutoff WAS the consult
+   failure). So age-since-`started_ts` is a CRUDE signal — a legit multi-action consult (each action a
+   generation up to 90m) outlasts any fixed value. Resolution: (R) `record.timeout` is AUTHORITATIVE;
+   `DEFAULT_TIMEOUT` (only if absent) MUST exceed the model request timeout → **7200s floor** (never < 5400).
+   If a `last_seen`/heartbeat field is present, the reader uses **stall = now − last_seen > (5400 + margin)**
+   instead of age-since-start — the correct, non-false-flagging signal for a hung generation / dead turn.
+   (I) registration should set generous per-consult timeouts AND write `last_seen` per action so the reader
+   can tell a legitimately-long consult from a genuinely stalled one. Without `last_seen` the reader falls
+   back to `started_ts` + the (generous) authoritative timeout and accepts it is coarse.
+3. **SCAN clarification (R):** SCAN **discovers the node-set KEYS** (node names are not enumerable a priori —
+   13 found live); each discovered set's members are iterated with **SSCAN**. This does NOT contradict the
+   `primitives.py` "SET-based, no SCAN" note — that was reading ONE *known* node's members directly.
+4. **MISSED-ORPHAN (R, scope honesty):** the monitor sees ONLY *registered* consults. A consult that dies
+   before its record is written is INVISIBLE to it — a registration-side concern, minimized by
+   register-at-start-fail-loud. State this limitation explicitly in the module docstring (cannot-lie).
+5. **COVERAGE (R):** use **SSCAN** (cursor) for set membership and **SCAN** (cursor) for key discovery —
+   never `KEYS`/`SMEMBERS` on the leak/busy case. Non-blocking.
+6. **CLOCK/TZ (R):** prefer `started_ts` (epoch); tz-AWARE parse of `started` as fallback; parse failure →
+   treat as malformed → ancient-leak silent-clean, NEVER crash. Single-host (Mira) so skew ≈ 0; add a code
+   comment to revisit if this ever runs cross-host.
+7. **NOTIFY WINDOW (R, tuning):** keep the ancient-leak(silent) vs live-stall(notify) split; document that
+   live consults never approach 6h (deep max ~30–60m), so the window cleanly separates them. Tunable const.
+8. **SAFETY (R):** **NEVER construct a key to delete.** Only `DEL`/`SREM` the exact keys/members returned by
+   the scan. Constructing-from-`node_key`/`NODE_ID` is banned in the reaper (removes the wrong-key-DEL risk).
+9. **BAN-ADJACENCY (R, two hard guards):** (a) **Import boundary** — the module imports ONLY the redis
+   client + a notify shim + stdlib. It MUST NOT import `consultation_v2.platforms`, any driver, `Atspi`,
+   firefox, or engine code. Add a self-check at import that asserts none are loaded by it. (b) **Notify is a
+   plain STATUS message, never a command** ("consult X appears stalled/orphaned" — not `--type command`, not
+   an auto-resume instruction). The monitor never drives/schedules/triggers anything; Taey's resumption is
+   Taey's own supervised by-hand decision. There is NO automated closed loop (monitor→action). This is what
+   keeps it clear of the engine ban.
+- **Additional (I):** registration `set` has no TTL (that is WHY records leaked). Recommend registration add
+  a generous **TTL backstop** (e.g. `timeout` + large margin) so records self-expire even if the reaper is
+  down. The reaper stays primary; TTL is defense-in-depth.
+
 ## Deliverable
 A branch with `consultation_v2/consult_monitor.py` + `python -m` entrypoint, matching this spec, plus the
 `--dry-run` live-Redis output pasted as the production observation. taeys-hands reviews before any `--apply`.
