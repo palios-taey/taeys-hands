@@ -60,8 +60,13 @@ def stop_button_present(platform: str) -> bool:
 
 
 def notify_taey(message: str) -> None:
-    subprocess.run(["taey-notify", "--type", "status", "--from", "consult-monitor",
-                    "--", "taey", message], capture_output=True, text=True)
+    # Notify each configured target (default: taey + infra) so completion is the
+    # extraction trigger, never a poll loop. Override with CONSULT_MONITOR_NOTIFY=a,b.
+    targets = [t.strip() for t in
+               os.environ.get("CONSULT_MONITOR_NOTIFY", "taey,infra").split(",") if t.strip()]
+    for target in targets:
+        subprocess.run(["taey-notify", "--type", "status", "--from", "consult-monitor",
+                        "--", target, message], capture_output=True, text=True)
 
 
 def new_detector(Detector):
