@@ -28,7 +28,7 @@
 
 Public boundary and mandate summary: [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/PUBLIC_OPERATING_BOUNDARY.md). What follows is the taeys-hands-seat statement of it.
 
-- **Taey is the customer — the only one.** There is no Claude Code user-adoption goal. This consult engine is PRODUCTION INFRASTRUCTURE *for Taey*. Taey lives on the Thors, trains on the Sparks, and *utilizes* the consult engine (with these Claude Code seats, the orchestrator, notify, ISMA) as a component of its own system. Docs here are written FOR Taey as the consumer.
+- **Taey is the customer — the only one.** There is no Claude Code user-adoption goal. **What is PRODUCTION INFRASTRUCTURE for Taey is the LAYER 1 primitives + the LAYER 2 step-by-step drive** (see README.md "the three layers") — Taey's actual hands (read/act/verify/lock/detect/notify) and the supervised one-action-at-a-time way it uses them via `drive_chat`. (The LAYER 3 engine is a WIP, not the production path.) Taey lives on the Thors, trains on the Sparks, and *utilizes* these hands (with the Claude Code seats, orchestrator, notify, ISMA) as a component of its own system. Docs here are written FOR Taey as the consumer.
 - **The PRIORITY:** enable **Taey** and **training development** — get Taey **using its own production infrastructure** (this engine) and **understanding it**. That is the point of the work, not the tooling for its own sake.
 - **Everything runs from PUBLIC production repos.** A released Taey + the public repos = a working system. `consultation_v2` is a Taey-used production system, so this repo is PUBLIC. Local specifics (IPs/hosts) are env-configurable (`fleet.env` + committed `.example`, fail-loud on a missing var — never silent-default). File paths are fine *only if they resolve for a downloaded Taey* — i.e. point into a public repo that ships, never a private repo or an operator-local dir.
 - **Disconnection, not cleanup, for private repos.** A pointer (in a prompt, doc, config, or YAML) into a private repo or an untracked local path is a **DISCONNECTION VIOLATION** — it fails SILENTLY: a downloaded Taey follows it, finds nothing, and proceeds without the knowledge. Resolve every pointer to public-reachable content or remove it.
@@ -138,7 +138,7 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 
 ## Consultation V2 — Isolated Driver Architecture
 
-**Branch:** `main` — this driver-architecture V2 engine IS the production code (reconciled onto `main` 2026-06-14).
+**Branch:** `main`. **This driver-architecture engine is LAYER 3 (see README.md "the three layers") — the autonomous chain that is a WORK IN PROGRESS and NOT run autonomously.** It works sometimes and not others; that is why no seat dispatches it (Jesse 2026-08-06/07) — kept as the target Taey makes reliable, not deleted. Production for consults today is LAYER 2: step-by-step via `drive_chat` over the LAYER 1 primitives (`snapshot`/`runtime`/`primitives`/YAMLs/`monitor.py`/`notify`), which are permanent. The engine text below is reference for the primitives + the display/YAML contract, NOT an instruction to run it.
 **Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
 **Status:** Production. `CONSULTATION_CONTRACT.md`, `FLOW_CONSULTATION_ENGINE.md`, and `100_TIMES.md` govern the flow.
 
