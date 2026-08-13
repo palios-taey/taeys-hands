@@ -3093,6 +3093,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         'in the artifact',
         'open the artifact',
         'artifacts panel',
+        'full response attached',
     )
     _ARTIFACT_PAGE_START_MARKERS = (
         '# JESSE',
@@ -4729,6 +4730,15 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             expected_names,
             attempts,
         )
+        if copied is None and artifact_expected:
+            opened = self._open_claude_artifact_panel(attempts)
+            if opened:
+                copied = self._copy_artifact_from_tree_controls(
+                    request,
+                    result,
+                    expected_names,
+                    attempts,
+                )
 
         if copied is not None:
             content = str(copied['content']).strip()
@@ -4754,8 +4764,8 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 'extract_additional',
                 False,
                 (
-                    'Claude artifact extraction requires a mapped AT-SPI artifact '
-                    'copy control; no configured control yielded artifact content'
+                    'Claude artifact extraction requires mapped AT-SPI opener and '
+                    'copy controls; the configured sequence yielded no artifact content'
                 ),
                 expected_artifacts=expected_names,
                 attempts=attempts,
@@ -4772,6 +4782,87 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             artifacts=[],
         )
         return True
+
+    def _open_claude_artifact_panel(self, attempts: list[dict]) -> bool:
+        extra_cfg = self.cfg.get('workflow', {}).get('extra_extract', {}) or {}
+        opener_key = str(extra_cfg.get('artifact_opener_key') or '').strip()
+        if not opener_key:
+            attempts.append({
+                'source': 'artifact_panel_opener',
+                'ok': False,
+                'reason': 'workflow.extra_extract.artifact_opener_key_missing',
+            })
+            return False
+        element_map = self.cfg.get('tree', {}).get('element_map', {}) or {}
+        if opener_key not in element_map:
+            raise ValueError(
+                f'claude artifact opener key not in element_map: {opener_key!r}'
+            )
+
+        snapshot_source = str(
+            extra_cfg.get('artifact_opener_snapshot') or 'snapshot'
+        ).strip().lower()
+        if snapshot_source == 'snapshot':
+            snapshot = self.runtime.snapshot()
+        elif snapshot_source == 'menu':
+            snapshot = self.runtime.menu_snapshot()
+        elif snapshot_source == 'app_root':
+            snapshot = self.runtime.app_root_snapshot()
+        else:
+            raise ValueError(
+                'claude workflow.extra_extract.artifact_opener_snapshot must be '
+                "'snapshot', 'menu', or 'app_root'"
+            )
+
+        candidates = list(snapshot.mapped.get(opener_key) or [])
+        selection = str(
+            extra_cfg.get('artifact_opener_strategy') or 'last_by_y'
+        ).strip().lower()
+        if selection != 'last_by_y':
+            raise ValueError(
+                'claude workflow.extra_extract.artifact_opener_strategy must be '
+                "'last_by_y'"
+            )
+        positioned = [candidate for candidate in candidates if candidate.y is not None]
+        if not positioned:
+            attempts.append({
+                'source': 'artifact_panel_opener',
+                'ok': False,
+                'reason': 'mapped_opener_not_found',
+                'opener_key': opener_key,
+                'snapshot_source': snapshot_source,
+                'snapshot': snapshot.serializable(),
+            })
+            return False
+
+        target = max(
+            positioned,
+            key=lambda candidate: (int(candidate.y or 0), int(candidate.x or 0)),
+        )
+        click_strategy = str(
+            extra_cfg.get('artifact_opener_click_strategy')
+            or self.cfg.get('click_strategy')
+            or 'xdotool_first'
+        )
+        clicked = self.runtime.click(target, strategy=click_strategy)
+        settle_ms = int(extra_cfg.get('artifact_panel_settle_ms') or 1200)
+        if settle_ms < 0:
+            raise ValueError(
+                'claude workflow.extra_extract.artifact_panel_settle_ms must be non-negative'
+            )
+        time.sleep(settle_ms / 1000.0)
+        attempts.append({
+            'source': 'artifact_panel_opener',
+            'ok': bool(clicked),
+            'opener_key': opener_key,
+            'selection': selection,
+            'snapshot_source': snapshot_source,
+            'click_strategy': click_strategy,
+            'settle_ms': settle_ms,
+            'candidate_count': len(candidates),
+            'opener': target.serializable(),
+        })
+        return bool(clicked)
 
     def _copy_artifact_from_tree_controls(
         self,

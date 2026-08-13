@@ -5366,6 +5366,167 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         evidence['reason'] = 'no_bounded_response_text_candidate'
         return '', evidence
 
+    def _reveal_chatgpt_extract_controls(
+        self,
+        document,
+        elements: list[dict],
+        copy_spec: dict,
+        request: ConsultationRequest,
+    ) -> tuple[list[dict], dict[str, object]]:
+        from consultation_v2.tree import find_elements as raw_find_elements
+
+        extract_cfg = self.cfg.get('workflow', {}).get('extract', {}) or {}
+        hover_strategy = str(extract_cfg.get('hover_strategy') or '').strip()
+        visible_copy_buttons = [
+            element for element in elements
+            if element.get('y') is not None and matches_spec(element, copy_spec)
+        ]
+        if visible_copy_buttons:
+            return elements, {
+                'ok': True,
+                'strategy': hover_strategy or None,
+                'reason': 'copy_button_already_visible',
+                'copy_buttons_found': len(visible_copy_buttons),
+                'hover_attempts': [],
+            }
+        if not hover_strategy:
+            return elements, {
+                'ok': False,
+                'strategy': None,
+                'reason': 'hover_strategy_not_configured',
+                'copy_buttons_found': 0,
+                'hover_attempts': [],
+            }
+        if hover_strategy != 'assistant_message_band_scan':
+            raise ValueError(
+                f'chatgpt workflow.extract.hover_strategy unsupported: {hover_strategy!r}'
+            )
+
+        element_map = self.cfg.get('tree', {}).get('element_map', {}) or {}
+        user_panel_spec = element_map.get('user_message_actions_panel', {}) or {}
+        prompt_cfg = self.cfg.get('workflow', {}).get('prompt', {}) or {}
+        composer_keys = [
+            *(prompt_cfg.get('input_keys') or []),
+            *(prompt_cfg.get('send_button_keys') or []),
+            'attach_trigger',
+        ]
+        composer_specs = [
+            element_map[key]
+            for key in composer_keys
+            if isinstance(element_map.get(key), dict)
+            and 'structural' not in element_map[key]
+        ]
+        prompt_norm = self._normalized_text(request.message).lower()
+        prompt_ys: list[int] = []
+        user_panel_ys: list[int] = []
+        composer_ys: list[int] = []
+        for element in elements:
+            y = self._chatgpt_int(element.get('y'))
+            if y is None:
+                continue
+            if matches_spec(element, user_panel_spec):
+                user_panel_ys.append(y)
+            if any(matches_spec(element, spec) for spec in composer_specs):
+                composer_ys.append(y)
+            if not prompt_norm:
+                continue
+            element_text = self._normalized_text(' '.join(
+                str(element.get(key) or '') for key in ('name', 'text')
+            )).lower()
+            if (
+                element_text == prompt_norm
+                or (len(prompt_norm) >= 24 and prompt_norm in element_text)
+                or (len(element_text) >= 80 and element_text in prompt_norm)
+            ):
+                prompt_ys.append(y)
+
+        anchor_ys = prompt_ys + user_panel_ys
+        lower_bound = max(anchor_ys) if anchor_ys else None
+        upper_bound = min(composer_ys) if composer_ys else None
+        hover_candidates: list[dict] = []
+        seen_points: set[tuple[int, int]] = set()
+        for element in sorted(
+            elements,
+            key=lambda item: self._chatgpt_int(item.get('y')) or 0,
+            reverse=True,
+        ):
+            x = self._chatgpt_int(element.get('x'))
+            y = self._chatgpt_int(element.get('y'))
+            if x is None or y is None or element.get('atspi_obj') is None:
+                continue
+            if lower_bound is not None and y <= lower_bound:
+                continue
+            if upper_bound is not None and y >= upper_bound:
+                continue
+            if self._chatgpt_is_response_action_element(element):
+                continue
+            name = str(element.get('name') or '').strip()
+            text = str(element.get('text') or '').strip()
+            role = str(element.get('role') or '').strip().lower()
+            if not (name or text or role in {'article', 'landmark', 'panel', 'section'}):
+                continue
+            point = (x, y)
+            if point in seen_points:
+                continue
+            seen_points.add(point)
+            hover_candidates.append(element)
+
+        hover_attempts: list[dict[str, object]] = []
+        current_elements = elements
+        for candidate in hover_candidates[:24]:
+            target = ElementRef(
+                key=None,
+                name=str(candidate.get('name') or ''),
+                role=str(candidate.get('role') or ''),
+                x=candidate.get('x'),
+                y=candidate.get('y'),
+                states=list(candidate.get('states') or []),
+                text=str(candidate.get('text') or '') or None,
+                atspi_obj=candidate.get('atspi_obj'),
+            )
+            hovered = self.runtime.hover(target)
+            time.sleep(0.3)
+            try:
+                document.clear_cache_single()
+            except Exception:
+                pass
+            current_elements = raw_find_elements(document, fence_after=[])
+            revealed = [
+                element for element in current_elements
+                if element.get('y') is not None and matches_spec(element, copy_spec)
+            ]
+            hover_attempt = {
+                'hovered': bool(hovered),
+                'candidate': {
+                    key: candidate.get(key) for key in ('name', 'role', 'x', 'y')
+                },
+                'copy_buttons_found': len(revealed),
+            }
+            if len(hover_attempts) < 12 or revealed:
+                hover_attempts.append(hover_attempt)
+            if revealed:
+                return current_elements, {
+                    'ok': True,
+                    'strategy': hover_strategy,
+                    'reason': 'copy_button_revealed',
+                    'copy_buttons_found': len(revealed),
+                    'lower_bound_y': lower_bound,
+                    'upper_bound_y': upper_bound,
+                    'hover_candidates': len(hover_candidates),
+                    'hover_attempts': hover_attempts,
+                }
+
+        return current_elements, {
+            'ok': False,
+            'strategy': hover_strategy,
+            'reason': 'assistant_message_band_scan_exhausted',
+            'copy_buttons_found': 0,
+            'lower_bound_y': lower_bound,
+            'upper_bound_y': upper_bound,
+            'hover_candidates': len(hover_candidates),
+            'hover_attempts': hover_attempts,
+        }
+
     def extract_primary(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         from consultation_v2 import clipboard
         from consultation_v2.platforms import routing as platform_routing
@@ -5426,6 +5587,12 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 pass
             last_snapshot = self.runtime.snapshot()
             all_elements = raw_find_elements(document, fence_after=[])
+            all_elements, reveal_evidence = self._reveal_chatgpt_extract_controls(
+                document,
+                all_elements,
+                copy_spec,
+                request,
+            )
             last_document_elements = all_elements
             copy_buttons = [
                 element for element in all_elements
@@ -5443,6 +5610,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                     'scroll': last_scroll,
                     'copy_buttons_found': 0,
                     'reason': 'copy_button_not_found',
+                    'reveal': reveal_evidence,
                 })
                 continue
 
@@ -5458,6 +5626,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                     'copy_buttons_found': len(copy_buttons),
                     'turn_correlation': turn_correlation,
                     'reason': 'copy_button_not_correlated_to_latest_user_turn',
+                    'reveal': reveal_evidence,
                 })
                 continue
 
@@ -5493,6 +5662,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 'scroll': last_scroll,
                 'copy_buttons_found': len(copy_buttons),
                 'turn_correlation': turn_correlation,
+                'reveal': reveal_evidence,
                 'copy_button': copy_button,
                 'button_scrolled_to_anywhere': bool(scrolled_button),
                 'clicked': bool(clicked),
