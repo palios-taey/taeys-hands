@@ -200,7 +200,7 @@ tree:
 workflow:
   defaults:
     model: pro
-    mode: deep_research
+    mode: deep_think
     tools: []
   full_consult:
     steps:
@@ -239,7 +239,7 @@ workflow:
       - menu: model
         option: pro
       - menu: mode
-        option: deep_research
+        option: deep_think
   selection:
     menus:
       model:
@@ -283,8 +283,8 @@ workflow:
           deep_research:
             element: tool_deep_research
             active_element: tool_deselect_deep_research
-        default_for_fresh: deep_research
-        example_rationale: Use Deep Research by default because Deep Think access is not available on the current Gemini plan.
+        default_for_fresh: deep_think
+        example_rationale: deep_think and deep_research are TWO SEPARATE, coequal options — not one "deep mode". Deep Think was inactive and is ACTIVE AGAIN (Jesse 2026-08-11); it is Gemini's deep-reasoning mode, so it is the default here (restoring Gemini as a reasoning lane, distinct from Perplexity's Deep Research lane). Deep Research (tool_deep_research) is its own still-fully-available option for web-research consults — select it explicitly via --select mode=deep_research; it is NOT a fallback for Deep Think. Deep Think requires the 3.1 Pro model first, then Upload & tools -> "More tools" flyout -> tool_deep_think (see element_map comments above).
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
