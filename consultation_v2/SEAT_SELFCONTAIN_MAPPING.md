@@ -1,5 +1,9 @@
 # Seat self-contain mapping (task-cd7f8711 — remove treasurer/act.py dependency)
 
+> **⚠ ENGINE-ERA REFERENCE (2026-08-13): read `README.md` "the three layers" first.** Engine/Layer-3
+> mapping context; the engine is a WIP **not run autonomously**. Production is Layer 2 (`drive_chat`
+> step-by-step over the Layer-1 primitives).
+
 **Goal (conductor RULING b):** the Taey consult seat (`taey_extract.py`) must drive via THIS repo's
 own primitives, not `_load_act()` from `/home/mira/treasurer/scripts/loop/act.py` (private, not
 shipped → a downloaded Taey can't load it → CONNECT broken off-machine). Do NOT vendor act.py
