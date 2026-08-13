@@ -133,6 +133,17 @@ below. Build against THIS spec.** R = reader-side (codex builds it here); I = re
   a generous **TTL backstop** (e.g. `timeout` + large margin) so records self-expire even if the reaper is
   down. The reaper stays primary; TTL is defense-in-depth.
 
+## PRE-LIVE-MONITORING RESIDUALS (reader landed 402ed168; close these BEFORE enabling live-stall notify)
+The reader's SILENT path (classify + scoped clean of the 297 leaks) is fully validated. The NOTIFY path
+(LIVE_STALL) was NOT exercised (0 live stalls existed) and needs registration to exist first. Before any
+`--apply` that could hit a live stall, close all three:
+1. **Add `--from`** to the `taey-notify` call in `_notify_status` — a headless run has no tty, so sender is
+   auto-inferred and can be misattributed. Pass an explicit sender.
+2. **Reconsider clean-then-notify ordering + `check=True`** — currently the record is cleaned, THEN notified;
+   a `taey-notify` failure loses the notification (record already gone) and raises out of the batch. Prefer
+   notify-before-clean, or don't `check=True` the notification.
+3. **Verify the notify end-to-end** against a real (or safely-staged) live stall — production is the oracle.
+
 ## Deliverable
 A branch with `consultation_v2/consult_monitor.py` + `python -m` entrypoint, matching this spec, plus the
 `--dry-run` live-Redis output pasted as the production observation. taeys-hands reviews before any `--apply`.
