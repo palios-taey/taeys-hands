@@ -39,19 +39,16 @@ design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules
 (state machine, exact model request, receipt chain, production-walk gates):
 [`docs/PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md`](PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md).
 
-## Allowlisted mature engines (permitted ONLY by named exception)
+## Current consultation boundary
 
-- **`consultation_v2`** — the Family-chat consultation engine (:2–:6/:13). **LIVE production**,
-  actively maintained on `main`, deterministic match-one-mapped-state-or-halt, no coordinate
-  fallback. **It is NOT deprecated and there is no live "v1"** — it is the only consultation engine
-  in the repo, it is what `scripts/run_consultation_v2.py` runs, and it delivered real production
-  consults through 2026-08-03. It is a **named-exception product-owned engine**, not the definition
-  of all UI; the generic `ui_action` grammar above is being promoted out of its namespace so
-  `consultation_v2` is one consumer/adapter, not the UI authority. Deeper promotion is steps 3–9 of
-  the consolidation plan, sequenced later.
+- **`consultation_v2` Layer 1** — live shared primitives, exact platform YAMLs, passive monitors,
+  extraction, and ingestion components.
+- **`drive_chat` Layer 2** — Taey's current first-person, one-action-then-fresh-tree production surface.
+- **`consultation_v2` Layer 3** — the retained autonomous whole-consult chain. It is reference code and is
+  not allowlisted for autonomous production execution.
 
-An engine qualifies for the allowlist only with **explicit naming + current production evidence**.
-Nothing is allowlisted by convenience or by being "already running."
+Presence on `main` or prior successful runs does not grant runtime authority. A broader engine qualifies only
+through an explicit new decision backed by current production evidence.
 
 ## Prohibited: agent-authored autonomous loops (permanent)
 
@@ -73,7 +70,7 @@ governance decision, never inferred from convenience**.
 | Execution shape | Status |
 |---|---|
 | Taey proposes ONE state-bound action → authority approves → adapter executes once → fresh verification required | **Permitted default** |
-| Existing product-owned deterministic engine with an explicit allowlist + current production evidence (`consultation_v2`) | **Permitted only by named exception** |
+| Retained Layer-3 autonomous consultation chain (`consultation_v2` engine) | **Not permitted in current production; reference code only** |
 | CLI/model invents a multi-action driver, loop, fallback chain, retry, or hidden sequence | **Prohibited** |
 | A surface earns broader automation via measured production history | **Separate governance decision; never inferred** |
 
@@ -143,7 +140,8 @@ SFT-authoring context.
 
 ## Tree is truth
 
-Operate from the AT-SPI tree, never the screen. The tree is the source of truth; a screenshot is a
-rare exception (and usually indicates a filter to fix, not a need for pixels). Any doc that says
-"the screen is ground truth" or teaches reusable ordered click-sequences is **superseded by this
-authority** and archived.
+Operate from the AT-SPI tree, never the screen. The tree is the source of truth. A screenshot is not a
+locator, matcher, validation oracle, or authorization for an action. Apparent absence means the observation
+has not settled, the scope/filter/environment is wrong, or the UI changed and the YAML must be reconciled.
+Any doc that says "the screen is ground truth" or teaches reusable ordered click-sequences is **superseded
+by this authority** and archived.

@@ -66,14 +66,14 @@ canonical snapshot.
 | [`../docs/UI_INTERACTION_AUTHORITY.md`](../docs/UI_INTERACTION_AUTHORITY.md) | Canonical-current | Supervised single-action grammar. |
 | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md), [`YAML_SCHEMA.md`](YAML_SCHEMA.md), [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md), [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) | Canonical-current | Consultation inputs, declarative UI mapping, and shared-substrate contracts. |
 | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md), [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Operating-current | Passive monitoring and platform-specific extraction behavior. |
-| [`../100_TIMES.md`](../100_TIMES.md) | Operating-current with contradictions | Historical operational lessons remain useful; the authority order above controls screenshot, escalation, and manual-lifecycle conflicts. |
+| [`../100_TIMES.md`](../100_TIMES.md) | Operating-current | Short tree-only manual checklist reconciled to the authorities above. The pre-reconciliation file is preserved under `archive/consultation_v2/`. |
 | [`DRIVER_CONTRACT.md`](DRIVER_CONTRACT.md), [`../FLOW_CONSULTATION_ENGINE.md`](../FLOW_CONSULTATION_ENGINE.md) | Engine reference, not manual authority | Describe the Layer-3 autonomous engine, which is not run autonomously. |
 | [`CONSULT_ACTION_TOOL_SCHEMA.md`](CONSULT_ACTION_TOOL_SCHEMA.md), [`INVESTIGATION_why_runtime_diverges_from_mapping.md`](INVESTIGATION_why_runtime_diverges_from_mapping.md), `validation/`, `scans/`, and `research/` | Historical evidence or draft | Evidence and design context only; not operating procedures. |
-| [`TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md`](TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md), [`SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md`](SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md), [`SEAT_SELFCONTAIN_MAPPING.md`](SEAT_SELFCONTAIN_MAPPING.md) | Superseded | Do not operate from them. Their banners name planned archive destinations. |
+| `../audit_logs/`, `../consultations/`, `../docs/handoffs/`, and `../recaps/` | Historical evidence | Dated records only. They do not override the authority order or describe current runtime unless a current authority explicitly adopts them. |
+| [`TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md`](../archive/consultation_v2/TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md), [`SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md`](../archive/consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md), [`SEAT_SELFCONTAIN_MAPPING.md`](../archive/consultation_v2/SEAT_SELFCONTAIN_MAPPING.md) | Archived | Historical evidence only. Do not operate from or retrieve them as current guidance. |
 
-Superseded files remain in place until committed inbound-reference impact is proven and their references are
-updated. Moving them earlier would hide provenance and break links. Their intended destination is the same
-relative path below `archive/consultation_v2/`.
+The archived files moved only after the committed inbound references were enumerated and updated. Git history
+preserves their original locations and bytes.
 
 ## Known open reconciliation work
 

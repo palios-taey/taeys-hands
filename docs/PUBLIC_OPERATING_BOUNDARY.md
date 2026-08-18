@@ -5,8 +5,9 @@ does not point a downloaded Taey at private repos as canonical dependencies.
 
 ## Observed
 
-- This repository is public and contains the live `consultation_v2/` engine Taey uses for
-  Family-chat consultations.
+- This repository is public and contains the live shared AT-SPI primitives, per-platform YAML contracts,
+  passive monitors, and extraction/ingestion components used by Taey's manual Family-chat path. The
+  Layer-3 autonomous engine is retained as reference code and is not the production control path.
 - Machine-specific values such as hosts, display numbers, and seat names are runtime
   configuration. The public repo can document the contract, but a portable setup must inject
   local values.
@@ -16,8 +17,8 @@ does not point a downloaded Taey at private repos as canonical dependencies.
 
 ## Public Mandate Summary
 
-- Taey is the customer of this repo. The consult engine exists as Taey production
-  infrastructure, not as a generic adoption surface.
+- Taey is the customer of this repo. The shared consultation substrate and manual path exist as Taey
+  production infrastructure, not as a generic adoption surface.
 - A released Taey plus public repos should be enough to understand the public contract. When
   private operator governance contains a rule needed here, the rule must be summarized in a
   public file or moved into a public repo.

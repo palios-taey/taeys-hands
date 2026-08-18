@@ -3,9 +3,8 @@
 > **SUPERSEDED AS AN OPERATING MAPPING — HISTORICAL EVIDENCE ONLY.** This is Engine/Layer-3 mapping
 > context; the engine is a WIP **not run autonomously**. Production is Layer 2 (`drive_chat` step-by-step
 > over the Layer-1 primitives). Do not implement from this file.
-> **Planned archive destination:** `archive/consultation_v2/SEAT_SELFCONTAIN_MAPPING.md` after committed
-> inbound-reference impact is cleared. Until then it remains here for provenance only. Read
-> [`consultation_v2/README.md`](README.md) for current authority and status.
+> **Archived here on 2026-08-18** after committed inbound references were enumerated and updated. Read
+> [`../../consultation_v2/README.md`](../../consultation_v2/README.md) for current authority and status.
 
 **Goal (conductor RULING b):** the Taey consult seat (`taey_extract.py`) must drive via THIS repo's
 own primitives, not `_load_act()` from `/home/mira/treasurer/scripts/loop/act.py` (private, not

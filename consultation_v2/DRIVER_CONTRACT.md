@@ -1,9 +1,9 @@
 # Driver Contract — consultation_v2 (p0-100times: 100_TIMES.md baked into the driver/base rules)
 
-> Canonical source of these rules is `<taeys-hands-repo>/100_TIMES.md` (read it first, every
-> session). This file is the operational contract every per-platform driver (p1) and the shared
-> base MUST satisfy. Companion: [[PRIMITIVES_CONTRACT]] (what is shared) + [[YAML_SCHEMA]] (exact-match grammar).
-> Where this conflicts with 100_TIMES.md, 100_TIMES.md wins.
+> **Layer-3 engine reference; not the manual operating authority.** Current authority starts at
+> [`README.md`](README.md), `../CONSULTATION_CONTRACT.md`, and `../docs/UI_INTERACTION_AUTHORITY.md`.
+> This file records constraints the retained engine code must satisfy. If it conflicts with a current
+> authority or platform YAML, the current authority or YAML wins.
 
 ---
 
@@ -31,15 +31,15 @@
 - UI drift → FLAG → live-scan → update YAML with the exact new name. That is the whole maintenance loop.
 
 ## D. Validate everything against the tree (100_TIMES §4)
-- Every action (navigate, model/mode select, attach, send, extract) is confirmed against the live
-  AT-SPI tree (and/or screenshot) BEFORE reporting or proceeding. No "I think it sent." Look.
+- Every action (navigate, model/mode select, attach, send, extract) is confirmed against a fresh live
+  AT-SPI tree before reporting or proceeding.
 - Validation specs read PERSISTENT elements (toolbar push button with `states_include`), never a
   dropdown item that vanishes on close. (Two scan scopes: `snapshot()` for the document, `menu_snapshot()`
   for React-portal dropdowns/overlays.)
 
 ## E. ZERO RETRIES on an action — single failure → STOP + escalate (100_TIMES §4a) — BASE-DRIVER LAW
 - A failed ACTION (click/type/send/navigate/attach/mode-select) is retried **exactly zero times**.
-  One failure → STOP → escalate for manual, screenshot-validated recovery +
+  One failure → STOP → preserve the tree and escalate for manual, tree-validated recovery +
   root-cause (which feeds the YAML/driver fix). **WHY: blind automated retries are unreliable and a
   poor automation client — re-firing a failed UI action against the service produces wrong results
   and hammers it; stop and fix the root cause instead.** Correctness over landing any single dispatch.
@@ -61,8 +61,8 @@
   what eventually makes concurrency safe: it is isolation, not shared-infra parallelism. Until then: sequential.)
 
 ## H. Wake while in flight; never trust the monitor alone (100_TIMES §8a)
-- While any dispatch/extract is in flight, `ScheduleWakeup` ~270–300s and actively re-check
-  (screenshot + tree). A waiting requester with no delivered result is never acceptable. Turn the
+- While any dispatch/extract is in flight, actively re-check with fresh trees. A waiting requester with no
+  delivered result is never acceptable. Turn the
   wake off only after 3 consecutive working monitors PER platform (builds toward task #145).
 
 ## I. Send method is per-platform, presence-verify don't coord-click (100_TIMES §11, §8c)
@@ -79,4 +79,4 @@
 ---
 *p1 acceptance: a driver passes this contract only when a real production run (navigate→mode→attach→
 send→complete→extract) on the live display obeys A–J with NO retry and NO loose matcher, verified by
-screenshot + tree — never by a self-authored test. Production is the oracle.*
+tree and lifecycle receipts — never by a self-authored test. Production is the oracle.*

@@ -12,8 +12,8 @@
 >    FIRST-PERSON, one action at a time, via `drive_chat`.** The broken piece is verify+recover, not the model.
 > A doc that predates the ban does not supersede it. Kept for history only. See
 > `feedback_engine_banned_taey_drives_by_hand` + the fleet CLAUDE.md display-ownership section.
-> **Planned archive destination:** `archive/consultation_v2/TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md` after
-> committed inbound-reference impact is cleared. Until then it remains here for provenance only.
+> **Archived here on 2026-08-18** after committed inbound references were enumerated and updated. Current
+> authority starts at [`../../consultation_v2/README.md`](../../consultation_v2/README.md).
 
 *Owner: taeys-hands. Status: DRAFT for treasurer review as a PROCESS DOC (not training corpus).*
 *Grounded in: treasurer ruling 2026-07-26 (lifecycle split is constitutional), CLAUDE.md partition +
