@@ -630,6 +630,10 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 'supply attachment_path or attachment_paths, not both'
             )
+        if isinstance(attachment_paths, (str, bytes, Path)):
+            raise TaeyConsultExtractionError(
+                'attachment_paths must be an ordered sequence of paths'
+            )
         raw_attachment_paths = (
             tuple(attachment_paths or ())
             if attachment_paths is not None
@@ -668,6 +672,11 @@ class TaeyConsultExtractionSeat:
                 if resolved in resolved_paths:
                     raise TaeyConsultExtractionError(
                         f'full consult attachment path is duplicated: {resolved}'
+                    )
+                if any(path.name == resolved.name for path in resolved_paths):
+                    raise TaeyConsultExtractionError(
+                        'full consult attachment filenames must be unique: '
+                        f'{resolved.name}'
                     )
                 if not resolved.is_file():
                     raise TaeyConsultExtractionError(
@@ -1163,16 +1172,6 @@ class TaeyConsultExtractionSeat:
             if filename_value == 'stem'
             else self.attachment_path.name
         )
-        attachment_stem = self.attachment_path.stem
-        attachment_suffix = (
-            ''
-            if filename_value == 'stem'
-            else self.attachment_path.suffix
-        )
-        duplicate_label = re.compile(
-            rf'^{re.escape(attachment_stem)}\([0-9]+\)'
-            rf'{re.escape(attachment_suffix)}$'
-        )
         for role in roles:
             found = self.act.find(
                 attachment_label,
@@ -1182,23 +1181,11 @@ class TaeyConsultExtractionSeat:
                 must_show=must_show,
                 scroll=scroll,
             )
-            if found is None:
-                found = self.act.find(
-                    attachment_stem,
-                    role=str(role),
-                    display=self.display,
-                    contains=True,
-                    must_show=must_show,
-                    scroll=scroll,
-                )
             if found:
                 observed_label = str(
                     self.act.node_label(found.get('node')) or ''
                 ).strip()
-                if (
-                    observed_label != attachment_label
-                    and duplicate_label.fullmatch(observed_label) is None
-                ):
+                if observed_label != attachment_label:
                     continue
                 return {
                     **found,
