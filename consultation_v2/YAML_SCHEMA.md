@@ -98,3 +98,14 @@ catches it at commit; the assert catches it at run. Two gates, same rule.
 > platform whose YAML is rebuilt exact-match — so it is production-verified against a real exact
 > YAML rather than flipped on 13 YAMLs that still carry 75 loose matchers (those are migrated
 > per-platform through p1). The lint gate is already live and green-on-clean today.
+
+## 5. Shared Firefox chrome — one exact allowlist
+
+`consultation_v2/firefox_chrome.yaml` owns the only browser control exposed in a base snapshot:
+`allow_elements.address_bar`. Its exact `name` + `role` and optional exact `ancestor` identify one
+live AT-SPI node. Zero or multiple matches are drift and halt the snapshot. This allowlist applies
+only to `build_snapshot`; menu and app-root projections continue pruning all Firefox toolbars.
+
+`exact_elements` remains an exclusion list for known browser-chrome leaks. It is never interpreted
+as an allowlist. Platform YAMLs must not duplicate the address bar, and Python must not rediscover it
+with a substring or another locator grammar.

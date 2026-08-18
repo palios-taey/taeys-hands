@@ -55,6 +55,34 @@ def _load_firefox_chrome_filter() -> Dict[str, Any]:
         value = chrome.get(key) or []
         if not isinstance(value, list):
             raise ValueError(f'{_FIREFOX_CHROME_YAML.name} {key} must be a list')
+    allow_elements = chrome.get('allow_elements') or {}
+    if not isinstance(allow_elements, dict):
+        raise ValueError(f'{_FIREFOX_CHROME_YAML.name} allow_elements must be a mapping')
+    for key, spec in allow_elements.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError(f'{_FIREFOX_CHROME_YAML.name} allow_elements keys must be non-empty strings')
+        if not isinstance(spec, dict):
+            raise ValueError(f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key} must be a mapping')
+        _reject_forbidden_matcher_keys(spec)
+        if not isinstance(spec.get('name'), str) or not spec['name']:
+            raise ValueError(f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key}.name must be exact')
+        if not isinstance(spec.get('role'), str) or not spec['role']:
+            raise ValueError(f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key}.role must be exact')
+        ancestor = spec.get('ancestor')
+        if ancestor is not None:
+            if not isinstance(ancestor, dict):
+                raise ValueError(
+                    f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key}.ancestor must be a mapping'
+                )
+            _reject_forbidden_matcher_keys(ancestor)
+            if not isinstance(ancestor.get('name'), str) or not ancestor['name']:
+                raise ValueError(
+                    f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key}.ancestor.name must be exact'
+                )
+            if not isinstance(ancestor.get('role'), str) or not ancestor['role']:
+                raise ValueError(
+                    f'{_FIREFOX_CHROME_YAML.name} allow_elements.{key}.ancestor.role must be exact'
+                )
     for spec in chrome.get('exact_elements') or []:
         if not isinstance(spec, dict):
             raise ValueError(f'{_FIREFOX_CHROME_YAML.name} exact_elements entries must be mappings')
@@ -133,6 +161,48 @@ def _obj_matches_spec(obj: Any, spec: Dict[str, Any]) -> bool:
     except Exception:
         return False
     return matches_spec(element, spec)
+
+
+def _matches_allowed_chrome_spec(element: Dict[str, Any], spec: Dict[str, Any]) -> bool:
+    exact_spec = {key: value for key, value in spec.items() if key != 'ancestor'}
+    if not matches_spec(element, exact_spec):
+        return False
+    ancestor = spec.get('ancestor')
+    if not isinstance(ancestor, dict):
+        return True
+    return any(
+        _obj_matches_spec(obj, ancestor)
+        for obj in _atspi_ancestor_objects(element.get('atspi_obj'))
+    )
+
+
+def _collect_allowed_chrome_elements(
+    firefox: Any,
+    chrome_cfg: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    allow_elements = chrome_cfg.get('allow_elements') or {}
+    if not allow_elements:
+        return {}
+    scanned = find_elements(firefox, fence_after=[])
+    selected: Dict[str, Dict[str, Any]] = {}
+    selected_identities: Set[Any] = set()
+    for key, spec in allow_elements.items():
+        matches = [
+            element for element in scanned
+            if _matches_allowed_chrome_spec(element, spec)
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f'Firefox chrome drift: allow_elements.{key} matched {len(matches)} elements; expected 1'
+            )
+        identity = _element_identity(matches[0])
+        if identity in selected_identities:
+            raise RuntimeError(
+                f'Firefox chrome drift: allow_elements.{key} aliases another allowed element'
+            )
+        selected_identities.add(identity)
+        selected[key] = matches[0]
+    return selected
 
 
 def _reject_forbidden_matcher_keys(spec: Dict[str, Any]) -> None:
@@ -324,10 +394,15 @@ def _classify_elements(
     elements: Iterable[Dict[str, Any]],
     menu_items: List[Dict[str, Any]] | None = None,
     chrome_cfg: Dict[str, Any] | None = None,
+    preclassified: Dict[str, Dict[str, Any]] | None = None,
 ) -> Snapshot:
     cfg = load_platform_yaml(platform)
     tree_cfg = dict(cfg.get('tree') or {})
     element_map = dict(tree_cfg.get('element_map') or {})
+    preclassified = dict(preclassified or {})
+    duplicate_keys = sorted(set(element_map) & set(preclassified))
+    if duplicate_keys:
+        raise ValueError(f'shared chrome keys collide with platform element_map: {duplicate_keys}')
     sidebar_nav = _listify(tree_cfg.get('sidebar_nav'))
     elements = list(elements)
     structural_excludes = _structural_exclude_roots(
@@ -335,7 +410,13 @@ def _classify_elements(
         _structural_exclude_specs(tree_cfg),
     )
     snapshot = Snapshot(platform=platform, url=None, raw_count=0)
-    mapped: Dict[str, List[ElementRef]] = {key: [] for key in element_map}
+    mapped: Dict[str, List[ElementRef]] = {
+        key: [] for key in (*element_map, *preclassified)
+    }
+    preclassified_by_identity = {
+        _element_identity(element): key
+        for key, element in preclassified.items()
+    }
     sidebar: List[ElementRef] = []
     exact_accounted: Set[Any] = set()
     sidebar_accounted: Set[Any] = set()
@@ -343,6 +424,11 @@ def _classify_elements(
 
     for element in elements:
         snapshot.raw_count += 1
+        preclassified_key = preclassified_by_identity.get(_element_identity(element))
+        if preclassified_key is not None:
+            mapped[preclassified_key].append(_to_ref(preclassified_key, element))
+            exact_accounted.add(_element_identity(element))
+            continue
         if _is_excluded(
             element,
             tree_cfg,
@@ -723,7 +809,14 @@ def build_snapshot(platform: str, scan_root: str = 'auto') -> Tuple[Any, Any, Sn
             fence_after=tree_cfg.get('fence_after') or [],
             prune_subtree_specs=prune_subtree_specs,
         )
-    snapshot = _classify_elements(platform, elements, chrome_cfg=chrome_cfg)
+    allowed_chrome = _collect_allowed_chrome_elements(firefox, chrome_cfg)
+    elements = _dedupe_elements([*elements, *allowed_chrome.values()])
+    snapshot = _classify_elements(
+        platform,
+        elements,
+        chrome_cfg=chrome_cfg,
+        preclassified=allowed_chrome,
+    )
     snapshot.url = url
     return firefox, doc, snapshot
 

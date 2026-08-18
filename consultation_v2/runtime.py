@@ -703,20 +703,7 @@ class ConsultationRuntime:
         return False
 
     def _address_bar_entry(self) -> ElementRef | None:
-        snapshot = self.app_root_snapshot()
-        for items in (
-            snapshot.unknown or [],
-            snapshot.mapped.get('firefox_address_bar') or [],
-            snapshot.menu_items or [],
-        ):
-            for element in items:
-                name = (element.name or '').strip().lower()
-                role = (element.role or '').strip().lower()
-                if role != 'entry':
-                    continue
-                if 'address' in name and 'search' in name:
-                    return element
-        return None
+        return self.snapshot().first('address_bar')
 
     def paste(self, text: str) -> bool:
         self._sync_platform_io_display()
