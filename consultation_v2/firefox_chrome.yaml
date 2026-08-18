@@ -8,13 +8,22 @@ firefox_chrome:
     - page tab list
     - status bar
 
+  # The filtered base snapshot may expose only these exact Firefox controls.
+  # They remain excluded from menu/app-root projections. A missing or duplicate
+  # match is drift and fails the snapshot instead of broadening the matcher.
+  allow_elements:
+    address_bar:
+      name: Search with Google or enter address
+      role: entry
+      ancestor:
+        name: Navigation
+        role: tool bar
+
   # Exact chrome elements observed leaking from Firefox app-root scans. This is
   # applied before per-platform tree.exclude and is intentionally exact-only.
   exact_elements:
     - name: Mozilla Firefox
       role: image
-    - name: Search with Google or enter address
-      role: push button
     - name: Add-ons for Firefox
       role: link
     - name: Open context menu for Add-ons for Firefox
