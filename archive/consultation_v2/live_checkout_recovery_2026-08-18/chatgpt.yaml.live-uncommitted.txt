@@ -1,0 +1,608 @@
+schema: identity_v1
+platform: chatgpt
+click_strategy: xdotool_first
+urls:
+  fresh: https://chatgpt.com/
+  verify_navigation: false
+tree:
+  schema: identity_v1
+  fence_after: []
+  menu_snapshot_scan: document_menu_roles
+  menu_snapshot_roles:
+  - menu item
+  - radio menu item
+  - check menu item
+  - option
+  menu_snapshot_exclude:
+    names:
+    - Undo
+    - Redo
+    - Cut
+    - Copy
+    - Paste
+    - Paste Without Formatting
+    - Delete
+    - Select All
+    - Check Spelling
+    - Inspect
+  prune_subtrees:
+  - role: landmark
+    name: Chat history
+    min_child_count: 3
+  exclude:
+    names:
+    - Skip to content
+    - Profile image
+    - Dismiss suggestion
+    roles:
+    - alert
+    - document web
+    - form
+    - heading
+    - image
+    - landmark
+    - list
+    - list item
+    - menu
+    - paragraph
+    - section
+    - separator
+    - static
+    - status bar
+  conformance:
+    scopes:
+      base:
+        expected:
+        - temporary_chat_on
+        - profile_menu
+        - download_apps
+        - attach_trigger
+        - input_chat_with_chatgpt
+        - model_selector
+        - dictation
+        - voice_button
+      model_menu:
+        expected:
+        - model_instant
+        - model_medium
+        - model_high
+        - model_extra_high
+        - model_pro
+        - model_gpt_5_6_sol
+      model_menu.gpt_5_6_sol:
+        expected:
+        - model_instant
+        - model_medium
+        - model_high
+        - model_extra_high
+        - model_pro
+        - model_gpt_5_6_sol
+        - model_gpt_5_6_sol_current
+        - model_gpt_5_5_legacy_current
+        - model_gpt_5_4
+        - model_gpt_5_3
+        - model_o3
+      tools_menu:
+        expected:
+        - tool_upload
+        - tool_recent_files
+        - tool_create_image
+        - tool_deep_research
+        - tool_web_search
+        - tool_more
+        - tool_projects
+      more_submenu:
+        expected:
+        - tool_upload
+        - tool_recent_files
+        - tool_create_image
+        - tool_deep_research
+        - tool_web_search
+        - tool_more
+        - tool_projects
+        - tool_agent_mode
+        - tool_create_task
+        - tool_finances
+        - tool_github
+        - tool_gmail
+        - tool_openai_platform
+  element_map:
+    home_link:
+      name: Home
+      role: link
+      scope: base.sidebar
+    close_sidebar:
+      name: Close sidebar
+      role: push button
+      scope: base.sidebar
+    temporary_chat_on:
+      name: Temporary chat
+      role: push button
+      scope: base.header
+    temporary_chat_off:
+      name: Turn off temporary chat
+      role: push button
+      scope: base.header
+    new_chat_shortcut:
+      name: New chat Control Shift O
+      role: link
+      scope: base.sidebar
+    search_chats:
+      name: Search chats Control K
+      role: push button
+      scope: base.sidebar
+    library_link:
+      name: Library
+      role: link
+      scope: base.sidebar
+    projects_link:
+      name: Projects New project
+      role: link
+      scope: base.sidebar
+    new_project:
+      name: New project
+      role: push button
+      scope: base.sidebar
+    scheduled_link:
+      name: Scheduled
+      role: link
+      scope: base.sidebar
+    apps_link:
+      name: Apps
+      role: link
+      scope: base.sidebar
+    personalized_greeting:
+      role: push button
+      scope: base.main
+      match_strategy: name_agnostic_structural
+      structural:
+        after: apps_link
+        before: attach_trigger
+      reason: "personalized greeting \u2014 user-specific name"
+    pinned_toggle:
+      name: Pinned
+      role: push button
+      scope: base.sidebar
+    recents_toggle:
+      name: Recents
+      role: push button
+      scope: base.sidebar
+    new_chat_recent:
+      name: New chat
+      role: link
+      scope: base.sidebar
+    organize_chats:
+      name: Organize chats
+      role: push button
+      scope: base.sidebar
+    profile_menu:
+      name: Jesse LaRose Pro, open profile menu
+      role: push button
+      scope: base.sidebar.footer
+    download_apps:
+      name: Download apps
+      role: push button
+      scope: base.sidebar.footer
+    attach_trigger:
+      name: Add files and more
+      role: push button
+      scope: base.composer
+    attach_trigger_tooltip:
+      name: Add files and more @
+      role: tool tip
+      scope: base.composer
+    quick_action_create_image:
+      name: Create an image
+      role: push button
+      scope: base.composer
+    quick_action_write_or_edit:
+      name: Write or edit
+      role: push button
+      scope: base.composer
+    quick_action_look_something_up:
+      name: Look something up
+      role: push button
+      scope: base.composer
+    chat_surface_panel:
+      name: Select chat surface
+      role: panel
+      scope: base.composer
+    chat_surface_chat:
+      name: Chat
+      role: radio button
+      scope: base.composer
+    chat_surface_work:
+      name: Work
+      role: radio button
+      scope: base.composer
+    input_chat_with_chatgpt:
+      name: Chat with ChatGPT
+      role: entry
+      scope: base.composer
+    input_ask_anything:
+      name: Ask anything
+      role: entry
+      scope: base.composer
+    model_selector:
+      role: push button
+      scope: base.composer
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attach_trigger
+        before: dictation
+      reason: ChatGPT labels the selector with the selected model or Pro effort
+    dictation:
+      name: Start dictation
+      role: push button
+      scope: base.composer
+    voice_button:
+      name: Start Voice
+      role: push button
+      scope: base.composer
+    send_button:
+      name: Send prompt
+      role: push button
+      scope: base.composer
+    stop_streaming_button:
+      name: Stop streaming
+      role: push button
+      scope: response.generating
+    stop_answering_button:
+      name: Stop answering
+      role: push button
+      scope: response.generating
+    user_message_actions_panel:
+      name: Your message actions
+      role: panel
+      scope: prompt.actions
+    response_actions_panel:
+      name: Response actions
+      role: panel
+      scope: response.actions
+    copy_button:
+      name: Copy response
+      role: push button
+      scope: response.actions
+    github_connector_permission_allow:
+      name: Allow once
+      role: push button
+      scope: connector_permission_modal
+    model_instant:
+      name: Instant 5.5
+      role: radio menu item
+      scope: model_menu
+      active_state: checked
+    model_medium:
+      name: Medium
+      role: radio menu item
+      scope: model_menu
+      active_state: checked
+    model_high:
+      name: High
+      role: radio menu item
+      scope: model_menu
+      active_state: checked
+    model_extra_high:
+      name: Extra High
+      role: radio menu item
+      scope: model_menu
+      active_state: checked
+    model_pro:
+      role: radio menu item
+      scope: model_menu
+      match_strategy: name_agnostic_structural
+      structural:
+        after: model_extra_high
+        before: model_gpt_5_6_sol
+      reason: ChatGPT 5.6 exposes Pro as the top Pro row; nested Pro effort rows are
+        no longer present.
+      active_state: checked
+    model_gpt_5_6_sol:
+      name: GPT-5.6 Sol
+      role: menu item
+      scope: model_menu
+    model_gpt_5_6_sol_current:
+      name: GPT-5.6 Sol
+      role: radio menu item
+      scope: model_menu.gpt_5_6_sol
+      active_state: checked
+    model_gpt_5_5_legacy_current:
+      name: GPT-5.5
+      role: radio menu item
+      scope: model_menu.gpt_5_6_sol
+      active_state: checked
+    model_gpt_5_4:
+      name: GPT-5.4 Leaving on July 23
+      role: radio menu item
+      scope: model_menu.gpt_5_6_sol
+      active_state: checked
+    model_gpt_5_3:
+      name: GPT-5.3
+      role: radio menu item
+      scope: model_menu.gpt_5_6_sol
+      active_state: checked
+    model_o3:
+      name: o3
+      role: radio menu item
+      scope: model_menu.gpt_5_6_sol
+      active_state: checked
+    tool_upload:
+      name: Add photos & files Control U
+      role: menu item
+      scope: tools_menu
+    tool_recent_files:
+      name: Recent files
+      role: menu item
+      scope: tools_menu
+    tool_create_image:
+      name: Create image
+      role: radio menu item
+      scope: tools_menu
+      active_state: checked
+    tool_deep_research:
+      name: Deep research
+      role: radio menu item
+      scope: tools_menu
+      active_state: checked
+    tool_web_search:
+      name: Web search
+      role: radio menu item
+      scope: tools_menu
+      active_state: checked
+    tool_deep_research_active:
+      name: Deep Research tabs
+      role: page tab list
+      scope: base.composer
+    tool_web_search_active:
+      name: Web search
+      role: push button
+      scope: base.composer
+    tool_more:
+      name: More
+      role: menu item
+      scope: tools_menu
+    tool_projects:
+      name: Projects
+      role: menu item
+      scope: tools_menu
+    tool_agent_mode:
+      name: Agent mode
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+    tool_create_task:
+      name: Create task
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+    tool_finances:
+      name: Finances
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+    tool_github:
+      name: GitHub
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+    tool_gmail:
+      name: Gmail
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+    tool_openai_platform:
+      name: OpenAI Platform
+      role: radio menu item
+      scope: more_submenu
+      active_state: checked
+workflow:
+  defaults:
+    model: pro
+    mode: pro
+    tools: none
+  full_consult:
+    steps:
+      attach_trigger:
+        elements:
+        - attach_trigger
+      upload_item:
+        elements:
+        - tool_upload
+      composer_input:
+        elements:
+        - input_chat_with_chatgpt
+        - input_ask_anything
+      submit:
+        elements:
+        - send_button
+      completion:
+        elements:
+        - stop_streaming_button
+        - stop_answering_button
+      copy_response:
+        elements:
+        - copy_button
+    attachment_present:
+      filename_roles:
+      - push button
+      - panel
+    select_mode:
+    - menu: model
+      option: pro
+  selection:
+    menus:
+      model:
+        select: single
+        active_recognition: checked
+        must_choose: true
+        resettable_on_followup: true
+        operate:
+          trigger: model_selector
+          scope: menu_snapshot
+        options:
+          instant:
+            element: model_instant
+          thinking:
+            element: model_medium
+          medium:
+            element: model_medium
+          high:
+            element: model_high
+          extra_high:
+            element: model_extra_high
+          pro:
+            element: model_pro
+          pro_standard:
+            element: model_pro
+          pro_extended:
+            element: model_pro
+          gpt_5_6_sol:
+            element: model_gpt_5_6_sol_current
+            path:
+            - element: model_gpt_5_6_sol
+              action: hover
+          gpt_5_5:
+            element: model_gpt_5_5_legacy_current
+            path:
+            - element: model_gpt_5_6_sol
+              action: hover
+          gpt_5_4:
+            element: model_gpt_5_4
+            path:
+            - element: model_gpt_5_6_sol
+              action: hover
+          gpt_5_3:
+            element: model_gpt_5_3
+            path:
+            - element: model_gpt_5_6_sol
+              action: hover
+          o3:
+            element: model_o3
+            path:
+            - element: model_gpt_5_6_sol
+              action: hover
+        default_for_fresh: pro_extended
+        example_rationale: Use Pro Extended for high-stakes work that needs the deepest
+          available reasoning.
+      tools:
+        select: multi
+        active_recognition: checked
+        must_choose: false
+        resettable_on_followup: false
+        operate:
+          trigger: attach_trigger
+          scope: app_root_snapshot
+          open_method: focus_and_key_open
+          open_key: space
+          typeahead_submit_keys:
+          - Down
+          - Return
+        options:
+          create_image:
+            element: tool_create_image
+          deep_research:
+            element: tool_deep_research
+            active_element: tool_deep_research_active
+            typeahead_label: Deep research
+            postcondition:
+              element: tool_deep_research_active
+              scope: app_root_snapshot
+              timeout_ms: 6000
+          web_search:
+            element: tool_web_search
+            active_element: tool_web_search_active
+            typeahead_label: Web search
+            postcondition:
+              element: tool_web_search_active
+              scope: app_root_snapshot
+              timeout_ms: 6000
+          github:
+            element: tool_github
+            path:
+            - element: tool_more
+              action: hover
+          gmail:
+            element: tool_gmail
+            path:
+            - element: tool_more
+              action: hover
+          agent_mode:
+            element: tool_agent_mode
+            path:
+            - element: tool_more
+              action: hover
+          finances:
+            element: tool_finances
+            path:
+            - element: tool_more
+              action: hover
+          openai_platform:
+            element: tool_openai_platform
+            path:
+            - element: tool_more
+              action: hover
+        default_for_fresh: none
+        example_rationale: Default to no tools because ChatGPT's + tools menu currently
+          stalls default consults; web_search remains opt-in via explicit --select
+          tools=web_search.
+  attachment:
+    trigger: attach_trigger
+    menu_target: tool_upload
+    open_method: focus_and_key_open
+    open_key: space
+    typeahead_label: Add photos
+    typeahead_submit_keys:
+    - Down
+    - Return
+  prompt:
+    input_keys:
+    - input_chat_with_chatgpt
+    - input_ask_anything
+    send_button_keys:
+    - send_button
+  send:
+    require_new_url: true
+    stop_keys:
+    - stop_streaming_button
+    - stop_answering_button
+    timeout: 30
+  monitor:
+    stop_keys:
+    - stop_streaming_button
+    - stop_answering_button
+    generation_timeout: 3600
+    sustained_stop_gone_cycles: 4
+    post_complete_quiet_cycles: 8
+    intermediate_states:
+    - name: github_connector_permission
+      detect:
+      - github_connector_permission_allow
+      action: click
+      element: github_connector_permission_allow
+      click_strategy: atspi_first
+      max_actions: 1
+  extract:
+    primary_key: copy_button
+    strategy: last_by_y
+    hover_strategy: assistant_message_band_scan
+    copy_button_names:
+    - Copy response
+    - Copy
+    - Copy code
+  extra_extract:
+    strategy: none
+settle:
+  default_ms: 2000
+  navigate_ms: 4000
+  base_conformance_ms: 45000
+  attach_ms: 3500
+  rescan_attempts: 1
+extraction:
+  assistant_text:
+    steps:
+    - action: scroll_to_bottom
+      element: attach_trigger
+    - action: copy_element
+      element: copy_button
+      select: last
+    - action: read_clipboard
