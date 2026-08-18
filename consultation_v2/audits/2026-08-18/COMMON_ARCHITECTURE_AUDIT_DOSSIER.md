@@ -121,12 +121,13 @@ Those unknowns do not change the proven parallel-reader, substring-filter, and n
 |---|---|---|
 | Canonical-current | `CONSULTATION_CONTRACT.md`, `PACKET_CONTRACT.md`, `PLATFORM_INDEPENDENCE_SPEC.md`, `docs/UI_INTERACTION_AUTHORITY.md`, `YAML_SCHEMA.md`, `PRIMITIVES_CONTRACT.md`, `EXTRACTION_SCHEMA.md` | Governs the recovery. |
 | Operating-current | `CONSULT_MONITOR_SPEC.md`, `EXTRACTION_PATTERNS.md` | May be used only within the higher-ranked manual contract. |
-| Operating-current with contradictions | `100_TIMES.md` | Retains useful production lessons; cannot override tree-only authority, manual operation, or Claude-Code prohibition. |
+| Canonical-current | `100_TIMES.md` | Concise manual production checklist, subordinate only to the authority order it names. |
 | Engine reference, not manual authority | `DRIVER_CONTRACT.md`, `FLOW_CONSULTATION_ENGINE.md` | Describes the Layer-3 engine; do not run it autonomously. |
 | Historical evidence or draft | `CONSULT_ACTION_TOOL_SCHEMA.md`, `INVESTIGATION_why_runtime_diverges_from_mapping.md`, `validation/`, `scans/`, `research/` | Evidence and design context only. |
-| Superseded | `TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md`, `SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md`, `SEAT_SELFCONTAIN_MAPPING.md` | Do not operate from them; current files carry banners and planned archive destinations. |
+| Archived superseded evidence | `archive/consultation_v2/TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md`, `archive/consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md`, `archive/consultation_v2/SEAT_SELFCONTAIN_MAPPING.md` | Historical evidence only; the active paths no longer exist. |
 
-No superseded file moves until committed inbound-reference impact is proven.
+The three superseded documents were moved only after committed inbound references were updated. The previous
+root checklist is preserved byte-for-byte at `archive/consultation_v2/100_TIMES_PRE_MANUAL_2026-08-18.md`.
 
 ## Proposed manual state machine
 

@@ -2,6 +2,10 @@
 v5.1, 2026-07-04, taeys-hands (Fable). Jesse-directed architecture: "everyone needs their own YAML, their own driver and their own monitor... Each platform is completely independent."
 Status: v1 BLOCKED (8) → v2 resolved-8/BLOCKED-3 → v3 resolved-3/BLOCKED on the CLASS (piecemeal curation: each round exposed the next uncovered fix — 9761aee0, f991d951, 2da240dd) → v4 generative machinery (class closed per council: 2 PASS/3 warn) BLOCKED on 3 precision defects → v5: unreachability requires GitNexus execution-flow proof (grep banned), full-history disposition window (no epoch), YAML-discipline ledger item (de248ee8/d4b09dc4) → v5 PUBLISHED by council (exit 0, verdict CONCERN = passed-with-carried-concerns) → v5.1 folds the strongest carried concern (--follow rename-truncation) into the command text; remaining carried concerns are r5-gate/lint IMPLEMENTATION notes (stub-gate check in lint task; GitNexus-vs-grep provenance recorded per disposition row), not spec re-rounds. → conductor ratification. Council logs archived in task evidence. Gates all `consult-platform-independence` work.
 
+**Current scope (2026-08-18):** this specifies Layer-1 platform isolation and the retained Layer-3 target
+architecture. It does not authorize the autonomous engine. Production consultations follow the higher-ranked
+manual contract in `100_TIMES.md`, `CONSULTATION_CONTRACT.md`, and `docs/UI_INTERACTION_AUTHORITY.md`.
+
 ## 1. Why (Observed evidence, not opinion)
 The shared behavioral base couples all five platforms: one shared-monitor change (`e132bf15`, Jun-22) simultaneously broke Grok, Gemini DR, and Perplexity DR (`MONITOR_REGRESSION_ARCHAEOLOGY_2026-07-03.md`); the audit-fix plan had to serialize every `base.py` fix into a depends-chain because each touched all platforms. `drivers/base.py` is 2,856 lines of shared behavior — every line is shared blast-radius.
 **Precedent (council git-historian, Observed):** isolation was ALREADY achieved once — `90de2d6b` (2026-06-03) built an isolated grok driver with exact-match YAML and "no platform skip-hack" — and today's `drivers/grok.py:34` inherits `BaseConsultationDriver` again with **no revert commit**: isolation without a mechanical gate silently re-couples. Therefore the isolation lint is load-bearing and must land BEFORE the first package merges (§5, §6-order).
@@ -72,6 +76,10 @@ A module is **leaf** iff it contains zero platform-conditional BEHAVIOR (no bran
 
 ## 8. Validation oracle (per THE RULE / NO TESTS) — happy path AND guard parity
 A package is done only when BOTH hold:
-1. **Production consult:** ONE real consult runs e2e on that platform's display (navigate → select → attach → send → per-platform monitor completion on stop-gone → extract → notify) with step evidence + screenshots. Executed by an Opus 4.8 subagent or CLI peer; Fable judges evidence only.
+1. **Production consult:** Taey manually performs ONE real consult on that platform's display through
+   `drive_chat` (navigate → select → attach two bundles → send → per-platform monitor completion on two
+   consecutive fresh stop-gone reads → bottom-first extraction including response attachments → ISMA ingest).
+   Every transition is proven by fresh canonical filtered-tree and Git-tracked action receipts. Screenshots are
+   not locators, matchers, validation oracles, or proof. Claude Code does not execute the consultation.
 2. **Guard-preservation checklist (§6 ledger) complete** in the PR: every ledger item cited present (file:line vs pinned SHA) or absent-by-design with rationale — reviewed at the r5 gate.
 Plan exit oracle: after decommission, a 5-platform fan-out (sequential sends) runs green without intervention on one tree, and the isolation lint is green in CI.

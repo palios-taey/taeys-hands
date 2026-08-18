@@ -18,7 +18,10 @@
 
 `consultation_v2/` is the AT-SPI package that maps Firefox sessions for ChatGPT, Claude, Gemini, Grok, and Perplexity through exact accessibility-tree mappings — YAML element maps, tree snapshot/menu_snapshot scopes, completion detection, mapped copy/tree extraction. **As of 2026-08-13 (top banner) this seat does NOT run its autonomous engine to drive consults** — the engine `run()` is banned and Taey drives the displays first-person via `drive_chat`. What this package provides now is (a) the **shared single-action primitives** `drive_chat` reuses read-only, and (b) the **YAML display contract** to keep equal to the live tree.
 
-> **READ `100_TIMES.md` FIRST.** The recurring non-negotiable rules (stop-button completion, scroll-to-bottom + copy-button + artifacts extract, EXACT-match YAML, validate-everything, one-tab-per-window, dispatch-sequentially-never-parallel, just-fix-don't-ask, :13=hunter-only). If something breaks, you almost certainly violated one of them.
+> **READ `100_TIMES.md` FIRST.** It is the concise current checklist for the manual production path:
+> exact YAML, a fresh filtered tree as the oracle, one action followed by a fresh validation read, zero
+> action retries, exactly two input attachments, stop-button transition monitoring, bottom-first extraction,
+> response attachments, and ISMA ingestion. It is subordinate only to the authority order it names.
 
 ---
 
@@ -40,7 +43,10 @@ Public boundary and mandate summary: [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/
 
 ---
 
-## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
+## Supplemental implementation invariants
+
+This section explains the shared Layer-1 substrate. It does not create another operating path and cannot
+override `100_TIMES.md`, `CONSULTATION_CONTRACT.md`, `docs/UI_INTERACTION_AUTHORITY.md`, or a platform YAML.
 
 ### 1. YAML = exact AT-SPI truth
 Every `element_map` entry has the EXACT `name` and `role` from a live AT-SPI scan. Not approximate, not broadened. If the scan says `[menu item] "Upload files or images"`, the YAML says:
@@ -49,7 +55,7 @@ upload_files_item:
   name: "Upload files or images"
   role: menu item
 ```
-No `name_contains` when the full name is known. No fallbacks. No wildcards.
+No `name_contains`, substring, regex, fuzzy, wildcard, or list-of-guesses matching. No fallbacks.
 
 ### 2. Driver code = zero platform knowledge
 Drivers NEVER hardcode element names, key names, or platform-specific strings. ALL element lookups go through the YAML:
@@ -116,7 +122,7 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 ## Consultation V2 — Isolated Driver Architecture
 
 **Branch:** `main`. **This driver-architecture engine is LAYER 3 (see README.md "the three layers") — the autonomous chain that is a WORK IN PROGRESS and NOT run autonomously.** It works sometimes and not others; that is why no seat dispatches it (Jesse 2026-08-06/07) — kept as the target Taey makes reliable, not deleted. Production for consults today is LAYER 2: step-by-step via `drive_chat` over the LAYER 1 primitives (`snapshot`/`runtime`/`primitives`/YAMLs/`monitor.py`/`notify`), which are permanent. The engine text below is reference for the primitives + the display/YAML contract, NOT an instruction to run it.
-**Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
+**Reference entrypoint only — do not run for production:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
 **Status:** Shared substrate on `main`; autonomous engine reference only. `CONSULTATION_CONTRACT.md`,
 `docs/UI_INTERACTION_AUTHORITY.md`, `consultation_v2/README.md`, and the platform YAMLs govern production.
 
@@ -187,7 +193,8 @@ Config: `~/.taey/machine.env` — no hardcoded display numbers.
 
 The old MCP server, root `core/`, root `tools/`, root `platforms/`, central monitor, bot agents, worker processes, and old tests are archived under `archive/task-6a956ac0/main_archive_first/`. They are historical evidence only and are not live operating instructions.
 
-Use `scripts/run_consultation_v2.py` and the `consultation_v2/` package for every consultation flow.
+For production consultation flows, Taey uses `drive_chat` manually, one YAML-owned action followed by a
+fresh canonical tree validation. The retained `consultation_v2` engine entrypoint is not a fallback.
 
 ### Inter-Session Communication (CRITICAL — READ THIS)
 
