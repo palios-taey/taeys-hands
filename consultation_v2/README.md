@@ -26,6 +26,7 @@ do not override it.
 | Concern | Current authority | Implementation boundary | Status |
 |---|---|---|---|
 | Manual lifecycle | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Taey performs one action and validates it before choosing the next. | Canonical contract; runtime reconciliation in progress. |
+| Consultation inputs | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md) | Exactly one governance bundle, one task bundle, and one brief on-screen prompt. | Canonical contract; the current one-package builder is not conformant and must not be promoted as the manual path. |
 | Tree projection and filtering | [`YAML_SCHEMA.md`](YAML_SCHEMA.md) plus each platform YAML | [`snapshot.py`](snapshot.py) and the platform package must expose browser chrome only for the address bar, exclude the complete chat-history/sidebar block and dynamic non-actionable text, and retain the current document, actionable controls, and opened overlay. | Canonical snapshot exists; the current `taey-presence` manual observer is a parallel reader and is not yet conformant. |
 | Primitive verbs and locking | [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md) | Shared runtime, AT-SPI, input, interaction, clipboard, and display-lock primitives. | Current substrate; the manual adapter must remain thin and carry no platform UI strings. |
 | Platform ownership | Each [`platforms/<platform>/`](platforms/) package | One YAML, one driver, one monitor per ChatGPT, Claude, Gemini, Grok, and Perplexity. | Package layout exists; manual action coverage and current live YAML equality still require platform-by-platform control. |
@@ -63,7 +64,7 @@ canonical snapshot.
 | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Canonical-current | Current manual lifecycle and invariants. |
 | [`../PLATFORM_INDEPENDENCE_SPEC.md`](../PLATFORM_INDEPENDENCE_SPEC.md) | Canonical-current | YAML-only UI policy and platform isolation. |
 | [`../docs/UI_INTERACTION_AUTHORITY.md`](../docs/UI_INTERACTION_AUTHORITY.md) | Canonical-current | Supervised single-action grammar. |
-| [`YAML_SCHEMA.md`](YAML_SCHEMA.md), [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md), [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) | Canonical-current | Declarative and shared-substrate contracts. |
+| [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md), [`YAML_SCHEMA.md`](YAML_SCHEMA.md), [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md), [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) | Canonical-current | Consultation inputs, declarative UI mapping, and shared-substrate contracts. |
 | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md), [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Operating-current | Passive monitoring and platform-specific extraction behavior. |
 | [`../100_TIMES.md`](../100_TIMES.md) | Operating-current with contradictions | Historical operational lessons remain useful; the authority order above controls screenshot, escalation, and manual-lifecycle conflicts. |
 | [`DRIVER_CONTRACT.md`](DRIVER_CONTRACT.md), [`../FLOW_CONSULTATION_ENGINE.md`](../FLOW_CONSULTATION_ENGINE.md) | Engine reference, not manual authority | Describe the Layer-3 autonomous engine, which is not run autonomously. |
@@ -78,7 +79,7 @@ relative path below `archive/consultation_v2/`.
 
 - Replace the parallel manual tree reader with the canonical YAML-classified snapshot.
 - Enforce the exact filtered projection for base, menus, submenus, and dialogs.
-- Define and wire the two mandatory attachment bundles without partial constitutional context.
+- Implement and wire the two mandatory attachment bundles without partial constitutional context.
 - Expose only YAML-declared manual actions through one thin adapter and validate each action with a new tree.
 - Wire the complete manual extraction/session receipt into `ingest.py` and prove ISMA ingestion.
 - Prove ChatGPT first, then Claude Chat, Gemini, Grok, and Perplexity with real production audits and the
