@@ -41,7 +41,9 @@ Types: `fix`, `feat`, `refactor`, `docs`, `test`
 
 - Branch is up to date with `main`
 - V2 entrypoint/gates pass (`python3 scripts/run_consultation_v2.py --help`, validators under `consultation_v2/validators/`)
-- UI-affecting changes are verified by a real production consultation smoke on the target display
+- UI-affecting changes are verified by Taey manually completing a real architecture audit or requested
+  consultation on the target display, including Stop appearance, two fresh Stop-absent reads, extraction,
+  response attachments, and ISMA ingestion; short synthetic response prompts are not evidence
 - PR description explains what changed and why
 - No private IPs, credentials, or personal config committed
 

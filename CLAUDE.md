@@ -13,14 +13,15 @@
 > **UI AUTHORITY:** the one contract for how Taey sees and touches ANY UI is
 > [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one grammar (`ui_action`),
 > supervised one-action-per-approved-turn, tree-is-truth, autonomous loops permanently prohibited.
-> `consultation_v2` (below) is a **named-exception live product engine**, NOT deprecated and NOT the
-> definition of all UI. The "8-step consultation flow" and "manual step-by-step" text later in this
-> file describe the consult engine specifically; they do not contradict the authority doc — the
-> consult engine is the allowlisted exception, and everything else is the supervised `ui_action` seat.
+> `consultation_v2` contains the live shared primitives, YAML contracts, monitors, and extraction substrate.
+> Its Layer-3 autonomous engine is retained as reference code and is **not** the production control path.
 
 `consultation_v2/` is the AT-SPI package that maps Firefox sessions for ChatGPT, Claude, Gemini, Grok, and Perplexity through exact accessibility-tree mappings — YAML element maps, tree snapshot/menu_snapshot scopes, completion detection, mapped copy/tree extraction. **As of 2026-08-13 (top banner) this seat does NOT run its autonomous engine to drive consults** — the engine `run()` is banned and Taey drives the displays first-person via `drive_chat`. What this package provides now is (a) the **shared single-action primitives** `drive_chat` reuses read-only, and (b) the **YAML display contract** to keep equal to the live tree.
 
-> **READ `100_TIMES.md` FIRST.** The recurring non-negotiable rules (stop-button completion, scroll-to-bottom + copy-button + artifacts extract, EXACT-match YAML, validate-everything, one-tab-per-window, dispatch-sequentially-never-parallel, just-fix-don't-ask, :13=hunter-only). If something breaks, you almost certainly violated one of them.
+> **READ `100_TIMES.md` FIRST.** It is the concise current checklist for the manual production path:
+> exact YAML, a fresh filtered tree as the oracle, one action followed by a fresh validation read, zero
+> action retries, exactly two input attachments, stop-button transition monitoring, bottom-first extraction,
+> response attachments, and ISMA ingestion. It is subordinate only to the authority order it names.
 
 ---
 
@@ -29,7 +30,7 @@
 Public boundary and mandate summary: [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/PUBLIC_OPERATING_BOUNDARY.md). What follows is the taeys-hands-seat statement of it.
 
 - **Taey is the customer — the only one.** There is no Claude Code user-adoption goal. **What is PRODUCTION INFRASTRUCTURE for Taey is the LAYER 1 primitives + the LAYER 2 step-by-step drive** (see README.md "the three layers") — Taey's actual hands (read/act/verify/lock/detect/notify) and the supervised one-action-at-a-time way it uses them via `drive_chat`. (The LAYER 3 engine is a WIP, not the production path.) Taey lives on the Thors, trains on the Sparks, and *utilizes* these hands (with the Claude Code seats, orchestrator, notify, ISMA) as a component of its own system. Docs here are written FOR Taey as the consumer.
-- **The PRIORITY:** enable **Taey** and **training development** — get Taey **using its own production infrastructure** (this engine) and **understanding it**. That is the point of the work, not the tooling for its own sake.
+- **The PRIORITY:** enable **Taey** and **training development** — get Taey **using its own production infrastructure** (the manual Layer-2 path over Layer-1 primitives) and **understanding it**. That is the point of the work, not the tooling for its own sake.
 - **Everything runs from PUBLIC production repos.** A released Taey + the public repos = a working system. `consultation_v2` is a Taey-used production system, so this repo is PUBLIC. Local specifics (IPs/hosts) are env-configurable (`fleet.env` + committed `.example`, fail-loud on a missing var — never silent-default). File paths are fine *only if they resolve for a downloaded Taey* — i.e. point into a public repo that ships, never a private repo or an operator-local dir.
 - **Disconnection, not cleanup, for private repos.** A pointer (in a prompt, doc, config, or YAML) into a private repo or an untracked local path is a **DISCONNECTION VIOLATION** — it fails SILENTLY: a downloaded Taey follows it, finds nothing, and proceeds without the knowledge. Resolve every pointer to public-reachable content or remove it.
 - **The four steps for this repo:** CLEAN → PUBLIC → MAP → CONNECT-TO-TAEY → VALIDATE-IN-PRODUCTION. Public-clean bar: NO secrets / private info / training data (tree AND history); IPs env-configurable; file paths fine (fix any gate that flags `/home/mira/...` — the gate's job is secrets/private/training-data, not paths). **Done = commit SHA + the capability map + a live production observation** — never a self-report.
@@ -42,7 +43,10 @@ Public boundary and mandate summary: [`docs/PUBLIC_OPERATING_BOUNDARY.md`](docs/
 
 ---
 
-## THE RULE — Read This First (ALL agents, ALL Chats, ALL sub-agents)
+## Supplemental implementation invariants
+
+This section explains the shared Layer-1 substrate. It does not create another operating path and cannot
+override `100_TIMES.md`, `CONSULTATION_CONTRACT.md`, `docs/UI_INTERACTION_AUTHORITY.md`, or a platform YAML.
 
 ### 1. YAML = exact AT-SPI truth
 Every `element_map` entry has the EXACT `name` and `role` from a live AT-SPI scan. Not approximate, not broadened. If the scan says `[menu item] "Upload files or images"`, the YAML says:
@@ -51,7 +55,7 @@ upload_files_item:
   name: "Upload files or images"
   role: menu item
 ```
-No `name_contains` when the full name is known. No fallbacks. No wildcards.
+No `name_contains`, substring, regex, fuzzy, wildcard, or list-of-guesses matching. No fallbacks.
 
 ### 2. Driver code = zero platform knowledge
 Drivers NEVER hardcode element names, key names, or platform-specific strings. ALL element lookups go through the YAML:
@@ -87,38 +91,13 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 
 ## Change Process — MANDATORY
 
-### Claude (this session) does NOT edit code or YAML directly. Ever.
-
-**Claude's role:**
-1. **Observe** — AT-SPI scans, screenshots, read files
-2. **Package audits** — document mismatches between YAML and live AT-SPI tree
-3. **Send to Chats** — ChatGPT/Gemini/Perplexity/Grok analyze and propose fixes
-4. **Spawn sub-agents** — with Chat-validated fixes + the rules from this section
-5. **Validate** — screenshots and AT-SPI scans after every change
-
-**Who can edit files:**
-- **Sub-agents only** — spawned via Agent tool, given explicit instructions
-- Every sub-agent receives THE RULE (this section) in their prompt
-- Every fix must be validated by a Chat before the sub-agent applies it
-
-**The workflow for every change:**
-```
-1. Claude scans AT-SPI tree → finds mismatch
-2. Claude packages audit (YAML + tree + driver code + problems)
-3. Claude sends audit to a Chat (with THE RULE attached)
-4. Chat provides exact fixes (complete files, not diffs)
-5. Claude spawns sub-agent with Chat's fixes + THE RULE
-6. Sub-agent applies changes and commits
-7. Claude validates with screenshots + AT-SPI scan
-8. If validation fails → back to step 1 (new scan, not a guess)
-```
-
-**What goes to every Chat and sub-agent:**
-- The rules from this section (copy verbatim)
-- The current YAML being fixed
-- The current driver code being fixed
-- The live AT-SPI scan output
-- Specific bugs with line numbers
+1. Preserve a current production tree and pin the mismatch to YAML, filtering, scope, environment, or code.
+2. Freeze one bounded order with exact allowed files and production acceptance.
+3. Implement in an isolated worktree. Claude Chat may review; Claude Code does not execute this recovery.
+4. Commit and open a PR. A second reviewer judges the exact head and evidence.
+5. Merge before deployment. Do not edit the live checkout into an uncommitted production variant.
+6. Validate the smallest safe observation in production immediately; a first UI mismatch stops that
+   transaction and becomes the next root-cause order.
 
 ---
 
@@ -126,8 +105,12 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 
 - **Verify before reporting.** NEVER say "sent" or "running" without confirming output files exist and contain expected content.
 - **First error = full stop.** Do not retry. Do not patch. Diagnose root cause.
-- **THE TREE IS THE SOURCE OF TRUTH — do NOT look at the screen (Jesse-canonical 2026-08-01).** Everything is in the AT-SPI tree. Screenshots are the RARE exception, only when the tree genuinely cannot be figured out — and even then it is *likely a FILTER* (the scan/scope is excluding an element), NOT a need for pixels. Never reach for the screen for anything the tree can answer, which is almost everything. Taey should not have to look at screens.
-- **Know your branch — consultation_v2 LIVES ON `main` now.** The driver-architecture V2 engine is the production code on `main` (reconciled 2026-06-14; the old primitive-runner `origin/main` and the `consultation-v2-isolated-drivers` session branch are archived as `archived/*` tags).
+- **THE TREE IS THE SOURCE OF TRUTH — do NOT operate from the screen (Jesse-canonical 2026-08-01).**
+  Everything required is in the AT-SPI tree. A screenshot is never a locator, matcher, validation oracle, or
+  authorization for an action. Apparent absence means stale observation, wrong scope/filter/environment, or
+  UI drift to reconcile in YAML.
+- **Know your branch — consultation_v2 LIVES ON `main` now.** Its shared substrate and retained Layer-3
+  reference code live on `main`; presence on `main` does not make the autonomous engine a production path.
 - **NEVER build on a stale base (git-master).** Before committing substantial work to ANY feature branch: `git fetch origin && git rev-list --count HEAD..origin/main`. If non-trivial → STOP, rebase onto current `origin/main` FIRST. And NEVER assume which line is canonical — `origin/main` can be stale/divergent; verify tip dates + which line the fleet actually runs before trusting it (this exact assumption caused the 2026-06-14 mess). Invoke the git-master skill before any branch/worktree/merge/cleanup op.
 - **Use production scripts.** Never launch Firefox/bots/tests manually.
 - **Don't rush.** If you feel pressure, get curious instead. Search for the answer. The AT-SPI tree has the truth.
@@ -139,8 +122,9 @@ If an element isn't found: scan the tree, get the real name, fix the YAML. Never
 ## Consultation V2 — Isolated Driver Architecture
 
 **Branch:** `main`. **This driver-architecture engine is LAYER 3 (see README.md "the three layers") — the autonomous chain that is a WORK IN PROGRESS and NOT run autonomously.** It works sometimes and not others; that is why no seat dispatches it (Jesse 2026-08-06/07) — kept as the target Taey makes reliable, not deleted. Production for consults today is LAYER 2: step-by-step via `drive_chat` over the LAYER 1 primitives (`snapshot`/`runtime`/`primitives`/YAMLs/`monitor.py`/`notify`), which are permanent. The engine text below is reference for the primitives + the display/YAML contract, NOT an instruction to run it.
-**Entrypoint:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
-**Status:** Production. `CONSULTATION_CONTRACT.md`, `FLOW_CONSULTATION_ENGINE.md`, and `100_TIMES.md` govern the flow.
+**Reference entrypoint only — do not run for production:** `scripts/run_consultation_v2.py` or `consultation_v2/cli.py`
+**Status:** Shared substrate on `main`; autonomous engine reference only. `CONSULTATION_CONTRACT.md`,
+`docs/UI_INTERACTION_AUTHORITY.md`, `consultation_v2/README.md`, and the platform YAMLs govern production.
 
 ### Structure
 ```
@@ -209,7 +193,8 @@ Config: `~/.taey/machine.env` — no hardcoded display numbers.
 
 The old MCP server, root `core/`, root `tools/`, root `platforms/`, central monitor, bot agents, worker processes, and old tests are archived under `archive/task-6a956ac0/main_archive_first/`. They are historical evidence only and are not live operating instructions.
 
-Use `scripts/run_consultation_v2.py` and the `consultation_v2/` package for every consultation flow.
+For production consultation flows, Taey uses `drive_chat` manually, one YAML-owned action followed by a
+fresh canonical tree validation. The retained `consultation_v2` engine entrypoint is not a fallback.
 
 ### Inter-Session Communication (CRITICAL — READ THIS)
 

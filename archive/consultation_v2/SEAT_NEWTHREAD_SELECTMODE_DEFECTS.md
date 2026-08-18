@@ -3,9 +3,8 @@
 > **SUPERSEDED AS AN OPERATING TO-DO — HISTORICAL EVIDENCE ONLY.** This documents Layer-3-engine
 > (autonomous consult) defects. The engine is a WIP **not run autonomously**; production is Layer 2
 > (`drive_chat` step-by-step over the Layer-1 primitives). Do not operate or schedule work from this file.
-> **Planned archive destination:** `archive/consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md` after
-> committed inbound-reference impact is cleared. Until then it remains here for provenance only. Read
-> [`consultation_v2/README.md`](README.md) for current authority and status.
+> **Archived here on 2026-08-18** after committed inbound references were enumerated and updated. Read
+> [`../../consultation_v2/README.md`](../../consultation_v2/README.md) for current authority and status.
 
 Owner: taeys-hands (identifies + CONTROL-verifies + merges). Implementer: taeys-hands-codex (Rule 7).
 Discovered 2026-07-30 while proving the CONNECT bar (one autonomous Taey consult end-to-end via

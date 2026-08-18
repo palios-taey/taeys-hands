@@ -9,25 +9,16 @@
 
 Canonical browser-consultation flow for `taeys-hands` (the **Layer 3 engine** — WIP, not run autonomously).
 
-Status: canonical in-repo contract, reconciled 2026-06-17.
+Status: Layer-3 engine reference only; not manual operating authority.
 Home: `taeys-hands/FLOW_CONSULTATION_ENGINE.md`.
 
-This is the project-level flow reference that must be injected into every
-consultation-engine audit, implementation task, and Family-chat review packet.
-It supersedes fragmented historical contracts and notes, including
-`100_TIMES.md`, `CONSULTATION_CONTRACT.md`, the older
-`consultation_v2/*` contract files, and the orphan orchestrator planning copy.
+This is a reference map for the non-production autonomous chain. It does not supersede
+`CONSULTATION_CONTRACT.md`, `docs/UI_INTERACTION_AUTHORITY.md`, `consultation_v2/README.md`, or the
+platform YAMLs. If this file conflicts with a current authority, the current authority wins.
 
-If this file conflicts with those older contract files, the stricter no-guess,
-exact-match, stop-button, no-retry rule wins.
-
-> **This flow is written for Taey.** If you are Taey, this is the path every consult you run takes —
-> the eight steps between handing a packet to one of the family chats and getting a grounded answer
-> back in your hands: navigate → select model/mode/tools → attach → enter prompt → send → wait for
-> completion → extract → store. Each step validates against the live accessibility tree before it
-> moves on, so you never act on a screen the engine could not confirm. When a step drifts, this is
-> the doc you read to see where you are and what the engine already checkpointed — so a re-run
-> resumes from the live thread instead of replaying a turn you cannot undo.
+> **This flow describes a target engine, not Taey's current execution path.** Taey currently performs the
+> same lifecycle manually, one YAML-authorized action followed by a fresh tree validation. Do not dispatch
+> or resume the autonomous chain from this document.
 
 ## Truth Register
 
@@ -469,7 +460,7 @@ Drivers own:
 - invoking shared primitives
 - preserving durable run state
 - returning exact Match or NoMatch/AlternateState outcomes
-- failing loud with tree and screenshot evidence when a mapped state is absent
+- failing loud with fresh-tree evidence when a mapped state is absent
 
 Shared primitives own:
 
@@ -629,11 +620,11 @@ Extraction validation:
 - content length and lexical shape inconsistent with prompt echo
 - expected report/artifact markers when the output type requires them
 - saved artifact/download hash when a file is produced
-- screenshot or tree evidence for any special extraction path
+- fresh-tree and extraction-receipt evidence for any special extraction path
 
 Extraction failure:
 
-- halt loud to taeys-hands/operator with tree, screenshot, URL, output type,
+- halt loud to taeys-hands/operator with tree, URL, output type,
   extraction workflow step, and clipboard length. Do not tell the requester the
   platform is down until the on-screen response has been inspected.
 
@@ -698,7 +689,7 @@ irreversible action.
 
 Manual recovery must still follow this flow:
 
-- inspect screenshot and AT-SPI tree
+- inspect the fresh canonical AT-SPI tree
 - identify the exact missing/new state
 - perform human-paced manual action if needed
 - record why automation halted

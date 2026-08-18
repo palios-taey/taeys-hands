@@ -140,21 +140,12 @@ EOF
 chmod 600 ~/.taey/instances/worker1.env
 ```
 
-Run a consultation against that instance:
-
-```bash
-TAEY_MACHINE_ENV=$HOME/.taey/instances/worker1.env \
-python3 scripts/run_consultation_v2.py \
-  --platform chatgpt \
-  --message "Smoke prompt" \
-  --requester taeys-hands \
-  --purpose deploy-smoke \
-  --output /tmp/worker1-chatgpt.json
-```
-
-`scripts/run_consultation_v2.py` initializes AT-SPI bus environment before
-calling the V2 CLI. Direct `consultation_v2/cli.py` usage must preserve that
-same environment invariant.
+Validate that instance through the current manual production path. Bind `drive_chat` to the instance's
+configured display environment, then have Taey perform one real architecture-audit or requested consultation
+one YAML-owned action at a time. Preserve the fresh canonical tree before and after each action. Do not use a
+short synthetic response prompt: validation must exercise Stop appearing, two consecutive fresh Stop-absent
+reads, bottom-first extraction, response attachments, and ISMA ingestion. The retained
+`scripts/run_consultation_v2.py` entrypoint is not a deploy-smoke fallback.
 
 ## Login Via VNC
 
