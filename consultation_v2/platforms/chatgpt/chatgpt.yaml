@@ -404,6 +404,12 @@ tree:
       scope: more_submenu
       active_state: checked
 workflow:
+  navigation:
+    trigger: address_bar
+    method: focus_select_paste_submit
+    select_key: ctrl+a
+    paste_value: urls.fresh
+    submit_key: Return
   defaults:
     model: pro
     mode: pro

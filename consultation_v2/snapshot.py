@@ -176,6 +176,44 @@ def _matches_allowed_chrome_spec(element: Dict[str, Any], spec: Dict[str, Any]) 
     )
 
 
+def _with_editable_text_state(key: str, element: Dict[str, Any]) -> Dict[str, Any]:
+    if key != 'address_bar':
+        return element
+    obj = element.get('atspi_obj')
+    if obj is None:
+        raise RuntimeError('Firefox chrome drift: address_bar has no AT-SPI object')
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi as _Atspi
+
+        text_iface = obj.get_text_iface()
+        if text_iface is None:
+            raise RuntimeError('address_bar has no AT-SPI Text interface')
+        character_count = int(_Atspi.Text.get_character_count(text_iface))
+        if character_count < 0:
+            raise RuntimeError(
+                f'address_bar returned invalid character count {character_count}'
+            )
+        text = _Atspi.Text.get_text(text_iface, 0, character_count)
+        selection_count = int(_Atspi.Text.get_n_selections(text_iface))
+        selections = []
+        for index in range(selection_count):
+            selection = _Atspi.Text.get_selection(text_iface, index)
+            selections.append({
+                'start': int(selection.start_offset),
+                'end': int(selection.end_offset),
+            })
+    except Exception as exc:
+        raise RuntimeError(
+            f'Firefox chrome drift: could not read exact address_bar text state: {exc}'
+        ) from exc
+    enriched = dict(element)
+    enriched['text'] = text
+    enriched['text_selections'] = selections
+    return enriched
+
+
 def _collect_allowed_chrome_elements(
     firefox: Any,
     chrome_cfg: Dict[str, Any],
@@ -201,7 +239,7 @@ def _collect_allowed_chrome_elements(
                 f'Firefox chrome drift: allow_elements.{key} aliases another allowed element'
             )
         selected_identities.add(identity)
-        selected[key] = matches[0]
+        selected[key] = _with_editable_text_state(key, matches[0])
     return selected
 
 
