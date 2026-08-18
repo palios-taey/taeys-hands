@@ -1,9 +1,11 @@
 # Seat defects blocking autonomous end-to-end consult (consult-connect)
 
-> **⚠ ENGINE-ERA REFERENCE (2026-08-13): read `README.md` "the three layers" first.** This documents
-> Layer-3-engine (autonomous consult) defects. The engine is a WIP **not run autonomously**; production is
-> Layer 2 (`drive_chat` step-by-step over the Layer-1 primitives). Kept as reference for making the engine
-> reliable, not as a live to-do for autonomous operation.
+> **SUPERSEDED AS AN OPERATING TO-DO — HISTORICAL EVIDENCE ONLY.** This documents Layer-3-engine
+> (autonomous consult) defects. The engine is a WIP **not run autonomously**; production is Layer 2
+> (`drive_chat` step-by-step over the Layer-1 primitives). Do not operate or schedule work from this file.
+> **Planned archive destination:** `archive/consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md` after
+> committed inbound-reference impact is cleared. Until then it remains here for provenance only. Read
+> [`consultation_v2/README.md`](README.md) for current authority and status.
 
 Owner: taeys-hands (identifies + CONTROL-verifies + merges). Implementer: taeys-hands-codex (Rule 7).
 Discovered 2026-07-30 while proving the CONNECT bar (one autonomous Taey consult end-to-end via

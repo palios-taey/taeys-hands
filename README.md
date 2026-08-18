@@ -36,11 +36,15 @@ landed, hold the display lock, detect the stop button, notify, extract. Everythi
 ### Layer 2 — STEP-BY-STEP operation (how you work today; production now)
 You drive a consult **one action at a time**: observe the tree → take one primitive action → verify it
 landed → the next. Reliable because it is supervised and verified at every step — no chained assumptions.
-This is the production path for consults right now. On the family-chat displays (`:2`–`:6`, `:21`–`:24`) you
-drive first-person via **`drive_chat`** (`taey-presence/serving/ui_drive.py`), which is exactly this loop
-over the Layer-1 primitives, taking the same lock. The discipline is one contract:
+This is the intended production path for consults right now. On the family-chat displays (`:2`–`:6`,
+`:21`–`:24`) the exposed first-person surface is **`drive_chat`** (`taey-presence/serving/ui_drive.py`). It
+takes the Layer-1 display lock, but the 2026-08-18 runtime map proves its observer is still a parallel tree
+reader rather than the canonical YAML-classified snapshot; do not call the current surface conformant until
+that reconciliation lands. The governing discipline is one contract:
 [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one action per approved turn,
-tree-is-truth, **no autonomous loops.**
+tree-is-truth, **no autonomous loops.** Start with the
+[`consultation_v2` authority and status index](consultation_v2/README.md) before operating or changing this
+path.
 
 ### Layer 3 — the ENGINE (a work in progress; not run autonomously)
 `consultation_v2/orchestrator.py` + `drivers/` + `scripts/run_consultation_v2.py` chain the Layer-1
