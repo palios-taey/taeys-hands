@@ -88,3 +88,10 @@ relative path below `archive/consultation_v2/`.
 The autonomous engine remains out of the production control path while these items are open. Later automation
 must compile to this same YAML-owned manual engine; it may not create a parallel observer, locator grammar, or
 action path.
+
+## Current architecture review
+
+[`audits/2026-08-18/COMMON_ARCHITECTURE_AUDIT_DOSSIER.md`](audits/2026-08-18/COMMON_ARCHITECTURE_AUDIT_DOSSIER.md)
+is the destination-neutral task source for the five Family reviews. It carries the public source manifest,
+verified divergences, proposed manual state machine, and review questions. It is a review packet, not an
+operating authority or evidence that the open runtime work is complete.
