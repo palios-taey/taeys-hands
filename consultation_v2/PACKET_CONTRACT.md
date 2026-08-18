@@ -36,8 +36,10 @@ The platform-to-identity mapping is exact:
 | Perplexity | `IDENTITY_CLARITY.md` |
 
 Bundle A contains no task files. Each source is included in full and in the order above. The builder records
-the logical source name, byte count, source SHA-256, and committed source revision in the local receipt. The
-Chat is never asked to calculate or return those values.
+the logical source name, canonical source locator, byte count, and source SHA-256 in the local receipt. When
+the source is Git-tracked, it also records the observed commit. When a governance source is not Git-tracked,
+its frozen byte count and SHA-256 are the content-addressed freshness gate; the builder never invents a
+revision. The Chat is never asked to calculate or return those values.
 
 ## Bundle B — task
 
@@ -53,11 +55,11 @@ Bundle B contains the complete task dossier in this deterministic order:
 When, and only when, the work touches public-platform engagement, Bundle B also includes the applicable
 public-platform engagement law. It is absent for unrelated work. Bundle B does not duplicate Bundle A.
 
-For every source artifact, the builder records a logical name, byte count, SHA-256, and committed revision.
-The attached bundle uses logical or repository-relative names; operator-local absolute paths remain in the
-local receipt and are not presented as facts the Chat could verify. Every source must be authorized for
-transmission to the destination Chat. Authorization is an input to the frozen request, never inferred by the
-builder.
+For every source artifact, the builder records a logical name, canonical source locator, byte count, and
+SHA-256. It also records a commit when the source is Git-tracked. The attached bundle uses logical or
+repository-relative names; operator-local absolute paths remain in the local receipt and are not presented
+as facts the Chat could verify. Every source must be authorized for transmission to the destination Chat.
+Authorization is an input to the frozen request, never inferred by the builder.
 
 ## Brief on-screen prompt
 
@@ -80,11 +82,13 @@ measurements. Those values come from the builder, Git, the canonical tree, or an
 ## Deterministic construction and receipt
 
 Construction freezes an input manifest before rendering. For every source, that manifest names its logical
-role, committed revision, expected byte count, and expected SHA-256. The builder then:
+role, canonical source locator, expected byte count, expected SHA-256, and an expected commit only when the
+source is actually Git-tracked. The builder then:
 
 1. resolves each source to one regular file;
 2. reads and hashes the source before rendering;
-3. compares the observed byte count and digest with the frozen manifest;
+3. compares the observed byte count and digest with the frozen manifest and, for a Git-tracked source, also
+   compares the observed commit;
 4. renders each source once in the declared order without omission or summarization;
 5. independently re-reads both completed bundles and records their byte counts and SHA-256 values; and
 6. writes one local receipt binding the request ID, destination platform, both bundle basenames and hashes,
@@ -101,7 +105,8 @@ Construction stops before any UI action when:
 - a mandatory governance source or task section is absent, unreadable, empty, non-regular, or unauthorized;
 - the destination platform has no exact identity mapping;
 - an observed source byte count or digest differs from the frozen manifest;
-- a source is not at the committed revision named by the manifest;
+- a Git-tracked source is not at the commit named by the manifest, or a non-Git source is assigned an
+  invented revision instead of its observed content address;
 - rendered inclusion is incomplete, reordered, duplicated, summarized, or transformed;
 - the builder would emit anything other than exactly two non-empty attachments;
 - either final bundle fails its independent re-read and hash; or
