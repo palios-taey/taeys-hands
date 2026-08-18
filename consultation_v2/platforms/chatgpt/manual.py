@@ -61,11 +61,12 @@ def element_operation(
         current = dict(context or {})
         current_text = str(current.get('text') or '')
         selections = current.get('text_selections') or []
-        full_selection = bool(current_text) and any(
-            isinstance(selection, dict)
-            and selection.get('start') == 0
-            and selection.get('end') == len(current_text)
-            for selection in selections
+        full_selection = (
+            bool(current_text)
+            and len(selections) == 1
+            and isinstance(selections[0], dict)
+            and selections[0].get('start') == 0
+            and selections[0].get('end') == len(current_text)
         )
         if 'focused' not in normalized_states:
             allowed_now = ['focus']
@@ -204,6 +205,24 @@ def validate_paste_action(text: str, snapshot: Snapshot) -> None:
         )
 
 
+def validate_type_action(text: str, snapshot: Snapshot) -> None:
+    if snapshot.platform != 'chatgpt':
+        raise ValueError(
+            f'ChatGPT type validation received platform {snapshot.platform!r}'
+        )
+    navigation_key, _select_key, _fresh_url, _submit_key = _navigation_rule()
+    address_bar = _single(snapshot, navigation_key)
+    address_states = {
+        str(state).strip().lower().replace('_', ' ')
+        for state in address_bar.states
+    }
+    if 'focused' in address_states:
+        raise ValueError(
+            'chatgpt address_bar YAML requires exact fresh-URL paste after full '
+            'selection; type is forbidden'
+        )
+
+
 def validate_key_state(key: str, snapshot: Snapshot) -> None:
     validate_key_action(key, snapshot)
 
@@ -214,4 +233,5 @@ __all__ = [
     'validate_key_action',
     'validate_key_state',
     'validate_paste_action',
+    'validate_type_action',
 ]
