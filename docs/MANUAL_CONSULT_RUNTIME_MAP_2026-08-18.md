@@ -119,7 +119,7 @@ a successful manual `drive_chat` call.
 
 3. **Observed — both snapshot implementations admit external portal roles from
    `firefox_chrome.yaml`.** The policy includes `menu`, `popup menu`, `listbox`,
-   `panel`, `dialog`, `alert`, and `window`. Canonical classification subsequently
+   `list box`, `panel`, `dialog`, `alert`, and `window`. Canonical classification subsequently
    applies per-platform exact excludes and mapping registers; the custom manual
    observer does not apply the platform classifier. A visible file chooser or
    Firefox window can therefore enter its option set.
