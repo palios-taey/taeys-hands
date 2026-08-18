@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 import datetime as dt
 import hashlib
 import json
@@ -581,6 +582,7 @@ class TaeyConsultExtractionSeat:
         system_prompt_path: str | Path | None = None,
         capture_root: str | Path | None = None,
         attachment_path: str | Path | None = None,
+        attachment_paths: Sequence[str | Path] | None = None,
         framing_prompt: str | None = None,
         completion_timeout: float = DEFAULT_COMPLETION_TIMEOUT_SECONDS,
     ) -> None:
@@ -624,37 +626,81 @@ class TaeyConsultExtractionSeat:
             self.system_prompt_path,
             'Taey system prompt',
         )
-        supplied_attachment = attachment_path is not None
+        if attachment_path is not None and attachment_paths is not None:
+            raise TaeyConsultExtractionError(
+                'supply attachment_path or attachment_paths, not both'
+            )
+        raw_attachment_paths = (
+            tuple(attachment_paths or ())
+            if attachment_paths is not None
+            else ((attachment_path,) if attachment_path is not None else ())
+        )
+        supplied_attachment = bool(raw_attachment_paths)
         supplied_prompt = framing_prompt is not None
         if supplied_attachment != supplied_prompt:
             raise TaeyConsultExtractionError(
-                'full consult requires both attachment_path and framing_prompt'
+                'full consult requires both attachment paths and framing_prompt'
             )
         self.full_consult = supplied_attachment and supplied_prompt
+        self.attachment_paths: tuple[Path, ...] = ()
+        self.attachment_sha256s: tuple[str, ...] = ()
+        self.attachment_receipts: list[dict[str, object]] = []
+        self.attachment_index = 0
         self.attachment_path: Path | None = None
         self.attachment_sha256 = ''
         self.framing_prompt = ''
         self.framing_prompt_sha256 = ''
         if self.full_consult:
-            raw_attachment = Path(str(attachment_path)).expanduser()
-            if not raw_attachment.is_absolute():
+            if len(raw_attachment_paths) > 2:
                 raise TaeyConsultExtractionError(
-                    'full consult attachment_path must be absolute'
+                    'full consult accepts at most two ordered attachments'
                 )
-            self.attachment_path = raw_attachment.resolve()
-            if not self.attachment_path.is_file():
-                raise TaeyConsultExtractionError(
-                    f'full consult attachment is unavailable: {self.attachment_path}'
+            resolved_paths: list[Path] = []
+            attachment_hashes: list[str] = []
+            attachment_contents: list[bytes] = []
+            for raw_value in raw_attachment_paths:
+                raw_attachment = Path(str(raw_value)).expanduser()
+                if not raw_attachment.is_absolute():
+                    raise TaeyConsultExtractionError(
+                        'full consult attachment paths must be absolute'
+                    )
+                resolved = raw_attachment.resolve()
+                if resolved in resolved_paths:
+                    raise TaeyConsultExtractionError(
+                        f'full consult attachment path is duplicated: {resolved}'
+                    )
+                if not resolved.is_file():
+                    raise TaeyConsultExtractionError(
+                        f'full consult attachment is unavailable: {resolved}'
+                    )
+                try:
+                    attachment_bytes = resolved.read_bytes()
+                except OSError as exc:
+                    raise TaeyConsultExtractionError(
+                        f'full consult attachment could not be read: {exc}'
+                    ) from exc
+                if not attachment_bytes:
+                    raise TaeyConsultExtractionError(
+                        f'full consult attachment is empty: {resolved}'
+                    )
+                resolved_paths.append(resolved)
+                attachment_contents.append(attachment_bytes)
+                attachment_hashes.append(
+                    hashlib.sha256(attachment_bytes).hexdigest()
                 )
-            try:
-                attachment_bytes = self.attachment_path.read_bytes()
-            except OSError as exc:
-                raise TaeyConsultExtractionError(
-                    f'full consult attachment could not be read: {exc}'
-                ) from exc
-            if not attachment_bytes:
-                raise TaeyConsultExtractionError('full consult attachment is empty')
-            self.attachment_sha256 = hashlib.sha256(attachment_bytes).hexdigest()
+            self.attachment_paths = tuple(resolved_paths)
+            self.attachment_sha256s = tuple(attachment_hashes)
+            self.attachment_receipts = [
+                {
+                    'index': index,
+                    'path': str(path),
+                    'sha256': attachment_hashes[index],
+                    'verified': False,
+                }
+                for index, path in enumerate(resolved_paths)
+            ]
+            self.attachment_path = self.attachment_paths[0]
+            self.attachment_sha256 = self.attachment_sha256s[0]
             self.framing_prompt = str(framing_prompt or '').strip()
             if not self.framing_prompt:
                 raise TaeyConsultExtractionError(
@@ -666,18 +712,21 @@ class TaeyConsultExtractionSeat:
                     f'{MAX_FRAMING_PROMPT_CHARACTERS} characters'
                 )
             prompt_bytes = self.framing_prompt.encode('utf-8')
-            if attachment_bytes.strip() == prompt_bytes.strip():
-                raise TaeyConsultExtractionError(
-                    'full consult framing prompt must not inline the attachment'
-                )
-            attachment_text = attachment_bytes.decode('utf-8', errors='ignore').strip()
-            if (
-                len(attachment_text) >= 80
-                and attachment_text[:200] in self.framing_prompt
-            ):
-                raise TaeyConsultExtractionError(
-                    'full consult framing prompt contains attachment content'
-                )
+            for attachment_bytes in attachment_contents:
+                if attachment_bytes.strip() == prompt_bytes.strip():
+                    raise TaeyConsultExtractionError(
+                        'full consult framing prompt must not inline an attachment'
+                    )
+                attachment_text = attachment_bytes.decode(
+                    'utf-8', errors='ignore'
+                ).strip()
+                if (
+                    len(attachment_text) >= 80
+                    and attachment_text[:200] in self.framing_prompt
+                ):
+                    raise TaeyConsultExtractionError(
+                        'full consult framing prompt contains attachment content'
+                    )
             self.framing_prompt_sha256 = _sha256_text(self.framing_prompt)
         try:
             self.completion_timeout = float(completion_timeout)
@@ -1346,6 +1395,29 @@ class TaeyConsultExtractionSeat:
         if self.full_consult or self.platform == 'claude':
             return self._required_full_consult_extraction_action()
         return self._required_extraction_action()
+
+    def _advance_verified_attachment(self) -> None:
+        receipt = self.attachment_receipts[self.attachment_index]
+        receipt['verified'] = True
+        self.attachment_verified = all(
+            bool(item.get('verified')) for item in self.attachment_receipts
+        )
+        if self.attachment_verified:
+            return
+        self.attachment_index += 1
+        self.attachment_path = self.attachment_paths[self.attachment_index]
+        self.attachment_sha256 = self.attachment_sha256s[self.attachment_index]
+        self.attach_trigger_focused = False
+        self.attach_trigger_activated = False
+        self.upload_typeahead_entered = False
+        self.upload_submit_key_index = 0
+        self.upload_control_clicked = False
+        self.dialog_location_opened = False
+        self.dialog_path_selected = False
+        self.attachment_path_pasted = False
+        self.attachment_submitted = False
+        self.found_controls.clear()
+        self.full_consult_found.clear()
 
     def _required_full_consult_action(self) -> dict[str, object]:
         if not self.fresh_thread_opened:
@@ -2562,16 +2634,22 @@ class TaeyConsultExtractionSeat:
                     panel_count = len(sources) + file_count
                     if (
                         panel_count == expected_count
-                        and file_count == 1
-                        and self.attachment_path is not None
+                        and file_count == len(self.attachment_paths)
+                        and self.attachment_paths
                     ):
                         candidates.append([
                             *sources,
-                            {
-                                'index': len(sources) + 1,
-                                'url': '',
-                                'title': self.attachment_path.name,
-                            },
+                            *[
+                                {
+                                    'index': len(sources) + index,
+                                    'url': '',
+                                    'title': path.name,
+                                }
+                                for index, path in enumerate(
+                                    self.attachment_paths,
+                                    start=1,
+                                )
+                            ],
                         ])
                     elif file_count in accepted_panel_counts:
                         file_panels += 1
@@ -2716,11 +2794,7 @@ class TaeyConsultExtractionSeat:
         request = ConsultationRequest(
             platform=self.platform,
             message=self.framing_prompt,
-            attachments=(
-                [str(self.attachment_path)]
-                if self.attachment_path is not None
-                else []
-            ),
+            attachments=[str(path) for path in self.attachment_paths],
             session_url=current_url,
         )
         result = driver.result(request)
@@ -2890,8 +2964,8 @@ class TaeyConsultExtractionSeat:
             platform=self.platform,
             message=self.framing_prompt if self.full_consult else '',
             attachments=(
-                [str(self.attachment_path)]
-                if self.full_consult and self.attachment_path is not None
+                [str(path) for path in self.attachment_paths]
+                if self.full_consult
                 else []
             ),
         )
@@ -3039,8 +3113,12 @@ class TaeyConsultExtractionSeat:
             if self.full_consult:
                 result['consultation'] = {
                     'platform': self.platform,
-                    'attachment_path': str(self.attachment_path),
-                    'attachment_sha256': self.attachment_sha256,
+                    'attachment_path': str(self.attachment_paths[0]),
+                    'attachment_sha256': self.attachment_sha256s[0],
+                    'attachments': [
+                        dict(receipt) for receipt in self.attachment_receipts
+                    ],
+                    'attachment_count': len(self.attachment_receipts),
                     'attachment_verified': self.attachment_verified,
                     'framing_prompt_characters': len(self.framing_prompt),
                     'framing_prompt_sha256': self.framing_prompt_sha256,
@@ -3272,7 +3350,11 @@ class TaeyConsultExtractionSeat:
                 self._forget_semantic_control(name)
                 self.found_controls.discard((name, role))
             if name == 'attachment_present' and serialized is not None:
-                self.attachment_verified = True
+                self.attachment_receipts[self.attachment_index].update({
+                    'observed_name': str(serialized.get('name') or ''),
+                    'observed_role': str(serialized.get('role') or ''),
+                })
+                self._advance_verified_attachment()
             return {
                 'ok': serialized is not None,
                 'action': action,
@@ -3496,6 +3578,7 @@ class TaeyConsultExtractionSeat:
                 'ok': True,
                 'action': action,
                 'name': name,
+                'attachment_index': self.attachment_index,
                 'attachment_characters': len(path_text),
                 'attachment_sha256': self.attachment_sha256,
                 'file_dialog_focus_verified': True,
@@ -3716,6 +3799,10 @@ class TaeyConsultExtractionSeat:
             'complete source panel; the harness then validates and finalizes.'
         )
         if self.full_consult:
+            attachment_summary = ', '.join(
+                f'{path.name!r} at SHA256 {self.attachment_sha256s[index]}'
+                for index, path in enumerate(self.attachment_paths)
+            )
             task = (
                 f'Run one complete {self.platform} consultation on display '
                 f'{self.display} with consult_extract_action only, one action per '
@@ -3724,11 +3811,10 @@ class TaeyConsultExtractionSeat:
                 'attachment_present, composer_input, select_mode, submit, '
                 'post_submit, completion, and copy_response. '
                 'The harness resolves those names through the platform YAML and '
-                'executes the exact live AT-SPI control. It owns one validated '
-                'attachment named '
-                f'{self.attachment_path.name!r} at SHA256 '
-                f'{self.attachment_sha256}; never request, reproduce, or paste its '
-                'contents into the composer. The harness also owns a short framing '
+                'executes the exact live AT-SPI control. It owns the ordered '
+                f'attachments {attachment_summary}; never request, reproduce, or '
+                'paste their contents into the composer. The harness also owns a '
+                'short framing '
                 f'prompt of {len(self.framing_prompt)} characters at SHA256 '
                 f'{self.framing_prompt_sha256}; use paste_prompt without emitting its '
                 'text. Begin with navigate new_thread. The harness must prove a clean '
@@ -4020,7 +4106,8 @@ def consult_with_taey(
     *,
     platform: str,
     display: str,
-    attachment_path: str | Path,
+    attachment_path: str | Path | None = None,
+    attachment_paths: Sequence[str | Path] | None = None,
     framing_prompt: str,
     endpoint: str | None = None,
     model: str | None = None,
@@ -4034,6 +4121,7 @@ def consult_with_taey(
         model=model,
         capture_root=capture_root,
         attachment_path=attachment_path,
+        attachment_paths=attachment_paths,
         framing_prompt=framing_prompt,
         completion_timeout=completion_timeout,
     ).run()
