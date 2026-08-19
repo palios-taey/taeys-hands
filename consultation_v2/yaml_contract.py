@@ -40,6 +40,7 @@ MATCH_SPEC_KEYS = frozenset({
     'structural',
     'attributes',
     'testid',
+    'child_texts',
     'name_must_be_nonempty',
     'pick',
     'trigger_type',
@@ -68,6 +69,7 @@ IDENTITY_ELEMENT_KEYS = frozenset({
     'match_strategy',
     'structural',
     'reason',
+    'child_texts',
 })
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
 MENU_ACTIVE_RECOGNITIONS = IDENTITY_ACTIVE_STATES | frozenset({'selected_name_prefix', 'click_only'})
@@ -337,6 +339,35 @@ def _validate_names_any_of(
                  'names_any_of entries must be exact labels, not patterns or padded strings')
 
 
+def _validate_child_texts(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    spec: dict[str, Any],
+    key_path: tuple[str, ...],
+) -> None:
+    if 'child_texts' not in spec:
+        return
+    values = spec['child_texts']
+    if (
+        not isinstance(values, list)
+        or not values
+        or not all(
+            isinstance(value, str)
+            and value
+            and value == value.strip()
+            and not _has_wildcard(value)
+            for value in values
+        )
+    ):
+        _add(
+            findings,
+            lines,
+            key_path + ('child_texts',),
+            'child_texts',
+            'child_texts must be a non-empty ordered list of exact labels',
+        )
+
+
 def _validate_structural(
     findings: list[ContractFinding],
     lines: dict[tuple[str, ...], int],
@@ -443,7 +474,7 @@ def _is_dynamic_control(element_key: str, spec: dict[str, Any]) -> bool:
 
 
 def _has_stable_locator(spec: dict[str, Any]) -> bool:
-    return any(key in spec for key in ('structural', 'attributes', 'testid'))
+    return any(key in spec for key in ('structural', 'attributes', 'testid', 'child_texts'))
 
 
 def _validate_match_spec(
@@ -483,6 +514,7 @@ def _validate_match_spec(
             _add(findings, lines, key_path + ('reason',), 'reason',
                  'name_agnostic_structural entries must explain the dynamic visible name')
     _validate_names_any_of(findings, lines, spec, key_path)
+    _validate_child_texts(findings, lines, spec, key_path)
     _validate_structural(findings, lines, spec, key_path, element_map)
     _validate_attributes(findings, lines, spec, key_path)
     name = spec.get('name')
@@ -532,9 +564,23 @@ def _validate_global_exactness(
                 ):
                     _add(findings, lines, child_path, key_name,
                          'names_any_of must contain exact non-empty labels only')
+            if key_name == 'child_texts':
+                if (
+                    not isinstance(value, list)
+                    or not value
+                    or not all(
+                        isinstance(item, str)
+                        and item
+                        and item == item.strip()
+                        and not _has_wildcard(item)
+                        for item in value
+                    )
+                ):
+                    _add(findings, lines, child_path, key_name,
+                         'child_texts must contain exact non-empty labels only')
             _validate_global_exactness(findings, lines, value, child_path)
         matcherish = bool(keys & {'role', 'states_include', 'active_state'})
-        exact_locator = bool(keys & {'name', 'names_any_of', 'structural', 'attributes', 'testid', 'match_strategy'})
+        exact_locator = bool(keys & {'name', 'names_any_of', 'structural', 'attributes', 'testid', 'match_strategy', 'child_texts'})
         if matcherish and not exact_locator:
             _add(findings, lines, key_path, key_path[-1] if key_path else 'mapping',
                  'presence-only matcher maps role/state without an exact stable locator')
@@ -734,12 +780,18 @@ def _validate_identity_element_map(
             if match_strategy == 'name_agnostic_structural' and 'name' in spec:
                 _add(findings, lines, key_path + ('name',), 'name',
                      'identity_v1 name_agnostic_structural entries must not declare a name')
-        required_fields = ('role', 'scope') if match_strategy == 'name_agnostic_structural' else ('name', 'role', 'scope')
+        child_text_locator = 'child_texts' in spec
+        required_fields = (
+            ('role', 'scope')
+            if match_strategy == 'name_agnostic_structural' or child_text_locator
+            else ('name', 'role', 'scope')
+        )
         for required in required_fields:
             value = spec.get(required)
             if not isinstance(value, str) or not value or value != value.strip() or _has_wildcard(value):
                 _add(findings, lines, key_path + (required,), required,
                      f'identity_v1 {required} must be an exact non-pattern string')
+        _validate_child_texts(findings, lines, spec, key_path)
         structural = spec.get('structural')
         if match_strategy == 'name_agnostic_structural':
             if not isinstance(structural, dict) or not structural:

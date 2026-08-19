@@ -8,7 +8,7 @@ import yaml
 
 from consultation_v2 import atspi
 from consultation_v2.platforms import routing as platform_routing
-from consultation_v2.tree import find_elements, find_menu_items
+from consultation_v2.tree import find_elements, find_menu_items, node_label
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
@@ -120,6 +120,26 @@ def _element_attributes(element: Dict[str, Any] | ElementRef) -> Dict[str, Any]:
     raw = _element_raw(element)
     attributes = raw.get('attributes') or {}
     return attributes if isinstance(attributes, dict) else {}
+
+
+def _direct_child_texts(element: Dict[str, Any] | ElementRef) -> List[str]:
+    obj = _element_raw(element).get('atspi_obj')
+    if obj is None:
+        return []
+    labels: List[str] = []
+    try:
+        child_count = obj.get_child_count()
+    except Exception:
+        return []
+    for index in range(child_count):
+        try:
+            child = obj.get_child_at_index(index)
+            label = node_label(child).strip() if child is not None else ''
+        except Exception:
+            label = ''
+        if label:
+            labels.append(label)
+    return labels
 
 
 def _element_identity(element: Dict[str, Any]) -> Any:
@@ -264,7 +284,7 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
     role = (element.role if isinstance(element, ElementRef) else element.get('role')) or ''
     states = set(s.lower() for s in ((element.states if isinstance(element, ElementRef) else element.get('states')) or []))
 
-    if not any(key in spec for key in ('name', 'names_any_of', 'role', 'states_include', 'attributes', 'testid')):
+    if not any(key in spec for key in ('name', 'names_any_of', 'role', 'states_include', 'attributes', 'testid', 'child_texts')):
         return False
     if 'name' in spec and name != str(spec['name']):
         return False
@@ -279,6 +299,12 @@ def matches_spec(element: Dict[str, Any] | ElementRef, spec: Dict[str, Any]) -> 
     if 'states_include' in spec:
         needed = {str(item).lower() for item in _listify(spec['states_include'])}
         if not needed.issubset(states):
+            return False
+    if 'child_texts' in spec:
+        expected = spec['child_texts']
+        if not isinstance(expected, list) or not all(isinstance(item, str) for item in expected):
+            raise ValueError('child_texts must be a list of exact labels')
+        if _direct_child_texts(element) != expected:
             return False
     if 'attributes' in spec:
         expected = spec['attributes']
@@ -467,22 +493,26 @@ def _classify_elements(
             mapped[preclassified_key].append(_to_ref(preclassified_key, element))
             exact_accounted.add(_element_identity(element))
             continue
+        matched = False
+        for key, spec in element_map.items():
+            if 'structural' in spec:
+                continue
+            if matches_spec(element, spec):
+                mapped_element = element
+                if 'child_texts' in spec:
+                    mapped_element = dict(element)
+                    mapped_element['text'] = ' | '.join(_direct_child_texts(element))
+                mapped.setdefault(key, []).append(_to_ref(key, mapped_element))
+                exact_accounted.add(_element_identity(element))
+                matched = True
+        if matched:
+            continue
         if _is_excluded(
             element,
             tree_cfg,
             chrome_cfg=chrome_cfg,
             structural_exclude_roots=structural_excludes,
         ):
-            continue
-        matched = False
-        for key, spec in element_map.items():
-            if 'structural' in spec:
-                continue
-            if matches_spec(element, spec):
-                mapped.setdefault(key, []).append(_to_ref(key, element))
-                exact_accounted.add(_element_identity(element))
-                matched = True
-        if matched:
             continue
         if any(matches_spec(element, spec) for spec in sidebar_nav if isinstance(spec, dict)):
             sidebar.append(_to_ref(None, element))

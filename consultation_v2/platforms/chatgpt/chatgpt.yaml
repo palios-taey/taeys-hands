@@ -335,8 +335,10 @@ tree:
       scope: model_menu.gpt_5_6_sol
       active_state: checked
     tool_upload:
-      name: Add photos & files Control U
-      role: menu item
+      child_texts:
+        - Add photos & files
+        - Upload from computer
+      role: section
       scope: tools_menu
     tool_recent_files:
       name: Recent files
@@ -572,6 +574,7 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
+    scope: base
     open_method: focus_and_key_open
     open_key: space
     typeahead_label: Add photos
