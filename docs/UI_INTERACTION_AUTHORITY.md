@@ -36,7 +36,7 @@ Implementation (Observed, merged on `main`): `consultation_v2/supervised_ui_seat
 `supervised_ui_contract.py`, `supervised_ui_receipts.py`, per-platform
 `consultation_v2/platforms/<p>/supervised_ui.yaml`, runner `scripts/run_supervised_ui_seat.py`,
 design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules.py`. The current documentation
-surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](../DOCUMENTATION_MAP.md).
+surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md).
 
 ## Current consultation boundary
 

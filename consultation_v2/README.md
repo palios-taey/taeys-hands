@@ -33,7 +33,7 @@ do not override it.
 | Completion | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md) and platform monitors | Stop appearance proves send; two consecutive fresh Stop absences, separated by the YAML-owned interval and with no mapped exception state, prove completion. | Passive monitors exist. A sent production validation must exercise this real lifecycle. |
 | Extraction | [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) and [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Scroll fully to bottom, activate the exact mapped Copy element, then harvest platform-specific response attachments. | Engine extraction exists; the manual path delegates response extraction but does not yet create the complete session receipt. |
 | Ingestion | [`ingest.py`](ingest.py) | Persist prompt, response, input/output attachments, final URL, and receipts; `auto_ingest` optionally submits the session to ISMA. | Implemented for the engine path, not wired into the current manual path. Do not claim manual ingestion until a production receipt proves it. |
-| Repository baseline | [`../DOCUMENTATION_MAP.md`](../DOCUMENTATION_MAP.md) | Current authority, reference, generated, and excluded surfaces. | Current; dated runtime claims require fresh production receipts. |
+| Repository baseline | [`../docs/DOCUMENTATION_MAP.md`](../docs/DOCUMENTATION_MAP.md) | Current authority, reference, generated, and excluded surfaces. | Current; dated runtime claims require fresh production receipts. |
 
 ## Production validation rule
 

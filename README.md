@@ -96,7 +96,7 @@ storage/                        # optional Redis + Neo4j persistence
 ```
 
 The current documentation surface is enumerated in
-[`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md). Historical audits, transcripts, recovery packets, and
+[`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md). Historical audits, transcripts, recovery packets, and
 superseded plans are available through Git history, not alongside current operating instructions.
 
 ## Requirements / setup
