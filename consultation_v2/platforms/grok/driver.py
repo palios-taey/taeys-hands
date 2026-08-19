@@ -1094,12 +1094,71 @@ class _GrokInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if not self.runtime.click(trigger):
+        menus = (((self.cfg.get('workflow') or {}).get('selection') or {}).get('menus') or {})
+        operations = [
+            (str(menu_key), dict(menu_spec.get('operate') or {}))
+            for menu_key, menu_spec in menus.items()
+            if isinstance(menu_spec, dict)
+            and str((menu_spec.get('operate') or {}).get('trigger') or '').strip() == trigger_key
+        ]
+        if len(operations) != 1:
             result.add_step(
                 'select',
                 False,
-                f'{self.platform} selection trigger {trigger_key} click failed',
+                f'{self.platform} selection trigger {trigger_key} has no unique YAML operation',
                 trigger=trigger_key,
+                operation_count=len(operations),
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        menu_key, operation = operations[0]
+        open_method = str(operation.get('open_method') or 'click').strip().lower()
+        if open_method == 'focus_and_key_open':
+            open_key = str(operation.get('open_key') or '').strip()
+            if not open_key:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection menu {menu_key} has no exact open_key',
+                    trigger=trigger_key,
+                    open_method=open_method,
+                    snapshot=trigger_snapshot.serializable(),
+                )
+                return None
+            open_evidence = self.runtime.focus_and_key_open(
+                trigger,
+                key=open_key,
+                settle=0.3,
+            )
+            if not open_evidence.get('ok'):
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection trigger {trigger_key} focus+key open failed',
+                    trigger=trigger_key,
+                    open_method=open_method,
+                    open_evidence=open_evidence,
+                    snapshot=trigger_snapshot.serializable(),
+                )
+                return None
+        elif open_method == 'click':
+            if not self.runtime.click(trigger):
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection trigger {trigger_key} click failed',
+                    trigger=trigger_key,
+                    open_method=open_method,
+                    snapshot=trigger_snapshot.serializable(),
+                )
+                return None
+        else:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection menu {menu_key} declares unsupported open_method',
+                trigger=trigger_key,
+                open_method=open_method,
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
