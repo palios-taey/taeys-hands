@@ -1396,7 +1396,7 @@ class TaeyConsultExtractionSeat:
     def _required_action(self) -> dict[str, object]:
         if self.full_consult and not self.consult_completed:
             return self._required_full_consult_action()
-        if self.full_consult or self.platform == 'claude':
+        if self.full_consult or self.platform != 'perplexity':
             return self._required_full_consult_extraction_action()
         return self._required_extraction_action()
 
@@ -3040,7 +3040,7 @@ class TaeyConsultExtractionSeat:
             raise TaeyConsultExtractionError(
                 'Taey attempted finish before a full report body was captured'
             )
-        if self.full_consult or self.platform == 'claude':
+        if self.full_consult or self.platform != 'perplexity':
             source_bearing = self.full_consult and self.platform == 'perplexity'
             citation_ids = sorted(
                 set(self.body_citation_ids) | set(_citation_ids(self.body))
@@ -3758,7 +3758,7 @@ class TaeyConsultExtractionSeat:
                 contains,
                 role,
             )
-        elif self.full_consult or self.platform == 'claude':
+        elif self.full_consult or self.platform != 'perplexity':
             result = self._execute_full_consult_extraction_action(
                 action,
                 name,
@@ -3830,17 +3830,21 @@ class TaeyConsultExtractionSeat:
                 'that submission and refuses any other thread. Finish only after '
                 'the configured copy_response action returns a non-empty body.'
             )
-        elif self.platform == 'claude':
+        elif self.platform != 'perplexity':
+            artifact_instruction = (
+                ' and invokes the Claude driver artifact extraction path when '
+                'that note indicates an artifact'
+                if self.platform == 'claude'
+                else ''
+            )
             task = (
-                f'Extract the completed Claude answer on consult display '
+                f'Extract the completed {self.platform} answer on consult display '
                 f'{self.display}. Use consult_extract_action only, one action per '
                 'turn. Use only the platform-agnostic copy_response semantic name '
                 'supplied by required_next_action. The harness resolves it through '
-                'the Claude YAML, copies the answer cover note, and invokes the '
-                'Claude driver artifact extraction path when that note indicates '
-                'an artifact. Finish only after the configured copy_response '
-                'action returns a non-empty body and any indicated artifact has '
-                'been captured.'
+                f'the {self.platform} YAML, copies the completed answer'
+                f'{artifact_instruction}. Finish only after the configured '
+                'copy_response action returns a non-empty body.'
             )
         else:
             task = (
