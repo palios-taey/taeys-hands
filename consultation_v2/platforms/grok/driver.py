@@ -3071,11 +3071,20 @@ class GrokConsultationDriver(_GrokInlineBase):
                 return False
             return self.wait_for_page_ready_after_navigation(result)
 
+        navigated = self.runtime.navigate(
+            target_url,
+            verify_change=bool(urls.get('verify_navigation')),
+        )
         snap = self.runtime.snapshot()
-        result.add_step('navigate', True, 'Grok fresh session uses current page and in-page New Chat',
-                        target_url=target_url, fresh_chat_required=True,
-                        snapshot=snap.serializable())
-        if not self._run_setup_step('new_chat', lambda: self._trigger_new_chat(result, snap)):
+        result.add_step(
+            'navigate',
+            navigated,
+            'Navigated to Grok fresh target through the configured address-bar path',
+            target_url=target_url,
+            fresh_chat_required=True,
+            snapshot=snap.serializable(),
+        )
+        if not navigated:
             return False
         return self._run_setup_step('page-ready', lambda: self._wait_for_fresh_chat_ready(result))
 
