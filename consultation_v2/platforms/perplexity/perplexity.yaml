@@ -1,5 +1,5 @@
 platform: perplexity
-click_strategy: xdotool_first
+click_strategy: atspi_only
 urls:
   fresh: https://www.perplexity.ai/
   verify_navigation: false
@@ -342,7 +342,7 @@ workflow:
           deep_research:
             element: deep_research
             active_element: deep_research_toggle
-            click_strategy: coordinate_only
+            click_strategy: atspi_only
         default_for_fresh: deep_research
         example_rationale: Use Deep Research for Perplexity because regular Pro Search can return thin or incomplete research.
   attachment:

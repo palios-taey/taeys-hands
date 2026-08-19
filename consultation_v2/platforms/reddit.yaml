@@ -1,5 +1,5 @@
 platform: reddit
-click_strategy: coordinate_only
+click_strategy: atspi_only
 navigation_key: F6
 urls:
   fresh: <AUXILIARY_URL>

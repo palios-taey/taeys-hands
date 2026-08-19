@@ -1,8 +1,19 @@
 # Archive - old code preserved for reference
 archive/
+docs/archive/
+audit_logs/
+consultations/
+recaps/
+docs/handoffs/
+consultation_v2/audits/
+consultation_v2/research/
+consultation_v2/scans/
+consultation_v2/validation/
 
 # Python
 __pycache__/
+.pytest_cache/
+.ruff_cache/
 *.pyc
 *.pyo
 *.egg-info/

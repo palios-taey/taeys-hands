@@ -37,10 +37,9 @@ landed, hold the display lock, detect the stop button, notify, extract. Everythi
 You drive a consult **one action at a time**: observe the tree → take one primitive action → verify it
 landed → the next. Reliable because it is supervised and verified at every step — no chained assumptions.
 This is the intended production path for consults right now. On the family-chat displays (`:2`–`:6`,
-`:21`–`:24`) the exposed first-person surface is **`drive_chat`** (`taey-presence/serving/ui_drive.py`). It
-takes the Layer-1 display lock, but the 2026-08-18 runtime map proves its observer is still a parallel tree
-reader rather than the canonical YAML-classified snapshot; do not call the current surface conformant until
-that reconciliation lands. The governing discipline is one contract:
+`:20`–`:24`) the exposed first-person surface is **`drive_chat`** (`taey-presence/serving/ui_drive.py`). It
+consumes the canonical `build_snapshot(platform)` projection, binds refs to the observed scope and revision,
+and executes only the operation declared by that platform's YAML. The governing discipline is one contract:
 [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one action per approved turn,
 tree-is-truth, **no autonomous loops.** Start with the
 [`consultation_v2` authority and status index](consultation_v2/README.md) before operating or changing this
@@ -94,8 +93,11 @@ scripts/
   launch_isolated_display.sh manage_displays.sh install_machine_displays.sh …  # display substrate
 systemd/user, ~/.config/systemd/user/taey-*  # display units + taey-consult-monitor@N
 storage/                        # optional Redis + Neo4j persistence
-archive/                        # retired evidence — historical only, never operate from it
 ```
+
+The current documentation surface is enumerated in
+[`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md). Historical audits, transcripts, recovery packets, and
+superseded plans are available through Git history, not alongside current operating instructions.
 
 ## Requirements / setup
 

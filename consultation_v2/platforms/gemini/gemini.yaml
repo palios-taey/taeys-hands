@@ -1,5 +1,5 @@
 platform: gemini
-click_strategy: atspi_first
+click_strategy: atspi_only
 urls:
   fresh: https://gemini.google.com/app
   verify_navigation: false
@@ -80,16 +80,13 @@ tree:
     # inside the Upload & tools menu. VERIFIED LIVE 2026-05-22 (Ultra acct):
     #  - REAL Deep Think requires the "3.1 Pro" model selected first (NOT the
     #    "3.5 Thinking" model — that is a different feature).
-    #  - Open "Upload & tools" via do_action(0); xdotool COORDINATE clicks
-    #    intermittently fail to open the menu (and to Send — use do_action there too).
-    #  - Menu items sit at the menu's own x-range (~x>=796), NOT the left edge.
-    #    "More tools" is the LAST item (below Create music) and is often NOT
-    #    exposed as an AT-SPI node (visual only) — hover it by coordinate inside
-    #    the menu x-range.
-    #  - Its flyout opens to the RIGHT (~x=1037) and exposes tool_deep_think /
+    #  - Open "Upload & tools" through its exact mapped AT-SPI action.
+    #  - "More tools" is the last mapped item below Create music; hover the
+    #    exact YAML-resolved element and verify the flyout from a fresh tree.
+    #  - Its flyout exposes tool_deep_think /
     #    tool_guided_learning as menu items; click tool_deep_think there.
     #  - Verify via tool_deselect_deep_think / the "Deep think" composer chip.
-    #  - Input needs grab_focus before xdotool type.
+    #  - Input must report FOCUSED before text entry.
     more_tools:
       name: More tools
       role: push button

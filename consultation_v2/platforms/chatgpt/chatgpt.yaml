@@ -1,6 +1,6 @@
 schema: identity_v1
 platform: chatgpt
-click_strategy: xdotool_first
+click_strategy: atspi_only
 urls:
   fresh: https://chatgpt.com/
   verify_navigation: false
@@ -603,7 +603,7 @@ workflow:
           - github_connector_permission_allow
         action: click
         element: github_connector_permission_allow
-        click_strategy: atspi_first
+        click_strategy: atspi_only
         max_actions: 1
   extract:
     primary_key: copy_button

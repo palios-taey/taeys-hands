@@ -1,6 +1,6 @@
 schema: identity_v1
 platform: claude
-click_strategy: atspi_first
+click_strategy: atspi_only
 navigation_key: alt+d
 urls:
   fresh: https://claude.ai/new
@@ -625,14 +625,14 @@ workflow:
           research:
             element: tool_research
             active_element: research_mode
-            click_strategy: coordinate_only
+            click_strategy: atspi_only
           web_search:
             element: tool_web_search
         default_for_fresh: web_search
         example_rationale: Web access is enabled by default; Research remains opt-in for report-style investigations.
   attachment:
     trigger: toggle_menu
-    trigger_click_strategy: coordinate_only
+    trigger_click_strategy: atspi_only
     menu_target: upload_files_item
     open_method: atspi_menu
     keyboard_shortcut: ctrl+u

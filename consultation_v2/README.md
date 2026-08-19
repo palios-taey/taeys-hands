@@ -25,15 +25,15 @@ do not override it.
 
 | Concern | Current authority | Implementation boundary | Status |
 |---|---|---|---|
-| Manual lifecycle | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Taey performs one action and validates it before choosing the next. | Canonical contract; runtime reconciliation in progress. |
+| Manual lifecycle | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Taey performs one action and validates it before choosing the next. | Canonical implementation; platform production validation is tracked separately. |
 | Consultation inputs | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md) | Exactly one governance bundle, one task bundle, and one brief on-screen prompt. | Canonical contract; the current one-package builder is not conformant and must not be promoted as the manual path. |
-| Tree projection and filtering | [`YAML_SCHEMA.md`](YAML_SCHEMA.md) plus each platform YAML | [`snapshot.py`](snapshot.py) and the platform package must expose browser chrome only for the address bar, exclude the complete chat-history/sidebar block and dynamic non-actionable text, and retain the current document, actionable controls, and opened overlay. | Canonical snapshot exists; the current `taey-presence` manual observer is a parallel reader and is not yet conformant. |
+| Tree projection and filtering | [`YAML_SCHEMA.md`](YAML_SCHEMA.md) plus each platform YAML | [`snapshot.py`](snapshot.py) and the platform package expose browser chrome only for the address bar, exclude the complete chat-history/sidebar block and dynamic non-actionable text, and retain the current document, actionable controls, and opened overlay. | `drive_chat` consumes this canonical snapshot directly; scoped refs are revision-bound and exact-match-only. |
 | Primitive verbs and locking | [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md) | Shared runtime, AT-SPI, input, interaction, clipboard, and display-lock primitives. | Current substrate; the manual adapter must remain thin and carry no platform UI strings. |
 | Platform ownership | Each [`platforms/<platform>/`](platforms/) package | One YAML, one driver, one monitor per ChatGPT, Claude, Gemini, Grok, and Perplexity. | Package layout exists; manual action coverage and current live YAML equality still require platform-by-platform control. |
 | Completion | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md) and platform monitors | Stop appearance proves send; two consecutive fresh Stop absences, separated by the YAML-owned interval and with no mapped exception state, prove completion. | Passive monitors exist. A sent production validation must exercise this real lifecycle. |
 | Extraction | [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) and [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Scroll fully to bottom, activate the exact mapped Copy element, then harvest platform-specific response attachments. | Engine extraction exists; the manual path delegates response extraction but does not yet create the complete session receipt. |
 | Ingestion | [`ingest.py`](ingest.py) | Persist prompt, response, input/output attachments, final URL, and receipts; `auto_ingest` optionally submits the session to ISMA. | Implemented for the engine path, not wired into the current manual path. Do not claim manual ingestion until a production receipt proves it. |
-| Runtime truth | [`../docs/MANUAL_CONSULT_RUNTIME_MAP_2026-08-18.md`](../docs/MANUAL_CONSULT_RUNTIME_MAP_2026-08-18.md) | Commit-pinned call graph, service routing, current divergences, and last-known-good evidence. | Read-only production audit merged 2026-08-18. |
+| Repository baseline | [`../DOCUMENTATION_MAP.md`](../DOCUMENTATION_MAP.md) | Current authority, reference, generated, and excluded surfaces. | Current; dated runtime claims require fresh production receipts. |
 
 ## Production validation rule
 
@@ -66,32 +66,16 @@ canonical snapshot.
 | [`../docs/UI_INTERACTION_AUTHORITY.md`](../docs/UI_INTERACTION_AUTHORITY.md) | Canonical-current | Supervised single-action grammar. |
 | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md), [`YAML_SCHEMA.md`](YAML_SCHEMA.md), [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md), [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) | Canonical-current | Consultation inputs, declarative UI mapping, and shared-substrate contracts. |
 | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md), [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Operating-current | Passive monitoring and platform-specific extraction behavior. |
-| [`../100_TIMES.md`](../100_TIMES.md) | Operating-current | Short tree-only manual checklist reconciled to the authorities above. The pre-reconciliation file is preserved under `archive/consultation_v2/`. |
+| [`../100_TIMES.md`](../100_TIMES.md) | Operating-current | Short tree-only manual checklist reconciled to the authorities above. |
 | [`DRIVER_CONTRACT.md`](DRIVER_CONTRACT.md), [`../FLOW_CONSULTATION_ENGINE.md`](../FLOW_CONSULTATION_ENGINE.md) | Engine reference, not manual authority | Describe the Layer-3 autonomous engine, which is not run autonomously. |
-| [`CONSULT_ACTION_TOOL_SCHEMA.md`](CONSULT_ACTION_TOOL_SCHEMA.md), [`INVESTIGATION_why_runtime_diverges_from_mapping.md`](INVESTIGATION_why_runtime_diverges_from_mapping.md), `validation/`, `scans/`, and `research/` | Historical evidence or draft | Evidence and design context only; not operating procedures. |
-| `../audit_logs/`, `../consultations/`, `../docs/handoffs/`, and `../recaps/` | Historical evidence | Dated records only. They do not override the authority order or describe current runtime unless a current authority explicitly adopts them. |
-| [`TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md`](../archive/consultation_v2/TAEY_CONSULT_ORCHESTRATION_RUNBOOK.md), [`SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md`](../archive/consultation_v2/SEAT_NEWTHREAD_SELECTMODE_DEFECTS.md), [`SEAT_SELFCONTAIN_MAPPING.md`](../archive/consultation_v2/SEAT_SELFCONTAIN_MAPPING.md) | Archived | Historical evidence only. Do not operate from or retrieve them as current guidance. |
-
-The archived files moved only after the committed inbound references were enumerated and updated. Git history
-preserves their original locations and bytes.
+| Historical audits, transcripts, receipts, and superseded plans | Excluded | Preserved in Git history and release recovery bundles; absent from the current training-visible tree. |
 
 ## Known open reconciliation work
 
-- Replace the parallel manual tree reader with the canonical YAML-classified snapshot.
-- Enforce the exact filtered projection for base, menus, submenus, and dialogs.
-- Implement and wire the two mandatory attachment bundles without partial constitutional context.
-- Expose only YAML-declared manual actions through one thin adapter and validate each action with a new tree.
-- Wire the complete manual extraction/session receipt into `ingest.py` and prove ISMA ingestion.
-- Prove ChatGPT first, then Claude Chat, Gemini, Grok, and Perplexity with real production audits and the
-  no-repeat first-error rule.
+- Complete substantive, monitor-backed production transactions on every platform from the current YAML maps.
+- Keep native chooser interaction recoverable as explicit primitives with a fresh browser-tree attachment proof.
+- Wire the complete manual extraction/session receipt into `ingest.py` only after the manual path is proven.
 
 The autonomous engine remains out of the production control path while these items are open. Later automation
-must compile to this same YAML-owned manual engine; it may not create a parallel observer, locator grammar, or
-action path.
-
-## Current architecture review
-
-[`audits/2026-08-18/COMMON_ARCHITECTURE_AUDIT_DOSSIER.md`](audits/2026-08-18/COMMON_ARCHITECTURE_AUDIT_DOSSIER.md)
-is the destination-neutral task source for the five Family reviews. It carries the public source manifest,
-verified divergences, proposed manual state machine, and review questions. It is a review packet, not an
-operating authority or evidence that the open runtime work is complete.
+must compile to this same YAML-owned path; it may not create a parallel observer, locator grammar, or action
+path.

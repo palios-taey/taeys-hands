@@ -143,30 +143,16 @@ tuple[ExtractionStep, ...], validate_markers: tuple[str, ...] }`.
 `ExtractionStep` is a frozen dataclass `{ action, element, select, validation
 }`. These mirror, in code, exactly the grammar this schema validates.
 
-## 5. Downstream interaction — NOTE for p4 extractor tasks
+## 5. Runtime ownership
 
-Drivers today read `workflow.extract.primary_key` (+ `workflow.extra_extract.*`)
-and hardcode the scroll/copy/validate sequence inside each
-`extract_primary`/`extract_secondary`. Concretely (per
-`consultations/inventory/p1_extraction_inventory.md`):
+Each platform YAML's `extraction:` section is the executable authority for that
+platform's supported output types. The current manual assistant-text path uses a
+fresh canonical snapshot, scrolls to the absolute bottom, activates the last
+exact mapped Copy control, and records the clipboard/file receipt. Platform-
+specific report, artifact, attachment, and download flows must be declared in
+that platform's YAML before they can be claimed as supported.
 
-- ChatGPT `consultation_v2/drivers/chatgpt.py` extract_primary: scroll-anchor
-  on `attach_trigger`, `copy_button` last-by-y. `assistant_text` only (Canvas/DR
-  not wired — NOT listed in its `extraction:` section).
-- Claude `consultation_v2/drivers/claude.py` extract_primary: raw-scan for
-  visible `Copy`, lowest-by-y. `assistant_text` only (artifacts not wired).
-- Gemini `consultation_v2/drivers/gemini.py`: normal = `copy_button`; Deep
-  Research = `share_export` -> `copy_content_item` popover. Both listed.
-- Grok `consultation_v2/drivers/grok.py`: `copy_button` to-bottom. Image
-  download is YAML-documented under `imagine:` but NOT executed by V2 —
-  `downloaded_file` is NOT listed (cannot-lie).
-- Perplexity `consultation_v2/drivers/perplexity.py`: `copy_contents_button`
-  first (full report), else `copy_button`. `assistant_text` + `research_report`.
-
-These p4 extractor tasks should refactor each driver's `extract_primary` to read
-`get_extraction(platform, request.output_type or 'assistant_text')` and execute
-the declared steps through shared runtime primitives, then retire
-`workflow.extract` / `workflow.extra_extract`. THIS schema task does NOT change
-any driver and does NOT remove the legacy `workflow.extract*` keys — doing so
-without the driver refactor would break extraction. The legacy keys and the new
-`extraction:` section coexist until the extractor tasks land.
+Legacy `workflow.extract` fields may remain only while current code still
+consumes them. They cannot override `extraction:`, authorize a fallback, or
+serve as a second source of truth. A migration must make the typed YAML workflow
+the reader used by the driver and remove the replaced reader in the same change.
