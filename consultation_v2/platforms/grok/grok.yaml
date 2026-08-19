@@ -107,23 +107,23 @@ tree:
     stop_button:
       name: Stop model response
       role: push button
-    # --- model/mode dropdown items (menu_snapshot after clicking Model select) ---
+    # --- model/mode dropdown items (live app-root after clicking Model select) ---
     model_auto:
       name: "Auto Chooses Fast or Expert"
       role: menu item
-      scope: menu_snapshot
+      scope: app_root_snapshot
     model_fast:
       name: "Fast Quick responses · Grok 4.5"
       role: menu item
-      scope: menu_snapshot
+      scope: app_root_snapshot
     model_expert:
       name: "Expert Thinks hard · Grok 4.5"
       role: menu item
-      scope: menu_snapshot
+      scope: app_root_snapshot
     model_heavy:
       name: "Heavy Team of Experts · Grok 4.5"
       role: menu item
-      scope: menu_snapshot
+      scope: app_root_snapshot
     # --- attach dropdown item (menu_snapshot after clicking Attach) ---
     upload_files_item:
       name: "Upload a file"
@@ -198,7 +198,7 @@ workflow:
         resettable_on_followup: true
         operate:
           trigger: model_selector
-          scope: menu_snapshot
+          scope: app_root_snapshot
         options:
           auto:
             element: model_auto
