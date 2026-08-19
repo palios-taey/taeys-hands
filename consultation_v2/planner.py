@@ -90,6 +90,68 @@ def selection_path_operation(platform: str, element_key: str) -> str | None:
     return next(iter(declarations))
 
 
+def selection_trigger_operation(
+    platform: str,
+    element_key: str,
+    states: Iterable[str],
+) -> dict[str, Any] | None:
+    declarations: dict[tuple[str, str], dict[str, Any]] = {}
+    normalized_states = {
+        str(state).strip().lower().replace('_', ' ') for state in states
+    }
+    for menu_key, menu in selection_menus(platform).items():
+        if not isinstance(menu, dict):
+            continue
+        operate = menu.get('operate') or {}
+        if not isinstance(operate, dict) or operate.get('trigger') != element_key:
+            continue
+        method = operate.get('open_method')
+        if method is None:
+            continue
+        if method == 'click':
+            declaration = {
+                'method': method,
+                'primitives': ['click'],
+                'allowed_now': ['click'],
+                'forbidden': ['activate', 'focus', 'hover'],
+            }
+            signature = (method, '')
+        elif method == 'focus_and_key_open':
+            open_key = operate.get('open_key')
+            if not isinstance(open_key, str) or not open_key:
+                raise SelectionPlanError((
+                    f'{platform} selection menu {menu_key!r} requires an exact '
+                    'open_key for focus_and_key_open',
+                ))
+            if 'expanded' in normalized_states:
+                allowed_now: list[str] = []
+            elif 'focused' in normalized_states:
+                allowed_now = [f'key:{open_key}']
+            else:
+                allowed_now = ['focus']
+            declaration = {
+                'method': method,
+                'primitives': ['focus', f'key:{open_key}'],
+                'allowed_now': allowed_now,
+                'forbidden': ['activate', 'click', 'hover'],
+            }
+            signature = (method, open_key)
+        else:
+            raise SelectionPlanError((
+                f'{platform} selection menu {menu_key!r} declares unsupported '
+                f'open_method {method!r}',
+            ))
+        declarations[signature] = declaration
+    if not declarations:
+        return None
+    if len(declarations) != 1:
+        raise SelectionPlanError((
+            f'{platform} element {element_key!r} has conflicting menu-open '
+            f'declarations: {sorted(declarations)}',
+        ))
+    return next(iter(declarations.values()))
+
+
 def normalize_choice(raw: Any) -> Choice:
     if isinstance(raw, Choice):
         return raw
