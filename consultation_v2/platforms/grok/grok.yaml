@@ -64,6 +64,7 @@ tree:
     model_selector:
       name: Model select
       role: push button
+      trigger_type: click
     new_chat:
       name: New Chat
       role: link
