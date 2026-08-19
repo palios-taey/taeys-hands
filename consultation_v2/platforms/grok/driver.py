@@ -3307,6 +3307,8 @@ class GrokConsultationDriver(_GrokInlineBase):
     #          ONCE each; no stale-cache, no re-click recovery)
     # ------------------------------------------------------------------
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        from consultation_v2.interact import atspi_focus
+
         if not request.attachments:
             result.add_step('attach', True, 'No Grok attachments requested')
             return True
@@ -3320,7 +3322,7 @@ class GrokConsultationDriver(_GrokInlineBase):
             self.runtime.close_stale_dialogs()
 
             # Resolve the Attach push button FRESH from a current snapshot
-            # (no stale/cached element) and click it ONCE.
+            # (no stale/cached element) and apply its YAML operation ONCE.
             # Settle + rescan FIRST (DRIVER_CONTRACT Section E): the persistent Attach
             # trigger can be absent from a *premature* snapshot - a scan fired
             # before the page finished rendering (right after navigate). Poll for
@@ -3337,14 +3339,83 @@ class GrokConsultationDriver(_GrokInlineBase):
                 result.add_step('attach', False, f'Grok attach trigger missing for {abs_path}',
                                 snapshot=snap.serializable())
                 return False
-            if not self.runtime.click(trigger):
-                result.add_step('attach', False, f'Grok attach trigger click failed for {abs_path}',
-                                snapshot=snap.serializable())
+            open_method = str(attachment.get('open_method') or '').strip().lower()
+            open_key = str(attachment.get('open_key') or '').strip()
+            if open_method != 'focus_and_key_open' or not open_key:
+                result.add_step(
+                    'attach',
+                    False,
+                    'Grok attachment YAML does not declare an exact focus+key operation',
+                    open_method=open_method,
+                    open_key=open_key,
+                    snapshot=snap.serializable(),
+                )
+                return False
+            focus_evidence = {
+                'trigger': {
+                    'key': trigger.key,
+                    'name': trigger.name,
+                    'role': trigger.role,
+                    'states': list(trigger.states or []),
+                },
+                'focused': atspi_focus({
+                    'atspi_obj': trigger.atspi_obj,
+                    'name': trigger.name,
+                    'role': trigger.role,
+                }),
+            }
+            if not focus_evidence['focused']:
+                result.add_step(
+                    'attach',
+                    False,
+                    f'Grok attach trigger focus failed for {abs_path}',
+                    focus_evidence=focus_evidence,
+                    snapshot=snap.serializable(),
+                )
+                return False
+
+            def _focused_trigger():
+                focus_snapshot = self.runtime.snapshot()
+                focused_trigger = self.find_first(focus_snapshot, trigger_key)
+                states = self._state_set(focused_trigger)
+                if focused_trigger is not None and 'focused' in states:
+                    return focus_snapshot, focused_trigger
+                return None
+
+            focused_state = self.runtime.wait_until(
+                _focused_trigger,
+                timeout=3.0,
+                interval=0.2,
+            )
+            if focused_state is None:
+                result.add_step(
+                    'attach',
+                    False,
+                    f'Grok attach trigger focus was not present in the fresh tree for {abs_path}',
+                    focus_evidence=focus_evidence,
+                )
+                return False
+            focused_snapshot, focused_trigger = focused_state
+            focus_evidence['fresh_trigger'] = {
+                'key': focused_trigger.key,
+                'name': focused_trigger.name,
+                'role': focused_trigger.role,
+                'states': list(focused_trigger.states or []),
+            }
+            if not self.runtime.press(open_key):
+                result.add_step(
+                    'attach',
+                    False,
+                    f'Grok attach trigger open key failed for {abs_path}',
+                    open_key=open_key,
+                    focus_evidence=focus_evidence,
+                    snapshot=focused_snapshot.serializable(),
+                )
                 return False
 
             # ONE bounded readiness wait (DRIVER_CONTRACT Section E) - the attach
             # dropdown's menu items ("Upload a file" etc.) render a beat after the
-            # Attach click, so menu_snapshot() can fire before they exist.
+            # Attach open operation, so menu_snapshot() can fire before they exist.
             # Re-SNAPSHOT here is observation while the portal renders; the Attach
             # trigger is NOT re-clicked.
             menu, upload_item = self.wait_for_key(
