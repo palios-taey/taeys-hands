@@ -32,7 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--capture-root', default=None)
     parser.add_argument('--endpoint', default=None)
     parser.add_argument('--model', default=None)
-    parser.add_argument('--attach', default=None)
+    parser.add_argument(
+        '--attach',
+        action='append',
+        default=None,
+        help='Absolute attachment path; repeat once for a second ordered attachment.',
+    )
     parser.add_argument('--prompt', default=None)
     parser.add_argument(
         '--completion-timeout',
@@ -62,9 +67,9 @@ def _request_id(args: argparse.Namespace, output: Path) -> str:
         'platform': args.platform,
         'display': args.display,
         'output': str(output),
-        'attachment': (
-            str(Path(args.attach).expanduser().resolve())
-            if args.attach is not None else None
+        'attachments': (
+            [str(Path(value).expanduser().resolve()) for value in args.attach]
+            if args.attach is not None else []
         ),
         'prompt_sha256': (
             hashlib.sha256(args.prompt.encode('utf-8')).hexdigest()
@@ -84,6 +89,8 @@ def main() -> int:
     args = build_parser().parse_args()
     if (args.attach is None) != (args.prompt is None):
         raise RuntimeError('--attach and --prompt must be supplied together')
+    if args.attach is not None and len(args.attach) > 2:
+        raise RuntimeError('--attach may be supplied at most twice')
     output = Path(args.output).expanduser().resolve()
     if output.exists():
         raise RuntimeError(f'refusing to overwrite existing output: {output}')
@@ -117,7 +124,7 @@ def main() -> int:
         if args.attach is not None:
             result = consult_with_taey(
                 **common,
-                attachment_path=args.attach,
+                attachment_paths=args.attach,
                 framing_prompt=args.prompt,
                 completion_timeout=args.completion_timeout,
             )
