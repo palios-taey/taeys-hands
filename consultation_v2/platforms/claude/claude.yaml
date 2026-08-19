@@ -402,7 +402,7 @@ tree:
       role: push button
       scope: base.main
     upload_files_item:
-      name: Add files or photos Ctrl+U
+      name: Add files or photos
       role: menu item
       scope: toggle_menu
     take_screenshot:
