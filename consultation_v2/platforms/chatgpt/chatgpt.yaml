@@ -29,6 +29,14 @@ tree:
     - role: landmark
       name: Chat history
       min_child_count: 3
+    - role: list
+      attributes:
+        tag: ul
+      ancestor:
+        role: section
+        attributes:
+          id: thread-bottom
+      min_child_count: 1
   exclude:
     names:
       - Skip to content
@@ -62,7 +70,7 @@ tree:
         # actually survive the scope. (Verified live on :2 2026-06-21: these 8
         # present, the 13 sidebar keys pruned despite being in the raw tree.)
         expected:
-          - temporary_chat_on
+          - temporary_chat
           - profile_menu
           - download_apps
           - attach_trigger
@@ -124,12 +132,8 @@ tree:
       name: Close sidebar
       role: push button
       scope: base.sidebar
-    temporary_chat_on:
-      name: Turn on temporary chat
-      role: push button
-      scope: base.header
-    temporary_chat_off:
-      name: Turn off temporary chat
+    temporary_chat:
+      name: Temporary chat
       role: push button
       scope: base.header
     new_chat_shortcut:
