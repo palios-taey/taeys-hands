@@ -64,7 +64,6 @@ tree:
     model_selector:
       name: Model select
       role: push button
-      trigger_type: click
     new_chat:
       name: New Chat
       role: link
@@ -199,6 +198,8 @@ workflow:
         operate:
           trigger: model_selector
           scope: app_root_snapshot
+          open_method: focus_and_key_open
+          open_key: space
         options:
           auto:
             element: model_auto
