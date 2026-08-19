@@ -659,7 +659,20 @@ class TaeyConsultExtractionSeat:
                 raise TaeyConsultExtractionError(
                     'full consult accepts at most two ordered attachments'
                 )
+            if len(raw_attachment_paths) > 1 and self.platform != 'chatgpt':
+                raise TaeyConsultExtractionError(
+                    'two-attachment full consult is mapped only for chatgpt'
+                )
+            attachment_present = self.full_consult_contract[
+                'attachment_present'
+            ]
+            filename_value = (
+                str(attachment_present.get('filename_value') or 'name')
+                if isinstance(attachment_present, dict)
+                else 'name'
+            )
             resolved_paths: list[Path] = []
+            visible_labels: set[str] = set()
             attachment_hashes: list[str] = []
             attachment_contents: list[bytes] = []
             for raw_value in raw_attachment_paths:
@@ -673,10 +686,13 @@ class TaeyConsultExtractionSeat:
                     raise TaeyConsultExtractionError(
                         f'full consult attachment path is duplicated: {resolved}'
                     )
-                if any(path.name == resolved.name for path in resolved_paths):
+                visible_label = (
+                    resolved.stem if filename_value == 'stem' else resolved.name
+                )
+                if visible_label in visible_labels:
                     raise TaeyConsultExtractionError(
-                        'full consult attachment filenames must be unique: '
-                        f'{resolved.name}'
+                        'full consult attachment labels must be unique: '
+                        f'{visible_label}'
                     )
                 if not resolved.is_file():
                     raise TaeyConsultExtractionError(
@@ -693,6 +709,7 @@ class TaeyConsultExtractionSeat:
                         f'full consult attachment is empty: {resolved}'
                     )
                 resolved_paths.append(resolved)
+                visible_labels.add(visible_label)
                 attachment_contents.append(attachment_bytes)
                 attachment_hashes.append(
                     hashlib.sha256(attachment_bytes).hexdigest()
