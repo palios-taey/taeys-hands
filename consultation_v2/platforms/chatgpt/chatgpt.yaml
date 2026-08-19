@@ -471,10 +471,16 @@ workflow:
             element: model_extra_high
           pro:
             element: model_pro
+            active_trigger_names:
+              - Pro
           pro_standard:
             element: model_pro
+            active_trigger_names:
+              - Pro
           pro_extended:
             element: model_pro
+            active_trigger_names:
+              - Pro
           gpt_5_6_sol:
             element: model_gpt_5_6_sol_current
             path:
