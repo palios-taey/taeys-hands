@@ -30,6 +30,62 @@ firefox_chrome:
       role: push button
     - name: ""
       role: status bar
+    - name: Back
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: Forward
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: Reload
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: Bookmark Page…
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: Save Page As…
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: Take Screenshot
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
+    - name: View Page Source
+      role: menu item
+      ancestor_chain:
+        - name: ""
+          role: menu
+        - role: frame
+        - name: Firefox
+          role: application
     - names_any_of:
         - ChatGPT — Mozilla Firefox
         - Claude — Mozilla Firefox

@@ -1,7 +1,7 @@
 platform: gemini
 click_strategy: atspi_only
 urls:
-  fresh: https://gemini.google.com/app
+  fresh: https://gemini.google.com/u/1/app?pageId=none
   verify_navigation: false
 tree:
   prune_subtrees:
@@ -62,8 +62,8 @@ tree:
       names_any_of:
         - Open mode picker, currently Flash
         - Open mode picker, currently Pro
+        - Open mode picker, currently Pro Extended
         - Open mode picker, currently Pro Deep Think
-        - Open mode picker, currently Thinking
       role: push button
       match_strategy: name_agnostic_structural
       structural:
@@ -77,21 +77,9 @@ tree:
     upload_menu:
       name: Upload & tools
       role: push button
-    # "Deep think" + "Guided learning" live behind a "More tools" expander
-    # inside the Upload & tools menu. VERIFIED LIVE 2026-05-22 (Ultra acct):
-    #  - REAL Deep Think requires the "3.1 Pro" model selected first (NOT the
-    #    "3.5 Thinking" model — that is a different feature).
-    #  - Open "Upload & tools" through its exact mapped AT-SPI action.
-    #  - "More tools" is the last mapped item below Create music; hover the
-    #    exact YAML-resolved element and verify the flyout from a fresh tree.
-    #  - Its flyout exposes tool_deep_think /
-    #    tool_guided_learning as menu items; click tool_deep_think there.
-    #  - Verify via tool_deselect_deep_think / the "Deep think" composer chip.
-    #  - Input must report FOCUSED before text entry.
-    more_tools:
-      name: More tools
-      role: push button
-      trigger_type: hover
+    # Gemini's current model picker contains the 3.1 Pro base model followed by
+    # its exact Extended and Deep Think reasoning choices. Deep Research remains
+    # a separate Upload & tools option and requires Pro Extended.
     copy_button:
       name: Copy
       role: push button
@@ -137,26 +125,16 @@ tree:
       name: NotebookLM
       role: menu item
     mode_fast:
-      names_any_of:
-        - "3.5 Flash All-around help"
-        - "Selected 3.5 Flash All-around help"
+      name: "3.7 Flash All-around help New"
       role: menu item
-    mode_thinking:
-      names_any_of:
-        - "3.5 Thinking Solves complex problems"
-        - "Selected 3.5 Thinking Solves complex problems"
-      role: menu item
-    # The model menu prefixes "Selected " onto the ACTIVE model, so a single
-    # exact name can't click Pro FROM Flash (when Flash is active the Pro item
-    # is "3.1 Pro Advanced math and code", NO "Selected"). Gemini also ships
-    # the same labels with "&" in place of "and". names_any_of matches Pro in
-    # either state and UI variant (enumerated-exact, contract-allowed).
     mode_pro:
-      names_any_of:
-        - "3.1 Pro Advanced math and code"
-        - "Selected 3.1 Pro Advanced math and code"
-        - "3.1 Pro Advanced math & code"
-        - "Selected 3.1 Pro Advanced math & code"
+      name: "3.1 Pro Advanced reasoning"
+      role: menu item
+    mode_extended:
+      name: "Extended thinking Complex problem solving"
+      role: menu item
+    mode_deep_think:
+      name: "Deep Think Max parallel reasoning"
       role: menu item
     # BUG 2 FIX: all tool items are check menu item, not menu item
     # BUG 3 FIX: tool_create_image exact AT-SPI name includes "New"
@@ -180,12 +158,6 @@ tree:
     tool_guided_learning:
       name: Guided learning
       role: check menu item
-    tool_deep_think:
-      name: Deep think
-      role: check menu item
-    tool_deselect_deep_think:
-      name: Deselect Deep think
-      role: push button
     tool_deselect_deep_research:
       name: Deselect Deep research
       role: push button
@@ -202,7 +174,7 @@ workflow:
   defaults:
     model: pro
     mode: deep_think
-    tools: []
+    tools: none
   full_consult:
     steps:
       attach_trigger:
@@ -258,33 +230,43 @@ workflow:
             element: mode_pro
             active_trigger_names:
               - Open mode picker, currently Pro
+              - Open mode picker, currently Pro Extended
               - Open mode picker, currently Pro Deep Think
-          thinking:
-            element: mode_thinking
-            active_trigger_names:
-              - Open mode picker, currently Thinking
         default_for_fresh: pro
-        example_rationale: Use Gemini 3.1 Pro as the base model for Deep Research.
+        example_rationale: Use Gemini 3.1 Pro as the base model for Extended, Deep Think, and Deep Research work.
       mode:
         select: single
+        active_recognition: selected_name_prefix
+        must_choose: false
+        resettable_on_followup: true
+        operate:
+          trigger: mode_picker
+          scope: menu_snapshot
+        options:
+          extended:
+            element: mode_extended
+            active_trigger_names:
+              - Open mode picker, currently Pro Extended
+          deep_think:
+            element: mode_deep_think
+            active_trigger_names:
+              - Open mode picker, currently Pro Deep Think
+        default_for_fresh: deep_think
+        example_rationale: Deep Think is the maximum parallel-reasoning option; Extended is required before enabling Deep Research.
+      tools:
+        select: multi
         active_recognition: checked
         must_choose: false
         resettable_on_followup: true
         operate:
           trigger: tools_button
-          scope: snapshot
+          scope: menu_snapshot
         options:
-          deep_think:
-            element: tool_deep_think
-            path:
-              - element: more_tools
-                action: hover
-            active_element: tool_deselect_deep_think
           deep_research:
             element: tool_deep_research
             active_element: tool_deselect_deep_research
-        default_for_fresh: deep_think
-        example_rationale: deep_think and deep_research are TWO SEPARATE, coequal options — not one "deep mode". Deep Think was inactive and is ACTIVE AGAIN (Jesse 2026-08-11); it is Gemini's deep-reasoning mode, so it is the default here (restoring Gemini as a reasoning lane, distinct from Perplexity's Deep Research lane). Deep Research (tool_deep_research) is its own still-fully-available option for web-research consults — select it explicitly via --select mode=deep_research; it is NOT a fallback for Deep Think. Deep Think requires the 3.1 Pro model first, then Upload & tools -> "More tools" flyout -> tool_deep_think (see element_map comments above).
+        default_for_fresh: none
+        example_rationale: Deep Research is a separate Upload & tools capability and is only valid with mode=extended.
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
@@ -344,10 +326,6 @@ validation:
     indicators:
     - name: 3.5 Thinking
       states_include: [checked]
-  deep_think_active:
-    indicators:
-    - name: Deselect Deep think
-      role: push button
   # PRE-SEND indicator that Deep Research is engaged: the composer shows a
   # "Deselect Deep research" toggle button (mirrors "Deselect Deep think").
   # The old "Start research"/"Share & export" buttons only appear on the

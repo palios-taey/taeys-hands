@@ -82,6 +82,7 @@ __all__ = [
     "poison_dead_session",
     "write_run_state",
     "read_run_state",
+    "read_run_states_with_prefix",
     "clear_run_state",
     # monitor registration
     "register_monitor_session",
@@ -379,6 +380,27 @@ def read_run_state(request_id: str) -> Optional[Dict[str, Any]]:
     if not raw:
         return None
     return json.loads(raw)
+
+
+def read_run_states_with_prefix(request_id_prefix: str) -> Dict[str, Dict[str, Any]]:
+    """Return all durable run-state records whose opaque ids share a prefix."""
+    client = get_client()
+    namespace_prefix = _run_state_key("")
+    requested_key_prefix = _run_state_key(request_id_prefix)
+    records: Dict[str, Dict[str, Any]] = {}
+    for raw_key in client.scan_iter(match=f"{namespace_prefix}*"):
+        key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else str(raw_key)
+        if not key.startswith(requested_key_prefix):
+            continue
+        raw = client.get(key)
+        if not raw:
+            continue
+        record = json.loads(raw)
+        if not isinstance(record, dict):
+            raise ValueError(f"run-state record {key!r} is not a JSON object")
+        request_id = key[len(namespace_prefix):]
+        records[request_id] = record
+    return dict(sorted(records.items()))
 
 
 def clear_run_state(request_id: str, *, force: bool = False) -> bool:

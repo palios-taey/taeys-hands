@@ -87,6 +87,20 @@ def _load_firefox_chrome_filter() -> Dict[str, Any]:
         if not isinstance(spec, dict):
             raise ValueError(f'{_FIREFOX_CHROME_YAML.name} exact_elements entries must be mappings')
         _reject_forbidden_matcher_keys(spec)
+        ancestor_chain = spec.get('ancestor_chain')
+        if ancestor_chain is not None:
+            if not isinstance(ancestor_chain, list) or not ancestor_chain:
+                raise ValueError(
+                    f'{_FIREFOX_CHROME_YAML.name} exact_elements ancestor_chain '
+                    'must be a non-empty list'
+                )
+            for ancestor_spec in ancestor_chain:
+                if not isinstance(ancestor_spec, dict) or not ancestor_spec:
+                    raise ValueError(
+                        f'{_FIREFOX_CHROME_YAML.name} exact_elements ancestor_chain '
+                        'entries must be non-empty mappings'
+                    )
+                _reject_forbidden_matcher_keys(ancestor_spec)
     return chrome
 
 
@@ -184,15 +198,29 @@ def _obj_matches_spec(obj: Any, spec: Dict[str, Any]) -> bool:
 
 
 def _matches_allowed_chrome_spec(element: Dict[str, Any], spec: Dict[str, Any]) -> bool:
-    exact_spec = {key: value for key, value in spec.items() if key != 'ancestor'}
+    exact_spec = {
+        key: value
+        for key, value in spec.items()
+        if key not in {'ancestor', 'ancestor_chain'}
+    }
     if not matches_spec(element, exact_spec):
         return False
+    ancestors = _atspi_ancestor_objects(element.get('atspi_obj'))
+    ancestor_chain = spec.get('ancestor_chain')
+    if isinstance(ancestor_chain, list):
+        if len(ancestors) < len(ancestor_chain):
+            return False
+        if not all(
+            _obj_matches_spec(ancestor_obj, ancestor_spec)
+            for ancestor_obj, ancestor_spec in zip(ancestors, ancestor_chain)
+        ):
+            return False
     ancestor = spec.get('ancestor')
     if not isinstance(ancestor, dict):
         return True
     return any(
         _obj_matches_spec(obj, ancestor)
-        for obj in _atspi_ancestor_objects(element.get('atspi_obj'))
+        for obj in ancestors
     )
 
 
@@ -336,7 +364,7 @@ def _is_excluded(
 ) -> bool:
     chrome = chrome_cfg or {}
     for spec in chrome.get('exact_elements') or []:
-        if matches_spec(element, spec):
+        if _matches_allowed_chrome_spec(element, spec):
             return True
 
     exclude = dict(tree_cfg.get('exclude', {}))
@@ -544,17 +572,20 @@ def _classify_elements(
 def _menu_snapshot_filtered(
     elements: Iterable[Dict[str, Any]],
     tree_cfg: Dict[str, Any],
+    chrome_cfg: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
     menu_exclude = tree_cfg.get('menu_snapshot_exclude') or {}
     names = menu_exclude.get('names') or []
     if isinstance(names, str):
         names = [names]
     excluded_names = {str(name).strip() for name in names if str(name).strip()}
-    if not excluded_names:
-        return list(elements)
     return [
         element for element in elements
         if (element.get('name') or '').strip() not in excluded_names
+        and not any(
+            _matches_allowed_chrome_spec(element, spec)
+            for spec in chrome_cfg.get('exact_elements') or []
+        )
     ]
 
 
@@ -940,7 +971,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             if (item.get('name') or '').strip()
             and (item.get('role') or '').strip().lower() in role_filter
         ]
-        menu = _menu_snapshot_filtered(menu, tree_cfg)
+        menu = _menu_snapshot_filtered(menu, tree_cfg, chrome_cfg)
         menu = _dedupe_elements(menu)
         menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
         snapshot = _classify_elements(platform, menu, menu_items=menu, chrome_cfg=chrome_cfg)
@@ -950,6 +981,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     menu = _menu_snapshot_filtered(
         find_menu_items(firefox, doc, allowed_roles=menu_snapshot_roles or None),
         tree_cfg,
+        chrome_cfg,
     )
 
     # ALWAYS supplement with find_elements(firefox) — find_menu_items may return
@@ -960,7 +992,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
     elements = find_elements(firefox, max_depth=menu_snapshot_max_depth)
     _EXTRA_ROLES = menu_snapshot_roles or (_MENU_ROLES | {'entry', 'push button', 'toggle button'})
     extra = [
-        e for e in _menu_snapshot_filtered(elements, tree_cfg)
+        e for e in _menu_snapshot_filtered(elements, tree_cfg, chrome_cfg)
         if (e.get('role') or '').strip().lower() in _EXTRA_ROLES
         and (e.get('name') or '').strip()
     ]
@@ -973,7 +1005,7 @@ def build_menu_snapshot(platform: str) -> Tuple[Any, Any, Snapshot]:
             seen.add(key)
 
     menu.sort(key=lambda item: (item.get('y') or 0, item.get('x') or 0))
-    snapshot = _classify_elements(platform, menu, menu_items=menu)
+    snapshot = _classify_elements(platform, menu, menu_items=menu, chrome_cfg=chrome_cfg)
     snapshot.url = atspi.get_document_url(doc) if doc is not None else None
     return firefox, doc, snapshot
 
