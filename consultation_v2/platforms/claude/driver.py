@@ -3613,22 +3613,14 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         return any(current.startswith(target + sep) for sep in ('?', '#', '/'))
 
     def _navigation_snapshot_clean(self, snapshot: Snapshot) -> bool:
-        chrome_names = {
-            'search with google or enter address',
-            'redirecting',
-            'wikipedia',
-            'youtube',
-            'reddit',
-        }
-        for element in self._snapshot_elements(snapshot):
-            name = ' '.join((element.name or '').strip().lower().split())
-            if not name:
-                continue
-            if name in chrome_names:
-                return False
-            if name.endswith('— wikipedia.org') or name.endswith('— youtube.com') or name.endswith('— reddit.com'):
-                return False
-        return True
+        required_controls = ('input', 'model_selector', 'toggle_menu')
+        return bool(
+            snapshot.raw_count > 0
+            and all(
+                len(snapshot.mapped.get(key) or []) == 1
+                for key in required_controls
+            )
+        )
 
     def _disable_research_mode_before_attach(self, result: ConsultationResult) -> bool:
         snapshot = self.runtime.snapshot()
