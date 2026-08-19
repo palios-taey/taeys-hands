@@ -60,6 +60,8 @@ tree:
       - editable
     mode_picker:
       names_any_of:
+        - Open mode picker, currently Flash
+        - Open mode picker, currently Pro
         - Open mode picker, currently Pro Extended
         - Open mode picker, currently Pro Deep Think
       role: push button
@@ -227,6 +229,7 @@ workflow:
           pro:
             element: mode_pro
             active_trigger_names:
+              - Open mode picker, currently Pro
               - Open mode picker, currently Pro Extended
               - Open mode picker, currently Pro Deep Think
         default_for_fresh: pro
