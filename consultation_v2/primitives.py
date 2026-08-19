@@ -321,6 +321,7 @@ def poison_dead_session(
     reason: str,
     notification_evidence: Dict[str, Any],
     needs_attention: bool,
+    state_fields: Optional[Dict[str, Any]] = None,
     ttl: int = 7200,
 ) -> bool:
     """Persist a terminal poison record after notification/parking.
@@ -333,6 +334,7 @@ def poison_dead_session(
     return write_run_state(
         request_id,
         {
+            **dict(state_fields or {}),
             "status": RUN_STATE_DEAD_SESSION,
             "dead_session": True,
             "dead_session_reason": reason,

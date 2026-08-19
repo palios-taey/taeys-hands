@@ -26,6 +26,12 @@ from consultation_v2.planner import (
     has_selection_menus,
     selection_plan_record,
 )
+from consultation_v2.run_state_identity import (
+    assert_request_run_state_available,
+    durable_run_id,
+    durable_state_fields,
+    monitor_id as durable_monitor_id,
+)
 from consultation_v2.types import ConsultationRequest, ConsultationResult
 from consultation_v2.platforms.chatgpt.driver import ChatGPTConsultationDriver
 from consultation_v2.platforms.claude.driver import ClaudeConsultationDriver
@@ -67,7 +73,6 @@ def _prepare_platform_identity_request(
 def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if request.platform not in _REGISTRY:
         raise ValueError(f'Unsupported platform: {request.platform}')
-    primitives.assert_session_not_dead(request.request_id())
 
     external_store_enabled = storage_policy.external_store_enabled(request)
     selection_record = []
@@ -84,6 +89,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             )
             return result
         selection_record = selection_plan_record(planned_selections)
+    assert_request_run_state_available(request)
 
     # --- Phase 0: Display readiness gate (all chat platforms; validation-only) ---
     # Before ANY interaction, verify the production display is readable and in
@@ -180,21 +186,22 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 attachments=package_paths,
                 caller_attachment_provenance=list(package.caller_provenance),
             )
-    primitives.assert_session_not_dead(request.request_id())
+    assert_request_run_state_available(request)
     if request.caller_attachment_provenance:
         try:
-            # Key by the STABLE request_id (FLOW §8), NOT the consolidated-package
-            # path: the package path is a per-run timestamped temp file, so keying
+            # Key by the mode-scoped durable run identity, not the consolidated-
+            # package path. That path is a per-run timestamped temp file, so keying
             # run-state on it would mint a fresh record every re-run and defeat the
             # duplicate-send guard. The driver's send/monitor checkpoints write to
             # this same key, so the attachment hashes merge into the one durable
             # record the resume logic reads.
             primitives.write_run_state(
-                request_id=request.request_id(),
+                request_id=durable_run_id(request),
                 state={
                     'platform': request.platform,
                     'prompt_hash': request.prompt_hash(),
                     'session_target': request.session_url or 'new',
+                    **durable_state_fields(request),
                     'identity_mode': identity_mode,
                     'attachment_hashes': [
                         prov.serializable() for prov in request.caller_attachment_provenance
@@ -279,11 +286,12 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     if result.ok and result.response_text:
         try:
             primitives.write_run_state(
-                request_id=request.request_id(),
+                request_id=durable_run_id(request),
                 state={
                     'status': 'extraction_done',
                     'platform': request.platform,
                     'prompt_hash': request.prompt_hash(),
+                    **durable_state_fields(request),
                     'url': result.session_url_after or '',
                     'response_chars': len(result.response_text),
                 },
@@ -488,7 +496,7 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
     # caller-level retry wrappers cannot re-drive the terminal session. Only the
     # monitor registration is removed here.
     if delivered and notification_delivered:
-        monitor_id = f'{request.platform}:{request.request_id()}'
+        monitor_id = durable_monitor_id(request)
         try:
             primitives.deregister_monitor_session(monitor_id)
         except Exception as exc:
@@ -582,7 +590,7 @@ def _write_notification_evidence(
 ) -> None:
     try:
         primitives.poison_dead_session(
-            request_id=request.request_id(),
+            request_id=durable_run_id(request),
             reason=reason,
             notification_evidence={
                 'delivered': bool(delivery),
@@ -597,6 +605,7 @@ def _write_notification_evidence(
                 'consumption_verification': 'async_stuck_inbox_watchdog',
             },
             needs_attention=needs_attention,
+            state_fields=durable_state_fields(request),
         )
     except Exception as exc:
         logger.error("Run-state notification evidence checkpoint failed: %s", exc)
@@ -626,10 +635,11 @@ def _park_notification_failure(
         notification_evidence['prior_status'] = 'extraction_done'
     try:
         primitives.poison_dead_session(
-            request_id=request.request_id(),
+            request_id=durable_run_id(request),
             reason=reason,
             notification_evidence=notification_evidence,
             needs_attention=True,
+            state_fields=durable_state_fields(request),
         )
     except Exception as exc:
         logger.error("Run-state notification failure park failed: %s", exc)
