@@ -84,10 +84,6 @@ def selection_fingerprint(request: ConsultationRequest) -> str:
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:32]
 
 
-def _legacy_mode_run_id(request: ConsultationRequest) -> str:
-    return f'{request.request_id()}:mode:{resolved_mode(request)}'
-
-
 def durable_run_id(request: ConsultationRequest) -> str:
     return f'{request.request_id()}:selection:{selection_fingerprint(request)}'
 
@@ -117,10 +113,19 @@ def read_durable_run_state(
     scoped = primitives.read_run_state(scoped_id)
     if scoped is not None:
         return scoped
-    legacy_candidates = (
-        ('mode-scoped', _legacy_mode_run_id(request)),
-        ('unscoped', request.request_id()),
+    legacy_mode_records = primitives.read_run_states_with_prefix(
+        f'{request.request_id()}:mode:'
     )
+    if legacy_mode_records:
+        legacy_id = next(iter(legacy_mode_records))
+        raise LegacyUnscopedRunState(
+            request_id=legacy_id,
+            durable_run_id=scoped_id,
+            mode=resolved_mode(request),
+            record=legacy_mode_records[legacy_id],
+            legacy_scope='mode-scoped',
+        )
+    legacy_candidates = (('unscoped', request.request_id()),)
     for legacy_scope, legacy_id in legacy_candidates:
         legacy = primitives.read_run_state(legacy_id)
         if legacy is None:

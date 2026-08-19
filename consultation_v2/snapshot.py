@@ -87,6 +87,20 @@ def _load_firefox_chrome_filter() -> Dict[str, Any]:
         if not isinstance(spec, dict):
             raise ValueError(f'{_FIREFOX_CHROME_YAML.name} exact_elements entries must be mappings')
         _reject_forbidden_matcher_keys(spec)
+        ancestor_chain = spec.get('ancestor_chain')
+        if ancestor_chain is not None:
+            if not isinstance(ancestor_chain, list) or not ancestor_chain:
+                raise ValueError(
+                    f'{_FIREFOX_CHROME_YAML.name} exact_elements ancestor_chain '
+                    'must be a non-empty list'
+                )
+            for ancestor_spec in ancestor_chain:
+                if not isinstance(ancestor_spec, dict) or not ancestor_spec:
+                    raise ValueError(
+                        f'{_FIREFOX_CHROME_YAML.name} exact_elements ancestor_chain '
+                        'entries must be non-empty mappings'
+                    )
+                _reject_forbidden_matcher_keys(ancestor_spec)
     return chrome
 
 
@@ -184,15 +198,29 @@ def _obj_matches_spec(obj: Any, spec: Dict[str, Any]) -> bool:
 
 
 def _matches_allowed_chrome_spec(element: Dict[str, Any], spec: Dict[str, Any]) -> bool:
-    exact_spec = {key: value for key, value in spec.items() if key != 'ancestor'}
+    exact_spec = {
+        key: value
+        for key, value in spec.items()
+        if key not in {'ancestor', 'ancestor_chain'}
+    }
     if not matches_spec(element, exact_spec):
         return False
+    ancestors = _atspi_ancestor_objects(element.get('atspi_obj'))
+    ancestor_chain = spec.get('ancestor_chain')
+    if isinstance(ancestor_chain, list):
+        if len(ancestors) < len(ancestor_chain):
+            return False
+        if not all(
+            _obj_matches_spec(ancestor_obj, ancestor_spec)
+            for ancestor_obj, ancestor_spec in zip(ancestors, ancestor_chain)
+        ):
+            return False
     ancestor = spec.get('ancestor')
     if not isinstance(ancestor, dict):
         return True
     return any(
         _obj_matches_spec(obj, ancestor)
-        for obj in _atspi_ancestor_objects(element.get('atspi_obj'))
+        for obj in ancestors
     )
 
 
@@ -336,7 +364,7 @@ def _is_excluded(
 ) -> bool:
     chrome = chrome_cfg or {}
     for spec in chrome.get('exact_elements') or []:
-        if matches_spec(element, spec):
+        if _matches_allowed_chrome_spec(element, spec):
             return True
 
     exclude = dict(tree_cfg.get('exclude', {}))
@@ -555,7 +583,7 @@ def _menu_snapshot_filtered(
         element for element in elements
         if (element.get('name') or '').strip() not in excluded_names
         and not any(
-            matches_spec(element, spec)
+            _matches_allowed_chrome_spec(element, spec)
             for spec in chrome_cfg.get('exact_elements') or []
         )
     ]

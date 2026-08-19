@@ -2888,6 +2888,8 @@ class _GeminiInlineBase:
             result = self.result(request)
             if not self._gate_selection_plan(request, result):
                 return result
+            if not self._selection_profile_conforms(request, result):
+                return result
             assert_request_run_state_available(request)
             with self._display_dispatch_lock(request) as owns_display:
                 if not owns_display:
@@ -2999,8 +3001,6 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             if not self.wait_for_page_ready_after_navigation(result):
                 return False
         if not self.apply_selection_plan(request, result):
-            return False
-        if not self._selection_profile_conforms(request, result):
             return False
         if not self.attach_files(request, result):
             return False
@@ -3197,14 +3197,23 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         model = str(self._resolved_selection_value(request, 'model', '') or '').strip().lower()
         mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
         deep_research = self._resolved_mode_is_deep_research(request)
-        valid = not deep_research or (model == 'pro' and mode == 'extended')
+        pro_mode = mode in {'extended', 'deep_think'}
+        valid = (not pro_mode or model == 'pro') and (
+            not deep_research or (model == 'pro' and mode == 'extended')
+        )
+        if pro_mode and model != 'pro':
+            failure = f'Gemini mode={mode} requires model=pro'
+        elif deep_research:
+            failure = 'Gemini Deep Research requires model=pro and mode=extended'
+        else:
+            failure = ''
         result.add_step(
             'selection_profile',
             valid,
             (
                 'Gemini selection profile satisfies model/mode/tool compatibility'
                 if valid
-                else 'Gemini Deep Research requires model=pro and mode=extended'
+                else failure
             ),
             model=model,
             mode=mode,
