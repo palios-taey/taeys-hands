@@ -57,8 +57,8 @@ def _attachment_target_rule() -> tuple[str, str]:
     if not isinstance(target_key, str) or not target_key:
         raise ValueError('chatgpt attachment menu_target must be exact')
     target_action = attachment.get('menu_action')
-    if target_action != 'click':
-        raise ValueError('chatgpt attachment menu_action must be click')
+    if target_action != 'key:ctrl+u':
+        raise ValueError('chatgpt attachment menu_action must be key:ctrl+u')
     return target_key, target_action
 
 
