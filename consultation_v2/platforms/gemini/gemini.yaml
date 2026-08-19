@@ -62,6 +62,7 @@ tree:
       names_any_of:
         - Open mode picker, currently Flash
         - Open mode picker, currently Pro
+        - Open mode picker, currently Pro Deep Think
         - Open mode picker, currently Thinking
       role: push button
       match_strategy: name_agnostic_structural
@@ -259,6 +260,7 @@ workflow:
             element: mode_pro
             active_trigger_names:
               - Open mode picker, currently Pro
+              - Open mode picker, currently Pro Deep Think
           thinking:
             element: mode_thinking
             active_trigger_names:
