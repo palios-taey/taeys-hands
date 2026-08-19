@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from consultation_v2.types import Choice, ConsultationRequest
-from consultation_v2.yaml_contract import load_platform_yaml
+from consultation_v2.yaml_contract import MENU_PATH_ACTIONS, load_platform_yaml
 
 
 PLACEHOLDER_RATIONALES = frozenset({
@@ -43,6 +43,51 @@ def has_selection_menus(platform: str) -> bool:
     selection = ((cfg.get('workflow') or {}).get('selection') or {})
     menus = selection.get('menus')
     return isinstance(menus, dict) and bool(menus)
+
+
+def selection_path_operation(platform: str, element_key: str) -> str | None:
+    cfg = load_platform_yaml(platform)
+    element_map = ((cfg.get('tree') or {}).get('element_map') or {})
+    declarations: set[str] = set()
+
+    element_spec = element_map.get(element_key)
+    if isinstance(element_spec, dict) and element_spec.get('trigger_type') is not None:
+        trigger_type = element_spec.get('trigger_type')
+        if trigger_type not in MENU_PATH_ACTIONS:
+            raise SelectionPlanError((
+                f'{platform} element {element_key!r} declares unsupported '
+                f'trigger_type {trigger_type!r}',
+            ))
+        declarations.add(trigger_type)
+
+    for menu in selection_menus(platform).values():
+        if not isinstance(menu, dict):
+            continue
+        options = menu.get('options') or {}
+        if not isinstance(options, dict):
+            continue
+        for option in options.values():
+            if not isinstance(option, dict):
+                continue
+            for step in option.get('path') or []:
+                if not isinstance(step, dict) or step.get('element') != element_key:
+                    continue
+                action = step.get('action')
+                if action not in MENU_PATH_ACTIONS:
+                    raise SelectionPlanError((
+                        f'{platform} element {element_key!r} declares unsupported '
+                        f'path action {action!r}',
+                    ))
+                declarations.add(action)
+
+    if not declarations:
+        return None
+    if len(declarations) != 1:
+        raise SelectionPlanError((
+            f'{platform} element {element_key!r} has conflicting operation '
+            f'declarations: {sorted(declarations)}',
+        ))
+    return next(iter(declarations))
 
 
 def normalize_choice(raw: Any) -> Choice:
