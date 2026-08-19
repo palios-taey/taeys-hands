@@ -4,6 +4,9 @@ urls:
   fresh: https://gemini.google.com/app
   verify_navigation: false
 tree:
+  prune_subtrees:
+    - name: Side Navigation
+      role: landmark
   fence_after:
   - name: Chats
     role: heading
