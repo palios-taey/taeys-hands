@@ -30,6 +30,20 @@ firefox_chrome:
       role: push button
     - name: ""
       role: status bar
+    - name: Back
+      role: menu item
+    - name: Forward
+      role: menu item
+    - name: Reload
+      role: menu item
+    - name: Bookmark Page…
+      role: menu item
+    - name: Save Page As…
+      role: menu item
+    - name: Take Screenshot
+      role: menu item
+    - name: View Page Source
+      role: menu item
     - names_any_of:
         - ChatGPT — Mozilla Firefox
         - Claude — Mozilla Firefox
