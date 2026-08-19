@@ -3000,6 +3000,8 @@ class GeminiConsultationDriver(_GeminiInlineBase):
                 return False
         if not self.apply_selection_plan(request, result):
             return False
+        if not self._selection_profile_conforms(request, result):
+            return False
         if not self.attach_files(request, result):
             return False
         if not self.enter_prompt(request, result):
@@ -3175,32 +3177,40 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         return verified
 
     def _resolved_mode_is_deep_research(self, request: ConsultationRequest) -> bool:
-        mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
-        if mode != 'deep_research':
-            return False
-
-        requested_mode = (
-            request.selection_value('mode', None)
-            if 'mode' in (request.selections or {})
-            else None
-        )
-        if str(requested_mode or '').strip().lower() in {'deep_research', 'default'}:
-            return True
-
-        requested_model = (
-            request.selection_value('model', None)
-            if 'model' in (request.selections or {})
-            else None
-        )
-        if str(requested_model or '').strip().lower() in {'fast', 'pro', 'thinking'}:
-            return False
-        return True
+        for step in self._current_selection_plan or []:
+            if str(step.get('menu') or '') != 'tools' or step.get('skip'):
+                continue
+            if str(step.get('option') or '').strip().lower() == 'deep_research':
+                return True
+        return 'deep_research' in request.selection_list('tools')
 
     def _resolved_mode_label(self, request: ConsultationRequest) -> str:
+        if self._resolved_mode_is_deep_research(request):
+            return 'deep_research'
+        return str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
+
+    def _selection_profile_conforms(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+    ) -> bool:
+        model = str(self._resolved_selection_value(request, 'model', '') or '').strip().lower()
         mode = str(self._resolved_selection_value(request, 'mode', '') or '').strip().lower()
-        if mode == 'deep_research' and not self._resolved_mode_is_deep_research(request):
-            return 'none'
-        return mode
+        deep_research = self._resolved_mode_is_deep_research(request)
+        valid = not deep_research or (model == 'pro' and mode == 'extended')
+        result.add_step(
+            'selection_profile',
+            valid,
+            (
+                'Gemini selection profile satisfies model/mode/tool compatibility'
+                if valid
+                else 'Gemini Deep Research requires model=pro and mode=extended'
+            ),
+            model=model,
+            mode=mode,
+            deep_research=deep_research,
+        )
+        return valid
 
     def _wait_for_deep_research_inactive(
         self,
@@ -3231,11 +3241,8 @@ class GeminiConsultationDriver(_GeminiInlineBase):
                 if 'model' in (request.selections or {})
                 else None
             ),
-            'requested_mode': (
-                request.selection_value('mode', None)
-                if 'mode' in (request.selections or {})
-                else None
-            ),
+            'requested_mode': request.selection_value('mode', None),
+            'requested_tools': request.selection_list('tools'),
         }
 
     def _ensure_non_deep_research_tool_state(

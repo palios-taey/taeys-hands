@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -19,14 +21,16 @@ class LegacyUnscopedRunState(RuntimeError):
         durable_run_id: str,
         mode: str,
         record: dict[str, Any],
+        legacy_scope: str = 'unscoped',
     ) -> None:
         self.request_id = request_id
         self.durable_run_id = durable_run_id
         self.mode = mode
+        self.legacy_scope = legacy_scope
         self.record = dict(record)
         status = str(record.get('status') or 'unknown')
         super().__init__(
-            'legacy unscoped run-state has no trustworthy mode binding; '
+            f'legacy {legacy_scope} run-state has no trustworthy full-selection binding; '
             f'refusing browser action until TTL expiry: request_id={request_id!r}, '
             f'mode={mode!r}, status={status!r}'
         )
@@ -52,18 +56,56 @@ def resolved_mode(request: ConsultationRequest) -> str:
     return mode
 
 
-def durable_run_id(request: ConsultationRequest) -> str:
+def resolved_selection_profile(request: ConsultationRequest) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not has_selection_menus(request.platform):
+        return ()
+    resolved: dict[str, list[str]] = {}
+    for step in build_selection_plan(request):
+        menu = str(step.get('menu') or '').strip()
+        if not menu:
+            raise ValueError(f'{request.platform} selection step has no stable menu name')
+        option = 'none' if step.get('skip') else str(step.get('option') or '').strip()
+        if not option:
+            raise ValueError(
+                f'{request.platform} selection menu {menu!r} has no stable resolved option'
+            )
+        resolved.setdefault(menu, []).append(option)
+    return tuple(
+        (menu, tuple(sorted(options)))
+        for menu, options in sorted(resolved.items())
+    )
+
+
+def selection_fingerprint(request: ConsultationRequest) -> str:
+    profile = resolved_selection_profile(request)
+    if not profile:
+        return 'default'
+    canonical = json.dumps(profile, ensure_ascii=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:32]
+
+
+def _legacy_mode_run_id(request: ConsultationRequest) -> str:
     return f'{request.request_id()}:mode:{resolved_mode(request)}'
+
+
+def durable_run_id(request: ConsultationRequest) -> str:
+    return f'{request.request_id()}:selection:{selection_fingerprint(request)}'
 
 
 def monitor_id(request: ConsultationRequest) -> str:
     return f'{request.platform}:{durable_run_id(request)}'
 
 
-def durable_state_fields(request: ConsultationRequest) -> dict[str, str]:
+def durable_state_fields(request: ConsultationRequest) -> dict[str, Any]:
+    profile = resolved_selection_profile(request)
     return {
         'base_request_id': request.request_id(),
         'durable_run_id': durable_run_id(request),
+        'selection_fingerprint': selection_fingerprint(request),
+        'selection_profile': [
+            {'menu': menu, 'options': list(options)}
+            for menu, options in profile
+        ],
         'mode': resolved_mode(request),
     }
 
@@ -75,16 +117,22 @@ def read_durable_run_state(
     scoped = primitives.read_run_state(scoped_id)
     if scoped is not None:
         return scoped
-    legacy_id = request.request_id()
-    legacy = primitives.read_run_state(legacy_id)
-    if legacy is None:
-        return None
-    raise LegacyUnscopedRunState(
-        request_id=legacy_id,
-        durable_run_id=scoped_id,
-        mode=resolved_mode(request),
-        record=legacy,
+    legacy_candidates = (
+        ('mode-scoped', _legacy_mode_run_id(request)),
+        ('unscoped', request.request_id()),
     )
+    for legacy_scope, legacy_id in legacy_candidates:
+        legacy = primitives.read_run_state(legacy_id)
+        if legacy is None:
+            continue
+        raise LegacyUnscopedRunState(
+            request_id=legacy_id,
+            durable_run_id=scoped_id,
+            mode=resolved_mode(request),
+            record=legacy,
+            legacy_scope=legacy_scope,
+        )
+    return None
 
 
 def assert_request_run_state_available(request: ConsultationRequest) -> str:
