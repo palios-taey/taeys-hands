@@ -204,6 +204,54 @@ tree:
       name: Add files and more @
       role: tool tip
       scope: base.composer
+    attachment_chip_1:
+      role: panel
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: chat_surface_work
+        before: attach_trigger
+      reason: first attachment tile has dynamic filename text
+    attachment_chip_2:
+      role: panel
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_chip_1
+        before: attach_trigger
+      reason: second attachment tile has dynamic filename text
+    attachment_remove_button_1:
+      role: push button
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: chat_surface_work
+        before: attachment_chip_1
+      reason: first attachment remove control has dynamic filename text
+    attachment_remove_button_2:
+      role: push button
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_remove_button_1
+        before: attachment_chip_1
+      reason: second attachment remove control has dynamic filename text
+    attachment_chip_button_1:
+      role: push button
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_remove_button_2
+        before: attachment_chip_2
+      reason: first attachment control has dynamic filename text
+    attachment_chip_button_2:
+      role: push button
+      scope: base.composer.attachments
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_chip_button_1
+        before: attach_trigger
+      reason: second attachment control has dynamic filename text
     quick_action_create_image:
       name: Create an image
       role: push button
@@ -579,13 +627,9 @@ workflow:
     trigger: attach_trigger
     menu_target: tool_upload
     menu_action: key:ctrl+u
-    scope: base
+    scope: app_root_snapshot
     open_method: focus_and_key_open
     open_key: space
-    typeahead_label: Add photos
-    typeahead_submit_keys:
-      - Down
-      - Return
   prompt:
     input_keys:
       - input_chat_with_chatgpt
