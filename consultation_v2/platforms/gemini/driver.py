@@ -3462,7 +3462,15 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         if parsed.netloc and parsed.netloc != 'gemini.google.com':
             return False
         segments = [segment for segment in parsed.path.split('/') if segment]
-        return len(segments) >= 2 and segments[0] == 'app' and bool(segments[1])
+        if len(segments) >= 2 and segments[0] == 'app' and bool(segments[1]):
+            return True
+        return (
+            len(segments) >= 4
+            and segments[0] == 'u'
+            and segments[1].isdigit()
+            and segments[2] == 'app'
+            and bool(segments[3])
+        )
 
     def is_resumable_session_url(self, url: str | None) -> bool:
         return self._is_answer_thread_url(url)
