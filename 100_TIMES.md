@@ -8,8 +8,10 @@ those documents, the current authorities win.
 
 ## 1. The YAML is the source of truth; the filtered AT-SPI tree is the oracle
 
-- Everything needed to operate the current UI is represented in the tree. There are zero pixel, OCR,
-  coordinate, screenshot-as-truth, remembered-shortcut, or guessed-control exceptions.
+- Everything needed to operate the current UI is represented in the tree. There are zero pixel,
+  OCR, screenshot-as-truth, remembered-coordinate, guessed-control, or coordinate-locator exceptions. A
+  YAML-declared hover or navigation primitive may use the live extents of the exact mapped node only as the
+  final actuation mechanism; those extents never discover, choose, or rescue a target.
 - Browser chrome is excluded except the address bar. The complete sidebar/chat-history block and dynamic
   non-actionable text such as greetings are excluded. The current document, actionable controls, and the
   currently opened menu, submenu, or dialog remain visible.
@@ -30,6 +32,9 @@ those documents, the current authorities win.
 
 - Read a fresh canonical tree, choose exactly one YAML-authorized action, execute it once, then read a fresh
   independent tree and validate the declared postcondition before choosing another action.
+- A raw or hardcoded coordinate is never an action. A hover-only flyout is reached only when its platform YAML
+  declares hover on the exact mapped trigger; the primitive derives transient pointer placement from that live
+  node and has no alternate target or fallback.
 - AT-SPI can refresh late. One YAML-owned settle followed by one fresh read is allowed. That is observation,
   not an action retry.
 - A failed action is repeated zero times. Do not spam a UI with retries. Preserve the tree and transaction
@@ -69,8 +74,9 @@ separate action.
 
 ## 7. Extraction and ingestion are part of the same transaction
 
-- For an ordinary response, scroll all the way to the bottom, activate the exact mapped Copy control, and
-  validate that the captured response is the assistant's final turn rather than the prompt.
+- For an ordinary response, scroll all the way to the bottom and activate the last exact mapped Copy control.
+  The copied body must be non-empty and differ from the submitted brief. Do not add a second speaker-attribution
+  heuristic to this current operator rule.
 - Platform-specific report and artifact extraction is YAML/driver-owned and must harvest every response
   attachment.
 - Persist prompt, response, both input attachments, all output attachments, final URL, action/tree receipts,

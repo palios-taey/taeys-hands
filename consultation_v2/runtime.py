@@ -7,7 +7,7 @@ import time
 from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
-from consultation_v2.interact import atspi_click
+from consultation_v2.interact import atspi_click, atspi_focus
 from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.platforms_runtime import display_environment
 from consultation_v2.tree import find_elements
@@ -40,7 +40,7 @@ class ConsultationRuntime:
         self.click_strategy = str(
             self.cfg.get("click_strategy")
             or self.cfg.get("workflow", {}).get("click_strategy")
-            or "xdotool_first"
+            or "atspi_only"
         )
 
     def _dialog_env(self) -> dict:
@@ -389,7 +389,7 @@ class ConsultationRuntime:
                 continue
             if not self._is_generic_popup_dismiss_name(name):
                 continue
-            if self.click(element, strategy='atspi_first'):
+            if self.click(element, strategy='atspi_only'):
                 clicked += 1
                 time.sleep(0.3)
         return clicked
@@ -439,36 +439,10 @@ class ConsultationRuntime:
     # ------------------------------------------------------------------
 
     def click(self, element: ElementRef, strategy: Optional[str] = None) -> bool:
-        chosen = (strategy or self.click_strategy or "xdotool_first").lower()
-        if chosen == "coordinate_only":
-            return (
-                element.x is not None
-                and element.y is not None
-                and bool(inp.click_at(int(element.x), int(element.y)))
-            )
-        if chosen == "atspi_only":
-            return bool(
-                atspi_click(
-                    {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-                )
-            )
-        if chosen == "atspi_first":
-            if atspi_click(
-                {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
-            ):
-                return True
-            return (
-                element.x is not None
-                and element.y is not None
-                and bool(inp.click_at(int(element.x), int(element.y)))
-            )
-        # Default: xdotool_first
-        if (
-            element.x is not None
-            and element.y is not None
-            and inp.click_at(int(element.x), int(element.y))
-        ):
-            return True
+        chosen = (strategy or self.click_strategy or "atspi_only").lower()
+        if chosen != "atspi_only":
+            logger.error("unsupported click strategy %r; only atspi_only is permitted", chosen)
+            return False
         return bool(
             atspi_click(
                 {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
@@ -680,7 +654,11 @@ class ConsultationRuntime:
         entry = self._address_bar_entry()
         if entry is None:
             return False
-        if not self.click(entry, strategy='coordinate_only'):
+        if not atspi_focus({
+            'atspi_obj': entry.atspi_obj,
+            'name': entry.name,
+            'role': entry.role,
+        }):
             return False
         time.sleep(0.2)
         return self._address_bar_focused()

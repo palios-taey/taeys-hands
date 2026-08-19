@@ -1,113 +1,43 @@
-# Shared-Primitive Contract — consultation_v2 (p0-primitives, LOCKED)
+# Shared primitive contract
 
-> **The contract:** the shared core contains ZERO platform knowledge. No platform
-> name string (`chatgpt`/`claude`/`gemini`/`grok`/`perplexity`), no `if platform ==`,
-> no platform→key/url/selector dict lives in a shared module. Platform is only ever a
-> **parameter** used to load that platform's YAML; every platform-specific datum lives
-> in the per-platform YAML and is reached through `load_platform_yaml(platform)`.
-> A primitive takes an `ElementRef`, a raw string/key, or a match-argument — never a
-> platform name to branch on.
->
-> Grounded against live code at the commit that lands this file. File:line citations
-> are real (verified by grep, not claimed). This is the reference p0-yaml-schema and
-> every p1 driver are built against.
+Status: current operating authority for the shared mechanism layer.
 
----
+## Ownership boundary
 
-## 1. THE LOCKED PRIMITIVE SURFACE (platform-agnostic — these stay shared)
+Shared code owns mechanisms only: canonical snapshot construction, exact element binding, AT-SPI focus/activate,
+keyboard and clipboard input, YAML-declared hover, file-dialog focus, display locks, monitor registration, receipts,
+and notification transport. It receives a platform only to load that platform's YAML and production display binding.
 
-### `consultation_v2/types.py` — pure data, no logic
-`ConsultationRequest`, `ConsultationResult`, `ElementRef`, `Snapshot`, `ExtractedArtifact`,
-`StepRecord`. No platform strings. ✓ Already clean.
+Each platform YAML owns every platform-specific URL, visible label, role, state, scope, structural locator, menu
+operation, settle interval, validation signal, completion key, and extraction workflow. A shared module may not
+carry a Chat-specific string or choose a different platform's behavior.
 
-### `consultation_v2/runtime.py` — `ConsultationRuntime` interaction primitives
-All operate on an `ElementRef`, a raw key/text, or a predicate — none branch on platform:
-- `click(element, strategy=None)` — click an `ElementRef` (xdotool/atspi strategies)
-- `press(key)`, `paste(text)`, `type_text(text, delay_ms)`, `read_clipboard()`, `write_clipboard(text)`
-- `wait_until(predicate, timeout, interval)`, `wait_for_url_change(prev, ...)`
-- `snapshot()` / `menu_snapshot()` — delegate to `build_snapshot(platform)` (platform is a param)
-- `current_url()`, `navigate(url, verify_change)` — `navigate` reads `navigation_key` from cfg ✓ (YAML-driven, not hardcoded)
-- `close_stale_dialogs()`, `focus_file_dialog()` — GTK dialog titles (`File Upload`/`Open`/`Open File`) are **toolkit-universal**, not platform-specific ✓
-- `switch()` — delegates to `inp.switch_to_platform` + `atspi.find_firefox_for_platform` (see §2.D: the *mechanism* is primitive, the *datum* must move to YAML)
+## Tree-selected actuation
 
-### `consultation_v2/` low-level primitives (genuinely agnostic)
-- `consultation_v2/clipboard.py` — `read()`, `write()` ✓
-- `consultation_v2/input.py` — `press_key`, `type_text`, `click_at`, `clipboard_paste`, `focus_firefox` ✓ (`switch_to_platform` is the registry exception, §2.D)
-- `consultation_v2/interact.py` — `atspi_click(element_dict)` ✓
-- `consultation_v2/tree.py` — `find_elements`, `find_menu_items` — pure tree walkers ✓
-- `consultation_v2/atspi.py` — `find_firefox_for_platform`, `get_platform_document`, `get_document_url`: the **walk-windows / match-document / read-url MECHANISM** is primitive; the platform→URL **datum** it consumes is not (§2.D)
+Every target is selected from a fresh canonical AT-SPI tree by one exact YAML mapping. Zero or multiple matches,
+a stale revision, a missing declared state, or an operation that contradicts YAML fails closed before mutation.
 
-### `consultation_v2/snapshot.py` — classify mechanics
-- `build_snapshot`, `build_menu_snapshot`, `_classify_elements`, `_to_ref`, `_is_excluded` — agnostic mechanics ✓
-- `matches_spec()` — **the matcher. Surface stays shared; its BEHAVIOR must change in p0-yaml-schema** (see §3 — it currently accepts loose matchers, which is the leak).
+Click, focus, and activate use the bound AT-SPI object. Some real interfaces expose a hover-only
+flyout or require pointer placement after the address bar has been selected exactly. A YAML-declared hover or mapped
+navigation primitive may derive transient pointer placement from the already-bound node's live AT-SPI extents. Those
+values are actuation payload only: they never discover, choose, disambiguate, persist, or rescue a target.
 
-### `consultation_v2/yaml_contract.py` — `load_platform_yaml(platform)` — agnostic loader ✓
-### Retired shared behavioral base
-`consultation_v2/drivers/base.py` and `consultation_v2/completion.py` are no longer live primitive surfaces. After the package-independence migration, each chat platform owns its lifecycle driver and completion detector under `consultation_v2/platforms/<platform>/driver.py` and `monitor.py`.
+Raw/hardcoded coordinates, pixel or OCR discovery, screen-as-truth, substring/fuzzy matching, fallback targets,
+fallback action strategies, hidden reads, and automatic action retries are outside the current production contract.
 
----
+## Current manual surface
 
-## 2. ARCHIVED PLATFORM-KNOWLEDGE LEAK INVENTORY (historical file:line)
+`drive_chat` composes the canonical snapshot and low-level primitives one invocation at a time. Each mutation is
+preceded by a fresh scoped observation and followed by a fresh independent observation before Taey chooses another
+action. The platform YAML may declare a compound operation as a sequence of existing primitives, but each permitted
+step remains state-bound and the runtime refuses a contradictory free verb.
 
-> These files now live under `archive/task-6a956ac0/main_archive_first/`. The inventory
-> remains as provenance for why the V1 surfaces were removed; it is not live guidance.
+`consultation_v2/runtime.py::ConsultationRuntime` belongs to the retained Layer-3 engine. Its click and focus paths
+are fail-closed AT-SPI operations. Promotion still requires proving one real platform transaction through the same
+exact YAML/canonical-snapshot boundary.
 
-### A. `core/mode_select.py` (686 lines) — the shared-branch anti-pattern, dissolve entirely into drivers
-- `:102` `if platform == 'grok' and target_mode_lower == 'heavy':` (skip-selector)
-- `:144` `if platform == 'grok' and not trigger:`
-- `:380-384` platform→selector-key dict (`chatgpt/claude/grok/perplexity`→`model_selector`, `gemini`→`mode_picker`)
-- `:399` `if platform == 'claude' and element_key == 'model_selector':`
-- `:411` `if platform == 'gemini' and element_key == 'mode_picker':`
-- `:548` `if platform == 'chatgpt' and select_target == 'extended':`
-→ **DESTINATION:** each driver's own `select_mode()` reading its own YAML `workflow.mode_targets`. No shared mode_select. (Removed at p2-delete-shared-branches once all p1 drivers exist.)
+## Fail-closed invariant
 
-### B. `core/config.py:75-108` — platform→element-key dicts in shared code
-- `:75-79` attach-trigger key per platform
-- `:104-108` upload-item key per platform
-→ **DESTINATION:** each YAML names its own attach/upload keys; driver reads them. No cross-platform dict.
-
-### C. `scripts/consultation.py` — archived V1 platform branches
-- `:439` `if platform == 'grok':` · `:568/:571` perplexity/gemini · `:918` chatgpt · `:926/:935` claude send · `:1603` perplexity mode
-→ **DESTINATION:** dissolve into per-platform drivers; the live entrypoint dispatches to the driver (p2-make-live).
-
-### D. `core/platforms.py:56-94` + `core/atspi.py:17,143-146` — window/document resolution registry
-- `core/platforms.py`: `NAV_KEYS`/alt+N (`:56-60`), `_EXTRA_URL_PATTERNS={'grok':'x.com/i/grok'}` (`:67`), `URL_PATTERNS` domains (`:69-71`), `DEFAULT_URLS` (`:83-87`), `CHAT_PLATFORMS` (`:94`)
-- `core/atspi.py:17` imports `URL_PATTERNS,_EXTRA_URL_PATTERNS`; `:143-146` loops them to pick the Firefox window/document
-→ **THE NUANCE (cannot-lie):** finding "which Firefox is this platform's window" inescapably needs a platform→URL datum somewhere. RULE-compliant shape: the **datum is a `url_match:` field in each per-platform YAML**; the primitive becomes `find_firefox_by_url_match(url_match)` taking the string as an argument. Mechanism stays primitive, data moves to YAML. (No alt+N tab-switching at all under the per-supervisor/one-window model, p3 — `NAV_KEYS` becomes dead.)
-
-### E. `core/ax_browser.py:423-425` — platform→search-token map (same class as D; legacy/MCP path)
-
-### F. Two-config-tree trap (task #171) — `core/config.py:20` `PLATFORMS_DIR = <repo>/platforms`
-The live path reads `consultation_v2/platforms/*.yaml`. The archived root `platforms/*.yaml` tree is historical evidence only. The
-isolated drivers read ONE tree (`consultation_v2/platforms/`).
-
----
-
-## 3. THE MATCHER LEAK (why the YAMLs are "full of name_contains") — fixed in p0-yaml-schema, noted here
-
-The "isolated" matcher itself invites loose matchers, so the YAMLs filled with them:
-- `consultation_v2/snapshot.py:35-54` `matches_spec()` accepts `name_contains`, `name_not_contains`,
-  `name_contains_all`, `name_pattern` (fnmatch **wildcards**), `names_any_of`, `role_contains`.
-- `consultation_v2/snapshot.py:75` `_is_excluded` accepts `name_contains` for the exclude set.
-- The retired `consultation_v2/drivers/base.py` used `url_contains` and file-chip substring probes.
-  That behavior is no longer shared; package drivers must keep exact/structural matching discipline locally.
-
-**p0-yaml-schema target shape (the lock this contract sets up):**
-- `matches_spec` accepts ONLY: exact `name` (verbatim) + exact `role` + `states_include`.
-- The single dynamic exception is a typed `structural:` locator — exact `role` + exact `parent`
-  key + integer `index`/`ordinal` — for inherently-dynamic leaves (file chips with timestamped
-  names, response text, generated ids). Only the leaf text varies; the locator is itself exact.
-- Every other key (`name_contains`/`name_pattern`/`role_contains`/`url_contains`/`fuzzy`/…) is
-  REJECTED at load (runtime assert) AND blocked at commit (`consultation_v2/validators/lint_exact_match.py`, already
-  wired into `.githooks/pre-commit`). The rule cannot regress.
-- Validation is read from the live AT-SPI tree for an exact element+state — never a screenshot-as-truth,
-  never a substring.
-
----
-
-## 4. ACCEPTANCE OF p0-primitives
-- [x] Locked primitive surface enumerated (§1) — every entry verified platform-agnostic against live code.
-- [x] Every platform-knowledge leak in shared code inventoried with real file:line (§2 A–F) + destination.
-- [x] The one unavoidable nuance (window/document resolution datum) stated honestly with its RULE-compliant shape (§2.D).
-- [x] The matcher leak that the lint already guards is documented as the p0-yaml-schema handoff (§3).
-- This is inventory+lock. No code moved here. Matcher rewrite = p0-yaml-schema; code relocation = p1 (per platform) + p2 (delete shared branches).
+The shared layer never interprets absence as permission to try another mechanism. It records the exact mismatch and
+stops the UI transaction. One YAML-owned settle followed by one fresh non-mutating observation may account for
+AT-SPI refresh latency; it never repeats the action.

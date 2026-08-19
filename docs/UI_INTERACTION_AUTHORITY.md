@@ -35,9 +35,9 @@ operation is a **separate reviewed authority design**, never an extension smuggl
 Implementation (Observed, merged on `main`): `consultation_v2/supervised_ui_seat.py`,
 `supervised_ui_contract.py`, `supervised_ui_receipts.py`, per-platform
 `consultation_v2/platforms/<p>/supervised_ui.yaml`, runner `scripts/run_supervised_ui_seat.py`,
-design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules.py`. Full protocol
-(state machine, exact model request, receipt chain, production-walk gates):
-[`docs/PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md`](PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md).
+design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules.py`. The current documentation
+surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md). The immutable state
+machine, request, approval, execution, and receipt contract is [`SUPERVISED_UI_PROTOCOL.md`](SUPERVISED_UI_PROTOCOL.md).
 
 ## Current consultation boundary
 
@@ -59,7 +59,7 @@ failure). Specifically banned as model-facing UI behavior:
 - any backend `while`/hourly/scheduled loop that drives a UI unattended;
 - a tool result auto-triggering the next model request (no implicit next turn);
 - a scripted/ordered "click-sequence" that says which control comes next;
-- coordinate-based clicking, or any hidden read/fallback;
+- raw/hardcoded coordinate locators or coordinate fallback clicking, or any hidden read/fallback;
 - inferring success from a primitive's return instead of a fresh independent verification.
 
 A surface earns broader automation later ONLY through measured production history — a **separate
@@ -109,18 +109,14 @@ soma_proxy), "engine optional." This does **not** break the automation ban and d
   the `ui_action` P0 seat, which stays local-only (`effect_class: local`, outward ops fail-closed).
   `drive_chat` is therefore a **named-exception lane** (like `consultation_v2`), not a change to `ui_action`.
   Deliberately named `drive_chat` to avoid forking the `ui_action` grammar.
-- **LOCK ENFORCEMENT — LANDED (Observed 2026-08-13, PR #86/#89):** `drive_chat` now **enforces** the
-  per-display dispatch-lock in `ui_drive.py` — it reuses `primitives.acquire_display_lock` /
-  `release_display_lock` / `_plan_lock_key` (one source of truth for key + NX/EX, so neither side
-  fat-fingers the colon), acquires-or-refuses before any *action* op, and observe stays lock-free but
-  *atomically renews* the owner's lease (WATCH/MULTI, `ui_drive.py:620`). Owner token
-  `LOCK_OWNER = "taey-drive_chat"` (`ui_drive.py:44`); TTL env-overridable (`TAEY_DRIVE_LOCK_TTL`,
-  default 600s, set to exceed the max poll gap incl. deep modes). The key is
-  **`taey:plan_active::{display}` — DOUBLE colon** (e.g. `taey:plan_active::5`), because `_display(':5')`
-  returns `':5'` *with* its colon (verified by EXECUTING `primitives._plan_lock_key(':5')`, not by
-  reading — infra caught an earlier single-colon misread). Mutual exclusion with a taeys-hands
-  infrastructure drive is therefore **by construction** — same import, same key, same NX/EX; each side
-  refuses if the other owns it.
+- **LOCK ENFORCEMENT — CURRENT:** the proxy derives a lease owner from validated active-turn state as
+  `taey-drive:{seat_id}:{process_generation}` and passes the seat, turn, and process generation to
+  `ui_drive.py`. The driver validates that identity before every mutation and acquires or renews the
+  per-display Redis lease atomically. A different seat, current-generation owner, malformed owner, expired
+  turn, missing coordination store, or Redis error refuses the mutation. Observe is read-only: it reports
+  lease state but does not create or transfer ownership. The shared key remains
+  `taey:plan_active::{display}` through `primitives._plan_lock_key`; manual and infrastructure paths therefore
+  contend on the same display boundary without sharing an actor identity.
 
 ## Training-source gate — what the live SFT-authoring context must reject
 
@@ -128,7 +124,7 @@ Before a UI record enters SFT authoring or ordinary retrieval, reject:
 
 - any document marked **superseded / historical / archived** (e.g. anything under `docs/archive/`);
 - any **raw UI script or CLI runbook** presented as a model target;
-- any path that **bypasses the canonical contract** (coordinate clicks, autonomous loops, hidden
+- any path that **bypasses the canonical contract** (raw coordinate locators, autonomous loops, hidden
   fallbacks);
 - any surface map carrying **domain-private facts**;
 - any record **without the surface-pack digest and exact contract version**;

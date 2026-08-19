@@ -1473,20 +1473,14 @@ class _PerplexityInlineBase:
         strategy: str | None,
     ) -> bool:
         readiness = self._selection_click_readiness(element, strategy)
-        chosen = str(readiness['strategy']).lower()
-        if chosen == 'coordinate_only':
-            return bool(readiness['has_coordinates'])
-        if chosen == 'atspi_only':
-            return bool(readiness['has_action'])
-        return bool(readiness['has_coordinates'] or readiness['has_action'])
+        return bool(readiness['has_action'])
 
     def _selection_click_readiness(
         self,
         element: ElementRef | None,
         strategy: str | None,
     ) -> dict[str, Any]:
-        chosen = (strategy or self.runtime.click_strategy or 'xdotool_first').lower()
-        has_coordinates = bool(element and element.x is not None and element.y is not None)
+        chosen = (strategy or self.runtime.click_strategy or 'atspi_only').lower()
         has_action = False
         if element is not None and element.atspi_obj is not None:
             try:
@@ -1496,10 +1490,7 @@ class _PerplexityInlineBase:
                 has_action = False
         return {
             'strategy': chosen,
-            'has_coordinates': has_coordinates,
             'has_action': has_action,
-            'x': element.x if element is not None else None,
-            'y': element.y if element is not None else None,
             'role': element.role if element is not None else None,
             'name': element.name if element is not None else None,
         }
@@ -2367,7 +2358,7 @@ class _PerplexityInlineBase:
                 return True, True
             clicked = self.runtime.click(
                 action_element,
-                strategy=str(state.get('click_strategy') or 'atspi_first'),
+                strategy=str(state.get('click_strategy') or 'atspi_only'),
             )
             action_counts[name] = current_count + 1
             result.add_step(
@@ -4342,7 +4333,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return False
         scrolled_into_view = bool(self.runtime.scroll_element_into_view(trigger))
         time.sleep(0.3)
-        if not self.runtime.click(trigger, strategy='coordinate_only'):
+        if not self.runtime.click(trigger, strategy='atspi_only'):
             result.add_step(
                 'extract_primary',
                 False,
@@ -4374,7 +4365,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 menu_snapshot=menu.serializable(),
             )
             return False
-        if not self.runtime.click(item, strategy='coordinate_only'):
+        if not self.runtime.click(item, strategy='atspi_only'):
             self.runtime.press('Escape')
             result.add_step(
                 'extract_primary',

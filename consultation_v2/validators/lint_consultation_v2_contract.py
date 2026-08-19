@@ -292,15 +292,14 @@ class PythonContractVisitor(ast.NodeVisitor):
                 'subprocess(check=False) hides failure in consultation_v2',  # lint-allow: diagnostic string, not subprocess configuration
                 ast.get_source_segment(self.source, node) or '',
             ))
-        if self._is_driver_file() and self._is_runtime_action_call(node):
-            if self._is_coordinate_only_click(node):
-                self.findings.append(Finding(
-                    str(self.path),
-                    getattr(node, 'lineno', 1),
-                    'py-coordinate-only-downgrade',
-                    'driver code must not downgrade a click to coordinate_only',
-                    ast.get_source_segment(self.source, node) or '',
-                ))
+        if self._is_forbidden_coordinate_action(node):
+            self.findings.append(Finding(
+                str(self.path),
+                getattr(node, 'lineno', 1),
+                'py-coordinate-action',
+                'consultation_v2 actions must use exact AT-SPI targets without coordinate fallback',
+                ast.get_source_segment(self.source, node) or '',
+            ))
         self.generic_visit(node)
 
     def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
@@ -357,12 +356,16 @@ class PythonContractVisitor(ast.NodeVisitor):
     def _is_runtime_action_call(self, node: ast.AST) -> bool:
         return isinstance(node, ast.Call) and self._runtime_action_name(node) is not None
 
-    def _is_coordinate_only_click(self, node: ast.Call) -> bool:
-        if self._runtime_action_name(node) != 'click':
-            return False
-        for kw in node.keywords:
-            if kw.arg == 'strategy' and isinstance(kw.value, ast.Constant):
-                return kw.value.value == 'coordinate_only'
+    def _is_forbidden_coordinate_action(self, node: ast.Call) -> bool:
+        fn = node.func
+        if isinstance(fn, ast.Name) and fn.id == 'click_at':
+            return True
+        if isinstance(fn, ast.Attribute) and fn.attr == 'click_at':
+            return True
+        if self._runtime_action_name(node) == 'click':
+            for kw in node.keywords:
+                if kw.arg == 'strategy' and isinstance(kw.value, ast.Constant):
+                    return kw.value.value != 'atspi_only'
         return False
 
     def _first_arg_name(self, node: ast.Call) -> str | None:
