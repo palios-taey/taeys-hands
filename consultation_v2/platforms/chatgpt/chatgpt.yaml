@@ -574,6 +574,7 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: tool_upload
+    menu_action: click
     scope: base
     open_method: focus_and_key_open
     open_key: space

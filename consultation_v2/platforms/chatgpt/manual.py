@@ -48,6 +48,20 @@ def _attachment_rule() -> tuple[str, str]:
     return trigger_key, open_key
 
 
+def _attachment_target_rule() -> tuple[str, str]:
+    cfg = load_platform_yaml('chatgpt')
+    attachment = (cfg.get('workflow') or {}).get('attachment') or {}
+    if not isinstance(attachment, dict):
+        raise ValueError('chatgpt workflow.attachment must be a mapping')
+    target_key = attachment.get('menu_target')
+    if not isinstance(target_key, str) or not target_key:
+        raise ValueError('chatgpt attachment menu_target must be exact')
+    target_action = attachment.get('menu_action')
+    if target_action != 'click':
+        raise ValueError('chatgpt attachment menu_action must be click')
+    return target_key, target_action
+
+
 def element_operation(
     element_key: str,
     states: list[str],
@@ -86,6 +100,15 @@ def element_operation(
             ],
             'allowed_now': allowed_now,
             'forbidden': ['activate', 'click'],
+        }
+
+    target_key, target_action = _attachment_target_rule()
+    if element_key == target_key:
+        return {
+            'method': 'attachment_menu_target',
+            'primitives': [target_action],
+            'allowed_now': [target_action],
+            'forbidden': ['activate', 'focus', 'hover'],
         }
 
     trigger_key, open_key = _attachment_rule()
