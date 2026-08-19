@@ -3915,33 +3915,12 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _attachment_name_matches(display_name: str, filename: str) -> bool:
-        expected_path = os.path.abspath(filename)
-        expected_name = os.path.basename(filename)
-        displayed_file = display_name.split()[0] if display_name else ''
-        for expected in (expected_path, expected_name):
-            if display_name == expected or displayed_file == expected:
-                return True
-            if '...' in displayed_file:
-                prefix, suffix = displayed_file.split('...', 1)
-                if expected.startswith(prefix) and expected.endswith(suffix):
-                    return True
-        return False
-
-    def _attachment_visible(self, snapshot, filename: str) -> bool:
-        return self._attachment_chip(snapshot, filename) is not None
-
-    def _attachment_chip(self, snapshot: Snapshot, filename: str) -> ElementRef | None:
-        allowed_roles = {'push button', 'panel'}
-        return next(
-            (
-                element
-                for element in self._composer_scope_elements(snapshot)
-                if element.role in allowed_roles
-                and self._attachment_name_matches(element.name or '', filename)
-            ),
-            None,
-        )
+    def _attachment_chips(snapshot: Snapshot) -> list[ElementRef]:
+        return [
+            chip
+            for key in ('attachment_chip_1', 'attachment_chip_2')
+            for chip in (snapshot.mapped.get(key) or [])
+        ]
 
     def _paste_chip_names(
         self,
@@ -4102,7 +4081,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             return False
         return finder(env_factory()) is not None
 
-    def _wait_for_attachment_chip(self, abs_path: str) -> tuple[Snapshot, ElementRef | None, bool]:
+    def _wait_for_attachment_chip(self, expected_count: int) -> tuple[Snapshot, ElementRef | None, bool]:
         last_snapshot: Snapshot | None = None
 
         def _probe() -> Snapshot | None:
@@ -4111,8 +4090,8 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 return None
             snap = self.runtime.snapshot()
             last_snapshot = snap
-            chip = self._attachment_chip(snap, abs_path)
-            return snap if chip is not None else None
+            chips = self._attachment_chips(snap)
+            return snap if len(chips) == expected_count else None
 
         matched = self.runtime.wait_until(
             _probe,
@@ -4120,7 +4099,9 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             interval=0.5,
         )
         verify_snap = matched if isinstance(matched, Snapshot) else last_snapshot or self.runtime.snapshot()
-        return verify_snap, self._attachment_chip(verify_snap, abs_path), not self._file_dialog_open()
+        chips = self._attachment_chips(verify_snap)
+        chip = chips[-1] if len(chips) == expected_count else None
+        return verify_snap, chip, not self._file_dialog_open()
 
     def _snapshot_elements(self, snapshot: Snapshot) -> list[ElementRef]:
         all_elements: list[ElementRef] = []
@@ -4173,7 +4154,8 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         last_snapshot: Snapshot | None = None
         last_evidence: dict[str, object] = {
             'attachments': attachment_paths,
-            'missing_attachments': attachment_paths,
+            'attachment_controls_required': len(attachment_paths),
+            'attachment_controls_observed': 0,
             'send_key': None,
             'send_button': None,
             'send_button_ready': False,
@@ -4186,10 +4168,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             nonlocal consecutive_ready, last_snapshot, last_evidence
             snap = self.runtime.snapshot()
             last_snapshot = snap
-            missing = [
-                path for path in attachment_paths
-                if not self._attachment_visible(snap, path)
-            ]
+            attachment_controls_observed = len(self._attachment_chips(snap))
             send_key, send_button = self.find_first_any(snap, self._send_button_keys())
             states = self._element_state_set(send_button)
             upload_blockers = self._attachment_upload_blockers(snap)
@@ -4198,14 +4177,19 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 and 'enabled' in states
                 and 'focusable' in states
             )
-            ready = bool(not missing and send_button_ready and not upload_blockers)
+            ready = bool(
+                attachment_controls_observed == len(attachment_paths)
+                and send_button_ready
+                and not upload_blockers
+            )
             if ready:
                 consecutive_ready += 1
             else:
                 consecutive_ready = 0
             last_evidence = {
                 'attachments': attachment_paths,
-                'missing_attachments': missing,
+                'attachment_controls_required': len(attachment_paths),
+                'attachment_controls_observed': attachment_controls_observed,
                 'send_key': send_key,
                 'send_button': self._element_evidence(send_button),
                 'send_button_ready': send_button_ready,
@@ -4226,63 +4210,114 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         return ready_snapshot, last_evidence, last_snapshot
 
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
+        from consultation_v2.interact import atspi_focus
+
         self.runtime.close_stale_dialogs()
-        for file_path in request.attachments:
+        for expected_count, file_path in enumerate(request.attachments, start=1):
             abs_path = os.path.abspath(file_path)
             snap = self.runtime.snapshot()
-            trigger = self.find_first(snap, 'attach_trigger')
+            observed_before = len(self._attachment_chips(snap))
+            if observed_before != expected_count - 1:
+                result.add_step('attach', False, f'ChatGPT attachment control count was not the expected pre-action state for {abs_path}', attachment_controls_expected=expected_count - 1, attachment_controls_observed=observed_before, snapshot=snap.serializable())
+                return False
+            attachment = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+            trigger_key = str(attachment.get('trigger') or '').strip()
+            trigger = self.find_first(snap, trigger_key) if trigger_key else None
             if not trigger:
                 result.add_step('attach', False, f'ChatGPT attach trigger not found for {abs_path}', snapshot=snap.serializable())
                 return False
 
-            attachment = self.cfg.get('workflow', {}).get('attachment', {}) or {}
             if str(attachment.get('open_method') or '').strip().lower() != 'focus_and_key_open':
                 result.add_step('attach', False, 'ChatGPT attachment requires focus_and_key_open tools-menu flow', snapshot=snap.serializable())
                 return False
-            open_evidence = self.runtime.focus_and_key_open(
-                trigger,
-                key=str(attachment.get('open_key') or 'space'),
-                settle=0.3,
+
+            focus_evidence = {
+                'trigger': self._element_evidence(trigger),
+                'focused': atspi_focus({
+                    'atspi_obj': trigger.atspi_obj,
+                    'name': trigger.name,
+                    'role': trigger.role,
+                }),
+            }
+            if not focus_evidence['focused']:
+                result.add_step('attach', False, f'ChatGPT attach trigger focus failed for {abs_path}', focus_evidence=focus_evidence, snapshot=snap.serializable())
+                return False
+
+            def _focused_trigger():
+                focus_snapshot = self.runtime.snapshot()
+                focused_trigger = self.find_first(focus_snapshot, trigger_key)
+                states = {
+                    str(state).strip().lower()
+                    for state in (focused_trigger.states or [])
+                } if focused_trigger else set()
+                if focused_trigger and 'focused' in states:
+                    return focus_snapshot, focused_trigger
+                return None
+
+            focused_state = self.runtime.wait_until(
+                _focused_trigger,
+                timeout=3.0,
+                interval=0.2,
             )
-            if not open_evidence.get('ok'):
-                result.add_step('attach', False, f'ChatGPT attach trigger focus+key open failed for {abs_path}', open_evidence=open_evidence, snapshot=snap.serializable())
+            if focused_state is None:
+                result.add_step('attach', False, f'ChatGPT attach trigger focus was not present in the fresh tree for {abs_path}', focus_evidence=focus_evidence)
                 return False
-            typeahead_label = str(attachment.get('typeahead_label') or '').strip()
-            if not typeahead_label:
-                result.add_step('attach', False, 'ChatGPT attachment missing typeahead_label', open_evidence=open_evidence, snapshot=snap.serializable())
+            focused_snapshot, focused_trigger = focused_state
+            focus_evidence['fresh_trigger'] = self._element_evidence(focused_trigger)
+
+            open_key = str(attachment.get('open_key') or '').strip()
+            if not open_key:
+                result.add_step('attach', False, 'ChatGPT attachment open_key is not declared', focus_evidence=focus_evidence, snapshot=focused_snapshot.serializable())
                 return False
-            if not self.runtime.type_text(typeahead_label, delay_ms=5):
-                result.add_step('attach', False, f'ChatGPT upload typeahead failed for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+            if not self.runtime.press(open_key):
+                result.add_step('attach', False, f'ChatGPT attach menu open key failed for {abs_path}', open_key=open_key, focus_evidence=focus_evidence, snapshot=focused_snapshot.serializable())
                 return False
-            for submit_key in attachment.get('typeahead_submit_keys') or ['Down', 'Return']:
-                if not self.runtime.press(str(submit_key)):
-                    result.add_step('attach', False, f'ChatGPT upload typeahead submit key failed for {abs_path}', submit_key=str(submit_key), typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
-                    return False
-                time.sleep(0.15)
+
+            menu_target_key = str(attachment.get('menu_target') or '').strip()
+            menu_scope = str(attachment.get('scope') or '').strip()
+            menu_snapshot = self._selection_stable_snapshot(
+                menu_scope,
+                timeout=5.0,
+                anchor_key=menu_target_key or None,
+            )
+            menu_target = self.find_first(menu_snapshot, menu_target_key) if menu_target_key else None
+            if not menu_target:
+                result.add_step('attach', False, f'ChatGPT attachment menu target not found for {abs_path}', menu_target=menu_target_key, menu_scope=menu_scope, open_key=open_key, focus_evidence=focus_evidence, snapshot=menu_snapshot.serializable())
+                return False
+
+            menu_action = str(attachment.get('menu_action') or '').strip()
+            if not menu_action.startswith('key:') or not menu_action.partition(':')[2]:
+                result.add_step('attach', False, 'ChatGPT attachment menu_action must declare one exact key primitive', menu_action=menu_action, menu_scope=menu_scope, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
+                return False
+            menu_key = menu_action.partition(':')[2]
+            if not self.runtime.press(menu_key):
+                result.add_step('attach', False, f'ChatGPT attachment menu action failed for {abs_path}', menu_action=menu_action, menu_scope=menu_scope, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
+                return False
+
             if not self.runtime.focus_file_dialog():
-                result.add_step('attach', False, f'ChatGPT file dialog did not focus for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog did not focus for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
             if not self.runtime.press('ctrl+l'):
-                result.add_step('attach', False, f'ChatGPT file dialog location shortcut failed for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog location shortcut failed for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
             time.sleep(0.2)
             if not self.runtime.press('ctrl+a'):
-                result.add_step('attach', False, f'ChatGPT file dialog path select-all failed for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog path select-all failed for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
             time.sleep(0.2)
             if not self.runtime.paste(abs_path):
-                result.add_step('attach', False, f'ChatGPT file dialog path paste failed for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog path paste failed for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
             time.sleep(0.2)
             if not self.runtime.focus_file_dialog():
-                result.add_step('attach', False, f'ChatGPT file dialog lost focus before submit for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog lost focus before submit for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
             # ONE Return is sufficient: selects the file and closes the GTK dialog.
             # A second Return would hit the now-focused chat input and submit garbage.
             if not self.runtime.press('Return'):
-                result.add_step('attach', False, f'ChatGPT file dialog submit failed for {abs_path}', typeahead_label=typeahead_label, open_evidence=open_evidence, snapshot=snap.serializable())
+                result.add_step('attach', False, f'ChatGPT file dialog submit failed for {abs_path}', menu_action=menu_action, menu_target=self._element_evidence(menu_target), snapshot=menu_snapshot.serializable())
                 return False
-            verify_snap, chip, dialog_closed = self._wait_for_attachment_chip(abs_path)
+            verify_snap, chip, dialog_closed = self._wait_for_attachment_chip(expected_count)
             verified = bool(chip and dialog_closed)
             result.add_step(
                 'attach',
