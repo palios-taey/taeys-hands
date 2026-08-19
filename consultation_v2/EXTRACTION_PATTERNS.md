@@ -7,8 +7,9 @@ Status: current operating reference. The destination platform YAML is the execut
 Extraction begins only after the passive monitor has observed Stop disappear in two consecutive fresh reads.
 Scroll to the absolute bottom, resolve the YAML-mapped response Copy control from a fresh canonical tree, and
 select the last mapped Copy control when the page contains more than one. Activate it through the declared
-AT-SPI operation, then read the clipboard. Do not infer response ownership from guessed text, browser chrome,
-coordinates, pixels, OCR, or a stale tree.
+operation, then read the clipboard. For the current ordinary-response contract, bottom-of-thread plus the last
+exact mapped Copy control is authoritative; do not insert a separate speaker-attribution heuristic. Never select
+the control from guessed text, browser chrome, raw coordinates, pixels, OCR, or a stale tree.
 
 The returned body must be non-empty and must differ from the submitted brief. Record its byte count and SHA-256
 from the extracted file, not from model-authored prose. If the platform declares response attachments, handle

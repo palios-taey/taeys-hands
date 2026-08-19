@@ -38,6 +38,7 @@ Per-platform supervised policy: `consultation_v2/platforms/<platform>/supervised
 | ChatGPT/Claude/Gemini/Grok/Perplexity **consultation** element maps | `consultation_v2/platforms/<p>/<p>.yaml` | **PERMITTED by NAMED EXCEPTION** — the live deterministic Family-chat consult engine (`consultation_v2`). Its tool is `consult_extract_action`, NOT the direct `ui_action` grammar (see the authority doc's grammar-lanes section). Not deprecated; not the definition of all UI. |
 
 ## Prohibited (permanent)
-Agent-authored autonomous loops, scripted click-sequences, coordinate clicking, hidden read/fallback,
+Agent-authored autonomous loops, scripted click-sequences, raw/hardcoded coordinate locators or coordinate
+fallback clicking, hidden read/fallback,
 implicit next-turn, and inferring success from a primitive return — all **prohibited** as model-facing
 UI behavior, on every surface. See the authority doc's automation-scope table.

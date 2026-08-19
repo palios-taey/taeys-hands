@@ -11,7 +11,9 @@ the model actually needs. Filtering is therefore part of the control system, not
 The platform YAML names the controls and operations that are expected. The fresh canonical AT-SPI tree says
 what actually exists now. Neither may replace the other: YAML without a fresh tree becomes memory, while a raw
 tree without YAML becomes an invitation to guess. An exact disagreement is useful evidence that the UI or map
-changed; it is not permission to use substring matching, coordinates, pixels, OCR, or a second driver.
+changed; it is not permission to use substring matching, raw or remembered coordinate locators, pixels, OCR, or
+a second driver. A YAML-declared hover may derive transient pointer placement from an exact mapped live node, but
+geometry never chooses the node or becomes a fallback.
 
 One action followed by one fresh observation keeps causality visible. When an action returns success but the
 expected tree change does not occur, the action did not succeed for purposes of the workflow. Taey stops the

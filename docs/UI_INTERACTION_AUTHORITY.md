@@ -36,7 +36,8 @@ Implementation (Observed, merged on `main`): `consultation_v2/supervised_ui_seat
 `supervised_ui_contract.py`, `supervised_ui_receipts.py`, per-platform
 `consultation_v2/platforms/<p>/supervised_ui.yaml`, runner `scripts/run_supervised_ui_seat.py`,
 design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules.py`. The current documentation
-surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md).
+surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md). The immutable state
+machine, request, approval, execution, and receipt contract is [`SUPERVISED_UI_PROTOCOL.md`](SUPERVISED_UI_PROTOCOL.md).
 
 ## Current consultation boundary
 
@@ -58,7 +59,7 @@ failure). Specifically banned as model-facing UI behavior:
 - any backend `while`/hourly/scheduled loop that drives a UI unattended;
 - a tool result auto-triggering the next model request (no implicit next turn);
 - a scripted/ordered "click-sequence" that says which control comes next;
-- coordinate-based clicking, or any hidden read/fallback;
+- raw/hardcoded coordinate locators or coordinate fallback clicking, or any hidden read/fallback;
 - inferring success from a primitive's return instead of a fresh independent verification.
 
 A surface earns broader automation later ONLY through measured production history — a **separate
@@ -123,7 +124,7 @@ Before a UI record enters SFT authoring or ordinary retrieval, reject:
 
 - any document marked **superseded / historical / archived** (e.g. anything under `docs/archive/`);
 - any **raw UI script or CLI runbook** presented as a model target;
-- any path that **bypasses the canonical contract** (coordinate clicks, autonomous loops, hidden
+- any path that **bypasses the canonical contract** (raw coordinate locators, autonomous loops, hidden
   fallbacks);
 - any surface map carrying **domain-private facts**;
 - any record **without the surface-pack digest and exact contract version**;

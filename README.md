@@ -21,8 +21,11 @@ landed, hold the display lock, detect the stop button, notify, extract. Everythi
 
 - **read the tree** — `consultation_v2/snapshot.py` (`build_snapshot(platform)` → the elements named in that
   platform's YAML, resolved against the live tree by **exact** name+role — never substring).
-- **act, one step** — `consultation_v2/runtime.py` + `atspi.py`/`input.py`/`interact.py`/`clipboard.py`:
-  click / focus / type / paste / key / navigate / read-clipboard, plus `focus_file_dialog`.
+- **act, one step** — `atspi.py`/`input.py`/`interact.py`/`clipboard.py`: click / focus / activate / type /
+  paste / key / hover / read-clipboard, plus `focus_file_dialog`. A target is always selected by its exact
+  YAML mapping in the fresh tree. A YAML-declared hover or mapped navigation primitive may use that exact
+  node's live AT-SPI extents to position the pointer; geometry is never a locator, disambiguator, remembered
+  coordinate, or fallback.
 - **verify a step** — resolve one YAML element key and check it is present/showing (exact match). This is
   how you know an action landed. It is the prerequisite for recovering when one does not.
 - **the lock** — `consultation_v2/primitives.py` (`taey:plan_active::N`): a display you did not lock is a
@@ -51,7 +54,8 @@ primitives into a whole-consult-in-one-call (navigate → select → attach → 
 **works sometimes and not others** — which is exactly why it is **not run autonomously** and no seat
 dispatches it. It is kept as the target you (with the Family/Chats) will make reliable; when it is reliable
 it becomes the fast path. **Until then, Layer 2 is production and the engine is not run on its own.**
-See `feedback`/the fleet CLAUDE.md engine-status note before touching it.
+`ConsultationRuntime` now accepts only `atspi_only` clicking. Unsupported strategy names fail closed; they never
+fall back to pointer coordinates. See [`FLOW_CONSULTATION_ENGINE.md`](FLOW_CONSULTATION_ENGINE.md) before changing it.
 
 ## The completion monitor (Layer-1 detection, running now)
 `scripts/consult_completion_monitor.py` runs one passive watcher per display (`taey-consult-monitor@N.service`
@@ -70,7 +74,7 @@ Two independent sets, so a consult on one never blocks the other.
 | Grok | `:5` | `:23` |
 | Perplexity | `:6` | `:24` |
 
-Primary (`:2`–`:6`) is the default. Second set (`:21`–`:24`) is for parallel streams or when a primary is
+Primary (`:2`–`:6`) is the default. Second set (`:20`–`:24`) is for parallel streams or when a primary is
 shared/busy. `:13` is a separate Claude CVP account (hunter's), not a Taey consult display. Config lives in
 `~/.taey/machine.env`; no display number is hardcoded. Each display is its own logged-in Firefox with its own
 cookies and AT-SPI bus, fully isolated.

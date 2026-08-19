@@ -158,14 +158,7 @@ class SeatActions:
         found = self.find(name, role, display, contains=contains)
         if found is None:
             return False
-        if atspi_click(found, timeout=post_delay):
-            return True
-        x = found.get('x')
-        y = found.get('y')
-        if x is None or y is None or not inp.click_at(int(x), int(y)):
-            return False
-        time.sleep(post_delay)
-        return True
+        return bool(atspi_click(found, timeout=post_delay))
 
     def do(
         self,
@@ -208,17 +201,7 @@ class SeatActions:
         found = self.find(name, role, display, contains=contains)
         if found is None:
             return False
-        focused = atspi_focus(found)
-        if not focused:
-            x = found.get('x')
-            y = found.get('y')
-            focused = bool(
-                x is not None
-                and y is not None
-                and inp.focus_firefox()
-                and inp.click_at(int(x), int(y))
-            )
-        if not focused:
+        if not atspi_focus(found):
             return False
         if clear:
             if not inp.press_key('ctrl+a'):

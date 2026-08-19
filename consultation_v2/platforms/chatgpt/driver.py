@@ -1677,20 +1677,14 @@ class _ChatGPTInlineBase:
         strategy: str | None,
     ) -> bool:
         readiness = self._selection_click_readiness(element, strategy)
-        chosen = str(readiness['strategy']).lower()
-        if chosen == 'coordinate_only':
-            return bool(readiness['has_coordinates'])
-        if chosen == 'atspi_only':
-            return bool(readiness['has_action'])
-        return bool(readiness['has_coordinates'] or readiness['has_action'])
+        return bool(readiness['has_action'])
 
     def _selection_click_readiness(
         self,
         element: ElementRef | None,
         strategy: str | None,
     ) -> dict[str, Any]:
-        chosen = (strategy or self.runtime.click_strategy or 'xdotool_first').lower()
-        has_coordinates = bool(element and element.x is not None and element.y is not None)
+        chosen = (strategy or self.runtime.click_strategy or 'atspi_only').lower()
         has_action = False
         if element is not None and element.atspi_obj is not None:
             try:
@@ -1700,10 +1694,7 @@ class _ChatGPTInlineBase:
                 has_action = False
         return {
             'strategy': chosen,
-            'has_coordinates': has_coordinates,
             'has_action': has_action,
-            'x': element.x if element is not None else None,
-            'y': element.y if element is not None else None,
             'role': element.role if element is not None else None,
             'name': element.name if element is not None else None,
         }
@@ -2562,7 +2553,7 @@ class _ChatGPTInlineBase:
                 return True, True
             clicked = self.runtime.click(
                 action_element,
-                strategy=str(state.get('click_strategy') or 'atspi_first'),
+                strategy=str(state.get('click_strategy') or 'atspi_only'),
             )
             action_counts[name] = current_count + 1
             result.add_step(
@@ -3633,7 +3624,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         scope ancestor as the click target, then require a focused editable
         descendant before Return.
         """
-        from consultation_v2 import input as _inp
+        from consultation_v2.interact import atspi_focus
 
         self._last_composer_focus_evidence = {
             'ok': False,
@@ -3670,11 +3661,14 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             if target_obj is None or not target_evidence.get('ok'):
                 self._last_composer_focus_evidence = focus_evidence
                 continue
-            click_point = target_evidence.get('click_point') or {}
-            clicked = bool(_inp.click_at(int(click_point['x']), int(click_point['y'])))
-            focus_evidence['clicked'] = clicked
-            if not clicked:
-                focus_evidence['reason'] = 'bounded_composer_click_failed'
+            focused_target = atspi_focus({
+                'atspi_obj': target_obj,
+                'name': str((target_evidence.get('target') or {}).get('node', {}).get('name') or ''),
+                'role': str((target_evidence.get('target') or {}).get('node', {}).get('role') or ''),
+            })
+            focus_evidence['focused_target'] = focused_target
+            if not focused_target:
+                focus_evidence['reason'] = 'bounded_composer_atspi_focus_failed'
                 self._last_composer_focus_evidence = focus_evidence
                 continue
             time.sleep(0.25)
@@ -3700,7 +3694,7 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 self._last_composer_focus_evidence = focus_evidence
                 return focused
 
-            focus_evidence['reason'] = 'composer_focus_not_landed_extentsless_node'
+            focus_evidence['reason'] = 'composer_focus_not_landed'
             self._last_composer_focus_evidence = focus_evidence
 
         return None
@@ -4841,34 +4835,33 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
 
     def _scroll_chatgpt_thread_to_bottom(self) -> dict:
         from consultation_v2 import input as _inp
+        from consultation_v2.interact import atspi_focus
 
         evidence = {
             'ok': False,
-            'source': 'document_extents',
+            'source': 'document_atspi_focus',
         }
         for _ in range(8):
             doc = self._chatgpt_document()
-            rect = self._screen_rect(doc)
-            if rect:
-                x = int(rect['x'] + rect['width'] // 2)
-                y_offset = min(max(120, rect['height'] // 2), max(0, rect['height'] - 180))
-                y = int(rect['y'] + y_offset)
-                clicked = bool(_inp.click_at(x, y))
+            if doc is not None:
+                focused = atspi_focus({
+                    'atspi_obj': doc,
+                    'name': '',
+                    'role': 'document web',
+                })
+                if not focused:
+                    evidence['reason'] = 'document_atspi_focus_failed'
+                    return evidence
                 time.sleep(0.2)
                 end_presses = 0
                 for _press in range(12):
-                    if _inp.press_key('End'):
+                    if _inp.press_key('ctrl+end'):
                         end_presses += 1
                     time.sleep(0.08)
-                wheel_ok = bool(_inp.scroll_wheel('down', clicks=12, hover_point=(x, y)))
                 evidence.update({
-                    'ok': bool(clicked and end_presses >= 10 and wheel_ok),
-                    'x': x,
-                    'y': y,
-                    'clicked': clicked,
+                    'ok': bool(end_presses >= 10),
+                    'focused': focused,
                     'end_presses': end_presses,
-                    'wheel_ok': wheel_ok,
-                    'document_rect': rect,
                 })
                 return evidence
             time.sleep(0.25)
@@ -5533,7 +5526,6 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         sentinel: str,
     ) -> tuple[str, dict[str, object]]:
         from consultation_v2 import clipboard
-        from consultation_v2 import input as _inp
         from consultation_v2.interact import atspi_click
 
         def _clipboard_observation(value: str | None) -> dict[str, object]:
@@ -5555,12 +5547,9 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             'sentinel_staged': sentinel_staged,
             'clipboard_before': _clipboard_observation(clipboard_before),
             'clipboard_after_atspi': _clipboard_observation(None),
-            'clipboard_after_pointer': _clipboard_observation(None),
             'clipboard_after': _clipboard_observation(clipboard_before),
             'atspi_clicked': False,
             'atspi_clipboard_changed': False,
-            'pointer_clicked': False,
-            'pointer_clipboard_changed': False,
             'clipboard_changed': False,
         }
         if not sentinel_staged:
@@ -5575,46 +5564,16 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             clipboard_after_atspi is not None
             and clipboard_after_atspi != sentinel
         )
-        pointer_clicked = False
-        clipboard_after_pointer = None
-        pointer_clipboard_changed = False
-        if not atspi_clipboard_changed:
-            x = self._chatgpt_int(target.get('x'))
-            y = self._chatgpt_int(target.get('y'))
-            if x is not None and y is not None:
-                pointer_clicked = bool(_inp.click_at(x, y))
-                time.sleep(1.0)
-                clipboard_after_pointer = clipboard.read()
-                pointer_clipboard_changed = bool(
-                    clipboard_after_pointer is not None
-                    and clipboard_after_pointer != sentinel
-                )
-
-        clipboard_changed = bool(
-            atspi_clipboard_changed or pointer_clipboard_changed
-        )
-        activation = (
-            'atspi'
-            if atspi_clipboard_changed
-            else 'pointer'
-            if pointer_clipboard_changed
-            else None
-        )
+        clipboard_changed = atspi_clipboard_changed
+        activation = 'atspi' if atspi_clipboard_changed else None
         evidence.update({
             'activation': activation,
             'clipboard_after_atspi': _clipboard_observation(clipboard_after_atspi),
-            'clipboard_after_pointer': _clipboard_observation(clipboard_after_pointer),
             'atspi_clicked': bool(atspi_clicked),
             'atspi_clipboard_changed': atspi_clipboard_changed,
-            'pointer_clicked': pointer_clicked,
-            'pointer_clipboard_changed': pointer_clipboard_changed,
             'clipboard_changed': clipboard_changed,
         })
-        clipboard_value = (
-            clipboard_after_pointer
-            if pointer_clipboard_changed
-            else clipboard_after_atspi
-        )
+        clipboard_value = clipboard_after_atspi
         evidence['clipboard_after'] = _clipboard_observation(clipboard_value)
         content = (clipboard_value or '').strip() if clipboard_changed else ''
         return content, evidence

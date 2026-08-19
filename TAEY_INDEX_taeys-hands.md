@@ -23,8 +23,10 @@ FLOW:      Freeze request and packets; navigate to a fresh thread and capture it
 ON FAIL:   First unexpected or ambiguous fresh tree is a full stop for Taey. Preserve the tree and action receipt.
            One YAML-owned settle plus one fresh read is allowed for AT-SPI refresh; no UI action is retried.
            Classify the root cause as stale tree, wrong scope, filter drift, environment drift, YAML drift, or UI drift.
-           Everything required is in the tree; missing data never authorizes screenshots, coordinates, OCR, guessed
-           controls, fuzzy matching, substring matching, alternate drivers, or an engine fallback.
+           Everything required to operate a target is in the tree; missing data never authorizes
+           screenshots, raw or remembered coordinate locators, OCR, guessed controls, fuzzy matching, substring
+           matching, alternate drivers, or an engine fallback. YAML-declared hover may use the exact mapped node's
+           live extents only as transient actuation after selection.
 
 NEVER:     Never use Claude Code in this recovery; Claude Chat remains a valid destination. Never spam a UI.
            Never touch CAREERS displays (:8 Upwork, :18 LinkedIn, :19 Sales Nav, apply-display) or Kendra's

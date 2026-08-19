@@ -1453,20 +1453,14 @@ class _GeminiInlineBase:
         strategy: str | None,
     ) -> bool:
         readiness = self._selection_click_readiness(element, strategy)
-        chosen = str(readiness['strategy']).lower()
-        if chosen == 'coordinate_only':
-            return bool(readiness['has_coordinates'])
-        if chosen == 'atspi_only':
-            return bool(readiness['has_action'])
-        return bool(readiness['has_coordinates'] or readiness['has_action'])
+        return bool(readiness['has_action'])
 
     def _selection_click_readiness(
         self,
         element: ElementRef | None,
         strategy: str | None,
     ) -> dict[str, Any]:
-        chosen = (strategy or self.runtime.click_strategy or 'xdotool_first').lower()
-        has_coordinates = bool(element and element.x is not None and element.y is not None)
+        chosen = (strategy or self.runtime.click_strategy or 'atspi_only').lower()
         has_action = False
         if element is not None and element.atspi_obj is not None:
             try:
@@ -1476,10 +1470,7 @@ class _GeminiInlineBase:
                 has_action = False
         return {
             'strategy': chosen,
-            'has_coordinates': has_coordinates,
             'has_action': has_action,
-            'x': element.x if element is not None else None,
-            'y': element.y if element is not None else None,
             'role': element.role if element is not None else None,
             'name': element.name if element is not None else None,
         }
@@ -2390,7 +2381,7 @@ class _GeminiInlineBase:
                 return True, True
             clicked = self.runtime.click(
                 action_element,
-                strategy=str(state.get('click_strategy') or 'atspi_first'),
+                strategy=str(state.get('click_strategy') or 'atspi_only'),
             )
             action_counts[name] = current_count + 1
             result.add_step(
@@ -3066,7 +3057,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
                                 open_attempts=open_attempts,
                                 menu=menu_snap.serializable())
                 return False
-            if not self.runtime.click(upload_item, strategy='atspi_first'):
+            if not self.runtime.click(upload_item, strategy='atspi_only'):
                 result.add_step('attach', False,
                                 f'Gemini upload item click failed for {abs_path}',
                                 menu=menu_snap.serializable())
@@ -3146,7 +3137,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             result.add_step('prompt', False, 'Gemini input field not found',
                             snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el, strategy='atspi_first'):
+        if not self.runtime.click(input_el, strategy='atspi_only'):
             result.add_step('prompt', False, 'Gemini input focus click failed',
                             snapshot=snap.serializable())
             return False
@@ -3253,7 +3244,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             )
             return not active_before
 
-        clicked = self.runtime.click(deselect, strategy='atspi_first')
+        clicked = self.runtime.click(deselect, strategy='atspi_only')
         if not clicked:
             result.add_step(
                 'deep_research_deselect',
@@ -3406,7 +3397,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             result.add_step('send', False, 'Gemini send button not found',
                             snapshot=snap.serializable())
             return False
-        clicked = self.runtime.click(send_button, strategy='atspi_first')
+        clicked = self.runtime.click(send_button, strategy='atspi_only')
         if not clicked:
             result.add_step(
                 'send', False, 'Gemini send button click failed',
@@ -3864,7 +3855,7 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             result.add_step('extract_primary', False, 'Gemini copy button not found',
                             snapshot=snap.serializable())
             return False
-        if not self.runtime.click(copy_button, strategy='atspi_first'):
+        if not self.runtime.click(copy_button, strategy='atspi_only'):
             result.add_step('extract_primary', False, 'Gemini copy button click failed',
                             snapshot=snap.serializable())
             return False

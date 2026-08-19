@@ -6,7 +6,7 @@ This is THE model the consultation engine must obey. Everything in the codebase 
 
 This section controls the current production path: Taey operates each Chat manually, one action at a time. Later automation must use this same contract and primitives; it may not invent a parallel execution path. The detailed requirements later in this file are subordinate where they conflict with this section.
 
-- Everything required for operation is present in the AT-SPI tree. An apparent absence means wrong scope, stale observation, filtering defect, environment defect, or demonstrated UI drift; it never authorizes OCR, pixels, coordinates, raw shell UI drive, substring search, or a remembered shortcut.
+- Everything required to identify and validate an operation is present in the AT-SPI tree. An apparent absence means wrong scope, stale observation, filtering defect, environment defect, or demonstrated UI drift; it never authorizes OCR, pixels, a raw or remembered coordinate locator, raw shell UI drive, substring search, or a remembered shortcut.
 - Browser chrome is excluded except the address bar. The full chat-history/sidebar block and dynamic non-actionable text such as greetings are excluded. The current document, current actionable controls, and the currently opened menu, submenu, or dialog remain visible.
 - Every control locator is an exact YAML-owned name plus role, with exact required state or an exact structural locator only where the visible value is inherently dynamic. Zero matches, multiple matches, or an unexpected state stop the current UI transaction for root-cause analysis; they do not stop recovery engineering.
 - The manual lifecycle is: new-chat navigation and URL capture; model, mode, and tool selection; two attachments; prompt paste; send preferably by Enter according to YAML; stop-button appearance; two consecutive fresh stop-button absences; scroll to bottom; exact Copy activation; platform-specific response-attachment harvest; complete prompt/response/input/output/URL ingestion into ISMA.
@@ -42,6 +42,10 @@ There is no third path. Specifically **BANNED** (in code and in behavior):
 
 Per platform: **1 YAML + 1 driver. No overlap.** Drivers carry zero platform knowledge; they call shared primitives only (click, click-react, **hover/pointer_move**, paste, snapshot, menu_snapshot, settle). (hover/pointer_move is REQUIRED — Gatekeeper item 3: a hover-only flyout is otherwise unreachable, a notify-forever dead end no YAML edit can resolve.)
 
+`hover/pointer_move` does not weaken tree authority. The platform YAML must declare hover on one exact mapped
+trigger, and the primitive may derive transient pointer placement only from that live node's AT-SPI extents.
+Geometry never discovers or disambiguates the target and is never a fallback after an exact match fails.
+
 The YAML maps **everything** exact-match:
 - The chat: browser chrome is filtered out except the address bar; the full sidebar/history block and dynamic non-actionable text such as greetings are also filtered out. **Every remaining element** is mapped exact — EXCEPT the response transcript: map the transcript CONTAINER (name/role), exempt its child text nodes from string validation (presence+role only), and exclude the transcript subtree from all session-driving locators. The response text is unbounded/unpredictable — it cannot be exact-mapped and must never be a control locator.
 - **Every menu and submenu** (model picker, tools, attach, mode flyouts) — exact names + roles, plus each flyout's **trigger type** (click vs hover/pointer_move) and its tree-attachment point.
@@ -65,7 +69,7 @@ A no-match is often just the tree not refreshed yet (attach menu slow to open, R
 
 ## Everything required is in the tree — enforced precondition
 
-The file tile and every selected option are represented in the AT-SPI tree. If something appears absent, the observation has not settled, the wrong tree scope or filter was used, the accessibility environment is defective, or the platform UI changed and the YAML must be reconciled. At build and launch, force renderer accessibility on and assert every critical-path control is AT-SPI-visible. Pixels, OCR, coordinates, raw shell UI drive, and remembered shortcuts are never substitutes for correcting the tree projection. Until the tree and YAML reconcile exactly, the current transaction remains stopped.
+The file tile and every selected option are represented in the AT-SPI tree. If something appears absent, the observation has not settled, the wrong tree scope or filter was used, the accessibility environment is defective, or the platform UI changed and the YAML must be reconciled. At build and launch, force renderer accessibility on and assert every critical-path control is AT-SPI-visible. Pixels, OCR, raw or remembered coordinate locators, raw shell UI drive, and remembered shortcuts are never substitutes for correcting the tree projection. Until the tree and YAML reconcile exactly, the current transaction remains stopped.
 
 ## How this stays true (enforcement, not memory) — hardened per the audit
 

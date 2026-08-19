@@ -18,8 +18,11 @@ The engine must consume, without reinterpretation:
 6. Exactly one destination platform YAML for every platform-specific element, operation, state, and timing value.
 
 Shared engine code may provide genuine primitives, canonical snapshot construction, receipts, durable run state,
-and notification transport. It may not contain platform UI strings, coordinates, pixels, OCR, substring or fuzzy
-matching, hidden fallbacks, automatic action retries, or a second accessibility-tree reader.
+and notification transport. A promotable engine may not contain platform UI strings, raw/remembered coordinate
+locators, pixels, OCR, substring or fuzzy matching, hidden fallbacks, automatic action retries, or a second
+accessibility-tree reader. `ConsultationRuntime` rejects every click strategy except `atspi_only`; a failed AT-SPI
+action stops instead of falling back. A YAML-declared hover may derive transient pointer placement from an already
+exact-mapped live node; it may not use geometry to select or rescue a target.
 
 ## Current execution boundary
 

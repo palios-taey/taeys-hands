@@ -1542,20 +1542,14 @@ class _ClaudeInlineBase:
         strategy: str | None,
     ) -> bool:
         readiness = self._selection_click_readiness(element, strategy)
-        chosen = str(readiness['strategy']).lower()
-        if chosen == 'coordinate_only':
-            return bool(readiness['has_coordinates'])
-        if chosen == 'atspi_only':
-            return bool(readiness['has_action'])
-        return bool(readiness['has_coordinates'] or readiness['has_action'])
+        return bool(readiness['has_action'])
 
     def _selection_click_readiness(
         self,
         element: ElementRef | None,
         strategy: str | None,
     ) -> dict[str, Any]:
-        chosen = (strategy or self.runtime.click_strategy or 'xdotool_first').lower()
-        has_coordinates = bool(element and element.x is not None and element.y is not None)
+        chosen = (strategy or self.runtime.click_strategy or 'atspi_only').lower()
         has_action = False
         if element is not None and element.atspi_obj is not None:
             try:
@@ -1565,10 +1559,7 @@ class _ClaudeInlineBase:
                 has_action = False
         return {
             'strategy': chosen,
-            'has_coordinates': has_coordinates,
             'has_action': has_action,
-            'x': element.x if element is not None else None,
-            'y': element.y if element is not None else None,
             'role': element.role if element is not None else None,
             'name': element.name if element is not None else None,
         }
@@ -2448,7 +2439,7 @@ class _ClaudeInlineBase:
                 return True, True
             clicked = self.runtime.click(
                 action_element,
-                strategy=str(state.get('click_strategy') or 'atspi_first'),
+                strategy=str(state.get('click_strategy') or 'atspi_only'),
             )
             action_counts[name] = current_count + 1
             result.add_step(
@@ -3844,7 +3835,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     ) -> bool:
         attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
         trigger_key = str(attachment_cfg.get('trigger') or 'toggle_menu')
-        trigger_strategy = str(attachment_cfg.get('trigger_click_strategy') or self.cfg.get('click_strategy') or 'atspi_first')
+        trigger_strategy = str(attachment_cfg.get('trigger_click_strategy') or self.cfg.get('click_strategy') or 'atspi_only')
         upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
         self.runtime.focus_firefox()
         self.runtime.press('Escape')
@@ -4842,7 +4833,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         click_strategy = str(
             extra_cfg.get('artifact_opener_click_strategy')
             or self.cfg.get('click_strategy')
-            or 'xdotool_first'
+            or 'atspi_only'
         )
         clicked = self.runtime.click(target, strategy=click_strategy)
         settle_ms = int(extra_cfg.get('artifact_panel_settle_ms') or 1200)

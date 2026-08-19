@@ -16,7 +16,9 @@ production-ready.
    interaction: a fresh canonical tree, one approved action, and a fresh independent validation.
 4. Each platform YAML is executable UI authority. The freshly filtered AT-SPI tree is the oracle. A mismatch
    stops the current UI transaction and produces evidence for recovery engineering; it never authorizes a
-   fuzzy matcher, pixel/OCR path, coordinate action, remembered shortcut, or action retry.
+   fuzzy matcher, pixel/OCR path, raw or remembered coordinate locator, remembered shortcut, or action retry.
+   A YAML-declared hover may derive transient pointer placement from the exact mapped node's live extents; this
+   is actuation after exact selection, never discovery, disambiguation, or fallback.
 
 The order above resolves contradictions. `100_TIMES.md`, engine-era contracts, and implementation comments
 do not override it.
@@ -28,10 +30,10 @@ do not override it.
 | Manual lifecycle | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Taey performs one action and validates it before choosing the next. | Canonical implementation; platform production validation is tracked separately. |
 | Consultation inputs | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md) | Exactly one governance bundle, one task bundle, and one brief on-screen prompt. | Canonical contract; the current one-package builder is not conformant and must not be promoted as the manual path. |
 | Tree projection and filtering | [`YAML_SCHEMA.md`](YAML_SCHEMA.md) plus each platform YAML | [`snapshot.py`](snapshot.py) and the platform package expose browser chrome only for the address bar, exclude the complete chat-history/sidebar block and dynamic non-actionable text, and retain the current document, actionable controls, and opened overlay. | `drive_chat` consumes this canonical snapshot directly; scoped refs are revision-bound and exact-match-only. |
-| Primitive verbs and locking | [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md) | Shared runtime, AT-SPI, input, interaction, clipboard, and display-lock primitives. | Current substrate; the manual adapter must remain thin and carry no platform UI strings. |
+| Primitive verbs and locking | [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md) | Canonical snapshot, AT-SPI/input/interaction, clipboard, and display-lock primitives. | `drive_chat` and `ConsultationRuntime` fail closed on non-AT-SPI click strategies. |
 | Platform ownership | Each [`platforms/<platform>/`](platforms/) package | One YAML, one driver, one monitor per ChatGPT, Claude, Gemini, Grok, and Perplexity. | Package layout exists; manual action coverage and current live YAML equality still require platform-by-platform control. |
 | Completion | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md) and platform monitors | Stop appearance proves send; two consecutive fresh Stop absences, separated by the YAML-owned interval and with no mapped exception state, prove completion. | Passive monitors exist. A sent production validation must exercise this real lifecycle. |
-| Extraction | [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) and [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Scroll fully to bottom, activate the exact mapped Copy element, then harvest platform-specific response attachments. | Engine extraction exists; the manual path delegates response extraction but does not yet create the complete session receipt. |
+| Extraction | [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) and [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Scroll fully to bottom, activate the last exact mapped Copy element, then harvest platform-specific response attachments. | This is the current manual rule; complete manual session receipt and ingestion closure remain unwired. |
 | Ingestion | [`ingest.py`](ingest.py) | Persist prompt, response, input/output attachments, final URL, and receipts; `auto_ingest` optionally submits the session to ISMA. | Implemented for the engine path, not wired into the current manual path. Do not claim manual ingestion until a production receipt proves it. |
 | Repository baseline | [`../docs/DOCUMENTATION_MAP.md`](../docs/DOCUMENTATION_MAP.md) | Current authority, reference, generated, and excluded surfaces. | Current; dated runtime claims require fresh production receipts. |
 
@@ -63,7 +65,7 @@ canonical snapshot.
 |---|---|---|
 | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Canonical-current | Current manual lifecycle and invariants. |
 | [`../PLATFORM_INDEPENDENCE_SPEC.md`](../PLATFORM_INDEPENDENCE_SPEC.md) | Canonical-current | YAML-only UI policy and platform isolation. |
-| [`../docs/UI_INTERACTION_AUTHORITY.md`](../docs/UI_INTERACTION_AUTHORITY.md) | Canonical-current | Supervised single-action grammar. |
+| [`../docs/UI_INTERACTION_AUTHORITY.md`](../docs/UI_INTERACTION_AUTHORITY.md), [`../docs/SUPERVISED_UI_PROTOCOL.md`](../docs/SUPERVISED_UI_PROTOCOL.md) | Canonical-current | Supervised single-action grammar and immutable approval/receipt state machine. |
 | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md), [`YAML_SCHEMA.md`](YAML_SCHEMA.md), [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md), [`EXTRACTION_SCHEMA.md`](EXTRACTION_SCHEMA.md) | Canonical-current | Consultation inputs, declarative UI mapping, and shared-substrate contracts. |
 | [`CONSULT_MONITOR_SPEC.md`](CONSULT_MONITOR_SPEC.md), [`EXTRACTION_PATTERNS.md`](EXTRACTION_PATTERNS.md) | Operating-current | Passive monitoring and platform-specific extraction behavior. |
 | [`../100_TIMES.md`](../100_TIMES.md) | Operating-current | Short tree-only manual checklist reconciled to the authorities above. |
@@ -75,6 +77,7 @@ canonical snapshot.
 - Complete substantive, monitor-backed production transactions on every platform from the current YAML maps.
 - Keep native chooser interaction recoverable as explicit primitives with a fresh browser-tree attachment proof.
 - Wire the complete manual extraction/session receipt into `ingest.py` only after the manual path is proven.
+- Keep the fail-closed AT-SPI-only action boundary intact before any autonomous engine promotion.
 
 The autonomous engine remains out of the production control path while these items are open. Later automation
 must compile to this same YAML-owned path; it may not create a parallel observer, locator grammar, or action
