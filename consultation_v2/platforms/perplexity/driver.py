@@ -909,7 +909,7 @@ class _PerplexityInlineBase:
                 )
                 return True
 
-        opened = self._open_selection_menu(trigger_key, first_key, scope, result)
+        opened = self._open_selection_menu(trigger_key, first_key, scope, operate, result)
         if opened is None:
             return False
         snapshot, _ = opened
@@ -1064,7 +1064,7 @@ class _PerplexityInlineBase:
             )
             return active_present
         time.sleep(0.2)
-        verify_opened = self._open_selection_menu(trigger_key, first_key, scope, result)
+        verify_opened = self._open_selection_menu(trigger_key, first_key, scope, operate, result)
         if verify_opened is None:
             return False
         verify_snapshot, _ = verify_opened
@@ -1104,6 +1104,7 @@ class _PerplexityInlineBase:
         trigger_key: str,
         expected_key: str,
         scope: str,
+        operate: dict[str, Any],
         result: ConsultationResult,
     ) -> tuple[Snapshot, ElementRef] | None:
         transition_seen = bool(getattr(self, '_selection_menu_transition_seen', False))
@@ -1142,12 +1143,33 @@ class _PerplexityInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if not self.runtime.click(trigger):
+        open_method = str(operate.get('open_method') or '').strip().lower()
+        open_key = str(operate.get('open_key') or '').strip()
+        if open_method != 'focus_and_key_open' or not open_key:
             result.add_step(
                 'select',
                 False,
-                f'{self.platform} selection trigger {trigger_key} click failed',
+                f'{self.platform} selection trigger {trigger_key} has no exact YAML open operation',
                 trigger=trigger_key,
+                open_method=open_method,
+                open_key=open_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        open_evidence = self.runtime.focus_and_key_open(
+            trigger,
+            key=open_key,
+            settle=self._selection_settle_seconds(),
+        )
+        if not bool(open_evidence.get('ok')):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} YAML operation failed',
+                trigger=trigger_key,
+                open_method=open_method,
+                open_key=open_key,
+                open_evidence=open_evidence,
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
@@ -3673,10 +3695,15 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         result: ConsultationResult,
     ) -> bool:
         self.runtime.close_stale_dialogs()
+        attachment = self.cfg['workflow']['attachment']
+        trigger_key = str(attachment['trigger'])
+        upload_key = str(attachment['menu_target'])
+        open_method = str(attachment.get('open_method') or '').strip().lower()
+        open_key = str(attachment.get('open_key') or '').strip()
         for file_path in request.attachments:
             abs_path = os.path.abspath(file_path)
             snap = self.runtime.snapshot()
-            trigger = self.find_first(snap, 'attach_trigger')
+            trigger = self.find_first(snap, trigger_key)
             if not trigger:
                 result.add_step(
                     'attach', False,
@@ -3684,21 +3711,38 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     snapshot=snap.serializable(),
                 )
                 return False
-            if not self.runtime.click(trigger):
+            if open_method != 'focus_and_key_open' or not open_key:
                 result.add_step(
                     'attach', False,
-                    f'Perplexity attach trigger click failed for {abs_path}',
+                    'Perplexity attachment YAML has no exact focus+key operation',
+                    open_method=open_method,
+                    open_key=open_key,
+                    snapshot=snap.serializable(),
+                )
+                return False
+            open_evidence = self.runtime.focus_and_key_open(
+                trigger,
+                key=open_key,
+                settle=0.3,
+            )
+            if not bool(open_evidence.get('ok')):
+                result.add_step(
+                    'attach', False,
+                    f'Perplexity attach trigger YAML operation failed for {abs_path}',
+                    open_method=open_method,
+                    open_key=open_key,
+                    open_evidence=open_evidence,
                     snapshot=snap.serializable(),
                 )
                 return False
             # Settle + rescan (DRIVER_CONTRACT Section E): the attach dropdown's
             # "Upload files or images" item renders a beat after the trigger
-            # click. A fixed time.sleep(0.7) + one-shot read flaked ("upload
+            # operation. A fixed time.sleep(0.7) + one-shot read flaked ("upload
             # item not found") when the menu was slow to render - the item was
             # present moments later. Poll for it (observation only, no re-click)
             # before declaring it missing, same readiness pattern as mode-select.
             menu_snap, upload_item = self.wait_for_key(
-                'upload_files_item',
+                upload_key,
                 timeout=10.0,
                 interval=0.4,
                 scope='menu',
@@ -4416,21 +4460,23 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        is_deep_research = self._is_deep_research(request)
-        if not is_deep_research:
-            # Wait for non-Deep-Research responses to finish exposing their action row.
-            time.sleep(2.0)
         if not self._ensure_answer_thread(result):
             return False
-
-        if is_deep_research:
-            # The DR action-row Copy is only a thin summary; Markdown is the
-            # source-bearing report artifact and therefore the only valid DR path.
-            return self._extract_deep_research_markdown(request, result)
-
+        extract_cfg = self.cfg['workflow']['extract']
+        target_key = str(extract_cfg.get('primary_key') or '').strip()
+        strategy = str(extract_cfg.get('strategy') or '').strip().lower()
+        if target_key != 'copy_button' or strategy != 'last_by_y':
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity YAML does not declare last exact Copy extraction',
+                stop_condition='extraction_failed',
+                target_key=target_key,
+                strategy=strategy,
+            )
+            return False
         self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
         snap = self.runtime.snapshot()
-        target_key = 'copy_button'
         target = self.find_last(snap, target_key)
         if not target:
             result.add_step(
