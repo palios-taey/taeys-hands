@@ -228,10 +228,8 @@ workflow:
           - stop_button
       copy_response:
         elements:
-          - share_export
-          - copy_content_item
-        sequence: true
-        action: activate
+          - copy_button
+        pick: last_by_y
     attachment_present:
       filename_value: stem
       filename_roles:
