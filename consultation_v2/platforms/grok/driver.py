@@ -23,6 +23,14 @@ from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
+from consultation_v2.run_state_identity import (
+    LegacyUnscopedRunState,
+    assert_request_run_state_available,
+    durable_run_id,
+    durable_state_fields,
+    monitor_id as durable_monitor_id,
+    read_durable_run_state,
+)
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.stop_conditions import is_stop_condition
@@ -1847,10 +1855,8 @@ class _GrokInlineBase:
     RUN_STATE_EXTRACTION_DONE = 'extraction_done'
 
     def _monitor_id(self, request: ConsultationRequest) -> str:
-        """Deterministic monitor/session id for this consultation. Derived from
-        the same stable request_id so a resumed run re-registers/looks up the
-        SAME monitor session rather than spawning a duplicate."""
-        return f'{self.platform}:{request.request_id()}'
+        """Deterministic mode-scoped monitor/session id for this consultation."""
+        return durable_monitor_id(request)
 
     def checkpoint_run_state(
         self,
@@ -1883,12 +1889,13 @@ class _GrokInlineBase:
         "cannot prove a prior send" (it still gates on the live URL/Stop tree)."""
         try:
             self.write_run_state(
-                request.request_id(),
+                durable_run_id(request),
                 {
                     'status': status,
                     'platform': self.platform,
                     'prompt_hash': request.prompt_hash(),
                     'session_target': request.session_url or 'new',
+                    **durable_state_fields(request),
                     **fields,
                 },
             )
@@ -1925,7 +1932,18 @@ class _GrokInlineBase:
         # landed-send record from an earlier run is detected, never clobbered.
         prior = None
         try:
-            prior = self.read_run_state(request.request_id())
+            prior = read_durable_run_state(request)
+        except LegacyUnscopedRunState as exc:
+            result.add_step(
+                'run_state_read', False, str(exc),
+                legacy_unscoped=True,
+                legacy_request_id=exc.request_id,
+                durable_run_id=exc.durable_run_id,
+                mode=exc.mode,
+                prior_status=exc.record.get('status'),
+                side_effect_uncertain=True,
+            )
+            return False
         except Exception as exc:  # noqa: BLE001 - cannot prove prior, gate on live tree
             result.add_step(
                 'run_state_read', False,
@@ -2122,7 +2140,7 @@ class _GrokInlineBase:
     ) -> bool:
         captured_url = str(prior.get('url') or '')
         try:
-            cleared = self.clear_run_state(request.request_id())
+            cleared = self.clear_run_state(durable_run_id(request))
         except Exception as exc:  # noqa: BLE001 - stale idempotency must fail loudly
             result.add_step(
                 'run_state_resume_rejected',
@@ -2192,6 +2210,7 @@ class _GrokInlineBase:
             'mode': str(request.selection_value('mode', '') or ''),
             'timeout': request.timeout,
             'request_id': request.request_id(),
+            **durable_state_fields(request),
             'prompt_hash': request.prompt_hash(),
             'purpose': request.purpose or '',
         }
@@ -2851,11 +2870,11 @@ class _GrokInlineBase:
         The lock is released at the EXACT moment setup_and_send returns (the
         send-registered handoff) AND on any setup/send failure or exception
         (release-safe ``finally`` in ``_display_dispatch_lock``)."""
-        self.assert_session_not_dead(request.request_id())
         with pause_display_watchdog(self.platform, self._display()):
             result = self.result(request)
             if not self._gate_selection_plan(request, result):
                 return result
+            assert_request_run_state_available(request)
             with self._display_dispatch_lock(request) as owns_display:
                 if not owns_display:
                     # Another consultation holds this display's dispatch lock. Per
