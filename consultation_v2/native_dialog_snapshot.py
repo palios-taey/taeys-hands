@@ -483,12 +483,7 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
             f'{platform}: native dialog root is ambiguous ({len(outer_roots)} direct '
             f'Firefox children); matches={json.dumps(_candidate_evidence(outer_roots), sort_keys=True)}'
         )
-    root = outer_roots[0]
-    if not _states_match(root, root_spec):
-        raise NativeDialogObservationError(
-            f'{platform}: native dialog root state drift at {root.path}; '
-            f'expected={root_spec["required_states"]!r} observed={list(root.states)!r}'
-        )
+    root_probe = outer_roots[0]
 
     capture_text_specs = tuple(
         spec
@@ -496,11 +491,22 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
         if spec.get('capture_text')
     )
     subtree = _subtree(
-        root.obj,
-        root.path,
+        root_probe.obj,
+        root_probe.path,
         contract['max_depth'],
         capture_text_specs,
     )
+    root = subtree[0]
+    if root.role != root_spec['role']:
+        raise NativeDialogObservationError(
+            f'{platform}: native dialog root role drift during capture at {root.path}; '
+            f'expected={root_spec["role"]!r} observed={root.role!r}'
+        )
+    if not _states_match(root, root_spec):
+        raise NativeDialogObservationError(
+            f'{platform}: native dialog root state drift during capture at {root.path}; '
+            f'expected={root_spec["required_states"]!r} observed={list(root.states)!r}'
+        )
     selected: Dict[str, tuple[_ObservedNode, ...]] = {}
     for key, spec in contract['elements'].items():
         if key == root_key:
