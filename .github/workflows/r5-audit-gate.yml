@@ -1,0 +1,102 @@
+# r5-audit-gate - mechanical R5 adversarial-audit gate.
+#
+# A risky PR must have both independent auditor commit statuses on the exact PR
+# head before the app-bound Actions job named `gate` succeeds:
+#   - audit/grok
+#   - audit/gatekeeper
+#
+# This workflow never writes commit statuses. Branch protection/rulesets must
+# require the Actions check `gate`; requiring a commit status named
+# `r5-audit-gate` is forgeable and is not this gate.
+name: r5-audit-gate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  status: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'status' &&
+       (github.event.context == 'audit/grok' ||
+        github.event.context == 'audit/gatekeeper'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate R5 audit gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            PR_NUM="${{ github.event.pull_request.number }}"
+          else
+            HEAD_SHA="${{ github.event.sha }}"
+            PR_JSON="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" 2>/dev/null || echo '[]')"
+            PR_NUM="$(echo "$PR_JSON" | jq -r '.[0].number // empty')"
+            BASE_REF="$(echo "$PR_JSON" | jq -r '.[0].base.ref // empty')"
+            if [ -z "$PR_NUM" ]; then
+              echo "status event for $HEAD_SHA maps to no open PR; nothing to gate."
+              exit 0
+            fi
+          fi
+
+          echo "PR #$PR_NUM head=$HEAD_SHA base=$BASE_REF"
+
+          git fetch -q origin "$BASE_REF"
+          CHANGED="$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA")"
+          echo "changed files:"
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            echo "  $path"
+          done <<< "$CHANGED"
+
+          RISKY=0
+          while IFS= read -r pattern; do
+            [ -n "$pattern" ] || continue
+            case "$pattern" in \#*) continue;; esac
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              # shellcheck disable=SC2254
+              case "$path" in $pattern)
+                RISKY=1
+                echo "  RISKY: $path matches $pattern"
+                ;;
+              esac
+            done <<< "$CHANGED"
+          done < .github/r5-risky-paths
+
+          if [ "$RISKY" -eq 0 ]; then
+            echo "no R5 risky surface touched; Actions check gate succeeds."
+            exit 0
+          fi
+
+          COMBINED="$(gh api "repos/$REPO/commits/$HEAD_SHA/status")"
+          grok_state="$(echo "$COMBINED" | jq -r '([.statuses[]? | select(.context=="audit/grok")][0].state) // "missing"')"
+          gatekeeper_state="$(echo "$COMBINED" | jq -r '([.statuses[]? | select(.context=="audit/gatekeeper")][0].state) // "missing"')"
+
+          echo "combined_state=$(echo "$COMBINED" | jq -r '.state // "missing"')"
+          echo "audit/grok=$grok_state audit/gatekeeper=$gatekeeper_state"
+
+          if [ "$grok_state" = "success" ] && [ "$gatekeeper_state" = "success" ]; then
+            echo "R5 ENDORSED: audit/grok + audit/gatekeeper; Actions check gate succeeds."
+            exit 0
+          fi
+
+          echo "R5 required: audit/grok=$grok_state audit/gatekeeper=$gatekeeper_state; both must be success."
+          echo "Failing the Actions job. No commit status is written."
+          exit 1
