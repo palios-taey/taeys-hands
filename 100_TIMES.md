@@ -32,6 +32,9 @@ those documents, the current authorities win.
 
 - Read a fresh canonical tree, choose exactly one YAML-authorized action, execute it once, then read a fresh
   independent tree and validate the declared postcondition before choosing another action.
+- One action means one YAML-declared semantic operation. `focus_and_key_open` is one `operate`: the runtime
+  focuses the exact fresh ref, verifies focus, and sends the exact YAML `open_key`; the next independent
+  observation must prove the exact YAML menu target. Taey never sequences those internal primitives.
 - A raw or hardcoded coordinate is never an action. A hover-only flyout is reached only when its platform YAML
   declares hover on the exact mapped trigger; the primitive derives transient pointer placement from that live
   node and has no alternate target or fallback.

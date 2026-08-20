@@ -93,10 +93,10 @@ the immediately preceding fresh observation in the same scope. If a mapped item 
 `declared_operation`, call `operate` with its ref; otherwise use only the direct action authorized by the
 selected platform card.
 
-`declared_operation.primitives` describes the complete ordered state machine, not the work of one
-`operate` call. One `operate` call executes only the single primitive in `declared_operation.allowed_now`.
-For `focus_and_key_open`, this means `focus`, fresh base observation, then `key:<open_key>` through a second
-`operate` call on the new ref. Never inspect the opened-menu scope after the focus receipt alone.
+`declared_operation.primitives` describes how the runtime implements the semantic operation. For
+`focus_and_key_open`, one `operate` call focuses the exact fresh ref, verifies focus, and sends the exact YAML
+`open_key`. Require `performed_primitive="focus_and_key_open"`, then observe the declared menu scope and prove
+the exact YAML target. Taey never issues separate focus and key calls for this method.
 
 ## The invariant for every worker turn
 
@@ -153,10 +153,8 @@ For each row in `workflow.full_consult.select_mode`:
 4. When `open_method` is absent, require the trigger has no `declared_operation`, then use direct `click` on
    the exact fresh trigger ref once. This is the driver's existing default menu-open action.
 5. For `open_method: click`, require `allowed_now=["click"]` and `operate` the fresh trigger ref once.
-6. For `open_method: focus_and_key_open`, require `allowed_now=["focus"]`, `operate` the fresh trigger ref,
-   require the receipt's `performed_primitive` is `focus`, then observe `base` again. Require the new trigger
-   ref is `focused` and advertises exactly `allowed_now=["key:<open_key>"]`; `operate` that new ref and require
-   the receipt's `performed_primitive` is `key:<open_key>`.
+6. For `open_method: focus_and_key_open`, `operate` the fresh trigger ref once and require the receipt's
+   `performed_primitive` is `focus_and_key_open`.
 7. Only after the complete open receipt, observe exactly the menu's `operate.scope`.
 8. Require exactly one mapped ref for the requested option element.
 9. `operate` that option ref when it advertises `declared_operation`; otherwise use its YAML-authorized direct
@@ -173,14 +171,8 @@ Start from a fresh base observation and record the current attachment-chip/remov
 
 ```text
 observe base
-require <attachment trigger declared_operation.allowed_now> == ["focus"]
 operate <fresh attachment trigger ref>
-require performed_primitive == "focus"
-observe base
-require <fresh attachment trigger> is focused
-require <fresh attachment trigger declared_operation.allowed_now> == ["key:<workflow.attachment.open_key>"]
-operate <fresh attachment trigger ref>
-require performed_primitive == "key:<workflow.attachment.open_key>"
+require performed_primitive == "focus_and_key_open"
 observe using <workflow.attachment.scope, otherwise base>
 operate or authorized direct action on <workflow.attachment.menu_target fresh ref>
 observe
