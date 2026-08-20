@@ -22,6 +22,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 _DISPLAY_RE = re.compile(r'^:[0-9]{1,3}$')
 _GIT_COMMIT_RE = re.compile(r'^(?:[0-9a-f]{40}|[0-9a-f]{64})$')
+_DBUS_ADDRESS_RE = re.compile(r'^\s*string "([^"\r\n]+)"\s*$', re.MULTILINE)
 _REQUEST_LIMIT = 1024 * 1024
 _PUBLIC_ORIGINS = frozenset({
     'git@github.com:palios-taey/taeys-hands.git',
@@ -114,7 +115,7 @@ def _bind_display(display: str) -> None:
             raise RuntimeError(f'{context} is empty')
         return value
 
-    atspi_bus = read_binding(
+    configured_atspi_bus = read_binding(
         Path('/tmp') / f'a11y_bus_{display}',
         'AT-SPI bus binding',
     )
@@ -122,6 +123,32 @@ def _bind_display(display: str) -> None:
         Path('/tmp') / f'dbus_session_bus_{display}',
         'D-Bus session binding',
     )
+    query_environment = dict(os.environ)
+    query_environment['DBUS_SESSION_BUS_ADDRESS'] = session_bus
+    try:
+        query = subprocess.run(
+            [
+                'dbus-send',
+                '--session',
+                '--print-reply',
+                '--dest=org.a11y.Bus',
+                '/org/a11y/bus',
+                'org.a11y.Bus.GetAddress',
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=query_environment,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError('unable to resolve live AT-SPI bus identity') from exc
+    addresses = _DBUS_ADDRESS_RE.findall(query.stdout)
+    if len(addresses) != 1:
+        raise RuntimeError('live AT-SPI bus identity is missing or ambiguous')
+    atspi_bus = addresses[0]
+    if atspi_bus.split(',', 1)[0] != configured_atspi_bus.split(',', 1)[0]:
+        raise RuntimeError('live AT-SPI bus socket differs from display binding')
     os.environ['DISPLAY'] = display
     os.environ['AT_SPI_BUS_ADDRESS'] = atspi_bus
     os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
