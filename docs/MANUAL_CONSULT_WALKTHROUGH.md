@@ -11,6 +11,9 @@ The governing contracts are [`100_TIMES.md`](../100_TIMES.md),
 turns those contracts into a small worker handoff. The platform YAML remains mutable UI authority and each
 fresh `drive_chat` observation remains the runtime oracle.
 
+This file is the sole executable supervisor-to-worker procedure for this manual lane. The linked contracts
+define its invariants; they are not alternate launch procedures.
+
 ## Give one worker only these inputs
 
 ```text
@@ -25,6 +28,50 @@ RESPONSE_FILE=<new absolute path for the verbatim response>
 Send one platform leg per worker turn. Do not ask one worker to read all five YAMLs, hold all five identities,
 or drive several displays. Bundle A, Bundle B, and the prompt are frozen before the worker starts. The worker
 does not edit, summarize, rebuild, lint, or reinterpret them.
+
+## Start one ChatGPT worker
+
+This is the canonical current-path invocation for the first platform leg. Its `manual-chat-ui` transport and
+first-error terminalization have production receipts; a complete send receipt through this exact entrypoint
+is still the acceptance gate. Do not describe it as fully production-proven until that receipt exists.
+
+First write one frozen request JSON file, replacing only the five uppercase fields in `content`:
+
+```json
+{
+  "model": "taey",
+  "stream": false,
+  "max_tokens": 8192,
+  "chat_template_kwargs": {"enable_thinking": false},
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read RUNBOOK. Execute the ChatGPT send phase only on DISPLAY with BUNDLE_A, BUNDLE_B, and PROMPT_FILE. Use drive_chat only and follow the runbook exactly. Stop after the section 6 send receipt or the first mismatch. Do not extract, retry, or recover in this turn."
+    }
+  ]
+}
+```
+
+Then replace the six uppercase command fields and invoke the worker exactly once:
+
+```bash
+curl -sS --max-time 3600 \
+  -D RESPONSE_HEADERS \
+  -o RESPONSE_JSON \
+  -H 'Content-Type: application/json' \
+  -H 'X-Taey-Seat-Id: SEAT_ID' \
+  -H 'X-Taey-Event-Id: EVENT_ID' \
+  -H 'X-Taey-Correlation-Id: CORRELATION_ID' \
+  -H 'X-Taey-Tool-Profile: manual-chat-ui' \
+  --data-binary @WORKER_REQUEST_JSON \
+  http://127.0.0.1:8767/v1/chat/completions
+```
+
+`SEAT_ID`, `EVENT_ID`, and `CORRELATION_ID` must be unique, stable identifiers for this one transaction and
+must match their values in the returned response headers. `RESPONSE_HEADERS` and `RESPONSE_JSON` must be new
+paths. A curl error, non-200 response, missing/mismatched identity header, malformed response, worker stop
+report, or missing section 6 send receipt ends the transaction. Never resend the request after an uncertain
+transport result.
 
 ## Exact `drive_chat` vocabulary
 
