@@ -31,7 +31,7 @@ VALIDATOR_PATH = 'consultation_v2/validators/validate_supervised_ui_design_rules
 TRAINING_REPO = 'palios-taey/palios-training'
 TRAINING_COMMIT = '58b108042e66fa508765a6277c033cc5a8f86abd'
 HANDS_REPO = 'palios-taey/taeys-hands'
-HANDS_COMMIT = '96847ebba90f6031d35cd76d579a75f9b937dc02'
+HANDS_COMMIT = 'e5f5de01a5c51107b6f2bf0759a5cd93aed08da1'
 NO_TRACE_CLAIM = 'design-backed rule only; no production trace or tool result'
 MAX_CANDIDATE_BYTES = 16 * 1024 * 1024
 
@@ -56,16 +56,16 @@ TRAINING_SOURCES = (
 
 HANDS_SOURCE_SHA256 = {
     'consultation_v2/supervised_ui_contract.py': (
-        'f3be0eeb6c4535529a5e0acf6778335cde9f446b368dadd998b0e75ede7dfcc3'
+        'c3adcb48afc691be3d2dde7e1ee062f4da0d6dce55a56bdfb18b552c314a13e5'
     ),
     'consultation_v2/supervised_ui_receipts.py': (
-        '30a8afe01ce76e40483ed7de32cc73bb1c0da0192576f94e69528858e9394880'
+        '34bd763ae47ad783e253030d87ffab579be0e8d60655f18bdc3de450e9d96890'
     ),
     'consultation_v2/supervised_ui_seat.py': (
-        '5b8517541a4d6ead65b411e8bd18b9d153d873c95dacea10dd1162d46d032efd'
+        '58c4641ac58c01d43e92afab2bd70ccbe1b669e05d362ed09a981d85bd8c2e21'
     ),
     'scripts/run_supervised_ui_seat.py': (
-        'a454355f4c5dab4f1ce3b7d960522c58b6f106d8f1baf2eb7590d1699e9cd362'
+        'ecb2383fc8507e43ad02701edfee4d8dbc0d9218d7b05aca796a40f14fcc1bdb'
     ),
     'consultation_v2/platforms/chatgpt/supervised_ui.yaml': (
         '50d307f0cd265de420aef6ece6985baa2943a213508fba40dbed0a9e4513e2ba'
@@ -77,11 +77,82 @@ HANDS_SOURCE_SHA256 = {
         '02ce600e094f0565102fb5ecb97cc7638e50eef14ee963a9592c54a2247d9668'
     ),
     'consultation_v2/platforms/grok/supervised_ui.yaml': (
-        '02ce600e094f0565102fb5ecb97cc7638e50eef14ee963a9592c54a2247d9668'
+        'd260e1189d26a5a5e1a3215c6771966dff2afffa24e4dd6c9a8b5ab1d785bd29'
     ),
     'consultation_v2/platforms/perplexity/supervised_ui.yaml': (
         'fd8c76a22eb3a9f5e59dc5dd3b40c85eeda682f0ecd91cbe3db347bbdcfb8400'
     ),
+}
+
+_FOCUS_TRANSITION = (('focus', (True, (), ('focused',)), (True, ('focused',), ())),)
+_EXPECTED_LIVE_POLICIES = {
+    'chatgpt': {
+        'input_ask_anything': (
+            'prompt_composer_alternate',
+            'Alternate prompt composer',
+            'entry',
+            ('focus',),
+            'local',
+            _FOCUS_TRANSITION,
+        ),
+        'input_chat_with_chatgpt': (
+            'prompt_composer_primary',
+            'Primary prompt composer',
+            'entry',
+            ('focus',),
+            'local',
+            _FOCUS_TRANSITION,
+        ),
+    },
+    'claude': {
+        'input': (
+            'prompt_composer', 'Prompt composer', 'entry', ('focus',), 'local', _FOCUS_TRANSITION,
+        ),
+    },
+    'gemini': {
+        'input': (
+            'prompt_composer', 'Prompt composer', 'entry', ('focus',), 'local', _FOCUS_TRANSITION,
+        ),
+    },
+    'grok': {
+        'input': (
+            'prompt_composer', 'Prompt composer', 'entry', ('focus',), 'local', _FOCUS_TRANSITION,
+        ),
+        'history': (
+            'history',
+            'History',
+            'push button',
+            ('activate',),
+            'local',
+            (('activate', (True, (), ('expanded',)), (True, ('expanded',), ())),),
+        ),
+        'search': (
+            'search',
+            'Search',
+            'push button',
+            ('activate',),
+            'local',
+            (('activate', (True, (), ()), (False, (), ())),),
+        ),
+    },
+    'perplexity': {
+        'input': (
+            'prompt_composer_primary',
+            'Primary prompt composer',
+            'entry',
+            ('focus',),
+            'local',
+            _FOCUS_TRANSITION,
+        ),
+        'input_message': (
+            'prompt_composer_alternate',
+            'Alternate prompt composer',
+            'entry',
+            ('focus',),
+            'local',
+            _FOCUS_TRANSITION,
+        ),
+    },
 }
 
 RULE_ID = re.compile(r'[a-z][a-z0-9_]{2,63}\Z')
@@ -170,9 +241,34 @@ def _validate_live_policy() -> list[str]:
         except Exception as exc:
             errors.append(f'cannot load supervised policy {platform}: {type(exc).__name__}: {exc}')
             continue
-        for control in policy.controls.values():
-            if control.effect_class != 'local' or control.operations != ('focus',):
-                errors.append(f'P0 policy {platform}.{control.mapping_key} is not local focus-only')
+        actual = {
+            mapping_key: (
+                control.control_id,
+                control.label,
+                control.role,
+                control.operations,
+                control.effect_class,
+                tuple(
+                    (
+                        operation,
+                        (
+                            postcondition.before.present,
+                            postcondition.before.states_include,
+                            postcondition.before.states_exclude,
+                        ),
+                        (
+                            postcondition.after.present,
+                            postcondition.after.states_include,
+                            postcondition.after.states_exclude,
+                        ),
+                    )
+                    for operation, postcondition in sorted(control.postconditions.items())
+                ),
+            )
+            for mapping_key, control in policy.controls.items()
+        }
+        if actual != _EXPECTED_LIVE_POLICIES[platform]:
+            errors.append(f'P0 policy {platform} differs from its exact reviewed transition policy')
     return errors
 
 
