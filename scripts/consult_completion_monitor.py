@@ -92,6 +92,7 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, str]
             routes.append({
                 "monitor_id": str(record.get("monitor_id") or ""),
                 "requester": str(record.get("requester") or ""),
+                "actor_seat_id": str(record.get("actor_seat_id") or ""),
                 "url": str(record.get("url") or ""),
                 "session_key": str(session_key),
                 "set_key": str(set_key),
@@ -171,6 +172,11 @@ def notify_taey(message: str, route: dict[str, str]) -> tuple[list[str], list[st
     routed_message = message
     if route["monitor_id"]:
         routed_message += f" monitor_id={route['monitor_id']}"
+    if route.get("actor_seat_id"):
+        routed_message += (
+            f" extraction_executor={route['actor_seat_id']} — delegate extraction to "
+            "that callable worker seat; Main Taey must not drive the display"
+        )
 
     failures: list[str] = []
     for target in sorted(targets):
