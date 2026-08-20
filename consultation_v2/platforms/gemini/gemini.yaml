@@ -270,6 +270,7 @@ workflow:
   attachment:
     trigger: upload_menu
     menu_target: upload_files_item
+    scope: menu_snapshot
     open_method: focus_and_key_open
     open_key: space
   prompt:
