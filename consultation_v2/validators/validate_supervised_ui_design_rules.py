@@ -31,7 +31,7 @@ VALIDATOR_PATH = 'consultation_v2/validators/validate_supervised_ui_design_rules
 TRAINING_REPO = 'palios-taey/palios-training'
 TRAINING_COMMIT = '58b108042e66fa508765a6277c033cc5a8f86abd'
 HANDS_REPO = 'palios-taey/taeys-hands'
-HANDS_COMMIT = 'e5f5de01a5c51107b6f2bf0759a5cd93aed08da1'
+HANDS_COMMIT = '880851a89af1c70310dccfc4d7004e090448da10'
 NO_TRACE_CLAIM = 'design-backed rule only; no production trace or tool result'
 MAX_CANDIDATE_BYTES = 16 * 1024 * 1024
 
@@ -65,7 +65,7 @@ HANDS_SOURCE_SHA256 = {
         '58c4641ac58c01d43e92afab2bd70ccbe1b669e05d362ed09a981d85bd8c2e21'
     ),
     'scripts/run_supervised_ui_seat.py': (
-        'ecb2383fc8507e43ad02701edfee4d8dbc0d9218d7b05aca796a40f14fcc1bdb'
+        '17f7a44ca7c1259c35b6a3ce066e5874072c0fbecc136b0bdfd1d388dddc6a20'
     ),
     'consultation_v2/platforms/chatgpt/supervised_ui.yaml': (
         '50d307f0cd265de420aef6ece6985baa2943a213508fba40dbed0a9e4513e2ba'
