@@ -12,6 +12,12 @@ from consultation_v2.tree import find_elements, find_menu_items, node_label
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
+from .native_file_dialog import (  # noqa: F401
+    NativeDialogError,
+    build_native_dialog_snapshot,
+    native_dialog_revision,
+    snapshot_contract as native_dialog_snapshot_contract,
+)
 
 
 _MENU_ROLES = {'menu item', 'radio menu item', 'check menu item', 'list item', 'option'}
