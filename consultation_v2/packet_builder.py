@@ -352,6 +352,38 @@ def _assert_not_rejected_input(path: Path, rejected_roots: Sequence[Path], conte
             raise PacketBuildError(f"{context} resolves inside rejected candidate root {root}")
 
 
+def _validate_generated_bundle_metadata(
+    request_id: str,
+    task_sources: Sequence[SourceBytes],
+    manifest: Mapping[str, Any],
+) -> None:
+    generated_fields: dict[str, Any] = {
+        "request_id": request_id,
+        "source_headers": [
+            {
+                "logical": source.record["logical"],
+                "section": source.record["section"],
+            }
+            for source in task_sources
+        ],
+        "manifest": manifest,
+    }
+
+    def reject_operator_paths(value: Any, context: str) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                reject_operator_paths(item, f"{context}.{key}")
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                reject_operator_paths(item, f"{context}[{index}]")
+        elif isinstance(value, str) and "/home/" in value:
+            raise PacketBuildError(
+                f"Bundle B generated metadata contains an operator-local absolute path at {context}"
+            )
+
+    reject_operator_paths(generated_fields, "bundle_b_generated")
+
+
 def _render_manifest(task_sources: Sequence[SourceBytes], excluded_stale: Sequence[str]) -> bytes:
     manifest_sources: list[dict[str, Any]] = []
     for source in task_sources:
@@ -661,14 +693,13 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         "note": "this file",
     }:
         raise PacketBuildError("generated manifest self-record is missing or malformed")
+    _validate_generated_bundle_metadata(request_id, task_sources, manifest_value)
 
     bundle_b = _render_bundle_b(request_id, task_sources, generated_manifest)
     _expected_blob(bundle_b, expected["bundle_b"], "expected.bundle_b")
     _validate_source_inclusion(bundle_b, task_sources, "Bundle B")
     if bundle_b.count(generated_manifest) != 1:
         raise PacketBuildError("Bundle B does not contain the generated manifest exactly once")
-    if b"/home/mira/" in bundle_b:
-        raise PacketBuildError("Bundle B contains an operator-local absolute path")
     if kernel.data in bundle_b or spotlight.data in bundle_b:
         raise PacketBuildError("Bundle B contains governance source bytes")
 
