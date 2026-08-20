@@ -12,19 +12,21 @@ construction standalone), so it could not simply be re-run; this runner supplies
 the always-on poll loop the engine used to provide.
 
 Watches ONE display's stop button every few seconds. On a seen->gone transition
-(a generation finishing) it notifies Taey and the requester recorded on the
-active consultation, then resets to catch the next generation. Passive: it only
-reads the tree and coordination record and notifies — it never drives.
+(a generation finishing) it prepares a frozen extraction handoff, notifies Taey,
+and sends status-only notices to the other recorded targets. It reads the tree
+and coordination record and writes only the handoff artifacts; it never drives.
 
 Usage: consult_completion_monitor.py <display-number>   e.g. 2
 """
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -40,6 +42,9 @@ DISPLAY_PLATFORM = {
 POLL_SECONDS = 3.0
 NOTIFICATION_RETRY_SECONDS = float(
     os.environ.get("CONSULT_MONITOR_NOTIFICATION_RETRY_SECONDS", "30")
+)
+NOTIFICATION_MAX_ATTEMPTS = int(
+    os.environ.get("CONSULT_MONITOR_NOTIFICATION_MAX_ATTEMPTS", "20")
 )
 
 
@@ -170,9 +175,7 @@ def finish_route(
         return False
     if notification_failures:
         now = time.time()
-        record["phase"] = "notification_failed"
-        record["notification_failures"] = notification_failures
-        record["notified_targets"] = sorted({
+        delivered_targets = sorted({
             str(target)
             for target in (
                 list(record.get("notified_targets") or [])
@@ -180,21 +183,147 @@ def finish_route(
             )
             if str(target)
         })
-        record["notification_attempts"] = int(
-            record.get("notification_attempts") or 0
-        ) + 1
+        if "taey" in delivered_targets:
+            pipe = client.pipeline()
+            pipe.srem(route["set_key"], route["session_key"])
+            pipe.delete(route["session_key"])
+            pipe.execute()
+            return True
+        attempts = int(record.get("notification_attempts") or 0) + 1
+        timeout = int(record.get("timeout") or 10800)
+        try:
+            started_ts = float(
+                record.get("started_ts")
+                or record.get("last_seen")
+                or now
+            )
+            deadline = float(
+                record.get("notification_deadline_at")
+                or started_ts + timeout
+            )
+        except (TypeError, ValueError):
+            deadline = now + timeout
+        remaining = max(1, int(deadline - now))
+        record["phase"] = "notification_failed"
+        record["notification_failures"] = notification_failures
+        record["notified_targets"] = delivered_targets
+        record["notification_attempts"] = attempts
+        record["notification_deadline_at"] = deadline
         record["next_notification_retry_at"] = (
             now + NOTIFICATION_RETRY_SECONDS
         )
         record["last_seen"] = now
-        timeout = int(record.get("timeout") or 10800)
-        client.set(route["session_key"], json.dumps(record), ex=timeout)
+        if attempts >= NOTIFICATION_MAX_ATTEMPTS or deadline <= now:
+            record["phase"] = "notification_abandoned"
+            record["last_action"] = "notification_retry_exhausted"
+            pipe = client.pipeline()
+            pipe.set(
+                route["session_key"],
+                json.dumps(record),
+                ex=remaining,
+            )
+            pipe.srem(route["set_key"], route["session_key"])
+            pipe.execute()
+            return True
+        client.set(route["session_key"], json.dumps(record), ex=remaining)
         return False
     pipe = client.pipeline()
     pipe.srem(route["set_key"], route["session_key"])
     pipe.delete(route["session_key"])
     pipe.execute()
     return True
+
+
+def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, str]:
+    monitor_id = str(route.get("monitor_id") or "")
+    actor_seat_id = str(route.get("actor_seat_id") or "")
+    platform = str(route.get("platform") or "")
+    display = str(route.get("display") or "")
+    if not all((monitor_id, actor_seat_id, platform, display)):
+        raise RuntimeError("completion route lacks extraction identity")
+    monitor_slug = re.sub(
+        r"[^A-Za-z0-9._-]+",
+        "_",
+        monitor_id,
+    ).strip("_")
+    if not monitor_slug:
+        raise RuntimeError("completion route has no safe monitor identifier")
+    response_root = Path(
+        os.environ.get(
+            "TAEY_CONSULT_RESPONSE_ROOT",
+            str(Path.home() / "taey_runs" / "consultations"),
+        )
+    ).expanduser()
+    artifact_root = response_root / monitor_slug
+    artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    response_file = artifact_root / "response.txt"
+    response_headers = artifact_root / "response.headers"
+    response_json = artifact_root / "worker_response.json"
+    request_json = artifact_root / "request.json"
+    preexisting_outputs = [
+        str(path)
+        for path in (response_file, response_headers, response_json)
+        if path.exists()
+    ]
+    if preexisting_outputs:
+        raise RuntimeError(
+            f"extraction output path already exists: {preexisting_outputs}"
+        )
+    identity_digest = hashlib.sha256(monitor_id.encode("utf-8")).hexdigest()
+    event_id = f"extract-{identity_digest[:24]}"
+    correlation_id = f"{event_id}-1"
+    runbook = Path(REPO) / "docs" / "MANUAL_CONSULT_WALKTHROUGH.md"
+    content = (
+        f"Read {runbook}. The completion monitor reported COMPLETE for "
+        f"monitor_id={monitor_id} on {platform} {display}. Execute section 7 "
+        f"extraction only in this new turn. RESPONSE_FILE={response_file}. "
+        "Use drive_chat only for the UI sequence and follow the runbook exactly. "
+        "Do not navigate, attach, paste, send, retry, or recover. Stop after a "
+        "verified non-empty response-file receipt or the first mismatch."
+    )
+    request_payload = {
+        "model": "taey",
+        "stream": False,
+        "max_tokens": 4096,
+        "chat_template_kwargs": {"enable_thinking": False},
+        "messages": [{"role": "user", "content": content}],
+    }
+    request_text = json.dumps(
+        request_payload,
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+    if request_json.exists():
+        if request_json.read_text(encoding="utf-8") != request_text:
+            raise RuntimeError(
+                f"extraction request path contains different bytes: {request_json}"
+            )
+    else:
+        with request_json.open("x", encoding="utf-8") as handle:
+            handle.write(request_text)
+        request_json.chmod(0o600)
+    command = " ".join([
+        "curl -sS --max-time 3600",
+        f"-D {shlex.quote(str(response_headers))}",
+        f"-o {shlex.quote(str(response_json))}",
+        "-H 'Content-Type: application/json'",
+        f"-H {shlex.quote(f'X-Taey-Seat-Id: {actor_seat_id}')}",
+        f"-H {shlex.quote(f'X-Taey-Event-Id: {event_id}')}",
+        f"-H {shlex.quote(f'X-Taey-Correlation-Id: {correlation_id}')}",
+        "-H 'X-Taey-Tool-Profile: manual-chat-ui'",
+        f"--data-binary @{shlex.quote(str(request_json))}",
+        "http://127.0.0.1:8767/v1/chat/completions",
+    ])
+    return {
+        "runbook": str(runbook),
+        "response_file": str(response_file),
+        "response_headers": str(response_headers),
+        "response_json": str(response_json),
+        "request_json": str(request_json),
+        "event_id": event_id,
+        "correlation_id": correlation_id,
+        "command": command,
+    }
 
 
 def notify_taey(
@@ -213,27 +342,6 @@ def notify_taey(
     routed_message = message
     if route["monitor_id"]:
         routed_message += f" monitor_id={route['monitor_id']}"
-    if route.get("actor_seat_id"):
-        monitor_slug = re.sub(
-            r"[^A-Za-z0-9._-]+",
-            "_",
-            str(route["monitor_id"]),
-        ).strip("_")
-        response_root = Path(
-            os.environ.get(
-                "TAEY_CONSULT_RESPONSE_ROOT",
-                str(Path.home() / "taey_runs" / "consultations"),
-            )
-        ).expanduser()
-        response_file = response_root / monitor_slug / "response.txt"
-        runbook = Path(REPO) / "docs" / "MANUAL_CONSULT_WALKTHROUGH.md"
-        routed_message += (
-            f" extraction_executor={route['actor_seat_id']}"
-            f" response_file={response_file}. Main Taey: use run_command, not "
-            f"send_message; start one new :8767 manual-chat-ui extraction worker "
-            f"exactly as documented under 'Start one extraction worker' in {runbook}. "
-            "Main Taey must not drive the display or ask a supervisor to extract."
-        )
 
     already_notified = {
         str(target)
@@ -243,10 +351,35 @@ def notify_taey(
     notified_targets: list[str] = []
     failures: list[str] = []
     for target in sorted(targets - already_notified):
+        target_message = routed_message
+        if target == "taey":
+            try:
+                handoff = _prepare_extraction_handoff(route)
+            except (OSError, RuntimeError) as exc:
+                failures.append(
+                    f"taey:handoff:{type(exc).__name__}:{str(exc)[:160]}"
+                )
+                continue
+            target_message += (
+                f" extraction_executor={route['actor_seat_id']}"
+                f" response_file={handoff['response_file']}"
+                f" extraction_request_json={handoff['request_json']}"
+                f" extraction_response_headers={handoff['response_headers']}"
+                f" extraction_response_json={handoff['response_json']}"
+                f" extraction_event_id={handoff['event_id']}"
+                f" extraction_correlation_id={handoff['correlation_id']}. "
+                "Main Taey: use run_command, not send_message; do not drive the "
+                f"display. Run exactly: {handoff['command']}"
+            )
+        else:
+            target_message += (
+                " status_only=true extraction_owner=taey. Do not invoke a worker "
+                "and do not drive the display."
+            )
         try:
             completed = subprocess.run(
                 ["taey-notify", "--type", "status", "--from", "consult-monitor",
-                 "--", target, routed_message],
+                 "--", target, target_message],
                 capture_output=True,
                 text=True,
                 timeout=5,

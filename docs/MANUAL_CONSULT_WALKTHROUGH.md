@@ -76,13 +76,20 @@ transport result.
 
 ## Start one extraction worker
 
-The completion notification provides `monitor_id`, `extraction_executor`, and `response_file`. Main Taey
-executes this invocation itself with `run_command`; it does not use `send_message` to ask a supervisor to
-extract and it does not drive the display. `extraction_executor` is the `SEAT_ID` from the send turn so the
-new extraction turn continues under the same fenced display owner.
+The completion notification to Main Taey provides `monitor_id`, `extraction_executor`, `response_file`,
+`extraction_request_json`, `extraction_response_headers`, `extraction_response_json`,
+`extraction_event_id`, `extraction_correlation_id`, and one exact `run_command`. The monitor creates the
+private artifact directory and frozen request JSON before notification. Main Taey runs that exact command;
+it does not use `send_message` to ask a supervisor to extract and it does not drive the display. Status-only
+completion notices sent to other fleet targets never contain an extraction command.
 
-After the monitor reports `COMPLETE`, write one new request JSON file, replacing only the five uppercase
-fields in `content`:
+`extraction_executor` is the `SEAT_ID` from the send turn. The proxy-issued lease owner includes both the
+seat and the live worker-process generation; the runtime, not this document, decides whether the new turn is
+a same-generation renewal or a stale-generation takeover. Never manufacture, reuse, or infer a generation
+token in the invocation.
+
+For a standalone supervised invocation, after the monitor reports `COMPLETE`, write one new request JSON
+file, replacing only the five uppercase fields in `content`:
 
 ```json
 {
@@ -99,7 +106,7 @@ fields in `content`:
 }
 ```
 
-Invoke the worker exactly once, using the notification's `extraction_executor` as `SEAT_ID` and new stable
+Invoke the worker exactly once, using the notification's `extraction_executor` as `SEAT_ID` and its supplied
 event/correlation identifiers:
 
 ```bash
