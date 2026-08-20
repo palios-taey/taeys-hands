@@ -31,9 +31,10 @@ does not edit, summarize, rebuild, lint, or reinterpret them.
 
 ## Start one ChatGPT worker
 
-This is the canonical current-path invocation for the first platform leg. Its `manual-chat-ui` transport and
-first-error terminalization have production receipts; a complete send receipt through this exact entrypoint
-is still the acceptance gate. Do not describe it as fully production-proven until that receipt exists.
+This is the canonical current-path invocation for the first platform leg. The ChatGPT send phase through
+Stop proof and monitor registration is production-proven by the
+[`2026-08-20 manual-chat-ui receipt`](../receipts/manual-chat-ui/2026-08-20-chatgpt-send.md). Completion and
+extraction remain separate acceptance gates and must not be inferred from the send receipt.
 
 First write one frozen request JSON file, replacing only the five uppercase fields in `content`:
 
