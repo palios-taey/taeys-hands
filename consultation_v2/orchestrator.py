@@ -1,6 +1,6 @@
 """Consultation V2 orchestrator — 4-phase consultation lifecycle.
 
-Phase 1: Consolidate attachments (FAMILY_KERNEL + platform identity + caller files)
+Phase 1: PACKET_CONTRACT Bundle A (governance) + Bundle B (task) construction
 Phase 2: Create Plan record in Neo4j (pre-flight)
 Phase 3: Run the platform driver (navigate → mode → attach → send → monitor → extract → store)
 Phase 4: Complete Plan record + notify requester + ingest into ISMA
@@ -174,18 +174,26 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             package = consolidate_attachments(
                 platform=request.platform,
                 caller_attachments=caller_attachments,
+                request_id=request.request_id(),
             )
             package_paths = package.attachment_paths()
+            if len(package_paths) != 2:
+                raise IdentityError(
+                    'PACKET_CONTRACT requires exactly two attachments; builder '
+                    f'returned {len(package_paths)}: {package_paths!r}. '
+                    'Consultation halted (no one-package fallback).'
+                )
             consolidated_path = '\n'.join(package_paths)
             # Provenance survives consolidation: stamp the caller-attachment path+hashes
             # onto the request (FLOW §3) and write them to durable run-state via the
             # shared-primitive surface so the audit trail records what the caller sent
-            # even though the browser receives the merged package file(s).
+            # even though the browser receives Bundle A + Bundle B.
             request = replace(
                 request,
                 attachments=package_paths,
                 caller_attachment_provenance=list(package.caller_provenance),
             )
+            identity_mode = 'packet_contract_two_bundle'
     assert_request_run_state_available(request)
     if request.caller_attachment_provenance:
         try:
