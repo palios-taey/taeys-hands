@@ -715,3 +715,44 @@ extraction:
         element: copy_button
         select: last
       - action: read_clipboard
+native_file_dialog:
+  root:
+    role: file chooser
+    uniqueness: exactly_one_application_child
+  mapped:
+    file_chooser_root:
+      role: file chooser
+      application_child: true
+      required: true
+      required_states:
+        - showing
+        - visible
+        - enabled
+    file_chooser_widget:
+      name: File Chooser Widget
+      role: file chooser
+      required: true
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_layer:
+      name: Location Layer
+      role: filler
+      required: false
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_entry:
+      role: text
+      required: false
+      required_states:
+        - showing
+        - visible
+        - focused
+        - editable
+        - enabled
+      ancestor:
+        name: Location Layer
+        role: filler

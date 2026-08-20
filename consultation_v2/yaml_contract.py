@@ -103,6 +103,26 @@ MENU_OPTION_KEYS = frozenset({
 MENU_POSTCONDITION_KEYS = frozenset({'element', 'scope', 'timeout_ms'})
 MENU_PATH_KEYS = frozenset({'element', 'action'})
 MENU_PATH_ACTIONS = frozenset({'hover', 'press', 'click'})
+NATIVE_FILE_DIALOG_KEYS = frozenset({'root', 'mapped'})
+NATIVE_FILE_DIALOG_ROOT_KEYS = frozenset({'role', 'uniqueness'})
+NATIVE_FILE_DIALOG_UNIQUENESS = frozenset({'exactly_one_application_child'})
+NATIVE_FILE_DIALOG_REQUIRED_MAPPED = frozenset({'file_chooser_root', 'file_chooser_widget'})
+NATIVE_FILE_DIALOG_OPTIONAL_MAPPED = frozenset({'location_layer', 'location_entry'})
+NATIVE_FILE_DIALOG_ITEM_KEYS = frozenset({
+    'name',
+    'role',
+    'application_child',
+    'required',
+    'required_states',
+    'ancestor',
+})
+NATIVE_FILE_DIALOG_REQUIRED_STATE_VALUES = frozenset({
+    'showing',
+    'visible',
+    'focused',
+    'editable',
+    'enabled',
+})
 LEGACY_SELECTION_KEYS = frozenset({
     'options',
     'model_targets',
@@ -542,6 +562,8 @@ def _validate_global_exactness(
     node: object,
     key_path: tuple[str, ...] = (),
 ) -> None:
+    if key_path[:1] == ('native_file_dialog',):
+        return
     if isinstance(node, dict):
         keys = {str(key) for key in node}
         for raw_key, value in node.items():
@@ -1137,6 +1159,103 @@ def _validate_identity_yaml(
     _validate_selection_menus(findings, lines, data)
 
 
+def _validate_native_file_dialog(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    data: dict[str, Any],
+) -> None:
+    spec = data.get('native_file_dialog')
+    if spec is None:
+        return
+    if not isinstance(spec, dict):
+        _add(findings, lines, ('native_file_dialog',), 'native_file_dialog',
+             'native_file_dialog must be a mapping')
+        return
+    extra_keys = set(spec) - NATIVE_FILE_DIALOG_KEYS
+    if extra_keys:
+        _add(findings, lines, ('native_file_dialog',), 'native_file_dialog',
+             f'native_file_dialog may only declare {sorted(NATIVE_FILE_DIALOG_KEYS)}')
+    root = spec.get('root')
+    if not isinstance(root, dict):
+        _add(findings, lines, ('native_file_dialog', 'root'), 'root',
+             'native_file_dialog.root must be a mapping')
+        return
+    if set(root) - NATIVE_FILE_DIALOG_ROOT_KEYS:
+        _add(findings, lines, ('native_file_dialog', 'root'), 'root',
+             f'native_file_dialog.root may only declare {sorted(NATIVE_FILE_DIALOG_ROOT_KEYS)}')
+    if root.get('role') != 'file chooser':
+        _add(findings, lines, ('native_file_dialog', 'root', 'role'), 'role',
+             'native_file_dialog.root.role must be file chooser')
+    if root.get('uniqueness') not in NATIVE_FILE_DIALOG_UNIQUENESS:
+        _add(findings, lines, ('native_file_dialog', 'root', 'uniqueness'), 'uniqueness',
+             'native_file_dialog.root.uniqueness must be exactly_one_application_child')
+    mapped = spec.get('mapped')
+    if not isinstance(mapped, dict):
+        _add(findings, lines, ('native_file_dialog', 'mapped'), 'mapped',
+             'native_file_dialog.mapped must be a mapping')
+        return
+    allowed = NATIVE_FILE_DIALOG_REQUIRED_MAPPED | NATIVE_FILE_DIALOG_OPTIONAL_MAPPED
+    missing = NATIVE_FILE_DIALOG_REQUIRED_MAPPED - set(mapped)
+    extra = set(mapped) - allowed
+    if missing:
+        _add(findings, lines, ('native_file_dialog', 'mapped'), 'mapped',
+             f'native_file_dialog.mapped missing required keys {sorted(missing)}')
+    if extra:
+        _add(findings, lines, ('native_file_dialog', 'mapped'), 'mapped',
+             f'native_file_dialog.mapped unknown keys {sorted(extra)}')
+    for key, item in mapped.items():
+        item_path = ('native_file_dialog', 'mapped', str(key))
+        if not isinstance(item, dict):
+            _add(findings, lines, item_path, str(key),
+                 'native_file_dialog mapped entries must be mappings')
+            continue
+        if set(item) - NATIVE_FILE_DIALOG_ITEM_KEYS:
+            _add(findings, lines, item_path, str(key),
+                 f'native_file_dialog mapped entries may only declare {sorted(NATIVE_FILE_DIALOG_ITEM_KEYS)}')
+        if not isinstance(item.get('role'), str) or not item.get('role'):
+            _add(findings, lines, item_path + ('role',), 'role',
+                 'native_file_dialog mapped role must be an exact string')
+        if 'name' in item and (not isinstance(item.get('name'), str) or not item.get('name')):
+            _add(findings, lines, item_path + ('name',), 'name',
+                 'native_file_dialog mapped name must be an exact non-empty string when declared')
+        required = item.get('required', True)
+        if not isinstance(required, bool):
+            _add(findings, lines, item_path + ('required',), 'required',
+                 'native_file_dialog mapped required must be a boolean')
+        if key in NATIVE_FILE_DIALOG_REQUIRED_MAPPED and required is False:
+            _add(findings, lines, item_path + ('required',), 'required',
+                 f'{key} must be required')
+        if key in NATIVE_FILE_DIALOG_OPTIONAL_MAPPED and required is not False:
+            _add(findings, lines, item_path + ('required',), 'required',
+                 f'{key} must be required: false so pre-ctrl+l observe can succeed')
+        if key == 'file_chooser_root' and item.get('application_child') is not True:
+            _add(findings, lines, item_path + ('application_child',), 'application_child',
+                 'file_chooser_root.application_child must be true')
+        states = item.get('required_states')
+        if not isinstance(states, list) or not states or not all(
+            isinstance(state, str) and state in NATIVE_FILE_DIALOG_REQUIRED_STATE_VALUES
+            for state in states
+        ):
+            _add(findings, lines, item_path + ('required_states',), 'required_states',
+                 f'required_states must be a non-empty list from {sorted(NATIVE_FILE_DIALOG_REQUIRED_STATE_VALUES)}')
+        ancestor = item.get('ancestor')
+        if ancestor is None:
+            if key == 'location_entry':
+                _add(findings, lines, item_path, 'ancestor',
+                     'location_entry must declare an exact ancestor')
+            continue
+        if not isinstance(ancestor, dict):
+            _add(findings, lines, item_path + ('ancestor',), 'ancestor',
+                 'ancestor must be a mapping')
+            continue
+        if set(ancestor) - {'name', 'role'}:
+            _add(findings, lines, item_path + ('ancestor',), 'ancestor',
+                 'ancestor may only declare exact name and role')
+        if not isinstance(ancestor.get('name'), str) or not isinstance(ancestor.get('role'), str):
+            _add(findings, lines, item_path + ('ancestor', 'name'), 'ancestor',
+                 'ancestor must have exact name and role strings')
+
+
 def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source: str) -> None:
     if platform not in CHAT_PLATFORMS:
         return
@@ -1164,6 +1283,7 @@ def _validate_chat_yaml(platform: str, path: Path, data: dict[str, Any], source:
                 )
         _validate_validation_specs(findings, lines, data)
         _validate_extraction_specs(findings, lines, data)
+    _validate_native_file_dialog(findings, lines, data)
 
     if findings:
         rendered = '\n'.join(finding.render(path) for finding in findings)
