@@ -11,13 +11,9 @@ The governing contracts are [`100_TIMES.md`](../100_TIMES.md),
 turns those contracts into a small worker handoff. The platform YAML remains mutable UI authority and each
 fresh `drive_chat` observation remains the runtime oracle.
 
-This file is the sole executable supervisor-to-worker procedure for a manual Family-Chat consultation.
-The linked contracts define its invariants; they are not alternate worker procedures.
-
 ## Give one worker only these inputs
 
 ```text
-RUNBOOK=<absolute path to this file in a public taeys-hands clone>
 PLATFORM=<chatgpt|claude|gemini|grok|perplexity>
 DISPLAY=<:2|:3|:4|:5|:6>
 BUNDLE_A=<absolute path to the governance bundle>
@@ -29,24 +25,6 @@ RESPONSE_FILE=<new absolute path for the verbatim response>
 Send one platform leg per worker turn. Do not ask one worker to read all five YAMLs, hold all five identities,
 or drive several displays. Bundle A, Bundle B, and the prompt are frozen before the worker starts. The worker
 does not edit, summarize, rebuild, lint, or reinterpret them.
-
-## Start exactly one worker
-
-Substitute the six frozen input values above, then run this command once. This is the established worker
-transport: delegate endpoint `:8767`, model alias `ep3`, thinking disabled, and one short file-directed
-instruction. Do not reconstruct it, add headers, change the endpoint, or send a second request after a
-timeout or transport error.
-
-```bash
-curl -s --max-time 300 http://127.0.0.1:8767/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"ep3","chat_template_kwargs":{"enable_thinking":false},"messages":[{"role":"user","content":"Read RUNBOOK. Execute the PLATFORM send leg only on DISPLAY with BUNDLE_A, BUNDLE_B, and PROMPT_FILE. Follow the worker procedure exactly. Stop after the send receipt or the first mismatch. Do not extract in this turn."}]}'
-```
-
-`RUNBOOK`, `PLATFORM`, `DISPLAY`, `BUNDLE_A`, `BUNDLE_B`, and `PROMPT_FILE` in the JSON string are literal
-replacement fields, not shell variables. Preserve the command around them byte-for-byte. The worker returns
-either the section 6 send receipt or the required stop report. Extraction is a separate worker turn only
-after the completion notification.
 
 ## Exact `drive_chat` vocabulary
 
