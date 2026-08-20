@@ -113,14 +113,36 @@ class ConsultationRuntime:
             found = self._file_dialog_window(env)
             if found is not None:
                 wid, title = found
-                subprocess.run(
+                activated = subprocess.run(
                     ["xdotool", "windowactivate", wid],
                     capture_output=True,
+                    text=True,
                     timeout=5,
                     env=env,
                 )
-                logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
+                if activated.returncode != 0:
+                    logger.warning(
+                        "focus_file_dialog: windowactivate failed for %s: %s",
+                        wid,
+                        activated.stderr.strip(),
+                    )
+                    return False
                 time.sleep(0.5)
+                active = subprocess.run(
+                    ["xdotool", "getactivewindow"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    env=env,
+                )
+                if active.returncode != 0 or active.stdout.strip() != wid:
+                    logger.warning(
+                        "focus_file_dialog: expected active window %s, observed %s",
+                        wid,
+                        active.stdout.strip() or None,
+                    )
+                    return False
+                logger.info("focus_file_dialog: activated window %s (%s)", wid, title)
                 return True
             time.sleep(0.25)
         logger.warning("focus_file_dialog: no file dialog window found")

@@ -1437,6 +1437,17 @@ class TaeyConsultExtractionSeat:
             else 'click'
         )
         if not self.attach_trigger_activated:
+            if open_method == 'keyboard_shortcut':
+                shortcut = str(attachment.get('keyboard_shortcut') or '').strip()
+                if not shortcut:
+                    raise TaeyConsultControlError(
+                        f'{self.platform} keyboard_shortcut has no keyboard_shortcut'
+                    )
+                return {
+                    'action': 'key',
+                    'name': shortcut,
+                    'contains': False,
+                }
             if self._stored_semantic_control('attach_trigger') is None:
                 return {
                     'action': 'find',
@@ -3508,12 +3519,36 @@ class TaeyConsultExtractionSeat:
                 'typeahead_sha256': _sha256_text(typeahead_label),
             }
         if action == 'key':
+            attachment = (self.cfg.get('workflow') or {}).get('attachment') or {}
+            open_method = (
+                str(attachment.get('open_method') or '').strip()
+                if isinstance(attachment, dict)
+                else ''
+            )
+            attachment_shortcut = (
+                str(attachment.get('keyboard_shortcut') or '').strip()
+                if isinstance(attachment, dict)
+                else ''
+            )
+            opening_attachment = (
+                open_method == 'keyboard_shortcut'
+                and bool(attachment_shortcut)
+                and name == attachment_shortcut
+                and not self.attach_trigger_activated
+            )
+            before_url = ''
+            if opening_attachment:
+                before_url = self._current_url()
+                if not self._normalized_session_url(before_url):
+                    raise TaeyConsultExtractionError(
+                        'could not read the browser URL before attachment shortcut; '
+                        'nothing executed'
+                    )
             pressed = bool(self.act.key(name, display=self.display))
             if not pressed:
                 raise TaeyConsultExtractionError(
                     f'act.key({name!r}) returned a non-success value'
                 )
-            attachment = (self.cfg.get('workflow') or {}).get('attachment') or {}
             submit_keys = (
                 tuple(
                     str(value)
@@ -3540,6 +3575,16 @@ class TaeyConsultExtractionSeat:
                             'focusable file dialog'
                         )
                     self.upload_control_clicked = True
+            elif opening_attachment:
+                self.attach_trigger_activated = True
+                time.sleep(1.0)
+                if not self.runtime.focus_file_dialog():
+                    raise TaeyConsultExtractionError(
+                        f'{self.platform} attachment shortcut did not expose a '
+                        'verified active file dialog'
+                    )
+                self.browser_url_before_dialog = before_url
+                self.upload_control_clicked = True
             elif name == 'ctrl+l':
                 self.dialog_location_opened = True
             elif name == 'ctrl+a':

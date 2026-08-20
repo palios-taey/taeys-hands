@@ -3348,40 +3348,6 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         prefix_matches = not normalized_message or normalized_live.startswith(normalized_message[:30])
         return landed_chars, landed_chars >= min_chars and prefix_matches
 
-    @staticmethod
-    def _attachment_name_matches(display_name: str, filename: str) -> bool:
-        expected_path = os.path.abspath(filename)
-        expected_name = os.path.basename(filename)
-        display_name = (display_name or '').strip()
-        displayed = {display_name}
-        if display_name:
-            displayed.add(display_name.split()[0].rstrip(','))
-            displayed.add(display_name.split(',', 1)[0].strip())
-        for expected in (expected_path, expected_name):
-            for displayed_file in displayed:
-                if displayed_file == expected:
-                    return True
-                if '...' in displayed_file:
-                    prefix, suffix = displayed_file.split('...', 1)
-                    if expected.startswith(prefix) and expected.endswith(suffix):
-                        return True
-        return False
-
-    def _attachment_visible(self, snapshot: Snapshot, filename: str) -> bool:
-        return self._attachment_chip_name(snapshot, filename) is not None
-
-    def _attachment_chip_name(self, snapshot: Snapshot, filename: str) -> str | None:
-        allowed_roles = {'push button', 'list item', 'heading'}
-        return next(
-            (
-                element.name
-                for element in self._snapshot_elements(snapshot)
-                if element.role in allowed_roles
-                and self._attachment_name_matches(element.name or '', filename)
-            ),
-            None,
-        )
-
     def _stop_keys(self) -> tuple[str, ...]:
         monitor_cfg = self.cfg.get('workflow', {}).get('monitor', {}) or {}
         keys = monitor_cfg.get('stop_keys') or monitor_cfg.get('stop_key') or ['stop_button']
@@ -3857,6 +3823,10 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 keyboard_shortcut=shortcut or None,
             )
             return False
+        before_snapshot = self.runtime.snapshot()
+        attachment_count_before = len(
+            before_snapshot.mapped.get('remove_attachment') or []
+        )
         if not self.runtime.focus_firefox():
             result.add_step('attach', False,
                             f'Claude Firefox focus failed for {abs_path}',
@@ -3915,9 +3885,11 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                             f'Claude file dialog Return submit failed for {abs_path}',
                             file=abs_path)
             return False
-        verify_snap = self._wait_for_attach_success(abs_path)
-        chip_name = self._attachment_chip_name(verify_snap, abs_path)
-        verified = chip_name is not None
+        expected_attachment_count = attachment_count_before + 1
+        verify_snap = self._wait_for_attach_success(expected_attachment_count)
+        attachment_controls = verify_snap.mapped.get('remove_attachment') or []
+        attachment_count_after = len(attachment_controls)
+        verified = attachment_count_after == expected_attachment_count
         result.add_step('attach', verified,
                         f'Claude attached {os.path.basename(abs_path)}',
                         file=abs_path,
@@ -3925,19 +3897,24 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         open_method=open_method,
                         keyboard_shortcut=shortcut,
                         dialog_submit='return',
-                        chip_name=chip_name,
+                        attachment_count_before=attachment_count_before,
+                        attachment_count_after=attachment_count_after,
+                        expected_attachment_count=expected_attachment_count,
+                        attachment_controls=[
+                            control.serializable() for control in attachment_controls
+                        ],
                         snapshot=verify_snap.serializable())
         return verified
 
-    def _wait_for_attach_success(self, abs_path: str):
+    def _wait_for_attach_success(self, expected_attachment_count: int):
         last_snapshot = None
 
         def _probe():
             nonlocal last_snapshot
-            for snapshot in (self.runtime.snapshot(), self.runtime.menu_snapshot()):
-                last_snapshot = snapshot
-                if self._attachment_visible(snapshot, abs_path):
-                    return snapshot
+            snapshot = self.runtime.snapshot()
+            last_snapshot = snapshot
+            if len(snapshot.mapped.get('remove_attachment') or []) == expected_attachment_count:
+                return snapshot
             return None
 
         matched = self.runtime.wait_until(_probe, timeout=20.0, interval=0.5)

@@ -26,7 +26,7 @@ def press_key(key: str, timeout: int = 10) -> bool:
     """Press a key combination via xdotool."""
     try:
         r = subprocess.run(
-            ['xdotool', 'key', key],
+            ['xdotool', 'key', '--clearmodifiers', key],
             env=_get_env(), capture_output=True, timeout=timeout,
         )
         if r.returncode != 0:
