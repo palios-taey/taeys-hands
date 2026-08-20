@@ -12,15 +12,16 @@ construction standalone), so it could not simply be re-run; this runner supplies
 the always-on poll loop the engine used to provide.
 
 Watches ONE display's stop button every few seconds. On a seen->gone transition
-(a generation finishing) it notifies Taey that the consult on that display is
-complete, then resets to catch the next generation. Passive: it only reads the
-tree and notifies — it never drives, never takes the display lock.
+(a generation finishing) it notifies Taey and the requester recorded on the
+active consultation, then resets to catch the next generation. Passive: it only
+reads the tree and coordination record and notifies — it never drives.
 
 Usage: consult_completion_monitor.py <display-number>   e.g. 2
 """
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import subprocess
 import sys
@@ -67,14 +68,80 @@ def stop_button_present(platform: str) -> bool:
     return any(snap.mapped.get(k) for k in stop_keys)
 
 
-def notify_taey(message: str) -> None:
-    # Notify each configured target (default: taey + infra) so completion is the
-    # extraction trigger, never a poll loop. Override with CONSULT_MONITOR_NOTIFY=a,b.
-    targets = [t.strip() for t in
-               os.environ.get("CONSULT_MONITOR_NOTIFY", "taey,infra").split(",") if t.strip()]
-    for target in targets:
-        subprocess.run(["taey-notify", "--type", "status", "--from", "consult-monitor",
-                        "--", target, message], capture_output=True, text=True)
+def active_completion_routes(platform: str, display: str) -> list[dict[str, str]]:
+    from storage.redis_pool import get_client
+
+    client = get_client()
+    routes: list[dict[str, str]] = []
+    for set_key in client.scan_iter(match="taey:*:active_session_ids"):
+        for session_key in client.smembers(set_key):
+            raw = client.get(session_key)
+            if not raw:
+                continue
+            record = json.loads(raw)
+            if not isinstance(record, dict) or record.get("platform") != platform:
+                continue
+            registered_display = str(record.get("display") or "")
+            if registered_display != display:
+                continue
+            routes.append({
+                "monitor_id": str(record.get("monitor_id") or ""),
+                "requester": str(record.get("requester") or ""),
+                "url": str(record.get("url") or ""),
+            })
+    if len(routes) > 1:
+        monitor_ids = sorted(route["monitor_id"] for route in routes)
+        raise RuntimeError(
+            f"multiple active consultations claim {display}: {monitor_ids}"
+        )
+    return routes
+
+
+def notify_taey(message: str, platform: str, display: str) -> tuple[list[str], list[str]]:
+    targets = {"taey"}
+    targets.update(
+        target.strip()
+        for target in os.environ.get("CONSULT_MONITOR_NOTIFY", "").split(",")
+        if target.strip()
+    )
+    route_error = ""
+    routes: list[dict[str, str]] = []
+    try:
+        routes = active_completion_routes(platform, display)
+    except Exception as exc:
+        route_error = f"active-session route lookup failed: {type(exc).__name__}: {exc}"
+    targets.update(
+        route["requester"]
+        for route in routes
+        if route["requester"] and route["requester"] != "unknown"
+    )
+
+    monitor_ids = sorted({route["monitor_id"] for route in routes if route["monitor_id"]})
+    routed_message = message
+    if monitor_ids:
+        routed_message += f" monitor_ids={','.join(monitor_ids)}"
+    if route_error:
+        routed_message += f" ROUTE_ERROR={route_error}"
+
+    failures: list[str] = []
+    for target in sorted(targets):
+        try:
+            completed = subprocess.run(
+                ["taey-notify", "--type", "status", "--from", "consult-monitor",
+                 "--", target, routed_message],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            failures.append(f"{target}:exception:{type(exc).__name__}:{exc}")
+            continue
+        if completed.returncode != 0:
+            failures.append(
+                f"{target}:{completed.returncode}:"
+                f"{(completed.stderr or completed.stdout).strip()[:160]}"
+            )
+    return sorted(targets), failures
 
 
 def new_detector(Detector):
@@ -112,10 +179,19 @@ def main() -> int:
             present = stop_button_present(platform)
             verdict = det.observe(present)
             if verdict == "complete":
-                notify_taey(f"consult on {display} ({platform}) COMPLETE — stop button "
-                            f"disappeared. Response ready to harvest.")
-                log(f"[consult-monitor {display}] COMPLETE -> notified taey")
-                det = new_detector(Detector)  # rearm for the next generation
+                try:
+                    targets, failures = notify_taey(
+                        f"consult on {display} ({platform}) COMPLETE — stop button "
+                        f"disappeared. Response ready to harvest.",
+                        platform,
+                        display,
+                    )
+                    log(
+                        f"[consult-monitor {display}] COMPLETE -> notified "
+                        f"{','.join(targets)} failures={failures or 'none'}"
+                    )
+                finally:
+                    det = new_detector(Detector)
         except Exception as e:  # firefox restart / empty tree / bus change — keep watching
             log(f"[consult-monitor {display}] scan_error {type(e).__name__}: {str(e)[:100]}")
             os.environ["AT_SPI_BUS_ADDRESS"] = resolve_bus(display)  # bus rotates on restart

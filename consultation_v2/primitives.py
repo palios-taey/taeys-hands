@@ -442,6 +442,10 @@ def register_monitor_session(
     client = get_client()
     session_key = node_key(f"active_session:{monitor_id}")
     record = dict(session)
+    display = str(record.get("display") or os.environ.get("DISPLAY") or "").strip()
+    if not display:
+        raise ValueError("monitor registration requires the active DISPLAY")
+    record["display"] = display
     record.setdefault("monitor_id", monitor_id)
     record.setdefault("tmux_session", NODE_ID)
     record.setdefault("started_ts", time.time())
