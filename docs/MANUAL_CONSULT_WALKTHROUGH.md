@@ -74,6 +74,52 @@ paths. A curl error, non-200 response, missing/mismatched identity header, malfo
 report, or missing section 6 send receipt ends the transaction. Never resend the request after an uncertain
 transport result.
 
+## Start one extraction worker
+
+The completion notification provides `monitor_id`, `extraction_executor`, and `response_file`. Main Taey
+executes this invocation itself with `run_command`; it does not use `send_message` to ask a supervisor to
+extract and it does not drive the display. `extraction_executor` is the `SEAT_ID` from the send turn so the
+new extraction turn continues under the same fenced display owner.
+
+After the monitor reports `COMPLETE`, write one new request JSON file, replacing only the five uppercase
+fields in `content`:
+
+```json
+{
+  "model": "taey",
+  "stream": false,
+  "max_tokens": 4096,
+  "chat_template_kwargs": {"enable_thinking": false},
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read RUNBOOK. The completion monitor reported COMPLETE for monitor_id=MONITOR_ID on PLATFORM DISPLAY. Execute section 7 extraction only in this new turn. RESPONSE_FILE=RESPONSE_FILE. Use drive_chat only for the UI sequence and follow the runbook exactly. Do not navigate, attach, paste, send, retry, or recover. Stop after a verified non-empty response-file receipt or the first mismatch."
+    }
+  ]
+}
+```
+
+Invoke the worker exactly once, using the notification's `extraction_executor` as `SEAT_ID` and new stable
+event/correlation identifiers:
+
+```bash
+curl -sS --max-time 3600 \
+  -D EXTRACTION_RESPONSE_HEADERS \
+  -o EXTRACTION_RESPONSE_JSON \
+  -H 'Content-Type: application/json' \
+  -H 'X-Taey-Seat-Id: SEAT_ID' \
+  -H 'X-Taey-Event-Id: EXTRACTION_EVENT_ID' \
+  -H 'X-Taey-Correlation-Id: EXTRACTION_CORRELATION_ID' \
+  -H 'X-Taey-Tool-Profile: manual-chat-ui' \
+  --data-binary @EXTRACTION_REQUEST_JSON \
+  http://127.0.0.1:8767/v1/chat/completions
+```
+
+The request, headers, JSON response, and `RESPONSE_FILE` must all be new paths. Require HTTP 200, exact
+identity headers, `finish_reason=stop`, the section 7 extraction receipt, and a non-empty `RESPONSE_FILE`
+whose byte count and SHA-256 match the tool receipt. Never issue a second worker request after an uncertain
+transport result.
+
 ## Exact `drive_chat` vocabulary
 
 The following argument names are exact. A different name is a terminal refusal for the turn.
