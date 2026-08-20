@@ -46,7 +46,8 @@ and executes only the operation declared by that platform's YAML. The governing 
 [`docs/UI_INTERACTION_AUTHORITY.md`](docs/UI_INTERACTION_AUTHORITY.md) — one action per approved turn,
 tree-is-truth, **no autonomous loops.** Start with the
 [`consultation_v2` authority and status index](consultation_v2/README.md) before operating or changing this
-path.
+path. The concrete two-attachment Taey worker action card is
+[`docs/MANUAL_CONSULT_WALKTHROUGH.md`](docs/MANUAL_CONSULT_WALKTHROUGH.md).
 
 ### Layer 3 — the ENGINE (a work in progress; not run autonomously)
 `consultation_v2/orchestrator.py` + `drivers/` + `scripts/run_consultation_v2.py` chain the Layer-1
