@@ -82,3 +82,12 @@ canonical snapshot.
 The autonomous engine remains out of the production control path while these items are open. Later automation
 must compile to this same YAML-owned path; it may not create a parallel observer, locator grammar, or action
 path.
+
+## Deterministic packet construction
+
+`scripts/consultation-packet-builder` builds the two attachment files, local prompt, and local receipt from
+a frozen JSON spec. `preflight` validates canonical source bytes, Git commits, rendering order, path scope,
+expected output hashes, rejected-root isolation, and negative receipts without creating the output root.
+`build` repeats those gates, creates the root and every file exclusively, fsyncs them, and derives receipt
+root/file/send-task bindings from the actual output paths. `validate-receipt` independently re-reads an
+existing receipt and its bound files. Packet construction does not stage attachments or perform a UI action.
