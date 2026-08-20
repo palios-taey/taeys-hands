@@ -199,6 +199,22 @@ def gate_paths(
     if not any(name not in {'PROVENANCE_MANIFEST.md'} for name in b_sections):
         findings.append('bundle_b has no task source sections')
 
+    # Builder-generated PROVENANCE_MANIFEST must not embed operator-local absolute
+    # paths (PACKET_CONTRACT: those stay in the local receipt only).
+    manifest_bodies = re.findall(
+        r'## PROVENANCE_MANIFEST\.md\n\n`PROVENANCE_MANIFEST\.md`\n\n'
+        r'```(?:markdown)?\n(.*?)\n```',
+        b_text,
+        flags=re.DOTALL,
+    )
+    for body in manifest_bodies:
+        if re.search(r'(?:^|\s)(/home/|/Users/|~/)[^\s`]+', body):
+            findings.append(
+                'PROVENANCE_MANIFEST embeds operator-local absolute path; '
+                'keep locators in the receipt only'
+            )
+            break
+
     if '# Bundle A - Governance' not in a_text and 'Bundle A - Governance' not in a_text:
         findings.append('bundle_a missing Bundle A governance title')
     if '# Bundle B - Task' not in b_text and 'Bundle B - Task' not in b_text:

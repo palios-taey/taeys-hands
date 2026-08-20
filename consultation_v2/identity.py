@@ -463,11 +463,16 @@ def _provenance_manifest(
         '## Governance sources (Bundle A; not duplicated in Bundle B body)',
         '',
     ]
-    for source_path, logical_name, content in gov_src:
+    for _source_path, logical_name, content in gov_src:
         digest = _sha256_bytes(content.encode('utf-8'))
+        # Chat-facing: logical name + content address only. Operator-local
+        # absolute locators stay in the builder receipt (PACKET_CONTRACT).
         lines.append(
             f'- `{logical_name}` bytes={len(content.encode("utf-8"))} '
-            f'sha256={digest} locator={source_path}'
+            f'sha256={digest}'
+        )
+        lines.append(
+            '  - local_locator: retained in builder receipt (not Chat-facing)'
         )
     lines.extend(['', '## Task sources (Bundle B)', ''])
     for source_path, logical_name, content in task_src:
@@ -478,9 +483,9 @@ def _provenance_manifest(
             f'- `{logical_name}` bytes={len(content.encode("utf-8"))} '
             f'sha256={digest}'
         )
-        # Operator-local absolute path stays in the receipt only; Chat sees
-        # logical name above. Keep a non-path note that a local locator exists.
-        lines.append('  - local_locator: retained in builder receipt (not Chat-facing)')
+        lines.append(
+            '  - local_locator: retained in builder receipt (not Chat-facing)'
+        )
     lines.append('')
     return '\n'.join(lines)
 
