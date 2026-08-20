@@ -13,7 +13,7 @@ is not listed here or linked from a listed index, it is not operating authority.
 6. `docs/UI_INTERACTION_AUTHORITY.md` — one-action, fresh-tree discipline.
 7. `docs/SUPERVISED_UI_PROTOCOL.md` — immutable supervised-seat state and receipt protocol.
 8. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
-8. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
+9. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
 
 ## Current operating documents
 
