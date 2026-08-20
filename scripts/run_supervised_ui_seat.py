@@ -98,21 +98,33 @@ def _decode_b64(value: Any, context: str, *, minimum: int = 1) -> bytes:
 def _bind_display(display: str) -> None:
     if not _DISPLAY_RE.fullmatch(display):
         raise RuntimeError('display must use the :N form')
-    bus_path = Path('/tmp') / f'a11y_bus_{display}'
-    descriptor = os.open(bus_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise RuntimeError('AT-SPI bus binding must be a regular nonsymlink file')
-        bus = os.read(descriptor, 4096).decode('utf-8').strip()
-        if os.read(descriptor, 1):
-            raise RuntimeError('AT-SPI bus binding is unexpectedly large')
-    finally:
-        os.close(descriptor)
-    if not bus:
-        raise RuntimeError('AT-SPI bus binding is empty')
+
+    def read_binding(path: Path, context: str) -> str:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError(f'{context} must be a regular nonsymlink file')
+            value = os.read(descriptor, 4096).decode('utf-8').strip()
+            if os.read(descriptor, 1):
+                raise RuntimeError(f'{context} is unexpectedly large')
+        finally:
+            os.close(descriptor)
+        if not value:
+            raise RuntimeError(f'{context} is empty')
+        return value
+
+    atspi_bus = read_binding(
+        Path('/tmp') / f'a11y_bus_{display}',
+        'AT-SPI bus binding',
+    )
+    session_bus = read_binding(
+        Path('/tmp') / f'dbus_session_bus_{display}',
+        'D-Bus session binding',
+    )
     os.environ['DISPLAY'] = display
-    os.environ['AT_SPI_BUS_ADDRESS'] = bus
+    os.environ['AT_SPI_BUS_ADDRESS'] = atspi_bus
+    os.environ['DBUS_SESSION_BUS_ADDRESS'] = session_bus
 
 
 def _current_commit() -> str:
