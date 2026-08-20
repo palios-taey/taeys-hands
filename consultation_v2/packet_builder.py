@@ -9,6 +9,9 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from typing import Any, Mapping, Sequence
 
 
@@ -1167,14 +1170,395 @@ def preflight_consultation_bundles(spec_path: str | Path) -> dict[str, Any]:
     }
 
 
+VERIFY_RUN_INPUT_SPEC_KEYS = frozenset(
+    {
+        "authority_source",
+        "bundle_a",
+        "bundle_b",
+        "corrected_packet",
+        "output_receipt",
+        "prompt",
+        "receipt",
+        "schema_version",
+        "send_task",
+    }
+)
+VERIFY_SEND_TASK_KEYS = frozenset(
+    {
+        "expected_authority",
+        "expected_claimed_worker",
+        "expected_status",
+        "task_id",
+    }
+)
+AUTHORITY_SOURCE_KINDS = frozenset({"local_snapshot", "orchestrator_readonly_get"})
+
+
+def _observed_hash_binding(binding: Mapping[str, Any], context: str) -> dict[str, Any]:
+    _require_exact_keys(binding, frozenset({"bytes", "path", "sha256"}), context)
+    path = _absolute_path(binding["path"], f"{context}.path")
+    data = _read_regular_file(path, context)
+    expected = _expected_blob(data, {"bytes": binding["bytes"], "sha256": binding["sha256"]}, context)
+    expected["path"] = str(path)
+    return expected
+
+
+def _readonly_get_task(locator: str, task_id: str) -> dict[str, Any]:
+    if any(token in locator for token in ("?", "#", " ")):
+        raise PacketBuildError("orchestrator locator must be a query-free URL")
+    if not locator.startswith(("http://127.0.0.1:", "http://localhost:")):
+        raise PacketBuildError("orchestrator locator must be a local GET URL")
+    if not locator.rstrip("/").endswith("/" + task_id):
+        raise PacketBuildError("orchestrator locator does not name the exact send task")
+    request = urllib.request.Request(locator, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            if response.getcode() != 200:
+                raise PacketBuildError(f"orchestrator GET returned HTTP {response.getcode()}")
+            raw = response.read()
+    except urllib.error.URLError as exc:
+        raise PacketBuildError(f"orchestrator GET failed: {exc}") from exc
+    if not raw:
+        raise PacketBuildError("orchestrator GET returned an empty body")
+    return _strict_json(raw, "orchestrator task")
+
+
+def _load_authority_snapshot(source: Mapping[str, Any], task_id: str) -> dict[str, Any]:
+    _require_exact_keys(source, frozenset({"kind", "locator"}), "authority_source")
+    kind = _require_text(source["kind"], "authority_source.kind")
+    locator = _require_text(source["locator"], "authority_source.locator")
+    if kind not in AUTHORITY_SOURCE_KINDS:
+        raise PacketBuildError(
+            "authority_source.kind is not a read-only proof source; "
+            "verify-run-inputs never starts, dispatches, or sends"
+        )
+    if kind == "local_snapshot":
+        path = _absolute_path(locator, "authority_source.locator")
+        return _strict_json(_read_regular_file(path, "authority snapshot"), "authority snapshot")
+    return _readonly_get_task(locator, task_id)
+
+
+def _prove_supervised_claim(snapshot: Mapping[str, Any], expected: Mapping[str, Any]) -> dict[str, Any]:
+    _require_exact_keys(expected, VERIFY_SEND_TASK_KEYS, "send_task")
+    task_id = _require_text(expected["task_id"], "send_task.task_id")
+    expected_status = _require_text(expected["expected_status"], "send_task.expected_status")
+    worker = _require_text(expected["expected_claimed_worker"], "send_task.expected_claimed_worker")
+    authority = _require_text(expected["expected_authority"], "send_task.expected_authority")
+    if expected_status != "in_progress":
+        raise PacketBuildError("send-input gate requires expected_status in_progress")
+    if authority != "supervised_taey":
+        raise PacketBuildError("send-input gate requires expected_authority supervised_taey")
+    snapshot_id = _require_text(snapshot.get("id"), "authority snapshot id")
+    snapshot_status = _require_text(snapshot.get("status"), "authority snapshot status")
+    dispatched_to = snapshot.get("dispatched_to")
+    snapshot_authority = snapshot.get("authority")
+    if snapshot_id != task_id:
+        raise PacketBuildError("authority snapshot id is not the exact send task")
+    if snapshot_status != "in_progress":
+        raise PacketBuildError("send task has not started (status is not in_progress)")
+    if not isinstance(dispatched_to, str) or not dispatched_to:
+        raise PacketBuildError("send task is not claimed (dispatched_to empty)")
+    if dispatched_to != worker:
+        raise PacketBuildError("send task claimed worker differs from frozen expected worker")
+    if snapshot_authority != "supervised_taey":
+        raise PacketBuildError("send task is not under supervised Taey authority")
+    claim_worker = snapshot.get("dispatch_claim_worker")
+    if claim_worker not in (None, worker):
+        raise PacketBuildError("dispatch_claim_worker disagrees with dispatched_to")
+    return {
+        "task_id": task_id,
+        "started": True,
+        "claimed": True,
+        "status": snapshot_status,
+        "claimed_worker": dispatched_to,
+        "authority": snapshot_authority,
+    }
+
+
+def _cross_check_receipt_hashes(
+    receipt_data: bytes,
+    hashes: Mapping[str, dict[str, Any]],
+    task_id: str,
+) -> None:
+    receipt = _strict_json(receipt_data, "send-input receipt")
+    attachments = receipt.get("attachments")
+    if isinstance(attachments, dict):
+        for label, key in (("a", "bundle_a"), ("b", "bundle_b")):
+            attachment = attachments.get(label)
+            if not isinstance(attachment, dict):
+                continue
+            sha = attachment.get("sha256")
+            size = attachment.get("bytes")
+            if sha != hashes[key]["sha256"] or size != hashes[key]["bytes"]:
+                raise PacketBuildError(f"receipt attachment {label} hash differs from frozen {key}")
+    prompt = receipt.get("prompt")
+    if isinstance(prompt, dict):
+        if prompt.get("sha256") != hashes["prompt"]["sha256"] or prompt.get("bytes") != hashes["prompt"]["bytes"]:
+            raise PacketBuildError("receipt prompt hash differs from frozen prompt")
+    send_task = receipt.get("send_task")
+    if isinstance(send_task, dict) and send_task.get("task_id") not in (None, task_id):
+        raise PacketBuildError("receipt send_task.task_id differs from frozen send task")
+    packet_records = [
+        source
+        for source in receipt.get("sources") or []
+        if isinstance(source, dict) and str(source.get("logical", "")).startswith("packet_")
+    ]
+    if packet_records:
+        if len(packet_records) != 1:
+            raise PacketBuildError("receipt names more than one corrected packet source")
+        packet = packet_records[0]
+        if packet.get("sha256") != hashes["corrected_packet"]["sha256"]:
+            raise PacketBuildError("receipt corrected packet hash differs from frozen packet")
+        if packet.get("locator") != hashes["corrected_packet"]["path"]:
+            raise PacketBuildError("receipt corrected packet locator differs from frozen packet path")
+
+
+def verify_run_inputs(spec_path: str | Path) -> dict[str, Any]:
+    path = _absolute_path(str(spec_path), "verify-run-inputs spec")
+    spec = _strict_json(_read_regular_file(path, "verify-run-inputs spec"), "verify-run-inputs spec")
+    _require_exact_keys(spec, VERIFY_RUN_INPUT_SPEC_KEYS, "verify-run-inputs spec")
+    if spec["schema_version"] != 1:
+        raise PacketBuildError("verify-run-inputs schema_version is unsupported")
+    hashes = {
+        "bundle_a": _observed_hash_binding(spec["bundle_a"], "bundle_a"),
+        "bundle_b": _observed_hash_binding(spec["bundle_b"], "bundle_b"),
+        "prompt": _observed_hash_binding(spec["prompt"], "prompt"),
+        "corrected_packet": _observed_hash_binding(spec["corrected_packet"], "corrected_packet"),
+        "receipt": _observed_hash_binding(spec["receipt"], "receipt"),
+    }
+    send_task = spec["send_task"]
+    if not isinstance(send_task, dict):
+        raise PacketBuildError("send_task must be an object")
+    task_id = _require_text(send_task.get("task_id"), "send_task.task_id")
+    receipt_data = _read_regular_file(Path(hashes["receipt"]["path"]), "receipt")
+    _cross_check_receipt_hashes(receipt_data, hashes, task_id)
+    snapshot = _load_authority_snapshot(spec["authority_source"], task_id)
+    proof = _prove_supervised_claim(snapshot, send_task)
+    output_path = _absolute_path(spec["output_receipt"], "output_receipt")
+    if output_path.parent == output_path:
+        raise PacketBuildError("output_receipt must be a file path")
+    receipt = {
+        "schema_version": 1,
+        "status": "verify_run_inputs_pass",
+        "spec": {"path": str(path), "bytes": path.stat().st_size, "sha256": _sha256(_read_regular_file(path, "verify spec reread"))},
+        "hashes": hashes,
+        "send_task": proof,
+        "authority_source": spec["authority_source"],
+        "actions": {key: False for key in PROHIBITED_ACTIONS},
+        "checks": {
+            "bundle_a_hash": True,
+            "bundle_b_hash": True,
+            "prompt_hash": True,
+            "corrected_packet_hash": True,
+            "receipt_hash": True,
+            "send_task_started": True,
+            "send_task_claimed": True,
+            "supervised_taey_authority": True,
+            "no_task_create_or_dispatch": True,
+            "no_attachment_staging": True,
+            "no_ui_or_send": True,
+        },
+    }
+    payload = _json_bytes(receipt)
+    descriptor = _open_exclusive(output_path)
+    try:
+        _write_all(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    observed = _read_regular_file(output_path, "verify-run-inputs output receipt")
+    if observed != payload:
+        raise PacketBuildError("verify-run-inputs output receipt reread mismatch")
+    return {
+        "status": "verify_run_inputs_pass",
+        "receipt": str(output_path),
+        "bytes": len(observed),
+        "sha256": _sha256(observed),
+        "send_task": proof,
+        "actions": receipt["actions"],
+    }
+
+
+def _control_hash_binding(path: Path, data: bytes) -> dict[str, Any]:
+    return {"path": str(path), "bytes": len(data), "sha256": _sha256(data)}
+
+
+def _write_control_file(path: Path, data: bytes) -> None:
+    descriptor = _open_exclusive(path)
+    try:
+        _write_all(descriptor, data)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def run_verify_run_inputs_controls() -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+
+    def one_case(name: str, *, expect_pass: bool, mutate: Any) -> None:
+        with tempfile.TemporaryDirectory(prefix="packet-verify-run-inputs-") as raw_root:
+            root = Path(raw_root)
+            bundle_a = b"FAKE-BUNDLE-A\n"
+            bundle_b = b"FAKE-BUNDLE-B\n"
+            prompt = (
+                b"Read both attached files fully before answering. Fake request. "
+                b"Deliver fake deliverable. Follow the governance, evidence, "
+                b"acceptance, and stop conditions in the attachments. If either "
+                b"attachment is unavailable or incomplete, state that and stop."
+            )
+            packet = b"FAKE-CORRECTED-PACKET\n"
+            task_id = "task-fake-send-1"
+            worker = "taey"
+            bundle_a_path = root / "bundle_a.md"
+            bundle_b_path = root / "bundle_b.md"
+            prompt_path = root / "prompt.txt"
+            packet_path = root / "corrected_packet.md"
+            receipt_path = root / "build_receipt.json"
+            snapshot_path = root / "authority.json"
+            spec_path = root / "verify_spec.json"
+            output_path = root / "verify_receipt.json"
+            for path, data in (
+                (bundle_a_path, bundle_a),
+                (bundle_b_path, bundle_b),
+                (prompt_path, prompt),
+                (packet_path, packet),
+            ):
+                _write_control_file(path, data)
+            build_receipt = {
+                "attachments": {
+                    "a": {"basename": "bundle_a.md", "bytes": len(bundle_a), "sha256": _sha256(bundle_a)},
+                    "b": {"basename": "bundle_b.md", "bytes": len(bundle_b), "sha256": _sha256(bundle_b)},
+                },
+                "prompt": {
+                    "basename": "prompt.txt",
+                    "bytes": len(prompt),
+                    "sha256": _sha256(prompt),
+                    "text": prompt.decode("utf-8"),
+                },
+                "send_task": {"task_id": task_id},
+                "sources": [
+                    {
+                        "logical": "packet_corrected",
+                        "locator": str(packet_path),
+                        "bytes": len(packet),
+                        "sha256": _sha256(packet),
+                    }
+                ],
+            }
+            snapshot = {
+                "id": task_id,
+                "status": "in_progress",
+                "dispatched_to": worker,
+                "dispatch_claim_worker": worker,
+                "authority": "supervised_taey",
+            }
+            spec = {
+                "schema_version": 1,
+                "bundle_a": _control_hash_binding(bundle_a_path, bundle_a),
+                "bundle_b": _control_hash_binding(bundle_b_path, bundle_b),
+                "prompt": _control_hash_binding(prompt_path, prompt),
+                "corrected_packet": _control_hash_binding(packet_path, packet),
+                "receipt": {
+                    "path": str(receipt_path),
+                    "bytes": 0,
+                    "sha256": "pending",
+                },
+                "send_task": {
+                    "task_id": task_id,
+                    "expected_status": "in_progress",
+                    "expected_claimed_worker": worker,
+                    "expected_authority": "supervised_taey",
+                },
+                "authority_source": {"kind": "local_snapshot", "locator": str(snapshot_path)},
+                "output_receipt": str(output_path),
+            }
+            mutate(spec, snapshot, build_receipt)
+            receipt_bytes = _json_bytes(build_receipt)
+            spec["receipt"] = _control_hash_binding(receipt_path, receipt_bytes)
+            if name == "falsified_receipt_hash":
+                spec["receipt"]["sha256"] = "0" * 64
+            _write_control_file(receipt_path, receipt_bytes)
+            _write_control_file(snapshot_path, _json_bytes(snapshot))
+            _write_control_file(spec_path, _json_bytes(spec))
+            try:
+                result = verify_run_inputs(spec_path)
+                passed = True
+                detail = result["status"]
+            except (OSError, PacketBuildError) as exc:
+                passed = False
+                detail = str(exc)
+            ok = passed if expect_pass else not passed
+            results.append(
+                {
+                    "name": name,
+                    "expect_pass": expect_pass,
+                    "passed": passed,
+                    "ok": ok,
+                    "detail": detail,
+                }
+            )
+
+    one_case("positive_started_claimed_hashes", expect_pass=True, mutate=lambda spec, snapshot, receipt: None)
+
+    def mismatch_a(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        spec["bundle_a"]["sha256"] = "0" * 64
+
+    def mismatch_b(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        spec["bundle_b"]["sha256"] = "0" * 64
+
+    def mismatch_prompt(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        spec["prompt"]["sha256"] = "0" * 64
+
+    def mismatch_packet(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        spec["corrected_packet"]["sha256"] = "0" * 64
+
+    def not_started(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        snapshot["status"] = "pending"
+
+    def not_claimed(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        snapshot["dispatched_to"] = ""
+
+    def wrong_task(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        snapshot["id"] = "task-other"
+
+    def not_supervised(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        snapshot["authority"] = "autonomous_engine"
+
+    def dispatch_kind(spec: dict[str, Any], snapshot: dict[str, Any], receipt: dict[str, Any]) -> None:
+        spec["authority_source"]["kind"] = "dispatch"
+
+    one_case("falsified_bundle_a_hash", expect_pass=False, mutate=mismatch_a)
+    one_case("falsified_bundle_b_hash", expect_pass=False, mutate=mismatch_b)
+    one_case("falsified_prompt_hash", expect_pass=False, mutate=mismatch_prompt)
+    one_case("falsified_corrected_packet_hash", expect_pass=False, mutate=mismatch_packet)
+    one_case("falsified_receipt_hash", expect_pass=False, mutate=lambda spec, snapshot, receipt: None)
+    one_case("falsified_not_started", expect_pass=False, mutate=not_started)
+    one_case("falsified_not_claimed", expect_pass=False, mutate=not_claimed)
+    one_case("falsified_wrong_task_id", expect_pass=False, mutate=wrong_task)
+    one_case("falsified_not_supervised_taey", expect_pass=False, mutate=not_supervised)
+    one_case("falsified_dispatch_authority_kind", expect_pass=False, mutate=dispatch_kind)
+
+    failed = [item for item in results if not item["ok"]]
+    if failed:
+        names = ", ".join(item["name"] for item in failed)
+        raise PacketBuildError(f"verify-run-inputs controls failed: {names}")
+    return {
+        "status": "verify_run_inputs_controls_pass",
+        "cases": results,
+        "positive": 1,
+        "falsified": len(results) - 1,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build PACKET_CONTRACT two-attachment consultation sets.")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("preflight", "build"):
+    for command in ("preflight", "build", "verify-run-inputs"):
         command_parser = subparsers.add_parser(command)
         command_parser.add_argument("--spec", required=True)
     receipt_parser = subparsers.add_parser("validate-receipt")
     receipt_parser.add_argument("receipt")
+    subparsers.add_parser("verify-run-inputs-controls")
     return parser
 
 
@@ -1185,6 +1569,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = preflight_consultation_bundles(args.spec)
         elif args.command == "build":
             result = build_consultation_bundles(args.spec)
+        elif args.command == "verify-run-inputs":
+            result = verify_run_inputs(args.spec)
+        elif args.command == "verify-run-inputs-controls":
+            result = run_verify_run_inputs_controls()
         else:
             receipt = validate_consultation_bundle_receipt(args.receipt)
             result = {

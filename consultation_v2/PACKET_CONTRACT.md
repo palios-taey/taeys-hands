@@ -98,6 +98,27 @@ The receipt is not a third Chat attachment. It is retained for the action and in
 bundle filenames are deterministic from the frozen request ID and destination platform, so the YAML-owned
 postcondition can validate the exact expected file-chip names.
 
+## Send-input gate
+
+UI attach/send is a later, separately authorized action. Before any display, attachment staging, or send,
+`scripts/consultation-packet-builder verify-run-inputs` must pass against the frozen send-input spec. That
+command:
+
+1. re-reads Bundle A, Bundle B, the prompt, the corrected packet, and the local build receipt;
+2. compares each observed byte count and SHA-256 to the frozen expected values;
+3. cross-checks those hashes against the receipt's attachment, prompt, and corrected-packet records;
+4. proves the exact named external send task has already started (`status=in_progress`) and is claimed
+   (`dispatched_to` equals the frozen worker) under `authority=supervised_taey`;
+5. writes one new local verify receipt; and
+6. never creates, dispatches, or starts a task, never stages attachments, never touches UI, never restarts a
+   display, and never sends.
+
+Authority proof is read-only: a local snapshot file, or a query-free GET of `http://127.0.0.1` /
+`http://localhost` whose URL path names that exact task id. Missing start, missing claim, worker mismatch,
+or missing supervised-Taey authority is a hard stop. Mechanical fake-only positive and falsified controls
+are `verify-run-inputs-controls`. Independent CONTROL must pass before any fresh live send task or live
+verify receipt is used as production evidence.
+
 ## Fail-loud conditions
 
 Construction stops before any UI action when:
@@ -109,11 +130,14 @@ Construction stops before any UI action when:
   invented revision instead of its observed content address;
 - rendered inclusion is incomplete, reordered, duplicated, summarized, or transformed;
 - the builder would emit anything other than exactly two non-empty attachments;
-- either final bundle fails its independent re-read and hash; or
-- the brief prompt requests a filesystem-derived claim from the Chat.
+- either final bundle fails its independent re-read and hash;
+- the brief prompt requests a filesystem-derived claim from the Chat; or
+- the send-input gate cannot prove exact frozen hashes or that the named send task is already started and
+  claimed under supervised Taey authority.
 
 There is no fallback to the old one-package builder, inline context, a partial packet, extra attachment,
 automatic chunking, or a send followed by repair. The failure receipt names the exact pre-UI obstruction.
+The send-input gate does not repair a missing task by creating or dispatching one.
 
 ## Production proof
 

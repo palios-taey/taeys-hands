@@ -28,7 +28,7 @@ do not override it.
 | Concern | Current authority | Implementation boundary | Status |
 |---|---|---|---|
 | Manual lifecycle | [`../CONSULTATION_CONTRACT.md`](../CONSULTATION_CONTRACT.md) | Taey performs one action and validates it before choosing the next. | Canonical implementation; platform production validation is tracked separately. |
-| Consultation inputs | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md) | Exactly one governance bundle, one task bundle, and one brief on-screen prompt. | Canonical contract; the current one-package builder is not conformant and must not be promoted as the manual path. |
+| Consultation inputs | [`PACKET_CONTRACT.md`](PACKET_CONTRACT.md) | Exactly one governance bundle, one task bundle, and one brief on-screen prompt. `scripts/consultation-packet-builder verify-run-inputs` is the pre-UI send-input gate. | Canonical contract; construction plus send-input hash/authority proof must pass before attach/send. |
 | Tree projection and filtering | [`YAML_SCHEMA.md`](YAML_SCHEMA.md) plus each platform YAML | [`snapshot.py`](snapshot.py) and the platform package expose browser chrome only for the address bar, exclude the complete chat-history/sidebar block and dynamic non-actionable text, and retain the current document, actionable controls, and opened overlay. | `drive_chat` consumes this canonical snapshot directly; scoped refs are revision-bound and exact-match-only. |
 | Primitive verbs and locking | [`PRIMITIVES_CONTRACT.md`](PRIMITIVES_CONTRACT.md) | Canonical snapshot, AT-SPI/input/interaction, clipboard, and display-lock primitives. | `drive_chat` and `ConsultationRuntime` fail closed on non-AT-SPI click strategies. |
 | Platform ownership | Each [`platforms/<platform>/`](platforms/) package | One YAML, one driver, one monitor per ChatGPT, Claude, Gemini, Grok, and Perplexity. | Package layout exists; manual action coverage and current live YAML equality still require platform-by-platform control. |
@@ -90,4 +90,10 @@ a frozen JSON spec. `preflight` validates canonical source bytes, Git commits, r
 expected output hashes, rejected-root isolation, and negative receipts without creating the output root.
 `build` repeats those gates, creates the root and every file exclusively, fsyncs them, and derives receipt
 root/file/send-task bindings from the actual output paths. `validate-receipt` independently re-reads an
-existing receipt and its bound files. Packet construction does not stage attachments or perform a UI action.
+existing receipt and its bound files. `verify-run-inputs` is the fail-closed send-input gate: it re-reads
+Bundle A, Bundle B, prompt, corrected packet, and receipt, checks those hashes, proves the exact external
+send task is already started and claimed under supervised Taey authority, and writes a local verify receipt.
+It never starts or dispatches a task, stages attachments, touches UI, restarts a display, or sends.
+`verify-run-inputs-controls` runs mechanical fake-only positive and falsified cases. Packet construction
+and the send-input gate do not stage attachments or perform a UI action. Independent CONTROL is required
+before any fresh live send task or live verify receipt.
