@@ -369,6 +369,60 @@ tree:
       name: Copy
       role: push button
       scope: response.actions
+    chat_messages_panel:
+      name: Chat messages
+      role: panel
+      scope: response.document
+    current_response_article:
+      role: article
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: chat_messages_panel
+        ordinal: last
+      reason: Claude numbers each message article dynamically; the current response is the last article under the exact Chat messages panel.
+    response_content_section:
+      role: section
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: current_response_article
+        ordinal: first
+      reason: The current response article's first section owns its rendered response content.
+    generated_artifact_controls_section:
+      role: section
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: response_content_section
+        ordinal: last
+        direct_child_roles:
+          - push button
+          - section
+          - section
+          - push button
+          - push button
+        required_direct_child:
+          index: 3
+          name: Open in Drive
+          role: push button
+      reason: A generated artifact is rendered in the last response-content section; the container has no accessible name.
+    generated_artifact_view_button:
+      role: push button
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: generated_artifact_controls_section
+        ordinal: first
+      reason: Claude includes the generated artifact title in this button's accessible name; it is the first push button in the exact artifact-controls section.
+    generated_artifact_download_button:
+      role: push button
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: generated_artifact_controls_section
+        ordinal: last
+      reason: Claude includes the generated artifact title in this button's accessible name; it is the last push button in the exact artifact-controls section.
     artifact_copy_push_button:
       name: Copy
       role: push button

@@ -8,7 +8,7 @@ import yaml
 
 from consultation_v2 import atspi
 from consultation_v2.platforms import routing as platform_routing
-from consultation_v2.tree import find_elements, find_menu_items, node_label
+from consultation_v2.tree import Atspi, IMPORTANT_STATES, find_elements, find_menu_items, node_label
 
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
@@ -598,6 +598,100 @@ def _menu_snapshot_max_depth(tree_cfg: Dict[str, Any]) -> int:
     return value
 
 
+def _direct_child_elements(parent: Any) -> List[Dict[str, Any]]:
+    try:
+        child_count = parent.get_child_count()
+    except Exception as exc:
+        raise RuntimeError('cannot read AT-SPI direct-child count for structural identity') from exc
+    children: List[Dict[str, Any]] = []
+    for index in range(child_count):
+        try:
+            child = parent.get_child_at_index(index)
+            if child is None:
+                raise RuntimeError(f'AT-SPI direct child {index} is unavailable')
+            state_set = child.get_state_set()
+            element: Dict[str, Any] = {
+                'name': child.get_name() or '',
+                'role': child.get_role_name() or '',
+                'states': [
+                    state.value_nick
+                    for state in IMPORTANT_STATES
+                    if state_set.contains(state)
+                ],
+                'atspi_obj': child,
+            }
+            component = child.get_component_iface()
+            if component is not None:
+                rect = component.get_extents(Atspi.CoordType.SCREEN)
+                if rect is not None:
+                    element['x'] = rect.x + (rect.width // 2 if rect.width > 0 else 0)
+                    element['y'] = rect.y + (rect.height // 2 if rect.height > 0 else 0)
+            description = child.get_description()
+            if description:
+                element['description'] = description
+        except Exception as exc:
+            raise RuntimeError(
+                f'cannot read AT-SPI direct child {index} for structural identity'
+            ) from exc
+        children.append(element)
+    return children
+
+
+def _matches_direct_child_signature(
+    element: Dict[str, Any],
+    structural: Dict[str, Any],
+) -> bool:
+    roles = structural.get('direct_child_roles')
+    required_child = structural.get('required_direct_child')
+    if roles is None and required_child is None:
+        return True
+    obj = element.get('atspi_obj')
+    if obj is None:
+        return False
+    children = _direct_child_elements(obj)
+    if roles is not None:
+        if not isinstance(roles, list):
+            raise ValueError('structural.direct_child_roles must be a list')
+        if [child.get('role') or '' for child in children] != roles:
+            return False
+    if required_child is not None:
+        if not isinstance(required_child, dict):
+            raise ValueError('structural.required_direct_child must be a mapping')
+        index = required_child.get('index')
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError('structural.required_direct_child.index must be an integer')
+        if index < 0 or index >= len(children):
+            return False
+        if not matches_spec(children[index], {
+            'name': required_child.get('name'),
+            'role': required_child.get('role'),
+        }):
+            return False
+    return True
+
+
+def _exact_ancestor_refs(
+    key: str,
+    spec: Dict[str, Any],
+    elements: List[Dict[str, Any]],
+) -> List[ElementRef]:
+    matches: List[Any] = []
+    for element in elements:
+        for ancestor in _atspi_ancestor_objects(element.get('atspi_obj')):
+            if not _obj_matches_spec(ancestor, spec):
+                continue
+            if not any(ancestor == existing for existing in matches):
+                matches.append(ancestor)
+    if len(matches) != 1:
+        return []
+    ancestor = matches[0]
+    return [_to_ref(key, {
+        'name': ancestor.get_name() or '',
+        'role': ancestor.get_role_name() or '',
+        'atspi_obj': ancestor,
+    })]
+
+
 def _resolve_structural_mappings(
     element_map: Dict[str, Any],
     elements: List[Dict[str, Any]],
@@ -612,6 +706,44 @@ def _resolve_structural_mappings(
         if spec.get('match_strategy') == 'name_agnostic_structural':
             expected_role = str(spec.get('role') or '').strip()
             if not expected_role:
+                continue
+            parent_key = structural.get('parent')
+            if isinstance(parent_key, str):
+                parent_refs = mapped.get(parent_key) or []
+                if not parent_refs:
+                    parent_spec = element_map.get(parent_key)
+                    if isinstance(parent_spec, dict):
+                        parent_refs = _exact_ancestor_refs(parent_key, parent_spec, elements)
+                        if parent_refs:
+                            mapped[parent_key] = parent_refs
+                if len(parent_refs) != 1 or parent_refs[0].atspi_obj is None:
+                    continue
+                candidates = []
+                for element in _direct_child_elements(parent_refs[0].atspi_obj):
+                    identity = _element_identity(element)
+                    if identity in accounted or identity in structural_accounted:
+                        continue
+                    if (element.get('role') or '') != expected_role:
+                        continue
+                    if structural.get('name_must_be_nonempty') and not (element.get('name') or '').strip():
+                        continue
+                    if not _matches_structural_exact_fields(element, spec):
+                        continue
+                    candidates.append(element)
+                index = structural.get('index')
+                ordinal = str(structural.get('ordinal') or '').strip().lower()
+                selected = None
+                if isinstance(index, int) and not isinstance(index, bool):
+                    if 0 <= index < len(candidates):
+                        selected = candidates[index]
+                elif ordinal == 'first' and candidates:
+                    selected = candidates[0]
+                elif ordinal == 'last' and candidates:
+                    selected = candidates[-1]
+                if selected is None or not _matches_direct_child_signature(selected, structural):
+                    continue
+                mapped.setdefault(key, []).append(_to_ref(key, selected))
+                structural_accounted.add(_element_identity(selected))
                 continue
             needed_states = {str(item).lower() for item in _listify(spec.get('states_include'))}
             candidates = []

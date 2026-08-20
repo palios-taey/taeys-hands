@@ -74,7 +74,15 @@ IDENTITY_ELEMENT_KEYS = frozenset({
 IDENTITY_ACTIVE_STATES = frozenset({'checked', 'selected', 'pressed', 'expanded', 'focused'})
 MENU_ACTIVE_RECOGNITIONS = IDENTITY_ACTIVE_STATES | frozenset({'selected_name_prefix', 'click_only'})
 IDENTITY_MATCH_STRATEGIES = frozenset({'name_agnostic_structural'})
-IDENTITY_STRUCTURAL_KEYS = frozenset({'after', 'before'})
+IDENTITY_STRUCTURAL_KEYS = frozenset({
+    'after',
+    'before',
+    'parent',
+    'index',
+    'ordinal',
+    'direct_child_roles',
+    'required_direct_child',
+})
 MENU_SELECTION_KEYS = frozenset({'menus'})
 MENU_KEYS = frozenset({
     'select',
@@ -752,6 +760,72 @@ def _uses_identity_schema(data: dict[str, Any]) -> bool:
     return data.get('schema') == IDENTITY_SCHEMA or (data.get('tree') or {}).get('schema') == IDENTITY_SCHEMA
 
 
+def _validate_identity_direct_child_signature(
+    findings: list[ContractFinding],
+    lines: dict[tuple[str, ...], int],
+    structural: dict[str, Any],
+    structural_path: tuple[str, ...],
+) -> None:
+    roles = structural.get('direct_child_roles')
+    if roles is not None and (
+        not isinstance(roles, list)
+        or not roles
+        or not all(
+            isinstance(role, str)
+            and role
+            and role == role.strip()
+            and not _has_wildcard(role)
+            for role in roles
+        )
+    ):
+        _add(findings, lines, structural_path + ('direct_child_roles',), 'direct_child_roles',
+             'identity_v1 direct_child_roles must be a non-empty list of exact roles')
+    required_child = structural.get('required_direct_child')
+    if required_child is None:
+        return
+    required_path = structural_path + ('required_direct_child',)
+    if not isinstance(required_child, dict):
+        _add(findings, lines, required_path, 'required_direct_child',
+             'identity_v1 required_direct_child must be an exact index/name/role mapping')
+        return
+    if set(required_child) != {'index', 'name', 'role'}:
+        _add(findings, lines, required_path, 'required_direct_child',
+             'identity_v1 required_direct_child must declare exactly index, name, and role')
+        return
+    child_index = required_child['index']
+    if isinstance(child_index, bool) or not isinstance(child_index, int) or child_index < 0:
+        _add(findings, lines, required_path + ('index',), 'index',
+             'identity_v1 required_direct_child.index must be a non-negative integer')
+    for field in ('name', 'role'):
+        value = required_child[field]
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+            or _has_wildcard(value)
+        ):
+            _add(findings, lines, required_path + (field,), field,
+                 f'identity_v1 required_direct_child.{field} must be exact')
+    if (
+        isinstance(roles, list)
+        and isinstance(child_index, int)
+        and not isinstance(child_index, bool)
+        and child_index >= len(roles)
+    ):
+        _add(findings, lines, required_path + ('index',), 'index',
+             'identity_v1 required_direct_child.index exceeds direct_child_roles')
+    elif (
+        isinstance(roles, list)
+        and isinstance(child_index, int)
+        and not isinstance(child_index, bool)
+        and 0 <= child_index < len(roles)
+        and isinstance(required_child.get('role'), str)
+        and roles[child_index] != required_child['role']
+    ):
+        _add(findings, lines, required_path + ('role',), 'role',
+             'identity_v1 required_direct_child.role must match direct_child_roles at index')
+
+
 def _validate_identity_element_map(
     findings: list[ContractFinding],
     lines: dict[tuple[str, ...], int],
@@ -796,14 +870,25 @@ def _validate_identity_element_map(
         if match_strategy == 'name_agnostic_structural':
             if not isinstance(structural, dict) or not structural:
                 _add(findings, lines, key_path + ('structural',), 'structural',
-                     'identity_v1 name_agnostic_structural requires after/before structural anchors')
+                     'identity_v1 name_agnostic_structural requires positional or direct-parent structural identity')
             else:
-                for structural_key, structural_value in structural.items():
-                    structural_key_name = str(structural_key)
-                    if structural_key_name not in IDENTITY_STRUCTURAL_KEYS:
-                        _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
-                             f'identity_v1 structural may only declare {sorted(IDENTITY_STRUCTURAL_KEYS)}')
+                unsupported = sorted(
+                    str(key) for key in structural
+                    if str(key) not in IDENTITY_STRUCTURAL_KEYS
+                )
+                for structural_key_name in unsupported:
+                    _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
+                         f'identity_v1 structural may only declare {sorted(IDENTITY_STRUCTURAL_KEYS)}')
+                parent_mode = 'parent' in structural
+                positional_mode = any(anchor in structural for anchor in ('after', 'before'))
+                if parent_mode and positional_mode:
+                    _add(findings, lines, key_path + ('structural',), 'structural',
+                         'identity_v1 structural cannot mix direct-parent and after/before identity')
+                reference_keys = ('parent',) if parent_mode else ('after', 'before')
+                for structural_key_name in reference_keys:
+                    if structural_key_name not in structural:
                         continue
+                    structural_value = structural[structural_key_name]
                     if (
                         not isinstance(structural_value, str)
                         or not structural_value
@@ -819,9 +904,40 @@ def _validate_identity_element_map(
                     elif structural_value not in element_map:
                         _add(findings, lines, key_path + ('structural', structural_key_name), structural_key_name,
                              'identity_v1 structural anchor must reference an existing element_map key')
-                if not any(anchor in structural for anchor in IDENTITY_STRUCTURAL_KEYS):
+                if parent_mode:
+                    has_index = 'index' in structural
+                    has_ordinal = 'ordinal' in structural
+                    if has_index == has_ordinal:
+                        _add(findings, lines, key_path + ('structural',), 'structural',
+                             'identity_v1 direct-parent structural identity requires exactly one of index or ordinal')
+                    if has_index and (
+                        isinstance(structural['index'], bool)
+                        or not isinstance(structural['index'], int)
+                        or structural['index'] < 0
+                    ):
+                        _add(findings, lines, key_path + ('structural', 'index'), 'index',
+                             'identity_v1 structural.index must be a non-negative integer')
+                    if has_ordinal and (
+                        not isinstance(structural['ordinal'], str)
+                        or structural['ordinal'] not in STRUCTURAL_ORDINAL_VALUES
+                    ):
+                        _add(findings, lines, key_path + ('structural', 'ordinal'), 'ordinal',
+                             f'identity_v1 structural.ordinal must be one of {sorted(STRUCTURAL_ORDINAL_VALUES)}')
+                    _validate_identity_direct_child_signature(
+                        findings,
+                        lines,
+                        structural,
+                        key_path + ('structural',),
+                    )
+                elif 'index' in structural or 'ordinal' in structural:
+                    _add(findings, lines, key_path + ('structural',), 'structural',
+                         'identity_v1 index/ordinal requires an exact direct parent')
+                elif not positional_mode:
                     _add(findings, lines, key_path + ('structural',), 'structural',
                          'identity_v1 structural requires at least one after/before anchor')
+                elif 'direct_child_roles' in structural or 'required_direct_child' in structural:
+                    _add(findings, lines, key_path + ('structural',), 'structural',
+                         'identity_v1 direct-child signatures require an exact direct parent')
             reason = spec.get('reason')
             if not isinstance(reason, str) or not reason.strip():
                 _add(findings, lines, key_path + ('reason',), 'reason',
