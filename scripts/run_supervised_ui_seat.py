@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,10 @@ sys.path.insert(0, str(REPO_ROOT))
 _DISPLAY_RE = re.compile(r'^:[0-9]{1,3}$')
 _GIT_COMMIT_RE = re.compile(r'^(?:[0-9a-f]{40}|[0-9a-f]{64})$')
 _REQUEST_LIMIT = 1024 * 1024
+_PUBLIC_ORIGINS = frozenset({
+    'git@github.com:palios-taey/taeys-hands.git',
+    'https://github.com/palios-taey/taeys-hands.git',
+})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,7 +125,46 @@ def _current_commit() -> str:
     commit = completed.stdout.strip()
     if not _GIT_COMMIT_RE.fullmatch(commit):
         raise RuntimeError('unable to establish exact Hands commit')
+    status = subprocess.run(
+        ['git', '-C', str(REPO_ROOT), 'status', '--porcelain'],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if status.stdout:
+        raise RuntimeError('running Hands checkout contains byte drift')
+    origin = subprocess.run(
+        ['git', '-C', str(REPO_ROOT), 'remote', 'get-url', 'origin'],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if origin not in _PUBLIC_ORIGINS:
+        raise RuntimeError('Hands origin is not the canonical public repository')
+    remote_heads = subprocess.run(
+        ['git', '-C', str(REPO_ROOT), 'ls-remote', '--heads', 'origin'],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout.splitlines()
+    if not any(line.split() and line.split()[0] == commit for line in remote_heads):
+        raise RuntimeError('running Hands commit is not published on a public branch')
     return commit
+
+
+def _verify_committed_runtime_config(
+    commit: str,
+    runtime_config: Mapping[str, Any],
+) -> None:
+    for relative_path, expected_digest in runtime_config['files'].items():
+        committed = subprocess.run(
+            ['git', '-C', str(REPO_ROOT), 'show', f'{commit}:{relative_path}'],
+            check=True,
+            capture_output=True,
+        ).stdout
+        if hashlib.sha256(committed).hexdigest() != expected_digest:
+            raise RuntimeError(f'runtime config differs from public commit: {relative_path}')
 
 
 def _lease_runtime_seconds(value: str) -> float:
@@ -227,6 +271,10 @@ def main() -> int:
     actual_commit = _current_commit()
     if args.hands_commit != actual_commit:
         raise RuntimeError('declared Hands commit does not match the running checkout')
+    from consultation_v2.supervised_ui_contract import runtime_config_manifest
+
+    runtime_config = runtime_config_manifest(args.platform)
+    _verify_committed_runtime_config(actual_commit, runtime_config)
     lease_runtime = _lease_runtime_seconds(args.lease_expires_at)
     secret_value = os.environ.pop(args.lease_secret_env, None)
     if secret_value is None:
@@ -252,6 +300,8 @@ def main() -> int:
         presence_incarnation_id=args.presence_incarnation_id,
         hands_incarnation_id=hands_incarnation_id,
         hands_commit=actual_commit,
+        platform=args.platform,
+        runtime_config=runtime_config,
     )
     seat = None
     try:
@@ -271,6 +321,7 @@ def main() -> int:
                 presence_incarnation_id=args.presence_incarnation_id,
                 hands_incarnation_id=hands_incarnation_id,
                 hands_commit=actual_commit,
+                runtime_config=runtime_config,
                 receipt_store=store,
             )
             return _serve(seat)

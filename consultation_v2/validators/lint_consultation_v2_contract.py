@@ -134,9 +134,11 @@ def scan_yaml_schema(path: Path, source: str) -> list[Finding]:
             from consultation_v2.supervised_ui_contract import (
                 clear_supervised_policy_cache,
                 load_supervised_policy,
+                runtime_config_manifest,
             )
             clear_supervised_policy_cache()
             load_supervised_policy(path.parent.name)
+            runtime_config_manifest(path.parent.name)
         except Exception as exc:
             findings.append(Finding(
                 str(path), 1, 'supervised-ui-policy-invalid',
