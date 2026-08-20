@@ -274,7 +274,7 @@ def _binding_record(binding: Mapping[str, Any], context: str) -> dict[str, Any]:
 def _git_observation(path: Path, expected_commit: str) -> dict[str, str]:
     root_run = subprocess.run(
         ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
-        check=False,
+        check=False,  # lint-allow: nonzero is translated to a path-specific PacketBuildError below
         capture_output=True,
         text=True,
     )
@@ -295,7 +295,7 @@ def _git_observation(path: Path, expected_commit: str) -> dict[str, str]:
     relative = path.relative_to(root)
     tracked_run = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--error-unmatch", str(relative)],
-        check=False,
+        check=False,  # lint-allow: untracked sources are rejected from the inspected returncode below
         capture_output=True,
         text=True,
     )
@@ -544,7 +544,7 @@ def _snapshot_root(root: Path) -> dict[str, Any]:
 def _assert_no_writers(root: Path) -> None:
     result = subprocess.run(
         ["lsof", "+D", str(root)],
-        check=False,
+        check=False,  # lint-allow: only documented lsof 0/1 statuses are accepted below
         capture_output=True,
         text=True,
     )
