@@ -135,6 +135,8 @@ class _ObservedNode:
     role: str = ''
     scope: str = ''
     path: str = ''
+    parent_path: str | None = None
+    ancestor_paths: tuple[str, ...] = ()
     states: tuple[str, ...] = ()
     text: str | None = None
 
@@ -145,6 +147,8 @@ class _ObservedNode:
             'role': self.role,
             'scope': self.scope,
             'path': self.path,
+            'parent_path': self.parent_path,
+            'ancestor_paths': list(self.ancestor_paths),
             'states': list(self.states),
         }
         if self.text is not None:
@@ -321,7 +325,14 @@ def _state_names(obj: Any) -> tuple[str, ...]:
     return tuple(sorted(state.value_nick for state in states))
 
 
-def _observed_node(obj: Any, path: str, *, scope: str = '') -> _ObservedNode:
+def _observed_node(
+    obj: Any,
+    path: str,
+    *,
+    scope: str = '',
+    parent_path: str | None = None,
+    ancestor_paths: tuple[str, ...] = (),
+) -> _ObservedNode:
     name = obj.get_name()
     role = obj.get_role_name()
     if name is None or role is None:
@@ -332,6 +343,8 @@ def _observed_node(obj: Any, path: str, *, scope: str = '') -> _ObservedNode:
         role=str(role),
         scope=scope,
         path=path,
+        parent_path=parent_path,
+        ancestor_paths=ancestor_paths,
         states=_state_names(obj),
     )
 
@@ -349,17 +362,45 @@ def _children(obj: Any) -> list[tuple[int, Any]]:
     return children
 
 
-def _subtree(root: Any, root_path: str, max_depth: int) -> list[_ObservedNode]:
+def _subtree(
+    root: Any,
+    root_path: str,
+    max_depth: int,
+    capture_text_specs: tuple[Mapping[str, Any], ...],
+) -> list[_ObservedNode]:
     observed: list[_ObservedNode] = []
 
-    def walk(obj: Any, path: str, depth: int) -> None:
-        observed.append(_observed_node(obj, path))
+    def walk(
+        obj: Any,
+        path: str,
+        depth: int,
+        ancestor_paths: tuple[str, ...],
+    ) -> None:
+        node = _observed_node(
+            obj,
+            path,
+            parent_path=ancestor_paths[-1] if ancestor_paths else None,
+            ancestor_paths=ancestor_paths,
+        )
+        if any(_node_matches(node, spec) for spec in capture_text_specs):
+            node = _ObservedNode(
+                obj=node.obj,
+                name=node.name,
+                role=node.role,
+                scope=node.scope,
+                path=node.path,
+                parent_path=node.parent_path,
+                ancestor_paths=node.ancestor_paths,
+                states=node.states,
+                text=_read_text(node.obj),
+            )
+        observed.append(node)
         if depth >= max_depth:
             return
         for index, child in _children(obj):
-            walk(child, f'{path}/{index}', depth + 1)
+            walk(child, f'{path}/{index}', depth + 1, (*ancestor_paths, path))
 
-    walk(root, root_path, 0)
+    walk(root, root_path, 0, ())
     return observed
 
 
@@ -376,18 +417,11 @@ def _node_matches(node: _ObservedNode, spec: Mapping[str, Any]) -> bool:
 
 
 def _has_parent(node: _ObservedNode, parent: _ObservedNode) -> bool:
-    return node.obj.get_parent() == parent.obj
+    return node.parent_path == parent.path
 
 
 def _has_ancestor(node: _ObservedNode, ancestor: _ObservedNode) -> bool:
-    current = node.obj
-    for _ in range(64):
-        current = current.get_parent()
-        if current is None:
-            return False
-        if current == ancestor.obj:
-            return True
-    raise NativeDialogObservationError('AT-SPI ancestor chain exceeded 64 levels')
+    return ancestor.path in node.ancestor_paths
 
 
 def _read_text(obj: Any) -> str:
@@ -449,14 +483,30 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
             f'{platform}: native dialog root is ambiguous ({len(outer_roots)} direct '
             f'Firefox children); matches={json.dumps(_candidate_evidence(outer_roots), sort_keys=True)}'
         )
-    root = outer_roots[0]
+    root_probe = outer_roots[0]
+
+    capture_text_specs = tuple(
+        spec
+        for spec in contract['elements'].values()
+        if spec.get('capture_text')
+    )
+    subtree = _subtree(
+        root_probe.obj,
+        root_probe.path,
+        contract['max_depth'],
+        capture_text_specs,
+    )
+    root = subtree[0]
+    if root.role != root_spec['role']:
+        raise NativeDialogObservationError(
+            f'{platform}: native dialog root role drift during capture at {root.path}; '
+            f'expected={root_spec["role"]!r} observed={root.role!r}'
+        )
     if not _states_match(root, root_spec):
         raise NativeDialogObservationError(
-            f'{platform}: native dialog root state drift at {root.path}; '
+            f'{platform}: native dialog root state drift during capture at {root.path}; '
             f'expected={root_spec["required_states"]!r} observed={list(root.states)!r}'
         )
-
-    subtree = _subtree(root.obj, root.path, contract['max_depth'])
     selected: Dict[str, tuple[_ObservedNode, ...]] = {}
     for key, spec in contract['elements'].items():
         if key == root_key:
@@ -494,7 +544,6 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
             selected[key] = ()
             continue
         match = matches[0]
-        text = _read_text(match.obj) if spec.get('capture_text') else None
         selected[key] = (
             _ObservedNode(
                 obj=match.obj,
@@ -502,8 +551,10 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
                 role=match.role,
                 scope=spec['scope'],
                 path=match.path,
+                parent_path=match.parent_path,
+                ancestor_paths=match.ancestor_paths,
                 states=match.states,
-                text=text,
+                text=match.text if spec.get('capture_text') else None,
             ),
         )
 
