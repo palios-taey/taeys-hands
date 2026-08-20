@@ -84,10 +84,17 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, str]
             registered_display = str(record.get("display") or "")
             if registered_display != display:
                 continue
+            if (
+                record.get("phase") != "awaiting_completion"
+                or record.get("stop_proven") is not True
+            ):
+                continue
             routes.append({
                 "monitor_id": str(record.get("monitor_id") or ""),
                 "requester": str(record.get("requester") or ""),
                 "url": str(record.get("url") or ""),
+                "session_key": str(session_key),
+                "set_key": str(set_key),
             })
     if len(routes) > 1:
         monitor_ids = sorted(route["monitor_id"] for route in routes)
@@ -97,31 +104,73 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, str]
     return routes
 
 
-def notify_taey(message: str, platform: str, display: str) -> tuple[list[str], list[str]]:
+def refresh_route(route: dict[str, str]) -> bool:
+    from storage.redis_pool import get_client
+
+    client = get_client()
+    raw = client.get(route["session_key"])
+    if not raw:
+        return False
+    record = json.loads(raw)
+    if (
+        not isinstance(record, dict)
+        or record.get("phase") != "awaiting_completion"
+        or record.get("stop_proven") is not True
+        or str(record.get("monitor_id") or "") != route["monitor_id"]
+    ):
+        return False
+    record["last_seen"] = time.time()
+    record["last_action"] = "completion_monitor_read"
+    timeout = int(record.get("timeout") or 10800)
+    client.set(route["session_key"], json.dumps(record), ex=timeout)
+    return True
+
+
+def finish_route(
+    route: dict[str, str],
+    *,
+    notification_failures: list[str],
+) -> bool:
+    from storage.redis_pool import get_client
+
+    client = get_client()
+    raw = client.get(route["session_key"])
+    if not raw:
+        return False
+    record = json.loads(raw)
+    if (
+        not isinstance(record, dict)
+        or str(record.get("monitor_id") or "") != route["monitor_id"]
+        or record.get("phase") != "awaiting_completion"
+    ):
+        return False
+    if notification_failures:
+        record["phase"] = "notification_failed"
+        record["notification_failures"] = notification_failures
+        record["last_seen"] = time.time()
+        timeout = int(record.get("timeout") or 10800)
+        client.set(route["session_key"], json.dumps(record), ex=timeout)
+        return False
+    pipe = client.pipeline()
+    pipe.srem(route["set_key"], route["session_key"])
+    pipe.delete(route["session_key"])
+    pipe.execute()
+    return True
+
+
+def notify_taey(message: str, route: dict[str, str]) -> tuple[list[str], list[str]]:
     targets = {"taey"}
     targets.update(
         target.strip()
         for target in os.environ.get("CONSULT_MONITOR_NOTIFY", "").split(",")
         if target.strip()
     )
-    route_error = ""
-    routes: list[dict[str, str]] = []
-    try:
-        routes = active_completion_routes(platform, display)
-    except Exception as exc:
-        route_error = f"active-session route lookup failed: {type(exc).__name__}: {exc}"
-    targets.update(
-        route["requester"]
-        for route in routes
-        if route["requester"] and route["requester"] != "unknown"
-    )
-
-    monitor_ids = sorted({route["monitor_id"] for route in routes if route["monitor_id"]})
+    requester = route["requester"]
+    if requester and requester != "unknown":
+        targets.add(requester)
     routed_message = message
-    if monitor_ids:
-        routed_message += f" monitor_ids={','.join(monitor_ids)}"
-    if route_error:
-        routed_message += f" ROUTE_ERROR={route_error}"
+    if route["monitor_id"]:
+        routed_message += f" monitor_id={route['monitor_id']}"
 
     failures: list[str] = []
     for target in sorted(targets):
@@ -171,27 +220,57 @@ def main() -> int:
     os.environ["DISPLAY"] = display
     os.environ["AT_SPI_BUS_ADDRESS"] = resolve_bus(display)
     Detector = load_detector(platform)
-    det = new_detector(Detector)
-    log(f"[consult-monitor {display} {platform}] started; watching stop_button every {POLL_SECONDS:.0f}s")
+    det = None
+    active_monitor_id = ""
+    log(
+        f"[consult-monitor {display} {platform}] started; idle until a "
+        "Stop-proven manual consultation is registered"
+    )
 
     while True:
         try:
+            routes = active_completion_routes(platform, display)
+            if not routes:
+                det = None
+                active_monitor_id = ""
+                time.sleep(POLL_SECONDS)
+                continue
+            route = routes[0]
+            if route["monitor_id"] != active_monitor_id:
+                det = new_detector(Detector)
+                det.observe(True)
+                active_monitor_id = route["monitor_id"]
+                log(
+                    f"[consult-monitor {display}] activated for "
+                    f"{active_monitor_id}"
+                )
             present = stop_button_present(platform)
+            if not refresh_route(route):
+                det = None
+                active_monitor_id = ""
+                time.sleep(POLL_SECONDS)
+                continue
+            assert det is not None
             verdict = det.observe(present)
             if verdict == "complete":
                 try:
                     targets, failures = notify_taey(
                         f"consult on {display} ({platform}) COMPLETE — stop button "
                         f"disappeared. Response ready to harvest.",
-                        platform,
-                        display,
+                        route,
+                    )
+                    removed = finish_route(
+                        route,
+                        notification_failures=failures,
                     )
                     log(
                         f"[consult-monitor {display}] COMPLETE -> notified "
-                        f"{','.join(targets)} failures={failures or 'none'}"
+                        f"{','.join(targets)} failures={failures or 'none'} "
+                        f"route_removed={removed}"
                     )
                 finally:
-                    det = new_detector(Detector)
+                    det = None
+                    active_monitor_id = ""
         except Exception as e:  # firefox restart / empty tree / bus change — keep watching
             log(f"[consult-monitor {display}] scan_error {type(e).__name__}: {str(e)[:100]}")
             os.environ["AT_SPI_BUS_ADDRESS"] = resolve_bus(display)  # bus rotates on restart
