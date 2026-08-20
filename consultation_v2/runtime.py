@@ -454,6 +454,7 @@ class ConsultationRuntime:
         element: ElementRef,
         *,
         key: str = 'space',
+        focus_timeout: float = 2.0,
         settle: float = 0.3,
     ) -> dict[str, Any]:
         self._sync_platform_io_display()
@@ -471,6 +472,7 @@ class ConsultationRuntime:
             'firefox_focused': False,
             'grab_focus_called': False,
             'element_focused': False,
+            'focus_wait_seconds': 0.0,
             'keyboard_event_sent': False,
         }
         firefox_focused = self.focus_firefox()
@@ -489,13 +491,25 @@ class ConsultationRuntime:
         except Exception as exc:
             evidence['error'] = f'grab_focus_failed:{type(exc).__name__}'
             return evidence
-        time.sleep(0.1)
         try:
             import gi
             gi.require_version('Atspi', '2.0')
             from gi.repository import Atspi as _Atspi
 
-            focused = bool(obj.get_state_set().contains(_Atspi.StateType.FOCUSED))
+            focus_started = time.monotonic()
+
+            def _focus_observed() -> bool:
+                return bool(obj.get_state_set().contains(_Atspi.StateType.FOCUSED))
+
+            focused = bool(self.wait_until(
+                _focus_observed,
+                timeout=max(0.1, float(focus_timeout)),
+                interval=0.1,
+            ))
+            evidence['focus_wait_seconds'] = round(
+                time.monotonic() - focus_started,
+                3,
+            )
             evidence['element_focused'] = focused
             if not focused or not firefox_focused:
                 evidence['error'] = 'element_not_focused' if not focused else 'firefox_not_focused'
