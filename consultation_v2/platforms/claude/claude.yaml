@@ -765,11 +765,7 @@ workflow:
         default_for_fresh: web_search
         example_rationale: Web access is enabled by default; Research remains opt-in for report-style investigations.
   attachment:
-    trigger: toggle_menu
-    scope: app_root_snapshot
-    trigger_click_strategy: atspi_only
-    menu_target: upload_files_item
-    open_method: atspi_menu
+    open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
   prompt:
     input: input

@@ -3845,66 +3845,47 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         result: ConsultationResult,
     ) -> bool:
         attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
-        trigger_key = str(attachment_cfg.get('trigger') or 'toggle_menu')
-        trigger_strategy = str(attachment_cfg.get('trigger_click_strategy') or self.cfg.get('click_strategy') or 'atspi_only')
-        upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
-        self.runtime.focus_firefox()
-        self.runtime.press('Escape')
-        time.sleep(0.2)
-        snap = self.runtime.snapshot()
-        toggle_menu = self.find_first(snap, trigger_key)
-        if not toggle_menu:
-            result.add_step('attach', False,
-                            f'Claude attach trigger {trigger_key!r} missing for {abs_path}',
-                            snapshot=snap.serializable())
-            return False
-        if not self.runtime.click(toggle_menu, strategy=trigger_strategy):
-            result.add_step('attach', False,
-                            f'Claude attach trigger {trigger_key!r} click failed for {abs_path}',
-                            snapshot=snap.serializable())
-            return False
-        menu_snap, upload_item = self._wait_for_upload_menu_item(upload_key)
-        if not upload_item:
-            result.add_step('attach', False,
-                            f'Claude upload item {upload_key!r} not found for {abs_path}',
-                            snapshot=menu_snap.serializable())
-            return False
-        if not self.runtime.click(upload_item):
-            result.add_step('attach', False,
-                            f'Claude upload item {upload_key!r} click failed for {abs_path}',
-                            snapshot=menu_snap.serializable())
-            return False
-        dialog_open = 'menu_item'
-        time.sleep(1.0)
-        if not self.runtime.focus_file_dialog():
-            shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
-            if shortcut:
-                self.runtime.focus_firefox()
-                time.sleep(0.2)
-                if self.runtime.press(shortcut):
-                    time.sleep(1.0)
-                    if self.runtime.focus_file_dialog():
-                        dialog_open = 'keyboard_shortcut'
-            if dialog_open != 'keyboard_shortcut':
-                result.add_step('attach', False,
-                                f'Claude file dialog did not focus for {abs_path}',
-                                file=abs_path,
-                                dialog_open=dialog_open,
-                                keyboard_shortcut=shortcut or None)
-                return False
-        if dialog_open == 'keyboard_shortcut':
+        open_method = str(attachment_cfg.get('open_method') or '').strip().lower()
+        shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
+        if open_method != 'keyboard_shortcut' or not shortcut:
             result.add_step(
-                'attach_prepare',
-                True,
-                'Claude opened file dialog with attachment keyboard shortcut fallback',
-                shortcut=shortcut,
+                'attach',
+                False,
+                'Claude attachment YAML does not declare the required keyboard shortcut',
+                file=abs_path,
+                open_method=open_method or None,
+                keyboard_shortcut=shortcut or None,
             )
+            return False
+        if not self.runtime.focus_firefox():
+            result.add_step('attach', False,
+                            f'Claude Firefox focus failed for {abs_path}',
+                            file=abs_path,
+                            open_method=open_method,
+                            keyboard_shortcut=shortcut)
+            return False
+        if not self.runtime.press(shortcut):
+            result.add_step('attach', False,
+                            f'Claude attachment shortcut failed for {abs_path}',
+                            file=abs_path,
+                            open_method=open_method,
+                            keyboard_shortcut=shortcut)
+            return False
+        time.sleep(1.0)
         if not self.runtime.focus_file_dialog():
             result.add_step('attach', False,
                             f'Claude file dialog did not focus for {abs_path}',
                             file=abs_path,
-                            dialog_open=dialog_open)
+                            open_method=open_method,
+                            keyboard_shortcut=shortcut)
             return False
+        result.add_step(
+            'attach_prepare',
+            True,
+            'Claude opened file dialog with the configured attachment shortcut',
+            open_method=open_method,
+            keyboard_shortcut=shortcut,
+        )
         if not self.runtime.press('ctrl+l'):
             result.add_step('attach', False,
                             f'Claude file dialog location shortcut failed for {abs_path}',
@@ -3915,7 +3896,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             result.add_step('attach', False,
                             f'Claude file dialog path select-all failed for {abs_path}',
                             file=abs_path,
-                            dialog_open=dialog_open)
+                            open_method=open_method)
             return False
         time.sleep(0.1)
         if not self.runtime.type_text(abs_path, delay_ms=5):
@@ -3941,30 +3922,12 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         f'Claude attached {os.path.basename(abs_path)}',
                         file=abs_path,
                         method='file_upload_dialog',
-                        trigger=trigger_key,
-                        trigger_click_strategy=trigger_strategy,
-                        menu_target=upload_key,
-                        dialog_open=dialog_open,
+                        open_method=open_method,
+                        keyboard_shortcut=shortcut,
                         dialog_submit='return',
                         chip_name=chip_name,
                         snapshot=verify_snap.serializable())
         return verified
-
-    def _wait_for_upload_menu_item(self, upload_key: str) -> tuple[Snapshot, ElementRef | None]:
-        deadline = time.time() + 12.0
-        last_snapshot: Snapshot | None = None
-        while time.time() < deadline:
-            for snapshot in (
-                self.runtime.menu_snapshot(),
-                self.runtime.snapshot(),
-                self.runtime.app_root_snapshot(),
-            ):
-                last_snapshot = snapshot
-                upload_item = self.find_first(snapshot, upload_key)
-                if upload_item is not None:
-                    return snapshot, upload_item
-            time.sleep(0.3)
-        return last_snapshot or self.runtime.menu_snapshot(), None
 
     def _wait_for_attach_success(self, abs_path: str):
         last_snapshot = None
