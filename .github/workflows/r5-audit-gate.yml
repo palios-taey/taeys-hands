@@ -46,7 +46,15 @@ jobs:
             PR_NUM="${{ github.event.pull_request.number }}"
           else
             HEAD_SHA="${{ github.event.sha }}"
-            PR_JSON="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" 2>/dev/null || echo '[]')"
+            set +e
+            PR_JSON="$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" 2>/tmp/r5-prs.err)"
+            PR_RC=$?
+            set -e
+            if [ "$PR_RC" -ne 0 ]; then
+              echo "FAIL: commit-to-PR lookup failed for status event (rc=$PR_RC)"
+              cat /tmp/r5-prs.err >&2 || true
+              exit 1
+            fi
             PR_NUM="$(echo "$PR_JSON" | jq -r '.[0].number // empty')"
             BASE_REF="$(echo "$PR_JSON" | jq -r '.[0].base.ref // empty')"
             if [ -z "$PR_NUM" ]; then
