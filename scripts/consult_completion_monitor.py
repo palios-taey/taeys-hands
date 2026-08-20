@@ -23,11 +23,13 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from pathlib import Path
+import re
 import subprocess
 import sys
 import time
 
-REPO = "/home/mira/taeys-hands"
+REPO = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, REPO)
 
 # Standard Mira consult display -> platform map (primary + second set).
@@ -36,6 +38,9 @@ DISPLAY_PLATFORM = {
     "21": "claude", "22": "gemini", "23": "grok", "24": "perplexity",
 }
 POLL_SECONDS = 3.0
+NOTIFICATION_RETRY_SECONDS = float(
+    os.environ.get("CONSULT_MONITOR_NOTIFICATION_RETRY_SECONDS", "30")
+)
 
 
 def resolve_bus(display: str) -> str:
@@ -68,11 +73,11 @@ def stop_button_present(platform: str) -> bool:
     return any(snap.mapped.get(k) for k in stop_keys)
 
 
-def active_completion_routes(platform: str, display: str) -> list[dict[str, str]]:
+def active_completion_routes(platform: str, display: str) -> list[dict[str, object]]:
     from storage.redis_pool import get_client
 
     client = get_client()
-    routes: list[dict[str, str]] = []
+    routes: list[dict[str, object]] = []
     for set_key in client.scan_iter(match="taey:*:active_session_ids"):
         for session_key in client.smembers(set_key):
             raw = client.get(session_key)
@@ -84,16 +89,30 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, str]
             registered_display = str(record.get("display") or "")
             if registered_display != display:
                 continue
+            phase = str(record.get("phase") or "")
+            if phase not in {"awaiting_completion", "notification_failed"}:
+                continue
+            if record.get("stop_proven") is not True:
+                continue
             if (
-                record.get("phase") != "awaiting_completion"
-                or record.get("stop_proven") is not True
+                phase == "notification_failed"
+                and float(record.get("next_notification_retry_at") or 0.0)
+                > time.time()
             ):
                 continue
             routes.append({
                 "monitor_id": str(record.get("monitor_id") or ""),
                 "requester": str(record.get("requester") or ""),
                 "actor_seat_id": str(record.get("actor_seat_id") or ""),
+                "phase": phase,
+                "platform": platform,
+                "display": display,
                 "url": str(record.get("url") or ""),
+                "notified_targets": [
+                    str(target)
+                    for target in (record.get("notified_targets") or [])
+                    if str(target)
+                ],
                 "session_key": str(session_key),
                 "set_key": str(set_key),
             })
@@ -105,7 +124,7 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, str]
     return routes
 
 
-def refresh_route(route: dict[str, str]) -> bool:
+def refresh_route(route: dict[str, object]) -> bool:
     from storage.redis_pool import get_client
 
     client = get_client()
@@ -128,9 +147,10 @@ def refresh_route(route: dict[str, str]) -> bool:
 
 
 def finish_route(
-    route: dict[str, str],
+    route: dict[str, object],
     *,
     notification_failures: list[str],
+    notified_targets: list[str],
 ) -> bool:
     from storage.redis_pool import get_client
 
@@ -142,13 +162,31 @@ def finish_route(
     if (
         not isinstance(record, dict)
         or str(record.get("monitor_id") or "") != route["monitor_id"]
-        or record.get("phase") != "awaiting_completion"
+        or record.get("phase") not in {
+            "awaiting_completion",
+            "notification_failed",
+        }
     ):
         return False
     if notification_failures:
+        now = time.time()
         record["phase"] = "notification_failed"
         record["notification_failures"] = notification_failures
-        record["last_seen"] = time.time()
+        record["notified_targets"] = sorted({
+            str(target)
+            for target in (
+                list(record.get("notified_targets") or [])
+                + notified_targets
+            )
+            if str(target)
+        })
+        record["notification_attempts"] = int(
+            record.get("notification_attempts") or 0
+        ) + 1
+        record["next_notification_retry_at"] = (
+            now + NOTIFICATION_RETRY_SECONDS
+        )
+        record["last_seen"] = now
         timeout = int(record.get("timeout") or 10800)
         client.set(route["session_key"], json.dumps(record), ex=timeout)
         return False
@@ -159,27 +197,52 @@ def finish_route(
     return True
 
 
-def notify_taey(message: str, route: dict[str, str]) -> tuple[list[str], list[str]]:
+def notify_taey(
+    message: str,
+    route: dict[str, object],
+) -> tuple[list[str], list[str], list[str]]:
     targets = {"taey"}
     targets.update(
         target.strip()
         for target in os.environ.get("CONSULT_MONITOR_NOTIFY", "").split(",")
         if target.strip()
     )
-    requester = route["requester"]
+    requester = str(route["requester"])
     if requester and requester != "unknown":
         targets.add(requester)
     routed_message = message
     if route["monitor_id"]:
         routed_message += f" monitor_id={route['monitor_id']}"
     if route.get("actor_seat_id"):
+        monitor_slug = re.sub(
+            r"[^A-Za-z0-9._-]+",
+            "_",
+            str(route["monitor_id"]),
+        ).strip("_")
+        response_root = Path(
+            os.environ.get(
+                "TAEY_CONSULT_RESPONSE_ROOT",
+                str(Path.home() / "taey_runs" / "consultations"),
+            )
+        ).expanduser()
+        response_file = response_root / monitor_slug / "response.txt"
+        runbook = Path(REPO) / "docs" / "MANUAL_CONSULT_WALKTHROUGH.md"
         routed_message += (
-            f" extraction_executor={route['actor_seat_id']} — delegate extraction to "
-            "that callable worker seat; Main Taey must not drive the display"
+            f" extraction_executor={route['actor_seat_id']}"
+            f" response_file={response_file}. Main Taey: use run_command, not "
+            f"send_message; start one new :8767 manual-chat-ui extraction worker "
+            f"exactly as documented under 'Start one extraction worker' in {runbook}. "
+            "Main Taey must not drive the display or ask a supervisor to extract."
         )
 
+    already_notified = {
+        str(target)
+        for target in (route.get("notified_targets") or [])
+        if str(target)
+    }
+    notified_targets: list[str] = []
     failures: list[str] = []
-    for target in sorted(targets):
+    for target in sorted(targets - already_notified):
         try:
             completed = subprocess.run(
                 ["taey-notify", "--type", "status", "--from", "consult-monitor",
@@ -196,7 +259,9 @@ def notify_taey(message: str, route: dict[str, str]) -> tuple[list[str], list[st
                 f"{target}:{completed.returncode}:"
                 f"{(completed.stderr or completed.stdout).strip()[:160]}"
             )
-    return sorted(targets), failures
+            continue
+        notified_targets.append(target)
+    return sorted(targets), notified_targets, failures
 
 
 def new_detector(Detector):
@@ -242,6 +307,26 @@ def main() -> int:
                 time.sleep(POLL_SECONDS)
                 continue
             route = routes[0]
+            if route["phase"] == "notification_failed":
+                targets, notified_targets, failures = notify_taey(
+                    f"consult on {display} ({platform}) COMPLETE — stop button "
+                    f"disappeared. Response ready to harvest.",
+                    route,
+                )
+                removed = finish_route(
+                    route,
+                    notification_failures=failures,
+                    notified_targets=notified_targets,
+                )
+                log(
+                    f"[consult-monitor {display}] NOTIFICATION RETRY -> "
+                    f"{','.join(targets)} failures={failures or 'none'} "
+                    f"route_removed={removed}"
+                )
+                det = None
+                active_monitor_id = ""
+                time.sleep(POLL_SECONDS)
+                continue
             if route["monitor_id"] != active_monitor_id:
                 det = new_detector(Detector)
                 det.observe(True)
@@ -260,7 +345,7 @@ def main() -> int:
             verdict = det.observe(present)
             if verdict == "complete":
                 try:
-                    targets, failures = notify_taey(
+                    targets, notified_targets, failures = notify_taey(
                         f"consult on {display} ({platform}) COMPLETE — stop button "
                         f"disappeared. Response ready to harvest.",
                         route,
@@ -268,6 +353,7 @@ def main() -> int:
                     removed = finish_route(
                         route,
                         notification_failures=failures,
+                        notified_targets=notified_targets,
                     )
                     log(
                         f"[consult-monitor {display}] COMPLETE -> notified "

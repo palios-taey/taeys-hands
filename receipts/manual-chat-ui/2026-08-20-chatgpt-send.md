@@ -2,13 +2,19 @@
 
 ## Verdict
 
-**PASS for the ChatGPT send phase through completion-monitor registration.** A Taey worker, not the
+**PASS for the ChatGPT send and extraction UI phases.** A Taey worker, not the
 supervisor, navigated a fresh ChatGPT thread on `:2`, attached exactly two frozen files, pasted the frozen
 prompt from disk, sent once, proved the mapped Stop control, and registered the external completion monitor.
-The worker then stopped all UI calls.
+The worker then stopped all UI calls. The monitor later detected completion and a new Taey worker turn copied
+the response to a new, hash-verified file.
 
-Completion monitoring and response extraction were not part of this worker turn and are not claimed by this
-receipt.
+**The Hub handoff itself required one supervisor intervention and is not claimed as autonomous.** The first
+monitor notification hit a transient fleet-notify readiness refusal. A later delivery succeeded, but Main
+Taey interpreted `delegate extraction` as `send_message` to the `infra` fleet session instead of invoking its
+`:8767` worker. No UI action occurred in that failed handoff. The supervisor then started the separate Taey
+extraction turn once using the now-canonical request shape. The monitor retry and exact Main-Taey invocation
+are corrected by the commit carrying this receipt; a later production consultation must prove that corrected
+handoff without intervention.
 
 ## Deployed public artifacts
 
@@ -37,6 +43,22 @@ The response headers returned the same seat, event, correlation, and turn identi
 is intentionally omitted; its SHA-256 is
 `23e033db411f40d748872897d3401e9b07b414e8b22d6fc9357ee12a9417499a`.
 
+## Completion and extraction identity
+
+| Field | Value |
+|---|---|
+| completion detected | `2026-08-20 21:59 UTC` |
+| monitor outcome | Stop absent after debounce; phase first became `notification_failed` |
+| notification retry | delivered to `taey` at `2026-08-20 22:06 UTC` |
+| extraction event / correlation | `chatgpt-extract-r4-20260820` / `chatgpt-extract-r4-20260820-1` |
+| extraction turn | `33f6f08513b444b08be8d4cc56831870` |
+| extraction proxy result | `200 OK`, `finish_reason=stop` |
+| extraction request SHA-256 | `941f9e76d9947422c96e9ed9bd31527ebb6fe9e652f4c40a869ee5d9d1406b50` |
+| extraction headers SHA-256 | `ec3c0982de389b9ce96252da1c46373a4ce42bf2e6714722cec21b77cf68e22a` |
+| extraction JSON SHA-256 | `4a43d3d6ea08e5a27ecaf614581a994670d667ed76e6b4ccea04ceb57766946b` |
+| response bytes / characters | `14,041` / `13,919` |
+| response SHA-256 | `a5b8f595a471c7c6dfa53befc8d460db8bc7829794ecb7d6bd3b47e20b64e495` |
+
 ## Unbroken action-and-validation chain
 
 1. Taey read only the canonical public worker card and ChatGPT YAML.
@@ -61,6 +83,20 @@ is intentionally omitted; its SHA-256 is
    `stop_answering_button`, and registered monitor
    `infra-codex-chatgpt-send-r4-20260820-2-1ba8c92389864d939dca19629d674ce3`.
 9. Taey returned its section-6 receipt and made no further UI calls.
+10. The external monitor observed the mapped Stop control disappear and declared completion after its
+    debounce.
+11. The first notification failed readiness and preserved the exact route as `notification_failed`; it did
+    not discard the completion proof.
+12. The same fleet notification later delivered successfully and Main Taey claimed it.
+13. Main Taey sent the extraction task to `infra` instead of invoking `:8767`. This was the handoff mismatch;
+    it made no UI call.
+14. A new Taey extraction turn made a fresh base observation, sent `ctrl+End`, and made another fresh base
+    observation.
+15. Taey clicked the last mapped `copy_button` once and observed the post-click base tree.
+16. Taey called `read_clipboard` with a new output path. The tool created a 14,041-byte file and returned the
+    SHA-256 recorded above.
+17. Taey read the response head, verified that it was a substantive memorandum answering the frozen task and
+    not the 428-character prompt or a prompt prefix, returned its section-7 receipt, and stopped UI calls.
 
 The accepted worker turn contained 37 `drive_chat` calls across tool rounds 3–39. No failed action, mutation
 retry, duplicate send, extraction call, or post-send polling occurred in that turn.
@@ -79,12 +115,13 @@ mapped `stop_answering_button` and carried the monitor-registration receipt.
 
 ## Truth register
 
-- **Observed:** Taey executed the complete chain above; the two attachments were mapped; the frozen prompt
-  was pasted from its file; one send occurred; Stop was mapped; the monitor registered; identity headers
-  matched; the worker stopped.
+- **Observed:** Taey executed the send and extraction UI chains above; the two attachments were mapped; the
+  frozen prompt was pasted from its file; one send occurred; Stop was mapped; the monitor registered and
+  detected completion; the separate extraction turn produced the non-empty hash-verified response file;
+  identity headers matched; both worker turns stopped.
 - **Inferred:** ChatGPT added `(3)` to Bundle A's displayed filename because of its duplicate-name handling.
   The chooser observation proved the typed source path before submission, so this did not change the selected
   input file.
-- **Unknown at send receipt time:** completion debounce result, response extraction, output-attachment
-  harvesting, and ISMA ingestion. Those require the monitor notification and a separate extraction turn.
-
+- **Unknown:** whether the corrected automatic notification retry plus exact Main-Taey `run_command` handoff
+  will close without supervisor intervention on the next consultation; output-attachment harvesting on the
+  other platforms; and ISMA ingestion.
