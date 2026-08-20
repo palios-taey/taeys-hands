@@ -27,10 +27,11 @@ fallback action strategies, hidden reads, and automatic action retries are outsi
 
 ## Current manual surface
 
-`drive_chat` composes the canonical snapshot and low-level primitives one invocation at a time. Each mutation is
-preceded by a fresh scoped observation and followed by a fresh independent observation before Taey chooses another
-action. The platform YAML may declare a compound operation as a sequence of existing primitives, but each permitted
-step remains state-bound and the runtime refuses a contradictory free verb.
+`drive_chat` composes the canonical snapshot and YAML-declared semantic operations one invocation at a time. Each
+operation is preceded by a fresh scoped observation and followed by a fresh independent observation before Taey
+chooses another operation. `focus_and_key_open` is one semantic `operate`: focus the exact bound ref, verify focus
+once, then send the exact YAML open key. The runtime refuses a contradictory free verb and never retries the
+operation.
 
 `consultation_v2/runtime.py::ConsultationRuntime` belongs to the retained Layer-3 engine. Its click and focus paths
 are fail-closed AT-SPI operations. Promotion still requires proving one real platform transaction through the same
