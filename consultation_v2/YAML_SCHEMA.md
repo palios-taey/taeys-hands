@@ -51,6 +51,10 @@ Rules for `structural:`:
 - A `structural:` entry MAY carry `name_must_be_nonempty: true` (presence check) but MUST NOT carry
   any `*_contains`/substring of the dynamic text. Matching the dynamic text is the thing we are
   banning; structural matching is the sanctioned replacement.
+- An unnamed dynamic container MAY add an exact `direct_child_roles` sequence and one
+  `required_direct_child: {index, name, role}` signature. The selected parent/ordinal candidate is
+  accepted only when its complete direct-child role sequence and the named child at that raw child
+  index both match exactly. A mismatch produces no mapped ref; it never searches another container.
 
 ## 3. validation — through the live tree, on everything
 
