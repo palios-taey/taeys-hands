@@ -1928,18 +1928,18 @@ class _GeminiInlineBase:
         ``self.send_prompt(...)`` call in run().
 
         1. READ durable run-state for this consultation's stable request_id.
-        2. If a prior run reached ``submitted`` (the send landed) AND captured a
-           chat URL, RESUME: do NOT re-send. Re-attach to the captured URL,
-           seed the result's session URL, register the monitor against it, and
-           return True so run() proceeds to monitor/extract the EXISTING turn.
+        2. If a prior run reached ``submitted`` (the send landed), RESUME: do
+           NOT re-send. Re-attach to the captured URL when available, seed the
+           result's session URL, register the monitor against it, and return
+           True so run() proceeds to monitor/extract the EXISTING turn.
         3. Otherwise perform the real (irreversible) send via the platform
            driver's ``send_prompt``. On success, checkpoint
            ``submitted`` + URL + prompt-hash + monitor-id and register the
            monitor session so the run is observably in-flight.
 
-        A send that the driver could not prove succeeded (``send_prompt``
-        returns False) is NOT checkpointed as submitted and NOT registered — per
-        FLOW §8 an unproven send must not be treated as monitored."""
+        ``send_prompt`` proves a send from the mapped Stop control appearing.
+        URL capture is routing evidence after that irreversible boundary; a URL
+        parser mismatch must never downgrade or erase a Stop-proven send."""
         # READ prior run-state FIRST — before writing any checkpoint — so a
         # landed-send record from an earlier run is detected, never clobbered.
         prior = None
@@ -1967,9 +1967,6 @@ class _GeminiInlineBase:
 
         if self._is_landed_send(prior, request):
             return self._resume_landed_send(prior, request, result)
-        if self._is_unresumable_landed_send(prior, request):
-            if not self._invalidate_unresumable_landed_send(prior, request, result):
-                return False
         if self._is_setup_complete_send_quarantine(prior, request):
             live_url = self._live_resumable_send_url()
             if live_url:
@@ -2001,34 +1998,62 @@ class _GeminiInlineBase:
             # monitor. run() will return on the False send step.
             return False
 
-        captured_url = (
-            result.session_url_after
-            or self.runtime.current_url()
-            or result.session_url_before
-            or ''
+        post_send_url = str(
+            result.session_url_after or self.runtime.current_url() or ''
         )
-        if not self.is_resumable_session_url(captured_url):
-            result.add_step(
-                'send_checkpoint',
-                False,
-                f'{self.platform} send produced no valid resumable answer-thread URL; '
-                f'not checkpointing or registering monitor',
-                captured_url=captured_url,
+        if self._request_targets_new_session(request):
+            captured_url = (
+                post_send_url
+                if post_send_url
+                and post_send_url != pre_send_url
+                else ''
             )
-            return False
+        else:
+            captured_url = str(request.session_url or post_send_url)
         monitor_id = self._monitor_id(request)
+        url_capture_valid = self.is_resumable_session_url(captured_url)
         self.checkpoint_run_state(
             request,
             self.RUN_STATE_SUBMITTED,
             result=result,
             url=captured_url,
             monitor_id=monitor_id,
+            stop_seen=True,
+            url_capture_valid=url_capture_valid,
         )
+        result.add_step(
+            'send_url_capture',
+            url_capture_valid,
+            (
+                f'{self.platform} captured the submitted answer-thread URL'
+                if url_capture_valid
+                else f'{self.platform} send is submitted from Stop appearance, but '
+                f'the captured URL did not match the current answer-thread parser'
+            ),
+            captured_url=captured_url,
+            url_capture_valid=url_capture_valid,
+            send_submitted=True,
+        )
+        if not captured_url:
+            result.add_step(
+                'monitor_register',
+                False,
+                f'{self.platform} send landed but no URL was captured; refusing to '
+                f're-send and leaving the submitted checkpoint for reconciliation',
+                monitor_id=monitor_id,
+                send_submitted=True,
+            )
+            return False
         self._register_monitor(request, result, monitor_id, captured_url)
         return True
 
     def is_resumable_session_url(self, url: str | None) -> bool:
         return bool((url or '').strip())
+
+    def _request_targets_new_session(self, request: ConsultationRequest) -> bool:
+        requested_url = str(request.session_url or '').strip()
+        fresh_url = str((self.cfg.get('urls') or {}).get('fresh') or '').strip()
+        return not requested_url or requested_url == fresh_url
 
     def _landed_run_state_statuses(self) -> set[str]:
         return {
@@ -2120,7 +2145,7 @@ class _GeminiInlineBase:
         request: ConsultationRequest,
     ) -> bool:
         """True iff the run-state record proves a send for THIS prompt already
-        landed (status at/after ``submitted`` AND a captured chat URL).
+        landed (status at/after ``submitted``).
 
         The prompt-hash match is required: a stale record whose prompt differs
         (request_id collision is cryptographically improbable, but the field is
@@ -2129,52 +2154,7 @@ class _GeminiInlineBase:
             return False
         if prior.get('prompt_hash') != request.prompt_hash():
             return False
-        if prior.get('status') not in self._landed_run_state_statuses():
-            return False
-        return self.is_resumable_session_url(str(prior.get('url') or ''))
-
-    def _is_unresumable_landed_send(
-        self,
-        prior: Optional[dict],
-        request: ConsultationRequest,
-    ) -> bool:
-        if not prior:
-            return False
-        if prior.get('prompt_hash') != request.prompt_hash():
-            return False
-        if prior.get('status') not in self._landed_run_state_statuses():
-            return False
-        return not self.is_resumable_session_url(str(prior.get('url') or ''))
-
-    def _invalidate_unresumable_landed_send(
-        self,
-        prior: dict,
-        request: ConsultationRequest,
-        result: ConsultationResult,
-    ) -> bool:
-        captured_url = str(prior.get('url') or '')
-        try:
-            cleared = self.clear_run_state(durable_run_id(request))
-        except Exception as exc:  # noqa: BLE001 - stale idempotency must fail loudly
-            result.add_step(
-                'run_state_resume_rejected',
-                False,
-                f'{self.platform} prior send checkpoint is not resumable, and clearing '
-                f'the stale durable run-state failed: {exc}',
-                prior_status=prior.get('status'),
-                captured_url=captured_url,
-            )
-            return False
-        result.add_step(
-            'run_state_resume_rejected',
-            True,
-            f'{self.platform} rejected stale prior send checkpoint; captured URL is not '
-            f'a valid resumable answer thread',
-            prior_status=prior.get('status'),
-            captured_url=captured_url,
-            run_state_cleared=bool(cleared),
-        )
-        return True
+        return prior.get('status') in self._landed_run_state_statuses()
 
     def _resume_landed_send(
         self,
@@ -2185,12 +2165,53 @@ class _GeminiInlineBase:
         """RESUME a consultation whose send already landed: re-attach to the
         captured chat URL WITHOUT re-sending, re-register the monitor, and let
         run() proceed to monitor/extract the existing turn."""
-        captured_url = str(prior.get('url') or '')
+        current_url = str(self.runtime.current_url() or '')
+        captured_url = str(
+            prior.get('url')
+            or (
+                request.session_url
+                if not self._request_targets_new_session(request)
+                else ''
+            )
+            or ''
+        )
         monitor_id = str(prior.get('monitor_id') or self._monitor_id(request))
+        if not captured_url:
+            result.add_step(
+                'send',
+                False,
+                f'{self.platform} prior send is durably submitted but has no captured '
+                f'URL; refusing to re-send',
+                resumed=True,
+                prior_status=prior.get('status'),
+                send_submitted=True,
+            )
+            return False
+        if (
+            not self.is_resumable_session_url(captured_url)
+            and captured_url != current_url
+        ):
+            result.add_step(
+                'send',
+                False,
+                f'{self.platform} prior send is durably submitted, but its captured '
+                f'URL is not parser-recognized and is not the active URL; refusing '
+                f'both navigation and re-send',
+                resumed=True,
+                captured_url=captured_url,
+                current_url=current_url,
+                prior_status=prior.get('status'),
+                send_submitted=True,
+            )
+            return False
         # Navigate the existing tab to the captured chat URL so monitor/extract
         # operate on the real in-flight/completed turn. This is navigation, not a
         # send — it produces no new irreversible turn.
-        navigated = self.runtime.navigate(captured_url) if captured_url else False
+        navigated = (
+            True
+            if captured_url == current_url
+            else self.runtime.navigate(captured_url)
+        )
         result.session_url_after = captured_url
         self._register_monitor(request, result, monitor_id, captured_url)
         result.add_step(
@@ -3475,14 +3496,10 @@ class GeminiConsultationDriver(_GeminiInlineBase):
         verify_snap = self.runtime.snapshot()
         url_changed = result.session_url_after and result.session_url_after != before
         answer_thread = self._is_answer_thread_url(result.session_url_after)
-        is_new_session = not request.session_url
-        if is_new_session:
-            verified = bool(clicked and stop_seen and url_changed and answer_thread)
-        else:
-            verified = bool(clicked and stop_seen and answer_thread)
+        verified = bool(clicked and stop_seen)
         result.add_step(
             'send', verified,
-            'Gemini send validated by Stop button and answer-thread URL capture',
+            'Gemini send validated by mapped Stop button appearance; URL captured separately',
             url_before=before,
             url_after=result.session_url_after,
             start_research_clicked=post_send_clicked,
@@ -3490,6 +3507,8 @@ class GeminiConsultationDriver(_GeminiInlineBase):
             stop_seen=stop_seen,
             url_changed=bool(url_changed),
             answer_thread=bool(answer_thread),
+            url_capture_valid=bool(answer_thread),
+            is_new_session=self._request_targets_new_session(request),
             snapshot=verify_snap.serializable(),
         )
         return verified
