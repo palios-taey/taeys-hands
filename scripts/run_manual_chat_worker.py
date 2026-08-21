@@ -548,11 +548,14 @@ def _is_worker_stop_report(receipt: str) -> bool:
         for line in receipt.splitlines()
         if line.strip()
     ]
-    if headlines and (
-        headlines[0].startswith("stop report")
-        or headlines[0].startswith("first-mismatch stop report")
-    ):
-        return True
+    if headlines:
+        normalized_headline = re.sub(r"[^a-z0-9]+", " ", headlines[0]).strip()
+        if normalized_headline.startswith((
+            "stop report",
+            "first mismatch stop report",
+            "stop first mismatch report",
+        )):
+            return True
     return all(
         field in lowered
         for field in (
