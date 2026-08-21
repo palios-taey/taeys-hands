@@ -233,12 +233,18 @@ def _extract_content(
             f"Claude extraction transaction on {display} with drive_chat only. Do not read any file, "
             "runbook, or YAML. Use a ref or snapshot revision only from the immediately preceding fresh "
             "observation. Execute exactly this sequence:\n"
-            "1. observe scope=base; require current_url to contain /chat/, require stop_button and "
-            "continue_button to be absent, and require none of these mapped exception elements: "
+            "1. observe scope=base; require current_url to contain /chat/, require stop_button to be "
+            "absent, and require none of these mapped exception elements: "
             "send_blocked_previous_message, send_blocked_previous_message_curly, network_connection_alert, "
             "send_blocked_caution_banner, claude_capacity_alert, claude_capacity_alert_pro, "
             "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
-            "claude_chat_length_limit_alert.\n"
+            "claude_chat_length_limit_alert. If exactly one continue_button named Continue is mapped, "
+            "click its fresh ref exactly once; observe scope=base exactly once; require the same /chat/ "
+            "URL condition, exactly one stop_button named Stop response, no continue_button, no mapped "
+            "exception, and a newly registered monitor_id different from the input monitor_id. Return a "
+            "continuation receipt containing both monitor IDs and stop all UI calls without Copy or "
+            "read_clipboard. If more than one continue_button is mapped, stop. If continue_button is "
+            "absent, continue with step 2.\n"
             "2. key ctrl+End using that fresh base snapshot revision; observe scope=base; require the same "
             "/chat/ URL condition, stop_button and continue_button absent, no mapped exception, at least "
             "one mapped copy_button, and exactly one fresh copy_button ref marked by the YAML last_by_y "
@@ -249,7 +255,7 @@ def _extract_content(
             "non-empty response file and return its byte count and SHA-256. Then stop all UI calls.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, send, "
-            "retry, recover, poll, click Continue, or make a second Copy attempt."
+            "retry, recover, poll, click Continue more than once, or make a second Copy attempt."
         )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen extraction sequence")
@@ -520,14 +526,28 @@ def main() -> int:
         )
         if _is_worker_stop_report(receipt):
             raise RuntimeError("worker returned the walkthrough stop report")
-        if args.phase == "send" and not re.search(
+        monitor_ids = tuple(dict.fromkeys(re.findall(
             r"(?im)\bmonitor_id\b[*`]*\s*(?::|=)?\s*[*`]*\s*(?!(?:none|null)\b)"
-            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
+            r"([A-Za-z0-9][A-Za-z0-9._:-]{0,199})",
             receipt,
-        ):
+        )))
+        if args.phase == "send" and not monitor_ids:
             raise RuntimeError("send response has no registered monitor_id")
+        continuation_monitor_ids = (
+            tuple(value for value in monitor_ids if value != args.monitor_id)
+            if args.phase == "extract" and args.platform == "claude"
+            else ()
+        )
+        continuation_handoff = bool(
+            response_file is not None
+            and not response_file.exists()
+            and len(continuation_monitor_ids) == 1
+        )
         if response_file is not None:
-            if not response_file.is_file() or response_file.stat().st_size == 0:
+            if (
+                not continuation_handoff
+                and (not response_file.is_file() or response_file.stat().st_size == 0)
+            ):
                 raise RuntimeError("extraction did not create a non-empty response file")
     except RuntimeError as exc:
         primary_error = exc
@@ -558,11 +578,17 @@ def main() -> int:
         "response_json": str(response_path),
         "response_json_sha256": _sha256(response_path),
     }
-    if response_file is not None:
+    if response_file is not None and response_file.is_file():
         result.update({
             "response_file": str(response_file),
             "response_bytes": response_file.stat().st_size,
             "response_sha256": _sha256(response_file),
+            "lease_release": lease_release,
+        })
+    elif continuation_handoff:
+        result.update({
+            "response_pending": True,
+            "continuation_monitor_id": continuation_monitor_ids[0],
             "lease_release": lease_release,
         })
     print(json.dumps(result, sort_keys=True))
