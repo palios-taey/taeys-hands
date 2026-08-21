@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chat Transaction Operator"
+  short_description: "Run the pinned Family Chat worker path"
+  default_prompt: "Use $chat-transaction-operator to run this frozen Family Chat transaction."
