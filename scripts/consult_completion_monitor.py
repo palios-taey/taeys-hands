@@ -12,9 +12,9 @@ construction standalone), so it could not simply be re-run; this runner supplies
 the always-on poll loop the engine used to provide.
 
 Watches ONE display's stop button every few seconds. On a seen->gone transition
-(a generation finishing) it prepares a frozen extraction handoff, notifies Taey,
-and sends status-only notices to the other recorded targets. It reads the tree
-and coordination record and writes only the handoff artifacts; it never drives.
+(a generation finishing) it directly launches the frozen extraction worker,
+notifies Taey of the persisted result, and sends status-only notices to the other
+recorded targets. The monitor never chooses or performs a UI primitive itself.
 
 Usage: consult_completion_monitor.py <display-number>   e.g. 2
 """
@@ -26,7 +26,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import subprocess
 import sys
 import time
@@ -95,7 +94,12 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, obje
             if registered_display != display:
                 continue
             phase = str(record.get("phase") or "")
-            if phase not in {"awaiting_completion", "notification_failed"}:
+            if phase not in {
+                "awaiting_completion",
+                "extraction_complete",
+                "extraction_failed",
+                "notification_failed",
+            }:
                 continue
             if record.get("stop_proven") is not True:
                 continue
@@ -118,6 +122,12 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, obje
                     for target in (record.get("notified_targets") or [])
                     if str(target)
                 ],
+                "extraction_status": str(record.get("extraction_status") or ""),
+                "extraction_result": (
+                    record.get("extraction_result")
+                    if isinstance(record.get("extraction_result"), dict)
+                    else {}
+                ),
                 "session_key": str(session_key),
                 "set_key": str(set_key),
             })
@@ -169,6 +179,8 @@ def finish_route(
         or str(record.get("monitor_id") or "") != route["monitor_id"]
         or record.get("phase") not in {
             "awaiting_completion",
+            "extraction_complete",
+            "extraction_failed",
             "notification_failed",
         }
     ):
@@ -234,7 +246,7 @@ def finish_route(
     return True
 
 
-def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, str]:
+def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, object]:
     monitor_id = str(route.get("monitor_id") or "")
     actor_seat_id = str(route.get("actor_seat_id") or "")
     platform = str(route.get("platform") or "")
@@ -284,7 +296,6 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, str]:
     if prepared.returncode != 0:
         detail = (prepared.stderr or prepared.stdout).strip()
         raise RuntimeError(f"extraction launcher preparation failed: {detail[:160]}")
-    command = " ".join(shlex.quote(value) for value in command_parts)
     return {
         "response_file": str(response_file),
         "response_headers": str(response_headers),
@@ -292,8 +303,117 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, str]:
         "request_json": str(request_json),
         "event_id": event_id,
         "correlation_id": correlation_id,
-        "command": command,
+        "command_parts": command_parts,
     }
+
+
+def _record_extraction_outcome(
+    route: dict[str, object],
+    outcome: dict[str, object],
+) -> dict[str, object]:
+    from storage.redis_pool import get_client
+
+    status = str(outcome.get("status") or "")
+    if status not in {"succeeded", "failed"}:
+        raise RuntimeError("invalid extraction outcome status")
+    client = get_client()
+    raw = client.get(route["session_key"])
+    if not raw:
+        raise RuntimeError("completion route disappeared before extraction outcome")
+    record = json.loads(raw)
+    if (
+        not isinstance(record, dict)
+        or str(record.get("monitor_id") or "") != route["monitor_id"]
+        or record.get("phase") != "awaiting_completion"
+    ):
+        raise RuntimeError("completion route changed before extraction outcome")
+    now = time.time()
+    record["phase"] = f"extraction_{'complete' if status == 'succeeded' else 'failed'}"
+    record["extraction_status"] = status
+    record["extraction_result"] = outcome
+    record["extraction_finished_at"] = now
+    record["last_seen"] = now
+    record["last_action"] = record["phase"]
+    timeout = int(record.get("timeout") or 10800)
+    client.set(route["session_key"], json.dumps(record), ex=timeout)
+    updated = dict(route)
+    updated.update({
+        "phase": record["phase"],
+        "extraction_status": status,
+        "extraction_result": outcome,
+    })
+    return updated
+
+
+def _run_extraction(route: dict[str, object]) -> dict[str, object]:
+    started_at = time.time()
+    handoff: dict[str, object] = {}
+    try:
+        handoff = _prepare_extraction_handoff(route)
+        completed = subprocess.run(
+            handoff["command_parts"],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise RuntimeError(
+                f"extraction worker exited {completed.returncode}: {detail[:500]}"
+            )
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
+        if not lines:
+            raise RuntimeError("extraction worker returned no result")
+        result = json.loads(lines[-1])
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise RuntimeError("extraction worker returned an invalid result")
+        response_file = Path(str(handoff["response_file"]))
+        if (
+            result.get("phase") != "extract"
+            or str(result.get("response_file") or "") != str(response_file)
+            or not response_file.is_file()
+            or response_file.stat().st_size == 0
+        ):
+            raise RuntimeError("extraction worker did not persist the expected response")
+        outcome: dict[str, object] = {
+            "status": "succeeded",
+            "finished_at": time.time(),
+            "elapsed_seconds": round(time.time() - started_at, 3),
+            "response_file": str(response_file),
+            "response_bytes": int(result["response_bytes"]),
+            "response_sha256": str(result["response_sha256"]),
+            "response_headers": str(handoff["response_headers"]),
+            "response_json": str(handoff["response_json"]),
+            "request_json": str(handoff["request_json"]),
+            "event_id": str(handoff["event_id"]),
+            "correlation_id": str(handoff["correlation_id"]),
+        }
+    except (
+        OSError,
+        RuntimeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as exc:
+        outcome = {
+            "status": "failed",
+            "finished_at": time.time(),
+            "elapsed_seconds": round(time.time() - started_at, 3),
+            "error": f"{type(exc).__name__}: {str(exc)[:500]}",
+        }
+        for key in (
+            "response_file",
+            "response_headers",
+            "response_json",
+            "request_json",
+            "event_id",
+            "correlation_id",
+        ):
+            if handoff.get(key):
+                outcome[key] = handoff[key]
+    return _record_extraction_outcome(route, outcome)
 
 
 def notify_taey(
@@ -312,6 +432,29 @@ def notify_taey(
     routed_message = message
     if route["monitor_id"]:
         routed_message += f" monitor_id={route['monitor_id']}"
+    extraction_status = str(route.get("extraction_status") or "")
+    extraction_result = route.get("extraction_result")
+    if not isinstance(extraction_result, dict):
+        extraction_result = {}
+    if extraction_status == "succeeded":
+        routed_message += (
+            " extraction_status=succeeded"
+            f" response_file={extraction_result.get('response_file')}"
+            f" response_bytes={extraction_result.get('response_bytes')}"
+            f" response_sha256={extraction_result.get('response_sha256')}"
+            f" request_json={extraction_result.get('request_json')}"
+            f" response_headers={extraction_result.get('response_headers')}"
+            f" response_json={extraction_result.get('response_json')}"
+            f" event_id={extraction_result.get('event_id')}"
+            f" correlation_id={extraction_result.get('correlation_id')}"
+        )
+    elif extraction_status == "failed":
+        routed_message += (
+            " extraction_status=failed terminal=true"
+            f" error={extraction_result.get('error')}"
+        )
+    else:
+        raise RuntimeError("completion notification lacks extraction outcome")
 
     already_notified = {
         str(target)
@@ -323,28 +466,13 @@ def notify_taey(
     for target in sorted(targets - already_notified):
         target_message = routed_message
         if target == "taey":
-            try:
-                handoff = _prepare_extraction_handoff(route)
-            except (OSError, RuntimeError) as exc:
-                failures.append(
-                    f"taey:handoff:{type(exc).__name__}:{str(exc)[:160]}"
-                )
-                continue
             target_message += (
-                f" extraction_executor={route['actor_seat_id']}"
-                f" response_file={handoff['response_file']}"
-                f" extraction_request_json={handoff['request_json']}"
-                f" extraction_response_headers={handoff['response_headers']}"
-                f" extraction_response_json={handoff['response_json']}"
-                f" extraction_event_id={handoff['event_id']}"
-                f" extraction_correlation_id={handoff['correlation_id']}. "
-                "Main Taey: use run_command with timeout_seconds=900, not "
-                "send_message; do not drive the display. Run exactly: "
-                f"{handoff['command']}"
+                " result_only=true extraction_owner=consult-monitor. "
+                "Main Taey: do not invoke a worker or drive the display."
             )
         else:
             target_message += (
-                " status_only=true extraction_owner=taey. Do not invoke a worker "
+                " status_only=true extraction_owner=consult-monitor. Do not invoke a worker "
                 "and do not drive the display."
             )
         try:
@@ -411,10 +539,14 @@ def main() -> int:
                 time.sleep(POLL_SECONDS)
                 continue
             route = routes[0]
-            if route["phase"] == "notification_failed":
+            if route["phase"] in {
+                "extraction_complete",
+                "extraction_failed",
+                "notification_failed",
+            }:
                 targets, notified_targets, failures = notify_taey(
-                    f"consult on {display} ({platform}) COMPLETE — stop button "
-                    f"disappeared. Response ready to harvest.",
+                    f"consult on {display} ({platform}) completion detected; "
+                    "dedicated extraction finished.",
                     route,
                 )
                 removed = finish_route(
@@ -449,9 +581,10 @@ def main() -> int:
             verdict = det.observe(present)
             if verdict == "complete":
                 try:
+                    route = _run_extraction(route)
                     targets, notified_targets, failures = notify_taey(
-                        f"consult on {display} ({platform}) COMPLETE — stop button "
-                        f"disappeared. Response ready to harvest.",
+                        f"consult on {display} ({platform}) completion detected; "
+                        "dedicated extraction finished.",
                         route,
                     )
                     removed = finish_route(
