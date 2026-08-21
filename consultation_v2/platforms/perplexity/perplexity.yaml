@@ -3,6 +3,86 @@ click_strategy: atspi_only
 urls:
   fresh: https://www.perplexity.ai/
   verify_navigation: false
+native_dialog:
+  schema: native_dialog_v1
+  root: dialog_root
+  max_depth: 32
+  elements:
+    dialog_root:
+      role: file chooser
+      scope: firefox_application.direct_child
+      capture_name: true
+      structural:
+        relation: direct_child
+        parent_scope: firefox_application
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - active
+    chooser_widget:
+      name: File Chooser Widget
+      role: file chooser
+      scope: native_dialog.chooser
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_layer:
+      name: Location Layer
+      role: filler
+      scope: native_dialog.location
+      structural:
+        relation: descendant
+        anchor: chooser_widget
+      required: false
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_entry:
+      name_absent: true
+      role: text
+      scope: native_dialog.location
+      structural:
+        relation: direct_child
+        anchor: location_layer
+      required: false
+      capture_text: true
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable
+        - focused
+        - editable
+    cancel_button:
+      name: Cancel
+      role: push button
+      scope: native_dialog.actions
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable
+    open_button:
+      name: Open
+      role: push button
+      scope: native_dialog.actions
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable
 tree:
   # fence_after disabled — Deep Research and input controls appear AFTER
   # sidebar history in AT-SPI tree. Fencing cuts them off.
