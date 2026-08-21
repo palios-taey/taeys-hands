@@ -279,7 +279,7 @@ def _send_content(
             f"{bundle_a}; observe; require location_entry text exactly {bundle_a}; key Return; observe "
             "scope=base; require uploaded_file_chip match_count 1 with name exactly Open attachment "
             "Remove this attachment and remove_attachment match_count 1 with name exactly Remove "
-            "this attachment. Require stop_button and send_button absent.\n"
+            "this attachment. Require stop_button absent.\n"
             f"4. Attach Bundle B from {bundle_b}: focus element=attach_trigger; observe scope=base; "
             "require attach_trigger match_count 1 with state focused and uploaded_file_chip plus "
             "remove_attachment match_count 1; key space; observe scope=menu_snapshot; require "
