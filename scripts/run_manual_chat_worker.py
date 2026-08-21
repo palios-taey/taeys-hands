@@ -11,8 +11,6 @@ import subprocess
 import sys
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNBOOK = REPO_ROOT / "docs" / "MANUAL_CONSULT_WALKTHROUGH.md"
 ENDPOINT = "http://127.0.0.1:8767/v1/chat/completions"
 PLATFORM_LABELS = {
     "chatgpt": "ChatGPT",
@@ -118,12 +116,40 @@ def _send_content(
     bundle_b: Path,
     prompt_file: Path,
 ) -> str:
+    if platform != "chatgpt":
+        raise RuntimeError(f"{platform} has no qualified frozen action sequence")
     return (
-        f"Read {RUNBOOK}. Execute the {PLATFORM_LABELS[platform]} send phase only "
-        f"on {display} with BUNDLE_A={bundle_a}, BUNDLE_B={bundle_b}, and "
-        f"PROMPT_FILE={prompt_file}. Use drive_chat only and follow the runbook "
-        "exactly. Stop after the section 6 send receipt or the first mismatch. "
-        "Do not extract, retry, or recover in this turn."
+        f"Execute one frozen ChatGPT send transaction on {display}. Use drive_chat only. "
+        "Do not read any file, runbook, or YAML. Use a ref only from the immediately preceding "
+        "fresh observation. Execute exactly this sequence, with one fresh observation after every "
+        "mutation:\n"
+        "1. navigate to https://chatgpt.com/; observe scope=base; require a populated ChatGPT tree, "
+        "one mapped composer, no auth/capacity exception, no running response, and record the fresh URL.\n"
+        "2. Require model_selector name Pro. If it is not Pro: click the fresh model_selector ref; "
+        "observe scope=menu_snapshot; click the fresh model_pro ref; observe scope=base; require "
+        "model_selector name Pro.\n"
+        f"3. Attach Bundle A from {bundle_a}: observe scope=base; operate the fresh attach_trigger "
+        "ref and require performed_primitive=focus_and_key_open; observe scope=app_root_snapshot; "
+        "operate the fresh tool_upload ref and require performed_primitive=key:ctrl+u; observe; "
+        "focus_dialog and require title File Upload; observe; key ctrl+l; observe; key ctrl+a; "
+        f"observe; type exactly {bundle_a}; observe; key Return; observe scope=base; require exactly "
+        "one mapped attachment chip and one remove control.\n"
+        f"4. Attach Bundle B from {bundle_b}: operate the fresh attach_trigger ref and require "
+        "performed_primitive=focus_and_key_open; observe scope=app_root_snapshot; operate the fresh "
+        "tool_upload ref and require performed_primitive=key:ctrl+u; observe; focus_dialog and "
+        "require title File Upload; observe; key ctrl+l; observe; key ctrl+a; observe; type exactly "
+        f"{bundle_b}; observe; key Return; observe scope=base; require exactly two mapped attachment "
+        "chips and two remove controls.\n"
+        "5. click the fresh input_chat_with_chatgpt ref, or input_ask_anything only if that is the "
+        f"single mapped composer; observe scope=base; paste text_file={prompt_file}; observe scope=base; "
+        "require exactly two attachment chips and one enabled send_button.\n"
+        "6. key Return exactly once; observe scope=base exactly once; require the URL changed from the "
+        "fresh URL, require stop_streaming_button or stop_answering_button, and require monitor "
+        "registration. Return a receipt containing platform/display, final URL, Pro proof, both "
+        "attachment proofs, the mapped Stop key, and monitor_id. Then stop all UI calls.\n"
+        "At the first missing element, refusal, failed postcondition, or unexpected state, return the "
+        "first-mismatch stop report and stop. Do not retry, recover, extract, poll, press Escape, or send "
+        "a second time."
     )
 
 
@@ -133,13 +159,17 @@ def _extract_content(
     display: str,
     response_file: Path,
 ) -> str:
+    if platform != "chatgpt":
+        raise RuntimeError(f"{platform} has no qualified frozen extraction sequence")
     return (
-        f"Read {RUNBOOK}. The completion monitor reported COMPLETE for "
-        f"monitor_id={monitor_id} on {PLATFORM_LABELS[platform]} {display}. Execute section 7 "
-        f"extraction only in this new turn. RESPONSE_FILE={response_file}. Use "
-        "drive_chat only for the UI sequence and follow the runbook exactly. Do "
-        "not navigate, attach, paste, send, retry, or recover. Stop after a "
-        "verified non-empty response-file receipt or the first mismatch."
+        f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one frozen "
+        f"ChatGPT extraction transaction on {display} with drive_chat only. Do not read any file, "
+        "runbook, or YAML. Execute exactly: observe scope=base; key ctrl+End; observe scope=base; "
+        "click the last-by-y fresh copy_button ref; observe scope=base; read_clipboard with "
+        f"output_file={response_file}. Require that drive_chat created a new non-empty response file "
+        "and return its byte count and SHA-256. Then stop all UI calls. At the first missing element, "
+        "refusal, failed postcondition, or unexpected state, return the first-mismatch stop report and "
+        "stop. Do not navigate, attach, paste, send, retry, recover, or poll."
     )
 
 
