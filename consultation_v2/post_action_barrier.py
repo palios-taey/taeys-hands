@@ -574,9 +574,8 @@ def _validate_action_receipt(
     return dict(action_receipt)
 
 
-def _run_post_action_barrier(
-    platform: str,
-    transition_id: str,
+def _run_resolved_post_action_barrier(
+    transition: PostActionTransition,
     *,
     lineage: PostActionLineage,
     action_receipt: Mapping[str, Any],
@@ -584,7 +583,6 @@ def _run_post_action_barrier(
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    transition = resolve_post_action_transition(platform, transition_id)
     lineage_payload = lineage.serializable()
     action_payload = _validate_action_receipt(transition, action_receipt, lineage)
     action_receipt_sha256 = _canonical_sha256(action_payload)
@@ -692,9 +690,22 @@ def run_post_action_barrier(
     lineage: PostActionLineage,
     action_receipt: Mapping[str, Any],
 ) -> dict[str, Any]:
-    return _run_post_action_barrier(
-        platform,
-        transition_id,
+    transition = resolve_post_action_transition(platform, transition_id)
+    return run_resolved_post_action_barrier(
+        transition,
+        lineage=lineage,
+        action_receipt=action_receipt,
+    )
+
+
+def run_resolved_post_action_barrier(
+    transition: PostActionTransition,
+    *,
+    lineage: PostActionLineage,
+    action_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=acquire_post_action_sample,

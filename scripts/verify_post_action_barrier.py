@@ -12,7 +12,7 @@ from consultation_v2.post_action_barrier import (
     PostActionObservationError,
     PostActionLineage,
     PostActionSample,
-    _run_post_action_barrier,
+    _run_resolved_post_action_barrier,
     resolve_post_action_transition,
 )
 from consultation_v2.types import ElementRef, Snapshot
@@ -90,9 +90,8 @@ def main() -> int:
     stop = element('stop_button', 'Stop model response', 'push button')
     success_samples = iter((sample({'stop_button': [stop]}), sample({'stop_button': [stop]})))
     success_time = FakeTime()
-    success = _run_post_action_barrier(
-        'grok',
-        'usage_limit_retry',
+    success = _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=lambda _transition: next(success_samples),
@@ -112,9 +111,8 @@ def main() -> int:
     )
     retry = element('retry_button', 'Retry', 'push button')
     alternate_time = FakeTime()
-    alternate = _run_post_action_barrier(
-        'grok',
-        'usage_limit_retry',
+    alternate = _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=lambda _transition: sample({
@@ -130,9 +128,8 @@ def main() -> int:
     assert len(alternate['samples']) == 1
 
     duplicate_time = FakeTime()
-    duplicate = _run_post_action_barrier(
-        'grok',
-        'usage_limit_retry',
+    duplicate = _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=lambda _transition: sample({'stop_button': [stop, stop]}),
@@ -145,9 +142,8 @@ def main() -> int:
     assert len(duplicate['samples']) == 1
 
     timeout_time = FakeTime()
-    timeout = _run_post_action_barrier(
-        'grok',
-        'usage_limit_retry',
+    timeout = _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=lambda _transition: sample({}),
@@ -159,9 +155,8 @@ def main() -> int:
     assert timeout['next_mutation_authorized'] is False
 
     failure_time = FakeTime()
-    failure = _run_post_action_barrier(
-        'grok',
-        'usage_limit_retry',
+    failure = _run_resolved_post_action_barrier(
+        transition,
         lineage=lineage,
         action_receipt=action_receipt,
         sample_reader=lambda _transition: (_ for _ in ()).throw(

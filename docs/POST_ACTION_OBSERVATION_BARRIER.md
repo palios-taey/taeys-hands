@@ -18,7 +18,8 @@ the declaration and library are mechanically qualified framework material, not a
 
 The transaction shape is:
 
-1. Resolve and validate the declaration before the mutation is authorized.
+1. Resolve and validate the declaration before the mutation is authorized, then retain that resolved
+   transition for the post-action barrier call.
 2. Accept one immutable action receipt bound to the pre-action revision and lineage.
 3. Acquire a fresh read-only sample using the declaration's scope-specific refresh policy.
 4. Project only the exact YAML-mapped expected control, URL gate, and mapped alternate exception.
