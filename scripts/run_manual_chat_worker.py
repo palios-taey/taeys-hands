@@ -116,6 +116,72 @@ def _send_content(
     bundle_b: Path,
     prompt_file: Path,
 ) -> str:
+    if platform == "claude":
+        return (
+            f"Execute one frozen Claude send transaction on {display}. Use drive_chat only. "
+            "Do not read any file, runbook, or YAML. Use a ref or snapshot revision only from "
+            "the immediately preceding fresh observation. Execute exactly this sequence, with "
+            "one fresh observation after every mutation:\n"
+            "1. navigate to https://claude.ai/new; observe scope=base; require current_url to "
+            "be the Claude fresh URL, a populated Claude tree, exactly one input, exactly one "
+            "toggle_menu, and exactly one model_selector whose exact name is Model: Opus 5 Extra. "
+            "Require zero remove_attachment controls, no stop_button, and none of these mapped "
+            "exception elements: send_blocked_previous_message, send_blocked_previous_message_curly, "
+            "network_connection_alert, send_blocked_caution_banner, claude_capacity_alert, "
+            "claude_capacity_alert_pro, claude_session_limit_alert, claude_hit_limit_alert, "
+            "claude_not_working_alert, or claude_chat_length_limit_alert. Record this post-navigation "
+            "fresh URL. If this exact base proof is absent, stop without opening the model or effort "
+            "menu.\n"
+            f"2. Attach Bundle A from {bundle_a}: click the fresh toggle_menu ref; observe "
+            "scope=app_root_snapshot; require exactly one upload_files_item named Add files or photos; "
+            "click its fresh ref; observe scope=base; focus_dialog using that fresh snapshot revision "
+            "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
+            "Choose File, or Select File; observe; require exactly one active "
+            "dialog_root and one enabled chooser_widget; key ctrl+l using the fresh native-dialog "
+            "revision; observe; require exactly one focused editable "
+            "location_entry; key ctrl+a using the fresh native-dialog revision; observe; "
+            "require location_entry still focused; "
+            f"type exactly {bundle_a} using the fresh native-dialog revision; observe; "
+            f"require location_entry text exactly {bundle_a}; key Return using "
+            "the fresh native-dialog revision; observe scope=base; require exactly one mapped "
+            "remove_attachment control and at least one fresh snapshot node whose role is push button, "
+            "list item, or heading and whose name matches Bundle A by the Claude driver rule: exact "
+            "absolute path or basename, first token, comma prefix, or one ellipsis with matching prefix "
+            "and suffix. Require zero Bundle B matches, model_selector still named Model: Opus 5 Extra, "
+            "and no mapped exception.\n"
+            f"3. Attach Bundle B from {bundle_b}: click the fresh toggle_menu ref; observe "
+            "scope=app_root_snapshot; require exactly one upload_files_item named Add files or photos; "
+            "click its fresh ref; observe scope=base; focus_dialog using that fresh snapshot revision "
+            "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
+            "Choose File, or Select File; observe; require exactly one active "
+            "dialog_root and one enabled chooser_widget; key ctrl+l using the fresh native-dialog "
+            "revision; observe; require exactly one focused editable "
+            "location_entry; key ctrl+a using the fresh native-dialog revision; observe; "
+            "require location_entry still focused; "
+            f"type exactly {bundle_b} using the fresh native-dialog revision; observe; "
+            f"require location_entry text exactly {bundle_b}; key Return using "
+            "the fresh native-dialog revision; observe scope=base; require exactly two mapped "
+            "remove_attachment controls, at least one filename-bearing snapshot node matching Bundle A, "
+            "and at least one filename-bearing snapshot node matching Bundle B under the same Claude "
+            "driver rule. Require no third remove_attachment control, model_selector still named "
+            "Model: Opus 5 Extra, and no mapped exception.\n"
+            "4. click the fresh input ref; observe scope=base; require the same exact two "
+            "remove_attachment controls and Bundle A plus Bundle B filename proofs; paste "
+            f"text_file={prompt_file} exactly once; observe scope=base; require the same two "
+            "attachment-count and filename proofs, exactly one enabled send_button named Send message, "
+            "model_selector still named Model: Opus 5 Extra, and no mapped exception. Do not require a "
+            "composer character count or type-text fallback.\n"
+            "5. click the fresh send_button ref exactly once; observe scope=base exactly once; require "
+            "current_url to differ from the recorded post-navigation fresh URL and to contain /chat/; "
+            "require exactly one mapped stop_button named Stop response; require no mapped exception "
+            "and require monitor registration. Return a receipt containing platform/display, final URL, "
+            "the Model: Opus 5 Extra proof, Bundle A one-count proof, Bundle B two-count proof, the "
+            "mapped Stop key, and monitor_id. Then stop all UI calls.\n"
+            "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
+            "action or scope; refusal; failed postcondition; or unexpected state, return the "
+            "first-mismatch stop report and stop. Do not retry, recover, press Escape, use ctrl+u, "
+            "extract, poll, click Continue, or send a second time."
+        )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen action sequence")
     return (
@@ -160,6 +226,30 @@ def _extract_content(
     display: str,
     response_file: Path,
 ) -> str:
+    if platform == "claude":
+        return (
+            f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one frozen "
+            f"Claude extraction transaction on {display} with drive_chat only. Do not read any file, "
+            "runbook, or YAML. Use a ref or snapshot revision only from the immediately preceding fresh "
+            "observation. Execute exactly this sequence:\n"
+            "1. observe scope=base; require current_url to contain /chat/, require stop_button and "
+            "continue_button to be absent, and require none of these mapped exception elements: "
+            "send_blocked_previous_message, send_blocked_previous_message_curly, network_connection_alert, "
+            "send_blocked_caution_banner, claude_capacity_alert, claude_capacity_alert_pro, "
+            "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
+            "claude_chat_length_limit_alert.\n"
+            "2. key ctrl+End using that fresh base snapshot revision; observe scope=base; require the same "
+            "/chat/ URL condition, stop_button and continue_button absent, no mapped exception, at least "
+            "one mapped copy_button, and exactly one fresh copy_button ref marked by the YAML last_by_y "
+            "selection.\n"
+            "3. click that YAML-selected last-by-y fresh copy_button ref; observe scope=base; require the "
+            "same /chat/ URL condition, stop_button and continue_button absent, and no mapped exception.\n"
+            f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a new "
+            "non-empty response file and return its byte count and SHA-256. Then stop all UI calls.\n"
+            "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
+            "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, send, "
+            "retry, recover, poll, click Continue, or make a second Copy attempt."
+        )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen extraction sequence")
     return (
