@@ -1,7 +1,9 @@
 # Five-platform production qualification
 
-Status: active  
-Owner: infra-codex  
+Status: active
+
+Owner: infra-codex
+
 Production surfaces: ChatGPT `:2`, Claude `:3`, Gemini `:4`, Grok `:5`, Perplexity `:6`
 
 ## Objective
@@ -134,4 +136,3 @@ Maintain one row per run with platform, question/decision, packet hashes, seat/e
 receipt, monitor ID, response path/hash, cleanup proof, result, and exact deployed commit. Final completion
 requires ten `PASS` rows plus five `PASS` rows from the parallel stage. Failed attempts remain in the record
 as defect evidence and never disappear into a later pass.
-
