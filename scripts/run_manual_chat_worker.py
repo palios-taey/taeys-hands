@@ -271,7 +271,9 @@ def _send_content(
             "element=model_selector again and require performed_primitive=focus_and_key_open; "
             "observe scope=app_root_snapshot; require model_heavy match_count 1 with name exactly "
             "Heavy Team of Experts · Grok 4.5 and state checked; "
-            "observe scope=base; require exactly one each of input, model_selector, and attach_trigger.\n"
+            "observe scope=base; require model_heavy match_count 1 with name exactly Heavy Team "
+            "of Experts · Grok 4.5 and state checked; key Escape; observe scope=base; require "
+            "exactly one each of input, model_selector, and attach_trigger.\n"
             f"3. Attach Bundle A from {bundle_a}: focus element=attach_trigger; observe scope=base; "
             "require attach_trigger match_count 1 with state focused; key space; observe "
             "scope=menu_snapshot; require upload_files_item match_count 1 with name exactly Upload "
@@ -303,12 +305,12 @@ def _send_content(
             "current_url to differ from the recorded fresh URL and match "
             "https://grok.com/c/<non-empty-id>; require exactly one stop_button named Stop model "
             "response and require monitor registration. Return a receipt containing "
-            "platform/display, final URL, the Heavy selected proof, the one-then-two attachment "
+            "platform/display, final URL, the Heavy checked proof, the one-then-two attachment "
             "proof, the mapped Stop key, and monitor_id. Then stop all UI calls.\n"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; "
             "unsupported action or scope; refusal; failed postcondition; or unexpected state, "
-            "return the first-mismatch stop report and stop. Do not retry, recover, press Escape, "
-            "extract, poll, click Regenerate, or send a second time."
+            "return the first-mismatch stop report and stop. Do not retry, recover, take any "
+            "additional close action, extract, poll, click Regenerate, or send a second time."
         )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen action sequence")

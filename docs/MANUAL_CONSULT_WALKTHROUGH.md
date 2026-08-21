@@ -214,7 +214,8 @@ For each row in `workflow.full_consult.select_mode`:
 9. `operate` that option ref when it advertises `declared_operation`; otherwise use its YAML-authorized direct
    action once.
 10. Observe again and require the YAML active state. If active state is visible only inside the opened menu,
-   reopen once through the same observe/action discipline solely to validate it.
+   reopen once through the same observe/action discipline solely to validate it. Any platform card that uses
+   this validation-only reopen must pin one close action and a fresh base proof before the attachment leg.
 
 Never silently downgrade. If the requested option is unavailable, report the exact observed state and stop
 that leg before attaching files.
