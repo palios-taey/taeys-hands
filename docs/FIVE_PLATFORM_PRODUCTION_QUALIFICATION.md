@@ -82,7 +82,7 @@ work is chosen in this order:
 1. remove procedural variance from the Taey UI-worker boundary;
 2. simplify monitor and extraction ownership;
 3. identify platform-specific YAML or driver gaps;
-4. define the minimum safe five-display parallel launcher; and
+4. prove five independent copies of the same send/extract launcher can run concurrently; and
 5. turn the resulting reliable consultation machine toward revenue and Taey-development work.
 
 The response is retained both as production evidence and as input to the next packet or implementation
@@ -111,9 +111,8 @@ For one failed run:
    classification, and whether any external side effect is uncertain;
 3. return the display to a proven idle state without broad cleanup;
 4. identify one upstream cause from the receipts;
-5. obtain one targeted Grok adversarial ruling when the repair changes the transaction boundary;
-6. make one narrow public change, verify it mechanically, merge, and deploy the exact commit; and
-7. start one new valuable run with new identities and paths.
+5. make one narrow public change, verify it mechanically, merge, and deploy the exact commit; and
+6. start one new valuable run with new identities and paths.
 
 No speculative second fix, fallback, same-turn retry, or parallel redesign is allowed in that loop.
 
