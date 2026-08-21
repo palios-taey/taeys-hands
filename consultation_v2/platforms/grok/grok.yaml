@@ -189,19 +189,19 @@ tree:
     # --- model/mode dropdown items (live app-root after clicking Model select) ---
     model_auto:
       name: "Auto Chooses Fast or Expert"
-      role: menu item
+      role: radio menu item
       scope: app_root_snapshot
     model_fast:
       name: "Fast Quick responses · Grok 4.5"
-      role: menu item
+      role: radio menu item
       scope: app_root_snapshot
     model_expert:
       name: "Expert Thinks hard · Grok 4.5"
-      role: menu item
+      role: radio menu item
       scope: app_root_snapshot
     model_heavy:
       name: "Heavy Team of Experts · Grok 4.5"
-      role: menu item
+      role: radio menu item
       scope: app_root_snapshot
     # --- attach dropdown item (menu_snapshot after clicking Attach) ---
     upload_files_item:
@@ -321,27 +321,27 @@ validation:
   auto_active:
     indicators:
     - name: "Auto Chooses Fast or Expert"
-      role: menu item
+      role: radio menu item
       states_include:
-      - selected
+      - checked
   fast_active:
     indicators:
     - name: "Fast Quick responses · Grok 4.5"
-      role: menu item
+      role: radio menu item
       states_include:
-      - selected
+      - checked
   expert_active:
     indicators:
     - name: "Expert Thinks hard · Grok 4.5"
-      role: menu item
+      role: radio menu item
       states_include:
-      - selected
+      - checked
   heavy_active:
     indicators:
     - name: "Heavy Team of Experts · Grok 4.5"
-      role: menu item
+      role: radio menu item
       states_include:
-      - selected
+      - checked
   # attach_present: presence of the static remove button (doc scope). Its name
   # is static (the filename is dynamic, the button name is not), so it is an
   # EXACT indicator — no structural locator. LIVE-CONFIRMED on :5 2026-06-03.

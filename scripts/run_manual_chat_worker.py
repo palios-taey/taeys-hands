@@ -270,7 +270,7 @@ def _send_content(
             "observe scope=base; require exactly one model_selector named Model select. Operate "
             "element=model_selector again and require performed_primitive=focus_and_key_open; "
             "observe scope=app_root_snapshot; require model_heavy match_count 1 with name exactly "
-            "Heavy Team of Experts · Grok 4.5 and state selected; "
+            "Heavy Team of Experts · Grok 4.5 and state checked; "
             "observe scope=base; require exactly one each of input, model_selector, and attach_trigger.\n"
             f"3. Attach Bundle A from {bundle_a}: focus element=attach_trigger; observe scope=base; "
             "require attach_trigger match_count 1 with state focused; key space; observe "
