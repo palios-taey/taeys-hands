@@ -308,7 +308,7 @@ def _extract_content(
             "send_blocked_caution_banner, claude_capacity_alert, claude_capacity_alert_pro, "
             "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
             "claude_chat_length_limit_alert.\n"
-            "2. key ctrl+End using that fresh base snapshot revision; observe scope=base; require the same "
+            "2. key ctrl+End; observe scope=base; require the same "
             "/chat/ URL condition, stop_button and continue_button absent, no mapped exception, at least "
             "one mapped copy_button, and exactly one fresh copy_button ref marked by the YAML last_by_y "
             "selection.\n"
@@ -329,7 +329,7 @@ def _extract_content(
             "1. observe scope=base; require current_url on gemini.google.com matching /app/<id> or "
             "/u/<digit>/app/<id>, require stop_button absent, and require "
             "deep_think_interim_ack_placeholder absent.\n"
-            "2. key ctrl+End using that fresh base snapshot revision; observe scope=base; require the "
+            "2. key ctrl+End; observe scope=base; require the "
             "same URL condition, stop_button and deep_think_interim_ack_placeholder absent, at least "
             "one mapped copy_button, and exactly one fresh copy_button ref marked by the YAML "
             "last_by_y selection.\n"
@@ -625,7 +625,7 @@ def main() -> int:
             send_stop_report = args.phase == "send"
             raise RuntimeError("worker returned the walkthrough stop report")
         if args.phase == "send" and not re.search(
-            r"(?im)\bmonitor_id\b[*\"'\s]*(?::|=|`)[*`\"'\s]*(?!(?:none|null)\b)"
+            r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
             receipt,
         ):
