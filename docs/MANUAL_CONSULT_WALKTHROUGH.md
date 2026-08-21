@@ -74,58 +74,18 @@ paths. A curl error, non-200 response, missing/mismatched identity header, malfo
 report, or missing section 6 send receipt ends the transaction. Never resend the request after an uncertain
 transport result.
 
-## Start one extraction worker
+## Completion and extraction
 
-The completion notification to Main Taey provides `monitor_id`, `extraction_executor`, `response_file`,
-`extraction_request_json`, `extraction_response_headers`, `extraction_response_json`,
-`extraction_event_id`, `extraction_correlation_id`, and one exact `run_command`. The monitor creates the
-private artifact directory and frozen request JSON before notification. Main Taey runs that exact command;
-it does not use `send_message` to ask a supervisor to extract and it does not drive the display. Status-only
-completion notices sent to other fleet targets never contain an extraction command.
+The per-display completion monitor polls the selected platform's mapped Stop control every three seconds.
+After two successive Stop-absent observations, it immediately prepares and invokes exactly one frozen
+`scripts/run_manual_chat_worker.py extract` transaction using the send turn's seat identity. The monitor
+records terminal success or failure before sending any notification, so notification retries cannot launch
+another extraction.
 
-`extraction_executor` is the `SEAT_ID` from the send turn. The proxy-issued lease owner includes both the
-seat and the live worker-process generation; the runtime, not this document, decides whether the new turn is
-a same-generation renewal or a stale-generation takeover. Never manufacture, reuse, or infer a generation
-token in the invocation.
-
-For a standalone supervised invocation, after the monitor reports `COMPLETE`, write one new request JSON
-file, replacing only the five uppercase fields in `content`:
-
-```json
-{
-  "model": "taey",
-  "stream": false,
-  "max_tokens": 4096,
-  "chat_template_kwargs": {"enable_thinking": false},
-  "messages": [
-    {
-      "role": "user",
-      "content": "Read RUNBOOK. The completion monitor reported COMPLETE for monitor_id=MONITOR_ID on PLATFORM DISPLAY. Execute section 7 extraction only in this new turn. RESPONSE_FILE=RESPONSE_FILE. Use drive_chat only for the UI sequence and follow the runbook exactly. Do not navigate, attach, paste, send, retry, or recover. Stop after a verified non-empty response-file receipt or the first mismatch."
-    }
-  ]
-}
-```
-
-Invoke the worker exactly once, using the notification's `extraction_executor` as `SEAT_ID` and its supplied
-event/correlation identifiers:
-
-```bash
-curl -sS --max-time 3600 \
-  -D EXTRACTION_RESPONSE_HEADERS \
-  -o EXTRACTION_RESPONSE_JSON \
-  -H 'Content-Type: application/json' \
-  -H 'X-Taey-Seat-Id: SEAT_ID' \
-  -H 'X-Taey-Event-Id: EXTRACTION_EVENT_ID' \
-  -H 'X-Taey-Correlation-Id: EXTRACTION_CORRELATION_ID' \
-  -H 'X-Taey-Tool-Profile: manual-chat-ui' \
-  --data-binary @EXTRACTION_REQUEST_JSON \
-  http://127.0.0.1:8767/v1/chat/completions
-```
-
-The request, headers, JSON response, and `RESPONSE_FILE` must all be new paths. Require HTTP 200, exact
-identity headers, `finish_reason=stop`, the section 7 extraction receipt, and a non-empty `RESPONSE_FILE`
-whose byte count and SHA-256 match the tool receipt. Never issue a second worker request after an uncertain
-transport result.
+Main Taey does not run an extraction command and does not drive the display. It receives only the persisted
+result: `monitor_id`, terminal extraction status, and, on success, the response path, byte count, and
+SHA-256. On failure it receives the first error and `terminal=true`. No supervisor, status recipient, or
+worker may issue a second extraction request.
 
 ## Exact `drive_chat` vocabulary
 

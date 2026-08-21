@@ -95,7 +95,7 @@ version and restarts the two-run qualification for the affected platform.
 |---|---|---|
 | Main Taey | Freeze the batch manifest, invoke one worker per leg, consume terminal receipts, synthesize the five responses | Drive a display, select refs, reconstruct a missing artifact, or ask a fleet seat to execute extraction |
 | Send worker | One platform/display from fresh navigation through Stop proof and monitor registration | Poll completion, extract, retry, recover, or touch another display |
-| Platform monitor | YAML-owned Stop policy, bounded notification, frozen extraction handoff | Drive UI, choose a worker action, or create duplicate executors |
+| Platform monitor | YAML-owned Stop policy, direct single extraction-worker launch, persisted outcome, bounded notification | Drive UI itself, choose a worker action, or create duplicate executors |
 | Extraction worker | One completed platform/display through primary and platform-specific output harvest | Navigate, attach, paste, send, retry, or touch another display |
 | Chat reviewer | Adversarially inspect the packet, trees, receipts, and responsibility boundary | Invent local runtime facts that are absent from the attachments |
 | Codex | Public code and documentation changes required by an observed first mismatch | Babysit UI actions, poll running generations, broaden scope to unrelated infrastructure, or improvise a second transport path |
@@ -106,8 +106,8 @@ version and restarts the two-run qualification for the affected platform.
 
 Complete these in public Git before another acceptance run:
 
-1. Make completion notification produce exactly one fully substituted extraction-worker command for Main
-   Taey; status recipients receive no executable command.
+1. Make the completion monitor directly invoke exactly one frozen extraction worker; Main Taey and status
+   recipients receive the persisted outcome and no executable command.
 2. Bound notification retries by attempt count and the original transaction deadline.
 3. Make each monitor consume the selected platform YAML's Stop keys, sustained-absence count, post-complete
    quiet count, interval, and mapped exception dispositions. No hardcoded global deep mode.
@@ -166,7 +166,7 @@ A run is PASS only when one unbroken artifact chain proves:
 7. prompt paste and enabled submit state with both attachments retained;
 8. exactly one send and a fresh mapped Stop control;
 9. YAML-owned completion debounce with no mapped exception;
-10. one Main-Taey notification and one extraction-worker invocation;
+10. one monitor-direct extraction-worker invocation followed by one Main-Taey result notification;
 11. primary response plus every YAML-declared output attachment, with byte counts and hashes;
 12. complete prompt/response/input/output/URL ingestion and its receipt;
 13. a closed monitor route, released display lease, zero open worker turns, and final manifest.

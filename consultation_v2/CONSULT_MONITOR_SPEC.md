@@ -13,14 +13,15 @@ records across 13 node sets** have accumulated (`taey:*:active_session*`, starte
 and `d0/d2/d3/d5/d6/d20-d24`; all 297 have valid JSON + fields, 0 missing, 0 cross-prefix, 0 dup memberships.
 An earlier single-set `SCARD` read only the 205 — hence the reader MUST SCAN all node sets, not one.)
 
-## THE HARD BOUNDARY (non-negotiable — this is why it is not the banned class)
-- **PASSIVE ONLY.** It reads Redis and NOTIFIES/RECORDS/CLEANS. It **NEVER** touches a display, drives a
-  UI, re-dispatches, restarts a display/service, or "recovers." Recovery stays in Taey's hands — the
-  monitor's only recovery action is to *notify Taey* so Taey resumes by hand.
-- **It does NOT detect completion.** Taey detects completion itself (observe stop-button + harvest). This
-  monitor catches ONLY what Taey cannot from inside its own turn: TIMEOUT and ORPHAN.
-- No display access, no `Atspi`, no firefox, no engine import. If the implementation reaches for a display
-  or a driver, it is wrong.
+## THE HARD BOUNDARY
+- `consultation_v2.consult_monitor` is the passive timeout/orphan reaper described by this spec. It reads
+  Redis and notifies/records/cleans; it never touches a display or performs completion extraction.
+- `scripts/consult_completion_monitor.py` is the separate per-display completion monitor. It reads the
+  mapped Stop control every three seconds, requires two successive Stop-absent observations, and then
+  directly launches the frozen `run_manual_chat_worker.py extract` transaction. It never asks Main Taey
+  to drive the display or launch extraction. Main Taey receives only the persisted result or terminal
+  failure notification.
+- Neither monitor re-dispatches, restarts a display/service, or recovers after a mismatch.
 
 ## What it consumes
 The existing primitives in `consultation_v2/primitives.py:408`:
@@ -68,7 +69,8 @@ Record fields observed live: `platform`, `url`, `mode`, `requester`, `timeout` (
 
 ## Non-goals / explicitly OUT of scope
 - Writing session records (that is infra's registration side, in `taey-presence`).
-- Completion detection / extraction (Taey does that).
+- Per-display completion detection/extraction; that belongs to
+  `scripts/consult_completion_monitor.py` and its dedicated extraction worker.
 - Any display/UI/driver/engine interaction.
 - Per-mode timeout tuning beyond reading `record.timeout` — defaults are fine; tuning is a later pass.
 
