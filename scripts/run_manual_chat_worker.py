@@ -521,7 +521,7 @@ def main() -> int:
         if _is_worker_stop_report(receipt):
             raise RuntimeError("worker returned the walkthrough stop report")
         if args.phase == "send" and not re.search(
-            r"(?im)\bmonitor_id\b[*`]*\s*(?::|=)\s*[*`]*\s*(?!(?:none|null)\b)"
+            r"(?im)\bmonitor_id\b[*`]*\s*(?::|=)?\s*[*`]*\s*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
             receipt,
         ):
