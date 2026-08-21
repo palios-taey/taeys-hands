@@ -254,68 +254,38 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, str]:
             str(Path.home() / "taey_runs" / "consultations"),
         )
     ).expanduser()
+    response_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     artifact_root = response_root / monitor_slug
-    artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     response_file = artifact_root / "response.txt"
     response_headers = artifact_root / "response.headers"
     response_json = artifact_root / "worker_response.json"
     request_json = artifact_root / "request.json"
-    preexisting_outputs = [
-        str(path)
-        for path in (response_file, response_headers, response_json)
-        if path.exists()
-    ]
-    if preexisting_outputs:
-        raise RuntimeError(
-            f"extraction output path already exists: {preexisting_outputs}"
-        )
     identity_digest = hashlib.sha256(monitor_id.encode("utf-8")).hexdigest()
     event_id = f"extract-{identity_digest[:24]}"
     correlation_id = f"{event_id}-1"
-    runbook = Path(REPO) / "docs" / "MANUAL_CONSULT_WALKTHROUGH.md"
-    content = (
-        f"Read {runbook}. The completion monitor reported COMPLETE for "
-        f"monitor_id={monitor_id} on {platform} {display}. Execute section 7 "
-        f"extraction only in this new turn. RESPONSE_FILE={response_file}. "
-        "Use drive_chat only for the UI sequence and follow the runbook exactly. "
-        "Do not navigate, attach, paste, send, retry, or recover. Stop after a "
-        "verified non-empty response-file receipt or the first mismatch."
+    launcher = Path(REPO) / "scripts" / "run_manual_chat_worker.py"
+    platform_key = platform.lower()
+    command_parts = [
+        str(launcher),
+        "extract",
+        "--platform", platform_key,
+        "--display", display,
+        "--seat-id", actor_seat_id,
+        "--artifact-root", str(artifact_root),
+        "--monitor-id", monitor_id,
+        "--response-file", str(response_file),
+    ]
+    prepared = subprocess.run(
+        [*command_parts, "--prepare-only"],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
-    request_payload = {
-        "model": "taey",
-        "stream": False,
-        "max_tokens": 4096,
-        "chat_template_kwargs": {"enable_thinking": False},
-        "messages": [{"role": "user", "content": content}],
-    }
-    request_text = json.dumps(
-        request_payload,
-        ensure_ascii=False,
-        indent=2,
-    ) + "\n"
-    if request_json.exists():
-        if request_json.read_text(encoding="utf-8") != request_text:
-            raise RuntimeError(
-                f"extraction request path contains different bytes: {request_json}"
-            )
-    else:
-        with request_json.open("x", encoding="utf-8") as handle:
-            handle.write(request_text)
-        request_json.chmod(0o600)
-    command = " ".join([
-        "curl -sS --max-time 3600",
-        f"-D {shlex.quote(str(response_headers))}",
-        f"-o {shlex.quote(str(response_json))}",
-        "-H 'Content-Type: application/json'",
-        f"-H {shlex.quote(f'X-Taey-Seat-Id: {actor_seat_id}')}",
-        f"-H {shlex.quote(f'X-Taey-Event-Id: {event_id}')}",
-        f"-H {shlex.quote(f'X-Taey-Correlation-Id: {correlation_id}')}",
-        "-H 'X-Taey-Tool-Profile: manual-chat-ui'",
-        f"--data-binary @{shlex.quote(str(request_json))}",
-        "http://127.0.0.1:8767/v1/chat/completions",
-    ])
+    if prepared.returncode != 0:
+        detail = (prepared.stderr or prepared.stdout).strip()
+        raise RuntimeError(f"extraction launcher preparation failed: {detail[:160]}")
+    command = " ".join(shlex.quote(value) for value in command_parts)
     return {
-        "runbook": str(runbook),
         "response_file": str(response_file),
         "response_headers": str(response_headers),
         "response_json": str(response_json),
