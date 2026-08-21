@@ -200,8 +200,9 @@ def _send_content(
             "mode_extended match_count 1 with name exactly Extended thinking Complex problem "
             "solving; click the fresh mode_extended ref; observe scope=base; require mode_picker "
             "name exactly Open mode picker, currently Pro Extended. Do not touch the model menu.\n"
-            f"3. Attach Bundle A from {bundle_a}: operate the fresh upload_menu ref and require "
-            "performed_primitive=focus_and_key_open; observe scope=menu_snapshot; require "
+            f"3. Attach Bundle A from {bundle_a}: focus the fresh upload_menu ref; observe "
+            "scope=base; require upload_menu match_count 1 with state focused; key space using that "
+            "fresh base snapshot revision; observe scope=menu_snapshot; require "
             "scope_expected_elements to contain upload_files_item and require upload_files_item "
             "match_count 1 with name exactly Upload files. Documents, data, code files; click the "
             "fresh upload_files_item ref; observe using that fresh menu snapshot revision; "
@@ -216,8 +217,9 @@ def _send_content(
             f"one node containing Bundle A stem {bundle_a_stem} and zero nodes containing Bundle B "
             f"stem {bundle_b_stem}. Require mode_picker still named Open mode picker, currently Pro "
             "Extended.\n"
-            f"4. Attach Bundle B from {bundle_b}: operate the fresh upload_menu ref and require "
-            "performed_primitive=focus_and_key_open; observe scope=menu_snapshot; require "
+            f"4. Attach Bundle B from {bundle_b}: focus the fresh upload_menu ref; observe "
+            "scope=base; require upload_menu match_count 1 with state focused; key space using that "
+            "fresh base snapshot revision; observe scope=menu_snapshot; require "
             "scope_expected_elements to contain upload_files_item and require upload_files_item "
             "match_count 1 with name exactly Upload files. Documents, data, code files; click the "
             "fresh upload_files_item ref; observe using that fresh menu snapshot revision; "
@@ -460,6 +462,16 @@ def _invoke(
 
 def _is_worker_stop_report(receipt: str) -> bool:
     lowered = receipt.lower()
+    headlines = [
+        line.strip(" \t#*_`").lower()
+        for line in receipt.splitlines()
+        if line.strip()
+    ]
+    if headlines and (
+        headlines[0].startswith("stop report")
+        or headlines[0].startswith("first-mismatch stop report")
+    ):
+        return True
     return all(
         field in lowered
         for field in (
@@ -599,6 +611,7 @@ def main() -> int:
         prepared_marker.unlink()
     lease_release = None
     primary_error = None
+    send_stop_report = False
     try:
         request_path, headers_path, response_path, receipt = _invoke(
             root=root,
@@ -608,9 +621,10 @@ def main() -> int:
             correlation_id=correlation_id,
         )
         if _is_worker_stop_report(receipt):
+            send_stop_report = args.phase == "send"
             raise RuntimeError("worker returned the walkthrough stop report")
         if args.phase == "send" and not re.search(
-            r"(?im)\bmonitor_id\b[*`]*\s*(?::|=)?(?:\s|[*`])*(?!(?:none|null)\b)"
+            r"(?im)\bmonitor_id\b[*\"'\s]*(?::|=|`)[*`\"'\s]*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
             receipt,
         ):
@@ -621,7 +635,7 @@ def main() -> int:
     except RuntimeError as exc:
         primary_error = exc
     finally:
-        if args.phase == "extract":
+        if args.phase == "extract" or send_stop_report:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
             except RuntimeError as cleanup_error:
