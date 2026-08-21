@@ -132,9 +132,10 @@ def _send_content(
             "claude_not_working_alert, or claude_chat_length_limit_alert. Record this post-navigation "
             "fresh URL. If this exact base proof is absent, stop without opening the model or effort "
             "menu.\n"
-            f"2. Attach Bundle A from {bundle_a}: click the fresh toggle_menu ref; observe "
-            "scope=app_root_snapshot; require exactly one upload_files_item named Add files or photos; "
-            "click its fresh ref; observe scope=base; focus_dialog using that fresh snapshot revision "
+            f"2. Attach Bundle A from {bundle_a}: key ctrl+u from the current fresh base observation; "
+            "observe scope=base; require the same Claude fresh URL, zero remove_attachment controls, "
+            "model_selector still named Model: Opus 5 Extra, and no mapped exception; focus_dialog "
+            "using that fresh observation "
             "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
             "Choose File, or Select File; observe; require exactly one active "
             "dialog_root and one enabled chooser_widget; key ctrl+l using the fresh native-dialog "
@@ -149,9 +150,9 @@ def _send_content(
             "absolute path or basename, first token, comma prefix, or one ellipsis with matching prefix "
             "and suffix. Require zero Bundle B matches, model_selector still named Model: Opus 5 Extra, "
             "and no mapped exception.\n"
-            f"3. Attach Bundle B from {bundle_b}: click the fresh toggle_menu ref; observe "
-            "scope=app_root_snapshot; require exactly one upload_files_item named Add files or photos; "
-            "click its fresh ref; observe scope=base; focus_dialog using that fresh snapshot revision "
+            f"3. Attach Bundle B from {bundle_b}: key ctrl+u from the current fresh base observation; "
+            "observe scope=base; require exactly one mapped remove_attachment control, model_selector "
+            "still named Model: Opus 5 Extra, and no mapped exception; focus_dialog using that fresh observation "
             "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
             "Choose File, or Select File; observe; require exactly one active "
             "dialog_root and one enabled chooser_widget; key ctrl+l using the fresh native-dialog "
@@ -179,7 +180,7 @@ def _send_content(
             "mapped Stop key, and monitor_id. Then stop all UI calls.\n"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
             "action or scope; refusal; failed postcondition; or unexpected state, return the "
-            "first-mismatch stop report and stop. Do not retry, recover, press Escape, use ctrl+u, "
+            "first-mismatch stop report and stop. Do not retry, recover, press Escape, "
             "extract, poll, click Continue, or send a second time."
         )
     if platform != "chatgpt":
@@ -519,8 +520,12 @@ def main() -> int:
         )
         if _is_worker_stop_report(receipt):
             raise RuntimeError("worker returned the walkthrough stop report")
-        if args.phase == "send" and "monitor_id" not in receipt:
-            raise RuntimeError("send response has no monitor_id")
+        if args.phase == "send" and not re.search(
+            r"(?im)\bmonitor_id\b[*`]*\s*(?::|=)\s*[*`]*\s*(?!(?:none|null)\b)"
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
+            receipt,
+        ):
+            raise RuntimeError("send response has no registered monitor_id")
         if response_file is not None:
             if not response_file.is_file() or response_file.stat().st_size == 0:
                 raise RuntimeError("extraction did not create a non-empty response file")
