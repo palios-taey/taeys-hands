@@ -233,13 +233,23 @@ tree.
 
 Use the Submit action in the platform card. Immediately make one fresh base observation.
 
-Require at least one exact key named by `workflow.send`/`workflow.monitor` as the Stop control. Where the
-YAML requires a new URL, also require that the URL changed from the recorded fresh URL. This Stop-proven
-observation registers the external completion monitor.
+If an exact key named by `workflow.send`/`workflow.monitor` is present as the Stop control, register the
+external completion monitor. If Stop is absent, make exactly one more fresh base observation without any
+intervening mutation. A Stop control on that second observation registers the monitor. If Stop is still
+absent, classify only a complete exact element set declared in `workflow.post_send.exceptions`. Preserve
+both observation revisions and return a `POST-SEND EXCEPTION REPORT`; do not click its recovery control in
+the send turn. If no declared exception set matches, preserve both revisions and return an
+`UNMAPPED POST-SEND STATE` report. A URL, response controls, or response text never proves completion.
 
 Return a send receipt containing platform, display, final URL, two-attachment proof, actual model/mode,
 mapped Stop key, and monitor registration. Then stop all UI calls on that display. The worker never polls for
 completion.
+
+An exception recovery is a new frozen worker turn tied to the source worker-response SHA-256. It makes the
+same two read-only observations before mutation, permits only the exact action and element declared by that
+exception's YAML `recovery`, and enforces `max_attempts: 1`. After that single action, apply the same two-
+observation Stop/exception classification. Stop is handed to the monitor; a persistent or different state
+ends the recovery turn without a second action.
 
 ### 7. Extract only after the completion notification
 
