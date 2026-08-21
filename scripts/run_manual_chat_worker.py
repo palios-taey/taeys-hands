@@ -541,7 +541,7 @@ def _send_content(
         "1. navigate to https://chatgpt.com/; observe scope=base; require a populated ChatGPT tree, "
         "one mapped composer, no auth/capacity exception, no running response, and record the fresh URL.\n"
         "2. Require model_selector name Pro. If it is not Pro: click the fresh model_selector ref; "
-        "observe scope=menu_snapshot; click the fresh model_pro ref; observe scope=base; require "
+        "observe scope=app_root_snapshot; click the fresh model_pro ref; observe scope=base; require "
         "model_selector name Pro.\n"
         f"3. Attach Bundle A from {bundle_a} using the current fresh base observation: operate the "
         "fresh attach_trigger ref and require performed_primitive=focus_and_key_open; observe "
