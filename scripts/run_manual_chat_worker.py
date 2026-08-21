@@ -11,6 +11,12 @@ import subprocess
 import sys
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from consultation_v2.yaml_contract import load_platform_yaml
+
+
 ENDPOINT = "http://127.0.0.1:8767/v1/chat/completions"
 PLATFORM_LABELS = {
     "chatgpt": "ChatGPT",
@@ -33,6 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--bundle-a", required=True)
     send.add_argument("--bundle-b", required=True)
     send.add_argument("--prompt-file", required=True)
+
+    recover = phases.add_parser(
+        "recover",
+        help="Execute one YAML-authorized post-send recovery action.",
+    )
+    _add_common(recover)
+    recover.add_argument("--exception-key", required=True)
+    recover.add_argument("--source-response-json", required=True)
 
     extract = phases.add_parser(
         "extract",
@@ -109,6 +123,135 @@ def _ensure_request(path: Path, text: str) -> None:
     path.chmod(0o600)
 
 
+def _post_send_exceptions(platform: str) -> dict[str, dict[str, object]]:
+    cfg = load_platform_yaml(platform)
+    workflow = cfg.get("workflow")
+    element_map = (cfg.get("tree") or {}).get("element_map")
+    if not isinstance(workflow, dict) or not isinstance(element_map, dict):
+        raise RuntimeError(f"{platform} YAML has no valid workflow or element_map")
+    post_send = workflow.get("post_send") or {}
+    if not isinstance(post_send, dict):
+        raise RuntimeError(f"{platform} workflow.post_send must be a mapping")
+    exceptions = post_send.get("exceptions") or {}
+    if not isinstance(exceptions, dict):
+        raise RuntimeError(f"{platform} workflow.post_send.exceptions must be a mapping")
+    normalized: dict[str, dict[str, object]] = {}
+    for exception_key, raw_spec in exceptions.items():
+        if not isinstance(exception_key, str) or not IDENTITY_RE.fullmatch(exception_key):
+            raise RuntimeError(f"{platform} has an invalid post-send exception key")
+        if not isinstance(raw_spec, dict):
+            raise RuntimeError(f"{platform} post-send exception {exception_key} must be a mapping")
+        detect = raw_spec.get("detect")
+        if (
+            not isinstance(detect, list)
+            or not detect
+            or not all(isinstance(value, str) and value in element_map for value in detect)
+        ):
+            raise RuntimeError(
+                f"{platform} post-send exception {exception_key} has invalid detect elements"
+            )
+        normalized[exception_key] = dict(raw_spec)
+    return normalized
+
+
+def _post_send_confirmation_content(platform: str) -> str:
+    exceptions = _post_send_exceptions(platform)
+    if exceptions:
+        rendered = "; ".join(
+            f"{key} requires exactly one each of {', '.join(spec['detect'])}"
+            for key, spec in exceptions.items()
+        )
+    else:
+        rendered = "no mapped post-send exception is currently configured for this platform"
+    return (
+        "POST-SEND CONFIRMATION: inspect the first fresh base observation already required by "
+        "the send step. If the mapped Stop control is present exactly once, require monitor "
+        "registration. If Stop is absent, do not mutate: call observe scope=base exactly once "
+        "more. If Stop is then present exactly once, require monitor registration. If Stop is "
+        f"still absent, classify only these exact YAML-owned exception sets: {rendered}. If one "
+        "complete set is present, return a POST-SEND EXCEPTION REPORT naming the exception key, "
+        "both fresh observation revisions, current URL, and matched elements. If no complete set "
+        "is present, return an UNMAPPED POST-SEND STATE report with both revisions and current "
+        "mapped elements. Stop the turn after either report. Do not infer completion from the URL, "
+        "Copy, Regenerate, Retry, or any response text. Do not click any recovery control in the "
+        "send turn.\n"
+    )
+
+
+def _monitor_stop_keys(platform: str) -> tuple[str, ...]:
+    workflow = load_platform_yaml(platform).get("workflow") or {}
+    monitor = workflow.get("monitor") or {}
+    if not isinstance(monitor, dict):
+        raise RuntimeError(f"{platform} workflow.monitor must be a mapping")
+    raw_keys = monitor.get("stop_keys")
+    if raw_keys is None:
+        raw_key = monitor.get("stop_key") or "stop_button"
+        raw_keys = [raw_key]
+    if (
+        not isinstance(raw_keys, list)
+        or not raw_keys
+        or not all(isinstance(value, str) and value for value in raw_keys)
+    ):
+        raise RuntimeError(f"{platform} workflow.monitor has invalid Stop keys")
+    return tuple(raw_keys)
+
+
+def _recovery_content(
+    platform: str,
+    display: str,
+    exception_key: str,
+    source_response_sha256: str,
+) -> str:
+    exceptions = _post_send_exceptions(platform)
+    spec = exceptions.get(exception_key)
+    if spec is None:
+        raise RuntimeError(f"{platform} has no mapped post-send exception {exception_key}")
+    recovery = spec.get("recovery")
+    if not isinstance(recovery, dict):
+        raise RuntimeError(f"{platform} exception {exception_key} has no recovery mapping")
+    action = recovery.get("action")
+    element = recovery.get("element")
+    max_attempts = recovery.get("max_attempts")
+    success_element = recovery.get("success_element")
+    url_prefix = recovery.get("url_prefix")
+    if action != "click" or max_attempts != 1:
+        raise RuntimeError(
+            f"{platform} exception {exception_key} recovery must be one exact click"
+        )
+    if not isinstance(element, str) or element not in spec["detect"]:
+        raise RuntimeError(f"{platform} exception {exception_key} has invalid recovery element")
+    if success_element not in _monitor_stop_keys(platform):
+        raise RuntimeError(f"{platform} exception {exception_key} has invalid success element")
+    if not isinstance(url_prefix, str) or not url_prefix.startswith("https://"):
+        raise RuntimeError(f"{platform} exception {exception_key} has invalid URL prefix")
+    detect = ", ".join(str(value) for value in spec["detect"])
+    stop_keys = ", ".join(_monitor_stop_keys(platform))
+    return (
+        f"Execute one frozen {PLATFORM_LABELS[platform]} post-send recovery transaction on "
+        f"{display}. Source evidence SHA-256 is {source_response_sha256}. Use drive_chat only. "
+        "Do not read any file, runbook, or YAML. Do not navigate, attach, paste, send, extract, "
+        "or operate any control except the one exact recovery control below.\n"
+        f"1. observe scope=base; require current_url to begin exactly {url_prefix}. If any mapped "
+        f"Stop key ({stop_keys}) is present exactly once, require monitor registration and return "
+        "a recovery receipt without clicking. Otherwise require exactly one each of the mapped "
+        f"exception elements {detect}.\n"
+        "2. observe scope=base exactly once more without mutation. Apply the same Stop check. If "
+        "Stop remains absent, require the same complete exception set. Any missing, duplicate, or "
+        "different state is an UNMAPPED POST-SEND STATE and ends this turn without mutation.\n"
+        f"3. click element={element} exactly once. This is the only recovery mutation authorized. "
+        "Observe scope=base exactly once. If Stop is present exactly once, require monitor "
+        "registration and return a receipt containing platform/display, URL, exception key, source "
+        "evidence SHA-256, clicked element, mapped Stop key, and monitor_id.\n"
+        "4. If Stop is absent after the click, do not mutate: observe scope=base exactly once more. "
+        "If Stop is now present exactly once, require monitor registration and return the same "
+        "receipt. If the mapped exception persists, return a POST-SEND EXCEPTION REPORT. Otherwise "
+        "return an UNMAPPED POST-SEND STATE report. Then stop all UI calls. Never click the recovery "
+        "control twice.\n"
+        "At the first refusal, failed postcondition, missing, renamed, duplicated, ambiguous, or "
+        "unsupported element or action, return the first-mismatch stop report and stop."
+    )
+
+
 def _send_content(
     platform: str,
     display: str,
@@ -116,6 +259,7 @@ def _send_content(
     bundle_b: Path,
     prompt_file: Path,
 ) -> str:
+    post_send = _post_send_confirmation_content(platform)
     if platform == "claude":
         return (
             f"Execute one frozen Claude send transaction on {display}. Use drive_chat only. "
@@ -174,10 +318,11 @@ def _send_content(
             "composer character count or type-text fallback.\n"
             "5. click the fresh send_button ref exactly once; observe scope=base exactly once; require "
             "current_url to differ from the recorded post-navigation fresh URL and to contain /chat/; "
-            "require exactly one mapped stop_button named Stop response; require no mapped exception "
-            "and require monitor registration. Return a receipt containing platform/display, final URL, "
+            "then follow the post-send confirmation below. On a Stop-proven observation, require no "
+            "mapped exception and return a receipt containing platform/display, final URL, "
             "the Model: Opus 5 Extra proof, Bundle A one-count proof, Bundle B two-count proof, the "
             "mapped Stop key, and monitor_id. Then stop all UI calls.\n"
+            f"{post_send}"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
             "action or scope; refusal; failed postcondition; or unexpected state, return the "
             "first-mismatch stop report and stop. Do not retry, recover, press Escape, "
@@ -243,10 +388,11 @@ def _send_content(
             "6. focus element=send_button; observe scope=base; key space; observe scope=base "
             "exactly once; require current_url on "
             "gemini.google.com matching /app/<id> or /u/<digit>/app/<id> and do not require a URL "
-            "change; require exactly one stop_button named Stop response within 30 seconds and "
-            "require monitor registration. Return a receipt containing platform/display, final URL, "
+            "change; then follow the post-send confirmation below. On a Stop-proven observation, "
+            "return a receipt containing platform/display, final URL, "
             "the Pro Extended proof, the one-then-two stem proof, the mapped Stop key, and monitor_id. "
             "Then stop all UI calls.\n"
+            f"{post_send}"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
             "action or scope; refusal; failed postcondition; or unexpected state, return the "
             "first-mismatch stop report and stop. Do not retry, recover, press Escape, extract, poll, "
@@ -298,10 +444,11 @@ def _send_content(
             "attachment-count proofs and exactly one enabled send_button named Submit.\n"
             "6. click element=send_button exactly once; observe scope=base exactly once; require "
             "current_url to differ from the recorded fresh URL and match "
-            "https://grok.com/c/<non-empty-id>; require exactly one stop_button named Stop model "
-            "response and require monitor registration. Return a receipt containing "
+            "https://grok.com/c/<non-empty-id>; then follow the post-send confirmation below. On a "
+            "Stop-proven observation, return a receipt containing "
             "platform/display, final URL, the exact Heavy click proof, the one-then-two attachment "
             "proof, the mapped Stop key, and monitor_id. Then stop all UI calls.\n"
+            f"{post_send}"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; "
             "unsupported action or scope; refusal; failed postcondition; or unexpected state, "
             "return the first-mismatch stop report and stop. Do not retry, recover, take any "
@@ -336,9 +483,10 @@ def _send_content(
         f"single mapped composer; observe scope=base; paste text_file={prompt_file}; observe scope=base; "
         "require exactly two attachment chips and one enabled send_button.\n"
         "6. key Return exactly once; observe scope=base exactly once; require the URL changed from the "
-        "fresh URL, require stop_streaming_button or stop_answering_button, and require monitor "
-        "registration. Return a receipt containing platform/display, final URL, Pro proof, both "
+        "fresh URL, then follow the post-send confirmation below. On a Stop-proven observation, return "
+        "a receipt containing platform/display, final URL, Pro proof, both "
         "attachment proofs, the mapped Stop key, and monitor_id. Then stop all UI calls.\n"
+        f"{post_send}"
         "At the first missing element, refusal, failed postcondition, or unexpected state, return the "
         "first-mismatch stop report and stop. Do not retry, recover, extract, poll, press Escape, or send "
         "a second time."
@@ -537,17 +685,17 @@ def _invoke(
 
 def _is_worker_stop_report(receipt: str) -> bool:
     lowered = receipt.lower()
-    headlines = [
-        line.strip(" \t#*_`").lower()
-        for line in receipt.splitlines()
-        if line.strip()
-    ]
-    if headlines:
-        normalized_headline = re.sub(r"[^a-z0-9]+", " ", headlines[0]).strip()
+    for line in receipt.splitlines():
+        if not line.strip():
+            continue
+        headline = line.strip(" \t#*_`").lower()
+        normalized_headline = re.sub(r"[^a-z0-9]+", " ", headline).strip()
         if normalized_headline.startswith((
             "stop report",
             "first mismatch stop report",
             "stop first mismatch report",
+            "post send exception report",
+            "unmapped post send state",
         )):
             return True
     return all(
@@ -616,6 +764,9 @@ def main() -> int:
         allow_existing=args.phase == "extract",
     )
 
+    source_response = None
+    source_response_sha256 = None
+    exception_key = None
     if args.phase == "send":
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
@@ -633,6 +784,26 @@ def main() -> int:
         event_id = f"send-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 8192)
+    elif args.phase == "recover":
+        exception_key = _identity(args.exception_key, "exception key")
+        source_response = _absolute_input(args.source_response_json, "source response JSON")
+        _source_payload, source_receipt = _worker_receipt(source_response)
+        if not _is_worker_stop_report(source_receipt):
+            raise RuntimeError("source response is not a terminal worker report")
+        source_response_sha256 = _sha256(source_response)
+        content = _recovery_content(
+            args.platform,
+            args.display,
+            exception_key,
+            source_response_sha256,
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0{args.platform}\0{args.display}\0{exception_key}\0"
+            f"{source_response_sha256}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"recover-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
     else:
         monitor_id = _identity(args.monitor_id, "monitor id")
         response_file = Path(args.response_file).expanduser()
@@ -689,7 +860,7 @@ def main() -> int:
         prepared_marker.unlink()
     lease_release = None
     primary_error = None
-    send_stop_report = False
+    mutation_stop_report = False
     try:
         request_path, headers_path, response_path, receipt = _invoke(
             root=root,
@@ -698,22 +869,27 @@ def main() -> int:
             event_id=event_id,
             correlation_id=correlation_id,
         )
+        if (
+            source_response is not None
+            and _sha256(source_response) != source_response_sha256
+        ):
+            raise RuntimeError("source response changed during recovery")
         if _is_worker_stop_report(receipt):
-            send_stop_report = args.phase == "send"
-            raise RuntimeError("worker returned the walkthrough stop report")
-        if args.phase == "send" and not re.search(
+            mutation_stop_report = args.phase in {"send", "recover"}
+            raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if args.phase in {"send", "recover"} and not re.search(
             r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
             receipt,
         ):
-            raise RuntimeError("send response has no registered monitor_id")
+            raise RuntimeError(f"{args.phase} response has no registered monitor_id")
         if response_file is not None:
             if not response_file.is_file() or response_file.stat().st_size == 0:
                 raise RuntimeError("extraction did not create a non-empty response file")
     except RuntimeError as exc:
         primary_error = exc
     finally:
-        if args.phase == "extract" or send_stop_report:
+        if args.phase == "extract" or mutation_stop_report:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
             except RuntimeError as cleanup_error:
@@ -745,6 +921,12 @@ def main() -> int:
             "response_bytes": response_file.stat().st_size,
             "response_sha256": _sha256(response_file),
             "lease_release": lease_release,
+        })
+    if source_response is not None:
+        result.update({
+            "exception_key": exception_key,
+            "source_response_json": str(source_response),
+            "source_response_json_sha256": source_response_sha256,
         })
     print(json.dumps(result, sort_keys=True))
     return 0

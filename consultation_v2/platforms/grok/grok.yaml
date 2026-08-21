@@ -158,6 +158,18 @@ tree:
     regenerate:
       name: Regenerate
       role: push button
+    usage_limit_updated_alert:
+      role: alert
+      states_include:
+        - showing
+        - enabled
+      child_texts:
+        - Your usage limit has been updated
+        - You can keep going now.
+        - Retry
+    retry_button:
+      name: Retry
+      role: push button
     like:
       name: Like
       role: push button
@@ -310,6 +322,18 @@ workflow:
     # Multi-line composer: submit by clicking the exact send_button, NOT Enter.
     send_key: send_button
     stop_key: stop_button
+  post_send:
+    exceptions:
+      usage_limit_updated:
+        detect:
+          - usage_limit_updated_alert
+          - retry_button
+        recovery:
+          action: click
+          element: retry_button
+          max_attempts: 1
+          success_element: stop_button
+          url_prefix: https://grok.com/c/
   monitor:
     stop_key: stop_button
     generation_timeout: 3600
