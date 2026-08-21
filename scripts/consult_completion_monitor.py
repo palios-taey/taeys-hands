@@ -338,8 +338,9 @@ def notify_taey(
                 f" extraction_response_json={handoff['response_json']}"
                 f" extraction_event_id={handoff['event_id']}"
                 f" extraction_correlation_id={handoff['correlation_id']}. "
-                "Main Taey: use run_command, not send_message; do not drive the "
-                f"display. Run exactly: {handoff['command']}"
+                "Main Taey: use run_command with timeout_seconds=900, not "
+                "send_message; do not drive the display. Run exactly: "
+                f"{handoff['command']}"
             )
         else:
             target_message += (
