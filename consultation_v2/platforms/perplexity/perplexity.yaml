@@ -323,13 +323,11 @@ tree:
       name: Stop response (Esc)
       role: push button
     copy_button:
+      name: Copy
       role: push button
-      match_strategy: name_agnostic_structural
-      structural:
-        after: download_button
-        before: more_actions
-        ordinal: first
-      reason: "Current Deep Research answer rows expose the response Copy action as a plain Copy push button between Download and More actions."
+      states_include:
+      - showing
+      - enabled
     copy_query_button:
       name: Copy query
       role: push button
@@ -545,6 +543,8 @@ validation:
 extraction:
   assistant_text:
     steps:
+      - action: scroll_to_bottom
+        element: input
       - action: copy_element
         element: copy_button
         select: last
