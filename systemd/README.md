@@ -101,7 +101,7 @@ Each generated `taey-display-N.service`:
 
 1. Depends on `taey-xvfb@N.service`.
 2. Reads `~/.taey/machine.env`.
-3. Starts `scripts/display_unit_runner.sh` under `dbus-run-session`.
+3. Pins the X11 session contract and starts `scripts/display_unit_runner.sh` under `dbus-run-session`.
 4. Fails if AT-SPI bus capture does not produce `/tmp/a11y_bus_:N`.
 5. Installs the repo-owned Firefox `user.js` into the configured profile.
 6. Launches Firefox with the configured URL and profile.

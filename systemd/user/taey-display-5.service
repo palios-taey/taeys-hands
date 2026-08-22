@@ -7,6 +7,8 @@ Requires=taey-xvfb@5.service
 Type=simple
 EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:5
+Environment=XDG_SESSION_TYPE=x11
+Environment=WAYLAND_DISPLAY=
 Environment=TAEY_PLATFORM=grok
 Environment=TAEY_PROFILE=ff-profile-grok
 Environment=TAEY_URL=https://grok.com/

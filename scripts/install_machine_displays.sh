@@ -419,6 +419,8 @@ Requires=taey-xvfb@${display_num}.service
 Type=simple
 EnvironmentFile=${SYSTEMD_ENV_FILE}
 Environment=DISPLAY=:${display_num}
+Environment=XDG_SESSION_TYPE=x11
+Environment=WAYLAND_DISPLAY=
 Environment=TAEY_PLATFORM=${platform}
 Environment=TAEY_PROFILE=${profile}
 Environment=TAEY_URL=${url}
