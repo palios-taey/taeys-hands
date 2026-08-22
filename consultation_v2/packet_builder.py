@@ -682,6 +682,14 @@ def _authored_markdown_lines(text: str) -> tuple[tuple[int, int, str], ...]:
     offset = 0
     for raw_line in text.splitlines(keepends=True):
         line = raw_line.rstrip("\r\n")
+        indent_columns = 0
+        for character in line:
+            if character == " ":
+                indent_columns += 1
+            elif character == "\t":
+                indent_columns += 4 - (indent_columns % 4)
+            else:
+                break
         fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
         if fence_character is None and fence is not None:
             marker = fence.group(1)
@@ -695,7 +703,7 @@ def _authored_markdown_lines(text: str) -> tuple[tuple[int, int, str], ...]:
             if closing is not None:
                 fence_character = None
                 fence_length = 0
-        elif not line.startswith(("    ", "\t")):
+        elif indent_columns < 4:
             authored.append((offset, offset + len(raw_line), line))
         offset += len(raw_line)
     return tuple(authored)
