@@ -701,11 +701,12 @@ class ConsultationRuntime:
         entry = self._address_bar_entry()
         if entry is None:
             return False
-        if not atspi_focus({
+        evidence = atspi_mapped_pointer_activate({
             'atspi_obj': entry.atspi_obj,
             'name': entry.name,
             'role': entry.role,
-        }):
+        })
+        if evidence.get('ok') is not True:
             return False
         time.sleep(0.2)
         return self._address_bar_focused()
