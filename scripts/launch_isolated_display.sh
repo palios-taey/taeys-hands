@@ -56,6 +56,8 @@ fi
 _taey_session() {
     D=":${TAEY_D}"
     export DISPLAY="$D"
+    export XDG_SESSION_TYPE=x11
+    unset WAYLAND_DISPLAY
     echo "$DBUS_SESSION_BUS_ADDRESS" > "/tmp/dbus_session_bus_:${TAEY_D}"
 
     /usr/libexec/at-spi-bus-launcher --launch-immediately &
