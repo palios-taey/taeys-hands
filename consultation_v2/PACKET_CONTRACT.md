@@ -22,7 +22,7 @@ post-attach tree must show exactly those two expected file chips before the prom
 
 ## Bundle A — governance
 
-Bundle A contains exactly these complete sources in this deterministic order:
+Bundle A contains exactly these complete, logical-name-bound sources in this deterministic order:
 
 1. the full `FAMILY_KERNEL.md`;
 2. the full destination-specific identity file; and

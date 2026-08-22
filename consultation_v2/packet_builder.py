@@ -21,6 +21,8 @@ IDENTITY_BY_PLATFORM = {
     "grok": "IDENTITY_LOGOS.md",
     "perplexity": "IDENTITY_CLARITY.md",
 }
+KERNEL_LOGICAL = "FAMILY_KERNEL.md"
+SPOTLIGHT_LOGICAL = "SPOTLIGHT_STANDARD_FOR_INTEGRITY.md"
 
 PROMPTING_LINT = Path("/usr/local/bin/prompting-lint")
 SCHEMA_VERSION = 2
@@ -598,6 +600,30 @@ def _validate_bundle_a_verbatim_markers(
     return tuple(logicals)
 
 
+def _validate_governance_logicals(
+    platform: str,
+    kernel: SourceBytes,
+    identity: SourceBytes,
+    spotlight: SourceBytes,
+    context: str,
+) -> tuple[str, ...]:
+    expected = (
+        KERNEL_LOGICAL,
+        IDENTITY_BY_PLATFORM[platform],
+        SPOTLIGHT_LOGICAL,
+    )
+    observed = (
+        kernel.record["logical"],
+        identity.record["logical"],
+        spotlight.record["logical"],
+    )
+    if observed != expected:
+        raise PacketBuildError(
+            f"{context} governance logicals differ: expected {expected!r}, observed {observed!r}"
+        )
+    return expected
+
+
 def _render_bundle_b(
     request_id: str,
     task_sources: Sequence[SourceBytes],
@@ -662,9 +688,13 @@ def _validate_task_dossier(source: SourceBytes) -> tuple[str, ...]:
             raise PacketBuildError(
                 f"corrected request packet section {required!r} must be non-empty"
             )
-        if required == "Problem statement" and "?" not in body:
+        question_body = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+        question_lines = [line.strip() for line in question_body.splitlines()]
+        if required == "Problem statement" and not any(
+            line.endswith("?") and "://" not in line for line in question_lines
+        ):
             raise PacketBuildError(
-                "corrected request packet Problem statement must be a question"
+                "corrected request packet Problem statement must contain a question-shaped line"
             )
     return REQUIRED_DOSSIER_HEADINGS
 
@@ -1071,6 +1101,9 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         identity = _source_bytes(destination["identity"], f"{context}.identity")
         if identity.record["logical"] != IDENTITY_BY_PLATFORM[platform]:
             raise PacketBuildError(f"{context} has wrong identity mapping")
+        governance_logicals = _validate_governance_logicals(
+            platform, kernel, identity, spotlight, context
+        )
         _assert_not_rejected_input(
             Path(identity.record["locator"]), rejected_roots, identity.record["logical"]
         )
@@ -1083,11 +1116,7 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         )
         _validate_bundle_a_verbatim_markers(
             bundle_a,
-            (
-                kernel.record["logical"],
-                identity.record["logical"],
-                spotlight.record["logical"],
-            ),
+            governance_logicals,
             f"{platform} Bundle A",
         )
         expected_bundle_a = destination["expected_bundle_a"]
@@ -1569,6 +1598,9 @@ def _freeze_expected_outputs(
         identity = _source_bytes(destination.get("identity"), f"{context}.identity")
         if identity.record["logical"] != IDENTITY_BY_PLATFORM[platform]:
             raise PacketBuildError(f"{context} has wrong identity mapping")
+        governance_logicals = _validate_governance_logicals(
+            platform, kernel, identity, spotlight, context
+        )
         display_name = _require_text(
             destination.get("display_name"), f"{context}.display_name"
         )
@@ -1581,11 +1613,7 @@ def _freeze_expected_outputs(
         )
         _validate_bundle_a_verbatim_markers(
             bundle_a,
-            (
-                kernel.record["logical"],
-                identity.record["logical"],
-                spotlight.record["logical"],
-            ),
+            governance_logicals,
             f"{platform} Bundle A",
         )
         frozen_expectation = {
@@ -2036,17 +2064,25 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
         if len(data) != attachment["bytes"] or _sha256(data) != attachment["sha256"]:
             raise PacketBuildError(f"attachment {label} content address mismatch")
         attachment_data[label] = data
-    governance_logicals = [
-        source.get("logical")
-        for source in receipt["governance_sources"]
-        if isinstance(source, dict)
-    ]
+    governance_sources = receipt["governance_sources"]
     if (
-        len(governance_logicals) != 3
-        or not all(isinstance(logical, str) for logical in governance_logicals)
-        or receipt["checks"].get("bundle_a_verbatim_sources")
-        != governance_logicals
+        not isinstance(governance_sources, list)
+        or len(governance_sources) != 3
+        or not all(isinstance(source, dict) for source in governance_sources)
     ):
+        raise PacketBuildError("receipt governance sources must contain three records")
+    governance_logicals = [source.get("logical") for source in governance_sources]
+    expected_governance_logicals = [
+        KERNEL_LOGICAL,
+        IDENTITY_BY_PLATFORM[destination],
+        SPOTLIGHT_LOGICAL,
+    ]
+    if governance_logicals != expected_governance_logicals:
+        raise PacketBuildError("receipt governance source identities are incorrect")
+    checks = receipt["checks"]
+    if not isinstance(checks, dict):
+        raise PacketBuildError("receipt checks must be an object")
+    if checks.get("bundle_a_verbatim_sources") != governance_logicals:
         raise PacketBuildError("receipt Bundle A VERBATIM source evidence is incomplete")
     _validate_bundle_a_verbatim_markers(
         attachment_data["a"], governance_logicals, "receipt Bundle A"
