@@ -18,9 +18,10 @@ Every target is selected from a fresh canonical AT-SPI tree by one exact YAML ma
 a stale revision, a missing declared state, or an operation that contradicts YAML fails closed before mutation.
 
 Click, focus, and activate use the bound AT-SPI object. Some real interfaces expose a hover-only
-flyout or require pointer placement after the address bar has been selected exactly. A YAML-declared hover or mapped
-navigation primitive may derive transient pointer placement from the already-bound node's live AT-SPI extents. Those
-values are actuation payload only: they never discover, choose, disambiguate, persist, or rescue a target.
+flyout or a React trigger whose advertised AT-SPI action does not dispatch the product's pointer handler. A
+YAML-declared hover, mapped navigation, or `mapped_pointer_activate` primitive may derive transient pointer
+placement from the already-bound node's live AT-SPI extents. Those values are actuation payload only: they never
+discover, choose, disambiguate, persist, or rescue a target.
 
 Raw/hardcoded coordinates, pixel or OCR discovery, screen-as-truth, substring/fuzzy matching, fallback targets,
 fallback action strategies, hidden reads, and automatic action retries are outside the current production contract.
@@ -33,10 +34,10 @@ chooses another operation. `focus_and_key_open` is one semantic `operate`: focus
 once, then send the exact YAML open key. The runtime refuses a contradictory free verb and never retries the
 operation.
 
-`mapped_pointer_open` is one semantic `operate`: move to the fresh bound node's mapped AT-SPI extent and click the
-primary pointer button exactly once. It has no coordinate input, alternate target, fallback strategy, or automatic
-retry. Only a platform YAML declaration can authorize it, and the declared observation scope remains the immediate
-postcondition oracle.
+`mapped_pointer_activate` is one semantic `operate`: the shared primitive accepts only the exact bound element,
+reacquires its live AT-SPI extent, and emits one primary-button event. It accepts and returns no geometry, has no
+alternate target, action fallback, or retry, and cannot authorize another mutation. The next fresh observation of
+the YAML-declared scope is the only success oracle.
 
 `consultation_v2/runtime.py::ConsultationRuntime` belongs to the retained Layer-3 engine. Its click and focus paths
 are fail-closed AT-SPI operations. Promotion still requires proving one real platform transaction through the same

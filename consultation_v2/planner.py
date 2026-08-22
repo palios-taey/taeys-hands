@@ -116,13 +116,13 @@ def selection_trigger_operation(
                 'forbidden': ['activate', 'focus', 'hover'],
             }
             signature = (method, '')
-        elif method == 'mapped_pointer_open':
+        elif method == 'mapped_pointer_activate':
             declaration = {
                 'method': method,
-                'primitives': ['mapped_pointer_click'],
+                'primitives': ['mapped_pointer_activate'],
                 'allowed_now': (
                     [] if 'expanded' in normalized_states
-                    else ['mapped_pointer_click']
+                    else ['mapped_pointer_activate']
                 ),
                 'forbidden': ['activate', 'click', 'focus', 'hover'],
             }

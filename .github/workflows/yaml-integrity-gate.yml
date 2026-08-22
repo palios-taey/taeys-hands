@@ -32,6 +32,9 @@ jobs:
       - name: Run consultation_v2 contract gate
         run: python3 consultation_v2/validators/lint_consultation_v2_contract.py --all
 
+      - name: Prove mapped pointer contract gate
+        run: python3 consultation_v2/validators/lint_consultation_v2_contract.py --self-test
+
       - name: Run consultation_v2 platform isolation gate
         run: python3 consultation_v2/validators/lint_platform_independence.py --all
 

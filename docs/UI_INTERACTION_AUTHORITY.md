@@ -109,6 +109,10 @@ soma_proxy), "engine optional." This does **not** break the automation ban and d
   the `ui_action` P0 seat, which stays local-only (`effect_class: local`, outward ops fail-closed).
   `drive_chat` is therefore a **named-exception lane** (like `consultation_v2`), not a change to `ui_action`.
   Deliberately named `drive_chat` to avoid forking the `ui_action` grammar.
+- **Mapped pointer activation is a YAML-owned semantic, not a coordinate grammar:** when a platform YAML declares
+  `mapped_pointer_activate`, `operate` passes only the fresh bound element to one shared primitive. That primitive
+  resolves the live AT-SPI extent internally and emits one primary-button activation. No coordinate is exposed to
+  Taey, no other target or mechanism is attempted, and a fresh exact postcondition is required next.
 - **LOCK ENFORCEMENT — CURRENT:** the proxy derives a lease owner from validated active-turn state as
   `taey-drive:{seat_id}:{process_generation}` and passes the seat, turn, and process generation to
   `ui_drive.py`. The driver validates that identity before every mutation and acquires or renews the

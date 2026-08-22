@@ -10,8 +10,10 @@ those documents, the current authorities win.
 
 - Everything needed to operate the current UI is represented in the tree. There are zero pixel,
   OCR, screenshot-as-truth, remembered-coordinate, guessed-control, or coordinate-locator exceptions. A
-  YAML-declared hover or navigation primitive may use the live extents of the exact mapped node only as the
-  final actuation mechanism; those extents never discover, choose, or rescue a target.
+  YAML-declared hover, navigation, or `mapped_pointer_activate` primitive may use the live extents of the exact
+  mapped node only as the final actuation mechanism; those extents never discover, choose, or rescue a target.
+  `mapped_pointer_activate` accepts only the fresh bound element, resolves its live extent inside the shared
+  primitive, emits one primary-button activation, exposes no geometry, and has no alternate or retry.
 - Browser chrome is excluded except the address bar. The complete sidebar/chat-history block and dynamic
   non-actionable text such as greetings are excluded. The current document, actionable controls, and the
   currently opened menu, submenu, or dialog remain visible.
@@ -35,6 +37,9 @@ those documents, the current authorities win.
 - One action means one YAML-declared semantic operation. `focus_and_key_open` is one `operate`: the runtime
   focuses the exact fresh ref, verifies focus, and sends the exact YAML `open_key`; the next independent
   observation must prove the exact YAML menu target. Taey never sequences those internal primitives.
+- `mapped_pointer_activate` is one `operate`: the runtime resolves the exact fresh ref's live AT-SPI extent and
+  emits one primary-button activation. The next independent observation must prove the exact YAML postcondition.
+  Taey never receives geometry, chooses a point, or repeats the activation.
 - A raw or hardcoded coordinate is never an action. A hover-only flyout is reached only when its platform YAML
   declares hover on the exact mapped trigger; the primitive derives transient pointer placement from that live
   node and has no alternate target or fallback.

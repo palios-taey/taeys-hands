@@ -1357,13 +1357,43 @@ class _ChatGPTInlineBase:
             trigger_key,
             trigger.states,
         )
-        open_method = str((declared or {}).get('method') or 'click')
+        if not isinstance(declared, dict):
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} has no YAML operation',
+                trigger=trigger_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        open_method = str(declared.get('method') or '')
         open_evidence = None
-        if open_method == 'mapped_pointer_open':
-            open_evidence = self.runtime.mapped_pointer_open(trigger)
+        if open_method == 'mapped_pointer_activate':
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
             opened = open_evidence.get('ok') is True
-        else:
+        elif open_method == 'focus_and_key_open':
+            primitives = declared.get('primitives')
+            open_key = (
+                primitives[1].partition(':')[2]
+                if isinstance(primitives, list)
+                and len(primitives) == 2
+                and isinstance(primitives[1], str)
+                and primitives[1].startswith('key:')
+                else ''
+            )
+            open_evidence = (
+                self.runtime.focus_and_key_open(trigger, key=open_key)
+                if open_key else {'ok': False, 'error': 'missing_exact_open_key'}
+            )
+            opened = open_evidence.get('ok') is True
+        elif open_method == 'click':
             opened = self.runtime.click(trigger)
+        else:
+            opened = False
+            open_evidence = {
+                'ok': False,
+                'error': f'unsupported_open_method:{open_method}',
+            }
         if not opened:
             result.add_step(
                 'select',

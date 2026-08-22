@@ -7,7 +7,11 @@ import time
 from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
-from consultation_v2.interact import atspi_click, atspi_focus
+from consultation_v2.interact import (
+    atspi_click,
+    atspi_focus,
+    atspi_mapped_pointer_activate,
+)
 from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.platforms_runtime import display_environment
 from consultation_v2.tree import find_elements
@@ -449,32 +453,30 @@ class ConsultationRuntime:
             )
         )
 
-    def mapped_pointer_open(
+    def mapped_pointer_activate(
         self,
         element: ElementRef,
-        *,
-        timeout: int = 5,
     ) -> dict[str, Any]:
-        self._sync_platform_io_display()
         evidence: dict[str, Any] = {
             'ok': False,
-            'method': 'mapped_pointer_open',
+            'method': 'mapped_pointer_activate',
             'element': {
                 'key': element.key,
                 'name': element.name,
                 'role': element.role,
-                'x': element.x,
-                'y': element.y,
             },
-            'pointer_event_sent': False,
+            'actuation': None,
         }
-        if element.x is None or element.y is None:
-            evidence['error'] = 'missing_mapped_extent'
-            return evidence
-        sent = inp.click_at(int(element.x), int(element.y), timeout=timeout)
-        evidence['pointer_event_sent'] = bool(sent)
-        if not sent:
-            evidence['error'] = 'mapped_pointer_click_failed'
+        actuation = atspi_mapped_pointer_activate({
+            'atspi_obj': element.atspi_obj,
+            'name': element.name,
+            'role': element.role,
+        })
+        evidence['actuation'] = actuation
+        if actuation.get('ok') is not True:
+            evidence['error'] = str(
+                actuation.get('error') or 'mapped_pointer_activate_failed'
+            )
             return evidence
         evidence['ok'] = True
         return evidence

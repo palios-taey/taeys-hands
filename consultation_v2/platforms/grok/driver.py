@@ -1149,6 +1149,19 @@ class _GrokInlineBase:
                     snapshot=trigger_snapshot.serializable(),
                 )
                 return None
+        elif open_method == 'mapped_pointer_activate':
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            if open_evidence.get('ok') is not True:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection trigger {trigger_key} mapped pointer activation failed',
+                    trigger=trigger_key,
+                    open_method=open_method,
+                    open_evidence=open_evidence,
+                    snapshot=trigger_snapshot.serializable(),
+                )
+                return None
         elif open_method == 'click':
             if not self.runtime.click(trigger):
                 result.add_step(

@@ -11,7 +11,7 @@ This section controls the current production path: Taey operates each Chat manua
 - Every control locator is an exact YAML-owned name plus role, with exact required state or an exact structural locator only where the visible value is inherently dynamic. Zero matches, multiple matches, or an unexpected state stop the current UI transaction for root-cause analysis; they do not stop recovery engineering.
 - The manual lifecycle is: new-chat navigation and URL capture; model, mode, and tool selection; two attachments; prompt paste; send preferably by Enter according to YAML; stop-button appearance; two consecutive fresh stop-button absences; scroll to bottom; exact Copy activation; platform-specific response-attachment harvest; complete prompt/response/input/output/URL ingestion into ISMA.
 - The two attachments and the brief on-screen prompt are defined by [`consultation_v2/PACKET_CONTRACT.md`](consultation_v2/PACKET_CONTRACT.md). No third attachment, partial constitutional context, or filesystem-derived deliverable requested from the Chat is permitted.
-- Every YAML-declared semantic operation has a fresh pre-action tree and a fresh independent post-action tree before Taey may decide the next operation. A deterministic semantic operation may contain tightly coupled primitives that require no model choice, such as `focus_and_key_open`; those primitives execute inside one `operate` call. If AT-SPI may be stale, wait the YAML-owned settle interval and make one fresh non-mutating observation; never repeat the operation or enter an automatic retry loop.
+- Every YAML-declared semantic operation has a fresh pre-action tree and a fresh independent post-action tree before Taey may decide the next operation. A deterministic semantic operation may contain tightly coupled primitives that require no model choice, such as `focus_and_key_open`; those primitives execute inside one `operate` call. `mapped_pointer_activate` is one other named semantic operation: the shared primitive accepts only the exact fresh bound node, resolves its live AT-SPI extent internally, emits one primary-button activation, exposes no geometry, and has no alternate target, fallback, or retry. If AT-SPI may be stale, wait the YAML-owned settle interval and make one fresh non-mutating observation; never repeat the operation or enter an automatic retry loop.
 - Gemini Deep Research includes the mapped research-plan confirmation and second submit transition.
 
 The first failed action or postcondition ends that UI transaction. Taey preserves the fresh tree and action receipt for root-cause analysis and performs no further UI action in that transaction. Recovery engineering continues from those artifacts. Only after the root cause is corrected may an explicitly authorized new transaction begin; it is never an automatic retry or replay. This prevents duplicate turns and avoids hammering the Chat surfaces.
@@ -40,11 +40,14 @@ There is no third path. Specifically **BANNED** (in code and in behavior):
 
 ## The map is finite, known, and complete
 
-Per platform: **1 YAML + 1 driver. No overlap.** Drivers carry zero platform knowledge; they call shared primitives only (click, click-react, **hover/pointer_move**, paste, snapshot, menu_snapshot, settle). (hover/pointer_move is REQUIRED — Gatekeeper item 3: a hover-only flyout is otherwise unreachable, a notify-forever dead end no YAML edit can resolve.)
+Per platform: **1 YAML + 1 driver. No overlap.** Drivers carry zero platform knowledge; they call shared primitives only (click, `mapped_pointer_activate`, **hover/pointer_move**, paste, snapshot, menu_snapshot, settle). (hover/pointer_move is REQUIRED — Gatekeeper item 3: a hover-only flyout is otherwise unreachable, a notify-forever dead end no YAML edit can resolve.)
 
 `hover/pointer_move` does not weaken tree authority. The platform YAML must declare hover on one exact mapped
 trigger, and the primitive may derive transient pointer placement only from that live node's AT-SPI extents.
 Geometry never discovers or disambiguates the target and is never a fallback after an exact match fails.
+The same boundary applies to `mapped_pointer_activate`: platform YAML must declare it on one exact mapped trigger,
+the shared primitive derives one transient center point from that bound node's live extent, and the fresh declared
+postcondition is the only success oracle.
 
 The YAML maps **everything** exact-match:
 - The chat: browser chrome is filtered out except the address bar; the full sidebar/history block and dynamic non-actionable text such as greetings are also filtered out. **Every remaining element** is mapped exact — EXCEPT the response transcript: map the transcript CONTAINER (name/role), exempt its child text nodes from string validation (presence+role only), and exclude the transcript subtree from all session-driving locators. The response text is unbounded/unpredictable — it cannot be exact-mapped and must never be a control locator.

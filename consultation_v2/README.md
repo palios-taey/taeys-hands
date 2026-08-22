@@ -17,8 +17,10 @@ production-ready.
 4. Each platform YAML is executable UI authority. The freshly filtered AT-SPI tree is the oracle. A mismatch
    stops the current UI transaction and produces evidence for recovery engineering; it never authorizes a
    fuzzy matcher, pixel/OCR path, raw or remembered coordinate locator, remembered shortcut, or action retry.
-   A YAML-declared hover may derive transient pointer placement from the exact mapped node's live extents; this
-   is actuation after exact selection, never discovery, disambiguation, or fallback.
+   A YAML-declared hover or `mapped_pointer_activate` may derive transient pointer placement from the exact mapped
+   node's live extents; this is actuation after exact selection, never discovery, disambiguation, or fallback.
+   The mapped activation accepts only the bound node, emits one primary-button event, exposes no geometry, and
+   requires the declared scope's fresh exact postcondition before another mutation.
 
 The order above resolves contradictions. `100_TIMES.md`, engine-era contracts, and implementation comments
 do not override it.

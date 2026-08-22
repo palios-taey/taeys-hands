@@ -37,6 +37,8 @@ FORBIDDEN_YAML_KEYS = {
 ALLOW_RE = re.compile(r"#\s*lint-allow:\s*(.*)$")
 ACTION_METHODS = {'click', 'paste', 'press', 'type_text'}
 CRITICAL_DRIVER_STEPS = {'attach', 'prompt', 'send', 'extract_primary', 'extract_additional'}
+MAPPED_POINTER_PRIMITIVE = 'atspi_mapped_pointer_activate'
+MAPPED_POINTER_PRIMITIVE_PATH = ('consultation_v2', 'interact.py')
 
 
 @dataclass(frozen=True)
@@ -214,6 +216,17 @@ class PythonContractVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
         self.func_stack.append(node.name)
+        if (
+            node.name == MAPPED_POINTER_PRIMITIVE
+            and not self._has_exact_mapped_pointer_contract(node)
+        ):
+            self.findings.append(Finding(
+                str(self.path),
+                getattr(node, 'lineno', 1),
+                'py-mapped-pointer-primitive-contract',
+                'mapped pointer primitive must be the exact bound-element/live-extent one-shot implementation',
+                ast.get_source_segment(self.source, node) or '',
+            ))
         self.generic_visit(node)
         self.func_stack.pop()
 
@@ -362,11 +375,197 @@ class PythonContractVisitor(ast.NodeVisitor):
             return True
         if isinstance(fn, ast.Attribute) and fn.attr == 'click_at':
             return True
+        if self._is_generate_mouse_event(node):
+            return not (
+                self._in_exact_mapped_pointer_primitive()
+                and self._is_exact_live_extent_mouse_event(node)
+            )
         if self._runtime_action_name(node) == 'click':
             for kw in node.keywords:
                 if kw.arg == 'strategy' and isinstance(kw.value, ast.Constant):
                     return kw.value.value != 'atspi_only'
         return False
+
+    def _in_exact_mapped_pointer_primitive(self) -> bool:
+        return (
+            tuple(self.path.parts[-2:]) == MAPPED_POINTER_PRIMITIVE_PATH
+            and bool(self.func_stack)
+            and self.func_stack[-1] == MAPPED_POINTER_PRIMITIVE
+        )
+
+    @staticmethod
+    def _call_name(node: ast.Call) -> str | None:
+        fn = node.func
+        if isinstance(fn, ast.Name):
+            return fn.id
+        if isinstance(fn, ast.Attribute):
+            return fn.attr
+        return None
+
+    @staticmethod
+    def _is_generate_mouse_event(node: ast.Call) -> bool:
+        fn = node.func
+        return (
+            isinstance(fn, ast.Name) and fn.id == 'generate_mouse_event'
+        ) or (
+            isinstance(fn, ast.Attribute) and fn.attr == 'generate_mouse_event'
+        )
+
+    @staticmethod
+    def _is_attr(node: ast.AST, base: str, attr: str) -> bool:
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr == attr
+            and isinstance(node.value, ast.Name)
+            and node.value.id == base
+        )
+
+    def _is_extent_center(self, node: ast.AST, axis: str, size: str) -> bool:
+        return (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Add)
+            and self._is_attr(node.left, 'rect', axis)
+            and isinstance(node.right, ast.BinOp)
+            and isinstance(node.right.op, ast.FloorDiv)
+            and self._is_attr(node.right.left, 'rect', size)
+            and isinstance(node.right.right, ast.Constant)
+            and node.right.right.value == 2
+        )
+
+    def _is_exact_live_extent_mouse_event(self, node: ast.Call) -> bool:
+        return (
+            len(node.args) == 3
+            and not node.keywords
+            and self._is_extent_center(node.args[0], 'x', 'width')
+            and self._is_extent_center(node.args[1], 'y', 'height')
+            and isinstance(node.args[2], ast.Constant)
+            and node.args[2].value == 'b1c'
+        )
+
+    @staticmethod
+    def _is_named_assignment_call(
+        node: ast.AST,
+        target: str,
+        owner: str,
+        method: str,
+        argument: str | None = None,
+    ) -> bool:
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == target
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == method
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == owner
+        ):
+            return False
+        if argument is None:
+            return not node.value.args and not node.value.keywords
+        return (
+            len(node.value.args) == 1
+            and not node.value.keywords
+            and isinstance(node.value.args[0], ast.Constant)
+            and node.value.args[0].value == argument
+        )
+
+    @staticmethod
+    def _is_screen_extent_assignment(node: ast.AST) -> bool:
+        if not (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == 'rect'
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == 'get_extents'
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == 'component'
+            and len(node.value.args) == 1
+            and not node.value.keywords
+        ):
+            return False
+        arg = node.value.args[0]
+        return (
+            isinstance(arg, ast.Attribute)
+            and arg.attr == 'SCREEN'
+            and isinstance(arg.value, ast.Attribute)
+            and arg.value.attr == 'CoordType'
+            and isinstance(arg.value.value, ast.Name)
+            and arg.value.value.id == 'Atspi'
+        )
+
+    @staticmethod
+    def _reads_raw_geometry(node: ast.AST) -> bool:
+        for child in ast.walk(node):
+            if (
+                isinstance(child, ast.Attribute)
+                and child.attr in {'x', 'y'}
+                and isinstance(child.value, ast.Name)
+                and child.value.id == 'element'
+            ):
+                return True
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == 'get'
+                and isinstance(child.func.value, ast.Name)
+                and child.func.value.id == 'element'
+                and child.args
+                and isinstance(child.args[0], ast.Constant)
+                and child.args[0].value in {'x', 'y'}
+            ):
+                return True
+            if (
+                isinstance(child, ast.Subscript)
+                and isinstance(child.value, ast.Name)
+                and child.value.id == 'element'
+                and isinstance(child.slice, ast.Constant)
+                and child.slice.value in {'x', 'y'}
+            ):
+                return True
+        return False
+
+    def _has_exact_mapped_pointer_contract(self, node: ast.FunctionDef) -> bool:
+        positional = [*node.args.posonlyargs, *node.args.args]
+        if not (
+            tuple(self.path.parts[-2:]) == MAPPED_POINTER_PRIMITIVE_PATH
+            and [arg.arg for arg in positional] == ['element']
+            and not node.args.kwonlyargs
+            and node.args.vararg is None
+            and node.args.kwarg is None
+        ):
+            return False
+        calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
+        pointer_calls = [call for call in calls if self._is_generate_mouse_event(call)]
+        if (
+            len(pointer_calls) != 1
+            or not self._is_exact_live_extent_mouse_event(pointer_calls[0])
+            or any(isinstance(child, (ast.For, ast.AsyncFor, ast.While)) for child in ast.walk(node))
+            or self._reads_raw_geometry(node)
+        ):
+            return False
+        forbidden_calls = {
+            'atspi_activate',
+            'atspi_click',
+            'click_at',
+            'hover',
+            MAPPED_POINTER_PRIMITIVE,
+        }
+        if any(self._call_name(call) in forbidden_calls for call in calls):
+            return False
+        assignments = list(ast.walk(node))
+        return (
+            any(self._is_named_assignment_call(
+                child, 'obj', 'element', 'get', 'atspi_obj'
+            ) for child in assignments)
+            and any(self._is_named_assignment_call(
+                child, 'component', 'obj', 'get_component_iface'
+            ) for child in assignments)
+            and any(self._is_screen_extent_assignment(child) for child in assignments)
+        )
 
     def _first_arg_name(self, node: ast.Call) -> str | None:
         if not node.args:
@@ -503,18 +702,136 @@ def scan_file(path: Path) -> list[Finding]:
     return findings
 
 
+def run_self_test() -> int:
+    exact = (
+        'def atspi_mapped_pointer_activate(element):\n'
+        "    obj = element.get('atspi_obj')\n"
+        '    component = obj.get_component_iface()\n'
+        '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
+        '    return Atspi.generate_mouse_event(\n'
+        '        rect.x + rect.width // 2,\n'
+        '        rect.y + rect.height // 2,\n'
+        "        'b1c',\n"
+        '    )\n'
+    )
+    cases = (
+        (
+            'direct-click-at',
+            Path('consultation_v2/runtime.py'),
+            'def bad(element):\n    return click_at(element.x, element.y)\n',
+            {'py-coordinate-action'},
+        ),
+        (
+            'arbitrary-mouse-event',
+            Path('consultation_v2/runtime.py'),
+            "def bad():\n    return Atspi.generate_mouse_event(10, 20, 'b1c')\n",
+            {'py-coordinate-action'},
+        ),
+        (
+            'exact-bound-live-extent-primitive',
+            Path('consultation_v2/interact.py'),
+            exact,
+            set(),
+        ),
+        (
+            'raw-xy-signature',
+            Path('consultation_v2/interact.py'),
+            "def atspi_mapped_pointer_activate(x, y):\n    return Atspi.generate_mouse_event(x, y, 'b1c')\n",
+            {
+                'py-coordinate-action',
+                'py-mapped-pointer-primitive-contract',
+            },
+        ),
+        (
+            'wrong-module',
+            Path('consultation_v2/runtime.py'),
+            exact,
+            {
+                'py-coordinate-action',
+                'py-mapped-pointer-primitive-contract',
+            },
+        ),
+        (
+            'wrong-function',
+            Path('consultation_v2/interact.py'),
+            exact.replace('atspi_mapped_pointer_activate', 'pointer_click', 1),
+            {'py-coordinate-action'},
+        ),
+        (
+            'raw-element-geometry',
+            Path('consultation_v2/interact.py'),
+            (
+                'def atspi_mapped_pointer_activate(element):\n'
+                "    obj = element.get('atspi_obj')\n"
+                '    component = obj.get_component_iface()\n'
+                '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
+                "    x = element.get('x')\n"
+                "    return Atspi.generate_mouse_event(x, rect.y, 'b1c')\n"
+            ),
+            {
+                'py-coordinate-action',
+                'py-mapped-pointer-primitive-contract',
+            },
+        ),
+        (
+            'fallback-action',
+            Path('consultation_v2/interact.py'),
+            exact.replace(
+                '    return Atspi.generate_mouse_event(',
+                '    sent = Atspi.generate_mouse_event(',
+            ) + '    return sent or atspi_click(element)\n',
+            {'py-mapped-pointer-primitive-contract'},
+        ),
+        (
+            'retry-loop',
+            Path('consultation_v2/interact.py'),
+            (
+                'def atspi_mapped_pointer_activate(element):\n'
+                "    obj = element.get('atspi_obj')\n"
+                '    component = obj.get_component_iface()\n'
+                '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
+                '    for _attempt in range(2):\n'
+                '        sent = Atspi.generate_mouse_event(\n'
+                '            rect.x + rect.width // 2,\n'
+                '            rect.y + rect.height // 2,\n'
+                "            'b1c',\n"
+                '        )\n'
+                '    return sent\n'
+            ),
+            {'py-mapped-pointer-primitive-contract'},
+        ),
+    )
+    failures: list[str] = []
+    for name, path, source, expected in cases:
+        observed = {finding.label for finding in scan_python_contract(path, source)}
+        if observed != expected:
+            failures.append(
+                f'{name}: expected {sorted(expected)}, observed {sorted(observed)}'
+            )
+    if failures:
+        print('consultation_v2 contract lint SELF-TEST FAIL:')
+        for failure in failures:
+            print(f'  {failure}')
+        return 1
+    print(f'consultation_v2 contract lint SELF-TEST CLEAN — {len(cases)} cases')
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--all', action='store_true', help='scan the consultation_v2 contract baseline')
     ap.add_argument('--staged', action='store_true', help='scan staged files in scope')
+    ap.add_argument('--self-test', action='store_true', help='prove mapped pointer allow and reject cases')
     ap.add_argument('files', nargs='*', help='explicit files to scan')
     args = ap.parse_args()
 
-    modes = sum(bool(mode) for mode in (args.all, args.staged, bool(args.files)))
+    modes = sum(bool(mode) for mode in (args.all, args.staged, args.self_test, bool(args.files)))
     if modes != 1:
-        ap.error('specify exactly one of --all, --staged, or explicit files')
+        ap.error('specify exactly one of --all, --staged, --self-test, or explicit files')
         return 2
 
+    if args.self_test:
+        return run_self_test()
     if args.all:
         targets = all_targets()
     elif args.staged:

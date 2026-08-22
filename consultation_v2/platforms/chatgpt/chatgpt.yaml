@@ -592,7 +592,7 @@ workflow:
         operate:
           trigger: model_selector
           scope: app_root_snapshot
-          open_method: mapped_pointer_open
+          open_method: mapped_pointer_activate
         options:
           instant:
             element: model_instant
