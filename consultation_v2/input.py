@@ -40,6 +40,28 @@ def press_key(key: str, timeout: int = 10) -> bool:
         return False
 
 
+def press_key_cleared(key: str, timeout: int = 10) -> bool:
+    """Press one key combination after releasing stale X modifier state."""
+    try:
+        result = subprocess.run(
+            ['xdotool', 'key', '--clearmodifiers', key],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "xdotool key --clearmodifiers %s failed: %s",
+                key,
+                result.stderr.decode(),
+            )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error(f"xdotool key --clearmodifiers {key} timed out")
+        return False
+    except Exception as exc:
+        logger.error(f"xdotool key --clearmodifiers {key} error: {exc}")
+        return False
+
+
 def click_at(x: int, y: int, timeout: int = 5) -> bool:
     """Move to one live-mapped screen point and click the primary button once."""
     try:

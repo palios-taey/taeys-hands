@@ -872,12 +872,12 @@ class ConsultationRuntime:
         self.close_stale_dialogs()
         inp.focus_firefox()
         time.sleep(0.3)
-        inp.press_key("Escape")
+        inp.press_key_cleared("Escape")
         time.sleep(0.2)
         # Use the platform-configured address bar key; fail below if it leaves
         # the composer focused instead of the browser chrome.
         nav_key = str(self.cfg.get("navigation_key") or "ctrl+l")
-        inp.press_key(nav_key)
+        inp.press_key_cleared(nav_key)
         # Critical settle: on Xvfb the address bar is not focused the instant the
         # nav_key returns; ctrl+a/paste/Return that follow MUST land in the
         # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
@@ -896,14 +896,14 @@ class ConsultationRuntime:
             )
             self._dismiss_address_bar()
             return False
-        inp.press_key("ctrl+a")
+        inp.press_key_cleared("ctrl+a")
         time.sleep(0.1)
-        if not self.paste(url) and not self.type_text(url, delay_ms=5):
-            logger.error('navigate: URL paste/type failed in focused address bar')
+        if not self.type_text(url, delay_ms=5):
+            logger.error('navigate: URL typing failed in focused address bar')
             self._dismiss_address_bar()
             return False
         time.sleep(0.3)
-        inp.press_key("Return")
+        inp.press_key_cleared("Return")
         if not verify_change:
             time.sleep(2.0)
             if not self._dismiss_address_bar():
