@@ -731,9 +731,79 @@ class ConsultationRuntime:
     def _address_bar_entry(self) -> ElementRef | None:
         return self.snapshot().first('address_bar')
 
-    def paste(self, text: str) -> bool:
+    def _address_bar_fully_selected(self) -> bool:
+        entry = self._address_bar_entry()
+        if entry is None:
+            return False
+        states = {str(state).lower() for state in (entry.states or [])}
+        text = str(entry.text or '')
+        selections = entry.raw.get('text_selections') or []
+        return (
+            'focused' in states
+            and bool(text)
+            and len(selections) == 1
+            and isinstance(selections[0], dict)
+            and selections[0].get('start') == 0
+            and selections[0].get('end') == len(text)
+        )
+
+    def _select_all_address_bar_text(self) -> bool:
+        entry = self._address_bar_entry()
+        if entry is None or entry.atspi_obj is None:
+            return False
+        states = {str(state).lower() for state in (entry.states or [])}
+        if 'focused' not in states:
+            return False
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+
+            text_iface = entry.atspi_obj.get_text_iface()
+            if text_iface is None:
+                return False
+            character_count = int(_Atspi.Text.get_character_count(text_iface))
+            if character_count < 1:
+                return False
+            selection_count = int(_Atspi.Text.get_n_selections(text_iface))
+            if selection_count == 0:
+                selected = bool(
+                    _Atspi.Text.add_selection(text_iface, 0, character_count)
+                )
+            elif selection_count == 1:
+                selected = bool(
+                    _Atspi.Text.set_selection(
+                        text_iface,
+                        0,
+                        0,
+                        character_count,
+                    )
+                )
+            else:
+                return False
+        except Exception as exc:
+            logger.error('navigate: exact address-bar selection failed: %s', exc)
+            return False
+        if not selected:
+            return False
+        return bool(
+            self.wait_until(
+                self._address_bar_fully_selected,
+                timeout=3.0,
+                interval=0.2,
+            )
+        )
+
+    def _address_bar_text_equals(self, expected: str) -> bool:
+        entry = self._address_bar_entry()
+        if entry is None:
+            return False
+        states = {str(state).lower() for state in (entry.states or [])}
+        return 'focused' in states and str(entry.text or '') == expected
+
+    def paste(self, text: str, *, clear_modifiers: bool = False) -> bool:
         self._sync_platform_io_display()
-        return bool(inp.clipboard_paste(text))
+        return bool(inp.clipboard_paste(text, clear_modifiers=clear_modifiers))
 
     def type_text(self, text: str, delay_ms: int = 5) -> bool:
         return bool(inp.type_text(text, delay_ms=delay_ms))
@@ -896,13 +966,22 @@ class ConsultationRuntime:
             )
             self._dismiss_address_bar()
             return False
-        inp.press_key_cleared("ctrl+a")
-        time.sleep(0.1)
-        if not self.type_text(url, delay_ms=5):
-            logger.error('navigate: URL typing failed in focused address bar')
+        if not self._select_all_address_bar_text():
+            logger.error('navigate: address-bar full selection was not proven')
             self._dismiss_address_bar()
             return False
-        time.sleep(0.3)
+        if not self.paste(url, clear_modifiers=True):
+            logger.error('navigate: URL paste failed in focused address bar')
+            self._dismiss_address_bar()
+            return False
+        if not self.wait_until(
+            lambda: self._address_bar_text_equals(url),
+            timeout=3.0,
+            interval=0.2,
+        ):
+            logger.error('navigate: exact pasted URL was not proven in address bar')
+            self._dismiss_address_bar()
+            return False
         inp.press_key_cleared("Return")
         if not verify_change:
             time.sleep(2.0)

@@ -270,14 +270,20 @@ def scroll_page_up():
     time.sleep(0.3)
 
 
-def clipboard_paste(text: str, timeout: float = 3.0) -> bool:
+def clipboard_paste(
+    text: str,
+    timeout: float = 3.0,
+    *,
+    clear_modifiers: bool = False,
+) -> bool:
     """Write text to clipboard and paste with Ctrl+V. Primary text input method."""
     from consultation_v2 import clipboard
     lock = clipboard.acquire_clipboard_lock()
     try:
         clipboard.write_marker(text)
         time.sleep(0.05)
-        ok = press_key('ctrl+v', timeout=5)
+        key_sender = press_key_cleared if clear_modifiers else press_key
+        ok = key_sender('ctrl+v', timeout=5)
         time.sleep(0.1)
         return ok
     except RuntimeError as e:
