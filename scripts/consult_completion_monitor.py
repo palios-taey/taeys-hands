@@ -5,16 +5,19 @@ This is the EXISTING monitor detection wired into a runner that does not depend
 on the (banned) engine. It reuses, unchanged:
   * the per-platform ``CompletionDetector`` (stop-seen-then-gone state machine),
   * the ``stop_button`` element from that platform's YAML (exact match),
+  * the registered conversation URL and YAML-owned primary extraction control,
   * ``taey-notify`` for the notification.
 
 The archived ``monitor_daemon.py`` was one-shot and engine-launched (it hung at
 construction standalone), so it could not simply be re-run; this runner supplies
 the always-on poll loop the engine used to provide.
 
-Watches ONE display's stop button every few seconds. On a seen->gone transition
-(a generation finishing) it directly launches the frozen extraction worker,
-notifies Taey of the persisted result, and sends status-only notices to the other
-recorded targets. The monitor never chooses or performs a UI primitive itself.
+Watches ONE display's stop button every few seconds. After a seen->gone
+transition, it waits read-only until the canonical snapshot proves the registered
+conversation is still loaded and exposes the YAML-owned primary copy control.
+It then directly launches the frozen extraction worker, notifies Taey of the
+persisted result, and sends status-only notices to the other recorded targets.
+The monitor never chooses or performs a UI primitive itself.
 
 Usage: consult_completion_monitor.py <display-number>   e.g. 2
 """
@@ -29,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 REPO = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, REPO)
@@ -62,19 +66,53 @@ def load_detector(platform: str):
     raise RuntimeError(f"no CompletionDetector in {platform} monitor module")
 
 
-def stop_button_present(platform: str) -> bool:
-    # The stop control is named per-platform: ChatGPT maps stop_streaming_button /
-    # stop_answering_button, others map stop_button. Read the platform's declared
-    # workflow.monitor.stop_keys (fallback stop_button) instead of hardcoding one key,
-    # or ChatGPT completion is never detected.
+def _url_path_identity(value: object) -> str:
+    parsed = urlsplit(str(value or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    path = (parsed.path or "/").rstrip("/")
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}"
+
+
+def completion_observation(
+    platform: str,
+    route: dict[str, object],
+) -> dict[str, object]:
     from consultation_v2.snapshot import build_snapshot
     from consultation_v2.yaml_contract import load_platform_yaml
+
     cfg = load_platform_yaml(platform)
-    stop_keys = (((cfg.get("workflow") or {}).get("monitor") or {}).get("stop_keys")
-                 or ["stop_button"])
+    workflow = cfg["workflow"]
+    monitor = workflow["monitor"]
+    stop_keys = monitor.get("stop_keys") or [
+        monitor.get("stop_key") or "stop_button"
+    ]
+    copy_key = workflow["extract"]["primary_key"]
+    fresh_identity = _url_path_identity(cfg["urls"]["fresh"])
+
     tup = build_snapshot(platform)
     snap = next(e for e in tup if hasattr(e, "mapped"))
-    return any(snap.mapped.get(k) for k in stop_keys)
+    current_identity = _url_path_identity(snap.url)
+    registered_identity = _url_path_identity(route.get("url"))
+    stop_present = any(snap.mapped.get(key) for key in stop_keys)
+    copy_count = len(snap.mapped.get(copy_key) or [])
+    loaded_conversation_url = bool(
+        current_identity
+        and registered_identity
+        and current_identity == registered_identity
+        and current_identity != fresh_identity
+    )
+    return {
+        "stop_present": stop_present,
+        "completion_ready": bool(
+            not stop_present and loaded_conversation_url and copy_count
+        ),
+        "current_url": str(snap.url or ""),
+        "registered_url": str(route.get("url") or ""),
+        "loaded_conversation_url": loaded_conversation_url,
+        "copy_key": copy_key,
+        "copy_count": copy_count,
+    }
 
 
 def active_completion_routes(platform: str, display: str) -> list[dict[str, object]]:
@@ -589,7 +627,8 @@ def main() -> int:
                     f"[consult-monitor {display}] activated for "
                     f"{active_monitor_id}"
                 )
-            present = stop_button_present(platform)
+            observation = completion_observation(platform, route)
+            present = bool(observation["stop_present"])
             if not refresh_route(route):
                 det = None
                 active_monitor_id = ""
@@ -597,7 +636,18 @@ def main() -> int:
                 continue
             assert det is not None
             verdict = det.observe(present)
-            if verdict == "complete":
+            if verdict == "complete" and not observation["completion_ready"]:
+                log(
+                    f"[consult-monitor {display}] COMPLETION WAIT "
+                    f"monitor_id={route['monitor_id']} "
+                    f"loaded_conversation_url="
+                    f"{observation['loaded_conversation_url']} "
+                    f"copy_key={observation['copy_key']} "
+                    f"copy_count={observation['copy_count']} "
+                    f"current_url={observation['current_url']!r} "
+                    f"registered_url={observation['registered_url']!r}"
+                )
+            elif verdict == "complete":
                 try:
                     route = _run_extraction(route)
                     targets, notified_targets, failures = notify_taey(
