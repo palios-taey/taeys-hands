@@ -179,6 +179,21 @@ def scan_yaml_schema(path: Path, source: str) -> list[Finding]:
                     if attempts < 1:
                         findings.append(Finding(str(path), 1, 'yaml-settle-range',
                                                 'settle.rescan_attempts must be >= 1'))
+        workflow = data.get('workflow')
+        monitor = workflow.get('monitor') if isinstance(workflow, dict) else None
+        if isinstance(monitor, dict) and 'extraction_timeout' in monitor:
+            extraction_timeout = monitor['extraction_timeout']
+            if (
+                isinstance(extraction_timeout, bool)
+                or not isinstance(extraction_timeout, int)
+                or extraction_timeout <= 0
+            ):
+                for loc in lines_for_key(lines, 'extraction_timeout'):
+                    findings.append(Finding(
+                        str(path), loc[0], 'yaml-monitor-extraction-timeout',
+                        'workflow.monitor.extraction_timeout must be a positive integer',
+                        loc[1],
+                    ))
 
     def walk(node: object, prefix: str = '') -> None:
         if isinstance(node, dict):
@@ -806,12 +821,47 @@ def run_self_test() -> int:
             failures.append(
                 f'{name}: expected {sorted(expected)}, observed {sorted(observed)}'
             )
+    timeout_cases = (
+        ('monitor-timeout-positive', '1800', set()),
+        ('monitor-timeout-zero', '0', {'yaml-monitor-extraction-timeout'}),
+        ('monitor-timeout-bool', 'true', {'yaml-monitor-extraction-timeout'}),
+        ('monitor-timeout-string', "'1800'", {'yaml-monitor-extraction-timeout'}),
+    )
+    for name, raw_timeout, expected in timeout_cases:
+        source = (
+            'platform: test\n'
+            'urls: {}\n'
+            'tree: {}\n'
+            'workflow:\n'
+            '  monitor:\n'
+            f'    extraction_timeout: {raw_timeout}\n'
+            'settle:\n'
+            '  default_ms: 1\n'
+            '  navigate_ms: 1\n'
+            '  attach_ms: 1\n'
+            '  rescan_attempts: 1\n'
+            'validation: {}\n'
+        )
+        observed = {
+            finding.label
+            for finding in scan_yaml_schema(
+                Path('consultation_v2/platforms/test/test.yaml'),
+                source,
+            )
+        }
+        if observed != expected:
+            failures.append(
+                f'{name}: expected {sorted(expected)}, observed {sorted(observed)}'
+            )
     if failures:
         print('consultation_v2 contract lint SELF-TEST FAIL:')
         for failure in failures:
             print(f'  {failure}')
         return 1
-    print(f'consultation_v2 contract lint SELF-TEST CLEAN — {len(cases)} cases')
+    print(
+        'consultation_v2 contract lint SELF-TEST CLEAN — '
+        f'{len(cases) + len(timeout_cases)} cases'
+    )
     return 0
 
 
