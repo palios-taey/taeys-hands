@@ -2,6 +2,7 @@
 Description=Taey Display :5 (grok)
 After=taey-xvfb@5.service
 Requires=taey-xvfb@5.service
+Wants=taey-consult-monitor@5.service
 
 [Service]
 Type=simple

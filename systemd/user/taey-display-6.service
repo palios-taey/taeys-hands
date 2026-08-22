@@ -2,6 +2,7 @@
 Description=Taey Display :6 (perplexity)
 After=taey-xvfb@6.service
 Requires=taey-xvfb@6.service
+Wants=taey-consult-monitor@6.service
 
 [Service]
 Type=simple
