@@ -26,6 +26,9 @@ PLATFORM_LABELS = {
     "perplexity": "Perplexity",
 }
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+CHATGPT_POWER_INSTANT_DESCRIPTION = (
+    "Instant, 1 of 5. Use Left and Right arrow keys to adjust power."
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -207,32 +210,37 @@ def _monitor_stop_keys(platform: str) -> tuple[str, ...]:
 
 def _chatgpt_model_menu_diagnostic_content(display: str) -> str:
     return (
-        f"Execute one frozen ChatGPT model-menu diagnostic transaction on {display}. Use "
+        f"Execute one frozen ChatGPT Power-focus diagnostic transaction on {display}. Use "
         "drive_chat only. Do not navigate, select a model, attach, paste, send, extract, poll, "
-        "recover, or press Escape. The only authorized mutations are opening model_selector once "
-        "if it is not already expanded and clicking Show advanced options once. Use a ref only "
-        "from the immediately preceding fresh observation.\n"
+        "recover, press Escape, click Show advanced options, click Model or Effort, or send any "
+        "Left or Right key. The only authorized mutations are opening model_selector once if it "
+        "is not already expanded and focusing model_power once. Use a ref only from the "
+        "immediately preceding fresh observation.\n"
         "1. observe scope=base exactly once. Require one populated ChatGPT tree and exactly one "
         "model_selector whose exact name is Instant. Record its states and snapshot revision. If "
         "its states include expanded, do not operate it. Otherwise operate the fresh "
-        "model_selector exactly once, require performed_primitive=mapped_pointer_activate, and do "
-        "not perform any other mutation.\n"
+        "model_selector exactly once, require performed_primitive=mapped_pointer_activate, and "
+        "perform no other mutation before step 2.\n"
         "2. observe scope=app_root_snapshot exactly once. Require exactly one model_power whose "
-        "exact name is Power and role is menu item, and exactly one model_show_advanced_options "
-        "whose exact name is Show advanced options and role is menu item.\n"
-        "3. click the fresh model_show_advanced_options ref exactly once. This is the only click "
-        "authorized by this transaction.\n"
-        "4. The immediately next drive_chat call must be observe scope=app_root_snapshot exactly "
-        "once. Make no intervening call. Require at least one mapped model-menu row other than "
-        "model_power and model_show_advanced_options; zero known mapped submenu rows is a terminal "
-        "mismatch. Return a CHATGPT MODEL MENU DIAGNOSTIC RECEIPT containing platform/display, "
-        "pre_click_selector, pre_click_app_root_revision, model_power, "
-        "model_show_advanced_options, click_result, post_click_app_root_revision, "
-        "post_click_raw_count, and post_click_rows. Under post_click_rows, preserve the exact "
-        "element key, name, role, and states of every mapped node in that receipt whose role is "
-        "menu, menu item, radio menu item, check menu item, or option. End with "
-        "selector_open_count: 0 or 1, advanced_click_count: 1, and selected_or_sent: false. Then "
-        "halt.\n"
+        f"exact name is Power, role is menu item, and description is exactly "
+        f"{CHATGPT_POWER_INSTANT_DESCRIPTION!r}. Also require exactly one "
+        "model_show_advanced_options whose exact name is Show advanced options and role is menu "
+        "item. Record the app-root revision, full model_power row, its description, and its fresh "
+        "ref.\n"
+        "3. focus element=model_power from that exact fresh ref once. Require performed=true and "
+        "performed_primitive=focus. This is the only Power action authorized.\n"
+        "4. The immediately next drive_chat call must be observe scope=base exactly once. Make no "
+        "intervening call. Require exactly one model_power with name Power, role menu item, states "
+        f"including showing, focused, and enabled, and description exactly "
+        f"{CHATGPT_POWER_INSTANT_DESCRIPTION!r}. Require model_selector still named Instant with "
+        "state expanded and model_show_advanced_options still present exactly once. Make no more "
+        "drive_chat calls. Return a CHATGPT MODEL MENU DIAGNOSTIC RECEIPT containing "
+        "platform/display, pre_focus_selector, pre_focus_app_root_revision, model_power, "
+        "model_show_advanced_options, pre_focus_power_description, power_ref_used, focus_result, "
+        "post_focus_base_revision, post_focus_power, post_focus_power_description, "
+        "power_focused: true, and power_description with the exact live description. End with "
+        "selector_open_count: 0 or 1, power_focus_count: 1, advanced_click_count: 0, "
+        "right_key_count: 0, and selected_or_sent: false. Then halt.\n"
         "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected element, "
         "state, action, scope, or postcondition, return the first-mismatch stop report and halt. Do "
         "not retry or recover."
@@ -1036,16 +1044,22 @@ def main() -> int:
             required_receipt_fields = (
                 "chatgpt model menu diagnostic receipt",
                 "platform/display",
-                "pre_click_selector",
-                "pre_click_app_root_revision",
+                "pre_focus_selector",
+                "pre_focus_app_root_revision",
                 "model_power",
                 "model_show_advanced_options",
-                "click_result",
-                "post_click_app_root_revision",
-                "post_click_raw_count",
-                "post_click_rows",
+                "pre_focus_power_description",
+                "power_ref_used",
+                "focus_result",
+                "post_focus_base_revision",
+                "post_focus_power",
+                "post_focus_power_description",
+                "power_focused",
+                "power_description",
                 "selector_open_count",
+                "power_focus_count",
                 "advanced_click_count",
+                "right_key_count",
                 "selected_or_sent",
             )
             lowered_receipt = receipt.lower()
@@ -1059,7 +1073,10 @@ def main() -> int:
                 )
             diagnostic_value_patterns = {
                 "selector_open_count": r"(?im)\bselector_open_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[01]\b",
-                "advanced_click_count": r"(?im)\badvanced_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "power_focus_count": r"(?im)\bpower_focus_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "advanced_click_count": r"(?im)\badvanced_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "right_key_count": r"(?im)\bright_key_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "power_focused": r"(?im)\bpower_focused\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
                 "selected_or_sent": r"(?im)\bselected_or_sent\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*false\b",
             }
             invalid_receipt_fields = [
@@ -1071,6 +1088,10 @@ def main() -> int:
                 raise RuntimeError(
                     "diagnostic response has invalid receipt fields: "
                     f"{invalid_receipt_fields}"
+                )
+            if CHATGPT_POWER_INSTANT_DESCRIPTION not in receipt:
+                raise RuntimeError(
+                    "diagnostic response does not preserve the exact live Power description"
                 )
         if args.phase in {"send", "recover"} and not re.search(
             r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
