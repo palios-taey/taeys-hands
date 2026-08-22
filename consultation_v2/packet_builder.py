@@ -37,7 +37,7 @@ QUESTION_LINE = re.compile(
     r"^(?:[-*+]\s+|\d+[.)]\s+)?(?:\[[^\]\r\n]+\]\s*)*"
     r"(?:(?:given|for|under|within|using|from|assuming|based on)\b[^?\r\n]*,\s*)?"
     r"(?:what|why|how|when|where|which|who|whom|whose|is|are|am|do|does|did|"
-    r"can|could|should|would|will|may|might|must|has|have|had)\b.*\?\s*$",
+    r"can|could|should|would|will|may|might|must|has|have|had)[ \t]+[^?\r\n]+\?\s*$",
     flags=re.IGNORECASE,
 )
 
