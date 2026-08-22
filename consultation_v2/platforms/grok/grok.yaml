@@ -290,8 +290,7 @@ workflow:
         operate:
           trigger: model_selector
           scope: app_root_snapshot
-          open_method: focus_and_key_open
-          open_key: space
+          open_method: click
         options:
           auto:
             element: model_auto
