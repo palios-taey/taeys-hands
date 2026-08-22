@@ -95,20 +95,21 @@ The following argument names are exact. A different name is a terminal refusal f
 |---|---|
 | `observe` | optional `scope`; valid values are `base`, `menu_snapshot`, `app_root_snapshot` |
 | `navigate` | `url` |
-| `click`, `focus`, `activate`, `hover`, `operate` | `ref` |
+| `click`, `focus`, `activate`, `hover`, `operate` | `element` |
 | `type` | `text` |
 | `paste` | `text_file` for a frozen prompt; `text` only for short inline text |
 | `key` | `key` |
 | `focus_dialog` | no additional argument |
 | `read_clipboard` | `output_file` |
 
-Never pass `element`, `snapshot`, `path`, a raw accessible name, or coordinates. A `ref` is usable only from
-the immediately preceding fresh observation in the same scope. If a mapped item reports
-`declared_operation`, call `operate` with its ref; otherwise use only the direct action authorized by the
-selected platform card.
+Never pass `ref`, `snapshot`, `path`, a raw accessible name, or coordinates. `element` must be the exact
+mapped key from the immediately preceding fresh observation in the same scope. Presence resolves that key
+to the stored canonical ref, including the YAML selection rule, without model transcription. If a mapped
+item reports `declared_operation`, call `operate` with its element key; otherwise use only the direct action
+authorized by the selected platform card.
 
 `declared_operation.primitives` describes how the runtime implements the semantic operation. For
-`focus_and_key_open`, one `operate` call focuses the exact fresh ref, verifies focus, and sends the exact YAML
+`focus_and_key_open`, one `operate` call resolves and focuses the exact fresh element, verifies focus, and sends the exact YAML
 `open_key`. Require `performed_primitive="focus_and_key_open"`, then observe the declared menu scope and prove
 the exact YAML target. Taey never issues separate focus and key calls for this method.
 
@@ -128,10 +129,10 @@ displays, or invent a fallback in that turn.
 | Member | Platform/display | YAML | Requested selection | Attachment menu observation | Submit |
 |---|---|---|---|---|---|
 | Horizon | ChatGPT `:2` | `consultation_v2/platforms/chatgpt/chatgpt.yaml` | `model=pro` | `app_root_snapshot` | focus composer, `key Return` |
-| Gaia | Claude `:3` | `consultation_v2/platforms/claude/claude.yaml` | `model=opus`, `mode=extended_thinking` | `app_root_snapshot` | `operate`/`click` exact `send_button` ref |
-| Cosmos | Gemini `:4` | `consultation_v2/platforms/gemini/gemini.yaml` | `model=pro`, `mode=deep_think` | YAML `workflow.attachment.scope`, otherwise `base` | `operate` exact `send_button` ref |
-| Logos | Grok `:5` | `consultation_v2/platforms/grok/grok.yaml` | `model=heavy` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `send_button` ref |
-| Clarity | Perplexity `:6` | `consultation_v2/platforms/perplexity/perplexity.yaml` | `mode=deep_research` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `submit_button` ref |
+| Gaia | Claude `:3` | `consultation_v2/platforms/claude/claude.yaml` | `model=opus`, `mode=extended_thinking` | `app_root_snapshot` | `operate`/`click` exact `send_button` element |
+| Cosmos | Gemini `:4` | `consultation_v2/platforms/gemini/gemini.yaml` | `model=pro`, `mode=deep_think` | YAML `workflow.attachment.scope`, otherwise `base` | `operate` exact `send_button` element |
+| Logos | Grok `:5` | `consultation_v2/platforms/grok/grok.yaml` | `model=heavy` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `send_button` element |
+| Clarity | Perplexity `:6` | `consultation_v2/platforms/perplexity/perplexity.yaml` | `mode=deep_research` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `submit_button` element |
 
 At the start of the leg, inspect only the executable parts of that one YAML:
 
@@ -165,13 +166,13 @@ For each row in `workflow.full_consult.select_mode`:
 2. If the current trigger already satisfies the YAML `active_recognition`, record that and do not mutate it.
 3. Otherwise inspect the menu's `operate.open_method` and the fresh trigger's `declared_operation`.
 4. When `open_method` is absent, require the trigger has no `declared_operation`, then use direct `click` on
-   the exact fresh trigger ref once. This is the driver's existing default menu-open action.
-5. For `open_method: click`, require `allowed_now=["click"]` and `operate` the fresh trigger ref once.
-6. For `open_method: focus_and_key_open`, `operate` the fresh trigger ref once and require the receipt's
+   the exact fresh trigger element once. This is the driver's existing default menu-open action.
+5. For `open_method: click`, require `allowed_now=["click"]` and `operate` the fresh trigger element once.
+6. For `open_method: focus_and_key_open`, `operate` the fresh trigger element once and require the receipt's
    `performed_primitive` is `focus_and_key_open`.
 7. Only after the complete open receipt, observe exactly the menu's `operate.scope`.
-8. Require exactly one mapped ref for the requested option element.
-9. `operate` that option ref when it advertises `declared_operation`; otherwise use its YAML-authorized direct
+8. Require exactly one mapped target for the requested option element.
+9. `operate` that option element when it advertises `declared_operation`; otherwise use its YAML-authorized direct
    action once.
 10. Observe again and require the YAML active state. If active state is visible only inside the opened menu,
    reopen once through the same observe/action discipline solely to validate it. Any platform card that uses
@@ -186,10 +187,10 @@ Start from a fresh base observation and record the current attachment-chip/remov
 
 ```text
 observe base
-operate <fresh attachment trigger ref>
+operate element=<workflow.attachment.trigger>
 require performed_primitive == "focus_and_key_open"
 observe using <workflow.attachment.scope, otherwise base>
-operate or authorized direct action on <workflow.attachment.menu_target fresh ref>
+operate or authorized direct action with element=<workflow.attachment.menu_target>
 observe
 focus_dialog
 observe
@@ -216,10 +217,10 @@ chips/remove controls. Do not infer Bundle B from Bundle A's success and do not 
 ### 5. Paste the frozen brief
 
 From a fresh base observation, require both attachments and exactly one mapped
-`workflow.full_consult.steps.composer_input` ref.
+`workflow.full_consult.steps.composer_input` element.
 
 ```text
-click <fresh composer ref>
+click element=<workflow.full_consult.steps.composer_input>
 observe
 paste text_file=PROMPT_FILE
 observe
@@ -259,7 +260,7 @@ Use a new worker turn after the monitor reports completion:
 drive_chat(display=DISPLAY, action="observe", scope="base")
 drive_chat(display=DISPLAY, action="key", key="ctrl+End")
 drive_chat(display=DISPLAY, action="observe", scope="base")
-operate or authorized direct action on <last workflow.extract.primary_key ref>
+operate or authorized direct action with element=<workflow.extract.primary_key>
 drive_chat(display=DISPLAY, action="observe", scope="base")
 drive_chat(display=DISPLAY, action="read_clipboard", output_file=RESPONSE_FILE)
 ```
