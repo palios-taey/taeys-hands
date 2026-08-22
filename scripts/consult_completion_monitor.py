@@ -519,21 +519,59 @@ def notify_taey(
     }
     notified_targets: list[str] = []
     failures: list[str] = []
+    taey_receipt: dict[str, object] = {
+        "display": str(route.get("display") or ""),
+        "extraction_status": extraction_status,
+        "monitor_id": str(route.get("monitor_id") or ""),
+        "platform": str(route.get("platform") or ""),
+        "schema": "taey.consult_terminal_receipt.v1",
+        "terminal": True,
+    }
+    lineage_fields = {
+        "correlation": "correlation_id",
+        "event": "event_id",
+        "headers": "response_headers",
+        "request_json": "request_json",
+        "response_file": "response_file",
+        "response_json": "response_json",
+    }
+    if extraction_status == "succeeded":
+        taey_receipt.update({
+            "bytes": extraction_result.get("response_bytes"),
+            "sha": extraction_result.get("response_sha256"),
+        })
+        taey_receipt.update({
+            receipt_key: extraction_result.get(result_key)
+            for receipt_key, result_key in lineage_fields.items()
+        })
+    else:
+        taey_receipt["error"] = extraction_result.get("error")
+        taey_receipt.update({
+            receipt_key: extraction_result[result_key]
+            for receipt_key, result_key in lineage_fields.items()
+            if extraction_result.get(result_key) not in (None, "")
+        })
+    taey_message = json.dumps(
+        taey_receipt,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     for target in sorted(targets - already_notified):
         target_message = routed_message
         if target == "taey":
-            target_message += (
-                " result_only=true extraction_owner=consult-monitor. "
-                "Main Taey: do not invoke a worker or drive the display."
-            )
+            notification_type = "result"
+            target_message = taey_message
         else:
+            notification_type = "status"
             target_message += (
                 " status_only=true extraction_owner=consult-monitor. Do not invoke a worker "
                 "and do not drive the display."
             )
         try:
             completed = subprocess.run(
-                ["taey-notify", "--type", "status", "--from", "consult-monitor",
+                ["taey-notify", "--type", notification_type, "--from", "consult-monitor",
                  "--", target, target_message],
                 capture_output=True,
                 text=True,

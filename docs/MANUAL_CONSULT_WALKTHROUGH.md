@@ -87,6 +87,12 @@ result: `monitor_id`, terminal extraction status, and, on success, the response 
 SHA-256. On failure it receives the first error and `terminal=true`. No supervisor, status recipient, or
 worker may issue a second extraction request.
 
+The monitor sends Main Taey a record-only `taey-notify --type result` body as compact, key-sorted JSON with
+`schema="taey.consult_terminal_receipt.v1"`. Every receipt contains `monitor_id`, `platform`, `display`,
+`extraction_status`, and `terminal=true`. Success adds `response_file`, `bytes`, `sha`, `request_json`,
+`headers`, `response_json`, `event`, and `correlation`; failure adds `error` and any lineage fields available
+from the attempted handoff. Notifications to an explicit requester remain actionable `status` messages.
+
 ## Exact `drive_chat` vocabulary
 
 The following argument names are exact. A different name is a terminal refusal for the turn.
