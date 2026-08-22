@@ -60,6 +60,15 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose_chatgpt_model_menu.add_argument("--seat-id", required=True)
     diagnose_chatgpt_model_menu.add_argument("--artifact-root", required=True)
 
+    reset_chatgpt_model_menu_compact = phases.add_parser(
+        "reset-chatgpt-model-menu-compact",
+        help="Reset one already-open ChatGPT advanced model menu to compact state.",
+    )
+    reset_chatgpt_model_menu_compact.set_defaults(platform="chatgpt")
+    reset_chatgpt_model_menu_compact.add_argument("--display", required=True)
+    reset_chatgpt_model_menu_compact.add_argument("--seat-id", required=True)
+    reset_chatgpt_model_menu_compact.add_argument("--artifact-root", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once after the completion monitor reports COMPLETE.",
@@ -244,6 +253,43 @@ def _chatgpt_model_menu_diagnostic_content(display: str) -> str:
         "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected element, "
         "state, action, scope, or postcondition, return the first-mismatch stop report and halt. Do "
         "not retry or recover."
+    )
+
+
+def _chatgpt_model_menu_compact_reset_content(display: str) -> str:
+    return (
+        f"Execute one frozen ChatGPT advanced-to-compact model-menu reset on {display}. Use "
+        "drive_chat only. Do not navigate, open the selector, focus Power, click Show advanced "
+        "options, click Model or Effort, select a model, attach, paste, send, extract, poll, "
+        "recover, press Escape, or send any key. The only authorized mutation is one direct "
+        "click on model_show_compact_options using a ref from the immediately preceding fresh "
+        "observation.\n"
+        "1. observe scope=base exactly once. Require one populated ChatGPT tree and exactly one "
+        "model_selector whose exact name is Instant and whose states include expanded. Record "
+        "the selector row and base revision. Do not operate it.\n"
+        "2. observe scope=app_root_snapshot exactly once. Require exactly one "
+        "model_show_compact_options whose exact name is Show compact options and role is menu "
+        "item. Record the app-root revision, full row, and fresh ref.\n"
+        "3. click element=model_show_compact_options from that exact fresh ref once. Require "
+        "performed=true and performed_primitive=click. This is the only mutation authorized.\n"
+        "4. The immediately next drive_chat call must be observe scope=app_root_snapshot exactly "
+        "once. Make no intervening call. Require exactly one model_power whose exact name is "
+        f"Power, role is menu item, and description is exactly "
+        f"{CHATGPT_POWER_INSTANT_DESCRIPTION!r}. Require exactly one "
+        "model_show_advanced_options whose exact name is Show advanced options and role is menu "
+        "item. Require model_show_compact_options absent. Make no more drive_chat calls. Return "
+        "a CHATGPT MODEL MENU COMPACT RESET RECEIPT containing platform/display, "
+        "pre_click_selector, pre_click_base_revision, pre_click_app_root_revision, "
+        "model_show_compact_options, compact_ref_used, click_result, "
+        "post_click_app_root_revision, post_click_model_power, post_click_power_description, "
+        "post_click_model_show_advanced_options, show_compact_options_absent: true, and "
+        "compact_proven: true. End with compact_click_count: 1, selector_open_count: 0, "
+        "power_focus_count: 0, advanced_click_count: 0, model_click_count: 0, "
+        "effort_click_count: 0, left_key_count: 0, right_key_count: 0, "
+        "other_mutation_count: 0, and selected_or_sent: false. Then halt.\n"
+        "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected "
+        "element, state, action, scope, or postcondition, return the first-mismatch stop report "
+        "and halt. Do not retry or recover."
     )
 
 
@@ -928,6 +974,18 @@ def main() -> int:
         event_id = f"diagnose-model-menu-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
+    elif args.phase == "reset-chatgpt-model-menu-compact":
+        if args.platform != "chatgpt":
+            raise RuntimeError(
+                "reset-chatgpt-model-menu-compact requires platform chatgpt"
+            )
+        content = _chatgpt_model_menu_compact_reset_content(args.display)
+        digest = hashlib.sha256(
+            f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"reset-model-menu-compact-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
     elif args.phase == "send":
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
@@ -1040,6 +1098,7 @@ def main() -> int:
                 "send",
                 "recover",
                 "diagnose-chatgpt-model-menu",
+                "reset-chatgpt-model-menu-compact",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
         if args.phase == "diagnose-chatgpt-model-menu":
@@ -1095,6 +1154,70 @@ def main() -> int:
                 raise RuntimeError(
                     "diagnostic response does not preserve the exact live Power description"
                 )
+        if args.phase == "reset-chatgpt-model-menu-compact":
+            required_receipt_fields = (
+                "chatgpt model menu compact reset receipt",
+                "platform/display",
+                "pre_click_selector",
+                "pre_click_base_revision",
+                "pre_click_app_root_revision",
+                "model_show_compact_options",
+                "compact_ref_used",
+                "click_result",
+                "post_click_app_root_revision",
+                "post_click_model_power",
+                "post_click_power_description",
+                "post_click_model_show_advanced_options",
+                "show_compact_options_absent",
+                "compact_proven",
+                "compact_click_count",
+                "selector_open_count",
+                "power_focus_count",
+                "advanced_click_count",
+                "model_click_count",
+                "effort_click_count",
+                "left_key_count",
+                "right_key_count",
+                "other_mutation_count",
+                "selected_or_sent",
+            )
+            lowered_receipt = receipt.lower()
+            missing_receipt_fields = [
+                field for field in required_receipt_fields if field not in lowered_receipt
+            ]
+            if missing_receipt_fields:
+                raise RuntimeError(
+                    "compact-reset response is missing required receipt fields: "
+                    f"{missing_receipt_fields}"
+                )
+            compact_value_patterns = {
+                "compact_click_count": r"(?im)\bcompact_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "selector_open_count": r"(?im)\bselector_open_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "power_focus_count": r"(?im)\bpower_focus_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "advanced_click_count": r"(?im)\badvanced_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "model_click_count": r"(?im)\bmodel_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "effort_click_count": r"(?im)\beffort_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "left_key_count": r"(?im)\bleft_key_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "right_key_count": r"(?im)\bright_key_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "other_mutation_count": r"(?im)\bother_mutation_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "show_compact_options_absent": r"(?im)\bshow_compact_options_absent\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "compact_proven": r"(?im)\bcompact_proven\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "selected_or_sent": r"(?im)\bselected_or_sent\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*false\b",
+            }
+            invalid_receipt_fields = [
+                field
+                for field, pattern in compact_value_patterns.items()
+                if re.search(pattern, receipt) is None
+            ]
+            if invalid_receipt_fields:
+                raise RuntimeError(
+                    "compact-reset response has invalid receipt fields: "
+                    f"{invalid_receipt_fields}"
+                )
+            if CHATGPT_POWER_INSTANT_DESCRIPTION not in receipt:
+                raise RuntimeError(
+                    "compact-reset response does not preserve the exact live Power description"
+                )
         if args.phase in {"send", "recover"} and not re.search(
             r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
@@ -1107,7 +1230,11 @@ def main() -> int:
     except RuntimeError as exc:
         primary_error = exc
     finally:
-        if args.phase in {"extract", "diagnose-chatgpt-model-menu"} or mutation_stop_report:
+        if args.phase in {
+            "extract",
+            "diagnose-chatgpt-model-menu",
+            "reset-chatgpt-model-menu-compact",
+        } or mutation_stop_report:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
             except RuntimeError as cleanup_error:
@@ -1146,7 +1273,10 @@ def main() -> int:
             "source_response_json": str(source_response),
             "source_response_json_sha256": source_response_sha256,
         })
-    if args.phase == "diagnose-chatgpt-model-menu":
+    if args.phase in {
+        "diagnose-chatgpt-model-menu",
+        "reset-chatgpt-model-menu-compact",
+    }:
         result["lease_release"] = lease_release
     print(json.dumps(result, sort_keys=True))
     return 0
