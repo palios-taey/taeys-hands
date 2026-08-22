@@ -82,10 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract = phases.add_parser(
         "extract",
-        help="Extract once after the completion monitor reports COMPLETE.",
+        help="Extract once from one explicitly authorized completion basis.",
     )
     _add_common(extract)
-    extract.add_argument("--monitor-id", required=True)
+    extraction_basis = extract.add_mutually_exclusive_group(required=True)
+    extraction_basis.add_argument("--monitor-id")
+    extraction_basis.add_argument("--completed-before-stop-source-response-json")
     extract.add_argument("--response-file", required=True)
     extract.add_argument("--prepare-only", action="store_true")
     return parser
@@ -752,11 +754,12 @@ def _require_extraction_steps(
 
 
 def _extract_content(
-    monitor_id: str,
+    monitor_id: str | None,
     platform: str,
     display: str,
     response_file: Path,
     research_report_file: Path | None = None,
+    completed_before_stop_source_sha256: str | None = None,
 ) -> str:
     if platform == "claude":
         return (
@@ -783,13 +786,34 @@ def _extract_content(
             "retry, recover, poll, click Continue, or make a second Copy attempt."
         )
     if platform == "gemini":
+        if completed_before_stop_source_sha256 is None:
+            completion_basis = (
+                f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. "
+            )
+            completion_requirements = "and "
+            receipt_requirements = ""
+        else:
+            completion_basis = (
+                "This separately authorized Gemini extraction is based on a terminal "
+                "completed-before-Stop send receipt with "
+                f"source_response_json_sha256={completed_before_stop_source_sha256}. "
+                "No completion monitor reported COMPLETE and no observed Stop transition is "
+                "claimed. "
+            )
+            completion_requirements = "require stop_button absent, and "
+            receipt_requirements = (
+                " Return completion_basis=completed_before_stop and "
+                f"source_response_json_sha256={completed_before_stop_source_sha256} in the "
+                "receipt."
+            )
         return (
-            f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one "
+            completion_basis
+            + "Execute one "
             f"frozen Gemini extraction transaction on {display} with drive_chat only. Do not read "
             "any file, runbook, or YAML. Use a ref or snapshot revision only from the immediately "
             "preceding fresh observation. Execute exactly this sequence:\n"
             "1. observe scope=base; require current_url on gemini.google.com matching /app/<id> or "
-            "/u/<digit>/app/<id>, and require "
+            f"/u/<digit>/app/<id>, {completion_requirements}require "
             "deep_think_interim_ack_placeholder absent.\n"
             "2. key ctrl+End; observe scope=base; require the "
             "same URL condition, deep_think_interim_ack_placeholder absent, at least "
@@ -799,7 +823,7 @@ def _extract_content(
             "the same URL condition and deep_think_interim_ack_placeholder absent.\n"
             f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty response file and return its byte count and SHA-256. Then stop all UI "
-            "calls.\n"
+            f"calls.{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, "
             "send, retry, recover, poll, use share_export or copy_content_item, or make a second Copy "
@@ -1151,7 +1175,57 @@ def main() -> int:
         response_file = None
         request_text = _request_text(content, 4096)
     else:
-        monitor_id = _identity(args.monitor_id, "monitor id")
+        monitor_id = None
+        completed_before_stop_source = args.completed_before_stop_source_response_json
+        if completed_before_stop_source is not None:
+            if args.platform != "gemini":
+                raise RuntimeError(
+                    "completed-before-Stop extraction is qualified only for Gemini"
+                )
+            source_response = _absolute_input(
+                completed_before_stop_source,
+                "completed-before-Stop source response JSON",
+            )
+            _source_payload, source_receipt = _worker_receipt(source_response)
+            source_receipt_lower = source_receipt.lower()
+            required_source_fragments = (
+                "unmapped post-send state",
+                "**send executed:** yes",
+                "**both fresh observation revisions:**",
+                "absent from both post-send fresh base observations",
+                "- `copy_button`",
+                "**monitor_id:** none",
+            )
+            source_revision_count = len(re.findall(
+                r"(?m)^\s*[12]\.\s*`[0-9a-f]{64}`",
+                source_receipt,
+            ))
+            source_platform_display = re.search(
+                rf"(?im)^\*\*platform / display:\*\*\s*gemini\s*/\s*"
+                rf"{re.escape(args.display)}\s*$",
+                source_receipt,
+            )
+            source_thread_url = re.search(
+                r"https://gemini\.google\.com/(?:u/\d+/)?app/[A-Za-z0-9_-]+",
+                source_receipt,
+            )
+            if (
+                not _is_worker_stop_report(source_receipt)
+                or any(
+                    fragment not in source_receipt_lower
+                    for fragment in required_source_fragments
+                )
+                or source_revision_count != 2
+                or source_platform_display is None
+                or source_thread_url is None
+            ):
+                raise RuntimeError(
+                    "completed-before-Stop source response lacks the exact Gemini send, "
+                    "two-observation, Stop-absent, Copy, URL, or monitor-none evidence"
+                )
+            source_response_sha256 = _sha256(source_response)
+        else:
+            monitor_id = _identity(args.monitor_id, "monitor id")
         response_file = Path(args.response_file).expanduser()
         if not response_file.is_absolute():
             raise RuntimeError("response file must be an absolute path")
@@ -1175,8 +1249,13 @@ def main() -> int:
             args.display,
             response_file,
             research_report_file,
+            source_response_sha256,
         )
-        digest = hashlib.sha256(monitor_id.encode("utf-8")).hexdigest()
+        extraction_identity = monitor_id or (
+            f"completed-before-stop\0{args.platform}\0{args.display}\0"
+            f"{source_response_sha256}"
+        )
+        digest = hashlib.sha256(extraction_identity.encode("utf-8")).hexdigest()
         event_id = f"extract-{digest[:24]}"
         request_text = _request_text(content, 4096)
 
@@ -1215,6 +1294,12 @@ def main() -> int:
             }
             if research_report_file is not None:
                 prepared_result["research_report_file"] = str(research_report_file)
+            if source_response is not None:
+                prepared_result.update({
+                    "completion_basis": "completed_before_stop",
+                    "source_response_json": str(source_response),
+                    "source_response_json_sha256": source_response_sha256,
+                })
             print(json.dumps(prepared_result, sort_keys=True))
             return 0
         if not prepared_marker.is_file():
@@ -1240,7 +1325,20 @@ def main() -> int:
             source_response is not None
             and _sha256(source_response) != source_response_sha256
         ):
-            raise RuntimeError("source response changed during recovery")
+            if args.phase == "recover":
+                raise RuntimeError("source response changed during recovery")
+            raise RuntimeError("source response changed during the extraction turn")
+        if (
+            args.phase == "extract"
+            and source_response is not None
+            and (
+                "completion_basis=completed_before_stop" not in receipt
+                or f"source_response_json_sha256={source_response_sha256}" not in receipt
+            )
+        ):
+            raise RuntimeError(
+                "completed-before-Stop extraction receipt lacks source provenance"
+            )
         if _is_worker_stop_report(receipt):
             mutation_stop_report = args.phase in {
                 "send",
@@ -1537,11 +1635,15 @@ def main() -> int:
             "research_report_sha256": _sha256(research_report_file),
         })
     if source_response is not None:
-        result.update({
-            "exception_key": exception_key,
+        source_result = {
             "source_response_json": str(source_response),
             "source_response_json_sha256": source_response_sha256,
-        })
+        }
+        if exception_key is None:
+            source_result["completion_basis"] = "completed_before_stop"
+        else:
+            source_result["exception_key"] = exception_key
+        result.update(source_result)
     if args.phase in {
         "diagnose-chatgpt-model-menu",
         "diagnose-chatgpt-power-right",
