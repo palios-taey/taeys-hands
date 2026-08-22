@@ -1,0 +1,15 @@
+[Unit]
+Description=Taey consult completion monitor for display :%i (stop-button gone -> extract and notify)
+Requires=taey-display-%i.service
+After=taey-display-%i.service
+PartOf=taey-display-%i.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.taey/machine.env
+ExecStart=/usr/bin/bash -lc 'set -Eeuo pipefail; : "$${TAEY_REPO:?TAEY_REPO}"; monitor_python="$${TAEY_PYTHON:-python3}"; command -v "$${monitor_python}" >/dev/null; exec "$${monitor_python}" "$${TAEY_REPO}/scripts/consult_completion_monitor.py" %i'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

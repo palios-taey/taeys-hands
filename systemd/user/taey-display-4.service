@@ -2,6 +2,7 @@
 Description=Taey Display :4 (gemini)
 After=taey-xvfb@4.service
 Requires=taey-xvfb@4.service
+Wants=taey-consult-monitor@4.service
 
 [Service]
 Type=simple

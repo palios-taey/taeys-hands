@@ -2,6 +2,7 @@
 Description=Taey Display :2 (chatgpt)
 After=taey-xvfb@2.service
 Requires=taey-xvfb@2.service
+Wants=taey-consult-monitor@2.service
 
 [Service]
 Type=simple

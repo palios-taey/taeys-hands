@@ -286,9 +286,12 @@ fi
 [[ -f "${TAEY_REPO}/systemd/user/firefox-user.js" ]] || die "missing ${TAEY_REPO}/systemd/user/firefox-user.js"
 [[ -x "${TAEY_REPO}/scripts/install_firefox_user_js.sh" ]] || die "missing executable ${TAEY_REPO}/scripts/install_firefox_user_js.sh"
 [[ -x "${TAEY_REPO}/scripts/display_unit_runner.sh" ]] || die "missing executable ${TAEY_REPO}/scripts/display_unit_runner.sh"
+[[ -f "${TAEY_REPO}/scripts/consult_completion_monitor.py" ]] || die "missing ${TAEY_REPO}/scripts/consult_completion_monitor.py"
 [[ -x "${TAEY_FIREFOX_BIN}" ]] || die "TAEY_FIREFOX_BIN missing or not executable: ${TAEY_FIREFOX_BIN}"
 [[ -x "${TAEY_AT_SPI_BUS_LAUNCHER}" ]] || die "TAEY_AT_SPI_BUS_LAUNCHER missing or not executable: ${TAEY_AT_SPI_BUS_LAUNCHER}"
 [[ -x "${TAEY_AT_SPI_REGISTRYD}" ]] || die "TAEY_AT_SPI_REGISTRYD missing or not executable: ${TAEY_AT_SPI_REGISTRYD}"
+MONITOR_PYTHON="${TAEY_PYTHON:-python3}"
+command -v "${MONITOR_PYTHON}" >/dev/null 2>&1 || die "monitor Python is unavailable: ${MONITOR_PYTHON}"
 
 mkdir -p "${SYSTEMD_USER_DIR}" "${HOME}/.taey/profiles"
 
@@ -396,6 +399,27 @@ EOF
     log "wrote ${SYSTEMD_USER_DIR}/taey-bus-watcher@.service"
 }
 
+write_consult_monitor_unit() {
+    cat > "${SYSTEMD_USER_DIR}/taey-consult-monitor@.service" <<EOF
+[Unit]
+Description=Taey consult completion monitor for display :%i (stop-button gone -> extract and notify)
+Requires=taey-display-%i.service
+After=taey-display-%i.service
+PartOf=taey-display-%i.service
+
+[Service]
+Type=simple
+EnvironmentFile=${SYSTEMD_ENV_FILE}
+ExecStart=/usr/bin/bash -lc 'set -Eeuo pipefail; : "\$\${TAEY_REPO:?TAEY_REPO}"; monitor_python="\$\${TAEY_PYTHON:-python3}"; command -v "\$\${monitor_python}" >/dev/null; exec "\$\${monitor_python}" "\$\${TAEY_REPO}/scripts/consult_completion_monitor.py" %i'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+    log "wrote ${SYSTEMD_USER_DIR}/taey-consult-monitor@.service"
+}
+
 write_display_unit() {
     local display_num="$1"
     local platform="${DISPLAY_PLATFORM[$display_num]}"
@@ -414,6 +438,7 @@ write_display_unit() {
 Description=Taey Display :${display_num} (${platform})
 After=taey-xvfb@${display_num}.service
 Requires=taey-xvfb@${display_num}.service
+Wants=taey-consult-monitor@${display_num}.service
 
 [Service]
 Type=simple
@@ -452,6 +477,7 @@ check_display_collisions() {
 
 write_xvfb_unit
 write_bus_watcher_unit
+write_consult_monitor_unit
 
 INSTALLED=()
 for display_num in "${TARGET_DISPLAY_NUMS[@]}"; do
@@ -469,6 +495,7 @@ for unit in "${INSTALLED[@]}"; do
     display_num="${unit#taey-display-}"
     display_num="${display_num%.service}"
     systemctl --user enable "taey-bus-watcher@${display_num}.service" >/dev/null
+    systemctl --user enable "taey-consult-monitor@${display_num}.service" >/dev/null
 done
 log "enabled: ${INSTALLED[*]}"
 
@@ -494,10 +521,13 @@ for unit in "${INSTALLED[@]}"; do
     display_num="${unit#taey-display-}"
     display_num="${display_num%.service}"
     watcher_state="$(systemctl --user is-active "taey-bus-watcher@${display_num}.service" 2>/dev/null || true)"
+    monitor_state="$(systemctl --user is-active "taey-consult-monitor@${display_num}.service" 2>/dev/null || true)"
     echo "  ${unit}: ${state}"
     echo "  taey-bus-watcher@${display_num}.service: ${watcher_state}"
+    echo "  taey-consult-monitor@${display_num}.service: ${monitor_state}"
     [[ "${state}" == "active" ]] || failed=1
     [[ "${watcher_state}" == "active" ]] || failed=1
+    [[ "${monitor_state}" == "active" ]] || failed=1
 done
 
 if ! ${NO_VNC}; then

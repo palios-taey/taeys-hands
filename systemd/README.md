@@ -107,6 +107,7 @@ Each generated `taey-display-N.service`:
 6. Launches Firefox with the configured URL and profile.
 7. Starts x11vnc when VNC is enabled.
 8. Writes `/tmp/firefox_pid_:N` for runtime consumers.
+9. Starts `taey-consult-monitor@N.service`; display stop/restart carries monitor lifecycle with it.
 
 `taey-bus-watcher@N.service` keeps `/tmp/a11y_bus_:N` current while the display
 is running. The consultation runtime pauses the display watchdog through

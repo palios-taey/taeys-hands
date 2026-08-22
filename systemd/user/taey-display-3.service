@@ -2,6 +2,7 @@
 Description=Taey Display :3 (claude)
 After=taey-xvfb@3.service
 Requires=taey-xvfb@3.service
+Wants=taey-consult-monitor@3.service
 
 [Service]
 Type=simple
