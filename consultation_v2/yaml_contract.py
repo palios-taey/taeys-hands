@@ -165,6 +165,7 @@ EXTRACTION_OUTPUT_TYPES = frozenset({
 EXTRACTION_STEP_ACTIONS = frozenset({
     'scroll_to_bottom',       # scroll the conversation to the final answer (anchor on element)
     'scroll_into_view',       # bring a specific report/artifact control on-screen
+    'hover',                  # reveal controls owned by an exact mapped element
     'click',                  # activate a mapped trigger/menu element via AT-SPI element action
     'copy_element',           # activate a mapped copy control (the clipboard-producing button)
     'read_clipboard',         # read the clipboard the prior copy_element populated
@@ -177,6 +178,7 @@ EXTRACTION_STEP_ACTIONS = frozenset({
 EXTRACTION_ELEMENT_REQUIRED_ACTIONS = frozenset({
     'scroll_to_bottom',
     'scroll_into_view',
+    'hover',
     'click',
     'copy_element',
     'open_panel',

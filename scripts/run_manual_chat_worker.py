@@ -850,6 +850,16 @@ def _extract_content(
     completed_before_stop_source_sha256: str | None = None,
 ) -> str:
     if platform == "claude":
+        _require_extraction_steps(
+            "claude",
+            "assistant_text",
+            (
+                ("scroll_to_bottom", "message_actions_button", "last", None),
+                ("hover", "message_actions_button", "last", None),
+                ("copy_element", "copy_button", "last", None),
+                ("read_clipboard", None, "last", None),
+            ),
+        )
         return (
             f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one frozen "
             f"Claude extraction transaction on {display} with drive_chat only. Do not read any file, "
@@ -863,12 +873,15 @@ def _extract_content(
             "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
             "claude_chat_length_limit_alert.\n"
             "2. key ctrl+End; observe scope=base; require the same "
-            "/chat/ URL condition, continue_button absent, no mapped exception, at least "
-            "one mapped copy_button, and exactly one fresh copy_button target marked by the YAML last_by_y "
-            "selection.\n"
-            "3. click element=copy_button; observe scope=base; require the "
+            "/chat/ URL condition, continue_button absent, no mapped exception, and exactly one "
+            "mapped message_actions_button owned by the current_response_article.\n"
+            "3. hover element=message_actions_button exactly once; observe scope=base; require the same "
+            "/chat/ URL condition, continue_button absent, no mapped exception, exactly one mapped "
+            "copy_button named Copy, and exactly one fresh copy_button target marked by the YAML "
+            "last_by_y selection.\n"
+            "4. click element=copy_button; observe scope=base; require the "
             "same /chat/ URL condition, continue_button absent, and no mapped exception.\n"
-            f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a new "
+            f"5. read_clipboard with output_file={response_file}. Require that drive_chat created a new "
             "non-empty response file and return its byte count and SHA-256. Then stop all UI calls.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, send, "

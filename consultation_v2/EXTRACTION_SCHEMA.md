@@ -76,6 +76,7 @@ driver invokes; no platform strings, no fuzzy discovery:
 |---|---|---|
 | `scroll_to_bottom` | scroll the conversation to the final answer (anchor on the named composer control) | required (anchor) |
 | `scroll_into_view` | bring a specific report/artifact control on-screen | required |
+| `hover` | reveal controls owned by an exact mapped element using its live AT-SPI extent | required |
 | `click` | activate a mapped trigger/menu element via AT-SPI element action (e.g. open a Share/Export popover) | required |
 | `copy_element` | activate a mapped copy control (the clipboard-producing button) | required |
 | `read_clipboard` | read the clipboard the prior `copy_element` populated | forbidden |
