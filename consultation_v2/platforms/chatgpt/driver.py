@@ -23,7 +23,12 @@ from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
-from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
+from consultation_v2.planner import (
+    SelectionPlanError,
+    build_selection_plan,
+    has_selection_menus,
+    selection_trigger_operation,
+)
 from consultation_v2.run_state_identity import (
     LegacyUnscopedRunState,
     assert_request_run_state_available,
@@ -1347,12 +1352,26 @@ class _ChatGPTInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if not self.runtime.click(trigger):
+        declared = selection_trigger_operation(
+            self.platform,
+            trigger_key,
+            trigger.states,
+        )
+        open_method = str((declared or {}).get('method') or 'click')
+        open_evidence = None
+        if open_method == 'mapped_pointer_open':
+            open_evidence = self.runtime.mapped_pointer_open(trigger)
+            opened = open_evidence.get('ok') is True
+        else:
+            opened = self.runtime.click(trigger)
+        if not opened:
             result.add_step(
                 'select',
                 False,
-                f'{self.platform} selection trigger {trigger_key} click failed',
+                f'{self.platform} selection trigger {trigger_key} open failed',
                 trigger=trigger_key,
+                open_method=open_method,
+                open_evidence=open_evidence,
                 snapshot=trigger_snapshot.serializable(),
             )
             return None

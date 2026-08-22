@@ -33,6 +33,11 @@ chooses another operation. `focus_and_key_open` is one semantic `operate`: focus
 once, then send the exact YAML open key. The runtime refuses a contradictory free verb and never retries the
 operation.
 
+`mapped_pointer_open` is one semantic `operate`: move to the fresh bound node's mapped AT-SPI extent and click the
+primary pointer button exactly once. It has no coordinate input, alternate target, fallback strategy, or automatic
+retry. Only a platform YAML declaration can authorize it, and the declared observation scope remains the immediate
+postcondition oracle.
+
 `consultation_v2/runtime.py::ConsultationRuntime` belongs to the retained Layer-3 engine. Its click and focus paths
 are fail-closed AT-SPI operations. Promotion still requires proving one real platform transaction through the same
 exact YAML/canonical-snapshot boundary.

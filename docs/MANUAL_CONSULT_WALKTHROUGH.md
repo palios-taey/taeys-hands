@@ -110,7 +110,9 @@ selected platform card.
 `declared_operation.primitives` describes how the runtime implements the semantic operation. For
 `focus_and_key_open`, one `operate` call focuses the exact fresh ref, verifies focus, and sends the exact YAML
 `open_key`. Require `performed_primitive="focus_and_key_open"`, then observe the declared menu scope and prove
-the exact YAML target. Taey never issues separate focus and key calls for this method.
+the exact YAML target. For `mapped_pointer_open`, one `operate` call clicks once at the exact fresh ref's mapped
+AT-SPI extent; require `performed_primitive="mapped_pointer_open"`, then prove the same declared scope. Taey never
+receives or supplies coordinates for either method.
 
 ## The invariant for every worker turn
 
@@ -169,11 +171,13 @@ For each row in `workflow.full_consult.select_mode`:
 5. For `open_method: click`, require `allowed_now=["click"]` and `operate` the fresh trigger ref once.
 6. For `open_method: focus_and_key_open`, `operate` the fresh trigger ref once and require the receipt's
    `performed_primitive` is `focus_and_key_open`.
-7. Only after the complete open receipt, observe exactly the menu's `operate.scope`.
-8. Require exactly one mapped ref for the requested option element.
-9. `operate` that option ref when it advertises `declared_operation`; otherwise use its YAML-authorized direct
+7. For `open_method: mapped_pointer_open`, `operate` the fresh trigger ref once and require the receipt's
+   `performed_primitive` is `mapped_pointer_open`.
+8. Only after the complete open receipt, observe exactly the menu's `operate.scope`.
+9. Require exactly one mapped ref for the requested option element.
+10. `operate` that option ref when it advertises `declared_operation`; otherwise use its YAML-authorized direct
    action once.
-10. Observe again and require the YAML active state. If active state is visible only inside the opened menu,
+11. Observe again and require the YAML active state. If active state is visible only inside the opened menu,
    reopen once through the same observe/action discipline solely to validate it. Any platform card that uses
    this validation-only reopen must pin one close action and a fresh base proof before the attachment leg.
 

@@ -116,6 +116,17 @@ def selection_trigger_operation(
                 'forbidden': ['activate', 'focus', 'hover'],
             }
             signature = (method, '')
+        elif method == 'mapped_pointer_open':
+            declaration = {
+                'method': method,
+                'primitives': ['mapped_pointer_click'],
+                'allowed_now': (
+                    [] if 'expanded' in normalized_states
+                    else ['mapped_pointer_click']
+                ),
+                'forbidden': ['activate', 'click', 'focus', 'hover'],
+            }
+            signature = (method, '')
         elif method == 'focus_and_key_open':
             open_key = operate.get('open_key')
             if not isinstance(open_key, str) or not open_key:

@@ -449,6 +449,36 @@ class ConsultationRuntime:
             )
         )
 
+    def mapped_pointer_open(
+        self,
+        element: ElementRef,
+        *,
+        timeout: int = 5,
+    ) -> dict[str, Any]:
+        self._sync_platform_io_display()
+        evidence: dict[str, Any] = {
+            'ok': False,
+            'method': 'mapped_pointer_open',
+            'element': {
+                'key': element.key,
+                'name': element.name,
+                'role': element.role,
+                'x': element.x,
+                'y': element.y,
+            },
+            'pointer_event_sent': False,
+        }
+        if element.x is None or element.y is None:
+            evidence['error'] = 'missing_mapped_extent'
+            return evidence
+        sent = inp.click_at(int(element.x), int(element.y), timeout=timeout)
+        evidence['pointer_event_sent'] = bool(sent)
+        if not sent:
+            evidence['error'] = 'mapped_pointer_click_failed'
+            return evidence
+        evidence['ok'] = True
+        return evidence
+
     def focus_and_key_open(
         self,
         element: ElementRef,
