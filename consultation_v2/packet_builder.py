@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import subprocess
 import sys
@@ -454,6 +455,21 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _rejected_input_roots(spec: Mapping[str, Any]) -> tuple[Path, ...]:
+    rejected_values = spec["rejected_input_roots"]
+    if not isinstance(rejected_values, list) or not rejected_values:
+        raise PacketBuildError("rejected_input_roots must be a non-empty array")
+    rejected_roots = tuple(
+        _absolute_path(value, f"rejected_input_roots[{index}]")
+        for index, value in enumerate(rejected_values)
+    )
+    if len(set(rejected_roots)) != len(rejected_roots):
+        raise PacketBuildError("rejected_input_roots contains duplicates")
+    for root in rejected_roots:
+        _observed_path_record(root, "directory")
+    return rejected_roots
+
+
 def _assert_not_rejected_input(
     path: Path, rejected_roots: Sequence[Path], context: str
 ) -> None:
@@ -519,6 +535,20 @@ def _render_manifest(
         "task_sources": manifest_sources,
     }
     return _json_bytes(manifest)
+
+
+def _render_generated_manifest_segment(
+    task_sources: Sequence[SourceBytes], excluded_stale: Sequence[str]
+) -> tuple[bytes, bytes]:
+    manifest = _render_manifest(task_sources, excluded_stale)
+    segment = b"".join(
+        (
+            b"## GENERATED ATTACHED PROVENANCE MANIFEST\n\n# generated_attached_provenance_manifest.json\n",
+            manifest,
+            b"\n",
+        )
+    )
+    return manifest, segment
 
 
 def _render_bundle_a(
@@ -844,17 +874,8 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
     if parent_record["owner_uid"] != os.geteuid():
         raise PacketBuildError("effective user does not own output parent")
 
-    rejected_values = spec["rejected_input_roots"]
-    if not isinstance(rejected_values, list) or not rejected_values:
-        raise PacketBuildError("rejected_input_roots must be a non-empty array")
-    rejected_roots = tuple(
-        _absolute_path(value, f"rejected_input_roots[{index}]")
-        for index, value in enumerate(rejected_values)
-    )
-    if len(set(rejected_roots)) != len(rejected_roots):
-        raise PacketBuildError("rejected_input_roots contains duplicates")
+    rejected_roots = _rejected_input_roots(spec)
     for root in rejected_roots:
-        _observed_path_record(root, "directory")
         if _inside(output_root, root) or _inside(root, output_root):
             raise PacketBuildError("output root overlaps a rejected candidate root")
 
@@ -929,13 +950,9 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         or not all(isinstance(item, str) and item for item in excluded)
     ):
         raise PacketBuildError("excluded_stale must be a non-empty string array")
-    generated_manifest_json = _render_manifest(task_sources, excluded)
-    generated_manifest = b"".join(
-        (
-            b"## GENERATED ATTACHED PROVENANCE MANIFEST\n\n# generated_attached_provenance_manifest.json\n",
-            generated_manifest_json,
-            b"\n",
-        )
+    generated_manifest_json, generated_manifest = _render_generated_manifest_segment(
+        task_sources,
+        excluded,
     )
     expected = spec["expected"]
     if not isinstance(expected, dict):
@@ -1219,6 +1236,471 @@ def _open_exclusive(path: Path) -> int:
     if metadata.st_uid != os.geteuid() or _mode_text(metadata.st_mode) != "0600":
         raise PacketBuildError(f"exclusive output owner/mode mismatch: {path}")
     return descriptor
+
+
+def _open_exclusive_at(
+    directory_descriptor: int, basename: str, display_path: Path
+) -> int:
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(basename, flags, 0o600, dir_fd=directory_descriptor)
+    try:
+        metadata = os.fstat(descriptor)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    try:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise PacketBuildError(f"exclusive output is not regular: {display_path}")
+        if metadata.st_uid != os.geteuid() or _mode_text(metadata.st_mode) != "0600":
+            raise PacketBuildError(
+                f"exclusive output owner/mode mismatch: {display_path}"
+            )
+    except BaseException:
+        os.close(descriptor)
+        _remove_exact_entry(
+            directory_descriptor,
+            basename,
+            metadata,
+            "invalid exclusive output",
+        )
+        raise
+    return descriptor
+
+
+def _read_descriptor(descriptor: int) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
+def _require_directory_identity(path: Path, expected: os.stat_result) -> None:
+    observed = os.stat(path, follow_symlinks=False)
+    if not stat.S_ISDIR(observed.st_mode) or not _same_inode(observed, expected):
+        raise PacketBuildError(f"frozen spec output parent identity changed: {path}")
+
+
+def _remove_exact_entry(
+    directory_descriptor: int,
+    basename: str,
+    expected: os.stat_result,
+    context: str,
+) -> None:
+    try:
+        observed = os.stat(
+            basename,
+            dir_fd=directory_descriptor,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return
+    if not _same_inode(observed, expected):
+        raise PacketBuildError(f"{context} identity changed before cleanup")
+    os.unlink(basename, dir_fd=directory_descriptor)
+    os.fsync(directory_descriptor)
+
+
+def _temporary_spec_entry(directory_descriptor: int) -> tuple[int, str]:
+    for _ in range(16):
+        basename = f".consultation-packet-freeze-{secrets.token_hex(16)}.json"
+        try:
+            descriptor = _open_exclusive_at(
+                directory_descriptor,
+                basename,
+                Path(basename),
+            )
+        except FileExistsError:
+            continue
+        return descriptor, basename
+    raise PacketBuildError("cannot allocate an exclusive temporary frozen spec")
+
+
+def _freeze_builder_binding(binding: Mapping[str, Any]) -> dict[str, Any]:
+    _require_exact_keys(
+        binding,
+        frozenset({"commit", "module", "module_sha256", "repo_root"}),
+        "draft builder",
+    )
+    if binding["commit"] is not None or binding["module_sha256"] is not None:
+        raise PacketBuildError(
+            "draft builder commit and module_sha256 must both be null"
+        )
+    repo_root = _absolute_path(binding["repo_root"], "draft builder.repo_root")
+    module = _require_text(binding["module"], "draft builder.module")
+    module_path = repo_root / module
+    if module_path.resolve() != Path(__file__).resolve():
+        raise PacketBuildError(
+            "draft builder.module does not identify the executing module"
+        )
+    module_data = _read_regular_file(module_path, "draft builder module")
+    commit_run = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = _require_commit(commit_run.stdout.strip(), "draft builder observed commit")
+    observation = _git_observation(module_path, commit, module_data)
+    if Path(observation["checkout_root"]) != repo_root:
+        raise PacketBuildError("draft builder.repo_root is not the Git checkout root")
+    return {
+        "commit": commit,
+        "module": module,
+        "module_sha256": _sha256(module_data),
+        "repo_root": str(repo_root),
+    }
+
+
+def _freeze_dossier_source(
+    spec: Mapping[str, Any], source_path: Path
+) -> tuple[SourceBytes, tuple[SourceBytes, ...]]:
+    request_id = _require_text(spec.get("request_id"), "request_id")
+    expected_logical = f"packet_{request_id.rsplit('-', 1)[-1]}.md"
+    task_values = spec.get("task_sources")
+    if not isinstance(task_values, list) or not task_values:
+        raise PacketBuildError("task_sources must be a non-empty array")
+    packet_indexes = [
+        index
+        for index, value in enumerate(task_values)
+        if isinstance(value, dict) and value.get("logical") == expected_logical
+    ]
+    if len(packet_indexes) != 1:
+        raise PacketBuildError(
+            "draft task sources must contain the corrected request packet exactly once"
+        )
+    packet_index = packet_indexes[0]
+    packet_value = task_values[packet_index]
+    if not isinstance(packet_value, dict):
+        raise PacketBuildError("draft corrected request packet must be an object")
+    packet_keys = {
+        "authorized",
+        "bytes",
+        "git_tracked",
+        "locator",
+        "logical",
+        "section",
+        "sha256",
+    }
+    if packet_value.get("git_tracked") is True:
+        packet_keys.add("expected_commit")
+    _require_exact_keys(
+        packet_value,
+        frozenset(packet_keys),
+        "draft corrected request packet",
+    )
+    if (
+        _absolute_path(
+            packet_value.get("locator"), "draft corrected request packet locator"
+        )
+        != source_path
+    ):
+        raise PacketBuildError(
+            "--source does not identify the draft corrected request packet"
+        )
+    if source_path.suffix.casefold() != ".md":
+        raise PacketBuildError("--source must identify one Markdown file")
+    if packet_value.get("bytes") is not None or packet_value.get("sha256") is not None:
+        raise PacketBuildError(
+            "draft corrected request packet bytes and sha256 must both be null"
+        )
+    source_data = _read_regular_file(source_path, "draft corrected request packet")
+    packet_value["bytes"] = len(source_data)
+    packet_value["sha256"] = _sha256(source_data)
+    task_sources = tuple(
+        _source_bytes(value, f"task_sources[{index}]")
+        for index, value in enumerate(task_values)
+        if isinstance(value, dict)
+    )
+    if len(task_sources) != len(task_values):
+        raise PacketBuildError("each task source must be an object")
+    return task_sources[packet_index], task_sources
+
+
+def _freeze_expected_outputs(
+    spec: dict[str, Any], source_path: Path
+) -> tuple[bytes, bytes, bytes, list[dict[str, Any]]]:
+    packet_source, task_sources = _freeze_dossier_source(spec, source_path)
+    _validate_task_dossier(packet_source)
+    _run_prompting_lint(packet_source)
+
+    expected = spec.get("expected")
+    if not isinstance(expected, dict):
+        raise PacketBuildError("draft expected must be an object")
+    _require_exact_keys(
+        expected,
+        frozenset({"bundle_b", "generated_manifest", "prompt"}),
+        "draft expected",
+    )
+    if expected["bundle_b"] is not None or expected["generated_manifest"] is not None:
+        raise PacketBuildError(
+            "draft bundle_b and generated_manifest expectations must both be null"
+        )
+    prompt_expected = expected["prompt"]
+    if not isinstance(prompt_expected, dict):
+        raise PacketBuildError("draft expected.prompt must be an object")
+    _require_exact_keys(
+        prompt_expected,
+        frozenset({"bytes", "sha256", "text"}),
+        "draft expected.prompt",
+    )
+    if prompt_expected["bytes"] is not None or prompt_expected["sha256"] is not None:
+        raise PacketBuildError("draft prompt bytes and sha256 must both be null")
+    prompt_text = _require_text(prompt_expected["text"], "draft expected.prompt.text")
+    prompt_data = prompt_text.encode("utf-8")
+    prompt = _validate_prompt(
+        prompt_text,
+        {"bytes": len(prompt_data), "sha256": _sha256(prompt_data)},
+    )
+
+    excluded = spec.get("excluded_stale")
+    if (
+        not isinstance(excluded, list)
+        or not excluded
+        or not all(isinstance(item, str) and item for item in excluded)
+    ):
+        raise PacketBuildError("excluded_stale must be a non-empty string array")
+    _, generated_manifest = _render_generated_manifest_segment(task_sources, excluded)
+    request_id = _require_text(spec.get("request_id"), "request_id")
+    bundle_b = _render_bundle_b(
+        request_id,
+        task_sources,
+        generated_manifest,
+    )
+
+    governance = spec.get("governance")
+    if not isinstance(governance, dict):
+        raise PacketBuildError("governance must be an object")
+    _require_exact_keys(
+        governance,
+        frozenset({"destinations", "kernel", "spotlight"}),
+        "governance",
+    )
+    kernel = _source_bytes(governance["kernel"], "governance.kernel")
+    spotlight = _source_bytes(governance["spotlight"], "governance.spotlight")
+    destination_values = governance["destinations"]
+    if not isinstance(destination_values, list) or not destination_values:
+        raise PacketBuildError(
+            "governance.destinations must contain at least one destination"
+        )
+    destination_expectations: list[dict[str, Any]] = []
+    for index, destination in enumerate(destination_values):
+        context = f"governance.destinations[{index}]"
+        if not isinstance(destination, dict):
+            raise PacketBuildError(f"{context} must be an object")
+        _require_exact_keys(
+            destination,
+            frozenset(
+                {
+                    "bundle_a_basename",
+                    "bundle_b_basename",
+                    "display_name",
+                    "expected_bundle_a",
+                    "expected_bundle_a_absolute_paths",
+                    "identity",
+                    "platform",
+                    "prompt_basename",
+                    "receipt_basename",
+                    "send_task",
+                }
+            ),
+            context,
+        )
+        if destination.get("expected_bundle_a") is not None:
+            raise PacketBuildError(f"{context}.expected_bundle_a must be null")
+        platform = _require_text(destination.get("platform"), f"{context}.platform")
+        if platform not in IDENTITY_BY_PLATFORM:
+            raise PacketBuildError(f"unsupported destination platform {platform}")
+        identity = _source_bytes(destination.get("identity"), f"{context}.identity")
+        if identity.record["logical"] != IDENTITY_BY_PLATFORM[platform]:
+            raise PacketBuildError(f"{context} has wrong identity mapping")
+        display_name = _require_text(
+            destination.get("display_name"), f"{context}.display_name"
+        )
+        bundle_a = _render_bundle_a(
+            request_id,
+            display_name,
+            kernel,
+            identity,
+            spotlight,
+        )
+        frozen_expectation = {
+            "bytes": len(bundle_a),
+            "sha256": _sha256(bundle_a),
+        }
+        destination["expected_bundle_a"] = frozen_expectation
+        destination_expectations.append(
+            {"platform": platform, "bundle_a": frozen_expectation}
+        )
+
+    expected["bundle_b"] = {
+        "bytes": len(bundle_b),
+        "sha256": _sha256(bundle_b),
+    }
+    expected["generated_manifest"] = {
+        "bytes": len(generated_manifest),
+        "sha256": _sha256(generated_manifest),
+    }
+    expected["prompt"] = {
+        "bytes": len(prompt),
+        "sha256": _sha256(prompt),
+        "text": prompt.decode("utf-8"),
+    }
+    return bundle_b, generated_manifest, prompt, destination_expectations
+
+
+def _validate_frozen_spec_bytes(
+    data: bytes,
+    output_path: Path,
+    directory_descriptor: int,
+    directory_identity: os.stat_result,
+) -> None:
+    descriptor, temporary_basename = _temporary_spec_entry(directory_descriptor)
+    temporary_identity = os.fstat(descriptor)
+    temporary_path = output_path.parent / temporary_basename
+    try:
+        _write_all(descriptor, data)
+        os.fsync(descriptor)
+        _require_directory_identity(output_path.parent, directory_identity)
+        _prepare_build(temporary_path)
+    finally:
+        os.close(descriptor)
+        _remove_exact_entry(
+            directory_descriptor,
+            temporary_basename,
+            temporary_identity,
+            "temporary frozen spec",
+        )
+
+
+def _write_frozen_spec_output(
+    data: bytes,
+    output_path: Path,
+    directory_descriptor: int,
+    directory_identity: os.stat_result,
+) -> None:
+    descriptor = _open_exclusive_at(
+        directory_descriptor,
+        output_path.name,
+        output_path,
+    )
+    output_identity = os.fstat(descriptor)
+    completed = False
+    try:
+        _write_all(descriptor, data)
+        os.fsync(descriptor)
+        if _read_descriptor(descriptor) != data:
+            raise PacketBuildError("frozen build spec final reread mismatch")
+        observed = os.stat(
+            output_path.name,
+            dir_fd=directory_descriptor,
+            follow_symlinks=False,
+        )
+        if not _same_inode(observed, output_identity):
+            raise PacketBuildError("frozen build spec identity changed after write")
+        os.fsync(directory_descriptor)
+        _require_directory_identity(output_path.parent, directory_identity)
+        completed = True
+    finally:
+        os.close(descriptor)
+        if not completed:
+            _remove_exact_entry(
+                directory_descriptor,
+                output_path.name,
+                output_identity,
+                "incomplete frozen spec output",
+            )
+
+
+def freeze_consultation_spec(
+    draft_spec_path: str | Path,
+    source_path: str | Path,
+    output_path: str | Path,
+) -> dict[str, Any]:
+    draft_path = _absolute_path(str(draft_spec_path), "draft spec path")
+    source = _absolute_path(str(source_path), "source path")
+    output = _absolute_path(str(output_path), "frozen spec output path")
+    if len({draft_path, source, output}) != 3:
+        raise PacketBuildError("draft spec, source, and frozen output must differ")
+    if output.exists() or output.is_symlink():
+        raise PacketBuildError(f"frozen spec output already exists: {output}")
+    _assert_no_symlink_components(output, include_leaf=False)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        directory_flags |= os.O_NOFOLLOW
+    directory_descriptor = os.open(output.parent, directory_flags)
+    try:
+        directory_identity = os.fstat(directory_descriptor)
+        if (
+            not stat.S_ISDIR(directory_identity.st_mode)
+            or directory_identity.st_uid != os.geteuid()
+        ):
+            raise PacketBuildError(
+                "effective user does not own frozen spec output parent"
+            )
+        _require_directory_identity(output.parent, directory_identity)
+
+        draft_data = _read_regular_file(draft_path, "draft build spec")
+        spec = _strict_json(draft_data, "draft build spec")
+        _require_exact_keys(spec, TOP_LEVEL_SPEC_KEYS, "draft build spec")
+        if spec.get("schema_version") != 1:
+            raise PacketBuildError("unsupported draft build spec schema_version")
+        _assert_not_rejected_input(
+            output,
+            _rejected_input_roots(spec),
+            "frozen spec output",
+        )
+        builder = spec.get("builder")
+        if not isinstance(builder, dict):
+            raise PacketBuildError("draft builder must be an object")
+        spec["builder"] = _freeze_builder_binding(builder)
+        bundle_b, generated_manifest, prompt, destinations = _freeze_expected_outputs(
+            spec, source
+        )
+        frozen_data = _json_bytes(spec)
+        _validate_frozen_spec_bytes(
+            frozen_data,
+            output,
+            directory_descriptor,
+            directory_identity,
+        )
+        _write_frozen_spec_output(
+            frozen_data,
+            output,
+            directory_descriptor,
+            directory_identity,
+        )
+    finally:
+        os.close(directory_descriptor)
+    return {
+        "status": "spec_frozen",
+        "draft_spec": str(draft_path),
+        "source": str(source),
+        "frozen_spec": {
+            "path": str(output),
+            "bytes": len(frozen_data),
+            "sha256": _sha256(frozen_data),
+        },
+        "expectations": {
+            "bundle_b": {"bytes": len(bundle_b), "sha256": _sha256(bundle_b)},
+            "generated_manifest": {
+                "bytes": len(generated_manifest),
+                "sha256": _sha256(generated_manifest),
+            },
+            "prompt": {"bytes": len(prompt), "sha256": _sha256(prompt)},
+            "destinations": destinations,
+        },
+        "ui_actions": False,
+    }
 
 
 def _receipt(
@@ -1720,6 +2202,10 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("preflight", "build"):
         command_parser = subparsers.add_parser(command)
         command_parser.add_argument("--spec", required=True)
+    freeze_parser = subparsers.add_parser("freeze-spec")
+    freeze_parser.add_argument("--draft-spec", required=True)
+    freeze_parser.add_argument("--source", required=True)
+    freeze_parser.add_argument("--output", required=True)
     receipt_parser = subparsers.add_parser("validate-receipt")
     receipt_parser.add_argument("receipt")
     return parser
@@ -1728,7 +2214,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "preflight":
+        if args.command == "freeze-spec":
+            result = freeze_consultation_spec(
+                args.draft_spec,
+                args.source,
+                args.output,
+            )
+        elif args.command == "preflight":
             result = preflight_consultation_bundles(args.spec)
         elif args.command == "build":
             result = build_consultation_bundles(args.spec)

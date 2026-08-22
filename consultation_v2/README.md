@@ -86,7 +86,18 @@ path.
 ## Deterministic packet construction
 
 `scripts/consultation-packet-builder` builds the two attachment files, local prompt, and local receipt from
-a frozen JSON spec. `preflight` validates canonical source bytes against both the frozen hashes and named Git
+a frozen JSON spec. `freeze-spec --draft-spec DRAFT --source DOSSIER.md --output FROZEN` accepts the final
+spec shape with the corrected dossier content address, builder commit/module digest, and rendered expectations
+set to `null`. It reads the explicitly named Markdown dossier, uses the same canonical renderers, fills those
+values, validates the result through the complete preflight path, and creates the frozen spec exclusively
+without constructing packets or performing UI work. All three CLI paths must be normalized absolute paths.
+One role-tailored question remains one spec; a shared question may still name multiple destinations. The draft
+preserves the final schema, with exactly these derived values set to `null`: `builder.commit`,
+`builder.module_sha256`, the corrected dossier source's `bytes` and `sha256`, `expected.bundle_b`,
+`expected.generated_manifest`, every destination's `expected_bundle_a`, and `expected.prompt.bytes` plus
+`expected.prompt.sha256`. All other source/binding content addresses and explicit allowlists remain populated
+inputs. After freezing, run `preflight --spec FROZEN`, then `build --spec FROZEN`.
+`preflight` validates canonical source bytes against both the frozen hashes and named Git
 blobs, requires the complete task-dossier sections, runs the hashed canonical prompting linter on the exact
 frozen request bytes, excludes governance bytes and operator-local paths from Bundle B, validates the full
 brief-prompt contract, and checks expected output hashes, rejected-root isolation, and negative receipts
