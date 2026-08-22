@@ -558,7 +558,7 @@ def _render_bundle_a(
 ) -> bytes:
     return b"".join(
         (
-            f"# {request_id} {display_name} Bundle A - Governance\n\n## FAMILY KERNEL\n\n# FAMILY_KERNEL.md\n\n<!-- BEGIN-VERBATIM: FAMILY_KERNEL.md -->\n".encode(),
+            f"# {request_id} {display_name} Bundle A - Governance\n\n## FAMILY KERNEL\n\n# {kernel.record['logical']}\n\n<!-- BEGIN-VERBATIM: {kernel.record['logical']} -->\n".encode(),
             kernel.data,
             b"\n<!-- END-VERBATIM -->\n",
             f"\n## IDENTITY\n\n# {identity.record['logical']}\n\n<!-- BEGIN-VERBATIM: {identity.record['logical']} -->\n".encode(),
