@@ -964,7 +964,10 @@ def _receipt(
             "prompt_cross_destination_cmp": True,
             "exactly_two_attachment_designation_per_destination": True,
             "immutable_source_content_absolute_paths": list(destination.expected_absolute_paths),
-            "immutable_source_content_path_hits": {"bundle_a": 2, "bundle_b": 0},
+            "immutable_source_content_path_hits": {
+                "bundle_a": len(destination.expected_absolute_paths),
+                "bundle_b": 0,
+            },
             "no_operator_local_abs_in_bundle_b_provenance_and_request": True,
             "generated_regular_file_count": len(files),
             "live_directory_exactly_matches_files": True,
