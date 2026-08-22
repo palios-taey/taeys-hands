@@ -571,7 +571,7 @@ def _send_content(
             "new_chat named New Chat. Require uploaded_file_chip, remove_attachment, send_button, "
             "stop_button, and copy_button absent. Record this post-navigation fresh URL.\n"
             "2. operate element=model_selector and require performed_primitive="
-            "focus_and_key_open; observe scope=app_root_snapshot; require model_heavy match_count "
+            "mapped_pointer_activate; observe scope=app_root_snapshot; require model_heavy match_count "
             "1 with name exactly Heavy Team of Experts · Grok 4.5; click element=model_heavy; "
             "observe scope=base; require exactly one each of input named Ask Grok anything, "
             "model_selector named Model select, and attach_trigger named Attach.\n"
