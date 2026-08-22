@@ -801,9 +801,9 @@ class ConsultationRuntime:
         states = {str(state).lower() for state in (entry.states or [])}
         return 'focused' in states and str(entry.text or '') == expected
 
-    def paste(self, text: str, *, clear_modifiers: bool = False) -> bool:
+    def paste(self, text: str) -> bool:
         self._sync_platform_io_display()
-        return bool(inp.clipboard_paste(text, clear_modifiers=clear_modifiers))
+        return bool(inp.clipboard_paste(text))
 
     def type_text(self, text: str, delay_ms: int = 5) -> bool:
         return bool(inp.type_text(text, delay_ms=delay_ms))
@@ -970,7 +970,7 @@ class ConsultationRuntime:
             logger.error('navigate: address-bar full selection was not proven')
             self._dismiss_address_bar()
             return False
-        if not self.paste(url, clear_modifiers=True):
+        if not self.paste(url):
             logger.error('navigate: URL paste failed in focused address bar')
             self._dismiss_address_bar()
             return False
