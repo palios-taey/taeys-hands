@@ -592,6 +592,8 @@ workflow:
         operate:
           trigger: model_selector
           scope: app_root_snapshot
+          open_method: focus_and_key_open
+          open_key: space
         options:
           instant:
             element: model_instant
