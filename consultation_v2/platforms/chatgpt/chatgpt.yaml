@@ -412,6 +412,10 @@ tree:
       name: Show advanced options
       role: menu item
       scope: model_menu
+    model_show_compact_options:
+      name: Show compact options
+      role: menu item
+      scope: model_menu
     model_instant:
       name: Instant 5.5
       role: radio menu item
@@ -602,6 +606,8 @@ workflow:
             element: model_power
           show_advanced_options:
             element: model_show_advanced_options
+          show_compact_options:
+            element: model_show_compact_options
           instant:
             element: model_instant
           thinking:
