@@ -911,12 +911,6 @@ class ConsultationRuntime:
                 return False
             return True
         current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
-        if not self._dismiss_address_bar():
-            logger.warning(
-                'navigate: address bar stayed focused after committed navigation; '
-                'continuing to exact target and tree verification'
-            )
-        current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         current = (current or self.current_url() or "").strip()
 
         # Defense: if the nav did not land on the target (still a stale thread,
@@ -927,7 +921,7 @@ class ConsultationRuntime:
             raw_count = int(settled_snapshot.raw_count or 0) if settled_snapshot else 0
             mapped_count = self._navigation_mapped_count(settled_snapshot)
             logger.error(
-                'navigate: target unreadable after post-dismiss bounded tree settle '
+                'navigate: target unreadable after bounded tree settle '
                 '(current=%r raw_count=%s mapped_count=%s)',
                 current,
                 raw_count,
