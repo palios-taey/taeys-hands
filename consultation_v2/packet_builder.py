@@ -33,6 +33,13 @@ REQUIRED_DOSSIER_HEADINGS = (
     "Constraints",
     "Objective",
 )
+QUESTION_LINE = re.compile(
+    r"^(?:[-*+]\s+|\d+[.)]\s+)?(?:\[[^\]\r\n]+\]\s*)*"
+    r"(?:(?:given|for|under|within|using|from|assuming|based on)\b[^?\r\n]*,\s*)?"
+    r"(?:what|why|how|when|where|which|who|whom|whose|is|are|am|do|does|did|"
+    r"can|could|should|would|will|may|might|must|has|have|had)\b.*\?\s*$",
+    flags=re.IGNORECASE,
+)
 
 FORBIDDEN_PROMPT_TERMS = (
     "filesystem",
@@ -668,30 +675,61 @@ def _validate_source_inclusion(
         raise PacketBuildError(f"{context} source order is not deterministic")
 
 
+def _authored_markdown_lines(text: str) -> tuple[tuple[int, int, str], ...]:
+    authored: list[tuple[int, int, str]] = []
+    fence_character: str | None = None
+    fence_length = 0
+    offset = 0
+    for raw_line in text.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        fence = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if fence_character is None and fence is not None:
+            marker = fence.group(1)
+            fence_character = marker[0]
+            fence_length = len(marker)
+        elif fence_character is not None:
+            closing = re.fullmatch(
+                rf" {{0,3}}{re.escape(fence_character)}{{{fence_length},}}[ \t]*",
+                line,
+            )
+            if closing is not None:
+                fence_character = None
+                fence_length = 0
+        elif not line.startswith(("    ", "\t")):
+            authored.append((offset, offset + len(raw_line), line))
+        offset += len(raw_line)
+    return tuple(authored)
+
+
 def _validate_task_dossier(source: SourceBytes) -> tuple[str, ...]:
     try:
         text = source.data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise PacketBuildError("corrected request packet is not UTF-8") from exc
-    matches = list(re.finditer(r"^## ([^\r\n]+)\s*$", text, flags=re.MULTILINE))
-    headings = [match.group(1).strip() for match in matches]
+    authored_lines = _authored_markdown_lines(text)
+    matches = [
+        (start, end, match.group(1).strip())
+        for start, end, line in authored_lines
+        if (match := re.fullmatch(r"## ([^\r\n]+)\s*", line)) is not None
+    ]
+    headings = [heading for _, _, heading in matches]
     if headings != list(REQUIRED_DOSSIER_HEADINGS):
         raise PacketBuildError(
             "corrected request packet must contain exactly these dossier headings "
             f"in order: {list(REQUIRED_DOSSIER_HEADINGS)!r}; observed {headings!r}"
         )
     for index, required in enumerate(REQUIRED_DOSSIER_HEADINGS):
-        body_start = matches[index].end()
-        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        body_start = matches[index][1]
+        body_end = matches[index + 1][0] if index + 1 < len(matches) else len(text)
         body = text[body_start:body_end].strip()
         if not body:
             raise PacketBuildError(
                 f"corrected request packet section {required!r} must be non-empty"
             )
-        question_body = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
-        question_lines = [line.strip() for line in question_body.splitlines()]
         if required == "Problem statement" and not any(
-            line.endswith("?") and "://" not in line for line in question_lines
+            QUESTION_LINE.fullmatch(line.strip())
+            for start, _, line in authored_lines
+            if body_start <= start < body_end
         ):
             raise PacketBuildError(
                 "corrected request packet Problem statement must contain a question-shaped line"
