@@ -1121,7 +1121,20 @@ class _GrokInlineBase:
             return None
         menu_key, operation = operations[0]
         open_method = str(operation.get('open_method') or 'click').strip().lower()
-        if open_method == 'focus_and_key_open':
+        if open_method == 'mapped_pointer_activate':
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            if open_evidence.get('ok') is not True:
+                result.add_step(
+                    'select',
+                    False,
+                    f'{self.platform} selection trigger {trigger_key} mapped-pointer activation failed',
+                    trigger=trigger_key,
+                    open_method=open_method,
+                    open_evidence=open_evidence,
+                    snapshot=trigger_snapshot.serializable(),
+                )
+                return None
+        elif open_method == 'focus_and_key_open':
             open_key = str(operation.get('open_key') or '').strip()
             if not open_key:
                 result.add_step(
@@ -3326,8 +3339,6 @@ class GrokConsultationDriver(_GrokInlineBase):
     #          ONCE each; no stale-cache, no re-click recovery)
     # ------------------------------------------------------------------
     def attach_files(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
-        from consultation_v2.interact import atspi_focus
-
         if not request.attachments:
             result.add_step('attach', True, 'No Grok attachments requested')
             return True
@@ -3359,76 +3370,25 @@ class GrokConsultationDriver(_GrokInlineBase):
                                 snapshot=snap.serializable())
                 return False
             open_method = str(attachment.get('open_method') or '').strip().lower()
-            open_key = str(attachment.get('open_key') or '').strip()
-            if open_method != 'focus_and_key_open' or not open_key:
+            if open_method != 'mapped_pointer_activate' or 'open_key' in attachment:
                 result.add_step(
                     'attach',
                     False,
-                    'Grok attachment YAML does not declare an exact focus+key operation',
+                    'Grok attachment YAML does not declare the exact mapped-pointer operation',
                     open_method=open_method,
-                    open_key=open_key,
+                    open_key_present='open_key' in attachment,
                     snapshot=snap.serializable(),
                 )
                 return False
-            focus_evidence = {
-                'trigger': {
-                    'key': trigger.key,
-                    'name': trigger.name,
-                    'role': trigger.role,
-                    'states': list(trigger.states or []),
-                },
-                'focused': atspi_focus({
-                    'atspi_obj': trigger.atspi_obj,
-                    'name': trigger.name,
-                    'role': trigger.role,
-                }),
-            }
-            if not focus_evidence['focused']:
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            if open_evidence.get('ok') is not True:
                 result.add_step(
                     'attach',
                     False,
-                    f'Grok attach trigger focus failed for {abs_path}',
-                    focus_evidence=focus_evidence,
+                    f'Grok attach trigger mapped-pointer activation failed for {abs_path}',
+                    open_method=open_method,
+                    open_evidence=open_evidence,
                     snapshot=snap.serializable(),
-                )
-                return False
-
-            def _focused_trigger():
-                focus_snapshot = self.runtime.snapshot()
-                focused_trigger = self.find_first(focus_snapshot, trigger_key)
-                states = self._state_set(focused_trigger)
-                if focused_trigger is not None and 'focused' in states:
-                    return focus_snapshot, focused_trigger
-                return None
-
-            focused_state = self.runtime.wait_until(
-                _focused_trigger,
-                timeout=3.0,
-                interval=0.2,
-            )
-            if focused_state is None:
-                result.add_step(
-                    'attach',
-                    False,
-                    f'Grok attach trigger focus was not present in the fresh tree for {abs_path}',
-                    focus_evidence=focus_evidence,
-                )
-                return False
-            focused_snapshot, focused_trigger = focused_state
-            focus_evidence['fresh_trigger'] = {
-                'key': focused_trigger.key,
-                'name': focused_trigger.name,
-                'role': focused_trigger.role,
-                'states': list(focused_trigger.states or []),
-            }
-            if not self.runtime.press(open_key):
-                result.add_step(
-                    'attach',
-                    False,
-                    f'Grok attach trigger open key failed for {abs_path}',
-                    open_key=open_key,
-                    focus_evidence=focus_evidence,
-                    snapshot=focused_snapshot.serializable(),
                 )
                 return False
 

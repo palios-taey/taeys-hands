@@ -114,6 +114,7 @@ def consult_extract_action_tool() -> dict[str, object]:
                             'find',
                             'click',
                             'activate',
+                            'mapped_pointer_activate',
                             'focus_and_key',
                             'focus',
                             'key',
@@ -1245,6 +1246,7 @@ class TaeyConsultExtractionSeat:
             'find',
             'click',
             'activate',
+            'mapped_pointer_activate',
             'focus_and_key',
             'focus',
             'key',
@@ -1266,6 +1268,7 @@ class TaeyConsultExtractionSeat:
             'find',
             'click',
             'activate',
+            'mapped_pointer_activate',
             'focus_and_key',
             'focus',
             'key',
@@ -1304,6 +1307,13 @@ class TaeyConsultExtractionSeat:
         if action == 'typeahead' and name != 'upload_item':
             raise TaeyConsultExtractionError(
                 'typeahead is restricted to semantic step upload_item'
+            )
+        if action == 'mapped_pointer_activate' and (
+            not self.full_consult or name != 'attach_trigger'
+        ):
+            raise TaeyConsultExtractionError(
+                'mapped_pointer_activate is restricted to the full-consult '
+                'attach_trigger semantic step'
             )
         if action == 'navigate' and name != 'new_thread':
             raise TaeyConsultExtractionError(
@@ -1371,6 +1381,7 @@ class TaeyConsultExtractionSeat:
                 'find',
                 'click',
                 'activate',
+                'mapped_pointer_activate',
                 'focus_and_key',
                 'focus',
                 'paste_prompt',
@@ -1381,6 +1392,7 @@ class TaeyConsultExtractionSeat:
             action in {
                 'click',
                 'activate',
+                'mapped_pointer_activate',
                 'focus_and_key',
                 'focus',
                 'paste_prompt',
@@ -1431,11 +1443,29 @@ class TaeyConsultExtractionSeat:
                 'contains': False,
             }
         attachment = (self.cfg.get('workflow') or {}).get('attachment') or {}
-        open_method = (
-            str(attachment.get('open_method') or 'click')
-            if isinstance(attachment, dict)
-            else 'click'
-        )
+        if not isinstance(attachment, dict):
+            raise TaeyConsultControlError(
+                f'{self.platform} workflow.attachment must be a mapping'
+            )
+        open_method = str(attachment.get('open_method') or '').strip()
+        if open_method not in {
+            'atspi_menu',
+            'click',
+            'focus_and_key_open',
+            'mapped_pointer_activate',
+        }:
+            raise TaeyConsultControlError(
+                f'{self.platform} full-consult attachment has unsupported '
+                f'open_method {open_method!r}'
+            )
+        if (
+            open_method == 'mapped_pointer_activate'
+            and 'open_key' in attachment
+        ):
+            raise TaeyConsultControlError(
+                f'{self.platform} mapped_pointer_activate attachment must not '
+                'declare open_key'
+            )
         if not self.attach_trigger_activated:
             if self._stored_semantic_control('attach_trigger') is None:
                 return {
@@ -1460,11 +1490,22 @@ class TaeyConsultExtractionSeat:
                     'name': open_key,
                     'contains': False,
                 }
-            return {
-                'action': 'click',
-                'name': 'attach_trigger',
-                'contains': False,
-            }
+            if open_method == 'mapped_pointer_activate':
+                return {
+                    'action': 'mapped_pointer_activate',
+                    'name': 'attach_trigger',
+                    'contains': False,
+                }
+            if open_method in {'atspi_menu', 'click'}:
+                return {
+                    'action': 'click',
+                    'name': 'attach_trigger',
+                    'contains': False,
+                }
+            raise TaeyConsultControlError(
+                f'{self.platform} full-consult attachment has no exact action '
+                f'for open_method {open_method!r}'
+            )
         if not self.upload_control_clicked:
             typeahead_label = (
                 str(attachment.get('typeahead_label') or '').strip()
@@ -1728,6 +1769,7 @@ class TaeyConsultExtractionSeat:
                 'an actionable exact name and role'
             )
         element_ref = found.get('element_ref')
+        operation_evidence: dict[str, object] | None = None
         if element_ref is not None:
             self.runtime.scroll_element_into_view(element_ref)
             steps = self.full_consult_contract['steps']
@@ -1753,7 +1795,12 @@ class TaeyConsultExtractionSeat:
                     f'{self.platform} semantic step {step!r} disappeared '
                     'after scroll; nothing activated'
                 )
-            if action == 'focus_and_key':
+            if action == 'mapped_pointer_activate':
+                evidence = self.runtime.mapped_pointer_activate(refreshed_ref)
+                acted = evidence.get('ok') is True
+                actuator_name = 'runtime.mapped_pointer_activate'
+                operation_evidence = dict(evidence)
+            elif action == 'focus_and_key':
                 key = str(step_cfg.get('key') or '')
                 evidence = self.runtime.focus_and_key_open(
                     refreshed_ref,
@@ -1767,7 +1814,7 @@ class TaeyConsultExtractionSeat:
                     self.runtime.click(refreshed_ref, strategy='atspi_only')
                 )
                 actuator_name = 'runtime.click'
-        elif action == 'focus_and_key':
+        elif action in {'focus_and_key', 'mapped_pointer_activate'}:
             steps = self.full_consult_contract['steps']
             step_cfg = steps.get(step) if isinstance(steps, dict) else None
             key = (
@@ -1794,13 +1841,19 @@ class TaeyConsultExtractionSeat:
                 ],
                 atspi_obj=found.get('node'),
             )
-            evidence = self.runtime.focus_and_key_open(
-                element,
-                key=key,
-                settle=0.3,
-            )
-            acted = bool(evidence.get('ok'))
-            actuator_name = 'runtime.focus_and_key_open'
+            if action == 'mapped_pointer_activate':
+                evidence = self.runtime.mapped_pointer_activate(element)
+                acted = evidence.get('ok') is True
+                actuator_name = 'runtime.mapped_pointer_activate'
+                operation_evidence = dict(evidence)
+            else:
+                evidence = self.runtime.focus_and_key_open(
+                    element,
+                    key=key,
+                    settle=0.3,
+                )
+                acted = bool(evidence.get('ok'))
+                actuator_name = 'runtime.focus_and_key_open'
         else:
             actuator = self.act.do if action == 'activate' else self.act.click
             acted = bool(
@@ -1819,13 +1872,19 @@ class TaeyConsultExtractionSeat:
                 f'{actuator_name}({control_name!r}, role={role!r}) '
                 f'failed for semantic step {step!r}'
             )
-        return {
+        receipt = {
             'semantic_step': step,
             'element_key': str(found.get('element_key') or ''),
             'control_name': control_name,
             'role': role,
             'scope': str(found.get('scope') or ''),
         }
+        if operation_evidence is not None:
+            receipt.update({
+                'performed_primitive': 'mapped_pointer_activate',
+                'operation_evidence': operation_evidence,
+            })
+        return receipt
 
     def _mode_element_control(
         self,
@@ -3406,7 +3465,12 @@ class TaeyConsultExtractionSeat:
                 'control_name': str(found.get('name') or ''),
                 'role': str(found.get('role') or ''),
             }
-        if action in {'click', 'activate', 'focus_and_key'}:
+        if action in {
+            'click',
+            'activate',
+            'mapped_pointer_activate',
+            'focus_and_key',
+        }:
             before_url = ''
             if name in {'attach_trigger', 'upload_item', 'submit'}:
                 before_url = self._current_url()
