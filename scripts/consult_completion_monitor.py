@@ -346,15 +346,33 @@ def _record_extraction_outcome(
 
 
 def _run_extraction(route: dict[str, object]) -> dict[str, object]:
+    from consultation_v2.yaml_contract import load_platform_yaml
+
     started_at = time.time()
     handoff: dict[str, object] = {}
     try:
+        platform = str(route.get("platform") or "")
+        workflow = load_platform_yaml(platform).get("workflow")
+        if not isinstance(workflow, dict):
+            raise RuntimeError(f"{platform} workflow must be a mapping")
+        monitor = workflow.get("monitor")
+        if not isinstance(monitor, dict):
+            raise RuntimeError(f"{platform} workflow.monitor must be a mapping")
+        extraction_timeout = monitor.get("extraction_timeout", 900)
+        if (
+            isinstance(extraction_timeout, bool)
+            or not isinstance(extraction_timeout, int)
+            or extraction_timeout <= 0
+        ):
+            raise RuntimeError(
+                f"{platform} workflow.monitor.extraction_timeout must be a positive integer"
+            )
         handoff = _prepare_extraction_handoff(route)
         completed = subprocess.run(
             handoff["command_parts"],
             capture_output=True,
             text=True,
-            timeout=900,
+            timeout=extraction_timeout,
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout).strip()
