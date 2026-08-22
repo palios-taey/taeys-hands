@@ -7,7 +7,11 @@ import time
 from typing import Any, Callable, Iterable, Optional
 
 from consultation_v2 import atspi, clipboard, input as inp
-from consultation_v2.interact import atspi_click, atspi_focus
+from consultation_v2.interact import (
+    atspi_click,
+    atspi_focus,
+    atspi_mapped_pointer_activate,
+)
 from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.platforms_runtime import display_environment
 from consultation_v2.tree import find_elements
@@ -448,6 +452,35 @@ class ConsultationRuntime:
                 {"atspi_obj": element.atspi_obj, "name": element.name, "role": element.role}
             )
         )
+
+    def mapped_pointer_activate(
+        self,
+        element: ElementRef,
+    ) -> dict[str, Any]:
+        self._sync_platform_io_display()
+        evidence: dict[str, Any] = {
+            'ok': False,
+            'method': 'mapped_pointer_activate',
+            'element': {
+                'key': element.key,
+                'name': element.name,
+                'role': element.role,
+            },
+            'actuation': None,
+        }
+        actuation = atspi_mapped_pointer_activate({
+            'atspi_obj': element.atspi_obj,
+            'name': element.name,
+            'role': element.role,
+        })
+        evidence['actuation'] = actuation
+        if actuation.get('ok') is not True:
+            evidence['error'] = str(
+                actuation.get('error') or 'mapped_pointer_activate_failed'
+            )
+            return evidence
+        evidence['ok'] = True
+        return evidence
 
     def focus_and_key_open(
         self,

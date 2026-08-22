@@ -1,4 +1,4 @@
-"""Keyboard and mapped hover input via xdotool, clipboard paste via xsel+Ctrl+V."""
+"""Keyboard and mapped pointer input via xdotool, clipboard paste via xsel+Ctrl+V."""
 
 import os
 import subprocess
@@ -37,6 +37,27 @@ def press_key(key: str, timeout: int = 10) -> bool:
         return False
     except Exception as e:
         logger.error(f"xdotool key {key} error: {e}")
+        return False
+
+
+def click_at(x: int, y: int, timeout: int = 5) -> bool:
+    """Move to one live-mapped screen point and click the primary button once."""
+    try:
+        result = subprocess.run(
+            ['xdotool', 'mousemove', str(x), str(y), 'click', '1'],
+            env=_get_env(), capture_output=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Mapped pointer activation failed: %s",
+                result.stderr.decode(),
+            )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        logger.error("Mapped pointer activation timed out")
+        return False
+    except Exception as exc:
+        logger.error("Mapped pointer activation error: %s", exc)
         return False
 
 
