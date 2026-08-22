@@ -420,6 +420,14 @@ EOF
     log "wrote ${SYSTEMD_USER_DIR}/taey-consult-monitor@.service"
 }
 
+has_consult_monitor() {
+    local display_num="$1"
+    case "${DISPLAY_PLATFORM[$display_num]}" in
+        chatgpt|claude|gemini|grok|perplexity) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 write_display_unit() {
     local display_num="$1"
     local platform="${DISPLAY_PLATFORM[$display_num]}"
@@ -428,9 +436,13 @@ write_display_unit() {
     local vnc_enabled=0
     local vnc_port=$((5900 + display_num))
     local unit_path="${SYSTEMD_USER_DIR}/taey-display-${display_num}.service"
+    local monitor_wants=""
 
     if ! ${NO_VNC}; then
         vnc_enabled=1
+    fi
+    if has_consult_monitor "${display_num}"; then
+        monitor_wants="Wants=taey-consult-monitor@${display_num}.service"
     fi
 
     cat > "${unit_path}" <<EOF
@@ -438,7 +450,7 @@ write_display_unit() {
 Description=Taey Display :${display_num} (${platform})
 After=taey-xvfb@${display_num}.service
 Requires=taey-xvfb@${display_num}.service
-Wants=taey-consult-monitor@${display_num}.service
+${monitor_wants}
 
 [Service]
 Type=simple
@@ -495,7 +507,11 @@ for unit in "${INSTALLED[@]}"; do
     display_num="${unit#taey-display-}"
     display_num="${display_num%.service}"
     systemctl --user enable "taey-bus-watcher@${display_num}.service" >/dev/null
-    systemctl --user enable "taey-consult-monitor@${display_num}.service" >/dev/null
+    if has_consult_monitor "${display_num}"; then
+        systemctl --user enable "taey-consult-monitor@${display_num}.service" >/dev/null
+    else
+        systemctl --user disable "taey-consult-monitor@${display_num}.service" >/dev/null
+    fi
 done
 log "enabled: ${INSTALLED[*]}"
 
@@ -521,13 +537,18 @@ for unit in "${INSTALLED[@]}"; do
     display_num="${unit#taey-display-}"
     display_num="${display_num%.service}"
     watcher_state="$(systemctl --user is-active "taey-bus-watcher@${display_num}.service" 2>/dev/null || true)"
-    monitor_state="$(systemctl --user is-active "taey-consult-monitor@${display_num}.service" 2>/dev/null || true)"
+    monitor_state="not-applicable"
+    if has_consult_monitor "${display_num}"; then
+        monitor_state="$(systemctl --user is-active "taey-consult-monitor@${display_num}.service" 2>/dev/null || true)"
+    fi
     echo "  ${unit}: ${state}"
     echo "  taey-bus-watcher@${display_num}.service: ${watcher_state}"
     echo "  taey-consult-monitor@${display_num}.service: ${monitor_state}"
     [[ "${state}" == "active" ]] || failed=1
     [[ "${watcher_state}" == "active" ]] || failed=1
-    [[ "${monitor_state}" == "active" ]] || failed=1
+    if has_consult_monitor "${display_num}"; then
+        [[ "${monitor_state}" == "active" ]] || failed=1
+    fi
 done
 
 if ! ${NO_VNC}; then
