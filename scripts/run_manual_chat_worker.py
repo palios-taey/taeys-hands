@@ -850,25 +850,44 @@ def _extract_content(
     completed_before_stop_source_sha256: str | None = None,
 ) -> str:
     if platform == "claude":
+        _require_extraction_steps(
+            "claude",
+            "assistant_text",
+            (
+                ("scroll_to_bottom", "message_actions_button", "last", None),
+                ("hover", "message_actions_button", "last", None),
+                ("copy_element", "copy_button", "last", None),
+                ("read_clipboard", None, "last", None),
+            ),
+        )
         return (
             f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one frozen "
             f"Claude extraction transaction on {display} with drive_chat only. Do not read any file, "
             "runbook, or YAML. For click, pass only the exact element key mapped by the immediately "
-            "preceding fresh observation; do not copy or pass an opaque ref. Execute exactly this "
+            f"preceding fresh observation; do not copy or pass an opaque ref. Every drive_chat call "
+            f"must include display={display}; omission is a terminal card violation. Execute exactly this "
             "sequence:\n"
-            "1. observe scope=base; require current_url to contain /chat/, require continue_button "
+            f"1. drive_chat display={display}, action=observe, scope=base; require current_url to "
+            "contain /chat/, require continue_button "
             "to be absent, and require none of these mapped exception elements: "
             "send_blocked_previous_message, send_blocked_previous_message_curly, network_connection_alert, "
             "send_blocked_caution_banner, claude_capacity_alert, claude_capacity_alert_pro, "
             "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
             "claude_chat_length_limit_alert.\n"
-            "2. key ctrl+End; observe scope=base; require the same "
-            "/chat/ URL condition, continue_button absent, no mapped exception, at least "
-            "one mapped copy_button, and exactly one fresh copy_button target marked by the YAML last_by_y "
-            "selection.\n"
-            "3. click element=copy_button; observe scope=base; require the "
+            f"2. drive_chat display={display}, action=key, key=ctrl+End; then drive_chat "
+            f"display={display}, action=observe, scope=base; require the same "
+            "/chat/ URL condition, continue_button absent, no mapped exception, and exactly one "
+            "mapped message_actions_button owned by the current_response_article.\n"
+            f"3. drive_chat display={display}, action=hover, element=message_actions_button exactly "
+            f"once; then drive_chat display={display}, action=observe, scope=base; require the same "
+            "/chat/ URL condition, continue_button absent, no mapped exception, exactly one mapped "
+            "copy_button named Copy, and exactly one fresh copy_button target marked by the YAML "
+            "last_by_y selection.\n"
+            f"4. drive_chat display={display}, action=click, element=copy_button; then drive_chat "
+            f"display={display}, action=observe, scope=base; require the "
             "same /chat/ URL condition, continue_button absent, and no mapped exception.\n"
-            f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a new "
+            f"5. drive_chat display={display}, action=read_clipboard, output_file={response_file}. "
+            "Require that drive_chat created a new "
             "non-empty response file and return its byte count and SHA-256. Then stop all UI calls.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, send, "
