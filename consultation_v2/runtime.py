@@ -882,7 +882,10 @@ class ConsultationRuntime:
         # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
         time.sleep(0.3)
         focused = bool(self.wait_until(self._address_bar_focused, timeout=3.0, interval=0.3))
-        if not focused and not self.focus_address_bar():
+        if not focused:
+            self.focus_address_bar()
+            focused = bool(self.wait_until(self._address_bar_focused, timeout=3.0, interval=0.3))
+        if not focused:
             logger.error(
                 'navigate: address bar not focused after navigation key; refusing to paste URL'
             )
