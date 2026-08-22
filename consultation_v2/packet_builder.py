@@ -564,7 +564,7 @@ def _render_bundle_a(
             f"\n## IDENTITY\n\n# {identity.record['logical']}\n\n<!-- BEGIN-VERBATIM: {identity.record['logical']} -->\n".encode(),
             identity.data,
             b"\n<!-- END-VERBATIM -->\n",
-            b"\n## SPOTLIGHT STANDARD FOR INTEGRITY\n\n# SPOTLIGHT_STANDARD_FOR_INTEGRITY.md\n\n<!-- BEGIN-VERBATIM: SPOTLIGHT_STANDARD_FOR_INTEGRITY.md -->\n",
+            f"\n## SPOTLIGHT STANDARD FOR INTEGRITY\n\n# {spotlight.record['logical']}\n\n<!-- BEGIN-VERBATIM: {spotlight.record['logical']} -->\n".encode(),
             spotlight.data,
             b"\n<!-- END-VERBATIM -->\n",
         )
