@@ -718,7 +718,21 @@ def _validate_task_dossier(source: SourceBytes) -> tuple[str, ...]:
         raise PacketBuildError(
             "corrected request packet must not contain raw HTML or angle-bracket syntax"
         )
-    authored_lines = _authored_markdown_lines(text)
+    markdown_offset = 0
+    front_matter = re.match(r"\A---[ \t]*\r?\n", text)
+    if front_matter is not None:
+        closing = re.search(
+            r"^---[ \t]*\r?$",
+            text[front_matter.end() :],
+            flags=re.MULTILINE,
+        )
+        if closing is None:
+            raise PacketBuildError("corrected request packet front matter is unclosed")
+        markdown_offset = front_matter.end() + closing.end()
+    authored_lines = tuple(
+        (start + markdown_offset, end + markdown_offset, line)
+        for start, end, line in _authored_markdown_lines(text[markdown_offset:])
+    )
     matches = [
         (start, end, match.group(1).strip())
         for start, end, line in authored_lines

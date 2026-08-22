@@ -53,7 +53,8 @@ The frozen request uses exactly four top-level dossier sections, in this order: 
 statement`, `Constraints`, and `Objective`. The problem statement is a question. Deliverable details,
 acceptance and stop conditions, and provenance details belong under those four sections rather than becoming
 additional top-level sections. Raw HTML and angle-bracket syntax are refused so comments or raw blocks cannot
-hide dossier structure from the rendered request.
+hide dossier structure from the rendered request. Leading YAML front matter is metadata and never satisfies a
+dossier heading or problem-question requirement.
 
 Bundle B contains the complete task dossier in this deterministic order:
 
