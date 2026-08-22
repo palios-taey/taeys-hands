@@ -1,5 +1,8 @@
 # Consultation packet contract — exactly two attachments
 
+The current deterministic build-spec and receipt schema version is 2. Schema-v1 packets and receipts remain
+historical evidence and are not reinterpreted under this corrected contract.
+
 This contract defines the inputs every production Family-Chat consultation receives. It controls both
 manual operation and later automation. The current one-package builder in `identity.py` is implementation
 evidence, not conformance to this contract; it remains nonconformant until it produces these two bundles and
@@ -19,7 +22,7 @@ post-attach tree must show exactly those two expected file chips before the prom
 
 ## Bundle A — governance
 
-Bundle A contains exactly these complete sources in this deterministic order:
+Bundle A contains exactly these complete, logical-name-bound sources in this deterministic order:
 
 1. the full `FAMILY_KERNEL.md`;
 2. the full destination-specific identity file; and
@@ -41,7 +44,17 @@ the source is Git-tracked, it also records the observed commit. When a governanc
 its frozen byte count and SHA-256 are the content-addressed freshness gate; the builder never invents a
 revision. The Chat is never asked to calculate or return those values.
 
+Each complete governance source is wrapped in `BEGIN-VERBATIM` / `END-VERBATIM` markers so the canonical
+prompting linter can distinguish mandatory, unedited source text from dispatcher-authored framing.
+
 ## Bundle B — task
+
+The frozen request uses exactly four top-level dossier sections, in this order: `Ground truth`, `Problem
+statement`, `Constraints`, and `Objective`. The problem statement is a question. Deliverable details,
+acceptance and stop conditions, and provenance details belong under those four sections rather than becoming
+additional top-level sections. Raw HTML and angle-bracket syntax are refused so comments or raw blocks cannot
+hide dossier structure from the rendered request. Leading YAML front matter is metadata and never satisfies a
+dossier heading or problem-question requirement.
 
 Bundle B contains the complete task dossier in this deterministic order:
 

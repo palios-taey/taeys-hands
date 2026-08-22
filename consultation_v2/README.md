@@ -86,7 +86,10 @@ path.
 ## Deterministic packet construction
 
 `scripts/consultation-packet-builder` builds the two attachment files, local prompt, and local receipt from
-a frozen JSON spec. `freeze-spec --draft-spec DRAFT --source DOSSIER.md --output FROZEN` accepts the final
+a schema-v2 frozen JSON spec. The corrected dossier contains exactly four top-level sections in canonical
+order—`Ground truth`, `Problem statement`, `Constraints`, and `Objective`—and Bundle A wraps each complete
+governance source in its named VERBATIM region. Schema-v1 artifacts remain historical and are not accepted by
+the current builder. `freeze-spec --draft-spec DRAFT --source DOSSIER.md --output FROZEN` accepts the final
 spec shape with the corrected dossier content address, builder commit/module digest, and rendered expectations
 set to `null`. It reads the explicitly named Markdown dossier, uses the same canonical renderers, fills those
 values, validates the result through the complete preflight path, and creates the frozen spec exclusively
