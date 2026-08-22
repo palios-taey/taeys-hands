@@ -719,8 +719,12 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
     prompt = _validate_prompt(prompt_text_value, prompt_expected_hash)
 
     destination_values = governance["destinations"]
-    if not isinstance(destination_values, list) or len(destination_values) != 2:
-        raise PacketBuildError("this builder invocation requires exactly two destinations")
+    if not isinstance(destination_values, list) or not destination_values:
+        raise PacketBuildError("governance.destinations must contain at least one destination")
+    if len(destination_values) > len(IDENTITY_BY_PLATFORM):
+        raise PacketBuildError(
+            "governance.destinations exceeds the five mapped Family platforms"
+        )
     destinations: list[DestinationBytes] = []
     bundle_b_basename_by_platform: dict[str, str] = {}
     identity_sources: list[SourceBytes] = []
@@ -761,11 +765,17 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         _expected_blob(bundle_a, expected_bundle_a, f"{context}.expected_bundle_a")
         _validate_source_inclusion(bundle_a, (kernel, identity, spotlight), f"{platform} Bundle A")
         absolute_paths = destination["expected_bundle_a_absolute_paths"]
-        if not isinstance(absolute_paths, list) or len(absolute_paths) != 2:
-            raise PacketBuildError(f"{context}.expected_bundle_a_absolute_paths must contain two strings")
+        if not isinstance(absolute_paths, list):
+            raise PacketBuildError(
+                f"{context}.expected_bundle_a_absolute_paths must be an array"
+            )
         expected_paths = tuple(_require_text(value, f"{context}.expected_bundle_a_absolute_paths") for value in absolute_paths)
+        if len(set(expected_paths)) != len(expected_paths):
+            raise PacketBuildError(
+                f"{context}.expected_bundle_a_absolute_paths contains duplicates"
+            )
         observed_paths = tuple(path for path in expected_paths if bundle_a.count(path.encode()) == 1)
-        if observed_paths != expected_paths or bundle_a.count(b"/home/") != 2:
+        if observed_paths != expected_paths or bundle_a.count(b"/home/") != len(expected_paths):
             raise PacketBuildError(f"{platform} Bundle A absolute-path scope differs")
         send_task = destination["send_task"]
         if not isinstance(send_task, dict):
@@ -816,8 +826,11 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         )
     if len({destination.platform for destination in destinations}) != len(destinations):
         raise PacketBuildError("destination platforms must be unique")
-    if len({name for destination in destinations for name in (destination.bundle_a_basename, bundle_b_basename_by_platform[destination.platform], destination.prompt_basename, destination.receipt_basename)}) != 8:
-        raise PacketBuildError("the two destination sets must produce exactly eight unique basenames")
+    expected_basename_count = 4 * len(destinations)
+    if len({name for destination in destinations for name in (destination.bundle_a_basename, bundle_b_basename_by_platform[destination.platform], destination.prompt_basename, destination.receipt_basename)}) != expected_basename_count:
+        raise PacketBuildError(
+            "each destination must produce four unique packet basenames"
+        )
     for destination in destinations:
         for other_identity in identity_sources:
             count = destination.bundle_a.count(other_identity.data)
@@ -986,16 +999,23 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
     if not isinstance(worker_spec, dict) or "r3_correction" not in worker_spec:
         raise PacketBuildError("receipt must preserve worker_spec.r3_correction")
     files = receipt["files"]
-    if not isinstance(files, list) or len(files) != 8:
-        raise PacketBuildError("receipt files must contain all eight generated files")
-    if len({item.get("basename") for item in files if isinstance(item, dict)}) != 8:
+    if (
+        not isinstance(files, list)
+        or len(files) < 4
+        or len(files) > 4 * len(IDENTITY_BY_PLATFORM)
+        or len(files) % 4 != 0
+    ):
+        raise PacketBuildError(
+            "receipt files must contain four generated files per destination"
+        )
+    if len({item.get("basename") for item in files if isinstance(item, dict)}) != len(files):
         raise PacketBuildError("receipt files basenames must be unique")
     expected_basenames = sorted(item["basename"] for item in files)
     with os.scandir(path.parent) as entries:
         live_basenames = sorted(entry.name for entry in entries)
     if live_basenames != expected_basenames:
         raise PacketBuildError(
-            "live output directory entries differ from the receipt's exact eight-file inventory"
+            "live output directory entries differ from the receipt's exact file inventory"
         )
     observed_files: list[dict[str, Any]] = []
     for item in files:
@@ -1006,8 +1026,10 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
         observed_files.append(_observed_path_record(path.parent / basename, "regular"))
     if files != observed_files:
         raise PacketBuildError("receipt file inventory differs from live output root")
-    if receipt["checks"].get("generated_regular_file_count") != 8:
-        raise PacketBuildError("receipt generated_regular_file_count must equal eight")
+    if receipt["checks"].get("generated_regular_file_count") != len(files):
+        raise PacketBuildError(
+            "receipt generated_regular_file_count must equal the live file count"
+        )
     if any(receipt["actions"].get(key) is not False for key in PROHIBITED_ACTIONS):
         raise PacketBuildError("receipt prohibited action fields must all be false")
     attachments = receipt["attachments"]
@@ -1078,14 +1100,17 @@ def build_consultation_bundles(spec_path: str | Path) -> dict[str, Any]:
             descriptors[basename] = _open_exclusive(path)
             file_paths.append(path)
         files = [_observed_path_record(path, "regular") for path in sorted(file_paths)]
-        if len(files) != 8:
-            raise PacketBuildError("construction did not create exactly eight regular files")
+        expected_file_count = 4 * len(prepared.destinations)
+        if len(files) != expected_file_count:
+            raise PacketBuildError(
+                "construction did not create four regular files per destination"
+            )
         expected_basenames = sorted(content_by_basename)
         with os.scandir(prepared.output_root) as entries:
             live_basenames = sorted(entry.name for entry in entries)
         if live_basenames != expected_basenames:
             raise PacketBuildError(
-                "live output directory entries differ from the exact eight intended basenames"
+                "live output directory entries differ from the exact intended basenames"
             )
 
         for basename, data in content_by_basename.items():
