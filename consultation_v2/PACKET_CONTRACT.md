@@ -1,5 +1,8 @@
 # Consultation packet contract — exactly two attachments
 
+The current deterministic build-spec and receipt schema version is 2. Schema-v1 packets and receipts remain
+historical evidence and are not reinterpreted under this corrected contract.
+
 This contract defines the inputs every production Family-Chat consultation receives. It controls both
 manual operation and later automation. The current one-package builder in `identity.py` is implementation
 evidence, not conformance to this contract; it remains nonconformant until it produces these two bundles and
@@ -41,7 +44,15 @@ the source is Git-tracked, it also records the observed commit. When a governanc
 its frozen byte count and SHA-256 are the content-addressed freshness gate; the builder never invents a
 revision. The Chat is never asked to calculate or return those values.
 
+Each complete governance source is wrapped in `BEGIN-VERBATIM` / `END-VERBATIM` markers so the canonical
+prompting linter can distinguish mandatory, unedited source text from dispatcher-authored framing.
+
 ## Bundle B — task
+
+The frozen request uses exactly four top-level dossier sections, in this order: `Ground truth`, `Problem
+statement`, `Constraints`, and `Objective`. The problem statement is a question. Deliverable details,
+acceptance and stop conditions, and provenance details belong under those four sections rather than becoming
+additional top-level sections.
 
 Bundle B contains the complete task dossier in this deterministic order:
 

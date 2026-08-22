@@ -23,15 +23,13 @@ IDENTITY_BY_PLATFORM = {
 }
 
 PROMPTING_LINT = Path("/usr/local/bin/prompting-lint")
+SCHEMA_VERSION = 2
 
 REQUIRED_DOSSIER_HEADINGS = (
-    "Objective",
     "Ground truth",
     "Problem statement",
     "Constraints",
-    "Required deliverable",
-    "Acceptance and stop conditions",
-    "Provenance manifest",
+    "Objective",
 )
 
 FORBIDDEN_PROMPT_TERMS = (
@@ -560,15 +558,44 @@ def _render_bundle_a(
 ) -> bytes:
     return b"".join(
         (
-            f"# {request_id} {display_name} Bundle A - Governance\n\n## FAMILY KERNEL\n\n# FAMILY_KERNEL.md\n".encode(),
+            f"# {request_id} {display_name} Bundle A - Governance\n\n## FAMILY KERNEL\n\n# FAMILY_KERNEL.md\n\n<!-- BEGIN-VERBATIM: FAMILY_KERNEL.md -->\n".encode(),
             kernel.data,
-            f"\n\n## IDENTITY\n\n# {identity.record['logical']}\n".encode(),
+            b"\n<!-- END-VERBATIM -->\n",
+            f"\n## IDENTITY\n\n# {identity.record['logical']}\n\n<!-- BEGIN-VERBATIM: {identity.record['logical']} -->\n".encode(),
             identity.data,
-            b"\n\n## SPOTLIGHT STANDARD FOR INTEGRITY\n\n# SPOTLIGHT_STANDARD_FOR_INTEGRITY.md\n",
+            b"\n<!-- END-VERBATIM -->\n",
+            b"\n## SPOTLIGHT STANDARD FOR INTEGRITY\n\n# SPOTLIGHT_STANDARD_FOR_INTEGRITY.md\n\n<!-- BEGIN-VERBATIM: SPOTLIGHT_STANDARD_FOR_INTEGRITY.md -->\n",
             spotlight.data,
-            b"\n",
+            b"\n<!-- END-VERBATIM -->\n",
         )
     )
+
+
+def _validate_bundle_a_verbatim_markers(
+    bundle_a: bytes, logicals: Sequence[str], context: str
+) -> tuple[str, ...]:
+    cursor = 0
+    end_marker = b"<!-- END-VERBATIM -->"
+    for logical in logicals:
+        begin_marker = f"<!-- BEGIN-VERBATIM: {logical} -->".encode()
+        if bundle_a.count(begin_marker) != 1:
+            raise PacketBuildError(
+                f"{context} must contain one BEGIN-VERBATIM marker for {logical}"
+            )
+        begin_index = bundle_a.find(begin_marker, cursor)
+        if begin_index < 0:
+            raise PacketBuildError(
+                f"{context} has out-of-order VERBATIM markers for {logical}"
+            )
+        end_index = bundle_a.find(end_marker, begin_index + len(begin_marker))
+        if end_index < 0:
+            raise PacketBuildError(
+                f"{context} has no END-VERBATIM marker for {logical}"
+            )
+        cursor = end_index + len(end_marker)
+    if bundle_a.count(end_marker) != len(logicals):
+        raise PacketBuildError(f"{context} has an unexpected VERBATIM marker count")
+    return tuple(logicals)
 
 
 def _render_bundle_b(
@@ -622,25 +649,23 @@ def _validate_task_dossier(source: SourceBytes) -> tuple[str, ...]:
         raise PacketBuildError("corrected request packet is not UTF-8") from exc
     matches = list(re.finditer(r"^## ([^\r\n]+)\s*$", text, flags=re.MULTILINE))
     headings = [match.group(1).strip() for match in matches]
-    positions: list[int] = []
-    for required in REQUIRED_DOSSIER_HEADINGS:
-        count = headings.count(required)
-        if count != 1:
-            raise PacketBuildError(
-                f"corrected request packet must contain heading {required!r} exactly once; observed {count}"
-            )
-        index = headings.index(required)
-        positions.append(index)
+    if headings != list(REQUIRED_DOSSIER_HEADINGS):
+        raise PacketBuildError(
+            "corrected request packet must contain exactly these dossier headings "
+            f"in order: {list(REQUIRED_DOSSIER_HEADINGS)!r}; observed {headings!r}"
+        )
+    for index, required in enumerate(REQUIRED_DOSSIER_HEADINGS):
         body_start = matches[index].end()
         body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        if not text[body_start:body_end].strip():
+        body = text[body_start:body_end].strip()
+        if not body:
             raise PacketBuildError(
                 f"corrected request packet section {required!r} must be non-empty"
             )
-    if positions != sorted(positions):
-        raise PacketBuildError(
-            "corrected request packet dossier headings are out of order"
-        )
+        if required == "Problem statement" and "?" not in body:
+            raise PacketBuildError(
+                "corrected request packet Problem statement must be a question"
+            )
     return REQUIRED_DOSSIER_HEADINGS
 
 
@@ -861,7 +886,7 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
     spec_data = _read_regular_file(spec_path, "build spec")
     spec = _strict_json(spec_data, "build spec")
     _require_exact_keys(spec, TOP_LEVEL_SPEC_KEYS, "build spec")
-    if spec["schema_version"] != 1:
+    if spec["schema_version"] != SCHEMA_VERSION:
         raise PacketBuildError("unsupported build spec schema_version")
     request_id = _require_text(spec["request_id"], "request_id")
     _require_text(spec["canonical_task_id"], "canonical_task_id")
@@ -1055,6 +1080,15 @@ def _prepare_build(spec_path: Path) -> PreparedBuild:
         )
         bundle_a = _render_bundle_a(
             request_id, display_name, kernel, identity, spotlight
+        )
+        _validate_bundle_a_verbatim_markers(
+            bundle_a,
+            (
+                kernel.record["logical"],
+                identity.record["logical"],
+                spotlight.record["logical"],
+            ),
+            f"{platform} Bundle A",
         )
         expected_bundle_a = destination["expected_bundle_a"]
         if not isinstance(expected_bundle_a, dict):
@@ -1545,6 +1579,15 @@ def _freeze_expected_outputs(
             identity,
             spotlight,
         )
+        _validate_bundle_a_verbatim_markers(
+            bundle_a,
+            (
+                kernel.record["logical"],
+                identity.record["logical"],
+                spotlight.record["logical"],
+            ),
+            f"{platform} Bundle A",
+        )
         frozen_expectation = {
             "bytes": len(bundle_a),
             "sha256": _sha256(bundle_a),
@@ -1668,7 +1711,7 @@ def freeze_consultation_spec(
         draft_data = _read_regular_file(draft_path, "draft build spec")
         spec = _strict_json(draft_data, "draft build spec")
         _require_exact_keys(spec, TOP_LEVEL_SPEC_KEYS, "draft build spec")
-        if spec.get("schema_version") != 1:
+        if spec.get("schema_version") != SCHEMA_VERSION:
             raise PacketBuildError("unsupported draft build spec schema_version")
         _assert_not_rejected_input(
             output,
@@ -1735,7 +1778,7 @@ def _receipt(
         if source.record["logical"].startswith("packet_")
     )
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "request_id": prepared.spec["request_id"],
         "canonical_task_id": prepared.spec["canonical_task_id"],
         "superseded_task_id": prepared.spec["superseded_task_id"],
@@ -1793,6 +1836,11 @@ def _receipt(
         "checks": {
             "source_size_hash_verification": True,
             "bundle_a_exact_once_count": 3,
+            "bundle_a_verbatim_sources": [
+                prepared.kernel.record["logical"],
+                destination.identity.record["logical"],
+                prepared.spotlight.record["logical"],
+            ],
             "bundle_b_exact_once_count": len(prepared.task_sources),
             "bundle_b_required_dossier_sections": list(prepared.dossier_sections),
             "deterministic_order": True,
@@ -1907,7 +1955,7 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
             "receipt root metadata does not match os.stat(actual_root)"
         )
     _require_exact_keys(receipt, RECEIPT_KEYS, "receipt")
-    if receipt["schema_version"] != 1:
+    if receipt["schema_version"] != SCHEMA_VERSION:
         raise PacketBuildError("receipt schema_version is unsupported")
     request_id = _require_text(receipt["request_id"], "receipt request_id")
     destination = _require_text(receipt["destination"], "receipt destination")
@@ -1968,6 +2016,7 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
         {"a", "b"}
     ):
         raise PacketBuildError("receipt must designate exactly Bundle A and Bundle B")
+    attachment_data: dict[str, bytes] = {}
     for label, attachment in attachments.items():
         if not isinstance(attachment, dict):
             raise PacketBuildError(f"attachment {label} must be an object")
@@ -1986,6 +2035,22 @@ def validate_consultation_bundle_receipt(receipt_path: str | Path) -> dict[str, 
         data = _read_regular_file(attachment_path, f"attachment {label}")
         if len(data) != attachment["bytes"] or _sha256(data) != attachment["sha256"]:
             raise PacketBuildError(f"attachment {label} content address mismatch")
+        attachment_data[label] = data
+    governance_logicals = [
+        source.get("logical")
+        for source in receipt["governance_sources"]
+        if isinstance(source, dict)
+    ]
+    if (
+        len(governance_logicals) != 3
+        or not all(isinstance(logical, str) for logical in governance_logicals)
+        or receipt["checks"].get("bundle_a_verbatim_sources")
+        != governance_logicals
+    ):
+        raise PacketBuildError("receipt Bundle A VERBATIM source evidence is incomplete")
+    _validate_bundle_a_verbatim_markers(
+        attachment_data["a"], governance_logicals, "receipt Bundle A"
+    )
     prompt = receipt["prompt"]
     if not isinstance(prompt, dict):
         raise PacketBuildError("receipt prompt must be an object")
