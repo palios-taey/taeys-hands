@@ -60,6 +60,15 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose_chatgpt_model_menu.add_argument("--seat-id", required=True)
     diagnose_chatgpt_model_menu.add_argument("--artifact-root", required=True)
 
+    diagnose_chatgpt_power_right = phases.add_parser(
+        "diagnose-chatgpt-power-right",
+        help="Press Right once on an already-focused ChatGPT Power row and map the result.",
+    )
+    diagnose_chatgpt_power_right.set_defaults(platform="chatgpt")
+    diagnose_chatgpt_power_right.add_argument("--display", required=True)
+    diagnose_chatgpt_power_right.add_argument("--seat-id", required=True)
+    diagnose_chatgpt_power_right.add_argument("--artifact-root", required=True)
+
     reset_chatgpt_model_menu_compact = phases.add_parser(
         "reset-chatgpt-model-menu-compact",
         help="Reset one already-open ChatGPT advanced model menu to compact state.",
@@ -253,6 +262,50 @@ def _chatgpt_model_menu_diagnostic_content(display: str) -> str:
         "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected element, "
         "state, action, scope, or postcondition, return the first-mismatch stop report and halt. Do "
         "not retry or recover."
+    )
+
+
+def _chatgpt_power_right_diagnostic_content(display: str) -> str:
+    return (
+        f"Execute one frozen ChatGPT Power Right-arrow discovery transaction on {display}. Use "
+        "drive_chat only. Do not navigate, open the selector, focus or click any element, select "
+        "through any other control, attach, paste, send, extract, poll, recover, press Escape, or "
+        "send any key other than the one exact Right key below. The only authorized mutation is "
+        "one drive_chat action=key with key=Right immediately after the fresh precondition "
+        "observation.\n"
+        "1. observe scope=base exactly once. Require one populated ChatGPT tree, exactly one "
+        "model_selector whose exact name is Instant, role is push button, and states include "
+        "expanded, and exactly one model_power whose exact name is Power, role is menu item, "
+        "states include showing, focused, and enabled, and description is exactly "
+        f"{CHATGPT_POWER_INSTANT_DESCRIPTION!r}. Record the base revision, full selector row, "
+        "full Power row, and exact pre-action description. Do not perform any other call before "
+        "step 2.\n"
+        "2. call drive_chat with action=key and key=Right exactly once. Do not pass element, ref, "
+        "or scope. Require the result key is exactly Right and clearmodifiers is true. This is the "
+        "only mutation authorized.\n"
+        "3. The immediately next drive_chat call must be observe scope=base exactly once. Make no "
+        "intervening call. Require exactly one model_power whose exact name is Power, role is menu "
+        "item, and states include showing, focused, and enabled. Require its exact description is "
+        "nonempty and is not equal to the pre-action description. Require exactly one "
+        "model_selector and record its complete post-action row without assuming its name. Make "
+        "no more drive_chat calls.\n"
+        "Return a CHATGPT POWER RIGHT DIAGNOSTIC RECEIPT containing platform/display, "
+        "pre_base_revision, pre_selector, pre_power, key_result, post_base_revision, post_power, "
+        "and post_selector. Include each of these two unformatted machine lines exactly once, "
+        "using ASCII double quotes around the complete verbatim descriptions:\n"
+        f"pre_power_description: \"{CHATGPT_POWER_INSTANT_DESCRIPTION}\"\n"
+        "post_power_description: \"<complete nonempty exact live post-action description>\"\n"
+        "All counters count only drive_chat calls issued by this transaction; an already-open or "
+        "already-focused state does not increment them. End with precondition_proven: true, "
+        "right_key_result_proven: true, key_result_key: \"Right\", "
+        "key_result_clearmodifiers: true, power_focused: true, "
+        "power_description_nonempty: true, power_description_changed: true, "
+        "base_observe_count: 2, right_key_count: 1, power_adjustment_count: 1, "
+        "selector_open_count: 0, power_focus_count: 0, click_count: 0, other_key_count: 0, "
+        "other_mutation_count: 0, and sent: false. Then halt.\n"
+        "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected "
+        "element, state, action, scope, result, or postcondition, return the first-mismatch stop "
+        "report and halt. Do not retry or recover."
     )
 
 
@@ -1020,6 +1073,16 @@ def main() -> int:
         event_id = f"diagnose-model-menu-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
+    elif args.phase == "diagnose-chatgpt-power-right":
+        if args.platform != "chatgpt":
+            raise RuntimeError("diagnose-chatgpt-power-right requires platform chatgpt")
+        content = _chatgpt_power_right_diagnostic_content(args.display)
+        digest = hashlib.sha256(
+            f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"diagnose-power-right-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
     elif args.phase == "reset-chatgpt-model-menu-compact":
         if args.platform != "chatgpt":
             raise RuntimeError(
@@ -1165,6 +1228,7 @@ def main() -> int:
                 "send",
                 "recover",
                 "diagnose-chatgpt-model-menu",
+                "diagnose-chatgpt-power-right",
                 "reset-chatgpt-model-menu-compact",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
@@ -1220,6 +1284,100 @@ def main() -> int:
             if CHATGPT_POWER_INSTANT_DESCRIPTION not in receipt:
                 raise RuntimeError(
                     "diagnostic response does not preserve the exact live Power description"
+                )
+        if args.phase == "diagnose-chatgpt-power-right":
+            required_receipt_fields = (
+                "chatgpt power right diagnostic receipt",
+                "platform/display",
+                "pre_base_revision",
+                "pre_selector",
+                "pre_power",
+                "pre_power_description",
+                "key_result",
+                "post_base_revision",
+                "post_power",
+                "post_power_description",
+                "post_selector",
+                "precondition_proven",
+                "right_key_result_proven",
+                "key_result_key",
+                "key_result_clearmodifiers",
+                "power_focused",
+                "power_description_nonempty",
+                "power_description_changed",
+                "base_observe_count",
+                "right_key_count",
+                "power_adjustment_count",
+                "selector_open_count",
+                "power_focus_count",
+                "click_count",
+                "other_key_count",
+                "other_mutation_count",
+                "sent",
+            )
+            lowered_receipt = receipt.lower()
+            missing_receipt_fields = [
+                field for field in required_receipt_fields if field not in lowered_receipt
+            ]
+            if missing_receipt_fields:
+                raise RuntimeError(
+                    "Power Right response is missing required receipt fields: "
+                    f"{missing_receipt_fields}"
+                )
+            power_right_value_patterns = {
+                "precondition_proven": r"(?im)\bprecondition_proven\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "right_key_result_proven": r"(?im)\bright_key_result_proven\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "key_result_key": r"(?im)\bkey_result_key\b[*`\"' \t|]*(?::|=|\|)[*` \t|]*[\"']Right[\"']",
+                "key_result_clearmodifiers": r"(?im)\bkey_result_clearmodifiers\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "power_focused": r"(?im)\bpower_focused\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "power_description_nonempty": r"(?im)\bpower_description_nonempty\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "power_description_changed": r"(?im)\bpower_description_changed\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "base_observe_count": r"(?im)\bbase_observe_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*2\b",
+                "right_key_count": r"(?im)\bright_key_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "power_adjustment_count": r"(?im)\bpower_adjustment_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "selector_open_count": r"(?im)\bselector_open_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "power_focus_count": r"(?im)\bpower_focus_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "click_count": r"(?im)\bclick_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "other_key_count": r"(?im)\bother_key_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "other_mutation_count": r"(?im)\bother_mutation_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*0\b",
+                "sent": r"(?im)\bsent\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*false\b",
+            }
+            invalid_receipt_fields = [
+                field
+                for field, pattern in power_right_value_patterns.items()
+                if re.search(pattern, receipt) is None
+            ]
+            if invalid_receipt_fields:
+                raise RuntimeError(
+                    "Power Right response has invalid receipt fields: "
+                    f"{invalid_receipt_fields}"
+                )
+            descriptions: dict[str, str] = {}
+            for field in ("pre_power_description", "post_power_description"):
+                pattern = re.compile(
+                    rf"(?im)\b{re.escape(field)}\b[\s*`\"']*(?::|=|\|)[\s*`]*"
+                    rf"(?P<quote>[\"'])(?P<value>[^\r\n]+?)(?P=quote)"
+                )
+                matches = list(pattern.finditer(receipt))
+                if len(matches) != 1:
+                    raise RuntimeError(
+                        f"Power Right response has {len(matches)} quoted {field} values; "
+                        "expected exactly one"
+                    )
+                descriptions[field] = matches[0].group("value").strip()
+            if descriptions["pre_power_description"] != CHATGPT_POWER_INSTANT_DESCRIPTION:
+                raise RuntimeError(
+                    "Power Right response changed the exact pre-action Power description"
+                )
+            if (
+                not descriptions["post_power_description"]
+                or descriptions["post_power_description"]
+                == descriptions["pre_power_description"]
+                or descriptions["post_power_description"]
+                == "<complete nonempty exact live post-action description>"
+            ):
+                raise RuntimeError(
+                    "Power Right response does not prove a nonempty changed Power description"
                 )
         if args.phase == "reset-chatgpt-model-menu-compact":
             required_receipt_fields = (
@@ -1308,6 +1466,7 @@ def main() -> int:
         if args.phase in {
             "extract",
             "diagnose-chatgpt-model-menu",
+            "diagnose-chatgpt-power-right",
             "reset-chatgpt-model-menu-compact",
         } or mutation_stop_report:
             try:
@@ -1356,6 +1515,7 @@ def main() -> int:
         })
     if args.phase in {
         "diagnose-chatgpt-model-menu",
+        "diagnose-chatgpt-power-right",
         "reset-chatgpt-model-menu-compact",
     }:
         result["lease_release"] = lease_release
