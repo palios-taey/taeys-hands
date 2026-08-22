@@ -8,6 +8,8 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
+from consultation_v2 import input as inp
+
 logger = logging.getLogger(__name__)
 
 # Element cache keyed by platform — updated by inspect after each scan
@@ -72,6 +74,50 @@ def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
         time.sleep(timeout)
         return True
     return False
+
+
+def atspi_mapped_pointer_activate(element: Dict) -> Dict[str, object]:
+    """Activate one exact bound object at the center of its live AT-SPI extent."""
+    evidence: Dict[str, object] = {
+        'ok': False,
+        'atspi_object_bound': False,
+        'live_extent_resolved': False,
+        'pointer_event_sent': False,
+    }
+    obj = element.get('atspi_obj')
+    if not obj or is_defunct(element):
+        evidence['error'] = 'missing_or_defunct_atspi_object'
+        return evidence
+    evidence['atspi_object_bound'] = True
+    try:
+        component = obj.get_component_iface()
+        if component is None:
+            evidence['error'] = 'missing_component_iface'
+            return evidence
+        rect = component.get_extents(Atspi.CoordType.SCREEN)
+        if (
+            rect is None
+            or rect.x < 0
+            or rect.y < 0
+            or rect.width <= 0
+            or rect.height <= 0
+        ):
+            evidence['error'] = 'invalid_live_extent'
+            return evidence
+        evidence['live_extent_resolved'] = True
+        sent = inp.click_at(
+            rect.x + rect.width // 2,
+            rect.y + rect.height // 2,
+        )
+        evidence['pointer_event_sent'] = bool(sent)
+    except Exception as exc:
+        evidence['error'] = f'pointer_event_failed:{type(exc).__name__}'
+        return evidence
+    if evidence['pointer_event_sent'] is not True:
+        evidence['error'] = 'pointer_event_returned_false'
+        return evidence
+    evidence['ok'] = True
+    return evidence
 
 
 def _try_do_action(obj) -> bool:

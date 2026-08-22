@@ -23,7 +23,12 @@ from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
-from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
+from consultation_v2.planner import (
+    SelectionPlanError,
+    build_selection_plan,
+    has_selection_menus,
+    selection_trigger_operation,
+)
 from consultation_v2.run_state_identity import (
     LegacyUnscopedRunState,
     assert_request_run_state_available,
@@ -1347,12 +1352,56 @@ class _ChatGPTInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        if not self.runtime.click(trigger):
+        declared = selection_trigger_operation(
+            self.platform,
+            trigger_key,
+            trigger.states,
+        )
+        if not isinstance(declared, dict):
             result.add_step(
                 'select',
                 False,
-                f'{self.platform} selection trigger {trigger_key} click failed',
+                f'{self.platform} selection trigger {trigger_key} has no YAML operation',
                 trigger=trigger_key,
+                snapshot=trigger_snapshot.serializable(),
+            )
+            return None
+        open_method = str(declared.get('method') or '')
+        open_evidence = None
+        if open_method == 'mapped_pointer_activate':
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            opened = open_evidence.get('ok') is True
+        elif open_method == 'focus_and_key_open':
+            primitives = declared.get('primitives')
+            open_key = (
+                primitives[1].partition(':')[2]
+                if isinstance(primitives, list)
+                and len(primitives) == 2
+                and isinstance(primitives[1], str)
+                and primitives[1].startswith('key:')
+                else ''
+            )
+            open_evidence = (
+                self.runtime.focus_and_key_open(trigger, key=open_key)
+                if open_key else {'ok': False, 'error': 'missing_exact_open_key'}
+            )
+            opened = open_evidence.get('ok') is True
+        elif open_method == 'click':
+            opened = self.runtime.click(trigger)
+        else:
+            opened = False
+            open_evidence = {
+                'ok': False,
+                'error': f'unsupported_open_method:{open_method}',
+            }
+        if not opened:
+            result.add_step(
+                'select',
+                False,
+                f'{self.platform} selection trigger {trigger_key} open failed',
+                trigger=trigger_key,
+                open_method=open_method,
+                open_evidence=open_evidence,
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
