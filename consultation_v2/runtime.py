@@ -908,8 +908,10 @@ class ConsultationRuntime:
             return True
         current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         if not self._dismiss_address_bar():
-            logger.error('navigate: address bar stayed focused after committed navigation')
-            return False
+            logger.warning(
+                'navigate: address bar stayed focused after committed navigation; '
+                'continuing to exact target and tree verification'
+            )
         current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         current = (current or self.current_url() or "").strip()
 
