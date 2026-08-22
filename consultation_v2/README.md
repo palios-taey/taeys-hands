@@ -86,8 +86,11 @@ path.
 ## Deterministic packet construction
 
 `scripts/consultation-packet-builder` builds the two attachment files, local prompt, and local receipt from
-a frozen JSON spec. `preflight` validates canonical source bytes, Git commits, rendering order, path scope,
-expected output hashes, rejected-root isolation, and negative receipts without creating the output root.
-`build` repeats those gates, creates the root and every file exclusively, fsyncs them, and derives receipt
-root/file/send-task bindings from the actual output paths. `validate-receipt` independently re-reads an
-existing receipt and its bound files. Packet construction does not stage attachments or perform a UI action.
+a frozen JSON spec. `preflight` validates canonical source bytes against both the frozen hashes and named Git
+blobs, requires the complete task-dossier sections, runs the hashed canonical prompting linter on the exact
+frozen request bytes, excludes governance bytes and operator-local paths from Bundle B, validates the full
+brief-prompt contract, and checks expected output hashes, rejected-root isolation, and negative receipts
+without creating the output root. `build` repeats those gates, creates the root and every file exclusively,
+fsyncs them, and derives request/root/file/send-task bindings from the actual output paths. The local receipt
+contains the prompting-lint machine exchange. `validate-receipt` independently re-reads an existing receipt
+and its bound files. Packet construction does not stage attachments or perform a UI action.
