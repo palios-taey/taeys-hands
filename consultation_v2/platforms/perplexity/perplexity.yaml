@@ -337,6 +337,9 @@ tree:
     copy_contents_button:
       name: Copy contents
       role: push button
+      states_include:
+      - showing
+      - enabled
     share_button:
       name: Share
       role: push button
@@ -536,11 +539,17 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
+#  - research_report: full report via the mapped `copy_contents_button` before
+#    bottom scrolling virtualizes that control away.
 #  - assistant_text: normal answer via the mapped `copy_button`.
-#  - Deep Research extraction is owned by the driver's closed Taey consult seat,
-#    which captures the citation-bearing body and complete source panel together.
 # ============================================================================
 extraction:
+  research_report:
+    steps:
+      - action: copy_element
+        element: copy_contents_button
+      - action: read_clipboard
+        validation: response_complete
   assistant_text:
     steps:
       - action: scroll_to_bottom

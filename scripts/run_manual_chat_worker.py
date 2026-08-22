@@ -14,7 +14,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from consultation_v2.yaml_contract import load_platform_yaml
+from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
 
 
 ENDPOINT = "http://127.0.0.1:8767/v1/chat/completions"
@@ -669,11 +669,31 @@ def _send_content(
     )
 
 
+def _require_extraction_steps(
+    platform: str,
+    output_type: str,
+    expected: tuple[tuple[str, str | None, str, str | None], ...],
+) -> None:
+    workflow = get_extraction(platform, output_type)
+    if workflow is None:
+        raise RuntimeError(f"{platform} YAML has no {output_type} extraction workflow")
+    observed = tuple(
+        (step.action, step.element, step.select, step.validation)
+        for step in workflow.steps
+    )
+    if observed != expected or workflow.validate_markers:
+        raise RuntimeError(
+            f"{platform} YAML {output_type} extraction workflow does not match the "
+            "qualified production sequence"
+        )
+
+
 def _extract_content(
     monitor_id: str,
     platform: str,
     display: str,
     response_file: Path,
+    research_report_file: Path | None = None,
 ) -> str:
     if platform == "claude":
         return (
@@ -742,6 +762,25 @@ def _extract_content(
             "send, retry, recover, poll, click Regenerate, or make a second Copy attempt."
         )
     if platform == "perplexity":
+        if research_report_file is None:
+            raise RuntimeError("Perplexity extraction requires a research report output file")
+        _require_extraction_steps(
+            "perplexity",
+            "research_report",
+            (
+                ("copy_element", "copy_contents_button", "last", None),
+                ("read_clipboard", None, "last", "response_complete"),
+            ),
+        )
+        _require_extraction_steps(
+            "perplexity",
+            "assistant_text",
+            (
+                ("scroll_to_bottom", "input", "last", None),
+                ("copy_element", "copy_button", "last", None),
+                ("read_clipboard", None, "last", "response_complete"),
+            ),
+        )
         return (
             f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one "
             f"frozen Perplexity extraction transaction on {display} with drive_chat only. Do not "
@@ -749,18 +788,24 @@ def _extract_content(
             "element key mapped as a singleton by the immediately preceding fresh observation; "
             "do not copy or pass an opaque ref. Execute exactly this sequence:\n"
             "1. observe scope=base; require current_url to begin "
-            "https://www.perplexity.ai/search/ and require stop_button absent.\n"
-            "2. scroll_to_bottom element=input exactly once; observe scope=base; require the same "
+            "https://www.perplexity.ai/search/, require stop_button absent, and require exactly one "
+            "mapped copy_contents_button named Copy contents with role push button and states "
+            "showing and enabled.\n"
+            "2. click element=copy_contents_button exactly once; observe scope=base; require the same "
+            "URL condition and stop_button absent.\n"
+            f"3. read_clipboard with output_file={research_report_file}. Require that drive_chat "
+            "created a new non-empty research report file and return its byte count and SHA-256.\n"
+            "4. scroll_to_bottom element=input exactly once; observe scope=base; require the same "
             "URL condition, stop_button absent, and exactly one mapped copy_button named Copy with "
             "role push button and states showing and enabled, selected by the YAML last_by_y rule.\n"
-            "3. click element=copy_button; observe scope=base; require the same URL condition and "
+            "5. click element=copy_button exactly once; observe scope=base; require the same URL condition and "
             "stop_button absent.\n"
-            f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a "
-            "new non-empty response file and return its byte count and SHA-256. Then stop all UI "
-            "calls.\n"
+            f"6. read_clipboard with output_file={response_file}. Require that drive_chat created a "
+            "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
+            "all UI calls.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, "
-            "send, retry, recover, poll, open Download, or make a second Copy attempt."
+            "send, retry, recover, poll, open Download, or make any additional Copy attempt."
         )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen extraction sequence")
@@ -964,6 +1009,7 @@ def main() -> int:
     source_response = None
     source_response_sha256 = None
     exception_key = None
+    research_report_file = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
@@ -1033,11 +1079,21 @@ def main() -> int:
             raise RuntimeError("response file must be ARTIFACT_ROOT/response.txt")
         if response_file.exists():
             raise RuntimeError(f"response file already exists; refusing retry: {response_file}")
+        if args.platform == "perplexity":
+            research_report_file = (
+                root / "output_attachments" / "perplexity_research_report.md"
+            )
+            if research_report_file.exists():
+                raise RuntimeError(
+                    "research report file already exists; refusing retry: "
+                    f"{research_report_file}"
+                )
         content = _extract_content(
             monitor_id,
             args.platform,
             args.display,
             response_file,
+            research_report_file,
         )
         digest = hashlib.sha256(monitor_id.encode("utf-8")).hexdigest()
         event_id = f"extract-{digest[:24]}"
@@ -1048,9 +1104,17 @@ def main() -> int:
         root.mkdir(mode=0o700)
     prepared_marker = root / ".prepared"
     if args.phase == "extract":
+        extraction_outputs = [
+            root / "response.headers",
+            root / "worker_response.json",
+            response_file,
+        ]
+        if research_report_file is not None:
+            research_report_file.parent.mkdir(mode=0o700, exist_ok=True)
+            extraction_outputs.append(research_report_file)
         _ensure_request(root / "request.json", request_text)
         if args.prepare_only:
-            for output in (root / "response.headers", root / "worker_response.json", response_file):
+            for output in extraction_outputs:
                 if output.exists():
                     raise RuntimeError(f"extraction output already exists: {output}")
             if prepared_marker.exists():
@@ -1062,18 +1126,21 @@ def main() -> int:
                 with prepared_marker.open("x", encoding="utf-8") as handle:
                     handle.write(event_id + "\n")
                 prepared_marker.chmod(0o600)
-            print(json.dumps({
+            prepared_result = {
                 "artifact_root": str(root),
                 "event_id": event_id,
                 "request_json": str(root / "request.json"),
                 "response_file": str(response_file),
-            }, sort_keys=True))
+            }
+            if research_report_file is not None:
+                prepared_result["research_report_file"] = str(research_report_file)
+            print(json.dumps(prepared_result, sort_keys=True))
             return 0
         if not prepared_marker.is_file():
             raise RuntimeError("extraction handoff is not prepared or was already consumed")
         if prepared_marker.read_text(encoding="utf-8") != event_id + "\n":
             raise RuntimeError("extraction handoff identity mismatch")
-        for output in (root / "response.headers", root / "worker_response.json", response_file):
+        for output in extraction_outputs:
             if output.exists():
                 raise RuntimeError(f"extraction output already exists; refusing retry: {output}")
         prepared_marker.unlink()
@@ -1227,6 +1294,14 @@ def main() -> int:
         if response_file is not None:
             if not response_file.is_file() or response_file.stat().st_size == 0:
                 raise RuntimeError("extraction did not create a non-empty response file")
+        if research_report_file is not None:
+            if (
+                not research_report_file.is_file()
+                or research_report_file.stat().st_size == 0
+            ):
+                raise RuntimeError(
+                    "extraction did not create a non-empty research report file"
+                )
     except RuntimeError as exc:
         primary_error = exc
     finally:
@@ -1266,6 +1341,12 @@ def main() -> int:
             "response_bytes": response_file.stat().st_size,
             "response_sha256": _sha256(response_file),
             "lease_release": lease_release,
+        })
+    if research_report_file is not None:
+        result.update({
+            "research_report_file": str(research_report_file),
+            "research_report_bytes": research_report_file.stat().st_size,
+            "research_report_sha256": _sha256(research_report_file),
         })
     if source_response is not None:
         result.update({
