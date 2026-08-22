@@ -714,6 +714,10 @@ def _validate_task_dossier(source: SourceBytes) -> tuple[str, ...]:
         text = source.data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise PacketBuildError("corrected request packet is not UTF-8") from exc
+    if "<" in text:
+        raise PacketBuildError(
+            "corrected request packet must not contain raw HTML or angle-bracket syntax"
+        )
     authored_lines = _authored_markdown_lines(text)
     matches = [
         (start, end, match.group(1).strip())
