@@ -160,12 +160,8 @@ tree:
           - voice_button
       model_menu:
         expected:
-          - model_instant
-          - model_medium
-          - model_high
-          - model_extra_high
-          - model_pro
-          - model_gpt_5_6_sol
+          - model_power
+          - model_show_advanced_options
       model_menu.gpt_5_6_sol:
         expected:
           - model_instant
@@ -408,6 +404,14 @@ tree:
       name: Allow once
       role: push button
       scope: connector_permission_modal
+    model_power:
+      name: Power
+      role: menu item
+      scope: model_menu
+    model_show_advanced_options:
+      name: Show advanced options
+      role: menu item
+      scope: model_menu
     model_instant:
       name: Instant 5.5
       role: radio menu item

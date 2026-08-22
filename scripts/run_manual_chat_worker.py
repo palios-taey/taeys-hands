@@ -48,6 +48,15 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--exception-key", required=True)
     recover.add_argument("--source-response-json", required=True)
 
+    diagnose_chatgpt_model_menu = phases.add_parser(
+        "diagnose-chatgpt-model-menu",
+        help="Map one ChatGPT advanced-model submenu without selecting or sending.",
+    )
+    diagnose_chatgpt_model_menu.set_defaults(platform="chatgpt")
+    diagnose_chatgpt_model_menu.add_argument("--display", required=True)
+    diagnose_chatgpt_model_menu.add_argument("--seat-id", required=True)
+    diagnose_chatgpt_model_menu.add_argument("--artifact-root", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once after the completion monitor reports COMPLETE.",
@@ -194,6 +203,37 @@ def _monitor_stop_keys(platform: str) -> tuple[str, ...]:
     ):
         raise RuntimeError(f"{platform} workflow.monitor has invalid Stop keys")
     return tuple(raw_keys)
+
+
+def _chatgpt_model_menu_diagnostic_content(display: str) -> str:
+    return (
+        f"Execute one frozen ChatGPT model-menu diagnostic transaction on {display}. Use "
+        "drive_chat only. Do not navigate, select a model, attach, paste, send, extract, poll, "
+        "recover, or press Escape. The only authorized mutations are opening model_selector once "
+        "if it is not already expanded and clicking Show advanced options once. Use a ref only "
+        "from the immediately preceding fresh observation.\n"
+        "1. observe scope=base exactly once. Require one populated ChatGPT tree and exactly one "
+        "model_selector whose exact name is Instant. Record its states and snapshot revision. If "
+        "its states include expanded, do not operate it. Otherwise operate the fresh "
+        "model_selector exactly once, require performed_primitive=mapped_pointer_activate, and do "
+        "not perform any other mutation.\n"
+        "2. observe scope=app_root_snapshot exactly once. Require exactly one model_power whose "
+        "exact name is Power and role is menu item, and exactly one model_show_advanced_options "
+        "whose exact name is Show advanced options and role is menu item.\n"
+        "3. click the fresh model_show_advanced_options ref exactly once. This is the only click "
+        "authorized by this transaction.\n"
+        "4. The immediately next drive_chat call must be observe scope=app_root_snapshot exactly "
+        "once. Make no intervening call. Return a CHATGPT MODEL MENU DIAGNOSTIC RECEIPT containing "
+        "platform/display, pre_click_selector, pre_click_app_root_revision, model_power, "
+        "model_show_advanced_options, click_result, post_click_app_root_revision, "
+        "post_click_raw_count, and post_click_rows. Under post_click_rows, preserve the exact name, "
+        "role, and states of every mapped or unknown node in that receipt whose role is menu, menu "
+        "item, radio menu item, check menu item, or option. End with selector_open_count: 0 or 1, "
+        "advanced_click_count: 1, and selected_or_sent: false. Then halt.\n"
+        "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected element, "
+        "state, action, scope, or postcondition, return the first-mismatch stop report and halt. Do "
+        "not retry or recover."
+    )
 
 
 def _recovery_content(
@@ -865,7 +905,17 @@ def main() -> int:
     source_response = None
     source_response_sha256 = None
     exception_key = None
-    if args.phase == "send":
+    if args.phase == "diagnose-chatgpt-model-menu":
+        if args.platform != "chatgpt":
+            raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
+        content = _chatgpt_model_menu_diagnostic_content(args.display)
+        digest = hashlib.sha256(
+            f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"diagnose-model-menu-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
+    elif args.phase == "send":
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
         prompt_file = _absolute_input(args.prompt_file, "prompt file")
@@ -973,8 +1023,52 @@ def main() -> int:
         ):
             raise RuntimeError("source response changed during recovery")
         if _is_worker_stop_report(receipt):
-            mutation_stop_report = args.phase in {"send", "recover"}
+            mutation_stop_report = args.phase in {
+                "send",
+                "recover",
+                "diagnose-chatgpt-model-menu",
+            }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if args.phase == "diagnose-chatgpt-model-menu":
+            required_receipt_fields = (
+                "chatgpt model menu diagnostic receipt",
+                "platform/display",
+                "pre_click_selector",
+                "pre_click_app_root_revision",
+                "model_power",
+                "model_show_advanced_options",
+                "click_result",
+                "post_click_app_root_revision",
+                "post_click_raw_count",
+                "post_click_rows",
+                "selector_open_count",
+                "advanced_click_count",
+                "selected_or_sent",
+            )
+            lowered_receipt = receipt.lower()
+            missing_receipt_fields = [
+                field for field in required_receipt_fields if field not in lowered_receipt
+            ]
+            if missing_receipt_fields:
+                raise RuntimeError(
+                    "diagnostic response is missing required receipt fields: "
+                    f"{missing_receipt_fields}"
+                )
+            diagnostic_value_patterns = {
+                "selector_open_count": r"(?im)\bselector_open_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[01]\b",
+                "advanced_click_count": r"(?im)\badvanced_click_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*1\b",
+                "selected_or_sent": r"(?im)\bselected_or_sent\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*false\b",
+            }
+            invalid_receipt_fields = [
+                field
+                for field, pattern in diagnostic_value_patterns.items()
+                if re.search(pattern, receipt) is None
+            ]
+            if invalid_receipt_fields:
+                raise RuntimeError(
+                    "diagnostic response has invalid receipt fields: "
+                    f"{invalid_receipt_fields}"
+                )
         if args.phase in {"send", "recover"} and not re.search(
             r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
@@ -987,7 +1081,7 @@ def main() -> int:
     except RuntimeError as exc:
         primary_error = exc
     finally:
-        if args.phase == "extract" or mutation_stop_report:
+        if args.phase in {"extract", "diagnose-chatgpt-model-menu"} or mutation_stop_report:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
             except RuntimeError as cleanup_error:
@@ -1026,6 +1120,8 @@ def main() -> int:
             "source_response_json": str(source_response),
             "source_response_json_sha256": source_response_sha256,
         })
+    if args.phase == "diagnose-chatgpt-model-menu":
+        result["lease_release"] = lease_release
     print(json.dumps(result, sort_keys=True))
     return 0
 
