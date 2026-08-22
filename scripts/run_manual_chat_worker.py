@@ -188,8 +188,59 @@ def _post_send_exceptions(platform: str) -> dict[str, dict[str, object]]:
     return normalized
 
 
-def _post_send_confirmation_content(platform: str) -> str:
+def _completed_before_stop_state(platform: str) -> dict[str, object] | None:
+    cfg = load_platform_yaml(platform)
+    workflow = cfg.get("workflow")
+    element_map = (cfg.get("tree") or {}).get("element_map")
+    if not isinstance(workflow, dict) or not isinstance(element_map, dict):
+        raise RuntimeError(f"{platform} YAML has no valid workflow or element_map")
+    post_send = workflow.get("post_send") or {}
+    if not isinstance(post_send, dict):
+        raise RuntimeError(f"{platform} workflow.post_send must be a mapping")
+    raw_state = post_send.get("completed_before_stop")
+    if raw_state is None:
+        return None
+    if not isinstance(raw_state, dict):
+        raise RuntimeError(
+            f"{platform} workflow.post_send.completed_before_stop must be a mapping"
+        )
+    detect = raw_state.get("detect")
+    absent = raw_state.get("absent")
+    stable_observations = raw_state.get("stable_observations")
+    for field_name, values in (("detect", detect), ("absent", absent)):
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(
+                isinstance(value, str) and value in element_map
+                for value in values
+            )
+            or len(values) != len(set(values))
+        ):
+            raise RuntimeError(
+                f"{platform} completed-before-Stop {field_name} elements are invalid"
+            )
+    if set(detect).intersection(absent):
+        raise RuntimeError(
+            f"{platform} completed-before-Stop detect and absent elements overlap"
+        )
+    if stable_observations != 2:
+        raise RuntimeError(
+            f"{platform} completed-before-Stop requires exactly two observations"
+        )
+    return {
+        "detect": tuple(detect),
+        "absent": tuple(absent),
+        "stable_observations": stable_observations,
+    }
+
+
+def _post_send_confirmation_content(
+    platform: str,
+    completed_before_stop_response_file: Path | None = None,
+) -> str:
     exceptions = _post_send_exceptions(platform)
+    completed_state = _completed_before_stop_state(platform)
     if exceptions:
         rendered = "; ".join(
             f"{key} requires exactly one each of {', '.join(spec['detect'])}"
@@ -197,18 +248,49 @@ def _post_send_confirmation_content(platform: str) -> str:
         )
     else:
         rendered = "no mapped post-send exception is currently configured for this platform"
-    return (
+    base = (
         "POST-SEND CONFIRMATION: inspect the first fresh base observation already required by "
         "the send step. If the mapped Stop control is present exactly once, require monitor "
         "registration. If Stop is absent, do not mutate: call observe scope=base exactly once "
         "more. If Stop is then present exactly once, require monitor registration. If Stop is "
         f"still absent, classify only these exact YAML-owned exception sets: {rendered}. If one "
         "complete set is present, return a POST-SEND EXCEPTION REPORT naming the exception key, "
-        "both fresh observation revisions, current URL, and matched elements. If no complete set "
-        "is present, return an UNMAPPED POST-SEND STATE report with both revisions and current "
-        "mapped elements. Stop the turn after either report. Do not infer completion from the URL, "
-        "Copy, Regenerate, Retry, or any response text. Do not click any recovery control in the "
-        "send turn.\n"
+        "both fresh observation revisions, current URL, and matched elements. "
+    )
+    if completed_state is None:
+        return (
+            base
+            + "If no complete set is present, return an UNMAPPED POST-SEND STATE report with "
+            "both revisions and current mapped elements. Stop the turn after either report. Do "
+            "not infer completion from the URL, Copy, Regenerate, Retry, or any response text. "
+            "Do not click any recovery control in the send turn.\n"
+        )
+    if completed_before_stop_response_file is None:
+        raise RuntimeError(
+            f"{platform} completed-before-Stop requires an extraction output file"
+        )
+    detect = ", ".join(completed_state["detect"])
+    absent = ", ".join(completed_state["absent"])
+    return (
+        base
+        + "If no exception set is present, classify the YAML-owned completed-before-Stop state "
+        f"only when both fresh observations contain exactly one each of {detect}, contain none "
+        f"of {absent}, preserve the same answer-thread URL, and the mapped input is enabled and "
+        "editable. Do not inspect or judge response text. If that exact state is absent, "
+        "duplicated, or differs between observations, return an UNMAPPED POST-SEND STATE report "
+        "with both revisions and current mapped elements, then stop. If the exact state is "
+        "present in both observations, completion occurred before Stop could be observed. Do not "
+        "register a monitor and do not claim Stop was seen. Continue in this same turn with exactly: "
+        "key ctrl+End; observe scope=base; require the same URL, completed state, and exactly one "
+        "copy_button target selected by the YAML last_by_y rule; click that copy_button; observe "
+        "scope=base; require the same URL and completed state; read_clipboard with "
+        f"output_file={completed_before_stop_response_file}. Require a new non-empty file. Return "
+        "a COMPLETED-BEFORE-STOP SEND RECEIPT containing completion_basis=completed_before_stop, "
+        "stop_seen=false, monitor_id=none, send_count=1, platform/display, both pre-extraction "
+        "observation revisions, the matched and absent elements, "
+        f"output_file={completed_before_stop_response_file}, byte_count=<exact integer>, and "
+        "response_sha256=<exact SHA-256>. Then stop "
+        "all UI calls. Do not click any recovery control or send again.\n"
     )
 
 
@@ -419,8 +501,12 @@ def _send_content(
     bundle_a: Path,
     bundle_b: Path,
     prompt_file: Path,
+    completed_before_stop_response_file: Path | None = None,
 ) -> str:
-    post_send = _post_send_confirmation_content(platform)
+    post_send = _post_send_confirmation_content(
+        platform,
+        completed_before_stop_response_file,
+    )
     if platform == "claude":
         return (
             f"Execute one frozen Claude send transaction on {display}. Use drive_chat only. "
@@ -1038,6 +1124,17 @@ def _is_worker_stop_report(receipt: str) -> bool:
     )
 
 
+def _is_completed_before_stop_receipt(receipt: str) -> bool:
+    for line in receipt.splitlines():
+        if not line.strip():
+            continue
+        headline = line.strip(" \t#*_`").lower()
+        normalized_headline = re.sub(r"[^a-z0-9]+", " ", headline).strip()
+        if normalized_headline.startswith("completed before stop send receipt"):
+            return True
+    return False
+
+
 def _release_extract_lease(display: str, seat_id: str) -> str:
     host = os.environ.get("REDIS_HOST") or os.environ.get("TAEY_REDIS_HOST") or "127.0.0.1"
     port = os.environ.get("REDIS_PORT") or os.environ.get("TAEY_REDIS_PORT") or "6379"
@@ -1097,6 +1194,7 @@ def main() -> int:
     source_response_sha256 = None
     exception_key = None
     research_report_file = None
+    completed_before_stop_response_file = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
@@ -1141,12 +1239,20 @@ def main() -> int:
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
         prompt_file = _absolute_input(args.prompt_file, "prompt file")
+        if args.platform == "gemini":
+            completed_before_stop_response_file = root / "response.txt"
+            if completed_before_stop_response_file.exists():
+                raise RuntimeError(
+                    "completed-before-Stop response file already exists; refusing send: "
+                    f"{completed_before_stop_response_file}"
+                )
         content = _send_content(
             args.platform,
             args.display,
             bundle_a,
             bundle_b,
             prompt_file,
+            completed_before_stop_response_file,
         )
         digest = hashlib.sha256(
             f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
@@ -1313,6 +1419,7 @@ def main() -> int:
     lease_release = None
     primary_error = None
     mutation_stop_report = False
+    completed_before_stop = False
     try:
         request_path, headers_path, response_path, receipt = _invoke(
             root=root,
@@ -1321,6 +1428,43 @@ def main() -> int:
             event_id=event_id,
             correlation_id=correlation_id,
         )
+        completed_before_stop = (
+            args.phase == "send"
+            and _is_completed_before_stop_receipt(receipt)
+        )
+        if completed_before_stop:
+            if args.platform != "gemini" or completed_before_stop_response_file is None:
+                raise RuntimeError(
+                    "completed-before-Stop receipt is not authorized for this platform"
+                )
+            if (
+                "completion_basis=completed_before_stop" not in receipt
+                or "stop_seen=false" not in receipt
+                or "monitor_id=none" not in receipt
+                or "send_count=1" not in receipt
+                or str(completed_before_stop_response_file) not in receipt
+            ):
+                raise RuntimeError(
+                    "completed-before-Stop send receipt lacks exact terminal provenance"
+                )
+            if (
+                not completed_before_stop_response_file.is_file()
+                or completed_before_stop_response_file.stat().st_size == 0
+            ):
+                raise RuntimeError(
+                    "completed-before-Stop send did not create a non-empty response file"
+                )
+            completed_response_sha256 = _sha256(
+                completed_before_stop_response_file
+            )
+            if (
+                f"byte_count={completed_before_stop_response_file.stat().st_size}"
+                not in receipt
+                or f"response_sha256={completed_response_sha256}" not in receipt
+            ):
+                raise RuntimeError(
+                    "completed-before-Stop send receipt does not match the extracted file"
+                )
         if (
             source_response is not None
             and _sha256(source_response) != source_response_sha256
@@ -1570,10 +1714,14 @@ def main() -> int:
                 raise RuntimeError(
                     "compact-reset response does not preserve the exact live Power description"
                 )
-        if args.phase in {"send", "recover"} and not re.search(
-            r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*(?!(?:none|null)\b)"
-            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
-            receipt,
+        if (
+            args.phase in {"send", "recover"}
+            and not completed_before_stop
+            and not re.search(
+                r"(?im)\bmonitor_id\b[*`\"' \t|]*(?::|=|`|\|)[*`\"' \t|]*"
+                r"(?!(?:none|null)\b)[A-Za-z0-9][A-Za-z0-9._:-]{0,199}",
+                receipt,
+            )
         ):
             raise RuntimeError(f"{args.phase} response has no registered monitor_id")
         if response_file is not None:
@@ -1595,7 +1743,7 @@ def main() -> int:
             "diagnose-chatgpt-model-menu",
             "diagnose-chatgpt-power-right",
             "reset-chatgpt-model-menu-compact",
-        } or mutation_stop_report:
+        } or mutation_stop_report or completed_before_stop:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
             except RuntimeError as cleanup_error:
@@ -1644,6 +1792,17 @@ def main() -> int:
         else:
             source_result["exception_key"] = exception_key
         result.update(source_result)
+    if completed_before_stop:
+        assert completed_before_stop_response_file is not None
+        result.update({
+            "completion_basis": "completed_before_stop",
+            "stop_seen": False,
+            "monitor_id": None,
+            "response_file": str(completed_before_stop_response_file),
+            "response_bytes": completed_before_stop_response_file.stat().st_size,
+            "response_sha256": _sha256(completed_before_stop_response_file),
+            "lease_release": lease_release,
+        })
     if args.phase in {
         "diagnose-chatgpt-model-menu",
         "diagnose-chatgpt-power-right",

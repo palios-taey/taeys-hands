@@ -361,6 +361,16 @@ workflow:
     require_new_url: false
     stop_key: stop_button
     post_send_key: start_research
+  post_send:
+    completed_before_stop:
+      detect:
+        - copy_button
+        - input
+      absent:
+        - stop_button
+        - send_button
+        - deep_think_interim_ack_placeholder
+      stable_observations: 2
   monitor:
     stop_key: stop_button
     generation_timeout: 3600
