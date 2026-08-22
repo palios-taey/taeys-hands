@@ -68,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose_chatgpt_power_right.add_argument("--display", required=True)
     diagnose_chatgpt_power_right.add_argument("--seat-id", required=True)
     diagnose_chatgpt_power_right.add_argument("--artifact-root", required=True)
+    diagnose_chatgpt_power_right.add_argument("--pre-selector-name", required=True)
+    diagnose_chatgpt_power_right.add_argument("--pre-description", required=True)
 
     reset_chatgpt_model_menu_compact = phases.add_parser(
         "reset-chatgpt-model-menu-compact",
@@ -265,7 +267,11 @@ def _chatgpt_model_menu_diagnostic_content(display: str) -> str:
     )
 
 
-def _chatgpt_power_right_diagnostic_content(display: str) -> str:
+def _chatgpt_power_right_diagnostic_content(
+    display: str,
+    pre_selector_name: str,
+    pre_description: str,
+) -> str:
     return (
         f"Execute one frozen ChatGPT Power Right-arrow discovery transaction on {display}. Use "
         "drive_chat only. Do not navigate, open the selector, focus or click any element, select "
@@ -274,10 +280,11 @@ def _chatgpt_power_right_diagnostic_content(display: str) -> str:
         "one drive_chat action=key with key=Right immediately after the fresh precondition "
         "observation.\n"
         "1. observe scope=base exactly once. Require one populated ChatGPT tree, exactly one "
-        "model_selector whose exact name is Instant, role is push button, and states include "
+        f"model_selector whose exact name is {pre_selector_name!r}, role is push button, and "
+        "states include "
         "expanded, and exactly one model_power whose exact name is Power, role is menu item, "
         "states include showing, focused, and enabled, and description is exactly "
-        f"{CHATGPT_POWER_INSTANT_DESCRIPTION!r}. Record the base revision, full selector row, "
+        f"{pre_description!r}. Record the base revision, full selector row, "
         "full Power row, and exact pre-action description. Do not perform any other call before "
         "step 2.\n"
         "2. call drive_chat with action=key and key=Right exactly once. Do not pass element, ref, "
@@ -286,19 +293,21 @@ def _chatgpt_power_right_diagnostic_content(display: str) -> str:
         "3. The immediately next drive_chat call must be observe scope=base exactly once. Make no "
         "intervening call. Require exactly one model_power whose exact name is Power, role is menu "
         "item, and states include showing, focused, and enabled. Require its exact description is "
-        "nonempty and is not equal to the pre-action description. Require exactly one "
-        "model_selector and record its complete post-action row without assuming its name. Make "
-        "no more drive_chat calls.\n"
+        "nonempty and byte-different from the exact pre-action description. Require exactly one "
+        "model_selector whose role is push button and states include expanded; record its complete "
+        "post-action row without assuming its name. Make no more drive_chat calls.\n"
         "Return a CHATGPT POWER RIGHT DIAGNOSTIC RECEIPT containing platform/display, "
         "pre_base_revision, pre_selector, pre_power, key_result, post_base_revision, post_power, "
-        "and post_selector. Include each of these two unformatted machine lines exactly once, "
-        "using ASCII double quotes around the complete verbatim descriptions:\n"
-        f"pre_power_description: \"{CHATGPT_POWER_INSTANT_DESCRIPTION}\"\n"
+        "and post_selector. Include each of these three unformatted machine lines exactly once, "
+        "using JSON double-quoted strings for the complete verbatim values:\n"
+        f"pre_selector_name: {json.dumps(pre_selector_name, ensure_ascii=False)}\n"
+        f"pre_power_description: {json.dumps(pre_description, ensure_ascii=False)}\n"
         "post_power_description: \"<complete nonempty exact live post-action description>\"\n"
         "All counters count only drive_chat calls issued by this transaction; an already-open or "
         "already-focused state does not increment them. End with precondition_proven: true, "
         "right_key_result_proven: true, key_result_key: \"Right\", "
         "key_result_clearmodifiers: true, power_focused: true, "
+        "post_selector_expanded: true, "
         "power_description_nonempty: true, power_description_changed: true, "
         "base_observe_count: 2, right_key_count: 1, power_adjustment_count: 1, "
         "selector_open_count: 0, power_focus_count: 0, click_count: 0, other_key_count: 0, "
@@ -1076,7 +1085,15 @@ def main() -> int:
     elif args.phase == "diagnose-chatgpt-power-right":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-power-right requires platform chatgpt")
-        content = _chatgpt_power_right_diagnostic_content(args.display)
+        if args.pre_selector_name == "":
+            raise RuntimeError("diagnose-chatgpt-power-right requires a nonempty pre-selector name")
+        if args.pre_description == "":
+            raise RuntimeError("diagnose-chatgpt-power-right requires a nonempty pre-description")
+        content = _chatgpt_power_right_diagnostic_content(
+            args.display,
+            args.pre_selector_name,
+            args.pre_description,
+        )
         digest = hashlib.sha256(
             f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
         ).hexdigest()
@@ -1292,6 +1309,7 @@ def main() -> int:
                 "pre_base_revision",
                 "pre_selector",
                 "pre_power",
+                "pre_selector_name",
                 "pre_power_description",
                 "key_result",
                 "post_base_revision",
@@ -1303,6 +1321,7 @@ def main() -> int:
                 "key_result_key",
                 "key_result_clearmodifiers",
                 "power_focused",
+                "post_selector_expanded",
                 "power_description_nonempty",
                 "power_description_changed",
                 "base_observe_count",
@@ -1330,6 +1349,7 @@ def main() -> int:
                 "key_result_key": r"(?im)\bkey_result_key\b[*`\"' \t|]*(?::|=|\|)[*` \t|]*[\"']Right[\"']",
                 "key_result_clearmodifiers": r"(?im)\bkey_result_clearmodifiers\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
                 "power_focused": r"(?im)\bpower_focused\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
+                "post_selector_expanded": r"(?im)\bpost_selector_expanded\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
                 "power_description_nonempty": r"(?im)\bpower_description_nonempty\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
                 "power_description_changed": r"(?im)\bpower_description_changed\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*true\b",
                 "base_observe_count": r"(?im)\bbase_observe_count\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*2\b",
@@ -1352,28 +1372,36 @@ def main() -> int:
                     "Power Right response has invalid receipt fields: "
                     f"{invalid_receipt_fields}"
                 )
-            descriptions: dict[str, str] = {}
-            for field in ("pre_power_description", "post_power_description"):
+            exact_values: dict[str, str] = {}
+            for field in (
+                "pre_selector_name",
+                "pre_power_description",
+                "post_power_description",
+            ):
                 pattern = re.compile(
-                    rf"(?im)\b{re.escape(field)}\b[\s*`\"']*(?::|=|\|)[\s*`]*"
-                    rf"(?P<quote>[\"'])(?P<value>[^\r\n]+?)(?P=quote)"
+                    rf"(?m)^{re.escape(field)}: "
+                    rf"(?P<value>\"(?:\\.|[^\"\\])*\")\r?$"
                 )
                 matches = list(pattern.finditer(receipt))
                 if len(matches) != 1:
                     raise RuntimeError(
-                        f"Power Right response has {len(matches)} quoted {field} values; "
+                        f"Power Right response has {len(matches)} exact {field} lines; "
                         "expected exactly one"
                     )
-                descriptions[field] = matches[0].group("value").strip()
-            if descriptions["pre_power_description"] != CHATGPT_POWER_INSTANT_DESCRIPTION:
+                exact_values[field] = json.loads(matches[0].group("value"))
+            if exact_values["pre_selector_name"] != args.pre_selector_name:
+                raise RuntimeError(
+                    "Power Right response changed the exact pre-action selector name"
+                )
+            if exact_values["pre_power_description"] != args.pre_description:
                 raise RuntimeError(
                     "Power Right response changed the exact pre-action Power description"
                 )
             if (
-                not descriptions["post_power_description"]
-                or descriptions["post_power_description"]
-                == descriptions["pre_power_description"]
-                or descriptions["post_power_description"]
+                not exact_values["post_power_description"]
+                or exact_values["post_power_description"]
+                == exact_values["pre_power_description"]
+                or exact_values["post_power_description"]
                 == "<complete nonempty exact live post-action description>"
             ):
                 raise RuntimeError(
