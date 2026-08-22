@@ -5,8 +5,10 @@ from functools import lru_cache
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import re
+import stat
 from typing import Any, Mapping
 
 import yaml
@@ -60,6 +62,7 @@ _PUBLIC_STATES = frozenset({
 })
 _ACTION_OPERATIONS = frozenset({'activate', 'focus'})
 _READ_OPERATIONS = frozenset({'observe', 'verify'})
+RUNTIME_CONFIG_SCHEMA = 'supervised_ui_runtime_config_v1'
 _PUBLIC_TEXT_FORBIDDEN = re.compile(
     r'(?:https?://|www\.|[/\\]|@|token|secret|password|credential|api[_ -]?key|'
     r'claude|chatgpt|openai|gemini|google|grok|perplexity|nvidia|reddit)',
@@ -79,7 +82,20 @@ class PolicyControl:
     role: str
     operations: tuple[str, ...]
     effect_class: str
-    postconditions: Mapping[str, Mapping[str, tuple[str, ...]]]
+    postconditions: Mapping[str, 'OperationPostcondition']
+
+
+@dataclass(frozen=True, slots=True)
+class StatePredicate:
+    present: bool
+    states_include: tuple[str, ...]
+    states_exclude: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OperationPostcondition:
+    before: StatePredicate
+    after: StatePredicate
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +129,95 @@ def _policy_path(platform: str) -> Path:
     if not isinstance(platform, str) or not _PLATFORM_RE.fullmatch(platform):
         raise SupervisedUiContractError('invalid supervised UI platform identifier')
     return Path(__file__).resolve().parent / 'platforms' / platform / 'supervised_ui.yaml'
+
+
+def _runtime_config_paths(platform: str) -> Mapping[str, Path]:
+    policy_path = _policy_path(platform)
+    package_root = Path(__file__).resolve().parent
+    return {
+        'consultation_v2/firefox_chrome.yaml': package_root / 'firefox_chrome.yaml',
+        f'consultation_v2/platforms/{platform}/{platform}.yaml': (
+            package_root / 'platforms' / platform / f'{platform}.yaml'
+        ),
+        f'consultation_v2/platforms/{platform}/supervised_ui.yaml': policy_path,
+    }
+
+
+def validate_runtime_config_manifest(
+    value: Any,
+    platform: str,
+) -> dict[str, Any]:
+    document = _plain_mapping(value, 'runtime_config')
+    _require_exact_keys(
+        document,
+        required=frozenset({'files', 'platform', 'schema', 'sha256'}),
+        context='runtime_config',
+    )
+    if document['schema'] != RUNTIME_CONFIG_SCHEMA or document['platform'] != platform:
+        raise SupervisedUiContractError('runtime_config identity is invalid')
+    files = _plain_mapping(document['files'], 'runtime_config.files')
+    expected_paths = frozenset(_runtime_config_paths(platform))
+    if frozenset(files) != expected_paths:
+        raise SupervisedUiContractError('runtime_config file set is invalid')
+    normalized_files: dict[str, str] = {}
+    for relative_path, digest in sorted(files.items()):
+        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+            raise SupervisedUiContractError(
+                f'runtime_config digest is invalid for {relative_path}'
+            )
+        normalized_files[relative_path] = digest
+    unsigned = {
+        'files': normalized_files,
+        'platform': platform,
+        'schema': RUNTIME_CONFIG_SCHEMA,
+    }
+    expected_digest = sha256_hex(canonical_json_bytes(unsigned))
+    if not isinstance(document['sha256'], str) or not hmac.compare_digest(
+        document['sha256'],
+        expected_digest,
+    ):
+        raise SupervisedUiContractError('runtime_config aggregate digest is invalid')
+    return {**unsigned, 'sha256': expected_digest}
+
+
+def runtime_config_manifest(platform: str) -> dict[str, Any]:
+    package_root = Path(__file__).resolve().parent
+    files: dict[str, str] = {}
+    for relative_path, path in sorted(_runtime_config_paths(platform).items()):
+        resolved = path.resolve(strict=True)
+        current = path
+        while current != package_root:
+            if current.is_symlink():
+                raise SupervisedUiContractError(
+                    f'runtime config path is missing or unsafe: {relative_path}'
+                )
+            current = current.parent
+        if not resolved.is_relative_to(package_root):
+            raise SupervisedUiContractError(
+                f'runtime config path is missing or unsafe: {relative_path}'
+            )
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise SupervisedUiContractError(
+                    f'runtime config path is missing or unsafe: {relative_path}'
+                )
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        finally:
+            os.close(descriptor)
+        files[relative_path] = sha256_hex(b''.join(chunks))
+    unsigned = {
+        'files': files,
+        'platform': platform,
+        'schema': RUNTIME_CONFIG_SCHEMA,
+    }
+    return {**unsigned, 'sha256': sha256_hex(canonical_json_bytes(unsigned))}
 
 
 def _plain_mapping(value: Any, context: str) -> dict[str, Any]:
@@ -154,6 +259,40 @@ def _normalized_state(value: Any, context: str) -> str:
     if normalized not in _PUBLIC_STATES:
         raise SupervisedUiContractError(f'{context} contains disallowed state {value!r}')
     return normalized
+
+
+def _state_predicate(value: Any, context: str) -> StatePredicate:
+    predicate = _plain_mapping(value, context)
+    predicate_keys = frozenset(predicate)
+    state_keys = frozenset({'states_include', 'states_exclude'})
+    if predicate_keys not in {state_keys, state_keys | {'present'}}:
+        raise SupervisedUiContractError(f'{context} fields are incomplete or unknown')
+    present = predicate.get('present', True)
+    if not isinstance(present, bool):
+        raise SupervisedUiContractError(f'{context}.present must be boolean')
+    normalized: dict[str, tuple[str, ...]] = {}
+    for condition_key in ('states_include', 'states_exclude'):
+        values = predicate[condition_key]
+        if not isinstance(values, list):
+            raise SupervisedUiContractError(f'{context}.{condition_key} must be a list')
+        states = tuple(sorted({
+            _normalized_state(item, f'{context}.{condition_key}')
+            for item in values
+        }))
+        if len(states) != len(values):
+            raise SupervisedUiContractError(f'{context}.{condition_key} contains duplicates')
+        normalized[condition_key] = states
+    included = frozenset(normalized['states_include'])
+    excluded = frozenset(normalized['states_exclude'])
+    if included & excluded:
+        raise SupervisedUiContractError(f'{context} includes and excludes the same state')
+    if not present and (included or excluded):
+        raise SupervisedUiContractError(f'{context} cannot assert states while absent')
+    return StatePredicate(
+        present=present,
+        states_include=normalized['states_include'],
+        states_exclude=normalized['states_exclude'],
+    )
 
 
 @lru_cache(maxsize=None)
@@ -222,43 +361,36 @@ def load_supervised_policy(platform: str) -> SupervisedPolicy:
             raise SupervisedUiContractError(
                 f'controls.{mapping_key}.postconditions must cover exactly its operations'
             )
-        postconditions: dict[str, Mapping[str, tuple[str, ...]]] = {}
+        postconditions: dict[str, OperationPostcondition] = {}
         for operation in operations:
             postcondition = _plain_mapping(
                 raw_postconditions[operation],
                 f'controls.{mapping_key}.postconditions.{operation}',
             )
-            _require_exact_keys(
-                postcondition,
-                required=frozenset({'states_include', 'states_exclude'}),
-                context=f'controls.{mapping_key}.postconditions.{operation}',
-            )
-            normalized: dict[str, tuple[str, ...]] = {}
-            for condition_key in ('states_include', 'states_exclude'):
-                values = postcondition[condition_key]
-                if not isinstance(values, list):
+            context = f'controls.{mapping_key}.postconditions.{operation}'
+            if frozenset(postcondition) == frozenset({'before', 'after'}):
+                before = _state_predicate(postcondition['before'], f'{context}.before')
+                after = _state_predicate(postcondition['after'], f'{context}.after')
+                if before == after:
                     raise SupervisedUiContractError(
-                        f'controls.{mapping_key}.postconditions.{operation}.{condition_key} '
-                        'must be a list'
+                        f'{context} before and after predicates must differ'
                     )
-                states = tuple(sorted({
-                    _normalized_state(
-                        item,
-                        f'controls.{mapping_key}.postconditions.{operation}.{condition_key}',
-                    )
-                    for item in values
-                }))
-                if len(states) != len(values):
+            else:
+                if operation == 'activate':
                     raise SupervisedUiContractError(
-                        f'controls.{mapping_key}.postconditions.{operation}.{condition_key} '
-                        'contains duplicates'
+                        f'{context} must define distinct before and after predicates'
                     )
-                normalized[condition_key] = states
-            if not normalized['states_include'] and not normalized['states_exclude']:
-                raise SupervisedUiContractError(
-                    f'controls.{mapping_key}.postconditions.{operation} must assert state'
+                after = _state_predicate(postcondition, context)
+                if not after.states_include:
+                    raise SupervisedUiContractError(
+                        f'{context} must include a state for an implicit before predicate'
+                    )
+                before = StatePredicate(
+                    present=True,
+                    states_include=(),
+                    states_exclude=after.states_include,
                 )
-            postconditions[operation] = normalized
+            postconditions[operation] = OperationPostcondition(before=before, after=after)
         controls[mapping_key] = PolicyControl(
             mapping_key=mapping_key,
             control_id=control_id,
@@ -290,6 +422,18 @@ def _public_states(states: list[str]) -> list[str]:
         if normalized in _PUBLIC_STATES:
             public.add(normalized)
     return sorted(public)
+
+
+def state_predicate_matches(
+    present: bool,
+    states: set[str],
+    predicate: StatePredicate,
+) -> bool:
+    return (
+        present == predicate.present
+        and set(predicate.states_include).issubset(states)
+        and set(predicate.states_exclude).isdisjoint(states)
+    )
 
 
 def project_snapshot(snapshot: Snapshot, lease_secret: bytes) -> ProjectedSnapshot:
@@ -326,14 +470,24 @@ def project_snapshot(snapshot: Snapshot, lease_secret: bytes) -> ProjectedSnapsh
         if ref in bindings:
             raise SupervisedUiContractError('opaque ref collision')
         bindings[ref] = element
+        public_states = _public_states(element.states)
+        permitted_operations = [
+            operation
+            for operation in control.operations
+            if state_predicate_matches(
+                True,
+                set(public_states),
+                control.postconditions[operation].before,
+            )
+        ]
         public_elements.append({
             'control_id': control.control_id,
             'effect_class': control.effect_class,
             'label': control.label,
-            'operations': list(control.operations),
+            'operations': permitted_operations,
             'ref': ref,
             'role': control.role,
-            'states': _public_states(element.states),
+            'states': public_states,
         })
     public_elements.sort(key=lambda item: (item['control_id'], item['ref']))
     public = {
