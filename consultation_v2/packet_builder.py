@@ -1238,6 +1238,16 @@ def _open_exclusive(path: Path) -> int:
     return descriptor
 
 
+def _close_descriptor(descriptor: int, context: str) -> None:
+    active_error = sys.exception()
+    try:
+        os.close(descriptor)
+    except OSError as exc:
+        if active_error is None:
+            raise
+        active_error.add_note(f"{context} descriptor close also failed: {exc}")
+
+
 def _open_exclusive_at(
     directory_descriptor: int, basename: str, display_path: Path
 ) -> int:
@@ -1248,7 +1258,7 @@ def _open_exclusive_at(
     try:
         metadata = os.fstat(descriptor)
     except BaseException:
-        os.close(descriptor)
+        _close_descriptor(descriptor, "exclusive output")
         raise
     try:
         if not stat.S_ISREG(metadata.st_mode):
@@ -1258,13 +1268,15 @@ def _open_exclusive_at(
                 f"exclusive output owner/mode mismatch: {display_path}"
             )
     except BaseException:
-        os.close(descriptor)
-        _remove_exact_entry(
-            directory_descriptor,
-            basename,
-            metadata,
-            "invalid exclusive output",
-        )
+        try:
+            _remove_exact_entry(
+                directory_descriptor,
+                basename,
+                metadata,
+                "invalid exclusive output",
+            )
+        finally:
+            _close_descriptor(descriptor, "invalid exclusive output")
         raise
     return descriptor
 
@@ -1573,13 +1585,15 @@ def _validate_frozen_spec_bytes(
         _require_directory_identity(output_path.parent, directory_identity)
         _prepare_build(temporary_path)
     finally:
-        os.close(descriptor)
-        _remove_exact_entry(
-            directory_descriptor,
-            temporary_basename,
-            temporary_identity,
-            "temporary frozen spec",
-        )
+        try:
+            _remove_exact_entry(
+                directory_descriptor,
+                temporary_basename,
+                temporary_identity,
+                "temporary frozen spec",
+            )
+        finally:
+            _close_descriptor(descriptor, "temporary frozen spec")
 
 
 def _write_frozen_spec_output(
@@ -1611,14 +1625,16 @@ def _write_frozen_spec_output(
         _require_directory_identity(output_path.parent, directory_identity)
         completed = True
     finally:
-        os.close(descriptor)
-        if not completed:
-            _remove_exact_entry(
-                directory_descriptor,
-                output_path.name,
-                output_identity,
-                "incomplete frozen spec output",
-            )
+        try:
+            if not completed:
+                _remove_exact_entry(
+                    directory_descriptor,
+                    output_path.name,
+                    output_identity,
+                    "incomplete frozen spec output",
+                )
+        finally:
+            _close_descriptor(descriptor, "frozen spec output")
 
 
 def freeze_consultation_spec(
