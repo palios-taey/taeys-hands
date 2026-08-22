@@ -1,0 +1,8 @@
+# R5 risky surfaces for taeys-hands.
+#
+# taeys-hands is public production infrastructure for supervised Family-chat UI
+# operation. A bad change can affect UI action authority, extraction provenance,
+# docs/contract truth, or the gate itself, so this repo gates the whole tree.
+# The workflow matches these patterns with shell `case "$path" in $pattern)`;
+# `*` intentionally matches any changed repository path.
+*
