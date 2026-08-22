@@ -37,11 +37,7 @@ from urllib.parse import urlsplit
 REPO = str(Path(__file__).resolve().parents[1])
 sys.path.insert(0, REPO)
 
-# Standard Mira consult display -> platform map (primary + second set).
-DISPLAY_PLATFORM = {
-    "2": "chatgpt", "3": "claude", "4": "gemini", "5": "grok", "6": "perplexity",
-    "21": "claude", "22": "gemini", "23": "grok", "24": "perplexity",
-}
+CHAT_PLATFORMS = frozenset({"chatgpt", "claude", "gemini", "grok", "perplexity"})
 POLL_SECONDS = 3.0
 NOTIFICATION_RETRY_SECONDS = float(
     os.environ.get("CONSULT_MONITOR_NOTIFICATION_RETRY_SECONDS", "30")
@@ -56,6 +52,21 @@ def resolve_bus(display: str) -> str:
                        capture_output=True, text=True)
     out = (r.stdout or "").strip()
     return out.split('= "', 1)[1].rstrip('"') if '= "' in out else ""
+
+
+def platform_for_display(display: str) -> str:
+    from consultation_v2.platforms_runtime import configured_platforms, get_platform_displays
+
+    matches = [
+        platform
+        for platform in configured_platforms()
+        if platform in CHAT_PLATFORMS and display in get_platform_displays(platform)
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"display {display} must map to exactly one Family-chat platform; matches={matches}"
+        )
+    return matches[0]
 
 
 def load_detector(platform: str):
@@ -609,9 +620,10 @@ def main() -> int:
         return 2
     n = sys.argv[1].lstrip(":")
     display = f":{n}"
-    platform = DISPLAY_PLATFORM.get(n)
-    if not platform:
-        log(f"[consult-monitor {display}] no platform mapped; refusing")
+    try:
+        platform = platform_for_display(display)
+    except RuntimeError as exc:
+        log(f"[consult-monitor {display}] {exc}; refusing")
         return 2
 
     os.environ["DISPLAY"] = display
