@@ -113,6 +113,15 @@ authorized by the selected platform card.
 `open_key`. Require `performed_primitive="focus_and_key_open"`, then observe the declared menu scope and prove
 the exact YAML target. Taey never issues separate focus and key calls for this method.
 
+Every successful `observe` includes `post_action_observation`. Presence issues a mutation token only when that
+receipt is `result=PASS`, `next_mutation_authorized=true`, and the relevant mapped projection matched for two
+consecutive independent samples. `base` and `menu_snapshot` invalidate and reacquire desktop, Firefox, and the
+document before each sample. `app_root_snapshot` deliberately reacquires without clearing so a transient portal
+is not dismissed. Native chooser observations use their existing fail-loud invalidate-and-reacquire path. The
+receipt exposes every sample's elapsed time, projection digest, exact match counts, and refresh result. A refresh
+failure, missing projection, or stabilization timeout returns `HALT` and cannot authorize a mutation. The worker
+must still compare the stable projection with the exact YAML postcondition named by the frozen platform card.
+
 ## The invariant for every worker turn
 
 ```text
