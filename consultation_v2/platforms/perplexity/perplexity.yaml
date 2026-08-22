@@ -543,6 +543,8 @@ validation:
 extraction:
   assistant_text:
     steps:
+      - action: scroll_to_bottom
+        element: input
       - action: copy_element
         element: copy_button
         select: last
