@@ -8,6 +8,8 @@ import gi
 gi.require_version('Atspi', '2.0')
 from gi.repository import Atspi
 
+from consultation_v2 import input as inp
+
 logger = logging.getLogger(__name__)
 
 # Element cache keyed by platform — updated by inspect after each scan
@@ -103,10 +105,9 @@ def atspi_mapped_pointer_activate(element: Dict) -> Dict[str, object]:
             evidence['error'] = 'invalid_live_extent'
             return evidence
         evidence['live_extent_resolved'] = True
-        sent = Atspi.generate_mouse_event(
+        sent = inp.click_at(
             rect.x + rect.width // 2,
             rect.y + rect.height // 2,
-            'b1c',
         )
         evidence['pointer_event_sent'] = bool(sent)
     except Exception as exc:

@@ -371,15 +371,17 @@ class PythonContractVisitor(ast.NodeVisitor):
 
     def _is_forbidden_coordinate_action(self, node: ast.Call) -> bool:
         fn = node.func
-        if isinstance(fn, ast.Name) and fn.id == 'click_at':
-            return True
-        if isinstance(fn, ast.Attribute) and fn.attr == 'click_at':
-            return True
-        if self._is_generate_mouse_event(node):
+        if (
+            isinstance(fn, ast.Name) and fn.id == 'click_at'
+        ) or (
+            isinstance(fn, ast.Attribute) and fn.attr == 'click_at'
+        ):
             return not (
                 self._in_exact_mapped_pointer_primitive()
-                and self._is_exact_live_extent_mouse_event(node)
+                and self._is_exact_live_extent_click_at(node)
             )
+        if self._is_generate_mouse_event(node):
+            return True
         if self._runtime_action_name(node) == 'click':
             for kw in node.keywords:
                 if kw.arg == 'strategy' and isinstance(kw.value, ast.Constant):
@@ -432,14 +434,12 @@ class PythonContractVisitor(ast.NodeVisitor):
             and node.right.right.value == 2
         )
 
-    def _is_exact_live_extent_mouse_event(self, node: ast.Call) -> bool:
+    def _is_exact_live_extent_click_at(self, node: ast.Call) -> bool:
         return (
-            len(node.args) == 3
+            len(node.args) == 2
             and not node.keywords
             and self._is_extent_center(node.args[0], 'x', 'width')
             and self._is_extent_center(node.args[1], 'y', 'height')
-            and isinstance(node.args[2], ast.Constant)
-            and node.args[2].value == 'b1c'
         )
 
     @staticmethod
@@ -539,10 +539,11 @@ class PythonContractVisitor(ast.NodeVisitor):
         ):
             return False
         calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
-        pointer_calls = [call for call in calls if self._is_generate_mouse_event(call)]
+        pointer_calls = [call for call in calls if self._call_name(call) == 'click_at']
         if (
             len(pointer_calls) != 1
-            or not self._is_exact_live_extent_mouse_event(pointer_calls[0])
+            or not self._is_exact_live_extent_click_at(pointer_calls[0])
+            or any(self._is_generate_mouse_event(call) for call in calls)
             or any(isinstance(child, (ast.For, ast.AsyncFor, ast.While)) for child in ast.walk(node))
             or self._reads_raw_geometry(node)
         ):
@@ -550,7 +551,6 @@ class PythonContractVisitor(ast.NodeVisitor):
         forbidden_calls = {
             'atspi_activate',
             'atspi_click',
-            'click_at',
             'hover',
             MAPPED_POINTER_PRIMITIVE,
         }
@@ -708,10 +708,9 @@ def run_self_test() -> int:
         "    obj = element.get('atspi_obj')\n"
         '    component = obj.get_component_iface()\n'
         '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
-        '    return Atspi.generate_mouse_event(\n'
+        '    return inp.click_at(\n'
         '        rect.x + rect.width // 2,\n'
         '        rect.y + rect.height // 2,\n'
-        "        'b1c',\n"
         '    )\n'
     )
     cases = (
@@ -736,7 +735,7 @@ def run_self_test() -> int:
         (
             'raw-xy-signature',
             Path('consultation_v2/interact.py'),
-            "def atspi_mapped_pointer_activate(x, y):\n    return Atspi.generate_mouse_event(x, y, 'b1c')\n",
+            "def atspi_mapped_pointer_activate(x, y):\n    return inp.click_at(x, y)\n",
             {
                 'py-coordinate-action',
                 'py-mapped-pointer-primitive-contract',
@@ -766,7 +765,7 @@ def run_self_test() -> int:
                 '    component = obj.get_component_iface()\n'
                 '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
                 "    x = element.get('x')\n"
-                "    return Atspi.generate_mouse_event(x, rect.y, 'b1c')\n"
+                "    return inp.click_at(x, rect.y)\n"
             ),
             {
                 'py-coordinate-action',
@@ -777,8 +776,8 @@ def run_self_test() -> int:
             'fallback-action',
             Path('consultation_v2/interact.py'),
             exact.replace(
-                '    return Atspi.generate_mouse_event(',
-                '    sent = Atspi.generate_mouse_event(',
+                '    return inp.click_at(',
+                '    sent = inp.click_at(',
             ) + '    return sent or atspi_click(element)\n',
             {'py-mapped-pointer-primitive-contract'},
         ),
@@ -791,10 +790,9 @@ def run_self_test() -> int:
                 '    component = obj.get_component_iface()\n'
                 '    rect = component.get_extents(Atspi.CoordType.SCREEN)\n'
                 '    for _attempt in range(2):\n'
-                '        sent = Atspi.generate_mouse_event(\n'
+                '        sent = inp.click_at(\n'
                 '            rect.x + rect.width // 2,\n'
                 '            rect.y + rect.height // 2,\n'
-                "            'b1c',\n"
                 '        )\n'
                 '    return sent\n'
             ),

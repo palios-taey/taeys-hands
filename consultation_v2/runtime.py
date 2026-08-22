@@ -457,6 +457,7 @@ class ConsultationRuntime:
         self,
         element: ElementRef,
     ) -> dict[str, Any]:
+        self._sync_platform_io_display()
         evidence: dict[str, Any] = {
             'ok': False,
             'method': 'mapped_pointer_activate',
