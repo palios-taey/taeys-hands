@@ -682,6 +682,7 @@ workflow:
     attachment_present:
       elements:
         - remove_attachment
+      pick: last_by_y
     select_mode:
       - menu: model
         option: opus
