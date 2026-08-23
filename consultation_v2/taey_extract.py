@@ -431,12 +431,14 @@ def _full_consult_contract(
     attachment_elements = attachment_present.get('elements') or []
     filename_roles = attachment_present.get('filename_roles') or []
     filename_value = attachment_present.get('filename_value', 'name')
+    attachment_pick = attachment_present.get('pick')
     if (
         not isinstance(attachment_elements, list)
         or not all(isinstance(key, str) and key in element_map for key in attachment_elements)
         or not isinstance(filename_roles, list)
         or not all(isinstance(role, str) and role for role in filename_roles)
         or filename_value not in {'name', 'stem'}
+        or attachment_pick not in {None, 'last_by_y'}
         or not attachment_elements and not filename_roles
     ):
         raise TaeyConsultExtractionError(
@@ -561,6 +563,7 @@ def _full_consult_contract(
             'elements': tuple(attachment_elements),
             'filename_roles': tuple(filename_roles),
             'filename_value': filename_value,
+            'pick': attachment_pick,
         },
         'mode': dict(mode),
         'select_mode': tuple(select_mode),
