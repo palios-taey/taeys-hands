@@ -9,7 +9,7 @@ Type=simple
 EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:4
 Environment=XDG_SESSION_TYPE=x11
-Environment=WAYLAND_DISPLAY=
+UnsetEnvironment=WAYLAND_DISPLAY
 Environment=TAEY_PLATFORM=gemini
 Environment=TAEY_PROFILE=ff-profile-gemini
 Environment=TAEY_URL=https://gemini.google.com/app
