@@ -38,6 +38,8 @@ export TAEY_VNC="$((5900 + DISPLAY_NUM))"
 export TAEY_USERJS="${TAEY_REPO:-$REPO}/systemd/user/firefox-user.js"
 export FIREFOX_BIN="${FIREFOX_BIN:-/usr/lib/firefox/firefox}"
 
+command -v gdbus >/dev/null 2>&1 || { echo "ERROR: missing command: gdbus" >&2; exit 1; }
+
 echo "=== launch_isolated_display :${DISPLAY_NUM} (${PLATFORM}) -> ${URL} ==="
 
 # 1. Xvfb — start only if the display isn't already up (don't clobber a live one)
@@ -62,16 +64,30 @@ _taey_session() {
 
     /usr/libexec/at-spi-bus-launcher --launch-immediately &
 
-    # deterministic bus capture (retry loop — the launcher publishes AT_SPI_BUS
-    # to the X root asynchronously; a single sleep races and loses)
+    # deterministic bus capture from the launcher's authoritative D-Bus API
     A=""
+    LAST_A11Y_REPLY=""
     for _ in $(seq 1 20); do
-        T=$(xprop -display "$D" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//; s/"$//')
+        if BUS_REPLY=$(gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress 2>&1); then
+            LAST_A11Y_REPLY="$BUS_REPLY"
+            T=$(printf '%s\n' "$BUS_REPLY" | sed -n "s/^('\\(unix:[^']*\\)',)$/\\1/p")
+        else
+            LAST_A11Y_REPLY="$BUS_REPLY"
+            T=""
+        fi
         case "$T" in
-            unix:path=*|unix:abstract=*) A="$T"; printf '%s\n' "$A" > "/tmp/a11y_bus_:${TAEY_D}"; break ;;
+            unix:path=*|unix:abstract=*)
+                A="$T"
+                xprop -display "$D" -root -f AT_SPI_BUS 8s -set AT_SPI_BUS "$A"
+                PUBLISHED=$(xprop -display "$D" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//; s/"$//')
+                [[ "$PUBLISHED" == "$A" ]] || { echo "ERROR: AT-SPI X property publication failed for $D" >&2; return 1; }
+                printf '%s\n' "$A" > "/tmp/a11y_bus_:${TAEY_D}"
+                break
+                ;;
         esac
         sleep 1
     done
+    [[ -n "$A" ]] || { echo "ERROR: AT-SPI GetAddress failed for $D; last_reply=${LAST_A11Y_REPLY:0:160}" >&2; return 1; }
 
     AT_SPI_BUS_ADDRESS="$A" /usr/libexec/at-spi2-registryd &
     sleep 1

@@ -102,7 +102,7 @@ Each generated `taey-display-N.service`:
 1. Depends on `taey-xvfb@N.service`.
 2. Reads `~/.taey/machine.env`.
 3. Pins the X11 session contract and starts `scripts/display_unit_runner.sh` under `dbus-run-session`.
-4. Fails if AT-SPI bus capture does not produce `/tmp/a11y_bus_:N`.
+4. Reads the isolated bus from `org.a11y.Bus.GetAddress`, publishes the compatibility X-root property, and fails unless both match.
 5. Installs the repo-owned Firefox `user.js` into the configured profile.
 6. Launches Firefox with the configured URL and profile.
 7. Starts x11vnc when VNC is enabled.
