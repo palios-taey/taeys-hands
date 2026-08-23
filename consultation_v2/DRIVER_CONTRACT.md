@@ -54,11 +54,16 @@
 - Each display's Firefox holds exactly ONE tab. Navigate the existing tab in-place; conversations
   persist in the platform history sidebar. Stacked tabs make extraction ambiguous.
 
-## G. Dispatch sequentially, NEVER parallel (100_TIMES §6)
-- On shared infrastructure, drive platforms ONE AT A TIME: verify page ready → dispatch → validate →
-  move on. Firing many at once causes contention (crashed Firefox, raced AT-SPI buses, half-render).
-- (The per-supervisor model — each supervisor's own displays, one window each, p3-per-supervisor — is
-  what eventually makes concurrency safe: it is isolation, not shared-infra parallelism. Until then: sequential.)
+## G. Serialize each display; isolate concurrent lanes
+- One display has exactly one active mutator and one display lease. Its next mutation remains serialized behind
+  the previous mutation's fresh-tree postcondition. A second actor for the same display is refused.
+- Independent platforms may run concurrently only on separately bound displays, Firefox processes, AT-SPI
+  buses, seats, turns, artifact roots, and completion routes. A failed lane cannot authorize, mutate, or close
+  another lane.
+- The accepted five-display production proof is
+  [`../receipts/manual-chat-ui/2026-08-23-five-lane-convergence-terminal-pass.md`](../receipts/manual-chat-ui/2026-08-23-five-lane-convergence-terminal-pass.md).
+  It proves isolated cross-display concurrency; it does not authorize parallel actions on one display, a
+  shared observer, or removal of any platform-local postcondition.
 
 ## H. Wake while in flight; never trust the monitor alone (100_TIMES §8a)
 - While any dispatch/extract is in flight, actively re-check with fresh trees. A waiting requester with no
