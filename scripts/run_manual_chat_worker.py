@@ -893,7 +893,7 @@ def _extract_content(
             "mapped message_actions_button owned by the current_response_article.\n"
             f"3. drive_chat display={display}, action=hover, element=message_actions_button exactly "
             f"once; then drive_chat display={display}, action=observe, scope=base; require the same "
-            "/chat/ URL condition, continue_button absent, no mapped exception, exactly one mapped "
+            "/chat/ URL condition, continue_button absent, no mapped exception, at least one mapped "
             "copy_button named Copy, and exactly one fresh copy_button target marked by the YAML "
             "last_by_y selection.\n"
             f"4. drive_chat display={display}, action=click, element=copy_button; then drive_chat "
