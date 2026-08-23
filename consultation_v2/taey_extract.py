@@ -438,7 +438,7 @@ def _full_consult_contract(
         or not isinstance(filename_roles, list)
         or not all(isinstance(role, str) and role for role in filename_roles)
         or filename_value not in {'name', 'stem'}
-        or attachment_pick not in {None, 'last_by_y'}
+        or attachment_pick not in {None, 'last_by_y', 'first_by_x'}
         or not attachment_elements and not filename_roles
     ):
         raise TaeyConsultExtractionError(
