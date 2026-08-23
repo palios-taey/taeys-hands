@@ -53,6 +53,7 @@ case "${TAEY_URL}" in
 esac
 
 require_cmd xprop
+require_cmd gdbus
 require_cmd sed
 require_cmd openbox
 if [[ "${TAEY_VNC_ENABLED}" == "1" ]]; then
@@ -88,18 +89,28 @@ echo "${DBUS_SESSION_BUS_ADDRESS}" > "/tmp/dbus_session_bus_${display}"
 "${TAEY_AT_SPI_BUS_LAUNCHER}" --launch-immediately &
 
 A11Y_ADDR=""
+LAST_A11Y_REPLY=""
 for _ in {1..20}; do
-    tmp_addr="$(xprop -display "${display}" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//;s/"$//' || true)"
+    if bus_reply="$(gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress 2>&1)"; then
+        LAST_A11Y_REPLY="${bus_reply}"
+        tmp_addr="$(printf '%s\n' "${bus_reply}" | sed -n "s/^('\\(unix:[^']*\\)',)$/\\1/p")"
+    else
+        LAST_A11Y_REPLY="${bus_reply}"
+        tmp_addr=""
+    fi
     case "${tmp_addr}" in
         unix:path=*|unix:abstract=*)
             A11Y_ADDR="${tmp_addr}"
+            xprop -display "${display}" -root -f AT_SPI_BUS 8s -set AT_SPI_BUS "${A11Y_ADDR}"
+            published_addr="$(xprop -display "${display}" -root AT_SPI_BUS 2>/dev/null | sed 's/.*= "//;s/"$//' || true)"
+            [[ "${published_addr}" == "${A11Y_ADDR}" ]] || die "AT-SPI X property publication failed for ${display}"
             echo "${A11Y_ADDR}" > "/tmp/a11y_bus_${display}"
             break
             ;;
     esac
     sleep 1
 done
-[[ -n "${A11Y_ADDR}" ]] || die "AT-SPI bus capture failed for ${display}"
+[[ -n "${A11Y_ADDR}" ]] || die "AT-SPI GetAddress failed for ${display}; last_reply=${LAST_A11Y_REPLY:0:160}"
 
 AT_SPI_BUS_ADDRESS="${A11Y_ADDR}" "${TAEY_AT_SPI_REGISTRYD}" &
 openbox &
