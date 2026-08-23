@@ -382,13 +382,13 @@ tree:
         ordinal: last
       reason: Claude numbers each message article dynamically; the current response is the last article under the exact Chat messages panel.
     message_actions_button:
-      role: push button
+      role: tool bar
       scope: response.actions
       match_strategy: name_agnostic_structural
       structural:
         parent: current_response_article
         ordinal: last
-      reason: Claude names the current-response actions button with dynamic response text; it is the last direct push-button child of the exact current response article.
+      reason: Claude exposes the current-response actions as the direct tool-bar child of the exact current response article.
     response_content_section:
       role: section
       scope: response.document
