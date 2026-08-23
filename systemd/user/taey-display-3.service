@@ -9,7 +9,7 @@ Type=simple
 EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:3
 Environment=XDG_SESSION_TYPE=x11
-Environment=WAYLAND_DISPLAY=
+UnsetEnvironment=WAYLAND_DISPLAY
 Environment=TAEY_PLATFORM=claude
 Environment=TAEY_PROFILE=ff-profile-claude
 Environment=TAEY_URL=https://claude.ai/new

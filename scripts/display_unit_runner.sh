@@ -20,6 +20,8 @@ require_env() {
 display_num="${1:-}"
 [[ "${display_num}" =~ ^[1-9][0-9]*$ ]] || die "display number must be a positive integer"
 display=":${display_num}"
+export XDG_SESSION_TYPE=x11
+unset WAYLAND_DISPLAY
 
 for name in \
     DBUS_SESSION_BUS_ADDRESS \

@@ -9,7 +9,7 @@ Type=simple
 EnvironmentFile=%h/.taey/machine.env
 Environment=DISPLAY=:6
 Environment=XDG_SESSION_TYPE=x11
-Environment=WAYLAND_DISPLAY=
+UnsetEnvironment=WAYLAND_DISPLAY
 Environment=TAEY_PLATFORM=perplexity
 Environment=TAEY_PROFILE=ff-profile-perplexity
 Environment=TAEY_URL=https://www.perplexity.ai/
