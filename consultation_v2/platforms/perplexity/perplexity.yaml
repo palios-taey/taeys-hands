@@ -483,6 +483,7 @@ workflow:
     settle_redirects: true
   monitor:
     stop_key: stop_button
+    completion_key: copy_contents_button
     generation_timeout: 3600
     extraction_timeout: 1800
   extract:
