@@ -98,7 +98,7 @@ def completion_observation(
     stop_keys = monitor.get("stop_keys") or [
         monitor.get("stop_key") or "stop_button"
     ]
-    copy_key = workflow["extract"]["primary_key"]
+    copy_key = monitor.get("completion_key") or workflow["extract"]["primary_key"]
     fresh_identity = _url_path_identity(cfg["urls"]["fresh"])
 
     tup = build_snapshot(platform)
