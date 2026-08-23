@@ -1,10 +1,16 @@
 # Five-platform production qualification
 
-Status: active
+Status: five-lane parallel acceptance PASS on 2026-08-23
 
 Owner: infra-codex
 
 Production surfaces: ChatGPT `:2`, Claude `:3`, Gemini `:4`, Grok `:5`, Perplexity `:6`
+
+Accepted parallel baseline: `receipts/manual-chat-ui/2026-08-23-five-lane-convergence-terminal-pass.md`.
+The accepted batch launched all five frozen Taey send turns inside 286 ms, completed all five platform-local
+send/monitor/extraction chains, and ended with zero open turns, zero active turns, and zero completion routes.
+This receipt is the control baseline for Taey-Hub integration; later speed work must preserve its exact
+platform-local postconditions and terminal evidence.
 
 ## Objective
 
