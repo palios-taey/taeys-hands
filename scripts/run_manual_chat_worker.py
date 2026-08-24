@@ -14,6 +14,10 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from consultation_v2.platforms.perplexity.markdown_download import (
+    read_new_markdown_download,
+    snapshot_markdown_downloads,
+)
 from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
 
 
@@ -977,8 +981,15 @@ def _extract_content(
             "perplexity",
             "research_report",
             (
-                ("copy_element", "copy_contents_button", "last", None),
-                ("read_clipboard", None, "last", "response_complete"),
+                ("scroll_to_bottom", "input", "last", None),
+                ("scroll_into_view", "download_button", "last", None),
+                ("click", "download_button", "last", None),
+                (
+                    "download",
+                    "download_markdown_item",
+                    "last",
+                    "response_complete",
+                ),
             ),
         )
         _require_extraction_steps(
@@ -996,14 +1007,14 @@ def _extract_content(
             "read any file, runbook, or YAML. For scroll_to_bottom and click, pass only the exact "
             "element key mapped as a singleton by the immediately preceding fresh observation; "
             "do not copy or pass an opaque ref. Execute exactly this sequence:\n"
-            "1. observe scope=base; require current_url to begin "
+            "1. scroll_to_bottom element=input exactly once; observe scope=base; require current_url to begin "
             "https://www.perplexity.ai/search/, require stop_button absent, and require exactly one "
-            "mapped copy_contents_button named Copy contents with role push button and states "
-            "showing and enabled.\n"
-            "2. click element=copy_contents_button exactly once; observe scope=base; require the same "
-            "URL condition and stop_button absent.\n"
-            f"3. read_clipboard with output_file={research_report_file}. Require that drive_chat "
-            "created a new non-empty research report file and return its byte count and SHA-256.\n"
+            "mapped download_button named Download with role push button and states showing.\n"
+            "2. click element=download_button exactly once; observe scope=menu_snapshot; require exactly "
+            "one mapped download_markdown_item named Markdown with role menu item.\n"
+            "3. click element=download_markdown_item exactly once; observe scope=base; require the same "
+            "URL condition and stop_button absent. The enclosing worker, not you, verifies and stages "
+            f"the unique new native Markdown download at {research_report_file}.\n"
             "4. scroll_to_bottom element=input exactly once; observe scope=base; require the same "
             "URL condition, stop_button absent, and exactly one mapped copy_button named Copy with "
             "role push button and states showing and enabled, selected by the YAML last_by_y rule.\n"
@@ -1011,10 +1022,11 @@ def _extract_content(
             "stop_button absent.\n"
             f"6. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
-            "all UI calls.\n"
+            "all UI calls. Return exact lines native_download=true, download_click_count=1, "
+            "markdown_click_count=1, and inline_copy_count=1.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, "
-            "send, retry, recover, poll, open Download, or make any additional Copy attempt."
+            "send, retry, recover, poll, or make any additional Download, Markdown, or Copy attempt."
         )
     if platform != "chatgpt":
         raise RuntimeError(f"{platform} has no qualified frozen extraction sequence")
@@ -1232,6 +1244,8 @@ def main() -> int:
     source_response_sha256 = None
     exception_key = None
     research_report_file = None
+    research_report_download_evidence = None
+    research_report_download_before = None
     completed_before_stop_response_file = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
@@ -1454,6 +1468,8 @@ def main() -> int:
             if output.exists():
                 raise RuntimeError(f"extraction output already exists; refusing retry: {output}")
         prepared_marker.unlink()
+    if args.phase == "extract" and args.platform == "perplexity":
+        research_report_download_before = snapshot_markdown_downloads()
     lease_release = None
     primary_error = None
     mutation_stop_report = False
@@ -1530,6 +1546,42 @@ def main() -> int:
                 "reset-chatgpt-model-menu-compact",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if research_report_download_before is not None:
+            assert research_report_file is not None
+            required_download_receipt = (
+                "native_download=true",
+                "download_click_count=1",
+                "markdown_click_count=1",
+                "inline_copy_count=1",
+            )
+            missing_download_receipt = [
+                field for field in required_download_receipt if field not in receipt
+            ]
+            if missing_download_receipt:
+                raise RuntimeError(
+                    "Perplexity extraction receipt lacks native-download cardinality: "
+                    f"{missing_download_receipt}"
+                )
+            raw_report, research_report_download_evidence = (
+                read_new_markdown_download(research_report_download_before)
+            )
+            if not raw_report:
+                raise RuntimeError(
+                    "Perplexity native Markdown download was not uniquely proven: "
+                    f"{research_report_download_evidence}"
+                )
+            with research_report_file.open("xb") as handle:
+                handle.write(raw_report)
+            research_report_file.chmod(0o600)
+            if (
+                research_report_file.stat().st_size
+                != research_report_download_evidence.get("download_bytes")
+                or _sha256(research_report_file)
+                != research_report_download_evidence.get("download_sha256")
+            ):
+                raise RuntimeError(
+                    "staged Perplexity report does not match the native Markdown download"
+                )
         if args.phase == "diagnose-chatgpt-model-menu":
             required_receipt_fields = (
                 "chatgpt model menu diagnostic receipt",
@@ -1820,6 +1872,8 @@ def main() -> int:
             "research_report_bytes": research_report_file.stat().st_size,
             "research_report_sha256": _sha256(research_report_file),
         })
+        if research_report_download_evidence is not None:
+            result["research_report_download"] = research_report_download_evidence
     if source_response is not None:
         source_result = {
             "source_response_json": str(source_response),
