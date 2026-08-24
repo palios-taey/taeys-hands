@@ -779,6 +779,11 @@ workflow:
     menu_target: upload_files_item
     open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
+    observation:
+      stable_cycles: 2
+      interval_ms: 250
+      dialog_timeout_ms: 12000
+      attachment_timeout_ms: 20000
   prompt:
     input: input
     send_button: send_button

@@ -2560,6 +2560,26 @@ class _GrokInlineBase:
     def _urls_equivalent(left: str | None, right: str | None) -> bool:
         return (left or '').strip().rstrip('/') == (right or '').strip().rstrip('/')
 
+    @staticmethod
+    def _answer_thread_identity(url: str | None) -> tuple[str, str] | None:
+        parsed = urlparse((url or '').strip())
+        host = (parsed.hostname or '').lower()
+        if host not in {'grok.com', 'www.grok.com'}:
+            return None
+        parts = [part for part in (parsed.path or '').split('/') if part]
+        if len(parts) < 2 or parts[0] != 'c' or not parts[1]:
+            return None
+        return 'grok.com', parts[1]
+
+    @classmethod
+    def _answer_threads_equivalent(
+        cls,
+        left: str | None,
+        right: str | None,
+    ) -> bool:
+        left_identity = cls._answer_thread_identity(left)
+        return left_identity is not None and left_identity == cls._answer_thread_identity(right)
+
     def _assert_monitor_answer_thread(
         self,
         result: ConsultationResult,
@@ -2590,7 +2610,7 @@ class _GrokInlineBase:
                 stop_condition='answer_thread_lost',
             )
             return False, True
-        if self._urls_equivalent(current, captured):
+        if self._answer_threads_equivalent(current, captured):
             return True, False
 
         result.add_step(
@@ -2651,7 +2671,7 @@ class _GrokInlineBase:
                 captured_url=captured,
             )
             return False
-        if self._urls_equivalent(current_before, captured):
+        if self._answer_threads_equivalent(current_before, captured):
             result.add_step(
                 'answer_thread',
                 True,
@@ -2664,7 +2684,7 @@ class _GrokInlineBase:
 
         def _arrived() -> str | None:
             current = (self.runtime.current_url() or '').strip()
-            if self._urls_equivalent(current, captured):
+            if self._answer_threads_equivalent(current, captured):
                 return current
             return None
 

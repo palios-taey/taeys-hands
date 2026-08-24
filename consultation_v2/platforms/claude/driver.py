@@ -17,11 +17,17 @@ from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.platforms.claude.monitor import COMPLETE, DEEP_MODES, ClaudeCompletionDetector
 from consultation_v2.stop_conditions import is_stop_condition
+from consultation_v2 import input as inp
 from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
+from consultation_v2.native_dialog_snapshot import (
+    NativeDialogObservationError,
+    NativeDialogSnapshot,
+    build_native_dialog_snapshot,
+)
 from consultation_v2.run_state_identity import (
     LegacyUnscopedRunState,
     assert_request_run_state_available,
@@ -3850,15 +3856,36 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
         open_method = str(attachment_cfg.get('open_method') or 'atspi_menu').strip()
         shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
-        self.runtime.focus_firefox()
-        time.sleep(0.2)
+        before_snapshot, attachment_count_before, before_samples = (
+            self._wait_for_stable_attachment_count()
+        )
+        if before_snapshot is None or attachment_count_before is None:
+            result.add_step(
+                'attach',
+                False,
+                f'Claude attachment count did not stabilize before {abs_path}',
+                file=abs_path,
+                observation_samples=before_samples,
+            )
+            return False
+        if not self.runtime.focus_firefox():
+            result.add_step(
+                'attach',
+                False,
+                f'Claude Firefox focus failed before attachment shortcut for {abs_path}',
+                file=abs_path,
+                attachment_count_before=attachment_count_before,
+                observation_samples=before_samples,
+            )
+            return False
+        inp.set_display(self._display())
         if open_method == 'keyboard_shortcut':
             if not shortcut:
                 result.add_step('attach', False,
                                 f'Claude attachment keyboard shortcut is absent for {abs_path}',
                                 open_method=open_method)
                 return False
-            if not self.runtime.press(shortcut):
+            if not inp.press_key_cleared(shortcut):
                 result.add_step('attach', False,
                                 f'Claude attachment keyboard shortcut failed for {abs_path}',
                                 open_method=open_method,
@@ -3895,59 +3922,75 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                             f'Claude attachment open_method {open_method!r} is unsupported',
                             open_method=open_method)
             return False
-        time.sleep(1.0)
-        if not self.runtime.focus_file_dialog():
+        dialog_snapshot, dialog_samples = self._wait_for_native_dialog_postcondition()
+        if dialog_snapshot is None:
             result.add_step('attach', False,
-                            f'Claude file dialog did not focus for {abs_path}',
+                            f'Claude native file dialog postcondition was not observed for {abs_path}',
                             file=abs_path,
                             dialog_open=open_method,
-                            keyboard_shortcut=shortcut or None)
+                            keyboard_shortcut=shortcut or None,
+                            observation_samples=dialog_samples)
             return False
         if open_method == 'keyboard_shortcut':
             result.add_step(
                 'attach_prepare',
                 True,
-                'Claude opened file dialog with the declared attachment keyboard shortcut',
+                'Claude observed the native file dialog after one declared attachment shortcut',
                 shortcut=shortcut,
+                native_dialog=dialog_snapshot.serializable(),
+                observation_samples=dialog_samples,
             )
-        if not self.runtime.focus_file_dialog():
-            result.add_step('attach', False,
-                            f'Claude file dialog did not focus for {abs_path}',
-                            file=abs_path,
-                            dialog_open=open_method)
-            return False
-        if not self.runtime.press('ctrl+l'):
+        if not inp.press_key_cleared('ctrl+l'):
             result.add_step('attach', False,
                             f'Claude file dialog location shortcut failed for {abs_path}',
                             file=abs_path)
             return False
-        time.sleep(0.3)
-        if not self.runtime.press('ctrl+a'):
+        location_snapshot, location_samples = self._wait_for_native_dialog_postcondition(
+            require_location_entry=True,
+        )
+        if location_snapshot is None:
+            result.add_step(
+                'attach',
+                False,
+                f'Claude file dialog location entry was not observed for {abs_path}',
+                file=abs_path,
+                observation_samples=location_samples,
+            )
+            return False
+        if not inp.press_key_cleared('ctrl+a'):
             result.add_step('attach', False,
                             f'Claude file dialog path select-all failed for {abs_path}',
                             file=abs_path,
                             dialog_open=open_method)
             return False
-        time.sleep(0.1)
         if not self.runtime.type_text(abs_path, delay_ms=5):
             result.add_step('attach', False,
                             f'Claude file dialog path typing failed for {abs_path}',
                             file=abs_path)
             return False
-        time.sleep(0.3)
-        if not self.runtime.focus_file_dialog():
+        path_snapshot, path_samples = self._wait_for_native_dialog_postcondition(
+            require_location_entry=True,
+            expected_location_text=abs_path,
+        )
+        if path_snapshot is None:
             result.add_step('attach', False,
-                            f'Claude file dialog lost focus before submit for {abs_path}',
-                            file=abs_path)
+                            f'Claude file dialog exact path was not observed for {abs_path}',
+                            file=abs_path,
+                            observation_samples=path_samples)
             return False
-        if not self.runtime.press('Return'):
+        if not inp.press_key_cleared('Return'):
             result.add_step('attach', False,
                             f'Claude file dialog Return submit failed for {abs_path}',
                             file=abs_path)
             return False
-        verify_snap = self._wait_for_attach_success(abs_path)
-        chip_name = self._attachment_chip_name(verify_snap, abs_path)
-        verified = chip_name is not None
+        expected_attachment_count = attachment_count_before + 1
+        verify_snap, attachment_count_after, verify_samples = (
+            self._wait_for_stable_attachment_count(expected_attachment_count)
+        )
+        verified = (
+            verify_snap is not None
+            and attachment_count_after == expected_attachment_count
+        )
         result.add_step('attach', verified,
                         f'Claude attached {os.path.basename(abs_path)}',
                         file=abs_path,
@@ -3957,9 +4000,114 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         menu_target=upload_key,
                         dialog_open=open_method,
                         dialog_submit='return',
-                        chip_name=chip_name,
-                        snapshot=verify_snap.serializable())
+                        attachment_count_before=attachment_count_before,
+                        attachment_count_after=attachment_count_after,
+                        expected_attachment_count=expected_attachment_count,
+                        observation_samples=verify_samples,
+                        snapshot=verify_snap.serializable() if verify_snap else None)
         return verified
+
+    def _attachment_observation_config(self) -> tuple[int, float, float, float]:
+        attachment_cfg = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+        observation = attachment_cfg.get('observation') or {}
+        stable_cycles = max(1, int(observation.get('stable_cycles', 2)))
+        interval = max(0.05, float(observation.get('interval_ms', 250)) / 1000.0)
+        dialog_timeout = max(
+            0.1,
+            float(observation.get('dialog_timeout_ms', 12000)) / 1000.0,
+        )
+        attachment_timeout = max(
+            0.1,
+            float(observation.get('attachment_timeout_ms', 20000)) / 1000.0,
+        )
+        return stable_cycles, interval, dialog_timeout, attachment_timeout
+
+    def _wait_for_native_dialog_postcondition(
+        self,
+        *,
+        require_location_entry: bool = False,
+        expected_location_text: str | None = None,
+    ) -> tuple[NativeDialogSnapshot | None, list[dict[str, Any]]]:
+        stable_cycles, interval, timeout, _ = self._attachment_observation_config()
+        started = time.monotonic()
+        deadline = started + timeout
+        matched_cycles = 0
+        samples: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            try:
+                snapshot = build_native_dialog_snapshot(self.platform)
+            except NativeDialogObservationError as exc:
+                matched_cycles = 0
+                samples.append({
+                    'elapsed_ms': elapsed_ms,
+                    'matched': False,
+                    'error': str(exc)[:500],
+                })
+                time.sleep(interval)
+                continue
+            dialog_count = len(snapshot.mapped.get('dialog_root') or ())
+            chooser_count = len(snapshot.mapped.get('chooser_widget') or ())
+            location_entries = snapshot.mapped.get('location_entry') or ()
+            location_count = len(location_entries)
+            location_text = location_entries[0].text if location_count == 1 else None
+            focus_verified = self.runtime.file_dialog_has_focus()
+            matched = (
+                dialog_count == 1
+                and chooser_count == 1
+                and focus_verified
+                and (not require_location_entry or location_count == 1)
+                and (
+                    expected_location_text is None
+                    or location_text == expected_location_text
+                )
+            )
+            samples.append({
+                'elapsed_ms': elapsed_ms,
+                'revision': snapshot.revision,
+                'dialog_root_count': dialog_count,
+                'chooser_widget_count': chooser_count,
+                'location_entry_count': location_count,
+                'location_text': location_text,
+                'file_dialog_focus_verified': focus_verified,
+                'matched': matched,
+            })
+            matched_cycles = matched_cycles + 1 if matched else 0
+            if matched_cycles >= stable_cycles:
+                return snapshot, samples
+            time.sleep(interval)
+        return None, samples
+
+    def _wait_for_stable_attachment_count(
+        self,
+        expected_count: int | None = None,
+    ) -> tuple[Snapshot | None, int | None, list[dict[str, Any]]]:
+        stable_cycles, interval, _, timeout = self._attachment_observation_config()
+        started = time.monotonic()
+        deadline = started + timeout
+        candidate_count: int | None = None
+        matched_cycles = 0
+        samples: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            snapshot = self.runtime.snapshot()
+            observed_count = len(snapshot.mapped.get('remove_attachment') or [])
+            matched = expected_count is None or observed_count == expected_count
+            if expected_count is None:
+                matched_cycles = matched_cycles + 1 if observed_count == candidate_count else 1
+                candidate_count = observed_count
+            else:
+                matched_cycles = matched_cycles + 1 if matched else 0
+            samples.append({
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'revision': snapshot.revision,
+                'expected_count': expected_count,
+                'observed_count': observed_count,
+                'matched': matched,
+            })
+            if matched and matched_cycles >= stable_cycles:
+                return snapshot, observed_count, samples
+            time.sleep(interval)
+        return None, candidate_count, samples
 
     def _wait_for_upload_menu_item(self, upload_key: str) -> tuple[Snapshot, ElementRef | None]:
         deadline = time.time() + 12.0
@@ -3976,22 +4124,6 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                     return snapshot, upload_item
             time.sleep(0.3)
         return last_snapshot or self.runtime.menu_snapshot(), None
-
-    def _wait_for_attach_success(self, abs_path: str):
-        last_snapshot = None
-
-        def _probe():
-            nonlocal last_snapshot
-            for snapshot in (self.runtime.snapshot(), self.runtime.menu_snapshot()):
-                last_snapshot = snapshot
-                if self._attachment_visible(snapshot, abs_path):
-                    return snapshot
-            return None
-
-        matched = self.runtime.wait_until(_probe, timeout=20.0, interval=0.5)
-        if isinstance(matched, Snapshot):
-            return matched
-        return last_snapshot or self.runtime.snapshot()
 
     # ------------------------------------------------------------------
     # Enter prompt
