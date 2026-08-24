@@ -64,8 +64,17 @@ def main() -> int:
     )
     _require(
         card.count('exactly one fresh download_button target marked by the YAML last_by_y selection')
-        == 2,
-        'Perplexity extraction card must select the final Download before and after scroll',
+        == 1,
+        'Perplexity extraction card must select the final Download only after scroll',
+    )
+    _require(
+        card.index('scroll_to_bottom element=input exactly once')
+        < card.index('at least one mapped download_button'),
+        'Perplexity extraction card requires Download before the scroll that exposes it',
+    )
+    _require(
+        'without any success cardinality field' in card,
+        'Perplexity failure receipt may echo success cardinality fields',
     )
     _require(
         'exactly one mapped download_button' not in card,
