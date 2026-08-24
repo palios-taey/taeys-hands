@@ -1025,11 +1025,11 @@ def _extract_content(
             "research_report",
             (
                 ("scroll_to_bottom", "input", "last", None),
-                ("scroll_into_view", "download_button", "last", None),
-                ("click", "download_button", "last", None),
+                ("scroll_into_view", "more_actions", "last", None),
+                ("click", "more_actions", "last", None),
                 (
                     "download",
-                    "download_markdown_item",
+                    "export_markdown_item",
                     "last",
                     "response_complete",
                 ),
@@ -1054,14 +1054,15 @@ def _extract_content(
             "Do not copy or pass an opaque ref. Execute exactly this sequence:\n"
             "1. observe scope=base; require current_url to begin "
             "https://www.perplexity.ai/search/, require stop_button absent, and require exactly one "
-            "mapped input editable entry. Do not require download_button before scrolling.\n"
+            "mapped input editable entry. Do not require final-response actions before scrolling.\n"
             "2. scroll_to_bottom element=input exactly once; observe scope=base; require the same URL "
-            "condition, stop_button absent, at least one mapped download_button, and exactly one fresh "
-            "download_button target marked by the YAML last_by_y selection.\n"
-            "3. operate element=download_button exactly once; require performed_primitive="
+            "condition, stop_button absent, at least one mapped more_actions named More actions with "
+            "role push button and states showing and enabled, and exactly one fresh more_actions target "
+            "marked by the YAML last_by_y selection.\n"
+            "3. operate element=more_actions exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=app_root_snapshot; require exactly one mapped "
-            "download_markdown_item named Markdown with role menu item.\n"
-            "4. operate element=download_markdown_item exactly once; require performed_primitive="
+            "export_markdown_item named Export as Markdown with role menu item.\n"
+            "4. operate element=export_markdown_item exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=base; require the same "
             "URL condition and stop_button absent. The enclosing worker, not you, verifies and stages "
             f"the unique new native Markdown download at {research_report_file}.\n"
@@ -1073,7 +1074,7 @@ def _extract_content(
             f"7. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
             "all UI calls. Only after all seven steps pass, return exact lines native_download=true, "
-            "download_click_count=1, markdown_click_count=1, and inline_copy_count=1."
+            "more_actions_click_count=1, export_markdown_click_count=1, and inline_copy_count=1."
             f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report without any success cardinality field and "
@@ -1663,8 +1664,8 @@ def main() -> int:
             assert research_report_file is not None
             required_download_receipt = (
                 "native_download=true",
-                "download_click_count=1",
-                "markdown_click_count=1",
+                "more_actions_click_count=1",
+                "export_markdown_click_count=1",
                 "inline_copy_count=1",
             )
             missing_download_receipt = [
