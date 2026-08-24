@@ -3888,7 +3888,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         upload_key = str(attachment['menu_target'])
         upload_scope = str(attachment.get('scope') or '').strip().lower()
         open_method = str(attachment.get('open_method') or '').strip().lower()
-        open_key = str(attachment.get('open_key') or '').strip()
         for file_path in request.attachments:
             abs_path = os.path.abspath(file_path)
             snap = self.runtime.snapshot()
@@ -3900,12 +3899,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     snapshot=snap.serializable(),
                 )
                 return False
-            if open_method != 'focus_and_key_open' or not open_key:
+            if open_method != 'mapped_pointer_activate' or 'open_key' in attachment:
                 result.add_step(
                     'attach', False,
-                    'Perplexity attachment YAML has no exact focus+key operation',
+                    'Perplexity attachment YAML has no exact mapped-pointer operation',
                     open_method=open_method,
-                    open_key=open_key,
+                    open_key_present='open_key' in attachment,
                     snapshot=snap.serializable(),
                 )
                 return False
@@ -3917,17 +3916,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     snapshot=snap.serializable(),
                 )
                 return False
-            open_evidence = self.runtime.focus_and_key_open(
-                trigger,
-                key=open_key,
-                settle=0.3,
-            )
-            if not bool(open_evidence.get('ok')):
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            if open_evidence.get('ok') is not True:
                 result.add_step(
                     'attach', False,
                     f'Perplexity attach trigger YAML operation failed for {abs_path}',
                     open_method=open_method,
-                    open_key=open_key,
                     open_evidence=open_evidence,
                     snapshot=snap.serializable(),
                 )

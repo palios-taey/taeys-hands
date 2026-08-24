@@ -460,8 +460,7 @@ workflow:
     trigger: attach_trigger
     menu_target: upload_files_item
     scope: app_root_snapshot
-    open_method: focus_and_key_open
-    open_key: space
+    open_method: mapped_pointer_activate
   onboarding:
     computer_setup:
       markers:
