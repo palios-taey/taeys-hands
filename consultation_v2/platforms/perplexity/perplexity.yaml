@@ -551,16 +551,20 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-#  - research_report: full report via the mapped `copy_contents_button` before
-#    bottom scrolling virtualizes that control away.
+#  - research_report: source-bearing Markdown via the mapped Download menu.
 #  - assistant_text: normal answer via the mapped `copy_button`.
 # ============================================================================
 extraction:
   research_report:
     steps:
-      - action: copy_element
-        element: copy_contents_button
-      - action: read_clipboard
+      - action: scroll_to_bottom
+        element: input
+      - action: scroll_into_view
+        element: download_button
+      - action: click
+        element: download_button
+      - action: download
+        element: download_markdown_item
         validation: response_complete
   assistant_text:
     steps:
