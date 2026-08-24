@@ -510,6 +510,7 @@ workflow:
       stable_observations: 2
   monitor:
     stop_key: stop_button
+    completion_gate: stop_absent_same_thread
     completion_key: copy_contents_button
     generation_timeout: 3600
     extraction_timeout: 1800
