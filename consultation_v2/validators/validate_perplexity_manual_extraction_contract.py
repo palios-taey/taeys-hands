@@ -31,34 +31,18 @@ def main() -> int:
         monitor.get('completion_gate') == 'stop_absent_same_thread',
         'Perplexity monitor must cut to extraction after stable Stop absence on the same thread',
     )
-    more_actions_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
-        'more_actions'
+    copy_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
+        'copy_button'
     ) or {}
     _require(
-        more_actions_spec.get('pick') == 'last_by_y',
-        'Perplexity More actions control must select the final response by y',
-    )
-    download_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
-        'download_menu_item'
-    ) or {}
-    _require(
-        download_spec.get('name') == 'Download'
-        and download_spec.get('role') == 'menu item'
-        and download_spec.get('scope') == 'app_root_snapshot',
-        'Perplexity Download menu item mapping drifted',
-    )
-    markdown_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
-        'download_markdown_item'
-    ) or {}
-    _require(
-        markdown_spec.get('name') == 'Markdown'
-        and markdown_spec.get('role') == 'menu item'
-        and markdown_spec.get('scope') == 'app_root_snapshot',
-        'Perplexity Markdown menu item mapping drifted',
+        copy_spec.get('name') == 'Copy'
+        and copy_spec.get('role') == 'push button'
+        and set(copy_spec.get('states_include') or ()) == {'showing', 'enabled'},
+        'Perplexity Copy control mapping drifted',
     )
 
-    workflow = get_extraction('perplexity', 'research_report')
-    _require(workflow is not None, 'Perplexity research report extraction is missing')
+    workflow = get_extraction('perplexity', 'assistant_text')
+    _require(workflow is not None, 'Perplexity assistant text extraction is missing')
     observed = tuple(
         (step.action, step.element, step.select, step.validation)
         for step in workflow.steps
@@ -66,12 +50,10 @@ def main() -> int:
     _require(
         observed == (
             ('scroll_to_bottom', 'input', 'last', None),
-            ('scroll_into_view', 'more_actions', 'last', None),
-            ('click', 'more_actions', 'last', None),
-            ('hover', 'download_menu_item', 'last', None),
-            ('download', 'download_markdown_item', 'last', 'response_complete'),
+            ('copy_element', 'copy_button', 'last', None),
+            ('read_clipboard', None, 'last', 'response_complete'),
         ),
-        'Perplexity research report extraction sequence drifted',
+        'Perplexity assistant text extraction sequence drifted',
     )
 
     card = _extract_content(
@@ -79,36 +61,31 @@ def main() -> int:
         'perplexity',
         ':6',
         Path('/frozen/response.txt'),
-        Path('/frozen/perplexity_research_report.md'),
     )
     _require(
-        card.count('exactly one fresh more_actions target marked by the YAML last_by_y selection')
+        card.count('selected by the YAML last_by_y rule')
         == 1,
-        'Perplexity extraction card must select the final More actions only after scroll',
+        'Perplexity extraction card must select the final Copy only after scroll',
     )
     _require(
         card.index('scroll_to_bottom element=input exactly once')
-        < card.index('at least one mapped more_actions'),
-        'Perplexity extraction card requires More actions before the scroll that exposes it',
+        < card.index('exactly one mapped copy_button'),
+        'Perplexity extraction card requires Copy before the scroll that exposes it',
     )
     _require(
         'without any success cardinality field' in card,
         'Perplexity failure receipt may echo success cardinality fields',
     )
     _require(
-        'operate element=download_button' not in card,
-        'Perplexity extraction card still exposes the superseded direct Download button path',
+        'operate element=more_actions' not in card
+        and 'download_menu_item' not in card
+        and 'download_markdown_item' not in card,
+        'Perplexity extraction card still exposes the optional native download path',
     )
     _require(
-        'more_actions_click_count=1' in card
-        and 'download_hover_count=1' in card
-        and 'markdown_click_count=1' in card,
-        'Perplexity extraction card lost exact native-download cardinality',
-    )
-    _require(
-        'operate element=download_menu_item' not in card
-        and 'hover element=download_menu_item exactly once' in card,
-        'Perplexity extraction card must hover the Download submenu without activating PDF',
+        'inline_copy_count=1' in card
+        and card.count('click element=copy_button exactly once') == 1,
+        'Perplexity extraction card lost exact Copy cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(
@@ -127,7 +104,6 @@ def main() -> int:
         'perplexity',
         ':6',
         Path('/frozen/response.txt'),
-        Path('/frozen/perplexity_research_report.md'),
         source_sha256,
     )
     _require(
