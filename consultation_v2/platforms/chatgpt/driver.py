@@ -4483,7 +4483,6 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         paste_chip_ready = bool(paste_chip_names)
         ready = bool(
             send_button
-            and has_coordinates
             and state_ready
         )
         return send_key, send_button, {
@@ -4502,13 +4501,11 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
         # Use the pre-navigation baseline captured in run() — file attachment
         # can change the URL before send, making current_url() stale.
         before = result.session_url_before
-        # SEND = exact mapped Send prompt button click. This is not a fixed pixel
-        # fallback: the click point comes from the YAML-mapped, enabled send
-        # element in the current tree. Stop/url validation still gates success.
+        # SEND = focus the exact mapped composer and press Return once. The
+        # enabled mapped Send button proves readiness; it is not clicked.
         attempts = []
         configured_timeout = float(self.cfg.get('workflow', {}).get('send', {}).get('timeout', 120) or 120)
         full_timeout = max(120.0, configured_timeout)
-        first_probe_timeout = min(12.0, full_timeout)
         stop_keys = self._stop_keys()
         if request.attachments:
             upload_snap, upload_readiness, last_upload_snap = (
@@ -4534,35 +4531,30 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
                 )
                 return False
 
-        for attempt in (1, 2):
-            send_snap = None
-            readiness_snapshot = self.runtime.wait_until(
-                lambda: (
-                    snap
-                    if self._send_button_readiness(snap := self.runtime.snapshot())[2]['ready']
-                    else None
-                ),
-                timeout=5.0,
-                interval=0.25,
-            ) or self.runtime.snapshot()
-            send_key, send_button, readiness = self._send_button_readiness(readiness_snapshot)
-            readiness['attempt'] = attempt
-            attempts.append(readiness)
-            if not readiness['ready'] or send_button is None:
-                if attempt == 2:
-                    break
-                continue
-
-            clicked = self._click(send_button)
-            timeout = first_probe_timeout if attempt == 1 else full_timeout
-            if clicked:
+        send_snap = None
+        readiness_snapshot = self.runtime.wait_until(
+            lambda: (
+                snap
+                if self._send_button_readiness(snap := self.runtime.snapshot())[2]['ready']
+                else None
+            ),
+            timeout=5.0,
+            interval=0.25,
+        ) or self.runtime.snapshot()
+        send_key, send_button, readiness = self._send_button_readiness(readiness_snapshot)
+        attempts.append(readiness)
+        if readiness['ready'] and send_button is not None:
+            focused = self._focus_composer()
+            focus_evidence = dict(getattr(self, '_last_composer_focus_evidence', {}) or {})
+            pressed = bool(focused and self.runtime.press('Return'))
+            if pressed:
                 send_snap = self.runtime.wait_until(
                     lambda: (
                         stop_state[1]
                         if (stop_state := self._read_stop_state(stop_keys, confirm_absence=False))[0]
                         else None
                     ),
-                    timeout=timeout,
+                    timeout=full_timeout,
                     interval=0.6,
                 ) or self.runtime.snapshot()
             else:
@@ -4582,50 +4574,38 @@ class ChatGPTConsultationDriver(_ChatGPTInlineBase):
             url_changed = bool(result.session_url_after and result.session_url_after != before)
             answer_thread = bool(self._is_answer_thread_url(result.session_url_after))
             url_landed = bool(answer_url and answer_thread and (url_changed or request.session_url))
-            prompt_still_staged = False
-            if attempt == 1 and not stop_seen and not url_landed:
-                prompt_still_staged = self.snapshot_has_any(self.runtime.snapshot(), self._send_button_keys())
-            verified = bool(clicked and stop_seen and url_landed)
             attempts.append({
-                'attempt': attempt,
-                'phase': 'exact_send_button_click',
+                'phase': 'exact_composer_return',
                 'send_key': send_key,
                 'send_button': self._element_evidence(send_button),
-                'clicked': clicked,
+                'focus': focus_evidence,
+                'focused': focused,
+                'pressed': pressed,
                 'stop_seen': stop_seen,
                 'stop_reading': self._compact_stop_reading(stop_reading),
                 'url_changed': url_changed,
                 'answer_thread': answer_thread,
                 'url_landed': url_landed,
-                'prompt_still_staged': prompt_still_staged,
             })
-            if verified:
-                verify_snap = send_snap
+            if pressed and stop_seen and url_landed:
                 result.add_step(
                     'send', True,
-                    'ChatGPT send validated by exact Send prompt click, Stop button, and answer-thread URL',
+                    'ChatGPT send validated by one mapped-composer Return, Stop button, and answer-thread URL',
                     url_before=before,
                     url_after=result.session_url_after,
                     stop_seen=stop_seen,
                     url_changed=url_changed,
                     url_landed=url_landed,
                     attempts=attempts,
-                    snapshot=verify_snap.serializable(),
+                    snapshot=send_snap.serializable(),
                 )
                 return True
-
-            # Retry only when the exact send click produced no send evidence and
-            # the prompt is still staged. If Stop or a thread URL appears, do not
-            # click again.
-            if attempt == 1 and not stop_seen and not url_landed and prompt_still_staged:
-                continue
-            break
 
         verify_snap = send_snap or self.runtime.snapshot()
         failure_reason = self._send_failure_reason(attempts)
         result.add_step(
             'send', False,
-            'ChatGPT send failed validation after exact Send prompt click',
+            'ChatGPT send failed validation after one mapped-composer Return',
             url_before=before,
             url_after=result.session_url_after or self.runtime.current_url() or before,
             failure_reason=failure_reason,

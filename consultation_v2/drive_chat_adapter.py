@@ -6,7 +6,9 @@ bus.  The caller continues to own display locking and JSON serialization.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -115,4 +117,143 @@ def attach(platform: str, path: str) -> dict[str, Any]:
     }
 
 
-__all__ = ['DriveChatAdapterError', 'attach', 'extract', 'scroll']
+def _input_file(path: str, label: str) -> Path:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file():
+        raise DriveChatAdapterError(f'{label} is not a file: {resolved}')
+    return resolved
+
+
+def _write_exclusive(path: str, payload: bytes, label: str) -> tuple[Path, str]:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.parent.is_dir():
+        raise DriveChatAdapterError(
+            f'{label} parent directory does not exist: {resolved.parent}'
+        )
+    try:
+        with resolved.open('xb') as handle:
+            handle.write(payload)
+    except FileExistsError as exc:
+        raise DriveChatAdapterError(
+            f'{label} already exists; refusing to overwrite: {resolved}'
+        ) from exc
+    return resolved, hashlib.sha256(payload).hexdigest()
+
+
+def _planned_output(path: str, label: str) -> Path:
+    resolved = Path(path).expanduser().resolve()
+    if resolved.exists():
+        raise DriveChatAdapterError(
+            f'{label} already exists; refusing before browser action: {resolved}'
+        )
+    if not resolved.parent.is_dir():
+        raise DriveChatAdapterError(
+            f'{label} parent directory does not exist: {resolved.parent}'
+        )
+    return resolved
+
+
+def consult(
+    platform: str,
+    *,
+    prompt_file: str,
+    bundle_a: str,
+    bundle_b: str,
+    output_file: str,
+    receipt_file: str,
+    requester: str,
+    timeout: int = 5400,
+) -> dict[str, Any]:
+    prompt_path = _input_file(prompt_file, 'prompt_file')
+    attachments = [
+        _input_file(bundle_a, 'bundle_a'),
+        _input_file(bundle_b, 'bundle_b'),
+    ]
+    source_paths = {prompt_path, *attachments}
+    if len(source_paths) != 3:
+        raise DriveChatAdapterError(
+            'prompt_file, bundle_a, and bundle_b must be three distinct files'
+        )
+    output_path = _planned_output(output_file, 'output_file')
+    receipt_path = _planned_output(receipt_file, 'receipt_file')
+    if output_path == receipt_path or output_path in source_paths or receipt_path in source_paths:
+        raise DriveChatAdapterError(
+            'output_file and receipt_file must be distinct from each other and all inputs'
+        )
+    if not requester:
+        raise DriveChatAdapterError('requester must be non-empty')
+    try:
+        prompt = prompt_path.read_text(encoding='utf-8')
+    except UnicodeDecodeError as exc:
+        raise DriveChatAdapterError('prompt_file must be UTF-8 text') from exc
+    if not prompt.strip():
+        raise DriveChatAdapterError('prompt_file is empty')
+
+    from consultation_v2.orchestrator import run_consultation
+
+    request = ConsultationRequest(
+        platform=platform,
+        message=prompt,
+        attachments=[str(path) for path in attachments],
+        timeout=timeout,
+        store_enabled=False,
+        attach_identity=False,
+        purpose='frozen_manual_baseline_promotion',
+        requester=requester,
+    )
+    result = run_consultation(request)
+    receipt_payload = json.dumps(
+        result.serializable(),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode('utf-8')
+    receipt_path, receipt_sha256 = _write_exclusive(
+        str(receipt_path),
+        receipt_payload,
+        'receipt_file',
+    )
+    if not result.ok or not result.response_text:
+        failed_steps = [step for step in result.steps if not step.success]
+        detail = (
+            failed_steps[-1].message
+            if failed_steps
+            else 'consultation returned no deliverable'
+        )
+        raise DriveChatAdapterError(
+            f'{platform}: frozen consultation failed: {detail}; '
+            f'receipt={receipt_path} sha256={receipt_sha256}'
+        )
+
+    response_payload = result.response_text.encode('utf-8')
+    response_path, response_sha256 = _write_exclusive(
+        str(output_path),
+        response_payload,
+        'output_file',
+    )
+    return {
+        'platform': platform,
+        'completed': True,
+        'session_url': result.session_url_after,
+        'response': {
+            'path': str(response_path),
+            'bytes': len(response_payload),
+            'sha256': response_sha256,
+        },
+        'receipt': {
+            'path': str(receipt_path),
+            'bytes': len(receipt_payload),
+            'sha256': receipt_sha256,
+        },
+        'steps': [
+            {
+                'step': step.step,
+                'success': step.success,
+                'message': step.message,
+            }
+            for step in result.steps
+        ],
+    }
+
+
+__all__ = ['DriveChatAdapterError', 'attach', 'consult', 'extract', 'scroll']
