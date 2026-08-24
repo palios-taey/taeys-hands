@@ -6,6 +6,7 @@ package.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -3574,13 +3575,32 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 )
             else:
                 navigated = self.runtime.navigate(target_url, verify_change=True)
-            snap = self.runtime.snapshot()
-            clean_navigation = self._navigation_snapshot_clean(snap)
+            navigation_performed = navigated
+            if navigated:
+                settled_navigation, snap, navigation_samples = (
+                    self._wait_for_stable_navigation_snapshot()
+                )
+                clean_navigation = settled_navigation is not None
+            else:
+                snap = self.runtime.snapshot()
+                navigation_samples = []
+                clean_navigation = False
             navigated = bool(navigated and clean_navigation)
             result.add_step(
-                'navigate', navigated, 'Navigated to Claude session target',
+                'navigate',
+                navigated,
+                (
+                    'Navigated to Claude session target'
+                    if navigated else
+                    (
+                        'Claude navigation exact-control postcondition did not stabilize'
+                        if navigation_performed else
+                        'Claude navigation primitive failed'
+                    )
+                ),
                 target_url=target_url,
                 clean_navigation=clean_navigation,
+                observation_samples=navigation_samples,
                 snapshot=snap.serializable(),
             )
             if not navigated:
@@ -3627,8 +3647,60 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             return True
         return any(current.startswith(target + sep) for sep in ('?', '#', '/'))
 
+    def _navigation_observation_config(
+        self,
+    ) -> tuple[tuple[str, ...], int, float, float]:
+        navigation = self.cfg.get('workflow', {}).get('navigation', {}) or {}
+        postcondition = navigation.get('postcondition') or {}
+        observation = navigation.get('observation') or {}
+        if postcondition.get('scope') != 'base':
+            raise RuntimeError('Claude navigation postcondition scope must be base')
+        if observation.get('refresh_policy') != 'invalidate_reacquire':
+            raise RuntimeError(
+                'Claude navigation refresh policy must be invalidate_reacquire'
+            )
+        required_controls = tuple(postcondition.get('exact_singletons') or ())
+        if not required_controls:
+            raise RuntimeError('Claude navigation exact singleton controls are required')
+        stable_cycles = max(2, int(observation.get('stable_cycles', 2)))
+        interval = max(0.05, float(observation.get('interval_ms', 250)) / 1000.0)
+        timeout = max(0.1, float(observation.get('timeout_ms', 12000)) / 1000.0)
+        return required_controls, stable_cycles, interval, timeout
+
+    def _wait_for_stable_navigation_snapshot(
+        self,
+    ) -> tuple[Snapshot | None, Snapshot, list[dict[str, Any]]]:
+        required_controls, stable_cycles, interval, timeout = (
+            self._navigation_observation_config()
+        )
+        started = time.monotonic()
+        deadline = started + timeout
+        matched_cycles = 0
+        samples: list[dict[str, Any]] = []
+        last_snapshot: Snapshot | None = None
+        while time.monotonic() < deadline:
+            last_snapshot = self.runtime.snapshot()
+            counts = {
+                key: len(last_snapshot.mapped.get(key) or [])
+                for key in required_controls
+            }
+            matched = self._navigation_snapshot_clean(last_snapshot)
+            matched_cycles = matched_cycles + 1 if matched else 0
+            samples.append({
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'revision': self._snapshot_receipt_revision(last_snapshot),
+                'required_exact_singletons': list(required_controls),
+                'observed_counts': counts,
+                'matched': matched,
+            })
+            if matched_cycles >= stable_cycles:
+                return last_snapshot, last_snapshot, samples
+            time.sleep(interval)
+        final_snapshot = last_snapshot or self.runtime.snapshot()
+        return None, final_snapshot, samples
+
     def _navigation_snapshot_clean(self, snapshot: Snapshot) -> bool:
-        required_controls = ('input', 'model_selector', 'toggle_menu')
+        required_controls, _, _, _ = self._navigation_observation_config()
         return bool(
             snapshot.raw_count > 0
             and all(
@@ -3636,6 +3708,16 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 for key in required_controls
             )
         )
+
+    @staticmethod
+    def _snapshot_receipt_revision(snapshot: Snapshot) -> str:
+        payload = json.dumps(
+            snapshot.serializable(),
+            ensure_ascii=False,
+            separators=(',', ':'),
+            sort_keys=True,
+        ).encode('utf-8')
+        return hashlib.sha256(payload).hexdigest()
 
     def _disable_research_mode_before_attach(self, result: ConsultationResult) -> bool:
         snapshot = self.runtime.snapshot()
@@ -4089,7 +4171,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 matched_cycles = matched_cycles + 1 if matched else 0
             samples.append({
                 'elapsed_ms': round((time.monotonic() - started) * 1000),
-                'revision': snapshot.revision,
+                'revision': self._snapshot_receipt_revision(snapshot),
                 'expected_count': expected_count,
                 'observed_count': observed_count,
                 'matched': matched,
