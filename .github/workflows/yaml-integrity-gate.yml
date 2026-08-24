@@ -41,5 +41,8 @@ jobs:
       - name: Prove Grok attachment semantic operation contract
         run: python3 consultation_v2/validators/validate_grok_manual_attachment_contract.py
 
+      - name: Prove Perplexity attachment semantic operation contract
+        run: python3 consultation_v2/validators/validate_perplexity_manual_attachment_contract.py
+
       - name: Run supervised UI design-rule public contract gate
         run: python3 consultation_v2/validators/validate_supervised_ui_design_rules.py --self-check
