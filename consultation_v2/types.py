@@ -275,8 +275,39 @@ class StepRecord:
             'step': self.step,
             'success': self.success,
             'message': self.message,
-            'evidence': self.evidence,
+            'evidence': _serializable_step_evidence(
+                self.evidence,
+                path=f'step[{self.step!r}].evidence',
+            ),
         }
+
+
+def _serializable_step_evidence(value: Any, *, path: str) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, ElementRef):
+        return value.serializable()
+    if isinstance(value, dict):
+        payload: Dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f'{path} contains non-string key {key!r} '
+                    f'of type {type(key).__name__}'
+                )
+            payload[key] = _serializable_step_evidence(
+                item,
+                path=f'{path}.{key}',
+            )
+        return payload
+    if isinstance(value, (list, tuple)):
+        return [
+            _serializable_step_evidence(item, path=f'{path}[{index}]')
+            for index, item in enumerate(value)
+        ]
+    raise TypeError(
+        f'{path} contains unsupported evidence type {type(value).__name__}'
+    )
 
 
 @dataclass(slots=True)
