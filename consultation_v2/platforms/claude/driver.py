@@ -3510,27 +3510,20 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 )
                 return False
 
-            def _removal_landed() -> Snapshot | None:
-                candidate = self.runtime.snapshot()
-                return (
-                    candidate
-                    if len(self._visible_attachment_removals(candidate)) < before_count
-                    else None
-                )
-
-            settled = self.runtime.wait_until(
-                _removal_landed,
-                timeout=5.0,
-                interval=0.3,
+            expected_remaining = before_count - 1
+            settled, observed_remaining, observation_samples = (
+                self._wait_for_stable_attachment_count(expected_remaining)
             )
-            if not isinstance(settled, Snapshot):
+            if settled is None:
                 snapshot = self.runtime.snapshot()
                 result.add_step(
                     'clean_composer',
                     False,
-                    'Claude stale attachment remained after removal click',
+                    'Claude stale attachment removal postcondition did not stabilize',
                     file=filename,
-                    remaining=len(self._visible_attachment_removals(snapshot)),
+                    expected_remaining=expected_remaining,
+                    observed_remaining=observed_remaining,
+                    observation_samples=observation_samples,
                     snapshot=snapshot.serializable(),
                 )
                 return False
@@ -3538,22 +3531,18 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             snapshot = settled
             controls = self._visible_attachment_removals(snapshot)
 
-        snapshot = self.runtime.wait_for_stable_snapshot(
-            consecutive=2,
-            timeout=3.0,
-            interval=0.3,
-            anchor_key='input',
-            require_non_empty=True,
+        snapshot, observed_remaining, observation_samples = (
+            self._wait_for_stable_attachment_count(0)
         )
-        controls = self._visible_attachment_removals(snapshot)
-        if controls:
+        if snapshot is None:
             result.add_step(
                 'clean_composer',
                 False,
-                'Claude fresh composer still contains stale attachments',
+                'Claude fresh composer zero-attachment postcondition did not stabilize',
                 removed=removed,
-                remaining=len(controls),
-                snapshot=snapshot.serializable(),
+                expected_remaining=0,
+                observed_remaining=observed_remaining,
+                observation_samples=observation_samples,
             )
             return False
         result.add_step(
@@ -3561,6 +3550,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             True,
             'Claude fresh composer has no stale attachments',
             removed=removed,
+            observation_samples=observation_samples,
             snapshot=snapshot.serializable(),
         )
         return True
