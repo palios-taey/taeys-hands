@@ -1188,6 +1188,22 @@ def _is_completed_before_stop_receipt(receipt: str) -> bool:
     return False
 
 
+def _extraction_event_id(
+    seat_id: str,
+    monitor_id: str | None,
+    platform: str,
+    display: str,
+    source_response_sha256: str | None,
+) -> str:
+    completion_identity = monitor_id or (
+        f"completed-before-stop\0{platform}\0{display}\0{source_response_sha256}"
+    )
+    digest = hashlib.sha256(
+        f"{seat_id}\0{completion_identity}".encode("utf-8")
+    ).hexdigest()
+    return f"extract-{digest[:24]}"
+
+
 def _release_extract_lease(display: str, seat_id: str) -> str:
     host = os.environ.get("REDIS_HOST") or os.environ.get("TAEY_REDIS_HOST") or "127.0.0.1"
     port = os.environ.get("REDIS_PORT") or os.environ.get("TAEY_REDIS_PORT") or "6379"
@@ -1412,12 +1428,13 @@ def main() -> int:
             research_report_file,
             source_response_sha256,
         )
-        extraction_identity = monitor_id or (
-            f"completed-before-stop\0{args.platform}\0{args.display}\0"
-            f"{source_response_sha256}"
+        event_id = _extraction_event_id(
+            seat_id,
+            monitor_id,
+            args.platform,
+            args.display,
+            source_response_sha256,
         )
-        digest = hashlib.sha256(extraction_identity.encode("utf-8")).hexdigest()
-        event_id = f"extract-{digest[:24]}"
         request_text = _request_text(content, 4096)
 
     correlation_id = f"{event_id}-1"
