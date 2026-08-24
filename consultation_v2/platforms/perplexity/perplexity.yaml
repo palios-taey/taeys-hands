@@ -497,6 +497,17 @@ workflow:
     require_new_url: true
     stop_key: stop_button
     settle_redirects: true
+  post_send:
+    completed_before_stop:
+      handoff: separate_extract
+      detect:
+        - copy_query_button
+        - helpful
+        - not_helpful
+        - input
+      absent:
+        - stop_button
+      stable_observations: 2
   monitor:
     stop_key: stop_button
     completion_key: copy_contents_button

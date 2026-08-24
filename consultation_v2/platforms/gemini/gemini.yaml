@@ -363,6 +363,7 @@ workflow:
     post_send_key: start_research
   post_send:
     completed_before_stop:
+      handoff: inline_extract
       detect:
         - copy_button
         - input

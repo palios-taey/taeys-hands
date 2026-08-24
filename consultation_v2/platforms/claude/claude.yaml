@@ -863,6 +863,7 @@ settle:
   model_menu_ms: 1000
   effort_menu_reveal_ms: 20000
   navigate_ms: 3500
+  composer_focus_release_ms: 10000
   attach_ms: 2500
   send_validation_ms: 90000
   rescan_attempts: 1

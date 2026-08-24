@@ -211,6 +211,7 @@ def _completed_before_stop_state(platform: str) -> dict[str, object] | None:
     detect = raw_state.get("detect")
     absent = raw_state.get("absent")
     stable_observations = raw_state.get("stable_observations")
+    handoff = raw_state.get("handoff")
     for field_name, values in (("detect", detect), ("absent", absent)):
         if (
             not isinstance(values, list)
@@ -232,10 +233,15 @@ def _completed_before_stop_state(platform: str) -> dict[str, object] | None:
         raise RuntimeError(
             f"{platform} completed-before-Stop requires exactly two observations"
         )
+    if handoff not in {"inline_extract", "separate_extract"}:
+        raise RuntimeError(
+            f"{platform} completed-before-Stop requires a qualified handoff"
+        )
     return {
         "detect": tuple(detect),
         "absent": tuple(absent),
         "stable_observations": stable_observations,
+        "handoff": handoff,
     }
 
 
@@ -269,13 +275,14 @@ def _post_send_confirmation_content(
             "not infer completion from the URL, Copy, Regenerate, Retry, or any response text. "
             "Do not click any recovery control in the send turn.\n"
         )
-    if completed_before_stop_response_file is None:
+    handoff = str(completed_state["handoff"])
+    if handoff == "inline_extract" and completed_before_stop_response_file is None:
         raise RuntimeError(
             f"{platform} completed-before-Stop requires an extraction output file"
         )
     detect = ", ".join(completed_state["detect"])
     absent = ", ".join(completed_state["absent"])
-    return (
+    completed_state_instruction = (
         base
         + "If no exception set is present, classify the YAML-owned completed-before-Stop state "
         f"only when both fresh observations contain exactly one each of {detect}, contain none "
@@ -284,17 +291,37 @@ def _post_send_confirmation_content(
         "duplicated, or differs between observations, return an UNMAPPED POST-SEND STATE report "
         "with both revisions and current mapped elements, then stop. If the exact state is "
         "present in both observations, completion occurred before Stop could be observed. Do not "
-        "register a monitor and do not claim Stop was seen. Continue in this same turn with exactly: "
-        "key ctrl+End; observe scope=base; require the same URL, completed state, and exactly one "
-        "copy_button target selected by the YAML last_by_y rule; click that copy_button; observe "
-        "scope=base; require the same URL and completed state; read_clipboard with "
-        f"output_file={completed_before_stop_response_file}. Require a new non-empty file. Return "
-        "a COMPLETED-BEFORE-STOP SEND RECEIPT containing completion_basis=completed_before_stop, "
-        "stop_seen=false, monitor_id=none, send_count=1, platform/display, both pre-extraction "
-        "observation revisions, the matched and absent elements, "
-        f"output_file={completed_before_stop_response_file}, byte_count=<exact integer>, and "
-        "response_sha256=<exact SHA-256>. Then stop "
-        "all UI calls. Do not click any recovery control or send again.\n"
+        "register a monitor and do not claim Stop was seen. "
+    )
+    receipt_fields = (
+        "The terminal receipt must include exact machine fields "
+        "completion_basis=completed_before_stop, stop_seen=false, monitor_id=none, "
+        "send_count=1, observation_revision_1=<first 64-hex revision>, "
+        "observation_revision_2=<second 64-hex revision>, thread_url=<exact current URL>, "
+        "platform=<platform>, and display=<display>. "
+    )
+    if handoff == "separate_extract":
+        return (
+            completed_state_instruction
+            + receipt_fields
+            + "Return a COMPLETED-BEFORE-STOP SEND RECEIPT with the matched and absent "
+            "elements, then stop all UI calls. Extraction requires a separately authorized "
+            "turn bound to this receipt. Do not scroll, Copy, Download, or mutate after the "
+            "second completion observation. Do not click any recovery control or send again.\n"
+        )
+    assert completed_before_stop_response_file is not None
+    return (
+        completed_state_instruction
+        + "Continue in this same turn with exactly: "
+        + "key ctrl+End; observe scope=base; require the same URL, completed state, and exactly one "
+        + "copy_button target selected by the YAML last_by_y rule; click that copy_button; observe "
+        + "scope=base; require the same URL and completed state; read_clipboard with "
+        + f"output_file={completed_before_stop_response_file}. Require a new non-empty file. Return "
+        + "a COMPLETED-BEFORE-STOP SEND RECEIPT containing the matched and absent elements and "
+        + receipt_fields
+        + f"output_file={completed_before_stop_response_file}, byte_count=<exact integer>, and "
+        + "response_sha256=<exact SHA-256>. Then stop "
+        + "all UI calls. Do not click any recovery control or send again.\n"
     )
 
 
@@ -975,6 +1002,24 @@ def _extract_content(
     if platform == "perplexity":
         if research_report_file is None:
             raise RuntimeError("Perplexity extraction requires a research report output file")
+        if completed_before_stop_source_sha256 is None:
+            completion_basis = (
+                f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. "
+            )
+            receipt_requirements = ""
+        else:
+            completion_basis = (
+                "This separately authorized Perplexity extraction is based on a terminal "
+                "completed-before-Stop send receipt with "
+                f"source_response_json_sha256={completed_before_stop_source_sha256}. "
+                "No completion monitor reported COMPLETE and no observed Stop transition is "
+                "claimed. "
+            )
+            receipt_requirements = (
+                " Return completion_basis=completed_before_stop and "
+                f"source_response_json_sha256={completed_before_stop_source_sha256} in the "
+                "receipt."
+            )
         _require_extraction_steps(
             "perplexity",
             "research_report",
@@ -1000,7 +1045,8 @@ def _extract_content(
             ),
         )
         return (
-            f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one "
+            completion_basis
+            + "Execute one "
             f"frozen Perplexity extraction transaction on {display} with drive_chat only. Do not "
             "read any file, runbook, or YAML. Pass only an exact element key from the immediately "
             "preceding fresh observation; do not require a singleton when that observation marks "
@@ -1029,7 +1075,8 @@ def _extract_content(
             f"7. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
             "all UI calls. Return exact lines native_download=true, download_click_count=1, "
-            "markdown_click_count=1, and inline_copy_count=1.\n"
+            "markdown_click_count=1, and inline_copy_count=1."
+            f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report and stop. Do not navigate, attach, paste, "
             "send, retry, recover, poll, or make any additional Download, Markdown, or Copy attempt."
@@ -1191,6 +1238,48 @@ def _is_completed_before_stop_receipt(receipt: str) -> bool:
     return False
 
 
+def _receipt_field_matches(receipt: str, field: str, expected: str) -> bool:
+    separator = r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+    return re.search(
+        rf"(?im)\b{re.escape(field)}\b{separator}{re.escape(expected)}"
+        rf"(?=$|[\s*`|,;)])",
+        receipt,
+    ) is not None
+
+
+def _completed_before_stop_provenance(
+    receipt: str,
+    platform: str,
+    display: str,
+) -> bool:
+    required = {
+        "completion_basis": "completed_before_stop",
+        "stop_seen": "false",
+        "monitor_id": "none",
+        "send_count": "1",
+        "platform": platform,
+        "display": display,
+    }
+    if any(
+        not _receipt_field_matches(receipt, field, expected)
+        for field, expected in required.items()
+    ):
+        return False
+    for index in (1, 2):
+        if re.search(
+            rf"(?im)\bobservation_revision_{index}\b"
+            r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{64}\b",
+            receipt,
+        ) is None:
+            return False
+    thread_url_patterns = {
+        "gemini": r"https://gemini\.google\.com/(?:u/\d+/)?app/[A-Za-z0-9_-]+",
+        "perplexity": r"https://www\.perplexity\.ai/search/[A-Za-z0-9_-]+",
+    }
+    pattern = thread_url_patterns.get(platform)
+    return pattern is not None and re.search(pattern, receipt) is not None
+
+
 def _extraction_event_id(
     seat_id: str,
     monitor_id: str | None,
@@ -1313,7 +1402,8 @@ def main() -> int:
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
         prompt_file = _absolute_input(args.prompt_file, "prompt file")
-        if args.platform == "gemini":
+        completed_state = _completed_before_stop_state(args.platform)
+        if completed_state is not None and completed_state["handoff"] == "inline_extract":
             completed_before_stop_response_file = root / "response.txt"
             if completed_before_stop_response_file.exists():
                 raise RuntimeError(
@@ -1358,50 +1448,27 @@ def main() -> int:
         monitor_id = None
         completed_before_stop_source = args.completed_before_stop_source_response_json
         if completed_before_stop_source is not None:
-            if args.platform != "gemini":
+            completed_state = _completed_before_stop_state(args.platform)
+            if completed_state is None:
                 raise RuntimeError(
-                    "completed-before-Stop extraction is qualified only for Gemini"
+                    "completed-before-Stop extraction is not qualified for this platform"
                 )
             source_response = _absolute_input(
                 completed_before_stop_source,
                 "completed-before-Stop source response JSON",
             )
             _source_payload, source_receipt = _worker_receipt(source_response)
-            source_receipt_lower = source_receipt.lower()
-            required_source_fragments = (
-                "unmapped post-send state",
-                "**send executed:** yes",
-                "**both fresh observation revisions:**",
-                "absent from both post-send fresh base observations",
-                "- `copy_button`",
-                "**monitor_id:** none",
-            )
-            source_revision_count = len(re.findall(
-                r"(?m)^\s*[12]\.\s*`[0-9a-f]{64}`",
-                source_receipt,
-            ))
-            source_platform_display = re.search(
-                rf"(?im)^\*\*platform / display:\*\*\s*gemini\s*/\s*"
-                rf"{re.escape(args.display)}\s*$",
-                source_receipt,
-            )
-            source_thread_url = re.search(
-                r"https://gemini\.google\.com/(?:u/\d+/)?app/[A-Za-z0-9_-]+",
-                source_receipt,
-            )
             if (
-                not _is_worker_stop_report(source_receipt)
-                or any(
-                    fragment not in source_receipt_lower
-                    for fragment in required_source_fragments
+                not _is_completed_before_stop_receipt(source_receipt)
+                or not _completed_before_stop_provenance(
+                    source_receipt,
+                    args.platform,
+                    args.display,
                 )
-                or source_revision_count != 2
-                or source_platform_display is None
-                or source_thread_url is None
             ):
                 raise RuntimeError(
-                    "completed-before-Stop source response lacks the exact Gemini send, "
-                    "two-observation, Stop-absent, Copy, URL, or monitor-none evidence"
+                    "completed-before-Stop source response lacks exact send, two-observation, "
+                    "thread, platform, display, or monitor-none evidence"
                 )
             source_response_sha256 = _sha256(source_response)
         else:
@@ -1510,38 +1577,54 @@ def main() -> int:
             and _is_completed_before_stop_receipt(receipt)
         )
         if completed_before_stop:
-            if args.platform != "gemini" or completed_before_stop_response_file is None:
+            completed_state = _completed_before_stop_state(args.platform)
+            if completed_state is None:
                 raise RuntimeError(
                     "completed-before-Stop receipt is not authorized for this platform"
                 )
-            if (
-                "completion_basis=completed_before_stop" not in receipt
-                or "stop_seen=false" not in receipt
-                or "monitor_id=none" not in receipt
-                or "send_count=1" not in receipt
-                or str(completed_before_stop_response_file) not in receipt
+            if not _completed_before_stop_provenance(
+                receipt,
+                args.platform,
+                args.display,
             ):
                 raise RuntimeError(
                     "completed-before-Stop send receipt lacks exact terminal provenance"
                 )
-            if (
-                not completed_before_stop_response_file.is_file()
-                or completed_before_stop_response_file.stat().st_size == 0
-            ):
-                raise RuntimeError(
-                    "completed-before-Stop send did not create a non-empty response file"
+            if completed_state["handoff"] == "inline_extract":
+                if completed_before_stop_response_file is None:
+                    raise RuntimeError(
+                        "completed-before-Stop inline extraction has no output path"
+                    )
+                if (
+                    not completed_before_stop_response_file.is_file()
+                    or completed_before_stop_response_file.stat().st_size == 0
+                ):
+                    raise RuntimeError(
+                        "completed-before-Stop send did not create a non-empty response file"
+                    )
+                completed_response_sha256 = _sha256(
+                    completed_before_stop_response_file
                 )
-            completed_response_sha256 = _sha256(
-                completed_before_stop_response_file
-            )
-            if (
-                f"byte_count={completed_before_stop_response_file.stat().st_size}"
-                not in receipt
-                or f"response_sha256={completed_response_sha256}" not in receipt
-            ):
-                raise RuntimeError(
-                    "completed-before-Stop send receipt does not match the extracted file"
-                )
+                if (
+                    not _receipt_field_matches(
+                        receipt,
+                        "output_file",
+                        str(completed_before_stop_response_file),
+                    )
+                    or not _receipt_field_matches(
+                        receipt,
+                        "byte_count",
+                        str(completed_before_stop_response_file.stat().st_size),
+                    )
+                    or not _receipt_field_matches(
+                        receipt,
+                        "response_sha256",
+                        completed_response_sha256,
+                    )
+                ):
+                    raise RuntimeError(
+                        "completed-before-Stop send receipt does not match the extracted file"
+                    )
         if (
             source_response is not None
             and _sha256(source_response) != source_response_sha256
@@ -1553,8 +1636,16 @@ def main() -> int:
             args.phase == "extract"
             and source_response is not None
             and (
-                "completion_basis=completed_before_stop" not in receipt
-                or f"source_response_json_sha256={source_response_sha256}" not in receipt
+                not _receipt_field_matches(
+                    receipt,
+                    "completion_basis",
+                    "completed_before_stop",
+                )
+                or not _receipt_field_matches(
+                    receipt,
+                    "source_response_json_sha256",
+                    str(source_response_sha256),
+                )
             )
         ):
             raise RuntimeError(
@@ -1908,16 +1999,21 @@ def main() -> int:
             source_result["exception_key"] = exception_key
         result.update(source_result)
     if completed_before_stop:
-        assert completed_before_stop_response_file is not None
+        completed_state = _completed_before_stop_state(args.platform)
+        assert completed_state is not None
         result.update({
             "completion_basis": "completed_before_stop",
+            "handoff": completed_state["handoff"],
             "stop_seen": False,
             "monitor_id": None,
-            "response_file": str(completed_before_stop_response_file),
-            "response_bytes": completed_before_stop_response_file.stat().st_size,
-            "response_sha256": _sha256(completed_before_stop_response_file),
             "lease_release": lease_release,
         })
+        if completed_before_stop_response_file is not None:
+            result.update({
+                "response_file": str(completed_before_stop_response_file),
+                "response_bytes": completed_before_stop_response_file.stat().st_size,
+                "response_sha256": _sha256(completed_before_stop_response_file),
+            })
     if args.phase in {
         "diagnose-chatgpt-model-menu",
         "diagnose-chatgpt-power-right",
