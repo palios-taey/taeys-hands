@@ -362,6 +362,7 @@ tree:
     download_button:
       name: Download
       role: push button
+      pick: last_by_y
       states_include:
       - showing
     download_markdown_item:
@@ -561,8 +562,10 @@ extraction:
         element: input
       - action: scroll_into_view
         element: download_button
+        select: last
       - action: click
         element: download_button
+        select: last
       - action: download
         element: download_markdown_item
         validation: response_complete
