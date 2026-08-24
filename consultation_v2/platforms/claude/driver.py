@@ -3848,62 +3848,73 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         trigger_key = str(attachment_cfg.get('trigger') or 'toggle_menu')
         trigger_strategy = str(attachment_cfg.get('trigger_click_strategy') or self.cfg.get('click_strategy') or 'atspi_only')
         upload_key = str(attachment_cfg.get('menu_target') or 'upload_files_item')
+        open_method = str(attachment_cfg.get('open_method') or 'atspi_menu').strip()
+        shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
         self.runtime.focus_firefox()
-        self.runtime.press('Escape')
         time.sleep(0.2)
-        snap = self.runtime.snapshot()
-        toggle_menu = self.find_first(snap, trigger_key)
-        if not toggle_menu:
+        if open_method == 'keyboard_shortcut':
+            if not shortcut:
+                result.add_step('attach', False,
+                                f'Claude attachment keyboard shortcut is absent for {abs_path}',
+                                open_method=open_method)
+                return False
+            if not self.runtime.press(shortcut):
+                result.add_step('attach', False,
+                                f'Claude attachment keyboard shortcut failed for {abs_path}',
+                                open_method=open_method,
+                                keyboard_shortcut=shortcut)
+                return False
+        elif open_method == 'atspi_menu':
+            self.runtime.press('Escape')
+            time.sleep(0.2)
+            snap = self.runtime.snapshot()
+            toggle_menu = self.find_first(snap, trigger_key)
+            if not toggle_menu:
+                result.add_step('attach', False,
+                                f'Claude attach trigger {trigger_key!r} missing for {abs_path}',
+                                snapshot=snap.serializable())
+                return False
+            if not self.runtime.click(toggle_menu, strategy=trigger_strategy):
+                result.add_step('attach', False,
+                                f'Claude attach trigger {trigger_key!r} click failed for {abs_path}',
+                                snapshot=snap.serializable())
+                return False
+            menu_snap, upload_item = self._wait_for_upload_menu_item(upload_key)
+            if not upload_item:
+                result.add_step('attach', False,
+                                f'Claude upload item {upload_key!r} not found for {abs_path}',
+                                snapshot=menu_snap.serializable())
+                return False
+            if not self.runtime.click(upload_item):
+                result.add_step('attach', False,
+                                f'Claude upload item {upload_key!r} click failed for {abs_path}',
+                                snapshot=menu_snap.serializable())
+                return False
+        else:
             result.add_step('attach', False,
-                            f'Claude attach trigger {trigger_key!r} missing for {abs_path}',
-                            snapshot=snap.serializable())
+                            f'Claude attachment open_method {open_method!r} is unsupported',
+                            open_method=open_method)
             return False
-        if not self.runtime.click(toggle_menu, strategy=trigger_strategy):
-            result.add_step('attach', False,
-                            f'Claude attach trigger {trigger_key!r} click failed for {abs_path}',
-                            snapshot=snap.serializable())
-            return False
-        menu_snap, upload_item = self._wait_for_upload_menu_item(upload_key)
-        if not upload_item:
-            result.add_step('attach', False,
-                            f'Claude upload item {upload_key!r} not found for {abs_path}',
-                            snapshot=menu_snap.serializable())
-            return False
-        if not self.runtime.click(upload_item):
-            result.add_step('attach', False,
-                            f'Claude upload item {upload_key!r} click failed for {abs_path}',
-                            snapshot=menu_snap.serializable())
-            return False
-        dialog_open = 'menu_item'
         time.sleep(1.0)
         if not self.runtime.focus_file_dialog():
-            shortcut = str(attachment_cfg.get('keyboard_shortcut') or '').strip()
-            if shortcut:
-                self.runtime.focus_firefox()
-                time.sleep(0.2)
-                if self.runtime.press(shortcut):
-                    time.sleep(1.0)
-                    if self.runtime.focus_file_dialog():
-                        dialog_open = 'keyboard_shortcut'
-            if dialog_open != 'keyboard_shortcut':
-                result.add_step('attach', False,
-                                f'Claude file dialog did not focus for {abs_path}',
-                                file=abs_path,
-                                dialog_open=dialog_open,
-                                keyboard_shortcut=shortcut or None)
-                return False
-        if dialog_open == 'keyboard_shortcut':
+            result.add_step('attach', False,
+                            f'Claude file dialog did not focus for {abs_path}',
+                            file=abs_path,
+                            dialog_open=open_method,
+                            keyboard_shortcut=shortcut or None)
+            return False
+        if open_method == 'keyboard_shortcut':
             result.add_step(
                 'attach_prepare',
                 True,
-                'Claude opened file dialog with attachment keyboard shortcut fallback',
+                'Claude opened file dialog with the declared attachment keyboard shortcut',
                 shortcut=shortcut,
             )
         if not self.runtime.focus_file_dialog():
             result.add_step('attach', False,
                             f'Claude file dialog did not focus for {abs_path}',
                             file=abs_path,
-                            dialog_open=dialog_open)
+                            dialog_open=open_method)
             return False
         if not self.runtime.press('ctrl+l'):
             result.add_step('attach', False,
@@ -3915,7 +3926,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
             result.add_step('attach', False,
                             f'Claude file dialog path select-all failed for {abs_path}',
                             file=abs_path,
-                            dialog_open=dialog_open)
+                            dialog_open=open_method)
             return False
         time.sleep(0.1)
         if not self.runtime.type_text(abs_path, delay_ms=5):

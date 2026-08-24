@@ -656,8 +656,7 @@ workflow:
   defaults:
     model: null
     mode: extended_thinking
-    tools:
-      - web_search
+    tools: none
   full_consult:
     steps:
       attach_trigger:
@@ -778,7 +777,7 @@ workflow:
     scope: app_root_snapshot
     trigger_click_strategy: atspi_only
     menu_target: upload_files_item
-    open_method: atspi_menu
+    open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
   prompt:
     input: input
