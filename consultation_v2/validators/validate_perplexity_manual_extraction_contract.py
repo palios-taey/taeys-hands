@@ -68,7 +68,7 @@ def main() -> int:
             ('scroll_to_bottom', 'input', 'last', None),
             ('scroll_into_view', 'more_actions', 'last', None),
             ('click', 'more_actions', 'last', None),
-            ('click', 'download_menu_item', 'last', None),
+            ('hover', 'download_menu_item', 'last', None),
             ('download', 'download_markdown_item', 'last', 'response_complete'),
         ),
         'Perplexity research report extraction sequence drifted',
@@ -101,9 +101,14 @@ def main() -> int:
     )
     _require(
         'more_actions_click_count=1' in card
-        and 'download_click_count=1' in card
+        and 'download_hover_count=1' in card
         and 'markdown_click_count=1' in card,
         'Perplexity extraction card lost exact native-download cardinality',
+    )
+    _require(
+        'operate element=download_menu_item' not in card
+        and 'hover element=download_menu_item exactly once' in card,
+        'Perplexity extraction card must hover the Download submenu without activating PDF',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(

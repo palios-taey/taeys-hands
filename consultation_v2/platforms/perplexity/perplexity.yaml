@@ -590,7 +590,7 @@ extraction:
       - action: click
         element: more_actions
         select: last
-      - action: click
+      - action: hover
         element: download_menu_item
       - action: download
         element: download_markdown_item

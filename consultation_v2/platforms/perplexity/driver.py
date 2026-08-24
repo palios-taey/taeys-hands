@@ -4409,7 +4409,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             ('scroll_to_bottom', 'input'),
             ('scroll_into_view', 'more_actions'),
             ('click', 'more_actions'),
-            ('click', 'download_menu_item'),
+            ('hover', 'download_menu_item'),
             ('download', 'download_markdown_item'),
         )
         observed = tuple(
@@ -4497,14 +4497,14 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 menu_snapshot=menu.serializable(),
             )
             return False
-        download_evidence = self.runtime.mapped_pointer_activate(download_item)
-        if download_evidence.get('ok') is not True:
+        download_hovered = bool(self.runtime.hover(download_item))
+        if not download_hovered:
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Download mapped-pointer activation failed',
+                'Perplexity Download hover failed',
                 stop_condition='extraction_failed',
-                download_evidence=download_evidence,
+                download_hovered=download_hovered,
                 menu_snapshot=menu.serializable(),
             )
             return False
