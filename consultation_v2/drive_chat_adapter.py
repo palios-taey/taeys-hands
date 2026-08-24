@@ -182,6 +182,45 @@ def _planned_output(path: str, label: str) -> Path:
     return resolved
 
 
+def _planned_artifact_directory(output_path: Path) -> Path:
+    artifact_directory = output_path.parent / 'output_attachments'
+    if artifact_directory.exists():
+        if not artifact_directory.is_dir():
+            raise DriveChatAdapterError(
+                f'output attachment path is not a directory: {artifact_directory}'
+            )
+        if any(artifact_directory.iterdir()):
+            raise DriveChatAdapterError(
+                f'output attachment directory is not empty: {artifact_directory}'
+            )
+    return artifact_directory
+
+
+def _planned_artifacts(
+    artifact_directory: Path,
+    result: ConsultationResult,
+) -> list[tuple[Path, bytes]]:
+    planned: list[tuple[Path, bytes]] = []
+    names: set[str] = set()
+    for artifact in result.extractions:
+        name = str(artifact.name or '').strip()
+        if not name or Path(name).name != name or name in {'.', '..'}:
+            raise DriveChatAdapterError(f'invalid extracted artifact name: {name!r}')
+        if name in names:
+            raise DriveChatAdapterError(f'duplicate extracted artifact name: {name!r}')
+        content = str(artifact.content or '')
+        if not content.strip():
+            raise DriveChatAdapterError(f'extracted artifact is empty: {name!r}')
+        path = artifact_directory / name
+        if path.exists():
+            raise DriveChatAdapterError(
+                f'extracted artifact already exists; refusing overwrite: {path}'
+            )
+        names.add(name)
+        planned.append((path, content.encode('utf-8')))
+    return planned
+
+
 def consult(
     platform: str,
     *,
@@ -205,6 +244,7 @@ def consult(
         )
     output_path = _planned_output(output_file, 'output_file')
     receipt_path = _planned_output(receipt_file, 'receipt_file')
+    artifact_directory = _planned_artifact_directory(output_path)
     if output_path == receipt_path or output_path in source_paths or receipt_path in source_paths:
         raise DriveChatAdapterError(
             'output_file and receipt_file must be distinct from each other and all inputs'
@@ -256,11 +296,32 @@ def consult(
         )
 
     response_payload = result.response_text.encode('utf-8')
+    planned_artifacts = _planned_artifacts(artifact_directory, result)
+    for artifact_path, artifact_payload in planned_artifacts:
+        if artifact_payload == response_payload:
+            raise DriveChatAdapterError(
+                f'extracted artifact duplicates the assistant response: {artifact_path.name!r}'
+            )
+
     response_path, response_sha256 = _write_exclusive(
         str(output_path),
         response_payload,
         'output_file',
     )
+    artifact_records: list[dict[str, Any]] = []
+    if planned_artifacts:
+        artifact_directory.mkdir(mode=0o700, exist_ok=True)
+        for artifact_path, artifact_payload in planned_artifacts:
+            materialized_path, artifact_sha256 = _write_exclusive(
+                str(artifact_path),
+                artifact_payload,
+                'extracted artifact',
+            )
+            artifact_records.append({
+                'path': str(materialized_path),
+                'bytes': len(artifact_payload),
+                'sha256': artifact_sha256,
+            })
     return {
         'platform': platform,
         'completed': True,
@@ -275,6 +336,7 @@ def consult(
             'bytes': len(receipt_payload),
             'sha256': receipt_sha256,
         },
+        'artifacts': artifact_records,
         'steps': [
             {
                 'step': step.step,
