@@ -653,6 +653,18 @@ tree:
       role: menu item
       scope: model_menu
 workflow:
+  navigation:
+    postcondition:
+      scope: base
+      exact_singletons:
+        - input
+        - model_selector
+        - toggle_menu
+    observation:
+      refresh_policy: invalidate_reacquire
+      stable_cycles: 2
+      interval_ms: 250
+      timeout_ms: 12000
   defaults:
     model: null
     mode: extended_thinking
