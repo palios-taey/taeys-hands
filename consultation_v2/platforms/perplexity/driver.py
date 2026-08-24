@@ -4407,9 +4407,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         workflow = get_extraction('perplexity', 'research_report')
         expected = (
             ('scroll_to_bottom', 'input'),
-            ('scroll_into_view', 'download_button'),
-            ('click', 'download_button'),
-            ('download', 'download_markdown_item'),
+            ('scroll_into_view', 'more_actions'),
+            ('click', 'more_actions'),
+            ('download', 'export_markdown_item'),
         )
         observed = tuple(
             (step.action, step.element)
@@ -4452,12 +4452,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
         )
         snap = self.runtime.snapshot()
-        trigger = self.find_last(snap, 'download_button')
+        trigger = self.find_last(snap, 'more_actions')
         if not trigger:
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Deep Research Download control not found',
+                'Perplexity Deep Research More actions control not found',
                 stop_condition='extraction_failed',
                 scrolled_to_bottom=scrolled_to_bottom,
                 snapshot=snap.serializable(),
@@ -4470,7 +4470,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Deep Research Download mapped-pointer activation failed',
+                'Perplexity Deep Research More actions mapped-pointer activation failed',
                 stop_condition='extraction_failed',
                 scrolled_to_bottom=scrolled_to_bottom,
                 scrolled_into_view=scrolled_into_view,
@@ -4483,15 +4483,15 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             consecutive=1,
             timeout=3.0,
             interval=0.2,
-            anchor_key='download_markdown_item',
+            anchor_key='export_markdown_item',
             require_non_empty=True,
         )
-        item = self.find_last(menu, 'download_markdown_item')
+        item = self.find_last(menu, 'export_markdown_item')
         if not item:
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Download menu did not expose the Markdown item',
+                'Perplexity More actions did not expose Export as Markdown',
                 stop_condition='extraction_failed',
                 menu_snapshot=menu.serializable(),
             )
@@ -4501,7 +4501,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Download Markdown mapped-pointer activation failed',
+                'Perplexity Export as Markdown mapped-pointer activation failed',
                 stop_condition='extraction_failed',
                 item_evidence=item_evidence,
                 menu_snapshot=menu.serializable(),
@@ -4517,7 +4517,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Download Markdown produced no unique source-bearing file',
+                'Perplexity Export as Markdown produced no unique source-bearing file',
                 stop_condition='extraction_failed',
                 **download_evidence,
             )
