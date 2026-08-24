@@ -295,23 +295,14 @@ def consult(
             f'receipt={receipt_path} sha256={receipt_sha256}'
         )
 
+    response_payload = result.response_text.encode('utf-8')
     planned_artifacts = _planned_artifacts(artifact_directory, result)
-    if platform == 'perplexity':
-        report_artifacts = [
-            item
-            for item in planned_artifacts
-            if item[0].name == 'perplexity_research_report.md'
-        ]
-        if len(report_artifacts) != 1:
+    for artifact_path, artifact_payload in planned_artifacts:
+        if artifact_payload == response_payload:
             raise DriveChatAdapterError(
-                'perplexity: frozen consultation produced no unique research report artifact'
-            )
-        if report_artifacts[0][1] == result.response_text.encode('utf-8'):
-            raise DriveChatAdapterError(
-                'perplexity: research report artifact duplicates the assistant response'
+                f'extracted artifact duplicates the assistant response: {artifact_path.name!r}'
             )
 
-    response_payload = result.response_text.encode('utf-8')
     response_path, response_sha256 = _write_exclusive(
         str(output_path),
         response_payload,
