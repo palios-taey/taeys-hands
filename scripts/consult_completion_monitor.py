@@ -719,7 +719,8 @@ def main() -> int:
                         notified_targets=notified_targets,
                     )
                     log(
-                        f"[consult-monitor {display}] COMPLETE -> notified "
+                        f"[consult-monitor {display}] EXTRACTION "
+                        f"{str(route['extraction_status']).upper()} -> notified "
                         f"{','.join(targets)} failures={failures or 'none'} "
                         f"route_removed={removed}"
                     )
