@@ -368,6 +368,7 @@ tree:
     download_markdown_item:
       name: Markdown
       role: menu item
+      scope: app_root_snapshot
     rewrite_thread:
       name: Rewrite Thread
       role: push button
@@ -387,6 +388,7 @@ tree:
     download_menu_item:
       name: Download
       role: menu item
+      scope: app_root_snapshot
       states_include:
       - showing
       - enabled
