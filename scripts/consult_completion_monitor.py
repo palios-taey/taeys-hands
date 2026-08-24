@@ -5,7 +5,7 @@ This is the EXISTING monitor detection wired into a runner that does not depend
 on the (banned) engine. It reuses, unchanged:
   * the per-platform ``CompletionDetector`` (stop-seen-then-gone state machine),
   * the ``stop_button`` element from that platform's YAML (exact match),
-  * the registered conversation URL and YAML-owned primary extraction control,
+  * the registered conversation URL and YAML-owned completion gate,
   * ``taey-notify`` for the notification.
 
 The archived ``monitor_daemon.py`` was one-shot and engine-launched (it hung at
@@ -14,7 +14,7 @@ the always-on poll loop the engine used to provide.
 
 Watches ONE display's stop button every few seconds. After a seen->gone
 transition, it waits read-only until the canonical snapshot proves the registered
-conversation is still loaded and exposes the YAML-owned primary copy control.
+conversation is still loaded and satisfies the platform's YAML completion gate.
 It then directly launches the frozen extraction worker, notifies Taey of the
 persisted result, and sends status-only notices to the other recorded targets.
 The monitor never chooses or performs a UI primitive itself.
@@ -98,6 +98,12 @@ def completion_observation(
     stop_keys = monitor.get("stop_keys") or [
         monitor.get("stop_key") or "stop_button"
     ]
+    completion_gate = monitor.get("completion_gate") or "stop_absent_same_thread_and_key"
+    if completion_gate not in {
+        "stop_absent_same_thread",
+        "stop_absent_same_thread_and_key",
+    }:
+        raise RuntimeError(f"{platform} monitor has invalid completion_gate")
     copy_key = monitor.get("completion_key") or workflow["extract"]["primary_key"]
     fresh_identity = _url_path_identity(cfg["urls"]["fresh"])
 
@@ -113,14 +119,16 @@ def completion_observation(
         and current_identity == registered_identity
         and current_identity != fresh_identity
     )
+    key_ready = completion_gate == "stop_absent_same_thread" or bool(copy_count)
     return {
         "stop_present": stop_present,
         "completion_ready": bool(
-            not stop_present and loaded_conversation_url and copy_count
+            not stop_present and loaded_conversation_url and key_ready
         ),
         "current_url": str(snap.url or ""),
         "registered_url": str(route.get("url") or ""),
         "loaded_conversation_url": loaded_conversation_url,
+        "completion_gate": completion_gate,
         "copy_key": copy_key,
         "copy_count": copy_count,
     }

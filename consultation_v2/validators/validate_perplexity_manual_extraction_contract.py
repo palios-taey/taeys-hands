@@ -26,6 +26,11 @@ def _require(condition: bool, message: str) -> None:
 
 def main() -> int:
     cfg = load_platform_yaml('perplexity')
+    monitor = (cfg.get('workflow') or {}).get('monitor') or {}
+    _require(
+        monitor.get('completion_gate') == 'stop_absent_same_thread',
+        'Perplexity monitor must cut to extraction after stable Stop absence on the same thread',
+    )
     download_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
         'download_button'
     ) or {}
