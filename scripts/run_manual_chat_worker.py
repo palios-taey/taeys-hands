@@ -1027,9 +1027,10 @@ def _extract_content(
                 ("scroll_to_bottom", "input", "last", None),
                 ("scroll_into_view", "more_actions", "last", None),
                 ("click", "more_actions", "last", None),
+                ("click", "download_menu_item", "last", None),
                 (
                     "download",
-                    "export_markdown_item",
+                    "download_markdown_item",
                     "last",
                     "response_complete",
                 ),
@@ -1061,20 +1062,24 @@ def _extract_content(
             "marked by the YAML last_by_y selection.\n"
             "3. operate element=more_actions exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=app_root_snapshot; require exactly one mapped "
-            "export_markdown_item named Export as Markdown with role menu item.\n"
-            "4. operate element=export_markdown_item exactly once; require performed_primitive="
+            "download_menu_item named Download with role menu item and states showing and enabled.\n"
+            "4. operate element=download_menu_item exactly once; require performed_primitive="
+            "mapped_pointer_activate; observe scope=app_root_snapshot; require exactly one mapped "
+            "download_markdown_item named Markdown with role menu item.\n"
+            "5. operate element=download_markdown_item exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=base; require the same "
             "URL condition and stop_button absent. The enclosing worker, not you, verifies and stages "
             f"the unique new native Markdown download at {research_report_file}.\n"
-            "5. scroll_to_bottom element=input exactly once; observe scope=base; require the same "
+            "6. scroll_to_bottom element=input exactly once; observe scope=base; require the same "
             "URL condition, stop_button absent, and exactly one mapped copy_button named Copy with "
             "role push button and states showing and enabled, selected by the YAML last_by_y rule.\n"
-            "6. click element=copy_button exactly once; observe scope=base; require the same URL condition and "
+            "7. click element=copy_button exactly once; observe scope=base; require the same URL condition and "
             "stop_button absent.\n"
-            f"7. read_clipboard with output_file={response_file}. Require that drive_chat created a "
+            f"8. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
-            "all UI calls. Only after all seven steps pass, return exact lines native_download=true, "
-            "more_actions_click_count=1, export_markdown_click_count=1, and inline_copy_count=1."
+            "all UI calls. Only after all eight steps pass, return exact lines native_download=true, "
+            "more_actions_click_count=1, download_click_count=1, markdown_click_count=1, and "
+            "inline_copy_count=1."
             f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report without any success cardinality field and "
@@ -1665,7 +1670,8 @@ def main() -> int:
             required_download_receipt = (
                 "native_download=true",
                 "more_actions_click_count=1",
-                "export_markdown_click_count=1",
+                "download_click_count=1",
+                "markdown_click_count=1",
                 "inline_copy_count=1",
             )
             missing_download_receipt = [

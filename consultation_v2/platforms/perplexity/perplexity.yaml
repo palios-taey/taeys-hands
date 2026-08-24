@@ -384,9 +384,12 @@ tree:
       states_include:
       - showing
       - enabled
-    export_markdown_item:
-      name: Export as Markdown
+    download_menu_item:
+      name: Download
       role: menu item
+      states_include:
+      - showing
+      - enabled
     thread_actions:
       name: Thread actions
       role: push button
@@ -571,7 +574,7 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-#  - research_report: source-bearing Markdown via More actions -> Export as Markdown.
+#  - research_report: source-bearing Markdown via More actions -> Download -> Markdown.
 #  - assistant_text: normal answer via the mapped `copy_button`.
 # ============================================================================
 extraction:
@@ -585,8 +588,10 @@ extraction:
       - action: click
         element: more_actions
         select: last
+      - action: click
+        element: download_menu_item
       - action: download
-        element: export_markdown_item
+        element: download_markdown_item
         validation: response_complete
   assistant_text:
     steps:

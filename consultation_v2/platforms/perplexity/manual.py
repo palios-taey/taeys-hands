@@ -24,7 +24,7 @@ def _attachment_trigger() -> str:
     return trigger_key
 
 
-def _download_elements() -> tuple[str, str]:
+def _download_elements() -> tuple[tuple[str, ...], str]:
     workflow = get_extraction('perplexity', 'research_report')
     if workflow is None:
         raise ValueError('perplexity research_report extraction is not declared')
@@ -38,12 +38,12 @@ def _download_elements() -> tuple[str, str]:
         for step in workflow.steps
         if step.action == 'download' and step.element
     ]
-    if len(triggers) != 1 or len(targets) != 1:
+    if len(triggers) < 1 or len(targets) != 1:
         raise ValueError(
-            'perplexity research_report extraction requires one click trigger '
-            'and one download target'
+            'perplexity research_report extraction requires one or more ordered '
+            'click triggers and one download target'
         )
-    return triggers[0], targets[0]
+    return tuple(triggers), targets[0]
 
 
 def element_operation(
@@ -69,12 +69,12 @@ def element_operation(
             'forbidden': ['activate', 'click', 'focus', 'hover'],
         }
 
-    trigger_key, target_key = _download_elements()
-    if element_key not in {trigger_key, target_key}:
+    trigger_keys, target_key = _download_elements()
+    if element_key not in {*trigger_keys, target_key}:
         return None
     allowed_now = (
         []
-        if element_key == trigger_key and 'expanded' in normalized_states
+        if element_key in trigger_keys and 'expanded' in normalized_states
         else ['mapped_pointer_activate']
     )
     return {
