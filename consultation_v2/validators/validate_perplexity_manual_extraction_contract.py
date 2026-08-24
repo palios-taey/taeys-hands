@@ -43,8 +43,18 @@ def main() -> int:
     ) or {}
     _require(
         download_spec.get('name') == 'Download'
-        and download_spec.get('role') == 'menu item',
+        and download_spec.get('role') == 'menu item'
+        and download_spec.get('scope') == 'app_root_snapshot',
         'Perplexity Download menu item mapping drifted',
+    )
+    markdown_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
+        'download_markdown_item'
+    ) or {}
+    _require(
+        markdown_spec.get('name') == 'Markdown'
+        and markdown_spec.get('role') == 'menu item'
+        and markdown_spec.get('scope') == 'app_root_snapshot',
+        'Perplexity Markdown menu item mapping drifted',
     )
 
     workflow = get_extraction('perplexity', 'research_report')
