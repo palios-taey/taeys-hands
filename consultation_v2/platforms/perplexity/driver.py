@@ -2985,6 +2985,11 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         attach_ready = self.find_first(snapshot, 'attach_trigger') is not None
         stop_absent = self.find_first(snapshot, 'stop_button') is None
         report_absent = self.find_first(snapshot, 'copy_button') is None
+        page_ready_missing = self._page_ready_missing_groups(
+            snapshot,
+            self._page_ready_key_groups(),
+        )
+        page_ready = not page_ready_missing
         ready = bool(
             normalized_current
             and normalized_current == normalized_target
@@ -2992,6 +2997,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             and attach_ready
             and stop_absent
             and report_absent
+            and page_ready
         )
         return {
             'ready': ready,
@@ -3000,6 +3006,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             'attach_ready': attach_ready,
             'stop_absent': stop_absent,
             'report_absent': report_absent,
+            'page_ready': page_ready,
+            'page_ready_missing': page_ready_missing,
             'snapshot': snapshot,
         }
 
@@ -3011,12 +3019,18 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
     ) -> tuple[dict[str, object], Snapshot]:
         evidence = self._neutral_composer_evidence(target_url)
         snapshot = evidence.pop('snapshot')
-        if evidence['ready'] or not self._is_answer_thread_url(
-            str(evidence['current_url'])
-        ):
+        if evidence['ready']:
             evidence['new_thread_attempted'] = False
             return evidence, snapshot
         new_thread = self.find_first(snapshot, 'new_thread_link')
+        answer_thread = self._is_answer_thread_url(str(evidence['current_url']))
+        if new_thread is None and not answer_thread:
+            evidence.update(
+                new_thread_attempted=False,
+                new_thread_found=False,
+                new_thread_clicked=False,
+            )
+            return evidence, snapshot
         evidence.update(
             new_thread_attempted=True,
             new_thread_found=new_thread is not None,
