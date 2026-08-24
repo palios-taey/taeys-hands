@@ -938,9 +938,20 @@ class ConsultationRuntime:
         self,
         *,
         consecutive: int = 2,
-        timeout: float = 3.0,
+        timeout: float | None = None,
         interval: float = 0.3,
     ) -> bool:
+        if timeout is None:
+            settle = self.cfg.get('settle') or {}
+            value = (
+                settle.get('composer_focus_release_ms', 3000)
+                if isinstance(settle, dict)
+                else 3000
+            )
+            try:
+                timeout = max(0.5, float(value) / 1000.0)
+            except (TypeError, ValueError):
+                timeout = 3.0
         required = max(1, int(consecutive))
         deadline = time.monotonic() + timeout
         stable = 0

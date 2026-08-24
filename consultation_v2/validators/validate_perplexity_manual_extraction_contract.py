@@ -11,7 +11,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
-from scripts.run_manual_chat_worker import _extract_content
+from scripts.run_manual_chat_worker import (
+    _completed_before_stop_provenance,
+    _completed_before_stop_state,
+    _extract_content,
+    _post_send_confirmation_content,
+)
 
 
 def _require(condition: bool, message: str) -> None:
@@ -60,6 +65,46 @@ def main() -> int:
     _require(
         'exactly one mapped download_button' not in card,
         'Perplexity extraction card still rejects valid duplicate response Download controls',
+    )
+    completed_state = _completed_before_stop_state('perplexity')
+    _require(
+        completed_state is not None
+        and completed_state.get('handoff') == 'separate_extract',
+        'Perplexity completed-before-Stop state must hand off to separate extraction',
+    )
+    send_card = _post_send_confirmation_content('perplexity', None)
+    _require(
+        'Do not scroll, Copy, Download, or mutate' in send_card,
+        'Perplexity send card must prohibit extraction after completed-before-Stop',
+    )
+    source_sha256 = 'a' * 64
+    completed_card = _extract_content(
+        None,
+        'perplexity',
+        ':6',
+        Path('/frozen/response.txt'),
+        Path('/frozen/perplexity_research_report.md'),
+        source_sha256,
+    )
+    _require(
+        'No completion monitor reported COMPLETE' in completed_card
+        and f'source_response_json_sha256={source_sha256}' in completed_card,
+        'Perplexity separate extraction card lost terminal source provenance',
+    )
+    receipt = '''# COMPLETED-BEFORE-STOP SEND RECEIPT
+completion_basis: completed_before_stop
+stop_seen: false
+monitor_id: none
+send_count: 1
+observation_revision_1: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+observation_revision_2: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+thread_url: https://www.perplexity.ai/search/ad156ccc-b809-4f0a-bf6b-4f5cacb5f43d
+platform: perplexity
+display: :6
+'''
+    _require(
+        _completed_before_stop_provenance(receipt, 'perplexity', ':6'),
+        'Perplexity completed-before-Stop receipt fields are not machine-readable',
     )
     print('perplexity manual extraction contract: PASS')
     return 0
