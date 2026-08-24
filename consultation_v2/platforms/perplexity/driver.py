@@ -4465,19 +4465,21 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             return False
         scrolled_into_view = bool(self.runtime.scroll_element_into_view(trigger))
         time.sleep(0.3)
-        if not self.runtime.click(trigger, strategy='atspi_only'):
+        trigger_evidence = self.runtime.mapped_pointer_activate(trigger)
+        if trigger_evidence.get('ok') is not True:
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Deep Research Download click failed',
+                'Perplexity Deep Research Download mapped-pointer activation failed',
                 stop_condition='extraction_failed',
                 scrolled_to_bottom=scrolled_to_bottom,
                 scrolled_into_view=scrolled_into_view,
+                trigger_evidence=trigger_evidence,
                 snapshot=snap.serializable(),
             )
             return False
 
-        menu = self.runtime.wait_for_stable_menu_snapshot(
+        menu = self.runtime.wait_for_stable_app_root_snapshot(
             consecutive=1,
             timeout=3.0,
             interval=0.2,
@@ -4494,12 +4496,14 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 menu_snapshot=menu.serializable(),
             )
             return False
-        if not self.runtime.click(item, strategy='atspi_only'):
+        item_evidence = self.runtime.mapped_pointer_activate(item)
+        if item_evidence.get('ok') is not True:
             result.add_step(
                 'extract_research_report',
                 False,
-                'Perplexity Download Markdown click failed',
+                'Perplexity Download Markdown mapped-pointer activation failed',
                 stop_condition='extraction_failed',
+                item_evidence=item_evidence,
                 menu_snapshot=menu.serializable(),
             )
             return False
