@@ -268,21 +268,10 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
             request.platform,
             request.purpose,
         )
-    if result.response_text and not result.ok:
-        result.add_step(
-            'deliverable_response_recovered',
-            True,
-            'Captured response_text is deliverable despite a non-terminal failure',
-            response_chars=len(result.response_text),
-        )
-        result.ok = True
-
     # extraction_done milestone (FLOW §8): the driver returned a real extracted
     # response. Checkpointed so a re-run that crashes between extraction and
     # delivery still sees the send as landed (and resumes/re-extracts rather than
-    # re-sending). Written after the delivery gate normalizes ok for any captured
-    # non-echo body, because requester delivery is keyed on the body, not on a
-    # non-terminal downstream step.
+    # re-sending).
     if result.ok and result.response_text:
         try:
             primitives.write_run_state(
