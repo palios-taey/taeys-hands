@@ -4733,8 +4733,12 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        expected_names = self._artifact_names_from_response(result.response_text)
-        artifact_expected = bool(expected_names or self._response_expects_artifact(result.response_text))
+        artifact_expected = self._response_expects_artifact(result.response_text)
+        expected_names = (
+            self._artifact_names_from_response(result.response_text)
+            if artifact_expected
+            else []
+        )
         attempts: list[dict] = []
         self.runtime._sync_platform_io_display()
         copied = self._copy_artifact_from_tree_controls(
