@@ -14,7 +14,7 @@ from typing import Any
 
 from .runtime import ConsultationRuntime
 from .types import ConsultationRequest, ConsultationResult
-from .yaml_contract import CHAT_PLATFORMS
+from .yaml_contract import CHAT_PLATFORMS, load_platform_yaml
 
 
 _SCROLL_CLICKS = 14
@@ -45,6 +45,35 @@ def _driver(platform: str):
             f'{platform}: expected one built consultation driver, found {len(candidates)}'
         )
     return candidates[0]()
+
+
+def _frozen_selections(platform: str) -> dict[str, str]:
+    cfg = load_platform_yaml(platform)
+    workflow = cfg.get('workflow') or {}
+    full_consult = workflow.get('full_consult') if isinstance(workflow, dict) else None
+    select_mode = full_consult.get('select_mode') if isinstance(full_consult, dict) else None
+    if not isinstance(select_mode, list) or not select_mode:
+        raise DriveChatAdapterError(
+            f'{platform}: workflow.full_consult.select_mode must be a non-empty list'
+        )
+    selections: dict[str, str] = {}
+    for index, item in enumerate(select_mode):
+        if not isinstance(item, dict) or set(item) != {'menu', 'option'}:
+            raise DriveChatAdapterError(
+                f'{platform}: full_consult.select_mode[{index}] must declare exactly menu/option'
+            )
+        menu = item.get('menu')
+        option = item.get('option')
+        if not isinstance(menu, str) or not menu or not isinstance(option, str) or not option:
+            raise DriveChatAdapterError(
+                f'{platform}: full_consult.select_mode[{index}] has an invalid menu/option'
+            )
+        if menu in selections:
+            raise DriveChatAdapterError(
+                f'{platform}: full_consult.select_mode repeats menu {menu!r}'
+            )
+        selections[menu] = option
+    return selections
 
 
 def _failure(platform: str, operation: str, result: ConsultationResult) -> DriveChatAdapterError:
@@ -195,6 +224,7 @@ def consult(
         platform=platform,
         message=prompt,
         attachments=[str(path) for path in attachments],
+        selections=_frozen_selections(platform),
         timeout=timeout,
         store_enabled=False,
         attach_identity=False,
