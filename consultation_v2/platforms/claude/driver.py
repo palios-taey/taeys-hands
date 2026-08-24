@@ -3955,7 +3955,7 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                         trigger=trigger_key,
                         trigger_click_strategy=trigger_strategy,
                         menu_target=upload_key,
-                        dialog_open=dialog_open,
+                        dialog_open=open_method,
                         dialog_submit='return',
                         chip_name=chip_name,
                         snapshot=verify_snap.serializable())
