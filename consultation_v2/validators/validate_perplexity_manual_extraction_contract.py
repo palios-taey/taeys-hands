@@ -38,13 +38,13 @@ def main() -> int:
         more_actions_spec.get('pick') == 'last_by_y',
         'Perplexity More actions control must select the final response by y',
     )
-    export_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
-        'export_markdown_item'
+    download_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
+        'download_menu_item'
     ) or {}
     _require(
-        export_spec.get('name') == 'Export as Markdown'
-        and export_spec.get('role') == 'menu item',
-        'Perplexity Export as Markdown menu item mapping drifted',
+        download_spec.get('name') == 'Download'
+        and download_spec.get('role') == 'menu item',
+        'Perplexity Download menu item mapping drifted',
     )
 
     workflow = get_extraction('perplexity', 'research_report')
@@ -58,7 +58,8 @@ def main() -> int:
             ('scroll_to_bottom', 'input', 'last', None),
             ('scroll_into_view', 'more_actions', 'last', None),
             ('click', 'more_actions', 'last', None),
-            ('download', 'export_markdown_item', 'last', 'response_complete'),
+            ('click', 'download_menu_item', 'last', None),
+            ('download', 'download_markdown_item', 'last', 'response_complete'),
         ),
         'Perplexity research report extraction sequence drifted',
     )
@@ -85,13 +86,13 @@ def main() -> int:
         'Perplexity failure receipt may echo success cardinality fields',
     )
     _require(
-        'operate element=download_button' not in card
-        and 'operate element=download_markdown_item' not in card,
-        'Perplexity extraction card still exposes the superseded direct Download path',
+        'operate element=download_button' not in card,
+        'Perplexity extraction card still exposes the superseded direct Download button path',
     )
     _require(
         'more_actions_click_count=1' in card
-        and 'export_markdown_click_count=1' in card,
+        and 'download_click_count=1' in card
+        and 'markdown_click_count=1' in card,
         'Perplexity extraction card lost exact native-download cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
