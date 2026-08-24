@@ -3717,6 +3717,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         attachment = self.cfg['workflow']['attachment']
         trigger_key = str(attachment['trigger'])
         upload_key = str(attachment['menu_target'])
+        upload_scope = str(attachment.get('scope') or '').strip().lower()
         open_method = str(attachment.get('open_method') or '').strip().lower()
         open_key = str(attachment.get('open_key') or '').strip()
         for file_path in request.attachments:
@@ -3739,6 +3740,14 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     snapshot=snap.serializable(),
                 )
                 return False
+            if upload_scope != 'app_root_snapshot':
+                result.add_step(
+                    'attach', False,
+                    'Perplexity attachment YAML has no exact live app-root observation scope',
+                    scope=upload_scope,
+                    snapshot=snap.serializable(),
+                )
+                return False
             open_evidence = self.runtime.focus_and_key_open(
                 trigger,
                 key=open_key,
@@ -3754,22 +3763,24 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     snapshot=snap.serializable(),
                 )
                 return False
-            # Settle + rescan (DRIVER_CONTRACT Section E): the attach dropdown's
-            # "Upload files or images" item renders a beat after the trigger
-            # operation. A fixed time.sleep(0.7) + one-shot read flaked ("upload
-            # item not found") when the menu was slow to render - the item was
-            # present moments later. Poll for it (observation only, no re-click)
-            # before declaring it missing, same readiness pattern as mode-select.
-            menu_snap, upload_item = self.wait_for_key(
-                upload_key,
-                timeout=10.0,
-                interval=0.4,
-                scope='menu',
-            )
+            # Perplexity's React upload portal can disappear when menu_snapshot
+            # clears the AT-SPI cache, so observe the already-open live app root.
+            deadline = time.time() + 10.0
+            menu_snap: Snapshot | None = None
+            upload_item: ElementRef | None = None
+            while time.time() < deadline:
+                menu_snap = self.runtime.app_root_snapshot(allowed_roles=['menu item'])
+                upload_item = self.find_first(menu_snap, upload_key)
+                if upload_item is not None:
+                    break
+                time.sleep(0.4)
+            menu_snap = menu_snap or self.runtime.app_root_snapshot(allowed_roles=['menu item'])
             if not upload_item:
                 result.add_step(
                     'attach', False,
                     f'Perplexity upload item not found for {abs_path}',
+                    open_evidence=open_evidence,
+                    observation_scope=upload_scope,
                     snapshot=menu_snap.serializable(),
                 )
                 return False

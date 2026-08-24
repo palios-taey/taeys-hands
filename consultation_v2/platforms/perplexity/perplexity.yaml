@@ -205,7 +205,7 @@ tree:
       name: For you
       role: page tab
 
-    # ─── Attach dropdown (Firefox root / portal — use menu_snapshot()) ────────
+    # ─── Attach dropdown (transient Firefox app-root portal) ───────────
     upload_files_item:
       name: "Upload files or images"
       role: menu item
@@ -443,7 +443,7 @@ workflow:
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
-    scope: menu_snapshot
+    scope: app_root_snapshot
     open_method: focus_and_key_open
     open_key: space
   onboarding:
