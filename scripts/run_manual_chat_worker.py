@@ -1027,7 +1027,7 @@ def _extract_content(
                 ("scroll_to_bottom", "input", "last", None),
                 ("scroll_into_view", "more_actions", "last", None),
                 ("click", "more_actions", "last", None),
-                ("click", "download_menu_item", "last", None),
+                ("hover", "download_menu_item", "last", None),
                 (
                     "download",
                     "download_markdown_item",
@@ -1063,8 +1063,8 @@ def _extract_content(
             "3. operate element=more_actions exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=app_root_snapshot; require exactly one mapped "
             "download_menu_item named Download with role menu item and states showing and enabled.\n"
-            "4. operate element=download_menu_item exactly once; require performed_primitive="
-            "mapped_pointer_activate; observe scope=app_root_snapshot; require exactly one mapped "
+            "4. hover element=download_menu_item exactly once; require performed_primitive=hover; "
+            "observe scope=app_root_snapshot; require exactly one mapped "
             "download_markdown_item named Markdown with role menu item.\n"
             "5. operate element=download_markdown_item exactly once; require performed_primitive="
             "mapped_pointer_activate; observe scope=base; require the same "
@@ -1078,7 +1078,7 @@ def _extract_content(
             f"8. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
             "all UI calls. Only after all eight steps pass, return exact lines native_download=true, "
-            "more_actions_click_count=1, download_click_count=1, markdown_click_count=1, and "
+            "more_actions_click_count=1, download_hover_count=1, markdown_click_count=1, and "
             "inline_copy_count=1."
             f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
@@ -1670,7 +1670,7 @@ def main() -> int:
             required_download_receipt = (
                 "native_download=true",
                 "more_actions_click_count=1",
-                "download_click_count=1",
+                "download_hover_count=1",
                 "markdown_click_count=1",
                 "inline_copy_count=1",
             )
