@@ -2944,6 +2944,14 @@ class _PerplexityInlineBase:
 class PerplexityConsultationDriver(_PerplexityInlineBase):
     platform = 'perplexity'
 
+    @staticmethod
+    def _visible_attachment_removals(snapshot: Snapshot) -> list[ElementRef]:
+        return [
+            element
+            for element in (snapshot.mapped.get('remove_attachment') or [])
+            if 'showing' in {str(state).lower() for state in (element.states or [])}
+        ]
+
     def _read_clipboard_until_nonempty(
         self,
         timeout: float = 4.0,
@@ -2990,6 +2998,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             self._page_ready_key_groups(),
         )
         page_ready = not page_ready_missing
+        attachment_removals = self._visible_attachment_removals(snapshot)
+        attachments_absent = not attachment_removals
         ready = bool(
             normalized_current
             and normalized_current == normalized_target
@@ -2998,6 +3008,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             and stop_absent
             and report_absent
             and page_ready
+            and attachments_absent
         )
         return {
             'ready': ready,
@@ -3008,8 +3019,122 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             'report_absent': report_absent,
             'page_ready': page_ready,
             'page_ready_missing': page_ready_missing,
+            'attachments_absent': attachments_absent,
+            'stale_attachment_controls': [
+                element.name for element in attachment_removals
+            ],
             'snapshot': snapshot,
         }
+
+    def _wait_for_neutral_composer(
+        self,
+        target_url: str,
+        *,
+        timeout: float,
+    ) -> tuple[dict[str, object], Snapshot]:
+        deadline = time.monotonic() + timeout
+        stable_cycles = 0
+        samples = 0
+        last_evidence: dict[str, object] | None = None
+        last_snapshot: Snapshot | None = None
+        while time.monotonic() < deadline:
+            samples += 1
+            current = self._neutral_composer_evidence(target_url)
+            last_snapshot = current.pop('snapshot')
+            stable_cycles = stable_cycles + 1 if current['ready'] else 0
+            current['stable_cycles'] = stable_cycles
+            current['samples'] = samples
+            last_evidence = current
+            if stable_cycles >= 2:
+                return current, last_snapshot
+            time.sleep(0.3)
+        if last_evidence is None or last_snapshot is None:
+            current = self._neutral_composer_evidence(target_url)
+            last_snapshot = current.pop('snapshot')
+            current['stable_cycles'] = 0
+            current['samples'] = 1
+            last_evidence = current
+        return last_evidence, last_snapshot
+
+    def _clear_dirty_root_composer(
+        self,
+        snapshot: Snapshot,
+        *,
+        max_stale_attachments: int = 2,
+    ) -> tuple[dict[str, object], Snapshot]:
+        attachment_removals: list[dict[str, object]] = []
+        evidence: dict[str, object] = {
+            'attempted': True,
+            'attachment_removals': attachment_removals,
+            'mode_reset_attempted': False,
+            'success': False,
+        }
+        current = snapshot
+        removals = self._visible_attachment_removals(current)
+        while removals and len(attachment_removals) < max_stale_attachments:
+            target = removals[0]
+            target_name = str(target.name or '').strip()
+            action_landed = bool(self.runtime.click(target))
+            attachment_removals.append({
+                'name': target_name,
+                'clicked': action_landed,
+            })
+            if not action_landed:
+                evidence['error'] = 'stale_attachment_remove_action_failed'
+                return evidence, current
+
+            def _attachment_removed() -> Snapshot | None:
+                candidate = self.runtime.snapshot()
+                names = {
+                    str(element.name or '').strip()
+                    for element in self._visible_attachment_removals(candidate)
+                }
+                return candidate if target_name not in names else None
+
+            settled = self.runtime.wait_until(
+                _attachment_removed,
+                timeout=5.0,
+                interval=0.3,
+            )
+            if not isinstance(settled, Snapshot):
+                current = self.runtime.snapshot()
+                evidence['error'] = 'stale_attachment_remove_postcondition_failed'
+                return evidence, current
+            current = settled
+            removals = self._visible_attachment_removals(current)
+
+        if removals:
+            evidence['error'] = 'stale_attachment_bound_exceeded'
+            return evidence, current
+
+        active_mode = self.find_first(current, 'deep_research_toggle')
+        if active_mode is not None:
+            evidence['mode_reset_attempted'] = True
+            evidence['mode_reset_clicked'] = bool(self.runtime.click(active_mode))
+            if evidence['mode_reset_clicked'] is not True:
+                evidence['error'] = 'deep_research_reset_action_failed'
+                return evidence, current
+
+            def _mode_reset_landed() -> Snapshot | None:
+                candidate = self.runtime.snapshot()
+                return candidate if (
+                    self.find_first(candidate, 'deep_research_toggle') is None
+                    and self.find_first(candidate, 'model_selector') is not None
+                ) else None
+
+            settled = self.runtime.wait_until(
+                _mode_reset_landed,
+                timeout=5.0,
+                interval=0.3,
+            )
+            if not isinstance(settled, Snapshot):
+                current = self.runtime.snapshot()
+                evidence['error'] = 'deep_research_reset_postcondition_failed'
+                return evidence, current
+            current = settled
+
+        evidence['success'] = True
+        return evidence, current
 
     def _open_neutral_composer(
         self,
@@ -3021,7 +3146,36 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         snapshot = evidence.pop('snapshot')
         if evidence['ready']:
             evidence['new_thread_attempted'] = False
-            return evidence, snapshot
+            return self._wait_for_neutral_composer(
+                target_url,
+                timeout=min(timeout, 2.0),
+            )
+        normalized_current = str(evidence['current_url']).rstrip('/').lower()
+        normalized_target = str(target_url or '').strip().rstrip('/').lower()
+        if normalized_current and normalized_current == normalized_target:
+            cleanup, snapshot = self._clear_dirty_root_composer(snapshot)
+            if cleanup['success'] is not True:
+                current = self._neutral_composer_evidence(target_url)
+                snapshot = current.pop('snapshot')
+                current.update(
+                    ready=False,
+                    new_thread_attempted=False,
+                    new_thread_found=self.find_first(snapshot, 'new_thread_link') is not None,
+                    new_thread_clicked=False,
+                    dirty_root_cleanup=cleanup,
+                )
+                return current, snapshot
+            current, snapshot = self._wait_for_neutral_composer(
+                target_url,
+                timeout=timeout,
+            )
+            current.update(
+                new_thread_attempted=False,
+                new_thread_found=self.find_first(snapshot, 'new_thread_link') is not None,
+                new_thread_clicked=False,
+                dirty_root_cleanup=cleanup,
+            )
+            return current, snapshot
         new_thread = self.find_first(snapshot, 'new_thread_link')
         answer_thread = self._is_answer_thread_url(str(evidence['current_url']))
         if new_thread is None and not answer_thread:
@@ -3041,15 +3195,16 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         evidence['new_thread_clicked'] = bool(self.runtime.click(new_thread))
         if not evidence['new_thread_clicked']:
             return evidence, snapshot
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            current = self._neutral_composer_evidence(target_url)
-            snapshot = current.pop('snapshot')
-            evidence.update(current)
-            if evidence['ready']:
-                return evidence, snapshot
-            time.sleep(0.3)
-        return evidence, snapshot
+        current, snapshot = self._wait_for_neutral_composer(
+            target_url,
+            timeout=timeout,
+        )
+        current.update(
+            new_thread_attempted=True,
+            new_thread_found=True,
+            new_thread_clicked=True,
+        )
+        return current, snapshot
 
     def setup_and_send(
         self, request: ConsultationRequest, result: ConsultationResult,

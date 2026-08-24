@@ -140,6 +140,22 @@ tree:
       structural:
         before: attach_trigger
       reason: Perplexity's composer entry is nameless; the Submit button is absent on an empty composer (it appears only after text entry), so anchor the editable page entry before the always-present "Add files or tools" trigger that sits just below the composer (composer y<attach y).
+    attachment_preview:
+      role: push button
+      match_strategy: name_agnostic_structural
+      structural:
+        after: new_thread_link
+        before: input
+        ordinal: first
+      reason: Perplexity's Preview control has a dynamic filename label but is the first push button between the exact New link and composer input when an attachment is present.
+    remove_attachment:
+      role: push button
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_preview
+        before: input
+        ordinal: last
+      reason: Perplexity's Remove control has a dynamic filename label but is the last push button after the structurally mapped Preview control and before the composer input.
     input_message:
       name: Message
       role: entry
