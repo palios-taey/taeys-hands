@@ -505,11 +505,6 @@ workflow:
   extract:
     primary_key: copy_button
     strategy: last_by_y
-    deep_research:
-      trigger: download_button
-      open_method: focus_and_key_open
-      open_key: space
-      target: download_markdown_item
   extra_extract:
     strategy: copy_contents_button
     copy_contents_key: copy_contents_button

@@ -4546,146 +4546,76 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        extract_cfg = self.cfg['workflow']['extract']
-        deep_research_cfg = extract_cfg.get('deep_research') or {}
-        trigger_key = str(deep_research_cfg.get('trigger') or '').strip()
-        target_key = str(deep_research_cfg.get('target') or '').strip()
-        open_method = str(deep_research_cfg.get('open_method') or '').strip().lower()
-        open_key = str(deep_research_cfg.get('open_key') or '').strip()
-        if (
-            not trigger_key
-            or not target_key
-            or open_method != 'focus_and_key_open'
-            or not open_key
+        snap = self.runtime.snapshot()
+        controls = list(snap.mapped.get('copy_contents_button') or [])
+        if len(controls) != 1:
+            result.add_step(
+                'extract_research_report',
+                False,
+                'Perplexity Deep Research requires exactly one Copy contents control',
+                stop_condition='extraction_failed',
+                expected_count=1,
+                observed_count=len(controls),
+                snapshot=snap.serializable(),
+            )
+            return False
+        if any(
+            artifact.name == 'perplexity_research_report.md'
+            for artifact in result.extractions
         ):
             result.add_step(
-                'extract_primary',
+                'extract_research_report',
                 False,
-                'Perplexity Deep Research YAML has no exact Markdown download operation',
+                'Perplexity Deep Research report was already extracted',
                 stop_condition='extraction_failed',
-                trigger_key=trigger_key,
-                target_key=target_key,
-                open_method=open_method,
-                open_key=open_key,
-            )
-            return False
-        try:
-            before = self._markdown_download_state()
-        except OSError as exc:
-            result.add_step(
-                'extract_primary',
-                False,
-                f'Perplexity Markdown download baseline failed: {exc}',
-                stop_condition='extraction_failed',
-                target_key=target_key,
             )
             return False
 
-        scrolled_to_bottom = bool(
-            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
-        )
-        snap = self.runtime.snapshot()
-        trigger = self.find_last(snap, trigger_key)
-        if not trigger:
+        self.runtime.write_clipboard('')
+        time.sleep(0.2)
+        copied = self.runtime.click(controls[0], strategy='atspi_only')
+        if not copied:
             result.add_step(
-                'extract_primary',
+                'extract_research_report',
                 False,
-                'Perplexity Deep Research Download control not found',
+                'Perplexity Deep Research Copy contents click failed',
                 stop_condition='extraction_failed',
-                trigger_key=trigger_key,
-                target_key=target_key,
-                scrolled_to_bottom=scrolled_to_bottom,
                 snapshot=snap.serializable(),
             )
             return False
-        scrolled_into_view = bool(self.runtime.scroll_element_into_view(trigger))
-        time.sleep(0.3)
-        open_evidence = self.runtime.focus_and_key_open(
-            trigger,
-            key=open_key,
-            settle=0.5,
-        )
-        if not bool(open_evidence.get('ok')):
-            result.add_step(
-                'extract_primary',
-                False,
-                'Perplexity Deep Research Download YAML operation failed',
-                stop_condition='extraction_failed',
-                trigger_key=trigger_key,
-                target_key=target_key,
-                open_method=open_method,
-                open_key=open_key,
-                open_evidence=open_evidence,
-                scrolled_to_bottom=scrolled_to_bottom,
-                scrolled_into_view=scrolled_into_view,
-                snapshot=snap.serializable(),
-            )
-            return False
-
-        menu = self.runtime.wait_for_stable_menu_snapshot(
-            consecutive=1,
-            timeout=3.0,
-            interval=0.2,
-            anchor_key=target_key,
-            require_non_empty=True,
-        )
-        item = self.find_last(menu, target_key)
-        if not item:
-            self.runtime.press('Escape')
-            result.add_step(
-                'extract_primary',
-                False,
-                'Perplexity Download menu did not expose the Markdown item',
-                stop_condition='extraction_failed',
-                target_key=target_key,
-                menu_snapshot=menu.serializable(),
-            )
-            return False
-        if not self.runtime.click(item, strategy='atspi_only'):
-            self.runtime.press('Escape')
-            result.add_step(
-                'extract_primary',
-                False,
-                'Perplexity Download -> Markdown item click failed',
-                stop_condition='extraction_failed',
-                target_key=target_key,
-                menu_snapshot=menu.serializable(),
-            )
-            return False
-
-        try:
-            content, download_evidence = self._read_new_markdown_download(before)
-        except OSError as exc:
-            content = ''
-            download_evidence = {'download_error': str(exc)}
-        finally:
-            self.runtime.press('Escape')
-            time.sleep(0.3)
+        content, clipboard_poll = self._read_clipboard_until_nonempty()
         if not content:
             result.add_step(
-                'extract_primary',
+                'extract_research_report',
                 False,
-                'Perplexity Download -> Markdown produced no complete source-bearing file',
+                'Perplexity Deep Research Copy contents produced an empty clipboard',
                 stop_condition='extraction_failed',
-                target_key=target_key,
-                scrolled_to_bottom=scrolled_to_bottom,
-                scrolled_into_view=scrolled_into_view,
-                download_popup_escape_sent=True,
-                **download_evidence,
+                **clipboard_poll,
+                snapshot=snap.serializable(),
             )
             return False
-        return self._accept_extracted_content(
-            content,
-            request,
-            result,
-            f'Perplexity Deep Research extracted via Markdown download ({len(content)} chars)',
-            source='perplexity_deep_research_markdown_download',
-            target_key=target_key,
-            scrolled_to_bottom=scrolled_to_bottom,
-            scrolled_into_view=scrolled_into_view,
-            download_popup_escape_sent=True,
-            **download_evidence,
+
+        result.extractions.append(
+            ExtractedArtifact(
+                name='perplexity_research_report.md',
+                content=content,
+                kind='research_report',
+                metadata={
+                    'source': 'copy_contents_button',
+                    'session_url': result.session_url_after or self.runtime.current_url() or '',
+                },
+            )
         )
+        result.add_step(
+            'extract_research_report',
+            True,
+            'Perplexity Deep Research report copied before bottom scrolling',
+            artifact_name='perplexity_research_report.md',
+            characters=len(content),
+            sha256=hashlib.sha256(content.encode('utf-8')).hexdigest(),
+            **clipboard_poll,
+        )
+        return True
 
     def extract_primary(
         self,
@@ -4698,7 +4628,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         if not self._ensure_answer_thread(result):
             return False
         if is_deep_research:
-            return self._extract_deep_research_markdown(request, result)
+            if not self._extract_deep_research_markdown(request, result):
+                return False
 
         extract_cfg = self.cfg['workflow']['extract']
         target_key = str(extract_cfg.get('primary_key') or '').strip()
@@ -4776,11 +4707,28 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         copy_contents = self.find_first(snap, 'copy_contents_button')
 
         if self._is_deep_research(request):
+            reports = [
+                artifact
+                for artifact in result.extractions
+                if (
+                    artifact.name == 'perplexity_research_report.md'
+                    and artifact.kind == 'research_report'
+                    and bool(artifact.content.strip())
+                )
+            ]
+            verified = len(reports) == 1
             result.add_step(
-                'extract_additional', True,
-                'Perplexity Deep Research report already captured by extract_primary',
+                'extract_additional',
+                verified,
+                (
+                    'Perplexity Deep Research has one separate report artifact'
+                    if verified
+                    else 'Perplexity Deep Research has no unique separate report artifact'
+                ),
+                expected_count=1,
+                observed_count=len(reports),
             )
-            return True
+            return verified
 
         if not copy_contents:
             result.add_step(
