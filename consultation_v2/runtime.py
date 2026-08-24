@@ -934,6 +934,26 @@ class ConsultationRuntime:
                     return element
         return None
 
+    def _composer_focus_released(
+        self,
+        *,
+        consecutive: int = 2,
+        timeout: float = 3.0,
+        interval: float = 0.3,
+    ) -> bool:
+        required = max(1, int(consecutive))
+        deadline = time.monotonic() + timeout
+        stable = 0
+        while time.monotonic() < deadline:
+            if self._focused_composer_entry() is None:
+                stable += 1
+                if stable >= required:
+                    return True
+            else:
+                stable = 0
+            time.sleep(interval)
+        return False
+
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         # Close stale GTK file dialogs FIRST — they intercept the address-bar
         # focus key (ctrl+l) and leave the composer focused, so the URL gets
@@ -960,7 +980,7 @@ class ConsultationRuntime:
                 'navigate: address bar not focused after navigation key; refusing to paste URL'
             )
             return False
-        if self._focused_composer_entry() is not None:
+        if not self._composer_focus_released():
             logger.error(
                 'navigate: composer still focused after address-bar focus; refusing to paste URL'
             )
