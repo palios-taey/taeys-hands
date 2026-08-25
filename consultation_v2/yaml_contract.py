@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable
 import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-KNOWN_PLATFORMS = ('chatgpt', 'claude', 'gemini', 'grok', 'perplexity', 'x_twitter', 'grok_x_scout', 'reddit', 'nvidia_forum')
+KNOWN_PLATFORMS = ('chatgpt', 'claude', 'gemini', 'grok', 'perplexity', 'x_twitter', 'grok_x_scout', 'reddit', 'nvidia_forum', 'linkedin')
 CHAT_PLATFORMS = frozenset({'chatgpt', 'claude', 'gemini', 'grok', 'perplexity'})
 
 FORBIDDEN_MATCHER_KEYS = frozenset({

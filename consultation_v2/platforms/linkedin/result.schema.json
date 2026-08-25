@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-jobs-result-v1.json",
+  "title": "LinkedIn Jobs public result",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "platform": {
+      "const": "linkedin"
+    },
+    "display": {
+      "type": "string",
+      "pattern": "^:[0-9]{1,3}$"
+    },
+    "state": {
+      "enum": [
+        "captured",
+        "already_captured",
+        "no_selected_job",
+        "postcondition_failed",
+        "technical_failure"
+      ]
+    },
+    "failure_code": {
+      "oneOf": [
+        {
+          "enum": [
+            "deadline_expired",
+            "display_lock_unavailable",
+            "lock_release_indeterminate",
+            "post_observation_indeterminate",
+            "postcondition_failed",
+            "pre_observation_failed",
+            "private_input_invalid",
+            "selected_job_not_exact",
+            "sink_write_indeterminate"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "records_observed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "records_written": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "content_digest": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "turn_lineage_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "ok",
+    "platform",
+    "display",
+    "state",
+    "failure_code",
+    "records_observed",
+    "records_written",
+    "content_digest",
+    "receipt_sha256",
+    "turn_lineage_sha256"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "captured"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "failure_code": {
+            "type": "null"
+          },
+          "records_observed": {
+            "const": 1
+          },
+          "records_written": {
+            "const": 1
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "already_captured"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "failure_code": {
+            "type": "null"
+          },
+          "records_observed": {
+            "const": 1
+          },
+          "records_written": {
+            "const": 0
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "no_selected_job"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          },
+          "failure_code": {
+            "const": "selected_job_not_exact"
+          },
+          "records_observed": {
+            "const": 0
+          },
+          "records_written": {
+            "const": 0
+          },
+          "content_digest": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "postcondition_failed"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          },
+          "failure_code": {
+            "const": "postcondition_failed"
+          },
+          "records_observed": {
+            "const": 1
+          },
+          "records_written": {
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "content_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "technical_failure"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "failure_code": {
+                "const": "sink_write_indeterminate"
+              },
+              "records_observed": {
+                "const": 1
+              },
+              "records_written": {
+                "type": "null"
+              },
+              "content_digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          {
+            "properties": {
+              "failure_code": {
+                "enum": [
+                  "deadline_expired",
+                  "display_lock_unavailable",
+                  "lock_release_indeterminate",
+                  "post_observation_indeterminate",
+                  "pre_observation_failed",
+                  "private_input_invalid"
+                ]
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "records_observed": {
+                    "const": 0
+                  },
+                  "records_written": {
+                    "const": 0
+                  },
+                  "content_digest": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "records_observed": {
+                    "const": 1
+                  },
+                  "records_written": {
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "content_digest": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

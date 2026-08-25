@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-jobs-request-v1.json",
+  "title": "LinkedIn Jobs Hands platform request",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "operation": {
+      "const": "capture_selected_job"
+    }
+  },
+  "required": [
+    "operation"
+  ]
+}
