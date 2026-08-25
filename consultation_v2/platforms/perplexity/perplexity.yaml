@@ -338,6 +338,17 @@ tree:
     stop_button:
       name: Stop response (Esc)
       role: push button
+    artifact_options:
+      name: Artifact options
+      role: push button
+    research_report_open:
+      role: push button
+      match_strategy: name_agnostic_structural
+      structural:
+        after: attachment_preview
+        before: artifact_options
+        ordinal: last
+      reason: The full report opener has a request-derived dynamic title and is the last push button before the exact Artifact options control on the completed report card.
     copy_button:
       name: Copy
       role: push button
