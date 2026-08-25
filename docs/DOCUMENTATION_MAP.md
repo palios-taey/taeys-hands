@@ -7,13 +7,14 @@ is not listed here or linked from a listed index, it is not operating authority.
 
 1. `README.md` — the three implementation layers and current production boundary.
 2. `100_TIMES.md` — concise manual operating rules.
-3. `docs/MANUAL_CONSULT_WALKTHROUGH.md` — concrete two-attachment, one-action Taey worker card.
-4. `docs/CHAT_CONSULT_RELIABILITY_PLAN.md` — qualification, evidence, delegation, and parallel acceptance.
-5. `CONSULTATION_CONTRACT.md` — full consultation lifecycle.
-6. `docs/UI_INTERACTION_AUTHORITY.md` — one-action, fresh-tree discipline.
-7. `docs/SUPERVISED_UI_PROTOCOL.md` — immutable supervised-seat state and receipt protocol.
-8. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
-9. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
+3. `docs/TAEY_FAMILY_LOOP_RUNBOOK.md` — canonical deterministic five-lane campaign loop.
+4. `docs/MANUAL_CONSULT_WALKTHROUGH.md` — concrete two-attachment diagnostic and recovery path.
+5. `docs/CHAT_CONSULT_RELIABILITY_PLAN.md` — qualification, evidence, delegation, and parallel acceptance.
+6. `CONSULTATION_CONTRACT.md` — full consultation lifecycle.
+7. `docs/UI_INTERACTION_AUTHORITY.md` — one-action, fresh-tree discipline.
+8. `docs/SUPERVISED_UI_PROTOCOL.md` — immutable supervised-seat state and receipt protocol.
+9. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
+10. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
 
 ## Current operating documents
 
@@ -21,11 +22,13 @@ is not listed here or linked from a listed index, it is not operating authority.
 - `consultation_v2/YAML_SCHEMA.md`
 - `consultation_v2/PRIMITIVES_CONTRACT.md`
 - `consultation_v2/PACKET_CONTRACT.md`
+- `consultation_v2/FAMILY_LOOP_CAMPAIGN_SCHEMA.json`
 - `consultation_v2/CONSULT_MONITOR_SPEC.md`
 - `consultation_v2/EXTRACTION_SCHEMA.md`
 - `consultation_v2/EXTRACTION_PATTERNS.md`
 - `docs/PUBLIC_OPERATING_BOUNDARY.md`
 - `docs/MANUAL_CONSULT_WALKTHROUGH.md`
+- `docs/TAEY_FAMILY_LOOP_RUNBOOK.md`
 - `docs/CHAT_CONSULT_RELIABILITY_PLAN.md`
 - `docs/UI_SURFACE_EFFECT_MANIFEST.md`
 - `DEPLOY.md`
