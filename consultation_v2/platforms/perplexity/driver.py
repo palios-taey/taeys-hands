@@ -6,7 +6,6 @@ in this package.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -16,10 +15,6 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
-from consultation_v2.platforms.perplexity.markdown_download import (
-    read_new_markdown_download,
-    snapshot_markdown_downloads,
-)
 from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, PerplexityCompletionDetector
 from consultation_v2.stop_conditions import is_stop_condition
 from consultation_v2 import primitives
@@ -4399,186 +4394,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         )
         return True
 
-    def _extract_deep_research_markdown(
-        self,
-        request: ConsultationRequest,
-        result: ConsultationResult,
-    ) -> bool:
-        workflow = get_extraction('perplexity', 'research_report')
-        expected = (
-            ('scroll_to_bottom', 'input'),
-            ('scroll_into_view', 'more_actions'),
-            ('click', 'more_actions'),
-            ('hover', 'download_menu_item'),
-            ('download', 'download_markdown_item'),
-        )
-        observed = tuple(
-            (step.action, step.element)
-            for step in (workflow.steps if workflow is not None else ())
-        )
-        if observed != expected:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity research_report YAML does not declare the exact Markdown download',
-                stop_condition='extraction_failed',
-                expected_steps=expected,
-                observed_steps=observed,
-            )
-            return False
-        if any(
-            artifact.name == 'perplexity_research_report.md'
-            for artifact in result.extractions
-        ):
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Deep Research report was already extracted',
-                stop_condition='extraction_failed',
-            )
-            return False
-
-        try:
-            before = snapshot_markdown_downloads()
-        except OSError as exc:
-            result.add_step(
-                'extract_research_report',
-                False,
-                f'Perplexity Markdown download baseline failed: {exc}',
-                stop_condition='extraction_failed',
-            )
-            return False
-
-        scrolled_to_bottom = bool(
-            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
-        )
-        snap = self.runtime.snapshot()
-        trigger = self.find_last(snap, 'more_actions')
-        if not trigger:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Deep Research More actions control not found',
-                stop_condition='extraction_failed',
-                scrolled_to_bottom=scrolled_to_bottom,
-                snapshot=snap.serializable(),
-            )
-            return False
-        scrolled_into_view = bool(self.runtime.scroll_element_into_view(trigger))
-        time.sleep(0.3)
-        trigger_evidence = self.runtime.mapped_pointer_activate(trigger)
-        if trigger_evidence.get('ok') is not True:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Deep Research More actions mapped-pointer activation failed',
-                stop_condition='extraction_failed',
-                scrolled_to_bottom=scrolled_to_bottom,
-                scrolled_into_view=scrolled_into_view,
-                trigger_evidence=trigger_evidence,
-                snapshot=snap.serializable(),
-            )
-            return False
-
-        menu = self.runtime.wait_for_stable_app_root_snapshot(
-            consecutive=1,
-            timeout=3.0,
-            interval=0.2,
-            anchor_key='download_menu_item',
-            require_non_empty=True,
-        )
-        download_item = self.find_last(menu, 'download_menu_item')
-        if not download_item:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity More actions did not expose Download',
-                stop_condition='extraction_failed',
-                menu_snapshot=menu.serializable(),
-            )
-            return False
-        download_hovered = bool(self.runtime.hover(download_item))
-        if not download_hovered:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Download hover failed',
-                stop_condition='extraction_failed',
-                download_hovered=download_hovered,
-                menu_snapshot=menu.serializable(),
-            )
-            return False
-
-        markdown_menu = self.runtime.wait_for_stable_app_root_snapshot(
-            consecutive=1,
-            timeout=3.0,
-            interval=0.2,
-            anchor_key='download_markdown_item',
-            require_non_empty=True,
-        )
-        item = self.find_last(markdown_menu, 'download_markdown_item')
-        if not item:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Download did not expose Markdown',
-                stop_condition='extraction_failed',
-                menu_snapshot=markdown_menu.serializable(),
-            )
-            return False
-        item_evidence = self.runtime.mapped_pointer_activate(item)
-        if item_evidence.get('ok') is not True:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Download Markdown mapped-pointer activation failed',
-                stop_condition='extraction_failed',
-                item_evidence=item_evidence,
-                menu_snapshot=markdown_menu.serializable(),
-            )
-            return False
-
-        try:
-            raw_bytes, download_evidence = read_new_markdown_download(before)
-        except OSError as exc:
-            raw_bytes = b''
-            download_evidence = {'download_error': str(exc)}
-        if not raw_bytes:
-            result.add_step(
-                'extract_research_report',
-                False,
-                'Perplexity Download Markdown produced no unique source-bearing file',
-                stop_condition='extraction_failed',
-                **download_evidence,
-            )
-            return False
-        content = raw_bytes.decode('utf-8', errors='replace')
-
-        result.extractions.append(
-            ExtractedArtifact(
-                name='perplexity_research_report.md',
-                content=content,
-                kind='research_report',
-                metadata={
-                    'source': 'perplexity_deep_research_markdown_download',
-                    'session_url': result.session_url_after or self.runtime.current_url() or '',
-                    **download_evidence,
-                },
-            )
-        )
-        result.add_step(
-            'extract_research_report',
-            True,
-            'Perplexity Deep Research report extracted from native Markdown download',
-            artifact_name='perplexity_research_report.md',
-            characters=len(content),
-            sha256=hashlib.sha256(raw_bytes).hexdigest(),
-            scrolled_to_bottom=scrolled_to_bottom,
-            scrolled_into_view=scrolled_into_view,
-            **download_evidence,
-        )
-        return True
-
     def extract_primary(
         self,
         request: ConsultationRequest,
@@ -4589,9 +4404,28 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             time.sleep(2.0)
         if not self._ensure_answer_thread(result):
             return False
-        if is_deep_research:
-            if not self._extract_deep_research_markdown(request, result):
-                return False
+
+        output_type = 'research_report' if is_deep_research else 'assistant_text'
+        extraction = get_extraction('perplexity', output_type)
+        expected_steps = (
+            ('scroll_to_bottom', 'input', 'last', None),
+            ('copy_element', 'copy_button', 'last', None),
+            ('read_clipboard', None, 'last', 'response_complete'),
+        )
+        observed_steps = tuple(
+            (step.action, step.element, step.select, step.validation)
+            for step in (extraction.steps if extraction is not None else ())
+        )
+        if observed_steps != expected_steps:
+            result.add_step(
+                'extract_primary',
+                False,
+                f'Perplexity {output_type} YAML does not declare the exact direct Copy sequence',
+                stop_condition='extraction_failed',
+                expected_steps=expected_steps,
+                observed_steps=observed_steps,
+            )
+            return False
 
         extract_cfg = self.cfg['workflow']['extract']
         target_key = str(extract_cfg.get('primary_key') or '').strip()
@@ -4665,33 +4499,24 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         request: ConsultationRequest,
         result: ConsultationResult,
     ) -> bool:
-        snap = self.runtime.snapshot()
-        copy_contents = self.find_first(snap, 'copy_contents_button')
-
         if self._is_deep_research(request):
-            reports = [
-                artifact
-                for artifact in result.extractions
-                if (
-                    artifact.name == 'perplexity_research_report.md'
-                    and artifact.kind == 'research_report'
-                    and bool(artifact.content.strip())
-                )
-            ]
-            verified = len(reports) == 1
+            verified = bool(result.response_text.strip()) and not result.extractions
             result.add_step(
                 'extract_additional',
                 verified,
                 (
-                    'Perplexity Deep Research has one separate report artifact'
+                    'Perplexity Deep Research direct Copy is the complete response; no additional artifact expected'
                     if verified
-                    else 'Perplexity Deep Research has no unique separate report artifact'
+                    else 'Perplexity Deep Research direct Copy output contract was not satisfied'
                 ),
-                expected_count=1,
-                observed_count=len(reports),
+                expected_count=0,
+                observed_count=len(result.extractions),
+                response_characters=len(result.response_text),
             )
             return verified
 
+        snap = self.runtime.snapshot()
+        copy_contents = self.find_first(snap, 'copy_contents_button')
         if not copy_contents:
             result.add_step(
                 'extract_additional', False,
