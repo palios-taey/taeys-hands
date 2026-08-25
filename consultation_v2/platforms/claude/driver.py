@@ -3601,6 +3601,9 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
                 target_url=target_url,
                 clean_navigation=clean_navigation,
                 observation_samples=navigation_samples,
+                navigation_primitive_evidence=getattr(
+                    self.runtime, 'last_navigation_evidence', {},
+                ),
                 snapshot=snap.serializable(),
             )
             if not navigated:
