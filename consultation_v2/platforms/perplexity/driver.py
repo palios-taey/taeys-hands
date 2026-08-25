@@ -4410,8 +4410,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         extraction = get_extraction('perplexity', output_type)
         expected_steps = (
             (
-                ('scroll_to_bottom', 'input', 'last', None),
                 ('open_panel', 'research_report_open', 'last', None),
+                ('open_panel', 'expand_artifact', 'last', None),
+                ('scroll_to_bottom', 'report_scroll_pane', 'last', None),
                 ('copy_element', 'copy_button', 'last', None),
                 ('read_clipboard', None, 'last', 'response_complete'),
             )
@@ -4450,7 +4451,8 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 strategy=strategy,
             )
             return False
-        self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+        if not is_deep_research:
+            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
         snap = self.runtime.snapshot()
         report_surface_evidence: dict[str, object] = {}
         if is_deep_research:
@@ -4492,10 +4494,72 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     **report_surface_evidence,
                 )
                 return False
+            expanders = list(snap.mapped.get('expand_artifact') or [])
+            if len(expanders) != 1:
+                result.add_step(
+                    'expand_research_report',
+                    False,
+                    'Perplexity report preview did not expose exactly one Expand artifact control',
+                    stop_condition='extraction_failed',
+                    observed_count=len(expanders),
+                    snapshot=snap.serializable(),
+                    report_surface=report_surface_evidence,
+                )
+                return False
+            if not self.runtime.click(expanders[0], strategy='atspi_only'):
+                result.add_step(
+                    'expand_research_report',
+                    False,
+                    'Perplexity Expand artifact click failed',
+                    stop_condition='extraction_failed',
+                    snapshot=snap.serializable(),
+                    report_surface=report_surface_evidence,
+                )
+                return False
+            snap, expanded_surface_evidence = self._wait_for_expanded_research_report()
+            if snap is None:
+                result.add_step(
+                    'expand_research_report',
+                    False,
+                    'Perplexity expanded report surface postcondition did not stabilize',
+                    stop_condition='extraction_failed',
+                    report_surface=report_surface_evidence,
+                    **expanded_surface_evidence,
+                )
+                return False
+            report_panes = list(snap.mapped.get('report_scroll_pane') or [])
+            if len(report_panes) != 1 or not self.runtime.scroll_to_bottom(report_panes[0]):
+                result.add_step(
+                    'scroll_research_report',
+                    False,
+                    'Perplexity expanded report pane did not scroll to bottom',
+                    stop_condition='extraction_failed',
+                    observed_count=len(report_panes),
+                    snapshot=snap.serializable(),
+                    report_surface=report_surface_evidence,
+                    expanded_surface=expanded_surface_evidence,
+                )
+                return False
+            snap, report_copy_evidence = self._wait_for_research_report_copy()
+            if snap is None:
+                result.add_step(
+                    'scroll_research_report',
+                    False,
+                    'Perplexity expanded report bottom did not expose one exact Copy control',
+                    stop_condition='extraction_failed',
+                    report_surface=report_surface_evidence,
+                    expanded_surface=expanded_surface_evidence,
+                    **report_copy_evidence,
+                )
+                return False
+            report_surface_evidence.update({
+                'expanded_surface': expanded_surface_evidence,
+                'report_copy_surface': report_copy_evidence,
+            })
             result.add_step(
                 'open_research_report',
                 True,
-                'Perplexity full research report opened with one exact Copy control',
+                'Perplexity full research report opened, expanded, and scrolled to one exact Copy control',
                 opener_name=report_opener.name,
                 scrolled_into_view=opener_scrolled_into_view,
                 **report_surface_evidence,
@@ -4567,30 +4631,84 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         timeout: float = 8.0,
         interval: float = 0.3,
     ) -> tuple[Snapshot | None, dict[str, object]]:
+        return self._wait_for_research_report_state(
+            required=('expand_artifact', 'close_artifact'),
+            absent=(),
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def _wait_for_expanded_research_report(
+        self,
+        *,
+        timeout: float = 8.0,
+        interval: float = 0.3,
+    ) -> tuple[Snapshot | None, dict[str, object]]:
+        return self._wait_for_research_report_state(
+            required=('report_scroll_pane', 'close_artifact'),
+            absent=('expand_artifact', 'copy_button'),
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def _wait_for_research_report_copy(
+        self,
+        *,
+        timeout: float = 8.0,
+        interval: float = 0.3,
+    ) -> tuple[Snapshot | None, dict[str, object]]:
+        return self._wait_for_research_report_state(
+            required=('report_scroll_pane', 'close_artifact', 'copy_button'),
+            absent=('expand_artifact',),
+            timeout=timeout,
+            interval=interval,
+        )
+
+    def _wait_for_research_report_state(
+        self,
+        *,
+        required: tuple[str, ...],
+        absent: tuple[str, ...],
+        timeout: float,
+        interval: float,
+    ) -> tuple[Snapshot | None, dict[str, object]]:
         deadline = time.monotonic() + timeout
         stable_cycles = 0
         samples = 0
         last_snapshot: Snapshot | None = None
         last_url = ''
-        last_copy_count = 0
-        last_copy_states: list[str] = []
+        last_counts: dict[str, int] = {}
+        last_states: dict[str, list[str]] = {}
         while time.monotonic() < deadline:
             samples += 1
             last_url = (self.runtime.current_url() or '').strip()
             last_snapshot = self.runtime.snapshot()
-            copy_targets = list(last_snapshot.mapped.get('copy_button') or [])
-            last_copy_count = len(copy_targets)
-            last_copy_states = (
-                sorted(str(state) for state in (copy_targets[0].states or []))
-                if last_copy_count == 1
-                else []
-            )
+            observed_keys = required + absent
+            last_counts = {
+                key: len(last_snapshot.mapped.get(key) or [])
+                for key in observed_keys
+            }
+            last_states = {
+                key: (
+                    sorted(
+                        str(state)
+                        for state in (last_snapshot.mapped[key][0].states or [])
+                    )
+                    if last_counts[key] == 1
+                    else []
+                )
+                for key in observed_keys
+            }
             query = parse_qs(urlsplit(last_url).query, keep_blank_values=True)
             ready = bool(
                 self._is_answer_thread_url(last_url)
                 and query.get('preview') == ['1']
-                and last_copy_count == 1
-                and {'showing', 'enabled'}.issubset(set(last_copy_states))
+                and all(last_counts[key] == 1 for key in required)
+                and all(
+                    {'showing', 'enabled'}.issubset(set(last_states[key]))
+                    for key in required
+                )
+                and all(last_counts[key] == 0 for key in absent)
             )
             stable_cycles = stable_cycles + 1 if ready else 0
             if stable_cycles >= 2:
@@ -4598,16 +4716,16 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     'url': last_url,
                     'samples': samples,
                     'stable_cycles': stable_cycles,
-                    'copy_count': last_copy_count,
-                    'copy_states': last_copy_states,
+                    'counts': last_counts,
+                    'states': last_states,
                 }
             time.sleep(interval)
         return None, {
             'url': last_url,
             'samples': samples,
             'stable_cycles': stable_cycles,
-            'copy_count': last_copy_count,
-            'copy_states': last_copy_states,
+            'counts': last_counts,
+            'states': last_states,
             'last_snapshot': (
                 last_snapshot.serializable() if last_snapshot is not None else None
             ),

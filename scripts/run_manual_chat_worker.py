@@ -1017,8 +1017,9 @@ def _extract_content(
             "perplexity",
             "research_report",
             (
-                ("scroll_to_bottom", "input", "last", None),
                 ("open_panel", "research_report_open", "last", None),
+                ("open_panel", "expand_artifact", "last", None),
+                ("scroll_to_bottom", "report_scroll_pane", "last", None),
                 ("copy_element", "copy_button", "last", None),
                 ("read_clipboard", None, "last", "response_complete"),
             ),
@@ -1033,21 +1034,22 @@ def _extract_content(
             "Do not copy or pass an opaque ref. Execute exactly this sequence:\n"
             "1. observe scope=base; require current_url to begin "
             "https://www.perplexity.ai/search/, require stop_button absent, and require exactly one "
-            "mapped input editable entry. Do not require final-response actions before scrolling.\n"
-            "2. scroll_to_bottom element=input exactly once; observe scope=base; require the same URL "
-            "condition, stop_button absent, exactly one mapped artifact_options named Artifact options, "
-            "and exactly one mapped research_report_open with a nonempty dynamic name.\n"
-            "3. click element=research_report_open exactly once; observe scope=base; require current_url "
-            "to equal the same answer-thread URL with query preview=1, stop_button absent, and exactly one "
-            "mapped copy_button named Copy with role push button and states showing and enabled, selected "
-            "by the YAML last_by_y rule. Without mutation, observe scope=base exactly once more and require "
-            "the same preview=1 URL and the same exact singleton Copy postcondition.\n"
-            "4. click element=copy_button exactly once; observe scope=base; require the preview=1 URL and "
+            "mapped research_report_open with a nonempty dynamic name.\n"
+            "2. click element=research_report_open exactly once; observe scope=base; require current_url "
+            "to equal the same answer-thread URL with query preview=1, stop_button absent, exactly one "
+            "mapped expand_artifact named Expand artifact, and exactly one mapped close_artifact named Close.\n"
+            "3. click element=expand_artifact exactly once; observe scope=base; require the same preview=1 "
+            "URL, stop_button absent, expand_artifact absent, exactly one mapped report_scroll_pane with "
+            "role scroll pane and states showing and enabled, and mapped copy_button absent.\n"
+            "4. scroll_to_bottom element=report_scroll_pane exactly once; observe scope=base; require the "
+            "same preview=1 URL, stop_button absent, exactly one mapped copy_button named Copy with role "
+            "push button and states showing and enabled, selected by the YAML last_by_y rule.\n"
+            "5. click element=copy_button exactly once; observe scope=base; require the preview=1 URL and "
             "stop_button absent.\n"
-            f"5. read_clipboard with output_file={response_file}. Require that drive_chat created a "
+            f"6. read_clipboard with output_file={response_file}. Require that drive_chat created a "
             "new non-empty research report file and return its byte count and SHA-256. Then stop "
-            "all UI calls. Only after all five steps pass, return the exact lines "
-            "report_open_count=1 and report_copy_count=1."
+            "all UI calls. Only after all six steps pass, return the exact lines "
+            "report_open_count=1, report_expand_count=1, report_scroll_count=1, and report_copy_count=1."
             f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report without any success cardinality field and "
