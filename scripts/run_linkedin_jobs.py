@@ -30,6 +30,30 @@ _EMPTY_MATCH_COUNTS = {
 }
 
 
+def _selection_receipt(
+    *,
+    verdict: str,
+    target_card_name: str | None,
+    detail_title_name: str | None,
+    detail_company_name: str | None,
+    target_match_count: int,
+    detail_title_match_count: int | None,
+    detail_company_match_count: int | None,
+    stable_cycles_observed: int,
+) -> dict[str, Any]:
+    return {
+        'kind': 'private_exact_job_card_atspi_activate',
+        'verdict': verdict,
+        'target_card_name_sha256': _digest_text(target_card_name),
+        'detail_title_name_sha256': _digest_text(detail_title_name),
+        'detail_company_name_sha256': _digest_text(detail_company_name),
+        'target_match_count': target_match_count,
+        'detail_title_match_count': detail_title_match_count,
+        'detail_company_match_count': detail_company_match_count,
+        'stable_cycles_observed': stable_cycles_observed,
+    }
+
+
 def _display_argument(value: str) -> str:
     from consultation_v2.linkedin_jobs_contract import validate_display
 
@@ -68,7 +92,7 @@ def _deadline_argument(value: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description='Capture one pre-positioned LinkedIn job into a private sink.',
+        description='Select or capture one frozen LinkedIn job into a private sink.',
     )
     parser.add_argument('--display', required=True, type=_display_argument)
     parser.add_argument('--transaction-file', required=True)
@@ -220,6 +244,7 @@ def _receipt_payload(
     display: str,
     requester: str,
     hands_commit: str,
+    operation: str,
     terminal_state: str,
     ok: bool,
     failure_code: str | None,
@@ -229,6 +254,7 @@ def _receipt_payload(
     sink_ref: str | None,
     pre_observation_sha256: str | None,
     pre_match_counts: Mapping[str, int],
+    selection: Mapping[str, Any],
     lock_lineage: Mapping[str, Any],
     action_verdict: str,
     records_observed: int,
@@ -242,7 +268,7 @@ def _receipt_payload(
     return {
         'schema': RECEIPT_SCHEMA,
         'platform': 'linkedin',
-        'operation': 'capture_selected_job',
+        'operation': operation,
         'display': display,
         'requester': requester,
         'turn_lineage_sha256': lock_lineage['turn_lineage_sha256'],
@@ -258,6 +284,7 @@ def _receipt_payload(
         'sink_ref_sha256': _digest_text(sink_ref),
         'pre_observation_sha256': pre_observation_sha256,
         'pre_match_counts': dict(pre_match_counts),
+        'selection': dict(selection),
         'lock': dict(lock_lineage),
         'action': {
             'kind': 'private_sink_write_once',
@@ -313,6 +340,7 @@ def _finalize(
     display: str,
     requester: str,
     hands_commit: str,
+    operation: str,
     terminal_state: str,
     ok: bool,
     failure_code: str | None,
@@ -322,6 +350,7 @@ def _finalize(
     sink_ref: str | None,
     pre_observation_sha256: str | None,
     pre_match_counts: Mapping[str, int],
+    selection: Mapping[str, Any],
     lock_lineage: Mapping[str, Any],
     action_verdict: str,
     records_observed: int,
@@ -336,6 +365,7 @@ def _finalize(
         display=display,
         requester=requester,
         hands_commit=hands_commit,
+        operation=operation,
         terminal_state=terminal_state,
         ok=ok,
         failure_code=failure_code,
@@ -345,6 +375,7 @@ def _finalize(
         sink_ref=sink_ref,
         pre_observation_sha256=pre_observation_sha256,
         pre_match_counts=pre_match_counts,
+        selection=selection,
         lock_lineage=lock_lineage,
         action_verdict=action_verdict,
         records_observed=records_observed,
@@ -380,6 +411,7 @@ def _terminal_facts(
     postcondition_verdict: str,
     post_observation_sha256: str | None,
     post_match_counts: Mapping[str, int] | None,
+    selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         'terminal_state': terminal_state,
@@ -393,6 +425,16 @@ def _terminal_facts(
         'postcondition_verdict': postcondition_verdict,
         'post_observation_sha256': post_observation_sha256,
         'post_match_counts': post_match_counts,
+        'selection': dict(selection or _selection_receipt(
+            verdict='not_required',
+            target_card_name=None,
+            detail_title_name=None,
+            detail_company_name=None,
+            target_match_count=0,
+            detail_title_match_count=None,
+            detail_company_match_count=None,
+            stable_cycles_observed=0,
+        )),
     }
 
 
@@ -401,17 +443,36 @@ def _execute_locked_transaction(
     lock: Mapping[str, Any],
     display: str,
     deadline_at: float,
+    operation: str,
     search_ref: str,
     sink_root: Path,
+    target_card_name: str | None,
+    detail_title_name: str | None,
+    detail_company_name: str | None,
 ) -> dict[str, Any]:
     from consultation_v2.platforms.linkedin.driver import (
+        LinkedInJobCardActionFailed,
+        LinkedInJobCardUnavailable,
         LinkedInSelectedJobUnavailable,
+        activate_private_job_card,
+        job_selection_barrier_policy,
+        observe_private_selected_job,
         observe_selected_job,
         selected_job_postcondition,
         write_selected_job_once,
     )
     from consultation_v2.snapshot import build_snapshot
 
+    selection = _selection_receipt(
+        verdict=('not_required' if operation == 'capture_selected_job' else 'not_executed'),
+        target_card_name=target_card_name,
+        detail_title_name=detail_title_name,
+        detail_company_name=detail_company_name,
+        target_match_count=0,
+        detail_title_match_count=None,
+        detail_company_match_count=None,
+        stable_cycles_observed=0,
+    )
     if lock.get('acquired') is not True:
         sys.stderr.write('RuntimeError: CAREERS display lock was not acquired\n')
         return _terminal_facts(
@@ -426,13 +487,75 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
-
     try:
         with _internal_deadline(deadline_at):
             _bind_display(display)
             _firefox, _document, before_snapshot = build_snapshot('linkedin')
-            before = observe_selected_job(before_snapshot, search_ref)
+            if operation == 'select_and_capture_job':
+                if not all((target_card_name, detail_title_name, detail_company_name)):
+                    raise RuntimeError('private exact job-selection identity is incomplete')
+                activated = activate_private_job_card(before_snapshot, target_card_name)
+                selection = _selection_receipt(
+                    verdict='action_executed',
+                    target_card_name=target_card_name,
+                    detail_title_name=detail_title_name,
+                    detail_company_name=detail_company_name,
+                    target_match_count=activated.target_match_count,
+                    detail_title_match_count=None,
+                    detail_company_match_count=None,
+                    stable_cycles_observed=0,
+                )
+                required_cycles, interval, barrier_timeout = job_selection_barrier_policy()
+                barrier_deadline = min(deadline_at, time.monotonic() + barrier_timeout)
+                stable_cycles = 0
+                prior_digest: str | None = None
+                before = None
+                detail_counts = None
+                while time.monotonic() < barrier_deadline:
+                    _firefox, _document, selected_snapshot = build_snapshot('linkedin')
+                    try:
+                        detail_counts = observe_private_selected_job(
+                            selected_snapshot,
+                            detail_title_name,
+                            detail_company_name,
+                        )
+                        candidate = observe_selected_job(selected_snapshot, search_ref)
+                    except (LinkedInJobCardUnavailable, LinkedInSelectedJobUnavailable):
+                        stable_cycles = 0
+                        prior_digest = None
+                    else:
+                        if candidate.content_digest == prior_digest:
+                            stable_cycles += 1
+                        else:
+                            stable_cycles = 1
+                            prior_digest = candidate.content_digest
+                        before = candidate
+                        if stable_cycles >= required_cycles:
+                            break
+                    time.sleep(interval)
+                if (
+                    before is None
+                    or detail_counts is None
+                    or stable_cycles < required_cycles
+                ):
+                    raise LinkedInJobCardUnavailable(
+                        'selected-job exact postcondition did not stabilize',
+                        0,
+                    )
+                selection = _selection_receipt(
+                    verdict='satisfied',
+                    target_card_name=target_card_name,
+                    detail_title_name=detail_title_name,
+                    detail_company_name=detail_company_name,
+                    target_match_count=activated.target_match_count,
+                    detail_title_match_count=detail_counts.detail_title_match_count,
+                    detail_company_match_count=detail_counts.detail_company_match_count,
+                    stable_cycles_observed=stable_cycles,
+                )
+            else:
+                before = observe_selected_job(before_snapshot, search_ref)
     except LinkedInJobsDeadlineExpired as exc:
         sys.stderr.write(f'{type(exc).__name__}: internal deadline expired\n')
         return _terminal_facts(
@@ -447,6 +570,64 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
+        )
+    except LinkedInJobCardUnavailable as exc:
+        sys.stderr.write(f'{type(exc).__name__}: exact job selection failed\n')
+        if selection['verdict'] == 'not_executed':
+            selection = _selection_receipt(
+                verdict='target_not_exact',
+                target_card_name=target_card_name,
+                detail_title_name=detail_title_name,
+                detail_company_name=detail_company_name,
+                target_match_count=exc.match_count,
+                detail_title_match_count=None,
+                detail_company_match_count=None,
+                stable_cycles_observed=0,
+            )
+            failure_code = 'pre_observation_failed'
+        else:
+            selection['verdict'] = 'postcondition_failed'
+            failure_code = 'pre_observation_failed'
+        return _terminal_facts(
+            terminal_state='technical_failure',
+            ok=False,
+            failure_code=failure_code,
+            pre_observation_sha256=None,
+            pre_match_counts=_EMPTY_MATCH_COUNTS,
+            action_verdict='not_executed',
+            records_observed=0,
+            records_written=0,
+            postcondition_verdict='not_evaluated',
+            post_observation_sha256=None,
+            post_match_counts=None,
+            selection=selection,
+        )
+    except LinkedInJobCardActionFailed as exc:
+        sys.stderr.write(f'{type(exc).__name__}: exact job-card action failed\n')
+        selection = _selection_receipt(
+            verdict='action_failed',
+            target_card_name=target_card_name,
+            detail_title_name=detail_title_name,
+            detail_company_name=detail_company_name,
+            target_match_count=1,
+            detail_title_match_count=None,
+            detail_company_match_count=None,
+            stable_cycles_observed=0,
+        )
+        return _terminal_facts(
+            terminal_state='technical_failure',
+            ok=False,
+            failure_code='pre_observation_failed',
+            pre_observation_sha256=None,
+            pre_match_counts=_EMPTY_MATCH_COUNTS,
+            action_verdict='not_executed',
+            records_observed=0,
+            records_written=0,
+            postcondition_verdict='not_evaluated',
+            post_observation_sha256=None,
+            post_match_counts=None,
+            selection=selection,
         )
     except LinkedInSelectedJobUnavailable as exc:
         sys.stderr.write(f'{type(exc).__name__}: no exact selected job\n')
@@ -462,6 +643,7 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
     except Exception as exc:
         sys.stderr.write(f'{type(exc).__name__}: pre-observation failed\n')
@@ -477,6 +659,7 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
 
     try:
@@ -496,6 +679,7 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
     except Exception as exc:
         sys.stderr.write(f'{type(exc).__name__}: private sink action indeterminate\n')
@@ -511,6 +695,7 @@ def _execute_locked_transaction(
             postcondition_verdict='not_evaluated',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
 
     action_verdict = (
@@ -536,6 +721,7 @@ def _execute_locked_transaction(
             postcondition_verdict='indeterminate',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
     except LinkedInSelectedJobUnavailable as exc:
         sys.stderr.write(f'{type(exc).__name__}: fresh exact mapping failed\n')
@@ -551,6 +737,7 @@ def _execute_locked_transaction(
             postcondition_verdict='failed',
             post_observation_sha256=None,
             post_match_counts=exc.match_counts,
+            selection=selection,
         )
     except Exception as exc:
         sys.stderr.write(f'{type(exc).__name__}: fresh postcondition indeterminate\n')
@@ -566,6 +753,7 @@ def _execute_locked_transaction(
             postcondition_verdict='indeterminate',
             post_observation_sha256=None,
             post_match_counts=None,
+            selection=selection,
         )
 
     if not selected_job_postcondition(before, after):
@@ -581,6 +769,7 @@ def _execute_locked_transaction(
             postcondition_verdict='failed',
             post_observation_sha256=after.content_digest,
             post_match_counts=after.match_counts,
+            selection=selection,
         )
 
     terminal_state = (
@@ -600,6 +789,7 @@ def _execute_locked_transaction(
         postcondition_verdict='satisfied',
         post_observation_sha256=after.content_digest,
         post_match_counts=after.match_counts,
+        selection=selection,
     )
 
 
@@ -634,8 +824,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if correlation_id_sha256 is None:
         raise RuntimeError('correlation lineage could not be established')
     transaction_sha256: str | None = None
+    operation = 'capture_selected_job'
     search_ref: str | None = None
     sink_ref: str | None = None
+    target_card_name: str | None = None
+    detail_title_name: str | None = None
+    detail_company_name: str | None = None
     unlocked_lineage = {
         'policy': CAREERS_POLICY,
         'request_id': turn_lineage_sha256,
@@ -655,8 +849,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
         if transaction_sha256 != args.expected_transaction_sha256:
             raise RuntimeError('transaction digest differs from the permanent claim')
+        operation = transaction['operation']
         search_ref = transaction['search_ref']
         sink_ref = transaction['sink_ref']
+        target_card_name = transaction.get('target_card_name')
+        detail_title_name = transaction.get('detail_title_name')
+        detail_company_name = transaction.get('detail_company_name')
         sink_root = validate_path_beneath_private_root(
             sink_ref,
             private_root,
@@ -669,6 +867,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             display=args.display,
             requester=requester,
             hands_commit=hands_commit,
+            operation=operation,
             terminal_state='technical_failure',
             ok=False,
             failure_code='private_input_invalid',
@@ -678,6 +877,20 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             sink_ref=sink_ref,
             pre_observation_sha256=None,
             pre_match_counts=_EMPTY_MATCH_COUNTS,
+            selection=_selection_receipt(
+                verdict=(
+                    'not_required'
+                    if operation == 'capture_selected_job'
+                    else 'not_executed'
+                ),
+                target_card_name=target_card_name,
+                detail_title_name=detail_title_name,
+                detail_company_name=detail_company_name,
+                target_match_count=0,
+                detail_title_match_count=None,
+                detail_company_match_count=None,
+                stable_cycles_observed=0,
+            ),
             lock_lineage=unlocked_lineage,
             action_verdict='not_executed',
             records_observed=0,
@@ -699,7 +912,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             'requester': requester,
             'transaction_sha256': transaction_sha256,
             'expected_transaction_sha256': args.expected_transaction_sha256,
-            'operation': 'capture_selected_job',
+            'operation': operation,
             'turn_lineage_sha256': turn_lineage_sha256,
             'correlation_id_sha256': correlation_id_sha256,
             'deadline_seconds': args.deadline_seconds,
@@ -711,8 +924,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             lock=lock,
             display=args.display,
             deadline_at=deadline_at,
+            operation=operation,
             search_ref=search_ref,
             sink_root=sink_root,
+            target_card_name=target_card_name,
+            detail_title_name=detail_title_name,
+            detail_company_name=detail_company_name,
         )
 
     lineage = _lock_lineage(
@@ -736,6 +953,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         display=args.display,
         requester=requester,
         hands_commit=hands_commit,
+        operation=operation,
         transaction_sha256=transaction_sha256,
         expected_transaction_sha256=args.expected_transaction_sha256,
         search_ref=search_ref,

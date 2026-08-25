@@ -48,7 +48,11 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validate_schema(path: Path, required: set[str]) -> list[str]:
+def _validate_schema(
+    path: Path,
+    required: set[str],
+    optional: set[str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     schema = _load_json(path)
     if schema.get('$schema') != 'https://json-schema.org/draft/2020-12/schema':
@@ -56,7 +60,7 @@ def _validate_schema(path: Path, required: set[str]) -> list[str]:
     if schema.get('type') != 'object' or schema.get('additionalProperties') is not False:
         errors.append(f'{path}: root must be an exact object')
     properties = schema.get('properties')
-    if not isinstance(properties, dict) or set(properties) != required:
+    if not isinstance(properties, dict) or set(properties) != required | (optional or set()):
         errors.append(f'{path}: properties differ from the frozen contract')
     if set(schema.get('required') or []) != required:
         errors.append(f'{path}: required fields differ from the frozen contract')
@@ -99,6 +103,32 @@ def _validate_yaml() -> list[str]:
     }
     if workflow.get('selected_job_read') != expected_workflow:
         errors.append(f'{YAML_PATH}: frozen transaction workflow drifted')
+    expected_selection = {
+        'operation': 'select_and_capture_job',
+        'observation': 'canonical_snapshot_private_exact_name',
+        'target_card': {
+            'role': 'push button',
+            'states_include': ['showing', 'enabled'],
+        },
+        'action': 'atspi_activate',
+        'detail_title': {
+            'role': 'link',
+            'states_include': ['showing', 'enabled'],
+        },
+        'detail_company': {
+            'role': 'link',
+            'states_include': ['showing', 'enabled'],
+        },
+        'observation_barrier': {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        },
+        'postcondition': 'private_exact_detail_identity_and_selected_job',
+    }
+    if workflow.get('job_selection') != expected_selection:
+        errors.append(f'{YAML_PATH}: exact job-selection workflow drifted')
     indicators = ((document.get('validation') or {}).get('selected_job_ready') or {}).get('indicators')
     if indicators != ['about_job_heading']:
         errors.append(f'{YAML_PATH}: selected-job readiness must use the exact heading')
@@ -248,6 +278,25 @@ def _validate_interface_patterns() -> list[str]:
         or set(match_counts.get('required') or []) != expected_match_keys
     ):
         errors.append(f"{SCHEMAS['receipt']}: exact match-count schema drifted")
+    selection = (receipt_schema.get('properties') or {}).get('selection') or {}
+    expected_selection_keys = {
+        'kind',
+        'verdict',
+        'target_card_name_sha256',
+        'detail_title_name_sha256',
+        'detail_company_name_sha256',
+        'target_match_count',
+        'detail_title_match_count',
+        'detail_company_match_count',
+        'stable_cycles_observed',
+    }
+    if (
+        selection.get('type') != 'object'
+        or selection.get('additionalProperties') is not False
+        or set(selection.get('properties') or {}) != expected_selection_keys
+        or set(selection.get('required') or []) != expected_selection_keys
+    ):
+        errors.append(f"{SCHEMAS['receipt']}: selection receipt schema drifted")
     if result_schema.get('allOf') != _state_conditionals('state'):
         errors.append(f"{SCHEMAS['result']}: state/ok/failure_code conditionals drifted")
     if receipt_schema.get('allOf') != _state_conditionals('terminal_state'):
@@ -389,8 +438,8 @@ def _validate_runtime_source() -> list[str]:
     ast.parse(display_lock_source, filename=str(DISPLAY_LOCK))
     if 'from consultation_v2.snapshot import build_snapshot' not in runner_source:
         errors.append(f'{RUNNER}: canonical snapshot builder is not wired')
-    if runner_source.count("build_snapshot('linkedin')") != 2:
-        errors.append(f'{RUNNER}: transaction must make exactly pre/post canonical observations')
+    if runner_source.count("build_snapshot('linkedin')") != 3:
+        errors.append(f'{RUNNER}: transaction must use only pre/barrier/post canonical observations')
     if 'write_selected_job_once(before, sink_root)' not in runner_source:
         errors.append(f'{RUNNER}: frozen one-action sink write is not wired')
     if 'selected_job_postcondition(before, after)' not in runner_source:
@@ -462,6 +511,17 @@ def _validate_runtime_source() -> list[str]:
         errors.append(f'{DRIVER}: description resolver must not become a tree walker')
     if 'match_counts' not in driver_source:
         errors.append(f'{DRIVER}: exact selector counts are not bound to observations')
+    required_selection = {
+        'activate_private_job_card',
+        'observe_private_selected_job',
+        'job_selection_barrier_policy',
+        'atspi_activate',
+        'element.name == exact_name',
+        'element.role == role',
+        'set(states).issubset(element.states)',
+    }
+    if any(token not in driver_source for token in required_selection):
+        errors.append(f'{DRIVER}: private exact job-selection contract is incomplete')
 
     runner_tree = ast.parse(runner_source, filename=str(RUNNER))
     lock_nodes = [
@@ -499,8 +559,10 @@ def _validate_runtime_source() -> list[str]:
     ]
     if execute_calls.count('_bind_display') != 1:
         errors.append(f'{RUNNER}: display binding must occur once inside the locked transaction')
-    if execute_calls.count('build_snapshot') != 2:
-        errors.append(f'{RUNNER}: both canonical observations must occur inside the locked transaction')
+    if execute_calls.count('build_snapshot') != 3:
+        errors.append(f'{RUNNER}: pre/barrier/post observations must use the canonical snapshot')
+    if execute_calls.count('activate_private_job_card') != 1:
+        errors.append(f'{RUNNER}: exact job-card action must occur once inside the lock')
     if execute_calls.count('write_selected_job_once') != 1:
         errors.append(f'{RUNNER}: the single sink action must occur inside the locked transaction')
     if "if lock.get('acquired') is not True" not in runner_source:
@@ -592,21 +654,28 @@ def _validate_runtime_source() -> list[str]:
 def validate() -> list[str]:
     errors: list[str] = []
     errors.extend(_validate_schema(SCHEMAS['request'], {'operation'}))
-    errors.extend(_validate_schema(SCHEMAS['private_input'], {
-        'schema', 'operation', 'search_ref', 'sink_ref'
-    }))
+    errors.extend(_validate_schema(
+        SCHEMAS['private_input'],
+        {'schema', 'operation', 'search_ref', 'sink_ref'},
+        {'target_card_name', 'detail_title_name', 'detail_company_name'},
+    ))
     errors.extend(_validate_schema(SCHEMAS['result'], {
         'ok', 'platform', 'display', 'state', 'failure_code', 'records_observed',
         'records_written', 'content_digest', 'receipt_sha256', 'turn_lineage_sha256'
     }))
-    errors.extend(_validate_schema(SCHEMAS['receipt'], {
-        'schema', 'platform', 'operation', 'display', 'requester',
-        'turn_lineage_sha256', 'correlation_id_sha256', 'deadline_seconds',
-        'hands_commit', 'terminal_state', 'ok', 'failure_code',
-        'transaction_sha256', 'expected_transaction_sha256',
-        'search_ref_sha256', 'sink_ref_sha256',
-        'pre_observation_sha256', 'pre_match_counts', 'lock', 'action', 'postcondition'
-    }))
+    errors.extend(_validate_schema(
+        SCHEMAS['receipt'],
+        {
+            'schema', 'platform', 'operation', 'display', 'requester',
+            'turn_lineage_sha256', 'correlation_id_sha256', 'deadline_seconds',
+            'hands_commit', 'terminal_state', 'ok', 'failure_code',
+            'transaction_sha256', 'expected_transaction_sha256',
+            'search_ref_sha256', 'sink_ref_sha256',
+            'pre_observation_sha256', 'pre_match_counts', 'lock', 'action',
+            'postcondition',
+        },
+        {'selection'},
+    ))
     errors.extend(_validate_yaml())
     errors.extend(_validate_interface_patterns())
     errors.extend(_validate_runtime_source())

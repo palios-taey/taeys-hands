@@ -66,7 +66,10 @@
       "const": "linkedin"
     },
     "operation": {
-      "const": "capture_selected_job"
+      "enum": [
+        "capture_selected_job",
+        "select_and_capture_job"
+      ]
     },
     "display": {
       "type": "string",
@@ -123,6 +126,66 @@
     },
     "pre_match_counts": {
       "$ref": "#/$defs/match_counts"
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "private_exact_job_card_atspi_activate"
+        },
+        "verdict": {
+          "enum": [
+            "not_required",
+            "not_executed",
+            "target_not_exact",
+            "action_failed",
+            "action_executed",
+            "satisfied",
+            "postcondition_failed"
+          ]
+        },
+        "target_card_name_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "detail_title_name_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "detail_company_name_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "target_match_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detail_title_match_count": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "detail_company_match_count": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "stable_cycles_observed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "kind",
+        "verdict",
+        "target_card_name_sha256",
+        "detail_title_name_sha256",
+        "detail_company_name_sha256",
+        "target_match_count",
+        "detail_title_match_count",
+        "detail_company_match_count",
+        "stable_cycles_observed"
+      ]
     },
     "lock": {
       "type": "object",

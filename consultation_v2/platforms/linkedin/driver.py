@@ -11,6 +11,7 @@ from consultation_v2.linkedin_jobs_contract import (
     sha256_hex,
     write_new_private_json,
 )
+from consultation_v2.interact import atspi_activate
 from consultation_v2.types import ElementRef, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -19,6 +20,16 @@ class LinkedInSelectedJobUnavailable(RuntimeError):
     def __init__(self, message: str, match_counts: Mapping[str, int]) -> None:
         super().__init__(message)
         self.match_counts = dict(match_counts)
+
+
+class LinkedInJobCardUnavailable(RuntimeError):
+    def __init__(self, message: str, match_count: int) -> None:
+        super().__init__(message)
+        self.match_count = match_count
+
+
+class LinkedInJobCardActionFailed(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +45,13 @@ class SinkWriteResult:
     artifact_sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class JobSelectionObservation:
+    target_match_count: int
+    detail_title_match_count: int
+    detail_company_match_count: int
+
+
 _REQUIRED_KEYS = (
     'about_job_heading',
     'selected_job_description_path',
@@ -42,6 +60,132 @@ _REQUIRED_KEYS = (
 
 class _DescriptionPathMismatch(RuntimeError):
     pass
+
+
+def _job_selection_contract() -> dict[str, Any]:
+    workflow = load_platform_yaml('linkedin').get('workflow') or {}
+    contract = workflow.get('job_selection')
+    if not isinstance(contract, dict):
+        raise RuntimeError('LinkedIn job selection is not configured')
+    return dict(contract)
+
+
+def _exact_private_element(
+    snapshot: Snapshot,
+    exact_name: str,
+    contract_key: str,
+) -> tuple[ElementRef | None, int]:
+    contract = _job_selection_contract().get(contract_key)
+    if not isinstance(contract, dict):
+        raise RuntimeError(f'LinkedIn {contract_key} contract is unavailable')
+    role = contract.get('role')
+    states = contract.get('states_include')
+    if not isinstance(role, str) or not role:
+        raise RuntimeError(f'LinkedIn {contract_key} role is invalid')
+    if not isinstance(states, list) or not states or not all(
+        isinstance(state, str) and state for state in states
+    ):
+        raise RuntimeError(f'LinkedIn {contract_key} states are invalid')
+    elements = [
+        *snapshot.unknown,
+        *snapshot.sidebar,
+        *snapshot.menu_items,
+        *[
+            element
+            for mapped in snapshot.mapped.values()
+            for element in mapped
+        ],
+    ]
+    matches: list[ElementRef] = []
+    seen: set[int] = set()
+    for element in elements:
+        identity = id(element.atspi_obj)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if (
+            element.name == exact_name
+            and element.role == role
+            and set(states).issubset(element.states)
+        ):
+            matches.append(element)
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
+def activate_private_job_card(
+    snapshot: Snapshot,
+    target_card_name: str,
+) -> JobSelectionObservation:
+    target, target_count = _exact_private_element(
+        snapshot,
+        target_card_name,
+        'target_card',
+    )
+    if target is None:
+        raise LinkedInJobCardUnavailable(
+            'job selection requires exactly one private exact target card',
+            target_count,
+        )
+    if not atspi_activate({
+        'atspi_obj': target.atspi_obj,
+        'name': target.name,
+        'role': target.role,
+    }):
+        raise LinkedInJobCardActionFailed('LinkedIn exact job-card activation failed')
+    return JobSelectionObservation(
+        target_match_count=target_count,
+        detail_title_match_count=0,
+        detail_company_match_count=0,
+    )
+
+
+def observe_private_selected_job(
+    snapshot: Snapshot,
+    detail_title_name: str,
+    detail_company_name: str,
+) -> JobSelectionObservation:
+    _title, title_count = _exact_private_element(
+        snapshot,
+        detail_title_name,
+        'detail_title',
+    )
+    _company, company_count = _exact_private_element(
+        snapshot,
+        detail_company_name,
+        'detail_company',
+    )
+    if title_count != 1 or company_count != 1:
+        raise LinkedInJobCardUnavailable(
+            'selected-job detail does not match the private exact title and company',
+            0,
+        )
+    return JobSelectionObservation(
+        target_match_count=0,
+        detail_title_match_count=title_count,
+        detail_company_match_count=company_count,
+    )
+
+
+def job_selection_barrier_policy() -> tuple[int, float, float]:
+    barrier = _job_selection_contract().get('observation_barrier')
+    if not isinstance(barrier, dict):
+        raise RuntimeError('LinkedIn job-selection observation barrier is unavailable')
+    stable_cycles = barrier.get('stable_cycles')
+    interval_ms = barrier.get('interval_ms')
+    timeout_ms = barrier.get('timeout_ms')
+    if (
+        isinstance(stable_cycles, bool)
+        or not isinstance(stable_cycles, int)
+        or stable_cycles < 1
+        or isinstance(interval_ms, bool)
+        or not isinstance(interval_ms, int)
+        or interval_ms < 1
+        or isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, int)
+        or timeout_ms < interval_ms
+    ):
+        raise RuntimeError('LinkedIn job-selection observation barrier is invalid')
+    return stable_cycles, interval_ms / 1000.0, timeout_ms / 1000.0
 
 
 def _description_traversal() -> list[dict[str, Any]]:
