@@ -562,6 +562,11 @@ workflow:
   extra_extract:
     strategy: copy_contents_button
     copy_contents_key: copy_contents_button
+    standalone_cleanup:
+      action: close_active_tab
+      key: ctrl+w
+      return_surface: answer_thread
+      stable_observations: 2
 settle:
   default_ms: 8000
   navigate_ms: 10000
@@ -607,7 +612,8 @@ validation:
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
 #  - research_report: open the report card's exact options menu, open the
-#    standalone report tab, then use its exact `copy_contents_button`.
+#    standalone report tab, use its exact `copy_contents_button`, then close the
+#    owned tab and prove return to the answer thread.
 #  - assistant_text: normal answer via the final mapped `copy_button`.
 # ============================================================================
 extraction:

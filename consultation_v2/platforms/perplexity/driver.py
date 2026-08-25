@@ -4457,11 +4457,34 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 strategy=strategy,
             )
             return False
+        standalone_cleanup = (
+            ((self.cfg.get('workflow') or {}).get('extra_extract') or {}).get(
+                'standalone_cleanup'
+            ) or {}
+        )
+        expected_standalone_cleanup = {
+            'action': 'close_active_tab',
+            'key': 'ctrl+w',
+            'return_surface': 'answer_thread',
+            'stable_observations': 2,
+        }
+        if is_deep_research and standalone_cleanup != expected_standalone_cleanup:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity YAML does not declare the exact standalone report cleanup',
+                stop_condition='extraction_failed',
+                expected_cleanup=expected_standalone_cleanup,
+                observed_cleanup=standalone_cleanup,
+            )
+            return False
         if not is_deep_research:
             self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
         snap = self.runtime.snapshot()
         report_surface_evidence: dict[str, object] = {}
+        answer_thread_url = ''
         if is_deep_research:
+            answer_thread_url = (self.runtime.current_url() or snap.url or '').strip()
             report_openers = list(snap.mapped.get('research_report_open') or [])
             options_targets = list(snap.mapped.get('artifact_options') or [])
             if len(report_openers) != 1 or len(options_targets) != 1:
@@ -4575,6 +4598,32 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         content, clipboard_poll = self._read_clipboard_until_nonempty()
 
         if content:
+            if is_deep_research:
+                returned_snapshot, cleanup_evidence = (
+                    self._close_standalone_research_report(
+                        answer_thread_url,
+                        key=str(standalone_cleanup['key']),
+                        stable_observations=int(
+                            standalone_cleanup['stable_observations']
+                        ),
+                    )
+                )
+                if returned_snapshot is None:
+                    result.add_step(
+                        'close_standalone_research_report',
+                        False,
+                        'Perplexity owned standalone report tab did not close back to the answer thread',
+                        stop_condition='extraction_failed',
+                        **cleanup_evidence,
+                    )
+                    return False
+                report_surface_evidence['cleanup_surface'] = cleanup_evidence
+                result.add_step(
+                    'close_standalone_research_report',
+                    True,
+                    'Perplexity owned standalone report tab closed and answer thread restored',
+                    **cleanup_evidence,
+                )
             return self._accept_extracted_content(
                 content,
                 request,
@@ -4601,6 +4650,72 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             snapshot=snap.serializable(),
         )
         return False
+
+    def _close_standalone_research_report(
+        self,
+        answer_thread_url: str,
+        *,
+        key: str,
+        stable_observations: int,
+        timeout: float = 8.0,
+        interval: float = 0.3,
+    ) -> tuple[Snapshot | None, dict[str, object]]:
+        expected_url = answer_thread_url.rstrip('/')
+        key_sent = bool(self.runtime.press(key))
+        if not key_sent:
+            return None, {
+                'key': key,
+                'key_sent': False,
+                'expected_url': expected_url,
+                'samples': 0,
+                'stable_observations': 0,
+            }
+
+        deadline = time.monotonic() + timeout
+        stable_cycles = 0
+        samples = 0
+        last_snapshot: Snapshot | None = None
+        last_url = ''
+        last_copy_contents_count = 0
+        while time.monotonic() < deadline:
+            samples += 1
+            last_snapshot = self.runtime.snapshot()
+            last_url = (
+                self.runtime.current_url() or last_snapshot.url or ''
+            ).strip()
+            last_copy_contents_count = len(
+                last_snapshot.mapped.get('copy_contents_button') or []
+            )
+            returned = bool(
+                self._is_answer_thread_url(last_url)
+                and last_url.rstrip('/') == expected_url
+                and last_copy_contents_count == 0
+            )
+            stable_cycles = stable_cycles + 1 if returned else 0
+            if stable_cycles >= stable_observations:
+                return last_snapshot, {
+                    'key': key,
+                    'key_sent': True,
+                    'expected_url': expected_url,
+                    'returned_url': last_url,
+                    'samples': samples,
+                    'stable_observations': stable_cycles,
+                    'copy_contents_count': last_copy_contents_count,
+                }
+            time.sleep(interval)
+
+        return None, {
+            'key': key,
+            'key_sent': True,
+            'expected_url': expected_url,
+            'returned_url': last_url,
+            'samples': samples,
+            'stable_observations': stable_cycles,
+            'copy_contents_count': last_copy_contents_count,
+            'last_snapshot': (
+                last_snapshot.serializable() if last_snapshot is not None else None
+            ),
+        }
 
     def _wait_for_research_report_menu(
         self,
