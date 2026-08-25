@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
+from consultation_v2.platforms.perplexity.manual import element_operation
 from scripts.run_manual_chat_worker import (
     _completed_before_stop_provenance,
     _completed_before_stop_state,
@@ -32,13 +33,13 @@ def main() -> int:
         'Perplexity monitor must cut to extraction after stable Stop absence on the same thread',
     )
     copy_spec = ((cfg.get('tree') or {}).get('element_map') or {}).get(
-        'copy_button'
+        'copy_contents_button'
     ) or {}
     _require(
-        copy_spec.get('name') == 'Copy'
+        copy_spec.get('name') == 'Copy contents'
         and copy_spec.get('role') == 'push button'
         and set(copy_spec.get('states_include') or ()) == {'showing', 'enabled'},
-        'Perplexity Copy control mapping drifted',
+        'Perplexity standalone report Copy contents mapping drifted',
     )
     element_map = ((cfg.get('tree') or {}).get('element_map') or {})
     _require(
@@ -58,9 +59,26 @@ def main() -> int:
                 'after': 'close_artifact',
                 'ordinal': 'first',
             },
-            'reason': 'The expanded Perplexity report has one nameless focusable scroll pane below the exact Close toolbar control; this is the report-owned surface that must reach bottom before its Copy control is rendered.',
+            'reason': 'The expanded Perplexity report has one nameless focusable scroll pane below the exact Close toolbar control; it is a mapped report surface, but extraction uses the standalone report Copy contents control.',
         },
         'Perplexity report-surface control mapping drifted',
+    )
+    _require(
+        element_map.get('artifact_open_new_tab') == {
+            'name': 'Open in new tab',
+            'role': 'menu item',
+            'states_include': ['showing', 'enabled'],
+        },
+        'Perplexity standalone report opener mapping drifted',
+    )
+    artifact_options_operation = element_operation(
+        'artifact_options', ['showing', 'focusable', 'enabled'], {}
+    )
+    _require(
+        artifact_options_operation is not None
+        and artifact_options_operation.get('method') == 'mapped_pointer_activate'
+        and artifact_options_operation.get('allowed_now') == ['mapped_pointer_activate'],
+        'Perplexity Artifact options must use mapped pointer activation',
     )
 
     workflow = get_extraction('perplexity', 'assistant_text')
@@ -85,10 +103,9 @@ def main() -> int:
     )
     _require(
         report_steps == (
-            ('open_panel', 'research_report_open', 'last', None),
-            ('open_panel', 'expand_artifact', 'last', None),
-            ('scroll_to_bottom', 'report_scroll_pane', 'last', None),
-            ('copy_element', 'copy_button', 'last', None),
+            ('open_panel', 'artifact_options', 'last', None),
+            ('open_panel', 'artifact_open_new_tab', 'last', None),
+            ('copy_element', 'copy_contents_button', 'last', None),
             ('read_clipboard', None, 'last', 'response_complete'),
         ),
         'Perplexity research report extraction sequence drifted',
@@ -101,21 +118,21 @@ def main() -> int:
         Path('/frozen/response.txt'),
     )
     _require(
-        card.count('selected by the YAML last_by_y rule')
-        == 1,
-        'Perplexity extraction card must select the final Copy only after scroll',
+        card.count('performed_primitive=mapped_pointer_activate') == 1,
+        'Perplexity extraction card must require mapped pointer activation for Artifact options',
     )
     _require(
-        card.index('click element=research_report_open exactly once')
-        < card.index('click element=expand_artifact exactly once')
-        < card.index('scroll_to_bottom element=report_scroll_pane exactly once')
-        < card.index('exactly one mapped copy_button'),
-        'Perplexity extraction card must open, expand, and scroll the report before requiring Copy',
+        card.index('operate element=artifact_options exactly once')
+        < card.index('click element=artifact_open_new_tab exactly once')
+        < card.index('exactly one mapped copy_contents_button')
+        < card.index('click element=copy_contents_button exactly once'),
+        'Perplexity extraction card must open the standalone report before Copy contents',
     )
     _require(
-        'mapped copy_button absent' in card
-        and card.count('scroll_to_bottom element=report_scroll_pane exactly once') == 1,
-        'Perplexity extraction card lost its pre-scroll Copy absence or exact report scroll',
+        card.count('observe scope=base') == 4
+        and 'https://www.perplexity.ai/computer/a/<non-empty-id>' in card
+        and 'scroll_to_bottom' not in card,
+        'Perplexity extraction card lost its exact report-tab transition or retained scrolling',
     )
     _require(
         'without any success cardinality field' in card,
@@ -128,14 +145,13 @@ def main() -> int:
         'Perplexity extraction card still exposes the optional native download path',
     )
     _require(
-        'report_open_count=1' in card
-        and 'report_expand_count=1' in card
-        and 'report_scroll_count=1' in card
+        'report_options_open_count=1' in card
+        and 'standalone_report_open_count=1' in card
         and 'report_copy_count=1' in card
-        and card.count('click element=research_report_open exactly once') == 1
-        and card.count('click element=expand_artifact exactly once') == 1
-        and card.count('click element=copy_button exactly once') == 1,
-        'Perplexity extraction card lost exact open, expand, scroll, or Copy cardinality',
+        and card.count('operate element=artifact_options exactly once') == 1
+        and card.count('click element=artifact_open_new_tab exactly once') == 1
+        and card.count('click element=copy_contents_button exactly once') == 1,
+        'Perplexity extraction card lost exact options, standalone, or Copy cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(
