@@ -1015,9 +1015,10 @@ def _extract_content(
             )
         _require_extraction_steps(
             "perplexity",
-            "assistant_text",
+            "research_report",
             (
                 ("scroll_to_bottom", "input", "last", None),
+                ("open_panel", "research_report_open", "last", None),
                 ("copy_element", "copy_button", "last", None),
                 ("read_clipboard", None, "last", "response_complete"),
             ),
@@ -1034,19 +1035,25 @@ def _extract_content(
             "https://www.perplexity.ai/search/, require stop_button absent, and require exactly one "
             "mapped input editable entry. Do not require final-response actions before scrolling.\n"
             "2. scroll_to_bottom element=input exactly once; observe scope=base; require the same URL "
-            "condition, stop_button absent, and exactly one mapped copy_button named Copy with role "
-            "push button and states showing and enabled, selected by the YAML last_by_y rule.\n"
-            "3. click element=copy_button exactly once; observe scope=base; require the same URL condition and "
+            "condition, stop_button absent, exactly one mapped artifact_options named Artifact options, "
+            "and exactly one mapped research_report_open with a nonempty dynamic name.\n"
+            "3. click element=research_report_open exactly once; observe scope=base; require current_url "
+            "to equal the same answer-thread URL with query preview=1, stop_button absent, and exactly one "
+            "mapped copy_button named Copy with role push button and states showing and enabled, selected "
+            "by the YAML last_by_y rule. Without mutation, observe scope=base exactly once more and require "
+            "the same preview=1 URL and the same exact singleton Copy postcondition.\n"
+            "4. click element=copy_button exactly once; observe scope=base; require the preview=1 URL and "
             "stop_button absent.\n"
-            f"4. read_clipboard with output_file={response_file}. Require that drive_chat created a "
-            "new non-empty assistant response file and return its byte count and SHA-256. Then stop "
-            "all UI calls. Only after all four steps pass, return the exact line "
-            "inline_copy_count=1."
+            f"5. read_clipboard with output_file={response_file}. Require that drive_chat created a "
+            "new non-empty research report file and return its byte count and SHA-256. Then stop "
+            "all UI calls. Only after all five steps pass, return the exact lines "
+            "report_open_count=1 and report_copy_count=1."
             f"{receipt_requirements}\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return the first-mismatch stop report without any success cardinality field and "
             "stop. Do not navigate, attach, paste, "
-            "send, retry, recover, poll, open More actions, use Download or Markdown, or make a second "
+            "send, retry, recover, poll, open More actions, use Download or Markdown, reopen the report, "
+            "or make a second "
             "Copy attempt."
         )
     if platform != "chatgpt":
