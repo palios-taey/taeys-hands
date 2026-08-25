@@ -593,20 +593,15 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-#  - research_report: open the completed report artifact, then use its mapped `copy_button`.
+#  - research_report: full report via the mapped `copy_contents_button` before
+#    bottom scrolling virtualizes that control away.
 #  - assistant_text: normal answer via the final mapped `copy_button`.
 # ============================================================================
 extraction:
   research_report:
     steps:
-      - action: scroll_to_bottom
-        element: input
-      - action: open_panel
-        element: research_report_open
-        select: last
       - action: copy_element
-        element: copy_button
-        select: last
+        element: copy_contents_button
       - action: read_clipboard
         validation: response_complete
   assistant_text:

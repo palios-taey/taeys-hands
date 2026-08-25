@@ -42,6 +42,14 @@ def main() -> int:
     )
     element_map = ((cfg.get('tree') or {}).get('element_map') or {})
     _require(
+        element_map.get('copy_contents_button') == {
+            'name': 'Copy contents',
+            'role': 'push button',
+            'states_include': ['showing', 'enabled'],
+        },
+        'Perplexity full-report Copy contents mapping drifted',
+    )
+    _require(
         element_map.get('expand_artifact') == {
             'name': 'Expand artifact',
             'role': 'push button',
@@ -75,9 +83,7 @@ def main() -> int:
     )
     _require(
         report_steps == (
-            ('scroll_to_bottom', 'input', 'last', None),
-            ('open_panel', 'research_report_open', 'last', None),
-            ('copy_element', 'copy_button', 'last', None),
+            ('copy_element', 'copy_contents_button', 'last', None),
             ('read_clipboard', None, 'last', 'response_complete'),
         ),
         'Perplexity research report extraction sequence drifted',
@@ -90,20 +96,10 @@ def main() -> int:
         Path('/frozen/response.txt'),
     )
     _require(
-        card.count('selected by the YAML last_by_y rule')
-        == 1,
-        'Perplexity extraction card must select the final Copy only after scroll',
-    )
-    _require(
-        card.index('scroll_to_bottom element=input exactly once')
-        < card.index('click element=research_report_open exactly once')
-        < card.index('exactly one mapped copy_button'),
-        'Perplexity extraction card must open the report before requiring its Copy',
-    )
-    _require(
-        'Without mutation, observe scope=base exactly once more' in card
-        and 'same exact singleton Copy postcondition' in card,
-        'Perplexity extraction card lost the two-observation report barrier',
+        'exactly one mapped copy_contents_button' in card
+        and 'scroll_to_bottom element=input' not in card
+        and 'click element=research_report_open' not in card,
+        'Perplexity report extraction must use Copy contents before bottom scrolling',
     )
     _require(
         'without any success cardinality field' in card,
@@ -116,11 +112,10 @@ def main() -> int:
         'Perplexity extraction card still exposes the optional native download path',
     )
     _require(
-        'report_open_count=1' in card
-        and 'report_copy_count=1' in card
-        and card.count('click element=research_report_open exactly once') == 1
-        and card.count('click element=copy_button exactly once') == 1,
-        'Perplexity extraction card lost exact report-open or Copy cardinality',
+        'copy_contents_count=1' in card
+        and card.count('click element=copy_contents_button exactly once') == 1
+        and 'click element=copy_button' not in card,
+        'Perplexity extraction card lost exact Copy contents cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(

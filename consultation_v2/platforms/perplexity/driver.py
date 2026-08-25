@@ -14,7 +14,6 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
-from urllib.parse import parse_qs, urlsplit
 
 from consultation_v2.platforms.perplexity.monitor import COMPLETE, DEEP_MODES, PerplexityCompletionDetector
 from consultation_v2.stop_conditions import is_stop_condition
@@ -4410,9 +4409,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         extraction = get_extraction('perplexity', output_type)
         expected_steps = (
             (
-                ('scroll_to_bottom', 'input', 'last', None),
-                ('open_panel', 'research_report_open', 'last', None),
-                ('copy_element', 'copy_button', 'last', None),
+                ('copy_element', 'copy_contents_button', 'last', None),
                 ('read_clipboard', None, 'last', 'response_complete'),
             )
             if is_deep_research
@@ -4437,69 +4434,25 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             )
             return False
 
-        extract_cfg = self.cfg['workflow']['extract']
-        target_key = str(extract_cfg.get('primary_key') or '').strip()
-        strategy = str(extract_cfg.get('strategy') or '').strip().lower()
-        if target_key != 'copy_button' or strategy != 'last_by_y':
-            result.add_step(
-                'extract_primary',
-                False,
-                'Perplexity YAML does not declare last exact Copy extraction',
-                stop_condition='extraction_failed',
-                target_key=target_key,
-                strategy=strategy,
-            )
-            return False
-        self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
-        snap = self.runtime.snapshot()
-        report_surface_evidence: dict[str, object] = {}
         if is_deep_research:
-            report_openers = list(snap.mapped.get('research_report_open') or [])
-            if len(report_openers) != 1:
+            target_key = 'copy_contents_button'
+        else:
+            extract_cfg = self.cfg['workflow']['extract']
+            target_key = str(extract_cfg.get('primary_key') or '').strip()
+            strategy = str(extract_cfg.get('strategy') or '').strip().lower()
+            if target_key != 'copy_button' or strategy != 'last_by_y':
                 result.add_step(
-                    'open_research_report',
+                    'extract_primary',
                     False,
-                    'Perplexity completed report card did not expose exactly one opener',
+                    'Perplexity YAML does not declare last exact Copy extraction',
                     stop_condition='extraction_failed',
-                    observed_count=len(report_openers),
-                    snapshot=snap.serializable(),
+                    target_key=target_key,
+                    strategy=strategy,
                 )
                 return False
-            report_opener = report_openers[0]
-            opener_scrolled_into_view = bool(
-                self.runtime.scroll_element_into_view(report_opener)
-            )
-            if not self.runtime.click(report_opener, strategy='atspi_only'):
-                result.add_step(
-                    'open_research_report',
-                    False,
-                    'Perplexity completed report opener click failed',
-                    stop_condition='extraction_failed',
-                    opener_name=report_opener.name,
-                    scrolled_into_view=opener_scrolled_into_view,
-                    snapshot=snap.serializable(),
-                )
-                return False
-            snap, report_surface_evidence = self._wait_for_research_report_surface()
-            if snap is None:
-                result.add_step(
-                    'open_research_report',
-                    False,
-                    'Perplexity report surface postcondition did not stabilize',
-                    stop_condition='extraction_failed',
-                    opener_name=report_opener.name,
-                    scrolled_into_view=opener_scrolled_into_view,
-                    **report_surface_evidence,
-                )
-                return False
-            result.add_step(
-                'open_research_report',
-                True,
-                'Perplexity full research report opened with one exact Copy control',
-                opener_name=report_opener.name,
-                scrolled_into_view=opener_scrolled_into_view,
-                **report_surface_evidence,
-            )
+            self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+
+        snap = self.runtime.snapshot()
 
         targets = list(snap.mapped.get(target_key) or [])
         if is_deep_research:
@@ -4516,7 +4469,9 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             )
             return False
 
-        scrolled_into_view = bool(self.runtime.scroll_element_into_view(target))
+        scrolled_into_view = bool(
+            not is_deep_research and self.runtime.scroll_element_into_view(target)
+        )
         time.sleep(0.5)
         self.runtime.write_clipboard('')
         time.sleep(0.3)
@@ -4542,7 +4497,6 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 target_key=target_key,
                 output_type=output_type,
                 scrolled_into_view=scrolled_into_view,
-                report_surface=report_surface_evidence,
                 **clipboard_poll,
             )
 
@@ -4555,63 +4509,10 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             output_type=output_type,
             scrolled_into_view=scrolled_into_view,
             clicked=bool(clicked),
-            report_surface=report_surface_evidence,
             **clipboard_poll,
             snapshot=snap.serializable(),
         )
         return False
-
-    def _wait_for_research_report_surface(
-        self,
-        *,
-        timeout: float = 8.0,
-        interval: float = 0.3,
-    ) -> tuple[Snapshot | None, dict[str, object]]:
-        deadline = time.monotonic() + timeout
-        stable_cycles = 0
-        samples = 0
-        last_snapshot: Snapshot | None = None
-        last_url = ''
-        last_copy_count = 0
-        last_copy_states: list[str] = []
-        while time.monotonic() < deadline:
-            samples += 1
-            last_url = (self.runtime.current_url() or '').strip()
-            last_snapshot = self.runtime.snapshot()
-            copy_targets = list(last_snapshot.mapped.get('copy_button') or [])
-            last_copy_count = len(copy_targets)
-            last_copy_states = (
-                sorted(str(state) for state in (copy_targets[0].states or []))
-                if last_copy_count == 1
-                else []
-            )
-            query = parse_qs(urlsplit(last_url).query, keep_blank_values=True)
-            ready = bool(
-                self._is_answer_thread_url(last_url)
-                and query.get('preview') == ['1']
-                and last_copy_count == 1
-                and {'showing', 'enabled'}.issubset(set(last_copy_states))
-            )
-            stable_cycles = stable_cycles + 1 if ready else 0
-            if stable_cycles >= 2:
-                return last_snapshot, {
-                    'url': last_url,
-                    'samples': samples,
-                    'stable_cycles': stable_cycles,
-                    'copy_count': last_copy_count,
-                    'copy_states': last_copy_states,
-                }
-            time.sleep(interval)
-        return None, {
-            'url': last_url,
-            'samples': samples,
-            'stable_cycles': stable_cycles,
-            'copy_count': last_copy_count,
-            'copy_states': last_copy_states,
-            'last_snapshot': (
-                last_snapshot.serializable() if last_snapshot is not None else None
-            ),
-        }
 
     def extract_additional(
         self,
