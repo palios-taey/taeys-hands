@@ -23,23 +23,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "active_job_details_jump": {
-          "type": "integer",
-          "minimum": 0
-        },
         "about_job_heading": {
           "type": "integer",
           "minimum": 0
         },
-        "selected_job_article": {
+        "selected_job_description_path": {
           "type": "integer",
           "minimum": 0
         }
       },
       "required": [
-        "active_job_details_jump",
         "about_job_heading",
-        "selected_job_article"
+        "selected_job_description_path"
       ]
     },
     "failure_code": {

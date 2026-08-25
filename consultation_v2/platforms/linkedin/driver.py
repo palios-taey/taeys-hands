@@ -12,6 +12,7 @@ from consultation_v2.linkedin_jobs_contract import (
     write_new_private_json,
 )
 from consultation_v2.types import ElementRef, Snapshot
+from consultation_v2.yaml_contract import load_platform_yaml
 
 
 class LinkedInSelectedJobUnavailable(RuntimeError):
@@ -34,26 +35,99 @@ class SinkWriteResult:
 
 
 _REQUIRED_KEYS = (
-    'active_job_details_jump',
     'about_job_heading',
-    'selected_job_article',
+    'selected_job_description_path',
 )
 
 
-def _exact_elements(snapshot: Snapshot) -> tuple[dict[str, ElementRef], dict[str, int]]:
+class _DescriptionPathMismatch(RuntimeError):
+    pass
+
+
+def _description_traversal() -> list[dict[str, Any]]:
+    workflow = load_platform_yaml('linkedin').get('workflow') or {}
+    selected_job_read = workflow.get('selected_job_read') or {}
+    traversal = selected_job_read.get('description_traversal')
+    if not isinstance(traversal, list) or not traversal:
+        raise RuntimeError('LinkedIn description traversal is not configured')
+    if not all(isinstance(step, dict) for step in traversal):
+        raise RuntimeError('LinkedIn description traversal steps must be mappings')
+    return [dict(step) for step in traversal]
+
+
+def _relative_node(anchor: ElementRef) -> Any:
+    node = anchor.atspi_obj
+    if node is None:
+        raise RuntimeError('About heading has no AT-SPI object')
+    for step in _description_traversal():
+        relation = step.get('relation')
+        if relation == 'parent' and set(step) == {'relation', 'role'}:
+            try:
+                node = node.get_parent()
+            except Exception as exc:
+                raise RuntimeError('cannot read LinkedIn description parent') from exc
+        elif relation == 'child' and set(step) == {'relation', 'index', 'role'}:
+            index = step.get('index')
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                raise RuntimeError('LinkedIn description child index is invalid')
+            try:
+                child_count = int(node.get_child_count())
+                node = node.get_child_at_index(index) if index < child_count else None
+            except Exception as exc:
+                raise RuntimeError('cannot read LinkedIn description child') from exc
+        else:
+            raise RuntimeError('LinkedIn description traversal step is invalid')
+        if node is None:
+            raise _DescriptionPathMismatch('LinkedIn description path is absent')
+        try:
+            role = str(node.get_role_name() or '')
+        except Exception as exc:
+            raise RuntimeError('cannot read LinkedIn description role') from exc
+        if role != step['role']:
+            raise _DescriptionPathMismatch('LinkedIn description role differs from YAML')
+    return node
+
+
+def _description_text(node: Any) -> str:
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        text_iface = node.get_text_iface()
+        if text_iface is None:
+            raise _DescriptionPathMismatch('LinkedIn description has no Text interface')
+        character_count = int(Atspi.Text.get_character_count(text_iface))
+        if character_count < 1:
+            raise _DescriptionPathMismatch('LinkedIn description Text interface is empty')
+        text = str(Atspi.Text.get_text(text_iface, 0, character_count) or '').strip()
+    except _DescriptionPathMismatch:
+        raise
+    except Exception as exc:
+        raise RuntimeError('cannot read LinkedIn description Text interface') from exc
+    if not text:
+        raise _DescriptionPathMismatch('LinkedIn description text is empty')
+    return text
+
+
+def _exact_elements(snapshot: Snapshot) -> tuple[ElementRef, Any, dict[str, int]]:
+    heading_matches = snapshot.mapped.get('about_job_heading') or []
     match_counts = {
-        key: len(snapshot.mapped.get(key) or [])
-        for key in _REQUIRED_KEYS
+        'about_job_heading': len(heading_matches),
+        'selected_job_description_path': 0,
     }
-    if any(count != 1 for count in match_counts.values()):
+    if len(heading_matches) != 1:
         raise LinkedInSelectedJobUnavailable(
-            'selected-job mapping requires exactly one match per key',
+            'selected-job mapping requires exactly one About heading',
             match_counts,
         )
-    return {
-        key: snapshot.mapped[key][0]
-        for key in _REQUIRED_KEYS
-    }, match_counts
+    heading = heading_matches[0]
+    try:
+        description_node = _relative_node(heading)
+    except _DescriptionPathMismatch as exc:
+        raise LinkedInSelectedJobUnavailable(str(exc), match_counts) from exc
+    match_counts['selected_job_description_path'] = 1
+    return heading, description_node, match_counts
 
 
 def observe_selected_job(snapshot: Snapshot, search_ref: str) -> SelectedJobObservation:
@@ -62,12 +136,13 @@ def observe_selected_job(snapshot: Snapshot, search_ref: str) -> SelectedJobObse
             'snapshot platform is not linkedin',
             {key: 0 for key in _REQUIRED_KEYS},
         )
-    elements, match_counts = _exact_elements(snapshot)
-    heading = elements['about_job_heading']
-    article = elements['selected_job_article']
+    heading, description_node, match_counts = _exact_elements(snapshot)
     source_url = str(snapshot.url or '').strip()
-    detail_text = str(article.text or article.name or '').strip()
-    if not source_url or not detail_text or heading.name != 'About the job':
+    try:
+        detail_text = _description_text(description_node)
+    except _DescriptionPathMismatch as exc:
+        raise LinkedInSelectedJobUnavailable(str(exc), match_counts) from exc
+    if not source_url or heading.name != 'About the job' or heading.role != 'heading':
         raise LinkedInSelectedJobUnavailable(
             'selected job detail is not fully observable',
             match_counts,
