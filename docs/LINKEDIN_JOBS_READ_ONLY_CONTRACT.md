@@ -11,13 +11,13 @@ The transaction is:
 1. Validate a Presence-injected owner-controlled private root and the transaction, receipt, and sink placement beneath it.
 2. Acquire the canonical CAREERS display lock and refuse its fail-open path.
 3. Bind the display and build one fresh canonical LinkedIn snapshot under a bounded internal deadline.
-4. Require the exact `Jump to active job details` control, the unique visible `article`, and its structurally owned exact `About the job` heading.
+4. Require exactly one `About the job` heading, then resolve the YAML-owned relative path `parent(section) -> child[1](paragraph) -> child[0](section)` and read only that node's AT-SPI Text interface.
 5. Compile `capture_selected_job` to one write-once private-sink action.
 6. Build one fresh canonical LinkedIn snapshot while holding the same lock.
-7. Require the selected-job content digest and all three exact match counts to be unchanged.
+7. Require the selected-job content digest, exact heading count, and exact description-path count to be unchanged.
 8. Release the lock, require the positive release verdict for success, then write the immutable terminal receipt and return counts, state, and digests only.
 
-The raw record contains the private search reference, selected source URL, exact detail heading, and canonical article text available in the AT-SPI snapshot. This is deliberately narrower than navigation or application. Later units require their own exact maps and production qualification.
+The raw record contains the private search reference, selected source URL, exact detail heading, and text from the one YAML-declared description node reached from the canonical snapshot anchor. This is deliberately narrower than navigation or application. Later units require their own exact maps and production qualification.
 
 ## Public request and result
 
@@ -45,7 +45,7 @@ The required private root is an owner-controlled, nonsymlink, exact-mode `0700` 
 
 Raw records and receipts are created once with exclusive creation, synced, changed to exact mode `0400`, and read back by digest. An existing record is an `already_captured` terminal state only when its bytes match the selected-job digest. Every normal terminal outcome, including no exact selected job, lock collision, pre-observation failure, sink indeterminacy, and postcondition failure, writes the requested compact receipt. If the receipt itself cannot be created, the runner emits no model-facing result.
 
-Receipts bind both claimed and actual transaction digests, requester, combined turn-lineage digest, correlation-ID digest, internal deadline, exact clean Hands commit, CAREERS request ID, lock acquisition and release verdicts, hashed lock-owner token, wait time, exact pre/post match counts, action verdict, fixed failure code, and postcondition verdict. The combined lineage digest is canonical JSON over requester, turn ID, correlation ID, and process generation. The CAREERS request ID is canonical JSON over the verified transaction and lineage digests. Before any display binding or sink action, the runner rejects a checkout with either tracked or untracked changes, so the receipt commit identifies the bytes that executed. `no_selected_job` is a non-success terminal with a null content digest and a non-null receipt digest.
+Receipts bind both claimed and actual transaction digests, requester, combined turn-lineage digest, correlation-ID digest, internal deadline, exact clean Hands commit, CAREERS request ID, lock acquisition and release verdicts, hashed lock-owner token, wait time, exact pre/post heading and description-path counts, action verdict, fixed failure code, and postcondition verdict. The combined lineage digest is canonical JSON over requester, turn ID, correlation ID, and process generation. The CAREERS request ID is canonical JSON over the verified transaction and lineage digests. Before any display binding or sink action, the runner rejects a checkout with either tracked or untracked changes, so the receipt commit identifies the bytes that executed. `no_selected_job` is a non-success terminal with a null content digest and a non-null receipt digest.
 
 The internal deadline is shorter than Presence's outer subprocess timeout. Its alarm is canceled before receipt finalization, allowing a deadline terminal to release the lock and persist a receipt. A missing positive release verdict demotes any otherwise-successful outcome to `technical_failure` with `lock_release_indeterminate`, while retaining the action and observation facts.
 

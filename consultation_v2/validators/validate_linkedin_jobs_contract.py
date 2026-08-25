@@ -33,15 +33,11 @@ SCHEMAS = {
 }
 FORBIDDEN_RUNTIME_TOKENS = (
     'find_elements',
-    'get_child_at_index',
     'get_extents',
-    'Atspi',
     'xdotool',
     'pyautogui',
     'clipboard',
     'click(',
-    '.x',
-    '.y',
 )
 
 
@@ -75,43 +71,37 @@ def _validate_yaml() -> list[str]:
     if document.get('platform') != 'linkedin' or document.get('click_strategy') != 'atspi_only':
         errors.append(f'{YAML_PATH}: platform or click strategy drifted')
     element_map = ((document.get('tree') or {}).get('element_map') or {})
-    if set(element_map) != {
-        'active_job_details_jump',
-        'about_job_heading',
-        'selected_job_article',
-    }:
+    if set(element_map) != {'about_job_heading'}:
         errors.append(f'{YAML_PATH}: selected-job map keys drifted')
-    exact_expected = {
-        'active_job_details_jump': ('Jump to active job details', 'push button'),
-        'about_job_heading': ('About the job', 'heading'),
-    }
-    for key, (name, role) in exact_expected.items():
-        spec = element_map.get(key) or {}
-        if spec.get('name') != name or spec.get('role') != role:
-            errors.append(f'{YAML_PATH}: {key} is not exact name+role')
-    article = element_map.get('selected_job_article') or {}
-    if article.get('role') != 'article' or article.get('states_include') != ['showing']:
-        errors.append(f'{YAML_PATH}: selected article is not exact role+state')
     about = element_map.get('about_job_heading') or {}
-    if about.get('structural') != {'parent': 'selected_job_article', 'ordinal': 'first'}:
-        errors.append(f'{YAML_PATH}: About heading lost its direct-parent structural anchor')
+    if about != {
+        'name': 'About the job',
+        'role': 'heading',
+        'scope': 'jobs.selected_detail',
+    }:
+        errors.append(f'{YAML_PATH}: About heading is not exact name+role')
     forbidden = {'contains', 'regex', 'fuzzy', 'name_contains', 'name_pattern'}
     if any(key in forbidden for spec in element_map.values() for key in spec):
         errors.append(f'{YAML_PATH}: fuzzy matcher grammar is forbidden')
     workflow = document.get('workflow') or {}
     expected_workflow = {
         'operation': 'capture_selected_job',
-        'observation': 'canonical_snapshot',
-        'required_elements': [
-            'active_job_details_jump',
-            'about_job_heading',
-            'selected_job_article',
+        'observation': 'canonical_snapshot_anchor',
+        'required_elements': ['about_job_heading'],
+        'description_traversal': [
+            {'relation': 'parent', 'role': 'section'},
+            {'relation': 'child', 'index': 1, 'role': 'paragraph'},
+            {'relation': 'child', 'index': 0, 'role': 'section'},
         ],
+        'description_interface': 'atspi_text',
         'action': 'private_sink_write_once',
         'postcondition': 'selected_job_content_digest_unchanged',
     }
     if workflow.get('selected_job_read') != expected_workflow:
         errors.append(f'{YAML_PATH}: frozen transaction workflow drifted')
+    indicators = ((document.get('validation') or {}).get('selected_job_ready') or {}).get('indicators')
+    if indicators != ['about_job_heading']:
+        errors.append(f'{YAML_PATH}: selected-job readiness must use the exact heading')
     return errors
 
 
@@ -249,6 +239,15 @@ def _validate_interface_patterns() -> list[str]:
         errors.append(f'{CONTRACT}: requester grammar differs from Presence')
     result_schema = _load_json(SCHEMAS['result'])
     receipt_schema = _load_json(SCHEMAS['receipt'])
+    match_counts = ((receipt_schema.get('$defs') or {}).get('match_counts') or {})
+    expected_match_keys = {'about_job_heading', 'selected_job_description_path'}
+    if (
+        match_counts.get('type') != 'object'
+        or match_counts.get('additionalProperties') is not False
+        or set(match_counts.get('properties') or {}) != expected_match_keys
+        or set(match_counts.get('required') or []) != expected_match_keys
+    ):
+        errors.append(f"{SCHEMAS['receipt']}: exact match-count schema drifted")
     if result_schema.get('allOf') != _state_conditionals('state'):
         errors.append(f"{SCHEMAS['result']}: state/ok/failure_code conditionals drifted")
     if receipt_schema.get('allOf') != _state_conditionals('terminal_state'):
@@ -375,10 +374,15 @@ def _validate_runtime_source() -> list[str]:
     errors: list[str] = []
     for path in (DRIVER, RUNNER):
         source = path.read_text(encoding='utf-8')
-        ast.parse(source, filename=str(path))
+        tree = ast.parse(source, filename=str(path))
         for token in FORBIDDEN_RUNTIME_TOKENS:
             if token in source:
                 errors.append(f'{path}: forbidden runtime token {token!r}')
+        if any(
+            isinstance(node, ast.Attribute) and node.attr in {'x', 'y'}
+            for node in ast.walk(tree)
+        ):
+            errors.append(f'{path}: coordinate attribute access is forbidden')
     driver_source = DRIVER.read_text(encoding='utf-8')
     runner_source = RUNNER.read_text(encoding='utf-8')
     display_lock_source = DISPLAY_LOCK.read_text(encoding='utf-8')
@@ -439,8 +443,23 @@ def _validate_runtime_source() -> list[str]:
         errors.append(f'{RUNNER}: permanent transaction claim is not compared')
     elif runner_source.index(claim_compare) > runner_source.rindex('with entrypoint_display_lock('):
         errors.append(f'{RUNNER}: permanent transaction claim must be checked before the lock')
-    if 'Snapshot' not in driver_source or "count != 1" not in driver_source:
-        errors.append(f'{DRIVER}: driver must consume mapped canonical Snapshot refs')
+    required_description_read = {
+        "snapshot.mapped.get('about_job_heading')",
+        "load_platform_yaml('linkedin')",
+        'node.get_parent()',
+        'node.get_child_at_index(index)',
+        'node.get_text_iface()',
+        "gi.require_version('Atspi', '2.0')",
+        'Atspi.Text.get_character_count(text_iface)',
+        'Atspi.Text.get_text(text_iface, 0, character_count)',
+    }
+    if any(token not in driver_source for token in required_description_read):
+        errors.append(f'{DRIVER}: exact YAML-owned AT-SPI description read is incomplete')
+    if (
+        driver_source.count('node.get_parent()') != 1
+        or driver_source.count('node.get_child_at_index(index)') != 1
+    ):
+        errors.append(f'{DRIVER}: description resolver must not become a tree walker')
     if 'match_counts' not in driver_source:
         errors.append(f'{DRIVER}: exact selector counts are not bound to observations')
 

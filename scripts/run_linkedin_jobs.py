@@ -25,9 +25,8 @@ _PROCESS_GENERATION_RE = re.compile(r'^[0-9a-f]{32}$')
 _MINIMUM_DEADLINE_SECONDS = 30
 _MAXIMUM_DEADLINE_SECONDS = 1700
 _EMPTY_MATCH_COUNTS = {
-    'active_job_details_jump': 0,
     'about_job_heading': 0,
-    'selected_job_article': 0,
+    'selected_job_description_path': 0,
 }
 
 
