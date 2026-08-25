@@ -34,7 +34,7 @@ def element_operation(
         str(state).strip().lower().replace('_', ' ') for state in states
     }
     attachment_trigger = _attachment_trigger()
-    if element_key == attachment_trigger:
+    if element_key in {attachment_trigger, 'artifact_options'}:
         allowed_now = (
             []
             if 'expanded' in normalized_states
