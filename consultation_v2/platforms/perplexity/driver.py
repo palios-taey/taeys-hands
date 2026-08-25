@@ -4468,6 +4468,21 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             'return_surface': 'answer_thread',
             'stable_observations': 2,
         }
+        direct_answer = (
+            ((self.cfg.get('workflow') or {}).get('extra_extract') or {}).get(
+                'direct_answer'
+            ) or {}
+        )
+        expected_direct_answer = {
+            'when_report_card_counts': {
+                'research_report_open': 0,
+                'artifact_options': 0,
+            },
+            'scroll_to_bottom': True,
+            'copy_key': 'copy_button',
+            'copy_count': 1,
+            'completion_keys': ['helpful', 'not_helpful'],
+        }
         if is_deep_research and standalone_cleanup != expected_standalone_cleanup:
             result.add_step(
                 'extract_primary',
@@ -4476,6 +4491,16 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 stop_condition='extraction_failed',
                 expected_cleanup=expected_standalone_cleanup,
                 observed_cleanup=standalone_cleanup,
+            )
+            return False
+        if is_deep_research and direct_answer != expected_direct_answer:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity YAML does not declare the exact direct-answer research extraction',
+                stop_condition='extraction_failed',
+                expected_direct_answer=expected_direct_answer,
+                observed_direct_answer=direct_answer,
             )
             return False
         if not is_deep_research:
@@ -4487,6 +4512,19 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             answer_thread_url = (self.runtime.current_url() or snap.url or '').strip()
             report_openers = list(snap.mapped.get('research_report_open') or [])
             options_targets = list(snap.mapped.get('artifact_options') or [])
+            direct_counts = dict(direct_answer['when_report_card_counts'])
+            direct_surface = bool(
+                len(report_openers) == int(direct_counts['research_report_open'])
+                and len(options_targets) == int(direct_counts['artifact_options'])
+            )
+            if direct_surface:
+                return self._extract_direct_research_answer(
+                    request,
+                    result,
+                    direct_answer,
+                    output_type=output_type,
+                    initial_snapshot=snap,
+                )
             if len(report_openers) != 1 or len(options_targets) != 1:
                 result.add_step(
                     'open_research_report_options',
@@ -4650,6 +4688,103 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             snapshot=snap.serializable(),
         )
         return False
+
+    def _extract_direct_research_answer(
+        self,
+        request: ConsultationRequest,
+        result: ConsultationResult,
+        direct_answer: dict[str, object],
+        *,
+        output_type: str,
+        initial_snapshot: Snapshot,
+    ) -> bool:
+        self.runtime.scroll_document_to_bottom(clicks=12, rounds=3, settle=0.5)
+        snapshot = self.runtime.snapshot()
+        copy_key = str(direct_answer['copy_key'])
+        copy_targets = list(snapshot.mapped.get(copy_key) or [])
+        completion_keys = [
+            str(key) for key in (direct_answer.get('completion_keys') or [])
+        ]
+        completion_counts = {
+            key: len(snapshot.mapped.get(key) or []) for key in completion_keys
+        }
+        current_url = (self.runtime.current_url() or snapshot.url or '').strip()
+        expected_copy_count = int(direct_answer['copy_count'])
+        ready = bool(
+            self._is_answer_thread_url(current_url)
+            and len(copy_targets) == expected_copy_count
+            and all(count == 1 for count in completion_counts.values())
+        )
+        if not ready:
+            result.add_step(
+                'select_research_report_surface',
+                False,
+                'Perplexity direct-answer research surface did not expose one terminal response Copy',
+                stop_condition='extraction_failed',
+                current_url=current_url,
+                expected_copy_count=expected_copy_count,
+                copy_count=len(copy_targets),
+                completion_counts=completion_counts,
+                initial_snapshot=initial_snapshot.serializable(),
+                snapshot=snapshot.serializable(),
+            )
+            return False
+
+        target = copy_targets[0]
+        scrolled_into_view = bool(self.runtime.scroll_element_into_view(target))
+        time.sleep(0.5)
+        self.runtime.write_clipboard('')
+        time.sleep(0.3)
+        clicked = self.runtime.click(target, strategy='atspi_only')
+        if not clicked:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity direct-answer research Copy activation failed',
+                stop_condition='extraction_failed',
+                target_key=copy_key,
+                scrolled_into_view=scrolled_into_view,
+                snapshot=snapshot.serializable(),
+            )
+            return False
+        content, clipboard_poll = self._read_clipboard_until_nonempty()
+        if not content:
+            result.add_step(
+                'extract_primary',
+                False,
+                'Perplexity direct-answer research Copy produced an empty clipboard',
+                stop_condition='extraction_failed',
+                target_key=copy_key,
+                scrolled_into_view=scrolled_into_view,
+                clicked=True,
+                **clipboard_poll,
+                snapshot=snapshot.serializable(),
+            )
+            return False
+
+        surface_evidence = {
+            'surface_variant': 'direct_answer',
+            'current_url': current_url,
+            'copy_count': len(copy_targets),
+            'completion_counts': completion_counts,
+        }
+        result.add_step(
+            'select_research_report_surface',
+            True,
+            'Perplexity direct-answer research surface exposed one terminal response Copy',
+            **surface_evidence,
+        )
+        return self._accept_extracted_content(
+            content,
+            request,
+            result,
+            f'Perplexity direct research answer extracted via Copy ({len(content)} chars)',
+            target_key=copy_key,
+            output_type=output_type,
+            scrolled_into_view=scrolled_into_view,
+            report_surface=surface_evidence,
+            **clipboard_poll,
+        )
 
     def _close_standalone_research_report(
         self,

@@ -567,6 +567,16 @@ workflow:
       key: ctrl+w
       return_surface: answer_thread
       stable_observations: 2
+    direct_answer:
+      when_report_card_counts:
+        research_report_open: 0
+        artifact_options: 0
+      scroll_to_bottom: true
+      copy_key: copy_button
+      copy_count: 1
+      completion_keys:
+      - helpful
+      - not_helpful
 settle:
   default_ms: 8000
   navigate_ms: 10000
@@ -611,9 +621,10 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-#  - research_report: open the report card's exact options menu, open the
-#    standalone report tab, use its exact `copy_contents_button`, then close the
-#    owned tab and prove return to the answer thread.
+#  - research_report: when Perplexity emits a report card, open its exact options
+#    menu and standalone report, Copy contents, then close the owned tab. When it
+#    emits the observed direct-answer variant without a report card, scroll to the
+#    exact terminal response Copy declared by workflow.extra_extract.direct_answer.
 #  - assistant_text: normal answer via the final mapped `copy_button`.
 # ============================================================================
 extraction:
