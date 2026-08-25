@@ -341,6 +341,12 @@ tree:
     artifact_options:
       name: Artifact options
       role: push button
+    expand_artifact:
+      name: Expand artifact
+      role: push button
+    close_artifact:
+      name: Close
+      role: push button
     research_report_open:
       role: push button
       match_strategy: name_agnostic_structural

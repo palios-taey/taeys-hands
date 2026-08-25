@@ -40,6 +40,18 @@ def main() -> int:
         and set(copy_spec.get('states_include') or ()) == {'showing', 'enabled'},
         'Perplexity Copy control mapping drifted',
     )
+    element_map = ((cfg.get('tree') or {}).get('element_map') or {})
+    _require(
+        element_map.get('expand_artifact') == {
+            'name': 'Expand artifact',
+            'role': 'push button',
+        }
+        and element_map.get('close_artifact') == {
+            'name': 'Close',
+            'role': 'push button',
+        },
+        'Perplexity report-surface control mapping drifted',
+    )
 
     workflow = get_extraction('perplexity', 'assistant_text')
     _require(workflow is not None, 'Perplexity assistant text extraction is missing')
