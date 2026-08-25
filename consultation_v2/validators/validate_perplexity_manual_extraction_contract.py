@@ -49,6 +49,16 @@ def main() -> int:
         and element_map.get('close_artifact') == {
             'name': 'Close',
             'role': 'push button',
+        }
+        and element_map.get('report_scroll_pane') == {
+            'role': 'scroll pane',
+            'states_include': ['showing', 'enabled'],
+            'match_strategy': 'name_agnostic_structural',
+            'structural': {
+                'after': 'close_artifact',
+                'ordinal': 'first',
+            },
+            'reason': 'The expanded Perplexity report has one nameless focusable scroll pane below the exact Close toolbar control; this is the report-owned surface that must reach bottom before its Copy control is rendered.',
         },
         'Perplexity report-surface control mapping drifted',
     )
@@ -75,8 +85,9 @@ def main() -> int:
     )
     _require(
         report_steps == (
-            ('scroll_to_bottom', 'input', 'last', None),
             ('open_panel', 'research_report_open', 'last', None),
+            ('open_panel', 'expand_artifact', 'last', None),
+            ('scroll_to_bottom', 'report_scroll_pane', 'last', None),
             ('copy_element', 'copy_button', 'last', None),
             ('read_clipboard', None, 'last', 'response_complete'),
         ),
@@ -95,15 +106,16 @@ def main() -> int:
         'Perplexity extraction card must select the final Copy only after scroll',
     )
     _require(
-        card.index('scroll_to_bottom element=input exactly once')
-        < card.index('click element=research_report_open exactly once')
+        card.index('click element=research_report_open exactly once')
+        < card.index('click element=expand_artifact exactly once')
+        < card.index('scroll_to_bottom element=report_scroll_pane exactly once')
         < card.index('exactly one mapped copy_button'),
-        'Perplexity extraction card must open the report before requiring its Copy',
+        'Perplexity extraction card must open, expand, and scroll the report before requiring Copy',
     )
     _require(
-        'Without mutation, observe scope=base exactly once more' in card
-        and 'same exact singleton Copy postcondition' in card,
-        'Perplexity extraction card lost the two-observation report barrier',
+        'mapped copy_button absent' in card
+        and card.count('scroll_to_bottom element=report_scroll_pane exactly once') == 1,
+        'Perplexity extraction card lost its pre-scroll Copy absence or exact report scroll',
     )
     _require(
         'without any success cardinality field' in card,
@@ -117,10 +129,13 @@ def main() -> int:
     )
     _require(
         'report_open_count=1' in card
+        and 'report_expand_count=1' in card
+        and 'report_scroll_count=1' in card
         and 'report_copy_count=1' in card
         and card.count('click element=research_report_open exactly once') == 1
+        and card.count('click element=expand_artifact exactly once') == 1
         and card.count('click element=copy_button exactly once') == 1,
-        'Perplexity extraction card lost exact report-open or Copy cardinality',
+        'Perplexity extraction card lost exact open, expand, scroll, or Copy cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(

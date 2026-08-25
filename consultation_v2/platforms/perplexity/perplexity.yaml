@@ -347,6 +347,16 @@ tree:
     close_artifact:
       name: Close
       role: push button
+    report_scroll_pane:
+      role: scroll pane
+      states_include:
+      - showing
+      - enabled
+      match_strategy: name_agnostic_structural
+      structural:
+        after: close_artifact
+        ordinal: first
+      reason: The expanded Perplexity report has one nameless focusable scroll pane below the exact Close toolbar control; this is the report-owned surface that must reach bottom before its Copy control is rendered.
     research_report_open:
       role: push button
       match_strategy: name_agnostic_structural
@@ -593,17 +603,20 @@ validation:
 # extraction — output-type -> ordered exact-matched workflow.
 # Schema + load-time validation: consultation_v2/yaml_contract.py;
 # grammar doc: consultation_v2/EXTRACTION_SCHEMA.md.
-#  - research_report: open the completed report artifact, then use its mapped `copy_button`.
+#  - research_report: open and expand the completed report, scroll its own pane,
+#    then use the report-owned `copy_button` rendered at the bottom.
 #  - assistant_text: normal answer via the final mapped `copy_button`.
 # ============================================================================
 extraction:
   research_report:
     steps:
-      - action: scroll_to_bottom
-        element: input
       - action: open_panel
         element: research_report_open
         select: last
+      - action: open_panel
+        element: expand_artifact
+      - action: scroll_to_bottom
+        element: report_scroll_pane
       - action: copy_element
         element: copy_button
         select: last
