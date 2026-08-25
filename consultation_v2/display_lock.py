@@ -164,18 +164,21 @@ def entrypoint_display_lock(
 
     wait_ms = round((time.monotonic() - started) * 1000)
     if owner_token:
+        lock_record = {
+            "acquired": True,
+            "owner_token": owner_token,
+            "wait_ms": wait_ms,
+            "holder": None,
+            "policy": policy,
+        }
         try:
-            yield {
-                "acquired": True,
-                "owner_token": owner_token,
-                "wait_ms": wait_ms,
-                "holder": None,
-                "policy": policy,
-            }
+            yield lock_record
         finally:
             try:
-                primitives.release_display_lock(owner_token, display=display)
+                released = primitives.release_display_lock(owner_token, display=display)
+                lock_record["released"] = released is True
             except Exception as exc:
+                lock_record["released"] = False
                 _collision_record(
                     kind="release_error",
                     display=display,
@@ -230,7 +233,7 @@ def entrypoint_display_lock(
         wait_ms,
     )
     with primitives.allow_display_lock_bypass(display):
-        yield {
+        lock_record = {
             "acquired": False,
             "owner_token": None,
             "wait_ms": wait_ms,
@@ -238,3 +241,7 @@ def entrypoint_display_lock(
             "policy": policy,
             "collision": collision,
         }
+        try:
+            yield lock_record
+        finally:
+            lock_record["released"] = False

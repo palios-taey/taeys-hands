@@ -1,0 +1,522 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-jobs-receipt-v1.json",
+  "title": "LinkedIn Jobs immutable receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullable_digest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "match_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "active_job_details_jump": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "about_job_heading": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_job_article": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "active_job_details_jump",
+        "about_job_heading",
+        "selected_job_article"
+      ]
+    },
+    "failure_code": {
+      "oneOf": [
+        {
+          "enum": [
+            "deadline_expired",
+            "display_lock_unavailable",
+            "lock_release_indeterminate",
+            "post_observation_indeterminate",
+            "postcondition_failed",
+            "pre_observation_failed",
+            "private_input_invalid",
+            "selected_job_not_exact",
+            "sink_write_indeterminate"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema": {
+      "const": "linkedin_jobs_receipt_v1"
+    },
+    "platform": {
+      "const": "linkedin"
+    },
+    "operation": {
+      "const": "capture_selected_job"
+    },
+    "display": {
+      "type": "string",
+      "pattern": "^:[0-9]{1,3}$"
+    },
+    "requester": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "turn_lineage_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "correlation_id_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "deadline_seconds": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 1700
+    },
+    "hands_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "terminal_state": {
+      "enum": [
+        "captured",
+        "already_captured",
+        "no_selected_job",
+        "postcondition_failed",
+        "technical_failure"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "failure_code": {
+      "$ref": "#/$defs/failure_code"
+    },
+    "transaction_sha256": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "expected_transaction_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "search_ref_sha256": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "sink_ref_sha256": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "pre_observation_sha256": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "pre_match_counts": {
+      "$ref": "#/$defs/match_counts"
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {
+          "const": "careers"
+        },
+        "request_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "acquired": {
+          "type": "boolean"
+        },
+        "released": {
+          "type": "boolean"
+        },
+        "owner_token_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "wait_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turn_lineage_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "correlation_id_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "deadline_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 1700
+        }
+      },
+      "required": [
+        "policy",
+        "request_id",
+        "acquired",
+        "released",
+        "owner_token_sha256",
+        "wait_ms",
+        "turn_lineage_sha256",
+        "correlation_id_sha256",
+        "deadline_seconds"
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "private_sink_write_once"
+        },
+        "verdict": {
+          "enum": [
+            "not_executed",
+            "written",
+            "already_present",
+            "indeterminate"
+          ]
+        },
+        "records_observed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "records_written": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_digest": {
+          "$ref": "#/$defs/nullable_digest"
+        }
+      },
+      "required": [
+        "kind",
+        "verdict",
+        "records_observed",
+        "records_written",
+        "content_digest"
+      ]
+    },
+    "postcondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "selected_job_content_digest_unchanged"
+        },
+        "verdict": {
+          "enum": [
+            "not_evaluated",
+            "satisfied",
+            "failed",
+            "indeterminate"
+          ]
+        },
+        "post_observation_sha256": {
+          "$ref": "#/$defs/nullable_digest"
+        },
+        "post_match_counts": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/match_counts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "verdict",
+        "post_observation_sha256",
+        "post_match_counts"
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "platform",
+    "operation",
+    "display",
+    "requester",
+    "turn_lineage_sha256",
+    "correlation_id_sha256",
+    "deadline_seconds",
+    "hands_commit",
+    "terminal_state",
+    "ok",
+    "failure_code",
+    "transaction_sha256",
+    "expected_transaction_sha256",
+    "search_ref_sha256",
+    "sink_ref_sha256",
+    "pre_observation_sha256",
+    "pre_match_counts",
+    "lock",
+    "action",
+    "postcondition"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "terminal_state": {
+            "const": "captured"
+          }
+        },
+        "required": [
+          "terminal_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "failure_code": {
+            "type": "null"
+          },
+          "action": {
+            "properties": {
+              "records_observed": {
+                "const": 1
+              },
+              "records_written": {
+                "const": 1
+              },
+              "content_digest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_state": {
+            "const": "already_captured"
+          }
+        },
+        "required": [
+          "terminal_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "failure_code": {
+            "type": "null"
+          },
+          "action": {
+            "properties": {
+              "records_observed": {
+                "const": 1
+              },
+              "records_written": {
+                "const": 0
+              },
+              "content_digest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_state": {
+            "const": "no_selected_job"
+          }
+        },
+        "required": [
+          "terminal_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          },
+          "failure_code": {
+            "const": "selected_job_not_exact"
+          },
+          "action": {
+            "properties": {
+              "records_observed": {
+                "const": 0
+              },
+              "records_written": {
+                "const": 0
+              },
+              "content_digest": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_state": {
+            "const": "postcondition_failed"
+          }
+        },
+        "required": [
+          "terminal_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          },
+          "failure_code": {
+            "const": "postcondition_failed"
+          },
+          "action": {
+            "properties": {
+              "records_observed": {
+                "const": 1
+              },
+              "records_written": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "content_digest": {
+                "$ref": "#/$defs/digest"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "terminal_state": {
+            "const": "technical_failure"
+          }
+        },
+        "required": [
+          "terminal_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "failure_code": {
+                "const": "sink_write_indeterminate"
+              },
+              "action": {
+                "properties": {
+                  "records_observed": {
+                    "const": 1
+                  },
+                  "records_written": {
+                    "type": "null"
+                  },
+                  "content_digest": {
+                    "$ref": "#/$defs/digest"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "failure_code": {
+                "enum": [
+                  "deadline_expired",
+                  "display_lock_unavailable",
+                  "lock_release_indeterminate",
+                  "post_observation_indeterminate",
+                  "pre_observation_failed",
+                  "private_input_invalid"
+                ]
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "action": {
+                    "properties": {
+                      "records_observed": {
+                        "const": 0
+                      },
+                      "records_written": {
+                        "const": 0
+                      },
+                      "content_digest": {
+                        "type": "null"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "action": {
+                    "properties": {
+                      "records_observed": {
+                        "const": 1
+                      },
+                      "records_written": {
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "content_digest": {
+                        "$ref": "#/$defs/digest"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

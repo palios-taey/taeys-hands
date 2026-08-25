@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -204,6 +205,8 @@ def _package_class_names(package_dir: Path, root: Path) -> set[str]:
 def _base_allowed(resolved: str, current_package: str, package_classes: set[str]) -> bool:
     if resolved == 'object':
         return True
+    if isinstance(getattr(builtins, resolved, None), type):
+        return True
     if resolved in package_classes:
         return True
     package_prefix = f'consultation_v2.platforms.{current_package}'
@@ -326,6 +329,8 @@ def _scan_driver_entry_contract(package_dir: Path, root: Path) -> list[Finding]:
     findings: list[Finding] = []
     driver = package_dir / 'driver.py'
     package_name = package_dir.name
+    if package_name not in CHAT_PLATFORM_PACKAGES:
+        return findings
     display = _display_path(driver, root)
     if not driver.exists():
         if (package_dir / 'routing.py').exists() and not (package_dir / f'{package_name}.yaml').exists():

@@ -1,0 +1,56 @@
+platform: linkedin
+click_strategy: atspi_only
+urls:
+  fresh: https://www.linkedin.com/jobs/
+  verify_navigation: false
+settle:
+  default_ms: 0
+  navigate_ms: 0
+  attach_ms: 0
+  rescan_attempts: 1
+tree:
+  fence_after: []
+  menu_snapshot_roles: []
+  menu_snapshot_exclude:
+    names: []
+  exclude:
+    names: []
+    roles:
+      - separator
+      - document web
+  sidebar_nav: []
+  element_map:
+    active_job_details_jump:
+      name: Jump to active job details
+      role: push button
+      scope: jobs.results
+    about_job_heading:
+      name: About the job
+      role: heading
+      scope: jobs.selected_detail
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: selected_job_article
+        ordinal: first
+      reason: The exact About the job heading is the first heading directly owned by the unique visible selected-job article.
+    selected_job_article:
+      role: article
+      states_include:
+        - showing
+      scope: jobs.selected_detail
+workflow:
+  selected_job_read:
+    operation: capture_selected_job
+    observation: canonical_snapshot
+    required_elements:
+      - active_job_details_jump
+      - about_job_heading
+      - selected_job_article
+    action: private_sink_write_once
+    postcondition: selected_job_content_digest_unchanged
+validation:
+  selected_job_ready:
+    indicators:
+      - active_job_details_jump
+      - about_job_heading
+      - selected_job_article
