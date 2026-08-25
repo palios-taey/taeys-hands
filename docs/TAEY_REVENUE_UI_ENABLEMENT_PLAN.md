@@ -3,7 +3,10 @@
 Status: current execution plan for tracker task `task-21a2f74b`.
 
 This plan extends Taey's existing supervised UI capability to revenue surfaces. It does not restore an old
-coordinate script or create another UI grammar. `ui_action` remains the only direct model-facing grammar.
+coordinate script or create another direct UI grammar. `ui_action` remains the only direct model-facing UI
+grammar. A routine lane may expose a frozen domain transaction, as `consult_chat` does, only when its driver
+compiles to the same observation, primitive, postcondition, and receipt contract; that domain transaction is
+not a second locator or action grammar.
 Hands owns observation, references, one action, postcondition verification, and receipts. Domain services own
 purpose and private state. Presence supplies identity, lease, and authority transport only when the existing
 supervised-seat transport cannot do so.
@@ -34,7 +37,7 @@ Public Git contains everything a downloaded Taey needs to understand and execute
 - surface identifiers and display-independent platform adapters;
 - exact static element maps and structural anchors;
 - the `ui_action` request, authority, effect, postcondition, and receipt schemas;
-- bounded dynamic-record schemas for public page content;
+- bounded private-projection schemas for dynamic page content;
 - private-input schemas and fail-loud validation, but no private values;
 - runners, service templates, mechanical validators, and production runbooks.
 
@@ -47,8 +50,9 @@ Runtime-injected private state contains:
 - private output records and full page content when it can identify a person or account.
 
 Public receipts carry schema versions, public commits, policy/input digests, action lineage, postcondition
-verdicts, counts, and content hashes. Private receipt storage may retain the corresponding values. Public code
-never points at an operator-only repository or path.
+verdicts, counts, and content hashes. Raw dynamic content is written off-context to the private sink and is
+never serialized into the model transcript. Private receipt storage may retain the corresponding values.
+Public code never points at an operator-only repository or path.
 
 ## Implementation order
 
@@ -60,7 +64,8 @@ Build the smallest complete vertical slice on the existing LinkedIn display:
 2. Expose the exact Jobs navigation control as a snapshot-bound reference.
 3. Execute one navigation action and require a LinkedIn-Jobs postcondition from a fresh observation.
 4. Load one runtime-injected search policy without exposing its value to the public projection.
-5. Project the mounted job-card collection as bounded structured records using the canonical tree.
+5. Project the mounted job-card collection into the off-context private sink as bounded structured records
+   using the canonical tree; expose only count, shape, and digest to Taey.
 6. Open one card with one action and verify selected-card identity before reading detail content.
 7. Extract the complete job description and apply-channel facts into the private sink.
 8. Emit a public-safe receipt joining the input-policy digest, card identity digest, description hash,
