@@ -29,6 +29,7 @@
 - The exact packet passes prompting-lint and an independent neutrality review before any UI action.
 
 ### Task: run-clean-parallel-five - Launch five independent Taey workers concurrently on displays :2 through :6 [priority: 21] [owner: infra-codex] [depends: freeze-loop-design-packet] [delivery_gate: true]
+- Launch the batch with `scripts/run_consult_chat_parallel.py`, which invokes each lane through `scripts/run_consult_chat_worker.py`; the manual `drive_chat` worker is evidence/diagnostic tooling and is not the unattended campaign launcher.
 - Preflight exactly one platform window and tab, zero active display leases, zero orphan worker processes, and zero active turns on each lane.
 - Refuse a campaign that reuses a burned seat/event/correlation tuple or terminal prompt/bundle identity.
 - Start all five requests without waiting for another lane to finish; one worker, seat, event, correlation, artifact root, platform, display, and one-call `consult_chat` transaction belong to each lane.
