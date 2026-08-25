@@ -6,7 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "operation": {
-      "const": "capture_selected_job"
+      "enum": [
+        "capture_selected_job",
+        "select_and_capture_job"
+      ]
     }
   },
   "required": [

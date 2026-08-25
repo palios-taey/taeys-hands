@@ -28,7 +28,7 @@ Per-platform supervised policy: `consultation_v2/platforms/<platform>/supervised
 | Surface | Policy file | Status |
 |---|---|---|
 | chatgpt, claude, gemini, grok, perplexity | `consultation_v2/platforms/<p>/supervised_ui.yaml` | **PERMITTED — supervised, local-effect only.** Policy declares capability + effect only; it carries no recommended order, target sequence, expected-next control, or corrective answer. |
-| LinkedIn, Sales Navigator public-safe control maps | *(not yet migrated)* | **NOT YET IN SCOPE** — migration to a supervised surface is a later consolidation step (reconcile-LinkedIn), gated separately. |
+| Sales Navigator public-safe control maps | *(not yet migrated)* | **NOT YET IN SCOPE** — migration to a supervised surface is a later consolidation step, gated separately. |
 | ATS provider control maps | *(apply-machine, not migrated)* | **NOT YET IN SCOPE** — split + adapt is a later step; ATS runtime stays in apply-machine. |
 | taey-ed Mac screen recipes | *(taey-ed)* | **EXCLUDED** from this consolidation (Jesse). |
 
@@ -36,6 +36,7 @@ Per-platform supervised policy: `consultation_v2/platforms/<platform>/supervised
 | Surface | Files | Status |
 |---|---|---|
 | ChatGPT/Claude/Gemini/Grok/Perplexity **consultation** element maps | `consultation_v2/platforms/<p>/<p>.yaml` | **PERMITTED by NAMED EXCEPTION** — the live deterministic Family-chat consult engine (`consultation_v2`). Its tool is `consult_extract_action`, NOT the direct `ui_action` grammar (see the authority doc's grammar-lanes section). Not deprecated; not the definition of all UI. |
+| LinkedIn Jobs read-only capture | `consultation_v2/platforms/linkedin/linkedin.yaml`, `scripts/run_linkedin_jobs.py` | **PERMITTED by NAMED EXCEPTION** — a frozen private transaction selects or consumes one exact job detail, writes only to a private sink, and performs no application, message, post, save, or retry. Taey receives only compact counts, hashes, state, and receipt evidence. |
 
 ## Prohibited (permanent)
 Agent-authored autonomous loops, scripted click-sequences, raw/hardcoded coordinate locators or coordinate

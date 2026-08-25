@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 
 PRIVATE_INPUT_SCHEMA = 'linkedin_jobs_private_input_v1'
-PUBLIC_OPERATION = 'capture_selected_job'
+PUBLIC_OPERATIONS = frozenset({'capture_selected_job', 'select_and_capture_job'})
 PUBLIC_PLATFORM = 'linkedin'
 RECEIPT_SCHEMA = 'linkedin_jobs_receipt_v1'
 SELECTED_JOB_SCHEMA = 'linkedin_selected_job_v1'
@@ -194,12 +194,33 @@ def read_private_input(
     value = _strict_object(raw_bytes, 'transaction file')
     if canonical_json_bytes(value) != raw_bytes:
         raise LinkedInJobsContractError('transaction file must use canonical JSON bytes')
-    expected = frozenset({'schema', 'operation', 'search_ref', 'sink_ref'})
+    operation = value.get('operation')
+    if operation == 'capture_selected_job':
+        expected = frozenset({'schema', 'operation', 'search_ref', 'sink_ref'})
+    elif operation == 'select_and_capture_job':
+        expected = frozenset({
+            'schema',
+            'operation',
+            'search_ref',
+            'sink_ref',
+            'target_card_name',
+            'detail_title_name',
+            'detail_company_name',
+        })
+    else:
+        raise LinkedInJobsContractError('transaction operation is unsupported')
     if frozenset(value) != expected:
         raise LinkedInJobsContractError('transaction fields are incomplete or unknown')
-    if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] != PUBLIC_OPERATION:
+    if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] not in PUBLIC_OPERATIONS:
         raise LinkedInJobsContractError('transaction schema or operation is unsupported')
-    for key in ('search_ref', 'sink_ref'):
+    string_fields = {'search_ref', 'sink_ref'}
+    if operation == 'select_and_capture_job':
+        string_fields.update({
+            'target_card_name',
+            'detail_title_name',
+            'detail_company_name',
+        })
+    for key in string_fields:
         item = value[key]
         if not isinstance(item, str) or not item or len(item) > 4096:
             raise LinkedInJobsContractError(f'transaction {key} is invalid')

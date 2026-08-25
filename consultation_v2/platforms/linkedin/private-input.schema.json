@@ -9,7 +9,10 @@
       "const": "linkedin_jobs_private_input_v1"
     },
     "operation": {
-      "const": "capture_selected_job"
+      "enum": [
+        "capture_selected_job",
+        "select_and_capture_job"
+      ]
     },
     "search_ref": {
       "type": "string",
@@ -20,6 +23,21 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4096
+    },
+    "target_card_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "detail_title_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "detail_company_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
     }
   },
   "required": [
@@ -27,5 +45,32 @@
     "operation",
     "search_ref",
     "sink_ref"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "select_and_capture_job"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "target_card_name",
+          "detail_title_name",
+          "detail_company_name"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["target_card_name"]},
+            {"required": ["detail_title_name"]},
+            {"required": ["detail_company_name"]}
+          ]
+        }
+      }
+    }
   ]
 }
