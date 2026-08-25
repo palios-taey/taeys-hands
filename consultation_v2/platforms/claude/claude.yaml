@@ -714,6 +714,8 @@ workflow:
         options:
           opus:
             element: model_opus
+            active_trigger_names:
+              - 'Model: Opus 5 Extra'
           sonnet:
             element: model_sonnet
             path:
