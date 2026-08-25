@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
+from consultation_v2.yaml_contract import load_platform_yaml
 
 
 def _attachment_trigger() -> str:
@@ -22,28 +22,6 @@ def _attachment_trigger() -> str:
             'perplexity mapped_pointer_activate attachment must not declare open_key'
         )
     return trigger_key
-
-
-def _download_elements() -> tuple[tuple[str, ...], str]:
-    workflow = get_extraction('perplexity', 'research_report')
-    if workflow is None:
-        raise ValueError('perplexity research_report extraction is not declared')
-    triggers = [
-        step.element
-        for step in workflow.steps
-        if step.action == 'click' and step.element
-    ]
-    targets = [
-        step.element
-        for step in workflow.steps
-        if step.action == 'download' and step.element
-    ]
-    if len(triggers) < 1 or len(targets) != 1:
-        raise ValueError(
-            'perplexity research_report extraction requires one or more ordered '
-            'click triggers and one download target'
-        )
-    return tuple(triggers), targets[0]
 
 
 def element_operation(
@@ -69,20 +47,7 @@ def element_operation(
             'forbidden': ['activate', 'click', 'focus', 'hover'],
         }
 
-    trigger_keys, target_key = _download_elements()
-    if element_key not in {*trigger_keys, target_key}:
-        return None
-    allowed_now = (
-        []
-        if element_key in trigger_keys and 'expanded' in normalized_states
-        else ['mapped_pointer_activate']
-    )
-    return {
-        'method': 'mapped_pointer_activate',
-        'primitives': ['mapped_pointer_activate'],
-        'allowed_now': allowed_now,
-        'forbidden': ['activate', 'click', 'focus', 'hover'],
-    }
+    return None
 
 
 def key_requires_state(_key: str) -> bool:
