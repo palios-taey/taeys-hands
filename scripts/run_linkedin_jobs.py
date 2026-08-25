@@ -40,6 +40,9 @@ def _selection_receipt(
     detail_title_match_count: int | None,
     detail_company_match_count: int | None,
     stable_cycles_observed: int,
+    action_name: str | None = None,
+    action_index: int | None = None,
+    action_match_count: int = 0,
 ) -> dict[str, Any]:
     return {
         'kind': 'private_exact_job_card_atspi_activate',
@@ -51,6 +54,9 @@ def _selection_receipt(
         'detail_title_match_count': detail_title_match_count,
         'detail_company_match_count': detail_company_match_count,
         'stable_cycles_observed': stable_cycles_observed,
+        'action_name': action_name,
+        'action_index': action_index,
+        'action_match_count': action_match_count,
     }
 
 
@@ -506,6 +512,9 @@ def _execute_locked_transaction(
                     detail_title_match_count=None,
                     detail_company_match_count=None,
                     stable_cycles_observed=0,
+                    action_name=activated.action_name,
+                    action_index=activated.action_index,
+                    action_match_count=activated.action_match_count,
                 )
                 required_cycles, interval, barrier_timeout = job_selection_barrier_policy()
                 barrier_deadline = min(deadline_at, time.monotonic() + barrier_timeout)
@@ -553,6 +562,9 @@ def _execute_locked_transaction(
                     detail_title_match_count=detail_counts.detail_title_match_count,
                     detail_company_match_count=detail_counts.detail_company_match_count,
                     stable_cycles_observed=stable_cycles,
+                    action_name=activated.action_name,
+                    action_index=activated.action_index,
+                    action_match_count=activated.action_match_count,
                 )
             else:
                 before = observe_selected_job(before_snapshot, search_ref)
@@ -606,7 +618,7 @@ def _execute_locked_transaction(
     except LinkedInJobCardActionFailed as exc:
         sys.stderr.write(f'{type(exc).__name__}: exact job-card action failed\n')
         selection = _selection_receipt(
-            verdict='action_failed',
+            verdict=exc.verdict,
             target_card_name=target_card_name,
             detail_title_name=detail_title_name,
             detail_company_name=detail_company_name,
@@ -614,6 +626,9 @@ def _execute_locked_transaction(
             detail_title_match_count=None,
             detail_company_match_count=None,
             stable_cycles_observed=0,
+            action_name=exc.action_name,
+            action_index=exc.action_index,
+            action_match_count=exc.action_match_count,
         )
         return _terminal_facts(
             terminal_state='technical_failure',

@@ -11,7 +11,6 @@ from consultation_v2.linkedin_jobs_contract import (
     sha256_hex,
     write_new_private_json,
 )
-from consultation_v2.interact import atspi_activate
 from consultation_v2.types import ElementRef, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -29,7 +28,20 @@ class LinkedInJobCardUnavailable(RuntimeError):
 
 
 class LinkedInJobCardActionFailed(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        verdict: str,
+        action_name: str,
+        action_index: int | None,
+        action_match_count: int,
+    ) -> None:
+        super().__init__(message)
+        self.verdict = verdict
+        self.action_name = action_name
+        self.action_index = action_index
+        self.action_match_count = action_match_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +62,9 @@ class JobSelectionObservation:
     target_match_count: int
     detail_title_match_count: int
     detail_company_match_count: int
+    action_name: str | None = None
+    action_index: int | None = None
+    action_match_count: int = 0
 
 
 _REQUIRED_KEYS = (
@@ -126,16 +141,56 @@ def activate_private_job_card(
             'job selection requires exactly one private exact target card',
             target_count,
         )
-    if not atspi_activate({
-        'atspi_obj': target.atspi_obj,
-        'name': target.name,
-        'role': target.role,
-    }):
-        raise LinkedInJobCardActionFailed('LinkedIn exact job-card activation failed')
+    action_contract = _job_selection_contract().get('action')
+    if not isinstance(action_contract, dict) or action_contract.get('interface') != 'atspi_action':
+        raise RuntimeError('LinkedIn job-card action interface is invalid')
+    action_name = action_contract.get('name')
+    if not isinstance(action_name, str) or not action_name:
+        raise RuntimeError('LinkedIn job-card action name is invalid')
+    try:
+        action_iface = target.atspi_obj.get_action_iface()
+        action_count = int(action_iface.get_n_actions()) if action_iface is not None else 0
+        action_indexes = [
+            index
+            for index in range(action_count)
+            if str(action_iface.get_action_name(index) or '') == action_name
+        ]
+    except Exception as exc:
+        raise RuntimeError('cannot inspect LinkedIn job-card Action interface') from exc
+    if len(action_indexes) != 1:
+        raise LinkedInJobCardActionFailed(
+            'LinkedIn authorized job-card action is not exact',
+            verdict='action_not_exact',
+            action_name=action_name,
+            action_index=None,
+            action_match_count=len(action_indexes),
+        )
+    action_index = action_indexes[0]
+    try:
+        action_succeeded = bool(action_iface.do_action(action_index))
+    except Exception as exc:
+        raise LinkedInJobCardActionFailed(
+            'LinkedIn exact job-card action raised',
+            verdict='action_failed',
+            action_name=action_name,
+            action_index=action_index,
+            action_match_count=1,
+        ) from exc
+    if not action_succeeded:
+        raise LinkedInJobCardActionFailed(
+            'LinkedIn exact job-card action returned false',
+            verdict='action_failed',
+            action_name=action_name,
+            action_index=action_index,
+            action_match_count=1,
+        )
     return JobSelectionObservation(
         target_match_count=target_count,
         detail_title_match_count=0,
         detail_company_match_count=0,
+        action_name=action_name,
+        action_index=action_index,
+        action_match_count=1,
     )
 
 
