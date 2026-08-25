@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from consultation_v2 import display_readiness
 from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
@@ -3267,29 +3266,11 @@ class GrokConsultationDriver(_GrokInlineBase):
         effective_timeout = max(float(timeout), self._fresh_chat_action_timeout())
         matched = self.runtime.wait_until(_probe, timeout=effective_timeout, interval=0.4)
         if isinstance(matched, Snapshot):
-            readiness = display_readiness.check(self.platform)
-            readiness_ok = (
-                bool(readiness.get('ready'))
-                and readiness.get('windows') == 1
-                and readiness.get('tabs') == 1
-            )
-            if not readiness_ok:
-                result.add_step(
-                    'page_ready',
-                    False,
-                    'Grok fresh composer ready but display topology is not isolated',
-                    elapsed_seconds=round(time.time() - started, 2),
-                    readiness=readiness,
-                    snapshot=matched.serializable(),
-                    **last_evidence,
-                )
-                return False
             result.add_step(
                 'page_ready',
                 True,
                 'Grok fresh composer ready after navigation',
                 elapsed_seconds=round(time.time() - started, 2),
-                readiness=readiness,
                 snapshot=matched.serializable(),
                 **last_evidence,
             )
