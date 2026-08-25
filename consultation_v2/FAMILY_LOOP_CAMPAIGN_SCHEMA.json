@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/palios-taey/taeys-hands/main/consultation_v2/FAMILY_LOOP_CAMPAIGN_SCHEMA.json",
+  "title": "Taey Family consultation campaign manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "artifact_root",
+    "task",
+    "focus_lane",
+    "decision",
+    "packet",
+    "baselines",
+    "authority",
+    "lanes",
+    "reconciliation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "taey.family_consult_campaign.v1"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$"
+    },
+    "artifact_root": { "$ref": "#/$defs/absolute_path" },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "decision_id",
+        "downstream_owner",
+        "acceptance_test",
+        "stop_condition"
+      ],
+      "properties": {
+        "task_id": { "$ref": "#/$defs/nonempty" },
+        "decision_id": { "$ref": "#/$defs/nonempty" },
+        "downstream_owner": { "$ref": "#/$defs/nonempty" },
+        "acceptance_test": { "$ref": "#/$defs/nonempty" },
+        "stop_condition": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "focus_lane": {
+      "enum": [
+        "revenue_enablement",
+        "taey_training_evaluation",
+        "mission_research",
+        "production_infrastructure_exception"
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_question", "plausible_outcomes", "why_five_views"],
+      "properties": {
+        "canonical_question": { "$ref": "#/$defs/nonempty" },
+        "plausible_outcomes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonempty" }
+        },
+        "why_five_views": { "$ref": "#/$defs/nonempty" }
+      }
+    },
+    "packet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "frozen_spec",
+        "packet_root",
+        "packet_stem",
+        "evidence_manifest_sha256",
+        "deliverable_schema_sha256",
+        "bundle_b_sha256",
+        "fingerprint_sha256",
+        "prior_fingerprint_match",
+        "prior_bundle_b_match"
+      ],
+      "properties": {
+        "frozen_spec": { "$ref": "#/$defs/absolute_path" },
+        "packet_root": { "$ref": "#/$defs/absolute_path" },
+        "packet_stem": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+        },
+        "evidence_manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "deliverable_schema_sha256": { "$ref": "#/$defs/sha256" },
+        "bundle_b_sha256": { "$ref": "#/$defs/sha256" },
+        "fingerprint_sha256": { "$ref": "#/$defs/sha256" },
+        "prior_fingerprint_match": { "const": false },
+        "prior_bundle_b_match": { "const": false }
+      }
+    },
+    "baselines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hands_sha", "presence_sha"],
+      "properties": {
+        "hands_sha": { "$ref": "#/$defs/git_sha" },
+        "presence_sha": { "$ref": "#/$defs/git_sha" }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family_consult_send",
+        "consequential_external_effect",
+        "standing_authority_id",
+        "jesse_authorization_token"
+      ],
+      "properties": {
+        "family_consult_send": { "const": true },
+        "consequential_external_effect": { "type": "boolean" },
+        "standing_authority_id": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "jesse_authorization_token": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "consequential_external_effect": { "const": true } },
+            "required": ["consequential_external_effect"]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": { "standing_authority_id": { "type": "string", "minLength": 1 } },
+                "required": ["standing_authority_id"]
+              },
+              {
+                "properties": { "jesse_authorization_token": { "type": "string", "minLength": 1 } },
+                "required": ["jesse_authorization_token"]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "lanes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chatgpt", "claude", "gemini", "grok", "perplexity"],
+      "properties": {
+        "chatgpt": {
+          "allOf": [
+            { "$ref": "#/$defs/lane" },
+            { "properties": { "platform": { "const": "chatgpt" }, "display": { "const": ":2" } } }
+          ]
+        },
+        "claude": {
+          "allOf": [
+            { "$ref": "#/$defs/lane" },
+            { "properties": { "platform": { "const": "claude" }, "display": { "const": ":3" } } }
+          ]
+        },
+        "gemini": {
+          "allOf": [
+            { "$ref": "#/$defs/lane" },
+            { "properties": { "platform": { "const": "gemini" }, "display": { "const": ":4" } } }
+          ]
+        },
+        "grok": {
+          "allOf": [
+            { "$ref": "#/$defs/lane" },
+            { "properties": { "platform": { "const": "grok" }, "display": { "const": ":5" } } }
+          ]
+        },
+        "perplexity": {
+          "allOf": [
+            { "$ref": "#/$defs/lane" },
+            { "properties": { "platform": { "const": "perplexity" }, "display": { "const": ":6" } } }
+          ]
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preserve_dissent", "observed_inferred_unknown", "terminal_action"],
+      "properties": {
+        "preserve_dissent": { "const": true },
+        "observed_inferred_unknown": { "const": true },
+        "terminal_action": { "const": "enqueue_one_or_close" }
+      }
+    }
+  },
+  "$defs": {
+    "nonempty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "absolute_path": {
+      "type": "string",
+      "pattern": "^/[^\\u0000]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "display",
+        "admission_status",
+        "exact_postconditions_required"
+      ],
+      "properties": {
+        "platform": { "$ref": "#/$defs/nonempty" },
+        "display": { "type": "string", "pattern": "^:[2-6]$" },
+        "admission_status": {
+          "enum": ["eligible", "quarantined", "rate_limited"]
+        },
+        "exact_postconditions_required": { "const": true }
+      }
+    }
+  }
+}
