@@ -796,7 +796,7 @@ workflow:
     observation:
       stable_cycles: 2
       interval_ms: 250
-      dialog_timeout_ms: 12000
+      dialog_timeout_ms: 120000
       attachment_timeout_ms: 120000
   prompt:
     input: input
