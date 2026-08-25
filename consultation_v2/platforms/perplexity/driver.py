@@ -4528,11 +4528,14 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 )
                 return False
             report_panes = list(snap.mapped.get('report_scroll_pane') or [])
-            if len(report_panes) != 1 or not self.runtime.scroll_to_bottom(report_panes[0]):
+            if len(report_panes) != 1 or not self.runtime.scroll_to_bottom(
+                report_panes[0],
+                required_mapped_key=target_key,
+            ):
                 result.add_step(
                     'scroll_research_report',
                     False,
-                    'Perplexity expanded report pane did not scroll to bottom',
+                    'Perplexity expanded report pane did not reach its exact Copy postcondition',
                     stop_condition='extraction_failed',
                     observed_count=len(report_panes),
                     snapshot=snap.serializable(),
