@@ -581,8 +581,9 @@ class ConsultationRuntime:
         self,
         anchor: Optional[Any] = None,
         clicks: int = 15,
-        max_rounds: int = 12,
+        max_rounds: int | None = None,
         settle: float = 0.4,
+        required_mapped_key: str | None = None,
     ) -> bool:
         """Scroll the conversation to the ABSOLUTE BOTTOM so the latest turn's
         Copy button + full response are rendered into the AT-SPI tree before
@@ -600,20 +601,36 @@ class ConsultationRuntime:
         input at bottom-centre — never a magic coordinate). ctrl+End is
         deliberately NOT used: on some platforms it focuses the empty composer
         and was measured to HIDE a Copy button.
+
+        When ``required_mapped_key`` is set, success requires one exact showing
+        and enabled mapped element; the ordinary whole-tree stability shortcut
+        is disabled and the bounded postcondition limit is 30 rounds.
         """
         if anchor is None or anchor.x is None or anchor.y is None:
             return False
         hover = (int(anchor.x), max(0, int(anchor.y) - 200))
+        round_limit = max_rounds if max_rounds is not None else (
+            30 if required_mapped_key else 12
+        )
         last_count = -1
         stable = 0
         ok = False
-        for _ in range(max_rounds):
+        for _ in range(round_limit):
             ok = bool(inp.scroll_wheel('down', clicks=clicks, hover_point=hover))
             time.sleep(settle)
             try:
                 snap = self.snapshot()
+                if required_mapped_key:
+                    targets = list(snap.mapped.get(required_mapped_key) or [])
+                    if len(targets) == 1 and {'showing', 'enabled'}.issubset(
+                        set(targets[0].states or [])
+                    ):
+                        return True
+                    continue
                 count = sum(len(v) for v in snap.mapped.values()) + len(snap.unknown)
             except Exception:
+                if required_mapped_key:
+                    continue
                 count = last_count  # snapshot hiccup — treat as no-change, keep scrolling
             if count == last_count:
                 stable += 1
@@ -622,7 +639,7 @@ class ConsultationRuntime:
             else:
                 stable = 0
                 last_count = count
-        return ok
+        return False if required_mapped_key else ok
 
     def scroll_document_to_bottom(
         self,
