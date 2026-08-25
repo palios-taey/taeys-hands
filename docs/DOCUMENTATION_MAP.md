@@ -13,8 +13,9 @@ is not listed here or linked from a listed index, it is not operating authority.
 6. `CONSULTATION_CONTRACT.md` — full consultation lifecycle.
 7. `docs/UI_INTERACTION_AUTHORITY.md` — one-action, fresh-tree discipline.
 8. `docs/SUPERVISED_UI_PROTOCOL.md` — immutable supervised-seat state and receipt protocol.
-9. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
-10. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
+9. `docs/TAEY_REVENUE_UI_ENABLEMENT_PLAN.md` — public/private boundary and revenue-surface rollout.
+10. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
+11. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
 
 ## Current operating documents
 
@@ -31,6 +32,7 @@ is not listed here or linked from a listed index, it is not operating authority.
 - `docs/TAEY_FAMILY_LOOP_RUNBOOK.md`
 - `docs/CHAT_CONSULT_RELIABILITY_PLAN.md`
 - `docs/UI_SURFACE_EFFECT_MANIFEST.md`
+- `docs/TAEY_REVENUE_UI_ENABLEMENT_PLAN.md`
 - `DEPLOY.md`
 - `systemd/DISPLAY_REGISTRY.md`
 - `systemd/README.md`
