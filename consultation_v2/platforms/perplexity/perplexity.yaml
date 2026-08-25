@@ -375,7 +375,6 @@ tree:
       name: Copy
       role: push button
       states_include:
-      - showing
       - enabled
     copy_query_button:
       name: Copy query
