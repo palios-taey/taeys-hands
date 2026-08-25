@@ -927,61 +927,6 @@ class ConsultationRuntime:
     # Navigation
     # ------------------------------------------------------------------
 
-    def _focused_composer_entry(self) -> ElementRef | None:
-        element_map = ((self.cfg.get('tree') or {}).get('element_map') or {})
-        if not isinstance(element_map, dict):
-            return None
-        candidate_keys: list[str] = []
-        for key, spec in element_map.items():
-            if not isinstance(spec, dict):
-                continue
-            role = str(spec.get('role') or '').strip().lower()
-            scope = str(spec.get('scope') or '').strip().lower()
-            if role != 'entry':
-                continue
-            if scope.startswith('base.composer') or str(key).startswith('input'):
-                candidate_keys.append(str(key))
-        if not candidate_keys:
-            return None
-        snapshot = self.snapshot()
-        for key in candidate_keys:
-            for element in snapshot.mapped.get(key) or []:
-                states = {str(state).lower() for state in (element.states or [])}
-                if 'focused' in states:
-                    return element
-        return None
-
-    def _composer_focus_released(
-        self,
-        *,
-        consecutive: int = 2,
-        timeout: float | None = None,
-        interval: float = 0.3,
-    ) -> bool:
-        if timeout is None:
-            settle = self.cfg.get('settle') or {}
-            value = (
-                settle.get('composer_focus_release_ms', 3000)
-                if isinstance(settle, dict)
-                else 3000
-            )
-            try:
-                timeout = max(0.5, float(value) / 1000.0)
-            except (TypeError, ValueError):
-                timeout = 3.0
-        required = max(1, int(consecutive))
-        deadline = time.monotonic() + timeout
-        stable = 0
-        while time.monotonic() < deadline:
-            if self._focused_composer_entry() is None:
-                stable += 1
-                if stable >= required:
-                    return True
-            else:
-                stable = 0
-            time.sleep(interval)
-        return False
-
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         started = time.monotonic()
         self.last_navigation_evidence = {
@@ -1039,13 +984,8 @@ class ConsultationRuntime:
                 'navigate: address bar not focused after navigation key; refusing to paste URL'
             )
             return False
-        if not self._composer_focus_released():
-            record('HALT', 'composer_focus_release', navigation_key=nav_key)
-            logger.error(
-                'navigate: composer still focused after address-bar focus; refusing to paste URL'
-            )
-            self._dismiss_address_bar()
-            return False
+        # Firefox can retain stale web-composer focus in AT-SPI while browser
+        # chrome owns focus; exact address-bar selection is the positive oracle.
         if not self._select_all_address_bar_text():
             record('HALT', 'address_bar_select_all', navigation_key=nav_key)
             logger.error('navigate: address-bar full selection was not proven')
