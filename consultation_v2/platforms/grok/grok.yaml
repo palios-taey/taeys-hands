@@ -316,6 +316,12 @@ workflow:
     open_method: mapped_pointer_activate
   prompt:
     input: input
+    observation:
+      scope: document
+      refresh_policy: invalidate_reacquire
+      stable_cycles: 2
+      interval_ms: 200
+      timeout_ms: 4000
   send:
     # Multi-line composer: submit by clicking the exact send_button, NOT Enter.
     send_key: send_button

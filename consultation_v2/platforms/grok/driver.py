@@ -5,6 +5,7 @@ methods it reaches, so Grok owns its driver and monitor code in this package.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -3471,6 +3472,63 @@ class GrokConsultationDriver(_GrokInlineBase):
     # ------------------------------------------------------------------
     # Shared: focus the composer with coordinate action + snapshot confirmation
     # ------------------------------------------------------------------
+    def _wait_for_input_focus(self, input_key: str):
+        prompt_cfg = self.cfg['workflow']['prompt']
+        observation = prompt_cfg['observation']
+        stable_cycles = max(1, int(observation['stable_cycles']))
+        interval_ms = max(1, int(observation['interval_ms']))
+        timeout_ms = max(interval_ms, int(observation['timeout_ms']))
+        started = time.monotonic()
+        deadline = started + (timeout_ms / 1000.0)
+        stable = 0
+        samples: list[dict[str, object]] = []
+        last_snapshot: Snapshot | None = None
+        last_input: ElementRef | None = None
+
+        while True:
+            last_snapshot = self.runtime.snapshot()
+            last_input = self.find_first(last_snapshot, input_key)
+            states = self._state_set(last_input)
+            matched = last_input is not None and 'focused' in states
+            stable = stable + 1 if matched else 0
+            serializable = last_snapshot.serializable()
+            samples.append({
+                'sample': len(samples) + 1,
+                'elapsed_ms': round((time.monotonic() - started) * 1000.0, 1),
+                'snapshot_revision': hashlib.sha256(
+                    json.dumps(serializable, sort_keys=True).encode('utf-8')
+                ).hexdigest(),
+                'input_present': last_input is not None,
+                'input_states': sorted(states),
+                'postcondition_matched': matched,
+                'stable_cycles': stable,
+            })
+            if stable >= stable_cycles:
+                self._last_focus_observation = {
+                    'scope': observation['scope'],
+                    'refresh_policy': observation['refresh_policy'],
+                    'stable_cycles_required': stable_cycles,
+                    'interval_ms': interval_ms,
+                    'timeout_ms': timeout_ms,
+                    'samples': samples,
+                    'result': 'PASS',
+                    'next_mutation_authorized': True,
+                }
+                return last_snapshot, last_input
+            if time.monotonic() >= deadline:
+                self._last_focus_observation = {
+                    'scope': observation['scope'],
+                    'refresh_policy': observation['refresh_policy'],
+                    'stable_cycles_required': stable_cycles,
+                    'interval_ms': interval_ms,
+                    'timeout_ms': timeout_ms,
+                    'samples': samples,
+                    'result': 'HALT',
+                    'next_mutation_authorized': False,
+                }
+                return last_snapshot, None
+            time.sleep(interval_ms / 1000.0)
+
     def _focus_input(self):
         """Coordinate-click the composer and confirm focus from a fresh snapshot.
 
@@ -3478,6 +3536,7 @@ class GrokConsultationDriver(_GrokInlineBase):
         those calls can block inside the bus and defeat outer workflow timeouts.
         """
         self._last_focus_failure: dict[str, object] = {}
+        self._last_focus_observation: dict[str, object] = {}
         input_key = self.cfg['workflow']['prompt']['input']
         snap = self.runtime.snapshot()
         input_el = self.find_first(snap, input_key)
@@ -3496,12 +3555,7 @@ class GrokConsultationDriver(_GrokInlineBase):
                 'element': input_el.serializable(),
             }
             return None
-        focused_snapshot, focused_input = self.wait_for_key(
-            input_key,
-            timeout=1.5,
-            interval=0.2,
-            scope='document',
-        )
+        focused_snapshot, focused_input = self._wait_for_input_focus(input_key)
         focused_states = self._state_set(focused_input)
         if focused_input is None or 'focused' not in focused_states:
             self._last_focus_failure = {
@@ -3517,7 +3571,17 @@ class GrokConsultationDriver(_GrokInlineBase):
 
     def _focus_failure_step_data(self) -> dict[str, object]:
         failure = getattr(self, '_last_focus_failure', {})
-        return {'focus_failure': failure} if failure else {}
+        observation = getattr(self, '_last_focus_observation', {})
+        data: dict[str, object] = {}
+        if failure:
+            data['focus_failure'] = failure
+        if observation:
+            data['focus_observation'] = observation
+        return data
+
+    def _focus_observation_step_data(self) -> dict[str, object]:
+        observation = getattr(self, '_last_focus_observation', {})
+        return {'focus_observation': observation} if observation else {}
 
     # ------------------------------------------------------------------
     # Step 4 - enter prompt
@@ -3525,7 +3589,7 @@ class GrokConsultationDriver(_GrokInlineBase):
     def enter_prompt(self, request: ConsultationRequest, result: ConsultationResult) -> bool:
         input_el = self._focus_input()
         if not input_el:
-            result.add_step('prompt', False, 'Grok input field not found',
+            result.add_step('prompt', False, 'Grok input focus postcondition did not stabilize',
                             snapshot=self.runtime.snapshot().serializable(),
                             **self._focus_failure_step_data())
             return False
@@ -3542,7 +3606,8 @@ class GrokConsultationDriver(_GrokInlineBase):
                             snapshot=self.runtime.snapshot().serializable())
             return False
         result.add_step('prompt', True, 'Grok prompt entered',
-                        snapshot=self.runtime.snapshot().serializable())
+                        snapshot=self.runtime.snapshot().serializable(),
+                        **self._focus_observation_step_data())
         return True
 
     # ------------------------------------------------------------------
@@ -3553,7 +3618,7 @@ class GrokConsultationDriver(_GrokInlineBase):
 
         input_el = self._focus_input()
         if not input_el:
-            result.add_step('send', False, 'Grok input field not found for send',
+            result.add_step('send', False, 'Grok input focus postcondition did not stabilize before send',
                             snapshot=self.runtime.snapshot().serializable(),
                             **self._focus_failure_step_data())
             return False
@@ -3598,6 +3663,7 @@ class GrokConsultationDriver(_GrokInlineBase):
             url_immediate_after=immediate_url,
             stop_seen_immediately=bool(immediate_stop_seen),
             snapshot=immediate_snap.serializable(),
+            **self._focus_observation_step_data(),
         )
         if not click_returned:
             return False
