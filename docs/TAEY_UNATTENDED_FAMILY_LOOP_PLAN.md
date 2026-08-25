@@ -8,6 +8,22 @@
 - The current Tasks API remains the sole work queue and campaign authority. This plan does not authorize a second dispatcher or graph-task implementation.
 - `infra-soul` is not an implementation or documentation surface for this work.
 
+## Scoped operator authorization
+
+Jesse explicitly authorized this Taey-owned five-platform qualification in the primary Codex session record
+`01a01edf-0759-7c81-9171-da2d42505ef4`:
+
+- 2026-08-21T20:31:11Z: "Get all the platforms working in parallel."
+- 2026-08-23T13:15:42Z: "We need to launch 5 Taey instances each with their own Chat to drive through send right?"
+- 2026-08-25T17:05:02Z: "Yes that is fine as long as works and is validating each step."
+
+This is a narrow authorization for Taey to execute the already-mapped Family-chat transaction concurrently
+through each platform's YAML, driver, monitor, and extractor. It does not authorize blind or general-purpose
+UI automation: after every mutation, the exact YAML-owned postcondition must be proven before the next
+mutation, and any unproved postcondition terminalizes only that lane. It does not authorize scheduled actors
+or consequential applications, posts, messages, purchases, or account actions. The manual `drive_chat` path
+remains the diagnostic and recovery surface after a terminal first error.
+
 ## Phase: close-current-control - Close the one remaining Claude production defect [order: 1]
 
 ### Task: merge-claude-slow-attachment-barrier - Merge the exact Claude-only observation-window correction [priority: 10] [owner: infra-codex]
