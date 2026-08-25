@@ -110,7 +110,10 @@ def _validate_yaml() -> list[str]:
             'role': 'push button',
             'states_include': ['showing', 'enabled'],
         },
-        'action': 'atspi_activate',
+        'action': {
+            'interface': 'atspi_action',
+            'name': 'click',
+        },
         'detail_title': {
             'role': 'link',
             'states_include': ['showing', 'enabled'],
@@ -289,6 +292,9 @@ def _validate_interface_patterns() -> list[str]:
         'detail_title_match_count',
         'detail_company_match_count',
         'stable_cycles_observed',
+        'action_name',
+        'action_index',
+        'action_match_count',
     }
     if (
         selection.get('type') != 'object'
@@ -515,13 +521,17 @@ def _validate_runtime_source() -> list[str]:
         'activate_private_job_card',
         'observe_private_selected_job',
         'job_selection_barrier_policy',
-        'atspi_activate',
+        "action_contract.get('interface') != 'atspi_action'",
+        "str(action_iface.get_action_name(index) or '') == action_name",
+        'action_iface.do_action(action_index)',
         'element.name == exact_name',
         'element.role == role',
         'set(states).issubset(element.states)',
     }
     if any(token not in driver_source for token in required_selection):
         errors.append(f'{DRIVER}: private exact job-selection contract is incomplete')
+    if 'from consultation_v2.interact import atspi_activate' in driver_source:
+        errors.append(f'{DRIVER}: shared fallback action primitive is forbidden')
 
     runner_tree = ast.parse(runner_source, filename=str(RUNNER))
     lock_nodes = [

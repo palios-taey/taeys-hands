@@ -33,7 +33,9 @@ workflow:
       states_include:
         - showing
         - enabled
-    action: atspi_activate
+    action:
+      interface: atspi_action
+      name: click
     detail_title:
       role: link
       states_include:
