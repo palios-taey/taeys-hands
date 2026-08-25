@@ -983,6 +983,25 @@ class ConsultationRuntime:
         return False
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
+        started = time.monotonic()
+        self.last_navigation_evidence = {
+            'target_url': url,
+            'verify_change': bool(verify_change),
+            'failed_substep': None,
+            'result': 'IN_PROGRESS',
+            'elapsed_ms': 0.0,
+        }
+
+        def record(result: str, failed_substep: str | None = None, **details: Any) -> None:
+            self.last_navigation_evidence = {
+                'target_url': url,
+                'verify_change': bool(verify_change),
+                'failed_substep': failed_substep,
+                'result': result,
+                'elapsed_ms': round((time.monotonic() - started) * 1000.0, 1),
+                **details,
+            }
+
         # Close stale GTK file dialogs FIRST — they intercept the address-bar
         # focus key (ctrl+l) and leave the composer focused, so the URL gets
         # typed/pasted into the chat input and sent as a message. (Proven path:
@@ -1000,25 +1019,40 @@ class ConsultationRuntime:
         # nav_key returns; ctrl+a/paste/Return that follow MUST land in the
         # location bar, not the (cold-home-page) focused composer. Was ~0.2s.
         time.sleep(0.3)
-        focused = bool(self.wait_until(self._address_bar_focused, timeout=3.0, interval=0.3))
+        primary_focus_observed = bool(
+            self.wait_until(self._address_bar_focused, timeout=3.0, interval=0.3)
+        )
+        focused = primary_focus_observed
+        fallback_invoked = False
         if not focused:
+            fallback_invoked = True
             focused = self.focus_address_bar()
         if not focused:
+            record(
+                'HALT',
+                'address_bar_focus',
+                navigation_key=nav_key,
+                primary_focus_observed=primary_focus_observed,
+                mapped_pointer_focus_invoked=fallback_invoked,
+            )
             logger.error(
                 'navigate: address bar not focused after navigation key; refusing to paste URL'
             )
             return False
         if not self._composer_focus_released():
+            record('HALT', 'composer_focus_release', navigation_key=nav_key)
             logger.error(
                 'navigate: composer still focused after address-bar focus; refusing to paste URL'
             )
             self._dismiss_address_bar()
             return False
         if not self._select_all_address_bar_text():
+            record('HALT', 'address_bar_select_all', navigation_key=nav_key)
             logger.error('navigate: address-bar full selection was not proven')
             self._dismiss_address_bar()
             return False
         if not self.paste(url):
+            record('HALT', 'url_paste', navigation_key=nav_key)
             logger.error('navigate: URL paste failed in focused address bar')
             self._dismiss_address_bar()
             return False
@@ -1027,6 +1061,7 @@ class ConsultationRuntime:
             timeout=3.0,
             interval=0.2,
         ):
+            record('HALT', 'exact_pasted_url', navigation_key=nav_key)
             logger.error('navigate: exact pasted URL was not proven in address bar')
             self._dismiss_address_bar()
             return False
@@ -1034,8 +1069,10 @@ class ConsultationRuntime:
         if not verify_change:
             time.sleep(2.0)
             if not self._dismiss_address_bar():
+                record('HALT', 'post_commit_address_bar_release', navigation_key=nav_key)
                 logger.error('navigate: address bar stayed focused after committed navigation')
                 return False
+            record('PASS', navigation_key=nav_key)
             return True
         current, settled_snapshot = self.wait_for_navigation_target_loaded(url)
         current = (current or self.current_url() or "").strip()
@@ -1047,6 +1084,14 @@ class ConsultationRuntime:
         if not current or not self._navigation_tree_ready(settled_snapshot):
             raw_count = int(settled_snapshot.raw_count or 0) if settled_snapshot else 0
             mapped_count = self._navigation_mapped_count(settled_snapshot)
+            record(
+                'HALT',
+                'navigation_target_tree',
+                navigation_key=nav_key,
+                current_url=current,
+                raw_count=raw_count,
+                mapped_count=mapped_count,
+            )
             logger.error(
                 'navigate: target unreadable after bounded tree settle '
                 '(current=%r raw_count=%s mapped_count=%s)',
@@ -1055,7 +1100,16 @@ class ConsultationRuntime:
                 mapped_count,
             )
             return False
-        return self._navigation_target_loaded(current, url)
+        target_loaded = self._navigation_target_loaded(current, url)
+        record(
+            'PASS' if target_loaded else 'HALT',
+            None if target_loaded else 'navigation_target_url',
+            navigation_key=nav_key,
+            current_url=current,
+            raw_count=int(settled_snapshot.raw_count or 0),
+            mapped_count=self._navigation_mapped_count(settled_snapshot),
+        )
+        return target_loaded
 
     @staticmethod
     def _navigation_target_loaded(current_url: str, target_url: str) -> bool:
