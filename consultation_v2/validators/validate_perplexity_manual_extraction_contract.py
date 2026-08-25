@@ -55,6 +55,21 @@ def main() -> int:
         ),
         'Perplexity assistant text extraction sequence drifted',
     )
+    report_workflow = get_extraction('perplexity', 'research_report')
+    _require(report_workflow is not None, 'Perplexity research report extraction is missing')
+    report_steps = tuple(
+        (step.action, step.element, step.select, step.validation)
+        for step in report_workflow.steps
+    )
+    _require(
+        report_steps == (
+            ('scroll_to_bottom', 'input', 'last', None),
+            ('open_panel', 'research_report_open', 'last', None),
+            ('copy_element', 'copy_button', 'last', None),
+            ('read_clipboard', None, 'last', 'response_complete'),
+        ),
+        'Perplexity research report extraction sequence drifted',
+    )
 
     card = _extract_content(
         'monitor-contract',
@@ -69,8 +84,14 @@ def main() -> int:
     )
     _require(
         card.index('scroll_to_bottom element=input exactly once')
+        < card.index('click element=research_report_open exactly once')
         < card.index('exactly one mapped copy_button'),
-        'Perplexity extraction card requires Copy before the scroll that exposes it',
+        'Perplexity extraction card must open the report before requiring its Copy',
+    )
+    _require(
+        'Without mutation, observe scope=base exactly once more' in card
+        and 'same exact singleton Copy postcondition' in card,
+        'Perplexity extraction card lost the two-observation report barrier',
     )
     _require(
         'without any success cardinality field' in card,
@@ -83,9 +104,11 @@ def main() -> int:
         'Perplexity extraction card still exposes the optional native download path',
     )
     _require(
-        'inline_copy_count=1' in card
+        'report_open_count=1' in card
+        and 'report_copy_count=1' in card
+        and card.count('click element=research_report_open exactly once') == 1
         and card.count('click element=copy_button exactly once') == 1,
-        'Perplexity extraction card lost exact Copy cardinality',
+        'Perplexity extraction card lost exact report-open or Copy cardinality',
     )
     completed_state = _completed_before_stop_state('perplexity')
     _require(
