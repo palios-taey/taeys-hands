@@ -74,7 +74,7 @@ has not been completely observed.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
    author-cooloff policy. A comment target must be no older than 72 hours.
 6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
-7. Observe the exact selected post and bind its activity identity and body SHA-256. Read the full selected post.
+7. Bind the exact observed `selected_post_activity_<id>` key, its activity identity, and its body SHA-256. Read the full selected post.
 8. If exact `selected_post_thread_open_activity_<id>_body_<digest>` is observed, invoke that key once using its
    declared `mapped_pointer_activate` primitive and require the same activity, same body digest, and visible
    target-scoped comment controls. Read the complete visible thread, including every visible author reply,
