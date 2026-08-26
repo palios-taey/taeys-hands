@@ -1,0 +1,112 @@
+schema: ats_provider_surface_v1
+provider: ashby
+status: mapping_only
+executable: false
+route:
+  scheme: https
+  exact_hosts:
+    - jobs.ashbyhq.com
+  suffix_hosts: []
+  identity_fields:
+    - tenant
+    - job
+  grammars:
+    - id: hosted_job
+      path:
+        - capture: tenant
+          type: slug
+        - capture: job
+          type: uuid
+      query: []
+    - id: hosted_apply
+      path:
+        - capture: tenant
+          type: slug
+        - capture: job
+          type: uuid
+        - literal: apply
+      query: []
+    - id: hosted_application
+      path:
+        - capture: tenant
+          type: slug
+        - capture: job
+          type: uuid
+        - literal: application
+      query: []
+form_projection:
+  enabled: false
+  max_depth: 45
+  anchors_all:
+    - id: full_name_field
+      names_any_of:
+        - Name
+        - Full name
+        - Full Name
+      roles_any_of:
+        - entry
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+    - id: email_field
+      names_any_of:
+        - Email
+      roles_any_of:
+        - entry
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+    - id: submit_boundary
+      names_any_of:
+        - Submit Application
+        - Submit application
+      roles_any_of:
+        - push button
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+  required_controls:
+    roles_any_of:
+      - entry
+      - password text
+      - combo box
+      - check box
+      - radio button
+      - spin button
+      - toggle button
+    states_all:
+      - showing
+      - visible
+      - enabled
+      - required
+  observation_barrier:
+    refresh_policy: invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 200
+    timeout_ms: 10000
+combo_safety:
+  geometry: contained_by_active_document
+  outside_document_refusal: combo_rect_outside_document_rect
+  invalid_extent_refusal: combo_rect_invalid
+  scroll_frontier: retain_refused_combo_when_scroll_supported
+  scroll_primitive: consultation_v2.runtime.ConsultationRuntime.scroll_element_into_view
+  activation_authority: none
+authorities:
+  fill: false
+  upload: false
+  submit: false
+transitions:
+  read_only_form_projection:
+    operation: observe
+    grammar: ui_action
+    call:
+      op: observe
+    traversal_primitive: consultation_v2.tree.find_elements
+    match_primitive: consultation_v2.snapshot.matches_spec
+    next: terminal

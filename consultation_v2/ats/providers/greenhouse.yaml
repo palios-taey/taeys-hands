@@ -1,0 +1,153 @@
+schema: ats_provider_surface_v1
+provider: greenhouse
+status: qualification_candidate
+executable: true
+route:
+  scheme: https
+  exact_hosts:
+    - boards.greenhouse.io
+    - job-boards.greenhouse.io
+  suffix_hosts: []
+  identity_fields:
+    - tenant
+    - job
+  grammars:
+    - id: hosted_job
+      path:
+        - capture: tenant
+          type: slug
+        - literal: jobs
+        - capture: job
+          type: integer
+      query: []
+    - id: hosted_job_with_identity_query
+      path:
+        - capture: tenant
+          type: slug
+        - literal: jobs
+        - capture: job
+          type: integer
+      query:
+        - key: gh_jid
+          capture: job
+          type: integer
+    - id: hosted_apply
+      path:
+        - capture: tenant
+          type: slug
+        - literal: jobs
+        - capture: job
+          type: integer
+        - literal: apply
+      query: []
+    - id: hosted_apply_with_identity_query
+      path:
+        - capture: tenant
+          type: slug
+        - literal: jobs
+        - capture: job
+          type: integer
+        - literal: apply
+      query:
+        - key: gh_jid
+          capture: job
+          type: integer
+    - id: embedded_application
+      path:
+        - literal: embed
+        - literal: job_app
+      query:
+        - key: for
+          capture: tenant
+          type: slug
+        - key: token
+          capture: job
+          type: integer
+    - id: embedded_application_with_validity
+      path:
+        - literal: embed
+        - literal: job_app
+      query:
+        - key: for
+          capture: tenant
+          type: slug
+        - key: token
+          capture: job
+          type: integer
+        - key: validityToken
+          capture: validity
+          type: base64url
+form_projection:
+  enabled: true
+  max_depth: 45
+  anchors_all:
+    - id: first_name_field
+      names_any_of:
+        - First Name
+      roles_any_of:
+        - entry
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+    - id: last_name_field
+      names_any_of:
+        - Last Name
+      roles_any_of:
+        - entry
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+    - id: submit_boundary
+      names_any_of:
+        - Submit Application
+        - Submit application
+      roles_any_of:
+        - push button
+      states_all:
+        - showing
+        - visible
+        - enabled
+      cardinality: exactly_one
+  required_controls:
+    roles_any_of:
+      - entry
+      - password text
+      - combo box
+      - check box
+      - radio button
+      - spin button
+      - toggle button
+    states_all:
+      - showing
+      - visible
+      - enabled
+      - required
+  observation_barrier:
+    refresh_policy: invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 200
+    timeout_ms: 10000
+combo_safety:
+  geometry: contained_by_active_document
+  outside_document_refusal: combo_rect_outside_document_rect
+  invalid_extent_refusal: combo_rect_invalid
+  scroll_frontier: retain_refused_combo_when_scroll_supported
+  scroll_primitive: consultation_v2.runtime.ConsultationRuntime.scroll_element_into_view
+  activation_authority: none
+authorities:
+  fill: false
+  upload: false
+  submit: false
+transitions:
+  read_only_form_projection:
+    operation: observe
+    grammar: ui_action
+    call:
+      op: observe
+    traversal_primitive: consultation_v2.tree.find_elements
+    match_primitive: consultation_v2.snapshot.matches_spec
+    next: terminal

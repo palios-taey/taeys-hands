@@ -59,6 +59,12 @@ ingestion path. A failed post-action tree ends that UI transaction; it never rep
 platform's consultation YAML and do not authorize the current `taey-presence` observer to bypass the
 canonical snapshot.
 
+The additive [`ats/`](ats/) package is a revenue-surface adapter, not a Chat platform package or second UI
+grammar. It contains four public static provider specs and one Greenhouse-only terminal read-only observation
+candidate. It reuses `ui_action({"op":"observe"})`, `tree.find_elements`, and `snapshot.matches_spec`; it grants
+no fill, upload, or submit authority. See
+[`ATS_PROVIDER_READ_ONLY_RUNBOOK.md`](../docs/ATS_PROVIDER_READ_ONLY_RUNBOOK.md).
+
 ## Document status
 
 | Document | Status | Use |

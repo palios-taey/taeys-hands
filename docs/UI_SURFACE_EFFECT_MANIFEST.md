@@ -29,7 +29,7 @@ Per-platform supervised policy: `consultation_v2/platforms/<platform>/supervised
 |---|---|---|
 | chatgpt, claude, gemini, grok, perplexity | `consultation_v2/platforms/<p>/supervised_ui.yaml` | **PERMITTED — supervised, local-effect only.** Policy declares capability + effect only; it carries no recommended order, target sequence, expected-next control, or corrective answer. |
 | Sales Navigator public-safe control maps | *(not yet migrated)* | **NOT YET IN SCOPE** — migration to a supervised surface is a later consolidation step, gated separately. |
-| ATS provider control maps | *(apply-machine, not migrated)* | **NOT YET IN SCOPE** — split + adapt is a later step; ATS runtime stays in apply-machine. |
+| ATS provider read-only maps | `consultation_v2/ats/providers/*.yaml` | **PUBLIC MECHANICAL CANDIDATE, NOT PRODUCTION-QUALIFIED** — Greenhouse alone may compile one terminal read-only observation. Lever/Ashby are mapping-only; Workday is inactive. Fill, upload, and submit remain prohibited. Private application state stays outside Hands. |
 | taey-ed Mac screen recipes | *(taey-ed)* | **EXCLUDED** from this consolidation (Jesse). |
 
 ### Named-exception mature engine (distinct lane — not `ui_action`)

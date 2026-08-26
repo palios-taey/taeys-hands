@@ -1,0 +1,108 @@
+schema: ats_provider_surface_v1
+provider: workday
+status: inactive_mapping
+executable: false
+route:
+  scheme: https
+  exact_hosts: []
+  suffix_hosts:
+    - .myworkdayjobs.com
+    - .workdayjobs.com
+  identity_fields:
+    - host
+    - board
+    - requisition
+  grammars:
+    - id: localized_job
+      path:
+        - capture: locale
+          type: locale
+        - capture: board
+          type: slug
+        - literal: job
+        - capture: location
+          type: workday_text
+        - capture: requisition
+          type: workday_job
+      query: []
+    - id: hosted_job
+      path:
+        - capture: board
+          type: slug
+        - literal: job
+        - capture: location
+          type: workday_text
+        - capture: requisition
+          type: workday_job
+      query: []
+    - id: compact_job
+      path:
+        - capture: board
+          type: slug
+        - literal: job
+        - capture: requisition
+          type: workday_job
+      query: []
+form_projection:
+  enabled: false
+  max_depth: 45
+  anchors_all:
+    - id: information_section
+      names_any_of:
+        - My Information
+      roles_any_of:
+        - heading
+        - section
+      states_all:
+        - showing
+        - visible
+      cardinality: exactly_one
+    - id: experience_section
+      names_any_of:
+        - My Experience
+      roles_any_of:
+        - heading
+        - section
+      states_all:
+        - showing
+        - visible
+      cardinality: exactly_one
+  required_controls:
+    roles_any_of:
+      - entry
+      - password text
+      - combo box
+      - check box
+      - radio button
+      - spin button
+      - toggle button
+    states_all:
+      - showing
+      - visible
+      - enabled
+      - required
+  observation_barrier:
+    refresh_policy: invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 200
+    timeout_ms: 10000
+combo_safety:
+  geometry: contained_by_active_document
+  outside_document_refusal: combo_rect_outside_document_rect
+  invalid_extent_refusal: combo_rect_invalid
+  scroll_frontier: retain_refused_combo_when_scroll_supported
+  scroll_primitive: consultation_v2.runtime.ConsultationRuntime.scroll_element_into_view
+  activation_authority: none
+authorities:
+  fill: false
+  upload: false
+  submit: false
+transitions:
+  read_only_form_projection:
+    operation: observe
+    grammar: ui_action
+    call:
+      op: observe
+    traversal_primitive: consultation_v2.tree.find_elements
+    match_primitive: consultation_v2.snapshot.matches_spec
+    next: terminal
