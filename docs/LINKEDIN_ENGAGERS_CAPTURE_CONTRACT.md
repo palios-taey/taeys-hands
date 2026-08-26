@@ -14,16 +14,19 @@ qualified Jobs operations. There is no second platform or runner.
 ## Exact machine
 
 The private canonical transaction contains exactly `schema`, `operation`,
-`source_ref`, `sink_ref`, `notifications_name`, and `return_url`.
-`notifications_name` is a nonempty bounded private live label; runtime exact
-AT-SPI equality and a match count of one are the authority. `return_url` must
-be the exact HTTPS LinkedIn Jobs search-results URL occupied at the start.
+`source_ref`, `sink_ref`, and `return_url`. `return_url` must be the exact HTTPS
+LinkedIn Jobs search-results URL occupied at the start. The Notifications
+authority is public and platform-owned: exactly one showing, enabled link with
+the exact normalized LinkedIn Notifications URI, the exact `jump` action at
+index `0`, and a nearest `document web` ancestor whose URL equals the current
+platform document. LinkedIn's separate `/preload/` document is not authority,
+and the mutable unread count in the accessible name is never transaction input.
 
 While holding one CAREERS lock, Hands:
 
-1. Proves the exact private Jobs URL and one exact Notifications link, then
-   requires exactly the YAML-owned `jump` action at index `0` and invokes it
-   once.
+1. Proves the exact private Jobs URL and one current-platform-document
+   Notifications link, then invokes its already-proven YAML-owned `jump` action
+   at index `0` once.
 2. Requires two fresh cache-invalidating observations of the exact
    `/notifications?filter=all` route and one exact `My posts` radio control.
 3. Requires exactly the YAML-owned `press` action at index `0`, invokes it
@@ -86,7 +89,7 @@ mode `0700`. Its semantic fields are exactly the existing engagement private
 input contract:
 
 ```json
-{"notifications_name":"PRIVATE_EXACT_NOTIFICATIONS_LABEL","operation":"capture_visible_new_engagement_signal","return_url":"https://www.linkedin.com/jobs/search-results/?PRIVATE_QUERY","schema":"linkedin_jobs_private_input_v1","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION","source_ref":"PRIVATE_AUTHORIZED_SOURCE_REFERENCE"}
+{"operation":"capture_visible_new_engagement_signal","return_url":"https://www.linkedin.com/jobs/search-results/?PRIVATE_QUERY","schema":"linkedin_engagement_private_input_v2","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION","source_ref":"PRIVATE_AUTHORIZED_SOURCE_REFERENCE"}
 ```
 
 The absolute `sink_ref` must equal the sink derived from the seat and
@@ -173,3 +176,20 @@ It proved the exact return URL but exposed the mutable-unread-label defect fixed
 by PR `#222`; the fresh post-fix identity produced the successful chain above.
 The private receipts remain the evidence authority. This public record exposes
 only their hashes and non-personal terminal facts.
+
+The v1 transaction and receipt schemas remain frozen for historical
+verification. The label-free preparer emits only
+`linkedin_engagement_private_input_v2`, and the runner emits only
+`linkedin_engagement_receipt_v2`. An authorized operator can prove the exact
+private prod2 receipt remains valid without publishing it:
+
+```bash
+python3 consultation_v2/validators/validate_linkedin_engagement_history.py \
+  --prod2-receipt "$AUTHORIZED_PRIVATE_PROD2_RECEIPT"
+```
+
+The qualification above remains historical evidence for its pinned commits.
+It is not evidence for later transaction preparation: an accepted private draft
+must not freeze the mutable unread-count label. Current qualification therefore
+requires the current-platform-document URI/action authority described above and
+a wholly new transaction identity.

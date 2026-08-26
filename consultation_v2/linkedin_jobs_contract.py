@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 
 PRIVATE_INPUT_SCHEMA = 'linkedin_jobs_private_input_v1'
+ENGAGEMENT_PRIVATE_INPUT_SCHEMA = 'linkedin_engagement_private_input_v2'
 PUBLIC_OPERATIONS = frozenset({
     'capture_selected_job',
     'capture_visible_new_engagement_signal',
@@ -18,7 +19,8 @@ PUBLIC_OPERATIONS = frozenset({
 })
 PUBLIC_PLATFORM = 'linkedin'
 RECEIPT_SCHEMA = 'linkedin_jobs_receipt_v1'
-ENGAGEMENT_RECEIPT_SCHEMA = 'linkedin_engagement_receipt_v1'
+ENGAGEMENT_RECEIPT_SCHEMA_V1 = 'linkedin_engagement_receipt_v1'
+ENGAGEMENT_RECEIPT_SCHEMA = 'linkedin_engagement_receipt_v2'
 SELECTED_JOB_SCHEMA = 'linkedin_selected_job_v1'
 ENGAGEMENT_SIGNAL_SCHEMA = 'linkedin_engagement_signal_v1'
 
@@ -247,19 +249,33 @@ def read_private_input(
             'detail_company_name',
         })
     elif operation == 'capture_visible_new_engagement_signal':
-        expected = frozenset({
-            'schema',
-            'operation',
-            'source_ref',
-            'sink_ref',
-            'notifications_name',
-            'return_url',
-        })
+        if value.get('schema') == PRIVATE_INPUT_SCHEMA:
+            expected = frozenset({
+                'schema',
+                'operation',
+                'source_ref',
+                'sink_ref',
+                'notifications_name',
+                'return_url',
+            })
+        else:
+            expected = frozenset({
+                'schema',
+                'operation',
+                'source_ref',
+                'sink_ref',
+                'return_url',
+            })
     else:
         raise LinkedInJobsContractError('transaction operation is unsupported')
     if frozenset(value) != expected:
         raise LinkedInJobsContractError('transaction fields are incomplete or unknown')
-    if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] not in PUBLIC_OPERATIONS:
+    supported_schema = (
+        value['schema'] in {PRIVATE_INPUT_SCHEMA, ENGAGEMENT_PRIVATE_INPUT_SCHEMA}
+        if operation == 'capture_visible_new_engagement_signal'
+        else value['schema'] == PRIVATE_INPUT_SCHEMA
+    )
+    if not supported_schema or value['operation'] not in PUBLIC_OPERATIONS:
         raise LinkedInJobsContractError('transaction schema or operation is unsupported')
     string_fields = {'sink_ref'}
     if operation in {'capture_selected_job', 'select_and_capture_job'}:
@@ -272,20 +288,13 @@ def read_private_input(
         })
     elif operation == 'capture_visible_new_engagement_signal':
         string_fields.add('source_ref')
+        if value['schema'] == PRIVATE_INPUT_SCHEMA:
+            string_fields.add('notifications_name')
     for key in string_fields:
         item = value[key]
         if not isinstance(item, str) or not item or len(item) > 4096:
             raise LinkedInJobsContractError(f'transaction {key} is invalid')
     if operation == 'capture_visible_new_engagement_signal':
-        notifications_name = value['notifications_name']
-        if (
-            not isinstance(notifications_name, str)
-            or not notifications_name
-            or len(notifications_name) > 4096
-        ):
-            raise LinkedInJobsContractError(
-                'transaction notifications_name is invalid'
-            )
         validate_return_url(value['return_url'])
     sink_root = validate_path_beneath_private_root(
         value['sink_ref'],

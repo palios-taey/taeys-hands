@@ -29,10 +29,14 @@ YAML_PATH = PLATFORM_ROOT / 'linkedin.yaml'
 SCHEMAS = {
     'request': PLATFORM_ROOT / 'request.schema.json',
     'result': PLATFORM_ROOT / 'result.schema.json',
-    'private_input': PLATFORM_ROOT / 'private-input.schema.json',
+    'private_input_v1': PLATFORM_ROOT / 'private-input.schema.json',
+    'engagement_private_input_v2': (
+        PLATFORM_ROOT / 'engagement-private-input-v2.schema.json'
+    ),
     'receipt': PLATFORM_ROOT / 'receipt.schema.json',
     'engagement_result': PLATFORM_ROOT / 'engagement-result.schema.json',
-    'engagement_receipt': PLATFORM_ROOT / 'engagement-receipt.schema.json',
+    'engagement_receipt_v1': PLATFORM_ROOT / 'engagement-receipt.schema.json',
+    'engagement_receipt_v2': PLATFORM_ROOT / 'engagement-receipt-v2.schema.json',
 }
 FORBIDDEN_RUNTIME_TOKENS = (
     'find_elements',
@@ -162,7 +166,7 @@ def _validate_yaml() -> list[str]:
         errors.append(f'{YAML_PATH}: engagement operation boundary drifted')
     navigation = engagement.get('navigation') or {}
     if navigation.get('target') != {
-        'private_exact_name_field': 'notifications_name',
+        'scope': 'current_platform_document',
         'role': 'link',
         'states_include': ['showing', 'enabled'],
         'uri': {
@@ -514,7 +518,8 @@ def _validate_interface_patterns() -> list[str]:
                                 f'{CONTRACT}: {state} count/digest mapping is not exact'
                             )
     engagement_result = _load_json(SCHEMAS['engagement_result'])
-    engagement_receipt = _load_json(SCHEMAS['engagement_receipt'])
+    engagement_receipt_v1 = _load_json(SCHEMAS['engagement_receipt_v1'])
+    engagement_receipt_v2 = _load_json(SCHEMAS['engagement_receipt_v2'])
     engagement_result_keys = {
         'ok', 'platform', 'display', 'state', 'failure_code',
         'records_observed', 'records_written', 'content_digest',
@@ -526,10 +531,15 @@ def _validate_interface_patterns() -> list[str]:
     ):
         errors.append(f"{SCHEMAS['engagement_result']}: exact 11-key result drifted")
     if (
-        (engagement_receipt.get('properties') or {}).get('schema', {}).get('const')
+        (engagement_receipt_v1.get('properties') or {}).get('schema', {}).get('const')
         != 'linkedin_engagement_receipt_v1'
     ):
-        errors.append(f"{SCHEMAS['engagement_receipt']}: receipt identity drifted")
+        errors.append(f"{SCHEMAS['engagement_receipt_v1']}: receipt identity drifted")
+    if (
+        (engagement_receipt_v2.get('properties') or {}).get('schema', {}).get('const')
+        != 'linkedin_engagement_receipt_v2'
+    ):
+        errors.append(f"{SCHEMAS['engagement_receipt_v2']}: receipt identity drifted")
     engagement_cases = (
         ('already_known', True, None, 1, 0, '2' * 64, True),
         ('ambiguous_signal', False, 'ambiguous_signal', 0, 0, None, False),
@@ -582,11 +592,17 @@ def _validate_engagement_schema_fixtures() -> list[str]:
     from jsonschema import Draft202012Validator
 
     errors: list[str] = []
+    private_schema_v1 = _load_json(SCHEMAS['private_input_v1'])
+    private_schema_v2 = _load_json(SCHEMAS['engagement_private_input_v2'])
     result_schema = _load_json(SCHEMAS['engagement_result'])
-    receipt_schema = _load_json(SCHEMAS['engagement_receipt'])
+    receipt_schema_v1 = _load_json(SCHEMAS['engagement_receipt_v1'])
+    receipt_schema_v2 = _load_json(SCHEMAS['engagement_receipt_v2'])
     for path, schema in (
+        (SCHEMAS['private_input_v1'], private_schema_v1),
+        (SCHEMAS['engagement_private_input_v2'], private_schema_v2),
         (SCHEMAS['engagement_result'], result_schema),
-        (SCHEMAS['engagement_receipt'], receipt_schema),
+        (SCHEMAS['engagement_receipt_v1'], receipt_schema_v1),
+        (SCHEMAS['engagement_receipt_v2'], receipt_schema_v2),
     ):
         try:
             Draft202012Validator.check_schema(schema)
@@ -616,7 +632,7 @@ def _validate_engagement_schema_fixtures() -> list[str]:
         'verdict': 'executed',
     }
     receipt = {
-        'schema': 'linkedin_engagement_receipt_v1',
+        'schema': 'linkedin_engagement_receipt_v2',
         'platform': 'linkedin',
         'operation': 'capture_visible_new_engagement_signal',
         'display': ':18',
@@ -637,7 +653,6 @@ def _validate_engagement_schema_fixtures() -> list[str]:
         'expected_transaction_sha256': '7' * 64,
         'source_ref_sha256': '8' * 64,
         'sink_ref_sha256': '9' * 64,
-        'notifications_name_sha256': 'a' * 64,
         'return_url_sha256': 'b' * 64,
         'start': {
             'route_exact': True,
@@ -694,15 +709,49 @@ def _validate_engagement_schema_fixtures() -> list[str]:
         },
     }
     validators = {
+        'private_v1': Draft202012Validator(private_schema_v1),
+        'private_v2': Draft202012Validator(private_schema_v2),
         'result': Draft202012Validator(result_schema),
-        'receipt': Draft202012Validator(receipt_schema),
+        'receipt_v1': Draft202012Validator(receipt_schema_v1),
+        'receipt_v2': Draft202012Validator(receipt_schema_v2),
+        'receipt': Draft202012Validator(receipt_schema_v2),
     }
+    legacy_receipt = deepcopy(receipt)
+    legacy_receipt.update({
+        'schema': 'linkedin_engagement_receipt_v1',
+        'notifications_name_sha256': 'a' * 64,
+    })
+    private_v1 = {
+        'schema': 'linkedin_jobs_private_input_v1',
+        'operation': 'capture_visible_new_engagement_signal',
+        'source_ref': '/private/source',
+        'sink_ref': '/private/sink',
+        'notifications_name': 'Notifications, 0 new notifications',
+        'return_url': 'https://www.linkedin.com/jobs/search-results/?keywords=ai',
+    }
+    private_v2 = {
+        key: value
+        for key, value in private_v1.items()
+        if key != 'notifications_name'
+    }
+    private_v2['schema'] = 'linkedin_engagement_private_input_v2'
     for label, validator, candidate in (
+        ('valid v1 private input', validators['private_v1'], private_v1),
+        ('valid v2 private input', validators['private_v2'], private_v2),
         ('valid captured result', validators['result'], result),
-        ('valid captured receipt', validators['receipt'], receipt),
+        ('valid captured v1 receipt', validators['receipt_v1'], legacy_receipt),
+        ('valid captured v2 receipt', validators['receipt_v2'], receipt),
     ):
         if not validator.is_valid(candidate):
             errors.append(f'{label} rejected by engagement schema')
+    for label, validator, candidate in (
+        ('v1 private input accepted as v2', validators['private_v2'], private_v1),
+        ('v2 private input accepted as v1', validators['private_v1'], private_v2),
+        ('v1 receipt accepted as v2', validators['receipt_v2'], legacy_receipt),
+        ('v2 receipt accepted as v1', validators['receipt_v1'], receipt),
+    ):
+        if validator.is_valid(candidate):
+            errors.append(label)
 
     empty_action = {
         'stage': 'notifications_navigation',
@@ -1012,7 +1061,8 @@ def _validate_engagement_schema_fixtures() -> list[str]:
 
 def _validate_restore_projection() -> list[str]:
     from consultation_v2.platforms.linkedin.driver import (
-        _exact_notifications_target,
+        _notifications_target,
+        observe_engagement_start,
         observe_engagement_restore,
     )
     from consultation_v2.types import ElementRef, Snapshot
@@ -1026,14 +1076,58 @@ def _validate_restore_projection() -> list[str]:
                 raise IndexError(index)
             return self._uri
 
+    class Action:
+        def __init__(self, names: tuple[str, ...]) -> None:
+            self._names = names
+
+        def get_n_actions(self) -> int:
+            return len(self._names)
+
+        def get_action_name(self, index: int) -> str:
+            return self._names[index]
+
+    class Document:
+        def __init__(self, url: str) -> None:
+            self._url = url
+
+        def get_parent(self) -> None:
+            return None
+
+        def get_role_name(self) -> str:
+            return 'document web'
+
+        def get_document_iface(self) -> Document:
+            return self
+
+        def get_document_attribute_value(self, key: str) -> str | None:
+            return self._url if key == 'DocURL' else None
+
     class Accessible:
-        def __init__(self, uri: str) -> None:
+        def __init__(
+            self,
+            uri: str,
+            document_url: str,
+            action_names: tuple[str, ...],
+        ) -> None:
             self._hyperlink = Hyperlink(uri)
+            self._document = Document(document_url)
+            self._action = Action(action_names)
 
         def get_hyperlink(self) -> Hyperlink:
             return self._hyperlink
 
-    def notifications(name: str, uri: str) -> ElementRef:
+        def get_parent(self) -> Document:
+            return self._document
+
+        def get_action_iface(self) -> Action:
+            return self._action
+
+    def notifications(
+        name: str,
+        uri: str,
+        document_url: str,
+        action_names: tuple[str, ...] = ('jump',),
+    ) -> ElementRef:
         return ElementRef(
             key=None,
             name=name,
@@ -1041,57 +1135,78 @@ def _validate_restore_projection() -> list[str]:
             x=None,
             y=None,
             states=['showing', 'enabled'],
-            atspi_obj=Accessible(uri),
+            atspi_obj=Accessible(uri, document_url, action_names),
         )
 
     def snapshot(*elements: ElementRef) -> Snapshot:
         return Snapshot(
             platform='linkedin',
-            url='https://www.linkedin.com/jobs/search-results?keywords=engineering',
+            url=return_url,
             unknown=list(elements),
         )
 
     errors: list[str] = []
-    old_name = 'Notifications, 933 new notifications'
-    current_name = 'Notifications, 0 new notifications'
+    current_name = 'Notifications, 15 new notifications'
     notifications_uri = 'https://www.linkedin.com/notifications'
     return_url = 'https://www.linkedin.com/jobs/search-results?keywords=engineering'
-    old_snapshot = snapshot(notifications(old_name, notifications_uri))
-    current_snapshot = snapshot(notifications(current_name, notifications_uri))
+    preload_url = 'https://www.linkedin.com/preload/?_bprMode=vanilla'
+    samples = [
+        snapshot(
+            notifications(current_name, notifications_uri, return_url),
+            notifications('15 new notifications Notifications', notifications_uri, preload_url),
+        )
+        for _sample in range(3)
+    ]
+    digests: list[str] = []
+    for sample in samples:
+        target, count = _notifications_target(sample)
+        start = observe_engagement_start(sample, return_url)
+        restored = observe_engagement_restore(sample, return_url)
+        digest = start['notifications_target_state_digest']
+        if not (
+            target is not None
+            and count == 1
+            and start['route_exact'] is True
+            and start['route_kind_exact'] is True
+            and start['notifications_target_match_count'] == 1
+            and restored == start
+            and isinstance(digest, str)
+        ):
+            errors.append('current-document Notifications authority was not exact')
+            break
+        digests.append(digest)
+    if len(digests) != 3 or len(set(digests)) != 1:
+        errors.append('three read-only Notifications samples did not stabilize')
 
-    old_target, old_count = _exact_notifications_target(old_snapshot, old_name)
-    changed_target, changed_count = _exact_notifications_target(
-        current_snapshot,
-        old_name,
+    changed_name = snapshot(
+        notifications('Notifications, 933 new notifications', notifications_uri, return_url),
+        notifications('933 new notifications Notifications', notifications_uri, preload_url),
     )
+    changed_target, changed_count = _notifications_target(changed_name)
+    changed_start = observe_engagement_start(changed_name, return_url)
+    changed_restore = observe_engagement_restore(changed_name, return_url)
     if (
-        old_target is None
-        or old_count != 1
-        or changed_target is not None
-        or changed_count != 0
+        changed_target is None
+        or changed_count != 1
+        or changed_start['notifications_target_state_digest'] != digests[0]
+        or changed_restore['notifications_target_state_digest'] != digests[0]
     ):
-        errors.append('pre-action Notifications target no longer requires private exact name')
-
-    first = observe_engagement_restore(current_snapshot, return_url)
-    second = observe_engagement_restore(current_snapshot, return_url)
-    if not (
-        first['route_exact'] is True
-        and first['route_kind_exact'] is True
-        and first['notifications_target_match_count'] == 1
-        and isinstance(first['notifications_target_state_digest'], str)
-        and first['notifications_target_state_digest']
-        == second['notifications_target_state_digest']
-    ):
-        errors.append('changed unread count did not satisfy stable restore projection')
+        errors.append('mutable unread count remained part of Notifications authority')
 
     failures = {
         'zero': snapshot(),
-        'duplicate': snapshot(
-            notifications(current_name, notifications_uri),
-            notifications('Notifications, 1 new notification', notifications_uri),
+        'duplicate_current_document': snapshot(
+            notifications(current_name, notifications_uri, return_url),
+            notifications('Notifications, 1 new notification', notifications_uri, return_url),
+        ),
+        'preload_only': snapshot(
+            notifications('15 new notifications Notifications', notifications_uri, preload_url),
         ),
         'wrong_uri': snapshot(
-            notifications(current_name, 'https://www.linkedin.com/feed/'),
+            notifications(current_name, 'https://www.linkedin.com/feed/', return_url),
+        ),
+        'wrong_action': snapshot(
+            notifications(current_name, notifications_uri, return_url, ('click',)),
         ),
     }
     for label, candidate in failures.items():
@@ -1396,13 +1511,17 @@ def validate() -> list[str]:
     errors: list[str] = []
     errors.extend(_validate_schema(SCHEMAS['request'], {'operation'}))
     errors.extend(_validate_schema(
-        SCHEMAS['private_input'],
+        SCHEMAS['private_input_v1'],
         {'schema', 'operation', 'sink_ref'},
         {
             'search_ref', 'target_card_name', 'detail_title_name',
             'detail_company_name', 'source_ref', 'notifications_name',
             'return_url',
         },
+    ))
+    errors.extend(_validate_schema(
+        SCHEMAS['engagement_private_input_v2'],
+        {'schema', 'operation', 'source_ref', 'sink_ref', 'return_url'},
     ))
     errors.extend(_validate_schema(SCHEMAS['result'], {
         'ok', 'platform', 'display', 'state', 'failure_code', 'records_observed',
@@ -1426,13 +1545,25 @@ def validate() -> list[str]:
         'records_written', 'content_digest', 'receipt_sha256',
         'turn_lineage_sha256', 'restore_verified',
     }))
-    errors.extend(_validate_schema(SCHEMAS['engagement_receipt'], {
+    errors.extend(_validate_schema(SCHEMAS['engagement_receipt_v1'], {
         'schema', 'platform', 'operation', 'display', 'requester',
         'turn_lineage_sha256', 'correlation_id_sha256', 'deadline_seconds',
         'hands_commit', 'yaml_sha256', 'terminal_state', 'ok', 'failure_code',
         'records_observed', 'records_written', 'content_digest',
         'restore_verified', 'transaction_sha256', 'expected_transaction_sha256',
         'source_ref_sha256', 'sink_ref_sha256', 'notifications_name_sha256',
+        'return_url_sha256', 'start', 'notifications_action',
+        'notifications_postcondition', 'my_posts_action',
+        'my_posts_postcondition', 'candidate', 'sink',
+        'signal_postcondition', 'restore', 'lock',
+    }))
+    errors.extend(_validate_schema(SCHEMAS['engagement_receipt_v2'], {
+        'schema', 'platform', 'operation', 'display', 'requester',
+        'turn_lineage_sha256', 'correlation_id_sha256', 'deadline_seconds',
+        'hands_commit', 'yaml_sha256', 'terminal_state', 'ok', 'failure_code',
+        'records_observed', 'records_written', 'content_digest',
+        'restore_verified', 'transaction_sha256', 'expected_transaction_sha256',
+        'source_ref_sha256', 'sink_ref_sha256',
         'return_url_sha256', 'start', 'notifications_action',
         'notifications_postcondition', 'my_posts_action',
         'my_posts_postcondition', 'candidate', 'sink',

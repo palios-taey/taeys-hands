@@ -143,7 +143,7 @@ workflow:
           filter: my_posts_all
     navigation:
       target:
-        private_exact_name_field: notifications_name
+        scope: current_platform_document
         role: link
         states_include:
           - showing

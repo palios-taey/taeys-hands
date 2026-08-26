@@ -6,7 +6,7 @@ import time
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
-from consultation_v2 import input as input_core
+from consultation_v2 import atspi, input as input_core
 from consultation_v2.linkedin_jobs_contract import (
     ENGAGEMENT_SIGNAL_SCHEMA,
     SELECTED_JOB_SCHEMA,
@@ -504,28 +504,54 @@ def _uri_matches(url: str | None, contract: Mapping[str, Any]) -> bool:
     )
 
 
-def _exact_notifications_target(
-    snapshot: Snapshot,
-    notifications_name: str,
-) -> tuple[ElementRef | None, int]:
-    target = (_engagement_workflow().get('navigation') or {}).get('target') or {}
-    matches = [
-        element
-        for element in _all_elements(snapshot)
-        if (
-            element.name == notifications_name
-            and element.role == target.get('role')
-            and _states_match(element, target.get('states_include'))
-            and _uri_matches(_element_uri(element), target.get('uri') or {})
-        )
-    ]
-    return (matches[0] if len(matches) == 1 else None), len(matches)
+def _nearest_document_url(element: ElementRef) -> str | None:
+    ancestor = element.atspi_obj
+    if ancestor is None:
+        return None
+    for _depth in range(64):
+        try:
+            ancestor = ancestor.get_parent()
+        except Exception as exc:
+            raise RuntimeError('cannot read LinkedIn Notifications ancestry') from exc
+        if ancestor is None:
+            return None
+        try:
+            role = str(ancestor.get_role_name() or '')
+        except Exception as exc:
+            raise RuntimeError('cannot read LinkedIn Notifications ancestor role') from exc
+        if role == 'document web':
+            return atspi.get_document_url(ancestor)
+    raise RuntimeError('LinkedIn Notifications ancestry exceeds the bounded document search')
 
 
-def _restore_notifications_target(
-    snapshot: Snapshot,
-) -> tuple[ElementRef | None, int]:
-    target = (_engagement_workflow().get('navigation') or {}).get('target') or {}
+def _notifications_target(snapshot: Snapshot) -> tuple[ElementRef | None, int]:
+    navigation = _engagement_workflow().get('navigation') or {}
+    target = navigation.get('target') or {}
+    action = navigation.get('action') or {}
+    action_name = action.get('name')
+    if (
+        target.get('scope') != 'current_platform_document'
+        or not isinstance(action_name, str)
+        or not action_name
+        or action.get('index') != 0
+    ):
+        raise RuntimeError('LinkedIn Notifications authority is invalid')
+
+    def exact_action(element: ElementRef) -> bool:
+        if element.atspi_obj is None:
+            return False
+        try:
+            action_iface = element.atspi_obj.get_action_iface()
+            action_count = int(action_iface.get_n_actions()) if action_iface else 0
+            indexes = [
+                index
+                for index in range(action_count)
+                if str(action_iface.get_action_name(index) or '') == action_name
+            ]
+        except Exception as exc:
+            raise RuntimeError('cannot read LinkedIn Notifications actions') from exc
+        return indexes == [0]
+
     matches = [
         element
         for element in _all_elements(snapshot)
@@ -533,9 +559,30 @@ def _restore_notifications_target(
             element.role == target.get('role')
             and _states_match(element, target.get('states_include'))
             and _uri_matches(_element_uri(element), target.get('uri') or {})
+            and _nearest_document_url(element) == snapshot.url
+            and exact_action(element)
         )
     ]
     return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
+def _notifications_target_state_digest(
+    snapshot: Snapshot,
+    target: ElementRef,
+    match_count: int,
+) -> str:
+    navigation = _engagement_workflow().get('navigation') or {}
+    authority = navigation.get('target') or {}
+    action = navigation.get('action') or {}
+    return sha256_hex(canonical_json_bytes({
+        'current_document_url': snapshot.url,
+        'role': target.role,
+        'states_include': authority.get('states_include'),
+        'normalized_uri': authority.get('uri'),
+        'action_name': action.get('name'),
+        'action_index': action.get('index'),
+        'match_count': match_count,
+    }))
 
 
 def _exact_mapped_engagement_element(
@@ -608,16 +655,14 @@ def _perform_engagement_action(
 
 def observe_engagement_start(
     snapshot: Snapshot,
-    notifications_name: str,
     return_url: str,
 ) -> dict[str, Any]:
-    target, count = _exact_notifications_target(snapshot, notifications_name)
-    state_digest = sha256_hex(canonical_json_bytes({
-        'name': target.name,
-        'role': target.role,
-        'states': sorted(target.states),
-        'uri': _element_uri(target),
-    })) if target is not None else None
+    target, count = _notifications_target(snapshot)
+    state_digest = (
+        _notifications_target_state_digest(snapshot, target, count)
+        if target is not None
+        else None
+    )
     return {
         'route_exact': snapshot.url == return_url,
         'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
@@ -630,13 +675,12 @@ def observe_engagement_restore(
     snapshot: Snapshot,
     return_url: str,
 ) -> dict[str, Any]:
-    target, count = _restore_notifications_target(snapshot)
-    state_digest = sha256_hex(canonical_json_bytes({
-        'name': target.name,
-        'role': target.role,
-        'states': sorted(target.states),
-        'uri': _element_uri(target),
-    })) if target is not None else None
+    target, count = _notifications_target(snapshot)
+    state_digest = (
+        _notifications_target_state_digest(snapshot, target, count)
+        if target is not None
+        else None
+    )
     return {
         'route_exact': snapshot.url == return_url,
         'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
@@ -647,9 +691,8 @@ def observe_engagement_restore(
 
 def activate_notifications(
     snapshot: Snapshot,
-    notifications_name: str,
 ) -> dict[str, Any]:
-    target, count = _exact_notifications_target(snapshot, notifications_name)
+    target, count = _notifications_target(snapshot)
     action = (_engagement_workflow().get('navigation') or {}).get('action') or {}
     return _perform_engagement_action(target, count, action, 'notifications_navigation')
 
