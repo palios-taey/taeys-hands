@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 
@@ -17,6 +18,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from consultation_v2.yaml_contract import get_extraction, load_platform_yaml  # noqa: E402
 from consultation_v2.platforms.claude.downloaded_artifact import (  # noqa: E402
     ClaudeArtifactDownloadError,
+    ClaudeDownloadSnapshot,
     materialize_claude_download,
     resolve_claude_download_scope,
     snapshot_claude_downloads,
@@ -35,6 +37,11 @@ PLATFORM_LABELS = {
 IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 CHATGPT_POWER_INSTANT_DESCRIPTION = (
     "Instant, 1 of 5. Use Left and Right arrow keys to adjust power."
+)
+CLAUDE_ARTIFACT_CONTROL_KEYS = (
+    "generated_artifact_controls_section",
+    "generated_artifact_view_button",
+    "generated_artifact_download_button",
 )
 
 
@@ -172,6 +179,17 @@ def _ensure_request(path: Path, text: str) -> None:
         return
     with path.open("x", encoding="utf-8") as handle:
         handle.write(text)
+    path.chmod(0o600)
+
+
+def _create_request(path: Path, text: str) -> None:
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"request path already exists; refusing retry: {path}"
+        ) from exc
     path.chmod(0o600)
 
 
@@ -1096,85 +1114,196 @@ def _require_extraction_steps(
         )
 
 
+def _require_claude_extraction_workflows() -> None:
+    _require_extraction_steps(
+        "claude",
+        "assistant_text",
+        (
+            ("scroll_to_bottom", "message_actions_button", "last", None),
+            ("hover", "message_actions_button", "last", None),
+            ("copy_element", "copy_button", "last", None),
+            ("read_clipboard", None, "last", None),
+        ),
+    )
+    _require_extraction_steps(
+        "claude",
+        "downloaded_file",
+        (("download", "generated_artifact_download_button", "last", None),),
+    )
+
+
+def _bind_claude_observation_display(display: str) -> None:
+    current_display = str(os.environ.get("DISPLAY") or "").strip()
+    if current_display and current_display != display:
+        raise RuntimeError(
+            f"process DISPLAY={current_display!r} does not match Claude display {display!r}"
+        )
+    bus_path = Path("/tmp") / f"a11y_bus_{display}"
+    try:
+        descriptor = os.open(
+            bus_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            f"could not open Claude AT-SPI bus binding: {bus_path}"
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError(
+                "Claude AT-SPI bus binding must be a regular nonsymlink file"
+            )
+        bus = os.read(descriptor, 4096).decode("utf-8").strip()
+        if os.read(descriptor, 1):
+            raise RuntimeError("Claude AT-SPI bus binding is unexpectedly large")
+    finally:
+        os.close(descriptor)
+    if not bus:
+        raise RuntimeError("Claude AT-SPI bus binding is empty")
+    current_bus = str(os.environ.get("AT_SPI_BUS_ADDRESS") or "").strip()
+    if current_bus and current_bus != bus:
+        raise RuntimeError(
+            "process AT_SPI_BUS_ADDRESS does not match the Claude display binding"
+        )
+    os.environ["DISPLAY"] = display
+    os.environ["AT_SPI_BUS_ADDRESS"] = bus
+
+
+def _build_canonical_claude_snapshot():
+    from consultation_v2.snapshot import build_snapshot
+
+    _firefox, _document, snapshot = build_snapshot("claude")
+    return snapshot
+
+
+def _classify_claude_extraction_snapshot(
+    snapshot,
+) -> tuple[str, str, dict[str, int]]:
+    if snapshot.platform != "claude":
+        raise RuntimeError("canonical Claude extraction snapshot has wrong platform")
+    counts = {
+        key: len((snapshot.mapped or {}).get(key) or ())
+        for key in CLAUDE_ARTIFACT_CONTROL_KEYS
+    }
+    observed = tuple(counts[key] for key in CLAUDE_ARTIFACT_CONTROL_KEYS)
+    if observed == (1, 1, 1):
+        mode = "downloaded_file"
+    elif observed == (0, 0, 0):
+        mode = "assistant_text"
+    else:
+        raise RuntimeError(
+            "canonical Claude extraction snapshot has partial or duplicate "
+            f"generated-artifact controls: {counts}"
+        )
+    serialized = json.dumps(
+        snapshot.serializable(),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return mode, hashlib.sha256(serialized).hexdigest(), counts
+
+
+def _prepare_claude_extraction(
+    display: str,
+) -> tuple[str, str, dict[str, int], ClaudeDownloadSnapshot | None]:
+    _bind_claude_observation_display(display)
+    snapshot = _build_canonical_claude_snapshot()
+    mode, revision, counts = _classify_claude_extraction_snapshot(snapshot)
+    download_before = None
+    if mode == "downloaded_file":
+        download_before = snapshot_claude_downloads(
+            resolve_claude_download_scope(display)
+        )
+    return mode, revision, counts, download_before
+
+
 def _extract_content(
     monitor_id: str | None,
     platform: str,
     display: str,
     response_file: Path,
     completed_before_stop_source_sha256: str | None = None,
+    claude_extraction_mode: str | None = None,
+    claude_launcher_revision: str | None = None,
 ) -> str:
     if platform == "claude":
-        _require_extraction_steps(
-            "claude",
-            "assistant_text",
-            (
-                ("scroll_to_bottom", "message_actions_button", "last", None),
-                ("hover", "message_actions_button", "last", None),
-                ("copy_element", "copy_button", "last", None),
-                ("read_clipboard", None, "last", None),
-            ),
-        )
-        _require_extraction_steps(
-            "claude",
-            "downloaded_file",
-            (
-                (
-                    "download",
-                    "generated_artifact_download_button",
-                    "last",
-                    None,
-                ),
-            ),
-        )
-        return (
-            f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. Execute one frozen "
-            f"Claude extraction transaction on {display} with drive_chat only. Do not read any file, "
+        _require_claude_extraction_workflows()
+        if claude_extraction_mode not in {"assistant_text", "downloaded_file"}:
+            raise RuntimeError(
+                "Claude extraction requires one launcher-classified output type"
+            )
+        if (
+            claude_launcher_revision is None
+            or re.fullmatch(r"[0-9a-f]{64}", claude_launcher_revision) is None
+        ):
+            raise RuntimeError(
+                "Claude extraction requires a canonical launcher snapshot revision"
+            )
+        expected_count = "1" if claude_extraction_mode == "downloaded_file" else "0"
+        common = (
+            f"The completion monitor reported COMPLETE for monitor_id={monitor_id}. The canonical "
+            f"Hands launcher snapshot selected extraction_mode={claude_extraction_mode} with "
+            f"launcher_snapshot_sha256={claude_launcher_revision}. Execute one frozen Claude "
+            f"extraction transaction on {display} with drive_chat only. Do not read any file, "
             "runbook, or YAML. For click, pass only the exact element key mapped by the immediately "
             f"preceding fresh observation; do not copy or pass an opaque ref. Every drive_chat call "
-            f"must include display={display}; omission is a terminal card violation. Execute exactly this "
-            "sequence:\n"
-            f"1. drive_chat display={display}, action=observe, scope=base; require current_url to "
-            "contain /chat/, require continue_button "
-            "to be absent, and require none of these mapped exception elements: "
-            "send_blocked_previous_message, send_blocked_previous_message_curly, network_connection_alert, "
+            f"must include display={display}; omission is a terminal card violation.\n"
+            f"1. drive_chat display={display}, action=observe, scope=base exactly once; require "
+            "current_url to contain /chat/, require continue_button absent, and require none of "
+            "these mapped exception elements: send_blocked_previous_message, "
+            "send_blocked_previous_message_curly, network_connection_alert, "
             "send_blocked_caution_banner, claude_capacity_alert, claude_capacity_alert_pro, "
             "claude_session_limit_alert, claude_hit_limit_alert, claude_not_working_alert, or "
-            "claude_chat_length_limit_alert. In this same fresh observation count exactly these three "
-            "mapped keys: generated_artifact_controls_section, generated_artifact_view_button, and "
-            "generated_artifact_download_button. Classify before any UI mutation: if all three counts "
-            "are exactly one, choose downloaded_file; if all three counts are zero, choose "
-            "assistant_text; any partial set, duplicate, or other count is a terminal first mismatch.\n"
-            f"2A. downloaded_file only: drive_chat display={display}, action=click, "
-            "element=generated_artifact_download_button exactly once; then make exactly one fresh "
-            f"drive_chat display={display}, action=observe, scope=base. Require the same /chat/ URL, "
-            "continue_button absent, and no mapped exception. Stop all UI calls. Do not click "
-            "generated_artifact_view_button, any artifact Copy control, or any generic artifact "
-            "control. Do not read the clipboard.\n"
-            f"2B. assistant_text only: drive_chat display={display}, action=key, key=ctrl+End; then "
-            f"drive_chat display={display}, action=observe, scope=base; require the same /chat/ URL, "
-            "continue_button absent, no mapped exception, and exactly one mapped "
-            "message_actions_button owned by the current_response_article. drive_chat "
-            f"display={display}, action=hover, element=message_actions_button exactly once; drive_chat display={display}, "
-            "action=observe, scope=base; require the same URL and exception conditions, at least one "
-            "mapped copy_button named Copy, and exactly one fresh copy_button target marked by the "
-            f"YAML last_by_y selection. drive_chat display={display}, action=click, element=copy_button exactly once; "
-            f"drive_chat display={display}, action=observe, scope=base; require the same URL and "
-            f"exception conditions. drive_chat display={display}, action=read_clipboard, "
-            f"output_file={response_file}; require a new non-empty response file. Stop all UI calls.\n"
-            "Only after the selected branch passes, return exactly one Claude extraction receipt "
+            "claude_chat_length_limit_alert. In this same fresh observation require exactly "
+            f"{expected_count} generated_artifact_controls_section, exactly {expected_count} "
+            "generated_artifact_view_button, and exactly "
+            f"{expected_count} generated_artifact_download_button. Any different, partial, or "
+            "duplicate count is classify-to-execute drift: return a terminal first-mismatch stop "
+            "report before mutation.\n"
+        )
+        if claude_extraction_mode == "downloaded_file":
+            branch = (
+                f"2. drive_chat display={display}, action=click, "
+                "element=generated_artifact_download_button exactly once; then make exactly one "
+                f"fresh drive_chat display={display}, action=observe, scope=base. Require the same "
+                "/chat/ URL, continue_button absent, and no mapped exception. Stop all UI calls. "
+                "Do not click generated_artifact_view_button, any artifact Copy control, or any "
+                "generic artifact control. Do not read the clipboard.\n"
+            )
+        else:
+            branch = (
+                f"2. drive_chat display={display}, action=key, key=ctrl+End; then drive_chat "
+                f"display={display}, action=observe, scope=base; require the same /chat/ URL, "
+                "continue_button absent, no mapped exception, and exactly one mapped "
+                "message_actions_button owned by the current_response_article. drive_chat "
+                f"display={display}, action=hover, element=message_actions_button exactly once; "
+                f"drive_chat display={display}, action=observe, scope=base; require the same URL "
+                "and exception conditions, at least one mapped copy_button named Copy, and exactly "
+                "one fresh copy_button target marked by the YAML last_by_y selection. drive_chat "
+                f"display={display}, action=click, element=copy_button exactly once; drive_chat "
+                f"display={display}, action=observe, scope=base; require the same URL and exception "
+                f"conditions. drive_chat display={display}, action=read_clipboard, "
+                f"output_file={response_file}; require a new non-empty response file. Stop all UI "
+                "calls.\n"
+            )
+        receipt = (
+            "Only after the exact branch passes, return exactly one Claude extraction receipt "
             "with one line per field in field=value form: extraction_mode; "
             "classification_revision; generated_artifact_controls_section_count; "
             "generated_artifact_view_button_count; generated_artifact_download_button_count; "
-            "artifact_download_click_count; artifact_view_click_count; "
-            "artifact_copy_click_count; generic_artifact_click_count; "
-            "assistant_copy_click_count; clipboard_read_count; post_download_observe_count. "
-            "classification_revision must be the 64-hex revision of step 1. downloaded_file must "
-            "also include post_download_revision as the 64-hex revision after its one click.\n"
+            "artifact_download_click_count; artifact_view_click_count; artifact_copy_click_count; "
+            "generic_artifact_click_count; assistant_copy_click_count; clipboard_read_count; "
+            "post_download_observe_count. classification_revision must be the 64-hex revision of "
+            "step 1. downloaded_file must also include post_download_revision as the 64-hex "
+            "revision after its one click.\n"
             "At the first missing or ambiguous element, refusal, failed postcondition, or unexpected "
             "state, return a first-mismatch stop report without any success receipt field and stop. "
             "Do not navigate, attach, paste, send, retry, recover, poll, click Continue, make a "
-            "second Download or Copy attempt, or cross from one extraction branch to the other."
+            "second Download or Copy attempt, or cross to the other extraction branch."
         )
+        return common + branch + receipt
     if platform == "gemini":
         if completed_before_stop_source_sha256 is None:
             completion_basis = (
@@ -1369,11 +1498,15 @@ def _invoke(
     seat_id: str,
     event_id: str,
     correlation_id: str,
+    request_must_be_new: bool = False,
 ) -> tuple[Path, Path, Path, str]:
     request_path = root / "request.json"
     headers_path = root / "response.headers"
     response_path = root / "worker_response.json"
-    _ensure_request(request_path, request_text)
+    if request_must_be_new:
+        _create_request(request_path, request_text)
+    else:
+        _ensure_request(request_path, request_text)
     completed = subprocess.run(
         [
             "curl",
@@ -1459,7 +1592,10 @@ def _is_completed_before_stop_receipt(receipt: str) -> bool:
     return False
 
 
-def _claude_extraction_mode(receipt: str) -> str:
+def _claude_extraction_mode(
+    receipt: str,
+    expected_mode: str | None = None,
+) -> str:
     def value(field: str) -> str:
         matches = re.findall(
             rf"(?m)^[ \t]*{re.escape(field)}[ \t]*=[ \t]*([^\r\n]+?)[ \t]*$",
@@ -1474,6 +1610,10 @@ def _claude_extraction_mode(receipt: str) -> str:
     mode = value("extraction_mode")
     if mode not in {"assistant_text", "downloaded_file"}:
         raise RuntimeError("Claude extraction receipt has an invalid extraction_mode")
+    if expected_mode is not None and mode != expected_mode:
+        raise RuntimeError(
+            "Claude extraction receipt crossed the launcher-classified branch"
+        )
     classification_revision = value("classification_revision")
     if re.fullmatch(r"[0-9a-f]{64}", classification_revision) is None:
         raise RuntimeError(
@@ -1654,6 +1794,8 @@ def main() -> int:
     claude_download_before = None
     claude_download_receipt = None
     extraction_mode = None
+    claude_launcher_revision = None
+    claude_launcher_counts = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
@@ -1799,13 +1941,6 @@ def main() -> int:
             raise RuntimeError("response file must be ARTIFACT_ROOT/response.txt")
         if response_file.exists():
             raise RuntimeError(f"response file already exists; refusing retry: {response_file}")
-        content = _extract_content(
-            monitor_id,
-            args.platform,
-            args.display,
-            response_file,
-            source_response_sha256,
-        )
         event_id = _extraction_event_id(
             seat_id,
             monitor_id,
@@ -1813,21 +1948,35 @@ def main() -> int:
             args.display,
             source_response_sha256,
         )
-        request_text = _request_text(content, 4096)
+        if args.platform == "claude":
+            _require_claude_extraction_workflows()
+            request_text = None
+        else:
+            content = _extract_content(
+                monitor_id,
+                args.platform,
+                args.display,
+                response_file,
+                source_response_sha256,
+            )
+            request_text = _request_text(content, 4096)
 
     correlation_id = f"{event_id}-1"
     if not root.exists():
         root.mkdir(mode=0o700)
     prepared_marker = root / ".prepared"
     if args.phase == "extract":
+        request_file = root / "request.json"
         extraction_outputs = [
             root / "response.headers",
             root / "worker_response.json",
             response_file,
         ]
         if args.platform == "claude":
-            extraction_outputs.append(root / "download_receipt.json")
-        _ensure_request(root / "request.json", request_text)
+            extraction_outputs.extend((root / "download_receipt.json", request_file))
+        else:
+            assert request_text is not None
+            _ensure_request(request_file, request_text)
         if args.prepare_only:
             for output in extraction_outputs:
                 if output.exists():
@@ -1844,7 +1993,7 @@ def main() -> int:
             prepared_result = {
                 "artifact_root": str(root),
                 "event_id": event_id,
-                "request_json": str(root / "request.json"),
+                "request_json": str(request_file),
                 "response_file": str(response_file),
             }
             if source_response is not None:
@@ -1863,24 +2012,42 @@ def main() -> int:
             if output.exists():
                 raise RuntimeError(f"extraction output already exists; refusing retry: {output}")
         prepared_marker.unlink()
-        if args.platform == "claude":
-            try:
-                claude_download_before = snapshot_claude_downloads(
-                    resolve_claude_download_scope(args.display)
-                )
-            except ClaudeArtifactDownloadError as exc:
-                raise RuntimeError(str(exc)) from exc
     lease_release = None
     primary_error = None
     mutation_stop_report = False
     completed_before_stop = False
     try:
+        request_must_be_new = False
+        if args.phase == "extract" and args.platform == "claude":
+            try:
+                (
+                    extraction_mode,
+                    claude_launcher_revision,
+                    claude_launcher_counts,
+                    claude_download_before,
+                ) = _prepare_claude_extraction(args.display)
+            except ClaudeArtifactDownloadError as exc:
+                raise RuntimeError(str(exc)) from exc
+            content = _extract_content(
+                monitor_id,
+                args.platform,
+                args.display,
+                response_file,
+                source_response_sha256,
+                extraction_mode,
+                claude_launcher_revision,
+            )
+            request_text = _request_text(content, 4096)
+            request_must_be_new = True
+        if request_text is None:
+            raise RuntimeError("worker request was not constructed")
         request_path, headers_path, response_path, receipt = _invoke(
             root=root,
             request_text=request_text,
             seat_id=seat_id,
             event_id=event_id,
             correlation_id=correlation_id,
+            request_must_be_new=request_must_be_new,
         )
         completed_before_stop = (
             args.phase == "send"
@@ -1972,10 +2139,12 @@ def main() -> int:
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
         if args.phase == "extract" and args.platform == "claude":
-            if claude_download_before is None:
-                raise RuntimeError("Claude download manifest was not captured")
-            extraction_mode = _claude_extraction_mode(receipt)
+            if extraction_mode is None:
+                raise RuntimeError("Claude extraction branch was not classified")
+            _claude_extraction_mode(receipt, extraction_mode)
             if extraction_mode == "downloaded_file":
+                if claude_download_before is None:
+                    raise RuntimeError("Claude download manifest was not captured")
                 try:
                     if (
                         resolve_claude_download_scope(args.display)
@@ -1994,6 +2163,10 @@ def main() -> int:
                     )
                 except ClaudeArtifactDownloadError as exc:
                     raise RuntimeError(str(exc)) from exc
+            elif claude_download_before is not None:
+                raise RuntimeError(
+                    "Claude assistant-text extraction captured a download manifest"
+                )
         if args.phase == "recover-claude-pre-send":
             assert exception_key is not None
             assert source_terminal_identity is not None
@@ -2362,6 +2535,11 @@ def main() -> int:
         })
     if extraction_mode is not None:
         result["extraction_mode"] = extraction_mode
+    if claude_launcher_revision is not None:
+        result.update({
+            "launcher_snapshot_sha256": claude_launcher_revision,
+            "launcher_artifact_control_counts": claude_launcher_counts,
+        })
     if claude_download_receipt is not None:
         download_receipt_path = root / "download_receipt.json"
         result.update({
