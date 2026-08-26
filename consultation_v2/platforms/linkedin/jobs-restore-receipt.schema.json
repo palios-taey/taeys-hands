@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-jobs-restore-receipt-v1.json",
+  "title": "LinkedIn Jobs surface restore immutable receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_digest": {
+      "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "failure_code": {
+      "enum": [
+        "deadline_expired",
+        "display_lock_unavailable",
+        "lock_release_indeterminate",
+        "private_input_invalid",
+        "restore_indeterminate"
+      ]
+    }
+  },
+  "properties": {
+    "schema": {"const": "linkedin_jobs_restore_receipt_v1"},
+    "platform": {"const": "linkedin"},
+    "operation": {"const": "restore_linkedin_jobs_surface"},
+    "display": {"type": "string", "pattern": "^:[0-9]{1,3}$"},
+    "requester": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "turn_lineage_sha256": {"$ref": "#/$defs/digest"},
+    "correlation_id_sha256": {"$ref": "#/$defs/digest"},
+    "deadline_seconds": {"type": "integer", "minimum": 30, "maximum": 1700},
+    "hands_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "state": {"enum": ["restored", "technical_failure"]},
+    "ok": {"type": "boolean"},
+    "failure_code": {
+      "oneOf": [{"type": "null"}, {"$ref": "#/$defs/failure_code"}]
+    },
+    "transaction_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "expected_transaction_sha256": {"$ref": "#/$defs/digest"},
+    "target_url_sha256": {"$ref": "#/$defs/nullable_digest"},
+    "restore_proof_sha256": {"$ref": "#/$defs/digest"},
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {"const": "careers"},
+        "request_id": {"$ref": "#/$defs/digest"},
+        "acquired": {"type": "boolean"},
+        "released": {"type": "boolean"},
+        "owner_token_sha256": {"$ref": "#/$defs/nullable_digest"},
+        "wait_ms": {"type": "integer", "minimum": 0},
+        "turn_lineage_sha256": {"$ref": "#/$defs/digest"},
+        "correlation_id_sha256": {"$ref": "#/$defs/digest"},
+        "deadline_seconds": {"type": "integer", "minimum": 30, "maximum": 1700}
+      },
+      "required": [
+        "policy",
+        "request_id",
+        "acquired",
+        "released",
+        "owner_token_sha256",
+        "wait_ms",
+        "turn_lineage_sha256",
+        "correlation_id_sha256",
+        "deadline_seconds"
+      ]
+    },
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {"enum": ["not_executed", "satisfied", "indeterminate"]},
+        "failed_substep": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "enum": [
+                "address_bar_focus",
+                "deadline",
+                "firefox_process_identity",
+                "focus_firefox_pid",
+                "navigation_key",
+                "paste",
+                "pasted_text_proof",
+                "return_postcondition",
+                "selection_action",
+                "selection_proof",
+                "submit",
+                "unclassified"
+              ]
+            }
+          ]
+        },
+        "firefox_pid_sha256": {"$ref": "#/$defs/nullable_digest"},
+        "stable_cycles_required": {"type": "integer", "enum": [0, 2]},
+        "stable_cycles_observed": {"type": "integer", "minimum": 0, "maximum": 2},
+        "return_url_sha256": {"$ref": "#/$defs/nullable_digest"}
+      },
+      "required": [
+        "verdict",
+        "failed_substep",
+        "firefox_pid_sha256",
+        "stable_cycles_required",
+        "stable_cycles_observed",
+        "return_url_sha256"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {"verdict": {"const": "not_executed"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "failed_substep": {"type": "null"},
+              "firefox_pid_sha256": {"type": "null"},
+              "stable_cycles_required": {"const": 0},
+              "stable_cycles_observed": {"const": 0}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verdict": {"const": "satisfied"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "failed_substep": {"type": "null"},
+              "firefox_pid_sha256": {"$ref": "#/$defs/digest"},
+              "stable_cycles_required": {"const": 2},
+              "stable_cycles_observed": {"const": 2},
+              "return_url_sha256": {"$ref": "#/$defs/digest"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"verdict": {"const": "indeterminate"}},
+            "required": ["verdict"]
+          },
+          "then": {
+            "properties": {
+              "failed_substep": {"not": {"type": "null"}}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "platform",
+    "operation",
+    "display",
+    "requester",
+    "turn_lineage_sha256",
+    "correlation_id_sha256",
+    "deadline_seconds",
+    "hands_commit",
+    "state",
+    "ok",
+    "failure_code",
+    "transaction_sha256",
+    "expected_transaction_sha256",
+    "target_url_sha256",
+    "restore_proof_sha256",
+    "lock",
+    "restore"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"state": {"const": "restored"}},
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "ok": {"const": true},
+          "failure_code": {"type": "null"},
+          "transaction_sha256": {"$ref": "#/$defs/digest"},
+          "target_url_sha256": {"$ref": "#/$defs/digest"},
+          "restore": {
+            "properties": {"verdict": {"const": "satisfied"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"state": {"const": "technical_failure"}},
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "ok": {"const": false},
+          "failure_code": {"$ref": "#/$defs/failure_code"}
+        }
+      }
+    }
+  ]
+}
