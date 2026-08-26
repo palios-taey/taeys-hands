@@ -1013,10 +1013,18 @@ def exact_engagement_return(
         fail('focus_firefox_pid')
     if restore.get('navigation_key') != 'ctrl+l' or not input_core.press_key_cleared('ctrl+l'):
         fail('navigation_key')
-    _firefox, _document, snapshot = build_snapshot('linkedin')
-    address = _exact_address_bar(snapshot)
-    if address is None or 'focused' not in address.states:
+    focus_deadline = min(deadline_at, time.monotonic() + 3.0)
+    focused_snapshot: Snapshot | None = None
+    while time.monotonic() < focus_deadline:
+        _firefox, _document, snapshot = build_snapshot('linkedin')
+        address = _exact_address_bar(snapshot)
+        if address is not None and 'focused' in address.states:
+            focused_snapshot = snapshot
+            break
+        time.sleep(0.3)
+    if focused_snapshot is None:
         fail('address_bar_focus')
+    snapshot = focused_snapshot
     if not _select_full_address_text(snapshot):
         fail('selection_action')
     _firefox, _document, snapshot = build_snapshot('linkedin')
