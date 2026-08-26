@@ -918,3 +918,8 @@ extraction:
         element: copy_button
         select: last
       - action: read_clipboard
+  downloaded_file:
+    steps:
+      - action: download
+        element: generated_artifact_download_button
+        select: last

@@ -82,6 +82,14 @@ After two successive Stop-absent observations, it immediately prepares and invok
 records terminal success or failure before sending any notification, so notification retries cannot launch
 another extraction.
 
+Claude's prepare-only handoff validates both typed YAML workflows and reserves the final `request.json`
+path, but does not create that file, observe AT-SPI, or inspect a download directory. After consuming the
+handoff marker, the launcher takes one canonical Claude base snapshot. Exactly one mapped controls section,
+View button, and Download button selects `downloaded_file`; complete absence selects `assistant_text`; any
+partial or duplicate trio stops before a worker invocation. Only `downloaded_file` resolves and snapshots
+the Firefox download scope. The launcher then creates the one branch-specific `request.json` exclusively
+and invokes one Taey turn. The worker's first fresh observation must prove the same branch before mutation.
+
 Main Taey does not run an extraction command and does not drive the display. It receives only the persisted
 result: `monitor_id`, terminal extraction status, and, on success, the response path, byte count, and
 SHA-256. On failure it receives the first error and `terminal=true`. No supervisor, status recipient, or
@@ -300,10 +308,16 @@ Require a newly created non-empty file and record its byte count and SHA-256 fro
 unchanged clipboard, the sent prompt, a prompt prefix, or text that does not answer the task. Never overwrite
 an existing response path.
 
-Platform-specific extra output remains separate from the primary answer:
+Platform-specific extraction remains YAML-owned:
 
-- Claude: inspect `workflow.extra_extract` and capture any generated artifact through its exact mapped
-  artifact Copy/Download control to a second new output path.
+- Claude: the first fresh base observation classifies exactly three generated-artifact controls. All three
+  present exactly once selects `extraction.downloaded_file`; all three absent selects
+  `extraction.assistant_text`; a partial or duplicate set stops before any UI mutation. The downloaded-file
+  branch clicks only `generated_artifact_download_button` once, observes once, and materializes exactly one
+  new stable non-empty regular non-symlink file into `response.txt` with source/destination hashes. The
+  current Firefox profile uses the shared `~/Downloads` default, so this path is qualified only inside a
+  serial exclusive download window. Any concurrent, partial, changed, duplicate, multiple, or symlink entry
+  is terminal; parallel-safe attribution requires a separately measured profile-local download directory.
 - Gemini: inspect `workflow.extra_extract` for Share/Export `copy_content_item` when the primary answer is a
   report surface.
 - Perplexity Deep Research: inspect `workflow.extract.deep_research` and prefer the mapped Markdown download
