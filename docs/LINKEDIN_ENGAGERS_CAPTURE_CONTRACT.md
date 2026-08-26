@@ -43,7 +43,10 @@ While holding one CAREERS lock, Hands:
    sends `Ctrl+L` once, proves the exact address bar is focused, selects its
    complete AT-SPI Text range, pastes the private return URL once, proves the
    exact text, sends `Return` once, and requires two stable observations of
-   the exact return URL and exact Notifications target.
+   the exact return URL and exactly one current Notifications target by the
+   YAML-owned role, states, and exact Notifications URI. Its full current
+   state digest must remain unchanged for both observations; the mutable unread
+   count in its label is not restoration identity.
 
 There is no Back action, pointer action, coordinate, shell UI command, default
 action, alternate focus, alternate selector, blind retry, or outward social
