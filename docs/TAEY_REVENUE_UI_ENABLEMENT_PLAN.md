@@ -54,12 +54,13 @@ verdicts, counts, and content hashes. Raw dynamic content is written off-context
 never serialized into the model transcript. Private receipt storage may retain the corresponding values.
 Public code never points at an operator-only repository or path.
 
-## Current observed baseline
+## Current observed status
 
 - Grok's repeated non-actionable notification loop is fixed; it is not a remaining revenue-UI gate.
 - LinkedIn `capture_mounted_job_search` and exact `select_and_capture_job` selected-detail capture have real
-  production PASS evidence. They remain read-only/local-effect baselines and are consumed downstream by
-  receipt; adapter work does not modify their YAML, runner, snapshot, lock, or receipt contracts.
+  successful production receipts. They remain current proven units pending joined qualification and are
+  consumed downstream by receipt; adapter work does not modify their YAML, runner, snapshot, lock, or receipt
+  contracts.
 - Public `palios-taey/taey-apply` main `ee8406f16ac552a8cf557538fd136e7750125564` validates the exact
   paired Hands search and selected artifacts/receipts and writes one unclassified LinkedIn job into the
   existing private jobs database. It does not score, filter, drive an ATS, or submit.
@@ -75,7 +76,7 @@ information to resolve an ATS target.
 
 ### 1. LinkedIn Jobs to unclassified application intake
 
-The source mechanics are retained baselines:
+The source mechanics are current proven units pending joined qualification:
 
 - `capture_mounted_job_search` captures only the cards already mounted on one authorized search-results page;
   it does not enter search terms, change filters, scroll, open, save, dismiss, or apply.
@@ -84,7 +85,7 @@ The source mechanics are retained baselines:
   releases the CAREERS lock, and stops.
 - The selected record is an application lead: it contains the private search reference, selected source
   URL/current job identity, exact detail heading, and description. Apply-channel facts are not part of the
-  qualified record and must not be inferred.
+  captured record and must not be inferred.
 
 The active natural unit is the Presence intake adapter:
 
@@ -104,14 +105,14 @@ The active natural unit is the Presence intake adapter:
 
 Acceptance requires two production proofs from exact public/deployed commits:
 
-- one existing qualified paired capture ingests or proves identical prior presence with independent database
-  readback; and
+- one existing paired capture with successful receipts ingests or proves identical prior presence with
+  independent database readback; and
 - one fresh mounted-search -> exact selected-detail -> separate intake transaction joins the Hands and intake
   receipt hashes, ends with zero open turns/leases, and produces no outward effect.
 
-Adapter work must not change the qualified LinkedIn YAML, runners, snapshot traversal, CAREERS lock, private
-record shapes, or public result shapes. If the lead later cannot resolve one exact ATS target, add only the
-missing read-only target projection under a new frozen contract and requalify it; do not widen search by
+Adapter work must not change the current proven-unit LinkedIn YAML, runners, snapshot traversal, CAREERS lock,
+private record shapes, or public result shapes. If the lead later cannot resolve one exact ATS target, add only
+the missing read-only target projection under a new frozen contract and requalify it; do not widen search by
 assumption.
 
 ### 2. LinkedIn engagement
@@ -119,8 +120,8 @@ assumption.
 Keep the six historical leaves independent: comment, own-post engager capture, messaging, invitation
 acceptance, connection invitation, and Jobs.
 
-- Jobs mounted-search and selected-detail capture are retained production baselines; do not reopen them for
-  intake-adapter work.
+- Jobs mounted-search and selected-detail capture are current proven units pending joined qualification; do
+  not reopen them for intake-adapter work.
 - Own-post engagement currently proves only the `no_new_signal` route/filter/restore result. Full qualification
   still requires one real `captured` write-once receipt followed by a fresh `already_known` receipt; lack of a
   live signal is not a reason to change the map.
@@ -161,9 +162,9 @@ A production baseline is frozen only after merge to public `main`, deployment fr
 receipt verification, and a real production observation. The release record names the public commit, private
 input digest, surface-policy digest, production receipt, and remaining unknowns.
 
-A downstream connector or adapter consumes qualified Hands receipts and may not edit their producing YAML,
-runners, snapshots, locks, or result schemas. Any genuinely shared-path change invalidates the affected
-baseline and requires that exact production unit to be re-earned before release.
+A downstream connector or adapter consumes successful Hands receipts from the current proven units and may not
+edit their producing YAML, runners, snapshots, locks, or result schemas. Any genuinely shared-path change
+invalidates the affected baseline and requires that exact production unit to be re-earned before release.
 
 The Jobs-to-intake critical path remains serial until one fresh end-to-end receipt chain passes. Afterward,
 only lanes with separate mutable state may run concurrently; they share immutable digests and public schemas
