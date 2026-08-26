@@ -8,6 +8,7 @@
     "operation": {
       "enum": [
         "capture_selected_job",
+        "capture_visible_new_engagement_signal",
         "select_and_capture_job"
       ]
     }

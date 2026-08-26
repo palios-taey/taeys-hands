@@ -808,6 +808,412 @@ def _execute_locked_transaction(
     )
 
 
+def _empty_engagement_action(stage: str) -> dict[str, Any]:
+    return {
+        'stage': stage,
+        'target_match_count': 0,
+        'action_name': None,
+        'action_index': None,
+        'action_match_count': 0,
+        'verdict': 'not_executed',
+    }
+
+
+def _empty_engagement_restore() -> dict[str, Any]:
+    return {
+        'verdict': 'not_executed',
+        'failed_substep': None,
+        'firefox_pid_sha256': None,
+        'stable_cycles_required': 0,
+        'stable_cycles_observed': 0,
+        'return_url_sha256': None,
+    }
+
+
+def _engagement_terminal(
+    *,
+    state: str,
+    failure_code: str | None,
+    records_observed: int = 0,
+    records_written: int | None = 0,
+    content_digest: str | None = None,
+    restore_verified: bool = False,
+    start: Mapping[str, Any] | None = None,
+    notifications_action: Mapping[str, Any] | None = None,
+    notifications_postcondition: Mapping[str, Any] | None = None,
+    my_posts_action: Mapping[str, Any] | None = None,
+    my_posts_postcondition: Mapping[str, Any] | None = None,
+    candidate_count: int = 0,
+    sink_verdict: str = 'not_executed',
+    signal_postcondition: str = 'not_evaluated',
+    restore: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        'terminal_state': state,
+        'ok': state in {'already_known', 'captured', 'no_new_signal'},
+        'failure_code': failure_code,
+        'records_observed': records_observed,
+        'records_written': records_written,
+        'content_digest': content_digest,
+        'restore_verified': restore_verified,
+        'start': dict(start or {}),
+        'notifications_action': dict(
+            notifications_action or _empty_engagement_action('notifications_navigation')
+        ),
+        'notifications_postcondition': dict(notifications_postcondition or {}),
+        'my_posts_action': dict(
+            my_posts_action or _empty_engagement_action('my_posts_filter')
+        ),
+        'my_posts_postcondition': dict(my_posts_postcondition or {}),
+        'candidate_count': candidate_count,
+        'sink_verdict': sink_verdict,
+        'signal_postcondition': signal_postcondition,
+        'restore': dict(restore or _empty_engagement_restore()),
+    }
+
+
+def _execute_engagement_transaction(
+    *,
+    lock: Mapping[str, Any],
+    display: str,
+    deadline_at: float,
+    sink_root: Path,
+    notifications_name: str,
+    return_url: str,
+) -> dict[str, Any]:
+    from consultation_v2.platforms.linkedin.driver import (
+        LinkedInEngagementActionFailed,
+        LinkedInEngagementRestoreFailed,
+        activate_my_posts,
+        activate_notifications,
+        engagement_signal_postcondition,
+        exact_engagement_return,
+        observe_engagement_signal,
+        observe_engagement_start,
+        stable_my_posts_observation,
+        stable_notifications_observation,
+        write_engagement_signal_once,
+    )
+    from consultation_v2.snapshot import build_snapshot
+
+    if lock.get('acquired') is not True:
+        return _engagement_terminal(
+            state='technical_failure',
+            failure_code='display_lock_unavailable',
+        )
+    start: dict[str, Any] = {}
+    notifications_action = _empty_engagement_action('notifications_navigation')
+    notifications_postcondition: dict[str, Any] = {}
+    my_posts_action = _empty_engagement_action('my_posts_filter')
+    my_posts_postcondition: dict[str, Any] = {}
+    candidate_count = 0
+    records_observed = 0
+    records_written: int | None = 0
+    content_digest: str | None = None
+    sink_verdict = 'not_executed'
+    signal_verdict = 'not_evaluated'
+    phase = 'pre_observation'
+    try:
+        with _internal_deadline(deadline_at):
+            _bind_display(display)
+            _firefox, _document, snapshot = build_snapshot('linkedin')
+            start = observe_engagement_start(snapshot, notifications_name, return_url)
+            if not (
+                start.get('route_exact') is True
+                and start.get('route_kind_exact') is True
+                and start.get('notifications_target_match_count') == 1
+                and isinstance(start.get('notifications_target_state_digest'), str)
+            ):
+                return _engagement_terminal(
+                    state='postcondition_failed',
+                    failure_code='postcondition_failed',
+                    start=start,
+                )
+            phase = 'notifications_action'
+            notifications_action = activate_notifications(snapshot, notifications_name)
+            phase = 'notifications_postcondition'
+            notifications = stable_notifications_observation(deadline_at)
+            notifications_postcondition = dict(notifications.receipt)
+            if not (
+                notifications.snapshot is not None
+                and notifications_postcondition.get('route_exact') is True
+                and notifications_postcondition.get('my_posts_match_count') == 1
+                and notifications_postcondition.get('stable_cycles_observed') == 2
+            ):
+                return _engagement_terminal(
+                    state='postcondition_failed',
+                    failure_code='postcondition_failed',
+                    start=start,
+                    notifications_action=notifications_action,
+                    notifications_postcondition=notifications_postcondition,
+                )
+            phase = 'my_posts_action'
+            my_posts_action = activate_my_posts(notifications.snapshot)
+            phase = 'my_posts_postcondition'
+            filtered = stable_my_posts_observation(deadline_at)
+            my_posts_postcondition = dict(filtered.receipt)
+            if not (
+                filtered.snapshot is not None
+                and filtered.signal is not None
+                and my_posts_postcondition.get('route_exact') is True
+                and my_posts_postcondition.get('selected_filter_marker_match_count') == 1
+                and my_posts_postcondition.get('stable_cycles_observed') == 2
+            ):
+                return _engagement_terminal(
+                    state='technical_failure',
+                    failure_code='navigation_not_exact',
+                    start=start,
+                    notifications_action=notifications_action,
+                    notifications_postcondition=notifications_postcondition,
+                    my_posts_action=my_posts_action,
+                    my_posts_postcondition=my_posts_postcondition,
+                )
+            signal_before = filtered.signal
+            candidate_count = signal_before.candidate_count
+            if candidate_count > 1:
+                return _engagement_terminal(
+                    state='ambiguous_signal',
+                    failure_code='ambiguous_signal',
+                    start=start,
+                    notifications_action=notifications_action,
+                    notifications_postcondition=notifications_postcondition,
+                    my_posts_action=my_posts_action,
+                    my_posts_postcondition=my_posts_postcondition,
+                    candidate_count=candidate_count,
+                )
+            if candidate_count == 1:
+                records_observed = 1
+                content_digest = signal_before.content_digest
+                phase = 'sink_write'
+                try:
+                    result = write_engagement_signal_once(signal_before, sink_root)
+                except Exception:
+                    return _engagement_terminal(
+                        state='sink_write_indeterminate',
+                        failure_code='sink_write_indeterminate',
+                        records_observed=1,
+                        records_written=None,
+                        content_digest=content_digest,
+                        start=start,
+                        notifications_action=notifications_action,
+                        notifications_postcondition=notifications_postcondition,
+                        my_posts_action=my_posts_action,
+                        my_posts_postcondition=my_posts_postcondition,
+                        candidate_count=1,
+                        sink_verdict='indeterminate',
+                    )
+                records_written = result.records_written
+                sink_verdict = 'written' if records_written == 1 else 'already_present'
+                phase = 'signal_postcondition'
+                _firefox, _document, post_snapshot = build_snapshot('linkedin')
+                signal_after = observe_engagement_signal(post_snapshot)
+                if not engagement_signal_postcondition(signal_before, signal_after):
+                    return _engagement_terminal(
+                        state='postcondition_failed',
+                        failure_code='postcondition_failed',
+                        records_observed=1,
+                        records_written=records_written,
+                        content_digest=content_digest,
+                        start=start,
+                        notifications_action=notifications_action,
+                        notifications_postcondition=notifications_postcondition,
+                        my_posts_action=my_posts_action,
+                        my_posts_postcondition=my_posts_postcondition,
+                        candidate_count=signal_after.candidate_count,
+                        sink_verdict=sink_verdict,
+                        signal_postcondition='failed',
+                    )
+                signal_verdict = 'satisfied'
+            phase = 'restore'
+            restore = exact_engagement_return(
+                display,
+                return_url,
+                notifications_name,
+                deadline_at,
+            )
+            return _engagement_terminal(
+                state=(
+                    'captured'
+                    if records_written == 1
+                    else ('already_known' if candidate_count == 1 else 'no_new_signal')
+                ),
+                failure_code=None,
+                records_observed=records_observed,
+                records_written=records_written,
+                content_digest=content_digest,
+                restore_verified=True,
+                start=start,
+                notifications_action=notifications_action,
+                notifications_postcondition=notifications_postcondition,
+                my_posts_action=my_posts_action,
+                my_posts_postcondition=my_posts_postcondition,
+                candidate_count=candidate_count,
+                sink_verdict=sink_verdict,
+                signal_postcondition=signal_verdict,
+                restore=restore,
+            )
+    except LinkedInEngagementActionFailed as exc:
+        if exc.stage == 'notifications_navigation':
+            notifications_action = exc.receipt
+        else:
+            my_posts_action = exc.receipt
+        return _engagement_terminal(
+            state='technical_failure',
+            failure_code='action_failed',
+            start=start,
+            notifications_action=notifications_action,
+            notifications_postcondition=notifications_postcondition,
+            my_posts_action=my_posts_action,
+            my_posts_postcondition=my_posts_postcondition,
+        )
+    except LinkedInEngagementRestoreFailed as exc:
+        return _engagement_terminal(
+            state='technical_failure',
+            failure_code='restore_indeterminate',
+            records_observed=records_observed,
+            records_written=records_written,
+            content_digest=content_digest,
+            start=start,
+            notifications_action=notifications_action,
+            notifications_postcondition=notifications_postcondition,
+            my_posts_action=my_posts_action,
+            my_posts_postcondition=my_posts_postcondition,
+            candidate_count=candidate_count,
+            sink_verdict=sink_verdict,
+            signal_postcondition=signal_verdict,
+            restore=exc.receipt,
+        )
+    except LinkedInJobsDeadlineExpired:
+        return _engagement_terminal(
+            state='sink_write_indeterminate' if phase == 'sink_write' else 'technical_failure',
+            failure_code=(
+                'sink_write_indeterminate'
+                if phase == 'sink_write'
+                else ('restore_indeterminate' if phase == 'restore' else 'deadline_expired')
+            ),
+            records_observed=records_observed,
+            records_written=None if phase == 'sink_write' else records_written,
+            content_digest=content_digest,
+            start=start,
+            notifications_action=notifications_action,
+            notifications_postcondition=notifications_postcondition,
+            my_posts_action=my_posts_action,
+            my_posts_postcondition=my_posts_postcondition,
+            candidate_count=candidate_count,
+            sink_verdict='indeterminate' if phase == 'sink_write' else sink_verdict,
+            signal_postcondition=signal_verdict,
+        )
+    except Exception:
+        return _engagement_terminal(
+            state='technical_failure',
+            failure_code=(
+                'restore_indeterminate'
+                if phase == 'restore'
+                else (
+                    'post_observation_indeterminate'
+                    if phase in {
+                        'notifications_postcondition',
+                        'my_posts_postcondition',
+                        'signal_postcondition',
+                    }
+                    else 'pre_observation_failed'
+                )
+            ),
+            records_observed=records_observed,
+            records_written=records_written,
+            content_digest=content_digest,
+            start=start,
+            notifications_action=notifications_action,
+            notifications_postcondition=notifications_postcondition,
+            my_posts_action=my_posts_action,
+            my_posts_postcondition=my_posts_postcondition,
+            candidate_count=candidate_count,
+            sink_verdict=sink_verdict,
+            signal_postcondition=signal_verdict,
+        )
+
+
+def _finalize_engagement(
+    *,
+    receipt_path: Path,
+    display: str,
+    requester: str,
+    hands_commit: str,
+    transaction_sha256: str | None,
+    expected_transaction_sha256: str,
+    source_ref: str | None,
+    sink_ref: str | None,
+    notifications_name: str | None,
+    return_url: str | None,
+    lock_lineage: Mapping[str, Any],
+    terminal: Mapping[str, Any],
+) -> dict[str, Any]:
+    from consultation_v2.linkedin_jobs_contract import (
+        ENGAGEMENT_RECEIPT_SCHEMA,
+        sha256_hex,
+        validate_public_result,
+        write_new_private_json,
+    )
+
+    yaml_path = REPO_ROOT / 'consultation_v2/platforms/linkedin/linkedin.yaml'
+    receipt = {
+        'schema': ENGAGEMENT_RECEIPT_SCHEMA,
+        'platform': 'linkedin',
+        'operation': 'capture_visible_new_engagement_signal',
+        'display': display,
+        'requester': requester,
+        'turn_lineage_sha256': lock_lineage['turn_lineage_sha256'],
+        'correlation_id_sha256': lock_lineage['correlation_id_sha256'],
+        'deadline_seconds': lock_lineage['deadline_seconds'],
+        'hands_commit': hands_commit,
+        'yaml_sha256': sha256_hex(yaml_path.read_bytes()),
+        'terminal_state': terminal['terminal_state'],
+        'ok': terminal['ok'],
+        'failure_code': terminal['failure_code'],
+        'records_observed': terminal['records_observed'],
+        'records_written': terminal['records_written'],
+        'content_digest': terminal['content_digest'],
+        'restore_verified': terminal['restore_verified'],
+        'transaction_sha256': transaction_sha256,
+        'expected_transaction_sha256': expected_transaction_sha256,
+        'source_ref_sha256': _digest_text(source_ref),
+        'sink_ref_sha256': _digest_text(sink_ref),
+        'notifications_name_sha256': _digest_text(notifications_name),
+        'return_url_sha256': _digest_text(return_url),
+        'start': terminal['start'],
+        'notifications_action': terminal['notifications_action'],
+        'notifications_postcondition': terminal['notifications_postcondition'],
+        'my_posts_action': terminal['my_posts_action'],
+        'my_posts_postcondition': terminal['my_posts_postcondition'],
+        'candidate': {
+            'match_count': terminal['candidate_count'],
+            'content_digest': terminal['content_digest'],
+        },
+        'sink': {
+            'kind': 'private_sink_write_once',
+            'verdict': terminal['sink_verdict'],
+            'records_written': terminal['records_written'],
+        },
+        'signal_postcondition': terminal['signal_postcondition'],
+        'restore': terminal['restore'],
+        'lock': dict(lock_lineage),
+    }
+    receipt_sha256 = sha256_hex(write_new_private_json(receipt_path, receipt))
+    return validate_public_result({
+        'ok': terminal['ok'],
+        'platform': 'linkedin',
+        'display': display,
+        'state': terminal['terminal_state'],
+        'failure_code': terminal['failure_code'],
+        'records_observed': terminal['records_observed'],
+        'records_written': terminal['records_written'],
+        'content_digest': terminal['content_digest'],
+        'receipt_sha256': receipt_sha256,
+        'turn_lineage_sha256': lock_lineage['turn_lineage_sha256'],
+        'restore_verified': terminal['restore_verified'],
+    })
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     from consultation_v2.display_lock import (
         CAREERS_POLICY,
@@ -839,9 +1245,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if correlation_id_sha256 is None:
         raise RuntimeError('correlation lineage could not be established')
     transaction_sha256: str | None = None
-    operation = 'capture_selected_job'
+    operation: str | None = None
     search_ref: str | None = None
     sink_ref: str | None = None
+    source_ref: str | None = None
+    notifications_name: str | None = None
+    return_url: str | None = None
     target_card_name: str | None = None
     detail_title_name: str | None = None
     detail_company_name: str | None = None
@@ -862,14 +1271,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             REPO_ROOT,
             private_root,
         )
+        operation = transaction['operation']
         if transaction_sha256 != args.expected_transaction_sha256:
             raise RuntimeError('transaction digest differs from the permanent claim')
-        operation = transaction['operation']
-        search_ref = transaction['search_ref']
         sink_ref = transaction['sink_ref']
-        target_card_name = transaction.get('target_card_name')
-        detail_title_name = transaction.get('detail_title_name')
-        detail_company_name = transaction.get('detail_company_name')
+        if operation == 'capture_visible_new_engagement_signal':
+            source_ref = transaction['source_ref']
+            notifications_name = transaction['notifications_name']
+            return_url = transaction['return_url']
+        else:
+            search_ref = transaction['search_ref']
+            target_card_name = transaction.get('target_card_name')
+            detail_title_name = transaction.get('detail_title_name')
+            detail_company_name = transaction.get('detail_company_name')
         sink_root = validate_path_beneath_private_root(
             sink_ref,
             private_root,
@@ -877,6 +1291,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     except Exception as exc:
         sys.stderr.write(f'{type(exc).__name__}: private transaction rejected\n')
+        if operation is None:
+            raise
+        if operation == 'capture_visible_new_engagement_signal':
+            return _finalize_engagement(
+                receipt_path=receipt_path,
+                display=args.display,
+                requester=requester,
+                hands_commit=hands_commit,
+                transaction_sha256=transaction_sha256,
+                expected_transaction_sha256=args.expected_transaction_sha256,
+                source_ref=source_ref,
+                sink_ref=sink_ref,
+                notifications_name=notifications_name,
+                return_url=return_url,
+                lock_lineage=unlocked_lineage,
+                terminal=_engagement_terminal(
+                    state='technical_failure',
+                    failure_code='private_input_invalid',
+                ),
+            )
         return _finalize(
             receipt_path=receipt_path,
             display=args.display,
@@ -915,6 +1349,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             post_match_counts=None,
         )
 
+    if operation is None:
+        raise RuntimeError('private transaction operation was not established')
+
     request_id = _lock_request_id(transaction_sha256, turn_lineage_sha256)
     deadline_at = time.monotonic() + args.deadline_seconds
     with entrypoint_display_lock(
@@ -935,17 +1372,31 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         wait_seconds=0.0,
         ttl=display_lock_ttl(args.deadline_seconds),
     ) as lock:
-        terminal = _execute_locked_transaction(
-            lock=lock,
-            display=args.display,
-            deadline_at=deadline_at,
-            operation=operation,
-            search_ref=search_ref,
-            sink_root=sink_root,
-            target_card_name=target_card_name,
-            detail_title_name=detail_title_name,
-            detail_company_name=detail_company_name,
-        )
+        if operation == 'capture_visible_new_engagement_signal':
+            if notifications_name is None or return_url is None:
+                raise RuntimeError('engagement transaction identity is incomplete')
+            terminal = _execute_engagement_transaction(
+                lock=lock,
+                display=args.display,
+                deadline_at=deadline_at,
+                sink_root=sink_root,
+                notifications_name=notifications_name,
+                return_url=return_url,
+            )
+        else:
+            if search_ref is None:
+                raise RuntimeError('job transaction search reference is incomplete')
+            terminal = _execute_locked_transaction(
+                lock=lock,
+                display=args.display,
+                deadline_at=deadline_at,
+                operation=operation,
+                search_ref=search_ref,
+                sink_root=sink_root,
+                target_card_name=target_card_name,
+                detail_title_name=detail_title_name,
+                detail_company_name=detail_company_name,
+            )
 
     lineage = _lock_lineage(
         lock,
@@ -963,6 +1414,21 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         terminal['ok'] = False
         terminal['failure_code'] = 'lock_release_indeterminate'
 
+    if operation == 'capture_visible_new_engagement_signal':
+        return _finalize_engagement(
+            receipt_path=receipt_path,
+            display=args.display,
+            requester=requester,
+            hands_commit=hands_commit,
+            transaction_sha256=transaction_sha256,
+            expected_transaction_sha256=args.expected_transaction_sha256,
+            source_ref=source_ref,
+            sink_ref=sink_ref,
+            notifications_name=notifications_name,
+            return_url=return_url,
+            lock_lineage=lineage,
+            terminal=terminal,
+        )
     return _finalize(
         receipt_path=receipt_path,
         display=args.display,
