@@ -147,7 +147,7 @@ LinkedIn Jobs is read-only intake. It never activates Apply or Easy Apply and ne
    mounted card-set digest, writes one private batch, proves the card set unchanged, and stops without a UI
    mutation.
 2. `select_and_capture_job` consumes one exact private card/title/company identity from that batch, observes a
-   singleton target, invokes its exact YAML-owned `click[0]` once, requires two stable exact selected-detail
+   singleton target, invokes its exact YAML-owned `click` primitive once, requires two stable exact selected-detail
    observations, writes one private record, and stops.
 3. `capture_selected_job` reads an already-selected exact detail without selecting another card. It writes one
    immutable private record and proves its content digest unchanged.
