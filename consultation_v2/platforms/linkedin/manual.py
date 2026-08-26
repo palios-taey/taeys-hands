@@ -99,6 +99,14 @@ def _manual_notification_contract() -> dict[str, Any]:
             'role': 'push button',
             'states_include': ['enabled', 'focusable'],
         },
+        'selected_activity_postcondition': {
+            'identity_sources': ['document_url', 'showing_link_uri'],
+            'showing_link': {
+                'role': 'link',
+                'states_include': ['showing'],
+            },
+            'exact_activity_identity_count': 1,
+        },
         'observation_barrier': {
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
@@ -192,6 +200,48 @@ def _notification_activity(uri: str, contract: dict[str, Any]) -> str | None:
         return None
     activity = values[0].removeprefix(uri_contract['activity_prefix'])
     return activity if activity.isdigit() else None
+
+
+def _selected_activity_identity(
+    snapshot: Snapshot,
+    contract: dict[str, Any],
+) -> tuple[str | None, tuple[str, ...]]:
+    postcondition = contract['selected_activity_postcondition']
+    sources: dict[str, set[str]] = {
+        'document_url': set(),
+        'showing_link_uri': set(),
+    }
+    document_activity = _notification_activity(str(snapshot.url or ''), contract)
+    if document_activity is not None:
+        sources['document_url'].add(document_activity)
+
+    showing_link = postcondition['showing_link']
+    required_states = set(showing_link['states_include'])
+    for element in _all_elements(snapshot):
+        if (
+            element.role != showing_link['role']
+            or not required_states.issubset(element.states)
+        ):
+            continue
+        uri = _element_uri(element)
+        activity = _notification_activity(uri or '', contract)
+        if activity is not None:
+            sources['showing_link_uri'].add(activity)
+
+    identities = {
+        activity
+        for source in postcondition['identity_sources']
+        for activity in sources[source]
+    }
+    if len(identities) != postcondition['exact_activity_identity_count']:
+        return None, ()
+    identity = next(iter(identities))
+    matched_sources = tuple(
+        source
+        for source in postcondition['identity_sources']
+        if identity in sources[source]
+    )
+    return identity, matched_sources
 
 
 def _notification_relative_age(element: Any, contract: dict[str, Any]) -> str | None:
@@ -428,23 +478,24 @@ def verify_post_action(
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     if candidate_match is not None:
-        activity = _notification_activity(
-            str(snapshot.url or ''),
+        activity, activity_sources = _selected_activity_identity(
+            snapshot,
             _manual_notification_contract(),
         )
         expected_activity = candidate_match.group('activity')
         if activity != expected_activity:
             raise ValueError(
                 'LinkedIn notification candidate postcondition failed: '
-                'fresh route does not expose the exact selected activity'
+                'fresh surface does not expose one exact selected activity'
             )
         return {
             'element_key': element_key,
             'operation': operation,
             'effect_class': 'page',
             'postcondition': 'exact_notification_activity',
-            'route_exact': True,
+            'route_exact': 'document_url' in activity_sources,
             'activity_exact': True,
+            'activity_sources': list(activity_sources),
             'observed_url': snapshot.url,
         }
     if continuation_match is not None:
@@ -543,10 +594,15 @@ def stable_post_action_observation(
             'sample': len(samples) + 1,
             'elapsed_ms': round((time.monotonic() - started_at) * 1000),
             'route_exact': bool(exact_receipt and exact_receipt.get('route_exact')),
+            'activity_exact': bool(
+                exact_receipt and exact_receipt.get('activity_exact')
+            ),
             'observed_url': snapshot.url,
         }
         if exact_receipt is not None:
             sample['postcondition'] = exact_receipt['postcondition']
+            if 'activity_sources' in exact_receipt:
+                sample['activity_sources'] = exact_receipt['activity_sources']
             if 'observed_candidate_count' in exact_receipt:
                 sample['observed_candidate_count'] = exact_receipt[
                     'observed_candidate_count'

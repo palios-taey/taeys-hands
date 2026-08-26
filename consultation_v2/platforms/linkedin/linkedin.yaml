@@ -225,6 +225,15 @@ workflow:
         states_include:
           - enabled
           - focusable
+      selected_activity_postcondition:
+        identity_sources:
+          - document_url
+          - showing_link_uri
+        showing_link:
+          role: link
+          states_include:
+            - showing
+        exact_activity_identity_count: 1
       observation_barrier:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
