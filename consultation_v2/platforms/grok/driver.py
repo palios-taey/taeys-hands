@@ -22,6 +22,11 @@ from consultation_v2 import primitives
 from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
+from consultation_v2.native_dialog_snapshot import (
+    NativeDialogObservationError,
+    NativeDialogSnapshot,
+    build_native_dialog_snapshot,
+)
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
 from consultation_v2.run_state_identity import (
     LegacyUnscopedRunState,
@@ -3415,11 +3420,13 @@ class GrokConsultationDriver(_GrokInlineBase):
                                 snapshot=menu.serializable())
                 return False
 
-            # GTK file dialog: focus it, type the absolute path, confirm ONCE.
-            if not self.runtime.focus_file_dialog():
+            dialog_snapshot, dialog_samples = self._wait_for_grok_native_dialog_postcondition()
+            if dialog_snapshot is None:
                 result.add_step(
                     'attach', False,
-                    f'Grok file dialog did not focus for {abs_path}',
+                    f'Grok native file dialog postcondition was not observed for {abs_path}',
+                    file=abs_path,
+                    observation_samples=dialog_samples,
                     snapshot=menu.serializable(),
                 )
                 return False
@@ -3429,16 +3436,33 @@ class GrokConsultationDriver(_GrokInlineBase):
                     f'Grok file dialog location shortcut failed for {abs_path}',
                 )
                 return False
+            location_snapshot, location_samples = self._wait_for_grok_native_dialog_postcondition(
+                require_location_entry=True,
+            )
+            if location_snapshot is None:
+                result.add_step(
+                    'attach', False,
+                    f'Grok file dialog location entry was not observed for {abs_path}',
+                    file=abs_path,
+                    observation_samples=location_samples,
+                )
+                return False
             if not self.runtime.paste(abs_path):
                 result.add_step(
                     'attach', False,
                     f'Grok file dialog path paste failed for {abs_path}',
                 )
                 return False
-            if not self.runtime.focus_file_dialog():
+            path_snapshot, path_samples = self._wait_for_grok_native_dialog_postcondition(
+                require_location_entry=True,
+                expected_location_text=abs_path,
+            )
+            if path_snapshot is None:
                 result.add_step(
                     'attach', False,
-                    f'Grok file dialog lost focus before submit for {abs_path}',
+                    f'Grok file dialog exact path was not observed for {abs_path}',
+                    file=abs_path,
+                    observation_samples=path_samples,
                 )
                 return False
             if not self.runtime.press('Return'):
@@ -3464,10 +3488,84 @@ class GrokConsultationDriver(_GrokInlineBase):
             verified = self.validation_passes(verify_snap, 'attach_present')
             result.add_step('attach', verified,
                             f'Grok attached {os.path.basename(abs_path)}',
-                            file=abs_path, snapshot=verify_snap.serializable())
+                            file=abs_path,
+                            native_dialog=dialog_snapshot.serializable(),
+                            dialog_observation_samples=dialog_samples,
+                            location_observation_samples=location_samples,
+                            path_observation_samples=path_samples,
+                            snapshot=verify_snap.serializable())
             if not verified:
                 return False
         return True
+
+    def _wait_for_grok_native_dialog_postcondition(
+        self,
+        *,
+        require_location_entry: bool = False,
+        expected_location_text: str | None = None,
+    ) -> tuple[NativeDialogSnapshot | None, list[dict[str, Any]]]:
+        attachment = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+        observation = attachment.get('observation') or {}
+        refresh_policy = str(observation.get('refresh_policy') or '')
+        if refresh_policy != 'native_invalidate_reacquire':
+            return None, [{
+                'elapsed_ms': 0,
+                'matched': False,
+                'error': f'unsupported native dialog refresh policy {refresh_policy!r}',
+            }]
+        stable_cycles = max(1, int(observation.get('stable_cycles', 2)))
+        interval = max(0.05, float(observation.get('interval_ms', 250)) / 1000.0)
+        timeout = max(
+            interval,
+            float(observation.get('dialog_timeout_ms', 12000)) / 1000.0,
+        )
+        started = time.monotonic()
+        deadline = started + timeout
+        matched_cycles = 0
+        samples: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            try:
+                snapshot = build_native_dialog_snapshot(self.platform)
+            except NativeDialogObservationError as exc:
+                matched_cycles = 0
+                samples.append({
+                    'elapsed_ms': elapsed_ms,
+                    'refresh_policy': refresh_policy,
+                    'matched': False,
+                    'error': str(exc)[:1000],
+                })
+                time.sleep(interval)
+                continue
+            dialog_roots = snapshot.mapped.get('dialog_root') or ()
+            chooser_widgets = snapshot.mapped.get('chooser_widget') or ()
+            location_entries = snapshot.mapped.get('location_entry') or ()
+            location_text = location_entries[0].text if len(location_entries) == 1 else None
+            matched = (
+                len(dialog_roots) == 1
+                and len(chooser_widgets) == 1
+                and (not require_location_entry or len(location_entries) == 1)
+                and (
+                    expected_location_text is None
+                    or location_text == expected_location_text
+                )
+            )
+            samples.append({
+                'elapsed_ms': elapsed_ms,
+                'refresh_policy': refresh_policy,
+                'revision': snapshot.revision,
+                'contract_sha256': snapshot.contract_sha256,
+                'dialog_root_count': len(dialog_roots),
+                'chooser_widget_count': len(chooser_widgets),
+                'location_entry_count': len(location_entries),
+                'location_text': location_text,
+                'matched': matched,
+            })
+            matched_cycles = matched_cycles + 1 if matched else 0
+            if matched_cycles >= stable_cycles:
+                return snapshot, samples
+            time.sleep(interval)
+        return None, samples
 
     # ------------------------------------------------------------------
     # Shared: focus the composer with coordinate action + snapshot confirmation

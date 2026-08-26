@@ -314,6 +314,11 @@ workflow:
     menu_target: upload_files_item
     scope: menu_snapshot
     open_method: mapped_pointer_activate
+    observation:
+      refresh_policy: native_invalidate_reacquire
+      stable_cycles: 2
+      interval_ms: 250
+      dialog_timeout_ms: 12000
   prompt:
     input: input
     observation:
