@@ -44,6 +44,9 @@ jobs:
       - name: Prove Claude semantic attachment shortcut contract
         run: python3 consultation_v2/validators/validate_claude_semantic_shortcut_contract.py
 
+      - name: Prove Claude generated-artifact download contract
+        run: python3 consultation_v2/validators/validate_claude_manual_extraction_contract.py
+
       - name: Prove Perplexity attachment semantic operation contract
         run: python3 consultation_v2/validators/validate_perplexity_manual_attachment_contract.py
 
