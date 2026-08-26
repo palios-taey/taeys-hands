@@ -404,12 +404,20 @@ tree:
         parent: current_response_article
         ordinal: first
       reason: The current response article's first section owns its rendered response content.
-    generated_artifact_controls_section:
+    generated_artifact_wrapper_section:
       role: section
       scope: response.document
       match_strategy: name_agnostic_structural
       structural:
         parent: response_content_section
+        ordinal: last
+      reason: Claude wraps generated artifact controls in the last nameless response-content section.
+    generated_artifact_controls_section:
+      role: section
+      scope: response.document
+      match_strategy: name_agnostic_structural
+      structural:
+        parent: generated_artifact_wrapper_section
         ordinal: last
         direct_child_roles:
           - push button
