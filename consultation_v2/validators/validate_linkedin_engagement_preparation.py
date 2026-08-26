@@ -17,7 +17,6 @@ COMMAND = REPO_ROOT / 'scripts/prepare_linkedin_engagement.py'
 SEAT = 'linkedin-engagement-prepare-validator'
 CORRELATION = 'linkedin-engagement-prepare-001'
 SOURCE_REF = 'private-engagement-source-sentinel'
-NOTIFICATIONS_NAME = 'private-notifications-name-sentinel'
 RETURN_URL = 'https://www.linkedin.com/jobs/search-results/?keywords=private-return-sentinel'
 RESULT_SCHEMA = 'linkedin_engagement_preparation_result_v1'
 TERMINAL_MARKER_SCHEMA = 'linkedin_engagement_preparation_terminal_v1'
@@ -55,7 +54,6 @@ def transaction(private_root: Path, **changes: Any) -> dict[str, Any]:
         'operation': 'capture_visible_new_engagement_signal',
         'source_ref': SOURCE_REF,
         'sink_ref': str(private_root / 'sinks' / SEAT / CORRELATION),
-        'notifications_name': NOTIFICATIONS_NAME,
         'return_url': RETURN_URL,
     }
     value.update(changes)
@@ -113,7 +111,6 @@ def invoke(
     )
     for private_value in (
         SOURCE_REF,
-        NOTIFICATIONS_NAME,
         RETURN_URL,
         str(private_root),
         str(draft),

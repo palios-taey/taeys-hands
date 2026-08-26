@@ -25,7 +25,6 @@ _DRAFT_FIELDS = frozenset({
     'operation',
     'source_ref',
     'sink_ref',
-    'notifications_name',
     'return_url',
 })
 
@@ -157,7 +156,7 @@ def _read_draft(
             raise LinkedInJobsContractError('draft manifest fields are not exact')
         if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] != OPERATION:
             raise LinkedInJobsContractError('draft manifest contract is unsupported')
-        for field in ('source_ref', 'sink_ref', 'notifications_name', 'return_url'):
+        for field in ('source_ref', 'sink_ref', 'return_url'):
             item = value[field]
             if not isinstance(item, str) or not item or len(item) > 4096:
                 raise LinkedInJobsContractError('draft manifest field is invalid')

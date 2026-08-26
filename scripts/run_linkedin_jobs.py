@@ -878,7 +878,6 @@ def _execute_engagement_transaction(
     display: str,
     deadline_at: float,
     sink_root: Path,
-    notifications_name: str,
     return_url: str,
 ) -> dict[str, Any]:
     from consultation_v2.platforms.linkedin.driver import (
@@ -917,7 +916,7 @@ def _execute_engagement_transaction(
         with _internal_deadline(deadline_at):
             _bind_display(display)
             _firefox, _document, snapshot = build_snapshot('linkedin')
-            start = observe_engagement_start(snapshot, notifications_name, return_url)
+            start = observe_engagement_start(snapshot, return_url)
             if not (
                 start.get('route_exact') is True
                 and start.get('route_kind_exact') is True
@@ -930,7 +929,7 @@ def _execute_engagement_transaction(
                     start=start,
                 )
             phase = 'notifications_action'
-            notifications_action = activate_notifications(snapshot, notifications_name)
+            notifications_action = activate_notifications(snapshot)
             phase = 'notifications_postcondition'
             notifications = stable_notifications_observation(deadline_at)
             notifications_postcondition = dict(notifications.receipt)
@@ -1142,7 +1141,6 @@ def _finalize_engagement(
     expected_transaction_sha256: str,
     source_ref: str | None,
     sink_ref: str | None,
-    notifications_name: str | None,
     return_url: str | None,
     lock_lineage: Mapping[str, Any],
     terminal: Mapping[str, Any],
@@ -1177,7 +1175,6 @@ def _finalize_engagement(
         'expected_transaction_sha256': expected_transaction_sha256,
         'source_ref_sha256': _digest_text(source_ref),
         'sink_ref_sha256': _digest_text(sink_ref),
-        'notifications_name_sha256': _digest_text(notifications_name),
         'return_url_sha256': _digest_text(return_url),
         'start': terminal['start'],
         'notifications_action': terminal['notifications_action'],
@@ -1248,7 +1245,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     search_ref: str | None = None
     sink_ref: str | None = None
     source_ref: str | None = None
-    notifications_name: str | None = None
     return_url: str | None = None
     target_card_name: str | None = None
     detail_title_name: str | None = None
@@ -1276,7 +1272,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         sink_ref = transaction['sink_ref']
         if operation == 'capture_visible_new_engagement_signal':
             source_ref = transaction['source_ref']
-            notifications_name = transaction['notifications_name']
             return_url = transaction['return_url']
         else:
             search_ref = transaction['search_ref']
@@ -1302,7 +1297,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 expected_transaction_sha256=args.expected_transaction_sha256,
                 source_ref=source_ref,
                 sink_ref=sink_ref,
-                notifications_name=notifications_name,
                 return_url=return_url,
                 lock_lineage=unlocked_lineage,
                 terminal=_engagement_terminal(
@@ -1372,14 +1366,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         ttl=display_lock_ttl(args.deadline_seconds),
     ) as lock:
         if operation == 'capture_visible_new_engagement_signal':
-            if notifications_name is None or return_url is None:
+            if return_url is None:
                 raise RuntimeError('engagement transaction identity is incomplete')
             terminal = _execute_engagement_transaction(
                 lock=lock,
                 display=args.display,
                 deadline_at=deadline_at,
                 sink_root=sink_root,
-                notifications_name=notifications_name,
                 return_url=return_url,
             )
         else:
@@ -1423,7 +1416,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             expected_transaction_sha256=args.expected_transaction_sha256,
             source_ref=source_ref,
             sink_ref=sink_ref,
-            notifications_name=notifications_name,
             return_url=return_url,
             lock_lineage=lineage,
             terminal=terminal,

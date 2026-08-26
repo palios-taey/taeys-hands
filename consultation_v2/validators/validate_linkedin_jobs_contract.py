@@ -162,7 +162,7 @@ def _validate_yaml() -> list[str]:
         errors.append(f'{YAML_PATH}: engagement operation boundary drifted')
     navigation = engagement.get('navigation') or {}
     if navigation.get('target') != {
-        'private_exact_name_field': 'notifications_name',
+        'scope': 'current_platform_document',
         'role': 'link',
         'states_include': ['showing', 'enabled'],
         'uri': {
@@ -637,7 +637,6 @@ def _validate_engagement_schema_fixtures() -> list[str]:
         'expected_transaction_sha256': '7' * 64,
         'source_ref_sha256': '8' * 64,
         'sink_ref_sha256': '9' * 64,
-        'notifications_name_sha256': 'a' * 64,
         'return_url_sha256': 'b' * 64,
         'start': {
             'route_exact': True,
@@ -1012,7 +1011,8 @@ def _validate_engagement_schema_fixtures() -> list[str]:
 
 def _validate_restore_projection() -> list[str]:
     from consultation_v2.platforms.linkedin.driver import (
-        _exact_notifications_target,
+        _notifications_target,
+        observe_engagement_start,
         observe_engagement_restore,
     )
     from consultation_v2.types import ElementRef, Snapshot
@@ -1026,14 +1026,58 @@ def _validate_restore_projection() -> list[str]:
                 raise IndexError(index)
             return self._uri
 
+    class Action:
+        def __init__(self, names: tuple[str, ...]) -> None:
+            self._names = names
+
+        def get_n_actions(self) -> int:
+            return len(self._names)
+
+        def get_action_name(self, index: int) -> str:
+            return self._names[index]
+
+    class Document:
+        def __init__(self, url: str) -> None:
+            self._url = url
+
+        def get_parent(self) -> None:
+            return None
+
+        def get_role_name(self) -> str:
+            return 'document web'
+
+        def get_document_iface(self) -> Document:
+            return self
+
+        def get_document_attribute_value(self, key: str) -> str | None:
+            return self._url if key == 'DocURL' else None
+
     class Accessible:
-        def __init__(self, uri: str) -> None:
+        def __init__(
+            self,
+            uri: str,
+            document_url: str,
+            action_names: tuple[str, ...],
+        ) -> None:
             self._hyperlink = Hyperlink(uri)
+            self._document = Document(document_url)
+            self._action = Action(action_names)
 
         def get_hyperlink(self) -> Hyperlink:
             return self._hyperlink
 
-    def notifications(name: str, uri: str) -> ElementRef:
+        def get_parent(self) -> Document:
+            return self._document
+
+        def get_action_iface(self) -> Action:
+            return self._action
+
+    def notifications(
+        name: str,
+        uri: str,
+        document_url: str,
+        action_names: tuple[str, ...] = ('jump',),
+    ) -> ElementRef:
         return ElementRef(
             key=None,
             name=name,
@@ -1041,57 +1085,71 @@ def _validate_restore_projection() -> list[str]:
             x=None,
             y=None,
             states=['showing', 'enabled'],
-            atspi_obj=Accessible(uri),
+            atspi_obj=Accessible(uri, document_url, action_names),
         )
 
     def snapshot(*elements: ElementRef) -> Snapshot:
         return Snapshot(
             platform='linkedin',
-            url='https://www.linkedin.com/jobs/search-results?keywords=engineering',
+            url=return_url,
             unknown=list(elements),
         )
 
     errors: list[str] = []
-    old_name = 'Notifications, 933 new notifications'
-    current_name = 'Notifications, 0 new notifications'
+    current_name = 'Notifications, 15 new notifications'
     notifications_uri = 'https://www.linkedin.com/notifications'
     return_url = 'https://www.linkedin.com/jobs/search-results?keywords=engineering'
-    old_snapshot = snapshot(notifications(old_name, notifications_uri))
-    current_snapshot = snapshot(notifications(current_name, notifications_uri))
+    preload_url = 'https://www.linkedin.com/preload/?_bprMode=vanilla'
+    samples = [
+        snapshot(
+            notifications(current_name, notifications_uri, return_url),
+            notifications('15 new notifications Notifications', notifications_uri, preload_url),
+        )
+        for _sample in range(3)
+    ]
+    digests: list[str] = []
+    for sample in samples:
+        target, count = _notifications_target(sample)
+        start = observe_engagement_start(sample, return_url)
+        restored = observe_engagement_restore(sample, return_url)
+        digest = start['notifications_target_state_digest']
+        if not (
+            target is not None
+            and count == 1
+            and start['route_exact'] is True
+            and start['route_kind_exact'] is True
+            and start['notifications_target_match_count'] == 1
+            and restored == start
+            and isinstance(digest, str)
+        ):
+            errors.append('current-document Notifications authority was not exact')
+            break
+        digests.append(digest)
+    if len(digests) != 3 or len(set(digests)) != 1:
+        errors.append('three read-only Notifications samples did not stabilize')
 
-    old_target, old_count = _exact_notifications_target(old_snapshot, old_name)
-    changed_target, changed_count = _exact_notifications_target(
-        current_snapshot,
-        old_name,
+    changed_name = snapshot(
+        notifications('Notifications, 933 new notifications', notifications_uri, return_url),
+        notifications('933 new notifications Notifications', notifications_uri, preload_url),
     )
-    if (
-        old_target is None
-        or old_count != 1
-        or changed_target is not None
-        or changed_count != 0
-    ):
-        errors.append('pre-action Notifications target no longer requires private exact name')
-
-    first = observe_engagement_restore(current_snapshot, return_url)
-    second = observe_engagement_restore(current_snapshot, return_url)
-    if not (
-        first['route_exact'] is True
-        and first['route_kind_exact'] is True
-        and first['notifications_target_match_count'] == 1
-        and isinstance(first['notifications_target_state_digest'], str)
-        and first['notifications_target_state_digest']
-        == second['notifications_target_state_digest']
-    ):
-        errors.append('changed unread count did not satisfy stable restore projection')
+    changed_target, changed_count = _notifications_target(changed_name)
+    if changed_target is None or changed_count != 1:
+        errors.append('mutable unread count remained part of Notifications authority')
 
     failures = {
         'zero': snapshot(),
-        'duplicate': snapshot(
-            notifications(current_name, notifications_uri),
-            notifications('Notifications, 1 new notification', notifications_uri),
+        'duplicate_current_document': snapshot(
+            notifications(current_name, notifications_uri, return_url),
+            notifications('Notifications, 1 new notification', notifications_uri, return_url),
+        ),
+        'preload_only': snapshot(
+            notifications('15 new notifications Notifications', notifications_uri, preload_url),
         ),
         'wrong_uri': snapshot(
-            notifications(current_name, 'https://www.linkedin.com/feed/'),
+            notifications(current_name, 'https://www.linkedin.com/feed/', return_url),
+        ),
+        'wrong_action': snapshot(
+            notifications(current_name, notifications_uri, return_url, ('click',)),
         ),
     }
     for label, candidate in failures.items():
@@ -1400,7 +1458,7 @@ def validate() -> list[str]:
         {'schema', 'operation', 'sink_ref'},
         {
             'search_ref', 'target_card_name', 'detail_title_name',
-            'detail_company_name', 'source_ref', 'notifications_name',
+            'detail_company_name', 'source_ref',
             'return_url',
         },
     ))
@@ -1432,7 +1490,7 @@ def validate() -> list[str]:
         'hands_commit', 'yaml_sha256', 'terminal_state', 'ok', 'failure_code',
         'records_observed', 'records_written', 'content_digest',
         'restore_verified', 'transaction_sha256', 'expected_transaction_sha256',
-        'source_ref_sha256', 'sink_ref_sha256', 'notifications_name_sha256',
+        'source_ref_sha256', 'sink_ref_sha256',
         'return_url_sha256', 'start', 'notifications_action',
         'notifications_postcondition', 'my_posts_action',
         'my_posts_postcondition', 'candidate', 'sink',

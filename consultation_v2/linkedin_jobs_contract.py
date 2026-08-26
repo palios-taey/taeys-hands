@@ -252,7 +252,6 @@ def read_private_input(
             'operation',
             'source_ref',
             'sink_ref',
-            'notifications_name',
             'return_url',
         })
     else:
@@ -277,15 +276,6 @@ def read_private_input(
         if not isinstance(item, str) or not item or len(item) > 4096:
             raise LinkedInJobsContractError(f'transaction {key} is invalid')
     if operation == 'capture_visible_new_engagement_signal':
-        notifications_name = value['notifications_name']
-        if (
-            not isinstance(notifications_name, str)
-            or not notifications_name
-            or len(notifications_name) > 4096
-        ):
-            raise LinkedInJobsContractError(
-                'transaction notifications_name is invalid'
-            )
         validate_return_url(value['return_url'])
     sink_root = validate_path_beneath_private_root(
         value['sink_ref'],
