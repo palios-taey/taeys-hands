@@ -25,6 +25,24 @@ The exact UI authority is
 The freshly filtered AT-SPI tree is the oracle. A prose instruction never creates an element, operation, or
 effect that the current YAML and deployed Taey-facing surface do not expose.
 
+### Authority registry
+
+This file is the sole public authority for the six-unit order and each unit's current qualification boundary.
+It does not replace the narrower executable contracts below:
+
+| Boundary | Public authority |
+| --- | --- |
+| UI observation, one-action execution, and receipts | [`UI_INTERACTION_AUTHORITY.md`](UI_INTERACTION_AUTHORITY.md) plus the current LinkedIn YAML |
+| My-post engagement capture and exact Jobs-route restoration | [`LINKEDIN_ENGAGERS_CAPTURE_CONTRACT.md`](LINKEDIN_ENGAGERS_CAPTURE_CONTRACT.md) |
+| Jobs search-surface restoration | [`LINKEDIN_JOBS_SURFACE_RESTORE_CONTRACT.md`](LINKEDIN_JOBS_SURFACE_RESTORE_CONTRACT.md) |
+| Mounted Jobs capture and exact-card selection | [`LINKEDIN_JOB_SEARCH_CAPTURE_CONTRACT.md`](LINKEDIN_JOB_SEARCH_CAPTURE_CONTRACT.md) and [`LINKEDIN_JOBS_READ_ONLY_CONTRACT.md`](LINKEDIN_JOBS_READ_ONLY_CONTRACT.md) |
+| Production qualification ledger for the revenue UI chain | [`TAEY_REVENUE_UI_ENABLEMENT_PLAN.md`](TAEY_REVENUE_UI_ENABLEMENT_PLAN.md) |
+| Company-site observation | [`ATS_PROVIDER_READ_ONLY_RUNBOOK.md`](ATS_PROVIDER_READ_ONLY_RUNBOOK.md) |
+
+Private records supply targets, routes, policy values, identities, facts, drafts, and results. They never create
+an element, operation, effect, qualification, or competing execution process. Historical tools, plans, and
+receipts remain provenance only unless this registry names their current public replacement.
+
 ## The mechanical transition
 
 Every UI transition inside every unit is the same machine:
@@ -110,10 +128,16 @@ liking, or sending any message is not released by the existing proof.
 
 ## Unit 3 — Messaging
 
-The intended unit reads every exposed unread thread in full, binds one exact participant/thread identity, drafts
-only from runtime-injected supported facts, sends one reply, verifies that reply in the same thread, and persists
-one touch. A hiring commitment, compensation decision, or other privately classified decision stops before a
-reply and emits a private escalation receipt.
+Inbound replies and proactive outbound messages are two distinct policy domains. An inbound-reply candidate
+begins from an exact exposed unread thread and its earned conversational context. A proactive-outbound candidate
+begins from a separate privately supplied target and purpose. Evidence or eligibility in one domain never
+authorizes the other.
+
+The intended inbound-reply path reads every exposed unread thread in full, binds one exact participant/thread
+identity, drafts only from runtime-injected supported facts, sends one reply, verifies that reply in the same
+thread, and persists one touch. A missing supported fact produces only `needs_fact` and stops before drafting;
+the runtime never invents an answer or substitutes an approval-queue state. A hiring commitment, compensation
+decision, or other privately classified decision stops before a reply and emits a private escalation receipt.
 
 Qualification: no current public LinkedIn YAML transaction maps and production-qualifies this complete unit.
 Message open, editor write, and send effects are not authorized. Taey records `not_production_qualified` without
@@ -124,6 +148,11 @@ a UI mutation and continues only to an independent later unit.
 The intended unit opens the invitations surface, observes all mounted requests, binds one exact invitation
 identity, activates Accept once, proves the same invitation reached the YAML-declared accepted/absent state, and
 persists the exact inbound connection touch. Every invitation is a separate transition and receipt.
+
+Invitation eligibility is a private runtime-injected policy verdict for that exact identity. `allowed` may enter
+the still-separate UI transition; `denied`, missing, duplicate, stale, or `unknown` stops without Accept. The
+existence of an invitation, a historical accept-all instruction, or a model preference never supplies the
+eligibility verdict.
 
 Qualification: no current public LinkedIn YAML transaction maps and production-qualifies invitation acceptance.
 No Accept effect is authorized. Taey records `not_production_qualified` without a UI mutation.
@@ -187,6 +216,11 @@ mapped chip/name are separate from submit. Submit is a separately frozen final e
 until the complete form sweep, artifact/truth/completeness gates, external confirmation postcondition, and
 private database readback are all independently qualified. A failed or ambiguous primitive is terminal and is
 never clicked again under the same application identity.
+
+When an application fact is absent, the only valid state is `needs_fact`; `needs_you`, an approval queue, a
+guessed value, and a model-authored substitute are not equivalent states. After an authorized submit, terminal
+success requires the employer-rendered confirmation state declared by that provider's public contract. Email is
+optional telemetry and never substitutes for the rendered confirmation or private database readback.
 
 ## Qualification control
 
