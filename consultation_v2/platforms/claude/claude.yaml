@@ -828,6 +828,10 @@ workflow:
     menu_target: upload_files_item
     open_method: keyboard_shortcut
     keyboard_shortcut: ctrl+u
+    key_precondition:
+      projection: attachment_shortcut_v1
+      scope: base
+      attachment_count_element: remove_attachment
     observation:
       stable_cycles: 2
       interval_ms: 250
