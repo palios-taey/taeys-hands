@@ -72,6 +72,25 @@ Public code never points at an operator-only repository or path.
   those exact four sources once: transaction `eab0e62a33ff343f4fd04040af74fb06447ad8bed8d01a97e3dedd5cc3af9960`, receipt
   `d73d96d18932ac45b9f87c1c138f7b4494ebd859923fd1c27fad9745a6645157`, jobs `2239 -> 2240`,
   applications `49 -> 49`, apply runs `593 -> 593`, and SQL `NULL` verdict, score, and applied-at fields.
+- The current-main production chain at Hands `e3dfb52fc1b9501db0c850380168b47401fefb9f`, Presence
+  `1f8ac7ab3f87a7c3a4ae945bd947cb0882c355b0`, and `taey-apply`
+  `f96fa643ee3879e50f5d85991c1c0ecc86ab0444` independently repeated the complete boundary:
+  - route restore transaction `c1f63c155838fa44f47be3a33c8e215705074609206a433e7b83994a947b185a` and receipt
+    `32466f96bbee574d1afc621783124ea7a39a24d1b07c32d7bbcd4064ec8cb7d7`, with two stable observations;
+  - 24-card mounted-search transaction `4d872f2a5104e37ee8b25ab282580291ded2fa6508e648171ee035d2efe6e323`, artifact
+    `e2b9844aef2c47a3b764beb305859388a881dfec34af7d43803a671f19d731ec`, and receipt
+    `e32a760b710331033688e7b4de825c7dde141d56522edede2c869b77bc09a4a2`;
+  - one exact new-card selection transaction `cca4a871ac1608a30c7fafcc6c99d6e0d62cfee0e1e9286e008647551ff26ef6`, artifact
+    `3733ea59e90c812177ae0f9298e53c2be825f0a3e750656deb48a90d02f4eae3`, and receipt
+    `293b762ef00c47296c2f6e2f3fe6f65352a75a6f127f1a24eb3d660999983a7f`; and
+  - intake transaction `e4e357fe777f344b8fad2d4b977fc4e7d7593273f4a1fc77549a80c301647166` and receipt
+    `280e173548481fe48b2c4083b34aa19e0f88cb7f7817065862b28171256aaf02`, with jobs `2275 -> 2276`,
+    applications `49 -> 49`, apply runs `593 -> 593`, one exact row, and SQL `NULL` verdict, score, and applied-at.
+- Before that accepted intake, one preparation identity stopped at `private_input_invalid` because its draft used
+  absolute rather than private-root-relative source references. Refusal receipt
+  `9b15720edb226eb341bdf34812ab40f877ac80fb77ff23ce64bbe469862a6249` was preserved, the identity was not
+  retried, and no UI or database action occurred. The corrected fresh identity passed the public four-source
+  pairing validator before Taey was invoked.
 - No comment, message, invitation, proposal, application fill, score, ATS action, or submit authority is
   released by the completed joined chain.
 
@@ -86,7 +105,7 @@ target.
 
 The source mechanics:
 
-- `select_and_capture_job` is a retained production baseline: one exact `click[0]`, private target/title/company
+- `select_and_capture_job` is a retained production baseline: one exact YAML-owned `click`, private target/title/company
   and selected detail stable for two fresh observations, one selected-detail write, unchanged content, CAREERS
   lock released, then stop.
 - `capture_mounted_job_search` is now a retained production baseline. It captures only the cards already mounted
@@ -115,7 +134,7 @@ The completed natural unit is the Presence intake adapter:
 The fresh joined-chain acceptance proof from exact public/deployed commits is now complete:
 
 - mounted search captured 25 cards with stable pre/post evidence and zero residual turn/lease;
-- deterministic ordinal `1` selection executed one exact click, stabilized exact title/company identity twice,
+- deterministic ordinal `1` selection executed one exact YAML-owned click, stabilized exact title/company identity twice,
   captured one unchanged detail record, and released the lock; and
 - the separate intake transaction joined all four Hands source hashes, inserted exactly one unclassified row,
   preserved applications and apply-runs counts, and produced no outward effect.
