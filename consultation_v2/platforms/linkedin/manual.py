@@ -21,12 +21,16 @@ from consultation_v2.yaml_contract import load_platform_yaml
 NOTIFICATIONS_NAVIGATION = 'notifications_navigation'
 NOTIFICATION_CANDIDATE_PREFIX = 'notification_candidate_'
 NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_after_'
+SELECTED_POST_PREFIX = 'selected_post_activity_'
 
 _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
 )
 _CONTINUATION_KEY = re.compile(
     rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_(?P<prefix>[0-9a-f]{{16}})$'
+)
+_SELECTED_POST_KEY = re.compile(
+    rf'^{SELECTED_POST_PREFIX}(?P<activity>[0-9]+)$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
 
@@ -107,6 +111,30 @@ def _manual_notification_contract() -> dict[str, Any]:
             },
             'exact_activity_identity_count': 1,
         },
+        'selected_post_observation': {
+            'element_key_prefix': SELECTED_POST_PREFIX,
+            'root': {
+                'role': 'list item',
+                'states_include': ['showing'],
+                'exact_match_count': 1,
+            },
+            'heading': {
+                'index_path': [0, 0],
+                'role': 'heading',
+                'name': 'Feed post',
+            },
+            'body': {
+                'index_path': [0, 8, 0],
+                'role': 'section',
+                'states_include': ['showing'],
+                'content_digest': 'sha256_utf8',
+            },
+            'operation': {
+                'effect_class': 'observation',
+                'primitives': [],
+                'allowed_now': [],
+            },
+        },
         'observation_barrier': {
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
@@ -160,6 +188,16 @@ def _direct_children(node: Any) -> list[Any]:
         ]
     except Exception:
         return []
+
+
+def _node_at_index_path(node: Any, index_path: list[int]) -> Any | None:
+    current = node
+    for index in index_path:
+        children = _direct_children(current)
+        if index < 0 or index >= len(children):
+            return None
+        current = children[index]
+    return current
 
 
 def _structural_index_path(node: Any) -> tuple[int, ...]:
@@ -242,6 +280,53 @@ def _selected_activity_identity(
         if identity in sources[source]
     )
     return identity, matched_sources
+
+
+def _selected_post_body(
+    snapshot: Snapshot,
+    contract: dict[str, Any],
+) -> tuple[Any | None, str | None]:
+    observation = contract['selected_post_observation']
+    root_contract = observation['root']
+    heading_contract = observation['heading']
+    body_contract = observation['body']
+    elements = _all_elements(snapshot)
+    elements_by_identity = {id(element.atspi_obj): element for element in elements}
+    roots: list[tuple[Any, str]] = []
+    for element in elements:
+        if (
+            element.role != root_contract['role']
+            or not set(root_contract['states_include']).issubset(element.states)
+        ):
+            continue
+        heading = _node_at_index_path(
+            element.atspi_obj,
+            heading_contract['index_path'],
+        )
+        body = _node_at_index_path(
+            element.atspi_obj,
+            body_contract['index_path'],
+        )
+        if (
+            heading is None
+            or _node_role(heading) != heading_contract['role']
+            or _node_name(heading) != heading_contract['name']
+            or body is None
+            or _node_role(body) != body_contract['role']
+        ):
+            continue
+        body_element = elements_by_identity.get(id(body))
+        if (
+            body_element is None
+            or not set(body_contract['states_include']).issubset(body_element.states)
+        ):
+            continue
+        text = body_element.text or _node_text(body)
+        if text:
+            roots.append((body_element, text))
+    if len(roots) != root_contract['exact_match_count']:
+        return None, None
+    return roots[0]
 
 
 def _notification_relative_age(element: Any, contract: dict[str, Any]) -> str | None:
@@ -340,6 +425,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             key != NOTIFICATIONS_NAVIGATION
             and not key.startswith(NOTIFICATION_CANDIDATE_PREFIX)
             and not key.startswith(NOTIFICATIONS_CONTINUATION_PREFIX)
+            and not key.startswith(SELECTED_POST_PREFIX)
         )
     }
     mapped[NOTIFICATIONS_NAVIGATION] = (
@@ -395,6 +481,35 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     'have evidenced exclusions'
                 ),
             )]
+    contract = _manual_notification_contract()
+    selected_activity, activity_sources = _selected_activity_identity(
+        snapshot,
+        contract,
+    )
+    if selected_activity is not None:
+        body, body_text = _selected_post_body(snapshot, contract)
+        if body is None or body_text is None:
+            raise ValueError(
+                'LinkedIn selected activity lacks one exact showing post body'
+            )
+        body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+        key = f'{SELECTED_POST_PREFIX}{selected_activity}'
+        raw = {
+            **dict(body.raw),
+            'selected_activity': selected_activity,
+            'selected_activity_sources': list(activity_sources),
+            'selected_post_body_sha256': body_digest,
+        }
+        mapped[key] = [replace(
+            body,
+            key=key,
+            name='Selected LinkedIn post body',
+            text=body_text,
+            description=(
+                f'activity={selected_activity}; body_sha256={body_digest}'
+            ),
+            raw=raw,
+        )]
     return replace(snapshot, mapped=mapped)
 
 
@@ -403,15 +518,50 @@ def element_operation(
     states: list[str],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    del context
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
+    selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
     if (
         element_key != NOTIFICATIONS_NAVIGATION
         and candidate_match is None
         and continuation_match is None
+        and selected_post_match is None
     ):
         return None
+    if selected_post_match is not None:
+        selected_context = dict(context or {})
+        activity = selected_post_match.group('activity')
+        body_text = selected_context.get('text')
+        body_digest = selected_context.get('selected_post_body_sha256')
+        if (
+            selected_context.get('selected_activity') != activity
+            or not isinstance(body_text, str)
+            or not body_text
+            or body_digest != hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+        ):
+            raise ValueError(
+                'LinkedIn selected-post observation identity is not exact'
+            )
+        operation = _manual_notification_contract()[
+            'selected_post_observation'
+        ]['operation']
+        return {
+            'method': 'observe',
+            **operation,
+            'forbidden': [
+                'click',
+                'focus',
+                'activate',
+                'hover',
+                'mapped_pointer_activate',
+            ],
+            'postcondition': {
+                'kind': 'exact_selected_post_body',
+                'activity': activity,
+                'body_sha256': body_digest,
+            },
+        }
+    del context
     normalized_states = {
         str(state).strip().lower().replace('_', ' ') for state in states
     }

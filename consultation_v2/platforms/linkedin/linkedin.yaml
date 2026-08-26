@@ -234,6 +234,32 @@ workflow:
           states_include:
             - showing
         exact_activity_identity_count: 1
+      selected_post_observation:
+        element_key_prefix: selected_post_activity_
+        root:
+          role: list item
+          states_include:
+            - showing
+          exact_match_count: 1
+        heading:
+          index_path:
+            - 0
+            - 0
+          role: heading
+          name: Feed post
+        body:
+          index_path:
+            - 0
+            - 8
+            - 0
+          role: section
+          states_include:
+            - showing
+          content_digest: sha256_utf8
+        operation:
+          effect_class: observation
+          primitives: []
+          allowed_now: []
       observation_barrier:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
