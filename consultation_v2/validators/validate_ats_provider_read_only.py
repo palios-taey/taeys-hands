@@ -173,6 +173,12 @@ def _assert_route_contract() -> None:
     )
     if repeated.grammar_id != 'hosted_job_with_identity_query':
         raise RuntimeError('Greenhouse repeated identity query did not bind exactly')
+    padded_embed = match_provider_route(
+        greenhouse,
+        'https://job-boards.greenhouse.io/embed/job_app?for=example&validityToken=abc_123%3D%3D&token=123456',
+    )
+    if padded_embed.grammar_id != 'embedded_application_with_validity':
+        raise RuntimeError('Greenhouse padded validity token did not bind exactly')
     _reject('greenhouse', 'http://boards.greenhouse.io/example/jobs/123456')
     _reject('greenhouse', 'https://boards.greenhouse.io/example/jobs/123456?gh_jid=999999')
     _reject(
@@ -182,6 +188,10 @@ def _assert_route_contract() -> None:
     _reject('greenhouse', 'https://boards.greenhouse.io.evil.invalid/example/jobs/123456')
     _reject('greenhouse', 'https://boards.greenhouse.io:bad/example/jobs/123456')
     _reject('greenhouse', 'https://[broken/example/jobs/123456')
+    _reject(
+        'greenhouse',
+        'https://job-boards.greenhouse.io/embed/job_app?for=example&validityToken=abc%3Ddef&token=123456',
+    )
     _reject('workday', 'https://myworkdayjobs.com/board/job/location/REQ-123')
 
 
@@ -245,6 +255,11 @@ def _assert_projection_contract() -> None:
         raise RuntimeError('off-document combo refusal/frontier invariant changed')
     if any('name' in field or 'value' in field for field in fields):
         raise RuntimeError('required-field projection leaked dynamic names or values')
+    scrolled_document = Rect(390, -2813, 840, 7137)
+    if not scrolled_document.valid or not scrolled_document.contains(Rect(500, 60, 300, 40)):
+        raise RuntimeError('scrolled active-document geometry was rejected')
+    if Rect(-1, -1, -1, -1).valid:
+        raise RuntimeError('invalid AT-SPI extent sentinel was accepted')
     if spec.document['authorities'] != {'fill': False, 'upload': False, 'submit': False}:
         raise RuntimeError('read-only projection granted mutation authority')
 

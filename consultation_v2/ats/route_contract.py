@@ -11,7 +11,7 @@ from .provider_contract import ProviderSpec
 
 
 _TYPE_PATTERNS = {
-    'base64url': re.compile(r'[A-Za-z0-9_-]+\Z'),
+    'base64url': re.compile(r'[A-Za-z0-9_-]+={0,2}\Z'),
     'integer': re.compile(r'[0-9]+\Z'),
     'locale': re.compile(r'[a-z]{2}-[A-Z]{2}\Z'),
     'slug': re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*\Z'),
