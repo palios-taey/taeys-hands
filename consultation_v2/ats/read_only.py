@@ -43,7 +43,7 @@ class Rect:
 
     @property
     def valid(self) -> bool:
-        return self.x >= 0 and self.y >= 0 and self.width > 0 and self.height > 0
+        return self.width > 0 and self.height > 0
 
     def contains(self, other: 'Rect') -> bool:
         return (
@@ -328,7 +328,10 @@ def _find_exact_document(spec: ProviderSpec) -> tuple[Any, Any, str]:
     firefox_candidates = atspi.find_all_firefox(pid=_pid_from_environment())
     matches: list[tuple[Any, Any, str]] = []
     for firefox in firefox_candidates:
-        for document in atspi.document_web_elements(firefox):
+        for document in atspi.document_web_elements(
+            firefox,
+            max_depth=spec.document['form_projection']['max_depth'],
+        ):
             url = atspi.get_document_url(document)
             if not url:
                 continue
