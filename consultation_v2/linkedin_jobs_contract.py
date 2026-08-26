@@ -7,13 +7,20 @@ from pathlib import Path
 import re
 import stat
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 
 PRIVATE_INPUT_SCHEMA = 'linkedin_jobs_private_input_v1'
-PUBLIC_OPERATIONS = frozenset({'capture_selected_job', 'select_and_capture_job'})
+PUBLIC_OPERATIONS = frozenset({
+    'capture_selected_job',
+    'capture_visible_new_engagement_signal',
+    'select_and_capture_job',
+})
 PUBLIC_PLATFORM = 'linkedin'
 RECEIPT_SCHEMA = 'linkedin_jobs_receipt_v1'
+ENGAGEMENT_RECEIPT_SCHEMA = 'linkedin_engagement_receipt_v1'
 SELECTED_JOB_SCHEMA = 'linkedin_selected_job_v1'
+ENGAGEMENT_SIGNAL_SCHEMA = 'linkedin_engagement_signal_v1'
 
 _DISPLAY_RE = re.compile(r'^:[0-9]{1,3}$')
 _REQUESTER_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
@@ -43,6 +50,18 @@ FAILURE_CODES_BY_STATE = {
     }),
 }
 
+ENGAGEMENT_TECHNICAL_FAILURE_CODES = frozenset({
+    'action_failed',
+    'deadline_expired',
+    'display_lock_unavailable',
+    'lock_release_indeterminate',
+    'navigation_not_exact',
+    'post_observation_indeterminate',
+    'pre_observation_failed',
+    'private_input_invalid',
+    'restore_indeterminate',
+})
+
 
 class LinkedInJobsContractError(ValueError):
     pass
@@ -71,6 +90,26 @@ def validate_display(value: str) -> str:
 def validate_requester(value: str) -> str:
     if not isinstance(value, str) or not _REQUESTER_RE.fullmatch(value):
         raise LinkedInJobsContractError('requester must be a public-safe identifier')
+    return value
+
+
+def validate_return_url(value: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 4096:
+        raise LinkedInJobsContractError('return_url is invalid')
+    parsed = urlsplit(value)
+    normalized_path = parsed.path.rstrip('/') or '/'
+    if (
+        parsed.scheme != 'https'
+        or parsed.hostname != 'www.linkedin.com'
+        or parsed.port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or normalized_path != '/jobs/search-results'
+        or parsed.fragment
+    ):
+        raise LinkedInJobsContractError(
+            'return_url must be an exact HTTPS LinkedIn Jobs search-results URL'
+        )
     return value
 
 
@@ -207,23 +246,47 @@ def read_private_input(
             'detail_title_name',
             'detail_company_name',
         })
+    elif operation == 'capture_visible_new_engagement_signal':
+        expected = frozenset({
+            'schema',
+            'operation',
+            'source_ref',
+            'sink_ref',
+            'notifications_name',
+            'return_url',
+        })
     else:
         raise LinkedInJobsContractError('transaction operation is unsupported')
     if frozenset(value) != expected:
         raise LinkedInJobsContractError('transaction fields are incomplete or unknown')
     if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] not in PUBLIC_OPERATIONS:
         raise LinkedInJobsContractError('transaction schema or operation is unsupported')
-    string_fields = {'search_ref', 'sink_ref'}
+    string_fields = {'sink_ref'}
+    if operation in {'capture_selected_job', 'select_and_capture_job'}:
+        string_fields.add('search_ref')
     if operation == 'select_and_capture_job':
         string_fields.update({
             'target_card_name',
             'detail_title_name',
             'detail_company_name',
         })
+    elif operation == 'capture_visible_new_engagement_signal':
+        string_fields.add('source_ref')
     for key in string_fields:
         item = value[key]
         if not isinstance(item, str) or not item or len(item) > 4096:
             raise LinkedInJobsContractError(f'transaction {key} is invalid')
+    if operation == 'capture_visible_new_engagement_signal':
+        notifications_name = value['notifications_name']
+        if (
+            not isinstance(notifications_name, str)
+            or not notifications_name
+            or len(notifications_name) > 4096
+        ):
+            raise LinkedInJobsContractError(
+                'transaction notifications_name is invalid'
+            )
+        validate_return_url(value['return_url'])
     sink_root = validate_path_beneath_private_root(
         value['sink_ref'],
         private_root,
@@ -238,8 +301,94 @@ def read_private_input(
     return {key: str(item) for key, item in value.items()}, transaction_sha256
 
 
+def _validate_engagement_public_result(result: dict[str, Any]) -> dict[str, Any]:
+    expected = frozenset({
+        'ok',
+        'platform',
+        'display',
+        'state',
+        'failure_code',
+        'records_observed',
+        'records_written',
+        'content_digest',
+        'receipt_sha256',
+        'turn_lineage_sha256',
+        'restore_verified',
+    })
+    if frozenset(result) != expected:
+        raise LinkedInJobsContractError(
+            'engagement public result fields are incomplete or unknown'
+        )
+    if not isinstance(result['ok'], bool) or result['platform'] != PUBLIC_PLATFORM:
+        raise LinkedInJobsContractError('engagement public result identity is invalid')
+    validate_display(result['display'])
+    state = result['state']
+    failure_code = result['failure_code']
+    exact_failure = {
+        'already_known': None,
+        'ambiguous_signal': 'ambiguous_signal',
+        'captured': None,
+        'no_new_signal': None,
+        'postcondition_failed': 'postcondition_failed',
+        'sink_write_indeterminate': 'sink_write_indeterminate',
+    }
+    if state == 'technical_failure':
+        if failure_code not in ENGAGEMENT_TECHNICAL_FAILURE_CODES:
+            raise LinkedInJobsContractError('engagement technical failure code is invalid')
+    elif state not in exact_failure or failure_code != exact_failure[state]:
+        raise LinkedInJobsContractError('engagement public result failure code is invalid')
+    success = state in {'already_known', 'captured', 'no_new_signal'}
+    if result['ok'] is not success:
+        raise LinkedInJobsContractError('engagement public result success is invalid')
+    if not isinstance(result['restore_verified'], bool):
+        raise LinkedInJobsContractError('engagement restore verdict is invalid')
+    if success and result['restore_verified'] is not True:
+        raise LinkedInJobsContractError('engagement success requires verified restoration')
+    observed = result['records_observed']
+    written = result['records_written']
+    digest = result['content_digest']
+    if isinstance(observed, bool) or observed not in {0, 1}:
+        raise LinkedInJobsContractError('engagement records_observed is invalid')
+    if isinstance(written, bool) or written not in {0, 1, None}:
+        raise LinkedInJobsContractError('engagement records_written is invalid')
+    if digest is not None and (
+        not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest)
+    ):
+        raise LinkedInJobsContractError('engagement content_digest is invalid')
+    exact_facts = {
+        'already_known': (1, 0, True),
+        'ambiguous_signal': (0, 0, False),
+        'captured': (1, 1, True),
+        'no_new_signal': (0, 0, False),
+        'sink_write_indeterminate': (1, None, True),
+    }
+    if state in exact_facts:
+        if (observed, written, digest is not None) != exact_facts[state]:
+            raise LinkedInJobsContractError('engagement public state facts are invalid')
+    elif state == 'postcondition_failed':
+        if not (
+            (observed, written, digest) == (0, 0, None)
+            or (observed == 1 and written in {0, 1} and digest is not None)
+        ):
+            raise LinkedInJobsContractError('engagement postcondition facts are invalid')
+    else:
+        before_signal = (observed, written, digest) == (0, 0, None)
+        after_signal = (
+            observed == 1 and written in {0, 1} and digest is not None
+        )
+        if not (before_signal or after_signal):
+            raise LinkedInJobsContractError('engagement technical facts are invalid')
+    for key in ('receipt_sha256', 'turn_lineage_sha256'):
+        item = result[key]
+        if not isinstance(item, str) or not _SHA256_RE.fullmatch(item):
+            raise LinkedInJobsContractError(f'engagement {key} is invalid')
+    return result
+
+
 def validate_public_result(value: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(value)
+    if 'restore_verified' in result:
+        return _validate_engagement_public_result(result)
     expected = frozenset({
         'ok',
         'platform',

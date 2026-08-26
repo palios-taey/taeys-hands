@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Any, Mapping
+from urllib.parse import parse_qs, urlsplit
 
+from consultation_v2 import input as input_core
 from consultation_v2.linkedin_jobs_contract import (
+    ENGAGEMENT_SIGNAL_SCHEMA,
     SELECTED_JOB_SCHEMA,
     canonical_json_bytes,
     read_owned_private_bytes,
     sha256_hex,
     write_new_private_json,
 )
+from consultation_v2.platforms import routing as platform_routing
+from consultation_v2.snapshot import build_snapshot
 from consultation_v2.types import ElementRef, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -389,3 +395,588 @@ def selected_job_postcondition(
         and dict(before.match_counts) == exact_counts
         and dict(after.match_counts) == exact_counts
     )
+
+
+class LinkedInEngagementActionFailed(RuntimeError):
+    def __init__(self, stage: str, receipt: Mapping[str, Any]) -> None:
+        super().__init__(f'{stage} exact action failed')
+        self.stage = stage
+        self.receipt = dict(receipt)
+
+
+class LinkedInEngagementRestoreFailed(RuntimeError):
+    def __init__(self, substep: str, receipt: Mapping[str, Any]) -> None:
+        super().__init__(f'exact return navigation failed at {substep}')
+        self.receipt = dict(receipt)
+
+
+@dataclass(frozen=True, slots=True)
+class EngagementSignalObservation:
+    candidate_count: int
+    candidate_set_digest: str
+    record: Mapping[str, Any] | None
+    content_digest: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class StableEngagementObservation:
+    snapshot: Snapshot | None
+    signal: EngagementSignalObservation | None
+    receipt: Mapping[str, Any]
+
+
+def _engagement_workflow() -> dict[str, Any]:
+    workflow = load_platform_yaml('linkedin').get('workflow') or {}
+    contract = workflow.get('engagement_signal_capture')
+    if not isinstance(contract, dict):
+        raise RuntimeError('LinkedIn engagement workflow is not configured')
+    return dict(contract)
+
+
+def _all_elements(snapshot: Snapshot) -> list[ElementRef]:
+    candidates = [
+        *snapshot.unknown,
+        *snapshot.sidebar,
+        *snapshot.menu_items,
+        *(element for values in snapshot.mapped.values() for element in values),
+    ]
+    elements: list[ElementRef] = []
+    seen: set[int] = set()
+    for element in candidates:
+        identity = id(element.atspi_obj)
+        if identity not in seen:
+            seen.add(identity)
+            elements.append(element)
+    return elements
+
+
+def _element_uri(element: ElementRef) -> str | None:
+    if element.atspi_obj is None:
+        return None
+    try:
+        hyperlink = element.atspi_obj.get_hyperlink()
+        uri = str(hyperlink.get_uri(0) if hyperlink is not None else '').strip()
+    except Exception:
+        return None
+    return uri or None
+
+
+def _exact_engagement_route(url: str | None, route_key: str) -> bool:
+    if not isinstance(url, str) or not url:
+        return False
+    route = (_engagement_workflow().get('routes') or {}).get(route_key)
+    if not isinstance(route, dict):
+        raise RuntimeError(f'LinkedIn engagement route {route_key!r} is invalid')
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != route.get('scheme')
+        or parsed.hostname != route.get('host')
+        or parsed.port is not None
+        or (parsed.path.rstrip('/') or '/') != route.get('normalized_path')
+        or parsed.fragment
+    ):
+        return False
+    expected_query = route.get('exact_query')
+    return expected_query is None or parse_qs(
+        parsed.query,
+        keep_blank_values=True,
+    ) == {str(key): [str(value)] for key, value in expected_query.items()}
+
+
+def _states_match(element: ElementRef, required: Any) -> bool:
+    if not isinstance(required, list) or not required or not all(
+        isinstance(state, str) and state for state in required
+    ):
+        raise RuntimeError('LinkedIn engagement states contract is invalid')
+    return set(required).issubset(set(element.states))
+
+
+def _uri_matches(url: str | None, contract: Mapping[str, Any]) -> bool:
+    if not isinstance(url, str) or not url:
+        return False
+    parsed = urlsplit(url)
+    return (
+        parsed.scheme == contract.get('scheme')
+        and parsed.hostname == contract.get('host')
+        and parsed.port is None
+        and (parsed.path.rstrip('/') or '/') == contract.get('normalized_path')
+        and not parsed.fragment
+    )
+
+
+def _exact_notifications_target(
+    snapshot: Snapshot,
+    notifications_name: str,
+) -> tuple[ElementRef | None, int]:
+    target = (_engagement_workflow().get('navigation') or {}).get('target') or {}
+    matches = [
+        element
+        for element in _all_elements(snapshot)
+        if (
+            element.name == notifications_name
+            and element.role == target.get('role')
+            and _states_match(element, target.get('states_include'))
+            and _uri_matches(_element_uri(element), target.get('uri') or {})
+        )
+    ]
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
+def _exact_mapped_engagement_element(
+    snapshot: Snapshot,
+    key: str,
+) -> tuple[ElementRef | None, int]:
+    contract = (
+        (load_platform_yaml('linkedin').get('tree') or {})
+        .get('element_map', {})
+        .get(key, {})
+    )
+    matches = [
+        element
+        for element in (snapshot.mapped.get(key) or [])
+        if (
+            element.name == contract.get('name')
+            and element.role == contract.get('role')
+            and _states_match(element, contract.get('states_include'))
+        )
+    ]
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
+def _perform_engagement_action(
+    element: ElementRef | None,
+    target_count: int,
+    action: Mapping[str, Any],
+    stage: str,
+) -> dict[str, Any]:
+    action_name = action.get('name')
+    if not isinstance(action_name, str) or not action_name or action.get('index') != 0:
+        raise RuntimeError(f'{stage} action contract is invalid')
+    receipt = {
+        'stage': stage,
+        'target_match_count': target_count,
+        'action_name': action_name,
+        'action_index': None,
+        'action_match_count': 0,
+        'verdict': 'target_not_exact',
+    }
+    if element is None or target_count != 1 or element.atspi_obj is None:
+        raise LinkedInEngagementActionFailed(stage, receipt)
+    try:
+        action_iface = element.atspi_obj.get_action_iface()
+        action_count = int(action_iface.get_n_actions()) if action_iface else 0
+        indexes = [
+            index
+            for index in range(action_count)
+            if str(action_iface.get_action_name(index) or '') == action_name
+        ]
+    except Exception as exc:
+        receipt['verdict'] = 'action_enumeration_failed'
+        raise LinkedInEngagementActionFailed(stage, receipt) from exc
+    receipt['action_match_count'] = len(indexes)
+    if indexes != [0]:
+        receipt['verdict'] = 'action_not_exact'
+        raise LinkedInEngagementActionFailed(stage, receipt)
+    receipt['action_index'] = 0
+    try:
+        executed = bool(action_iface.do_action(0))
+    except Exception as exc:
+        receipt['verdict'] = 'action_raised'
+        raise LinkedInEngagementActionFailed(stage, receipt) from exc
+    if not executed:
+        receipt['verdict'] = 'action_returned_false'
+        raise LinkedInEngagementActionFailed(stage, receipt)
+    receipt['verdict'] = 'executed'
+    return receipt
+
+
+def observe_engagement_start(
+    snapshot: Snapshot,
+    notifications_name: str,
+    return_url: str,
+) -> dict[str, Any]:
+    target, count = _exact_notifications_target(snapshot, notifications_name)
+    state_digest = sha256_hex(canonical_json_bytes({
+        'name': target.name,
+        'role': target.role,
+        'states': sorted(target.states),
+        'uri': _element_uri(target),
+    })) if target is not None else None
+    return {
+        'route_exact': snapshot.url == return_url,
+        'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
+        'notifications_target_match_count': count,
+        'notifications_target_state_digest': state_digest,
+    }
+
+
+def activate_notifications(
+    snapshot: Snapshot,
+    notifications_name: str,
+) -> dict[str, Any]:
+    target, count = _exact_notifications_target(snapshot, notifications_name)
+    action = (_engagement_workflow().get('navigation') or {}).get('action') or {}
+    return _perform_engagement_action(target, count, action, 'notifications_navigation')
+
+
+def _barrier_settings(section: Mapping[str, Any], projection: str) -> tuple[int, float, float]:
+    barrier = section.get('observation_barrier') or {}
+    stable_cycles = barrier.get('stable_cycles')
+    interval_ms = barrier.get('interval_ms')
+    timeout_ms = barrier.get('timeout_ms')
+    if (
+        barrier.get('projection') != projection
+        or barrier.get('refresh_policy') != 'invalidate_reacquire'
+        or stable_cycles != 2
+        or isinstance(interval_ms, bool)
+        or not isinstance(interval_ms, int)
+        or interval_ms < 1
+        or isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, int)
+        or timeout_ms < interval_ms
+    ):
+        raise RuntimeError('LinkedIn engagement observation barrier is invalid')
+    return stable_cycles, interval_ms / 1000.0, timeout_ms / 1000.0
+
+
+def stable_notifications_observation(deadline_at: float) -> StableEngagementObservation:
+    navigation = _engagement_workflow().get('navigation') or {}
+    required, interval, timeout = _barrier_settings(
+        navigation,
+        'exact_route_and_my_posts_state',
+    )
+    barrier_deadline = min(deadline_at, time.monotonic() + timeout)
+    prior: tuple[int, str | None] | None = None
+    cycles = 0
+    last_snapshot: Snapshot | None = None
+    receipt: dict[str, Any] = {}
+    while time.monotonic() < barrier_deadline:
+        _firefox, _document, snapshot = build_snapshot('linkedin')
+        target, count = _exact_mapped_engagement_element(snapshot, 'my_posts_filter')
+        state_digest = sha256_hex(canonical_json_bytes({
+            'name': target.name,
+            'role': target.role,
+            'states': sorted(target.states),
+        })) if target is not None else None
+        exact = (
+            _exact_engagement_route(snapshot.url, 'notifications_all')
+            and count == 1
+            and state_digest is not None
+        )
+        projection = (count, state_digest)
+        cycles = cycles + 1 if exact and projection == prior else (1 if exact else 0)
+        prior = projection if exact else None
+        last_snapshot = snapshot
+        receipt = {
+            'route_exact': _exact_engagement_route(snapshot.url, 'notifications_all'),
+            'my_posts_match_count': count,
+            'my_posts_state_digest': state_digest,
+            'stable_cycles_required': required,
+            'stable_cycles_observed': cycles,
+        }
+        if cycles >= required:
+            return StableEngagementObservation(snapshot, None, receipt)
+        time.sleep(interval)
+    return StableEngagementObservation(last_snapshot, None, receipt)
+
+
+def activate_my_posts(snapshot: Snapshot) -> dict[str, Any]:
+    target, count = _exact_mapped_engagement_element(snapshot, 'my_posts_filter')
+    contract = (
+        (load_platform_yaml('linkedin').get('tree') or {})
+        .get('element_map', {})
+        .get('my_posts_filter', {})
+    )
+    return _perform_engagement_action(
+        target,
+        count,
+        contract.get('action') or {},
+        'my_posts_filter',
+    )
+
+
+def observe_engagement_signal(snapshot: Snapshot) -> EngagementSignalObservation:
+    contract = _engagement_workflow().get('candidate_observation') or {}
+    prefix = contract.get('observation_name_prefix')
+    allowed_paths = contract.get('allowed_uri_normalized_path_prefixes')
+    if (
+        contract.get('authority') != 'observation_classification_only'
+        or not isinstance(prefix, str)
+        or not isinstance(allowed_paths, list)
+        or not allowed_paths
+    ):
+        raise RuntimeError('LinkedIn engagement candidate contract is invalid')
+    candidates: list[tuple[ElementRef, str]] = []
+    for element in _all_elements(snapshot):
+        uri = _element_uri(element)
+        if (
+            element.role == contract.get('role')
+            and element.name.startswith(prefix)
+            and _states_match(element, contract.get('states_include'))
+            and isinstance(uri, str)
+        ):
+            parsed = urlsplit(uri)
+            if (
+                parsed.scheme == 'https'
+                and parsed.hostname == 'www.linkedin.com'
+                and parsed.port is None
+                and any(parsed.path.startswith(str(path)) for path in allowed_paths)
+                and not parsed.fragment
+            ):
+                candidates.append((element, uri))
+    projection = sorted(
+        ({'notification_name': element.name, 'notification_uri': uri}
+         for element, uri in candidates),
+        key=canonical_json_bytes,
+    )
+    candidate_set_digest = sha256_hex(canonical_json_bytes(projection))
+    if len(candidates) != 1:
+        return EngagementSignalObservation(
+            len(candidates),
+            candidate_set_digest,
+            None,
+            None,
+        )
+    element, uri = candidates[0]
+    record = {
+        'schema': ENGAGEMENT_SIGNAL_SCHEMA,
+        'notification_name': element.name,
+        'notification_uri': uri,
+    }
+    return EngagementSignalObservation(
+        1,
+        candidate_set_digest,
+        record,
+        sha256_hex(canonical_json_bytes(record)),
+    )
+
+
+def stable_my_posts_observation(deadline_at: float) -> StableEngagementObservation:
+    workflow = _engagement_workflow()
+    required, interval, timeout = _barrier_settings(
+        workflow,
+        'exact_route_marker_and_candidate_set',
+    )
+    barrier_deadline = min(deadline_at, time.monotonic() + timeout)
+    prior: tuple[int, str] | None = None
+    cycles = 0
+    last_snapshot: Snapshot | None = None
+    last_signal: EngagementSignalObservation | None = None
+    receipt: dict[str, Any] = {}
+    while time.monotonic() < barrier_deadline:
+        _firefox, _document, snapshot = build_snapshot('linkedin')
+        marker, marker_count = _exact_mapped_engagement_element(
+            snapshot,
+            'selected_filter_marker',
+        )
+        signal = observe_engagement_signal(snapshot)
+        route_exact = _exact_engagement_route(snapshot.url, 'notifications_my_posts')
+        exact = route_exact and marker_count == 1 and marker is not None
+        projection = (signal.candidate_count, signal.candidate_set_digest)
+        cycles = cycles + 1 if exact and projection == prior else (1 if exact else 0)
+        prior = projection if exact else None
+        last_snapshot = snapshot
+        last_signal = signal
+        receipt = {
+            'route_exact': route_exact,
+            'selected_filter_marker_match_count': marker_count,
+            'candidate_count': signal.candidate_count,
+            'candidate_set_digest': signal.candidate_set_digest,
+            'stable_cycles_required': required,
+            'stable_cycles_observed': cycles,
+        }
+        if cycles >= required:
+            return StableEngagementObservation(snapshot, signal, receipt)
+        time.sleep(interval)
+    return StableEngagementObservation(last_snapshot, last_signal, receipt)
+
+
+def write_engagement_signal_once(
+    observation: EngagementSignalObservation,
+    sink_root: Path,
+) -> SinkWriteResult:
+    if observation.record is None or observation.content_digest is None:
+        raise RuntimeError('exact engagement signal is unavailable')
+    artifact = sink_root / f'linkedin-engagement-{observation.content_digest}.json'
+    if artifact.exists():
+        existing = read_owned_private_bytes(artifact, 'engagement artifact')
+        if sha256_hex(existing) != observation.content_digest:
+            raise RuntimeError('existing engagement artifact digest mismatch')
+        return SinkWriteResult(records_written=0, artifact_sha256=observation.content_digest)
+    raw_bytes = write_new_private_json(artifact, observation.record)
+    digest = sha256_hex(raw_bytes)
+    if digest != observation.content_digest:
+        raise RuntimeError('engagement sink readback digest mismatch')
+    readback = read_owned_private_bytes(artifact, 'engagement artifact')
+    if sha256_hex(readback) != observation.content_digest:
+        raise RuntimeError('engagement sink persisted digest mismatch')
+    return SinkWriteResult(records_written=1, artifact_sha256=digest)
+
+
+def engagement_signal_postcondition(
+    before: EngagementSignalObservation,
+    after: EngagementSignalObservation,
+) -> bool:
+    return (
+        before.candidate_count == 1
+        and after.candidate_count == 1
+        and before.content_digest is not None
+        and before.content_digest == after.content_digest
+    )
+
+
+def _restore_contract() -> dict[str, Any]:
+    contract = (_engagement_workflow().get('restore') or {})
+    expected = {
+        'navigation_key': 'ctrl+l',
+        'address_bar': {
+            'key': 'address_bar',
+            'name': 'Search with Google or enter address',
+            'role': 'entry',
+            'states_include': ['editable', 'focusable'],
+        },
+        'submit_key': 'Return',
+        'observation_barrier': {
+            'projection': 'exact_route_and_notifications_target_state',
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        },
+    }
+    if contract != expected:
+        raise RuntimeError('LinkedIn engagement restore contract is invalid')
+    return dict(contract)
+
+
+def _exact_address_bar(snapshot: Snapshot) -> ElementRef | None:
+    contract = _restore_contract()['address_bar']
+    key = contract.get('key')
+    matches = [
+        element
+        for element in (snapshot.mapped.get(key) or [])
+        if (
+            element.name == contract.get('name')
+            and element.role == contract.get('role')
+            and _states_match(element, contract.get('states_include'))
+        )
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _select_full_address_text(snapshot: Snapshot) -> bool:
+    entry = _exact_address_bar(snapshot)
+    if entry is None or entry.atspi_obj is None or 'focused' not in entry.states:
+        return False
+    try:
+        import gi
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        text_iface = entry.atspi_obj.get_text_iface()
+        character_count = int(Atspi.Text.get_character_count(text_iface))
+        selections = int(Atspi.Text.get_n_selections(text_iface))
+        if character_count < 1 or selections > 1:
+            return False
+        return bool(
+            Atspi.Text.add_selection(text_iface, 0, character_count)
+            if selections == 0
+            else Atspi.Text.set_selection(text_iface, 0, 0, character_count)
+        )
+    except Exception:
+        return False
+
+
+def _full_address_selection_proven(snapshot: Snapshot) -> bool:
+    entry = _exact_address_bar(snapshot)
+    selections = entry.raw.get('text_selections') if entry is not None else None
+    text = str(entry.text or '') if entry is not None else ''
+    return (
+        entry is not None
+        and 'focused' in entry.states
+        and bool(text)
+        and isinstance(selections, list)
+        and len(selections) == 1
+        and selections[0].get('start') == 0
+        and selections[0].get('end') == len(text)
+    )
+
+
+def exact_engagement_return(
+    display: str,
+    return_url: str,
+    notifications_name: str,
+    deadline_at: float,
+) -> dict[str, Any]:
+    restore = _restore_contract()
+    receipt = {
+        'verdict': 'not_executed',
+        'failed_substep': None,
+        'firefox_pid_sha256': None,
+        'stable_cycles_required': 0,
+        'stable_cycles_observed': 0,
+        'return_url_sha256': sha256_hex(return_url.encode('utf-8')),
+    }
+
+    def fail(substep: str) -> None:
+        receipt['verdict'] = 'indeterminate'
+        receipt['failed_substep'] = substep
+        raise LinkedInEngagementRestoreFailed(substep, receipt)
+
+    input_core.set_display(display)
+    try:
+        firefox = platform_routing.find_firefox_for_platform('linkedin')
+        pid = int(firefox.get_process_id()) if firefox is not None else 0
+    except Exception:
+        pid = 0
+    if pid < 1:
+        fail('firefox_process_identity')
+    receipt['firefox_pid_sha256'] = sha256_hex(str(pid).encode('utf-8'))
+    if not input_core.focus_firefox_pid(pid):
+        fail('focus_firefox_pid')
+    if restore.get('navigation_key') != 'ctrl+l' or not input_core.press_key_cleared('ctrl+l'):
+        fail('navigation_key')
+    _firefox, _document, snapshot = build_snapshot('linkedin')
+    address = _exact_address_bar(snapshot)
+    if address is None or 'focused' not in address.states:
+        fail('address_bar_focus')
+    if not _select_full_address_text(snapshot):
+        fail('selection_action')
+    _firefox, _document, snapshot = build_snapshot('linkedin')
+    if not _full_address_selection_proven(snapshot):
+        fail('selection_proof')
+    if not input_core.clipboard_paste(return_url):
+        fail('paste')
+    _firefox, _document, snapshot = build_snapshot('linkedin')
+    address = _exact_address_bar(snapshot)
+    if address is None or 'focused' not in address.states or str(address.text or '') != return_url:
+        fail('pasted_text_proof')
+    if restore.get('submit_key') != 'Return' or not input_core.press_key_cleared('Return'):
+        fail('submit')
+    required, interval, timeout = _barrier_settings(
+        restore,
+        'exact_route_and_notifications_target_state',
+    )
+    receipt['stable_cycles_required'] = required
+    barrier_deadline = min(deadline_at, time.monotonic() + timeout)
+    prior: str | None = None
+    cycles = 0
+    while time.monotonic() < barrier_deadline:
+        _firefox, _document, snapshot = build_snapshot('linkedin')
+        start = observe_engagement_start(snapshot, notifications_name, return_url)
+        digest = start['notifications_target_state_digest']
+        exact = (
+            start['route_exact'] is True
+            and start['route_kind_exact'] is True
+            and start['notifications_target_match_count'] == 1
+            and isinstance(digest, str)
+        )
+        cycles = cycles + 1 if exact and digest == prior else (1 if exact else 0)
+        prior = digest if exact else None
+        receipt['stable_cycles_observed'] = cycles
+        if cycles >= required:
+            receipt['verdict'] = 'satisfied'
+            return receipt
+        time.sleep(interval)
+    fail('return_postcondition')
+    raise AssertionError('unreachable')

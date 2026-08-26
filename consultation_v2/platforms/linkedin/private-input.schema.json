@@ -11,6 +11,7 @@
     "operation": {
       "enum": [
         "capture_selected_job",
+        "capture_visible_new_engagement_signal",
         "select_and_capture_job"
       ]
     },
@@ -38,12 +39,26 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4096
+    },
+    "source_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "notifications_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "return_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
     }
   },
   "required": [
     "schema",
     "operation",
-    "search_ref",
     "sink_ref"
   ],
   "allOf": [
@@ -68,6 +83,51 @@
             {"required": ["target_card_name"]},
             {"required": ["detail_title_name"]},
             {"required": ["detail_company_name"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "capture_visible_new_engagement_signal"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source_ref",
+          "notifications_name",
+          "return_url"
+        ],
+        "not": {
+          "required": [
+            "search_ref"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "search_ref"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "source_ref"
+              ]
+            },
+            {
+              "required": [
+                "notifications_name"
+              ]
+            },
+            {
+              "required": [
+                "return_url"
+              ]
+            }
           ]
         }
       }

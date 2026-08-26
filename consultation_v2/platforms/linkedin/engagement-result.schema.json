@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-engagement-result-v1.json",
+  "title": "LinkedIn engagement compact public result",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullableSha256": {
+      "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+    },
+    "technicalFailureCode": {
+      "enum": [
+        "action_failed",
+        "deadline_expired",
+        "display_lock_unavailable",
+        "lock_release_indeterminate",
+        "navigation_not_exact",
+        "post_observation_indeterminate",
+        "pre_observation_failed",
+        "private_input_invalid",
+        "restore_indeterminate"
+      ]
+    }
+  },
+  "properties": {
+    "ok": {"type": "boolean"},
+    "platform": {"const": "linkedin"},
+    "display": {"type": "string", "pattern": "^:[0-9]{1,3}$"},
+    "state": {
+      "enum": [
+        "already_known",
+        "ambiguous_signal",
+        "captured",
+        "no_new_signal",
+        "postcondition_failed",
+        "sink_write_indeterminate",
+        "technical_failure"
+      ]
+    },
+    "failure_code": {
+      "oneOf": [
+        {"type": "null"},
+        {"const": "ambiguous_signal"},
+        {"const": "postcondition_failed"},
+        {"const": "sink_write_indeterminate"},
+        {"$ref": "#/$defs/technicalFailureCode"}
+      ]
+    },
+    "records_observed": {"type": "integer", "enum": [0, 1]},
+    "records_written": {
+      "oneOf": [{"type": "integer", "enum": [0, 1]}, {"type": "null"}]
+    },
+    "content_digest": {"$ref": "#/$defs/nullableSha256"},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"},
+    "turn_lineage_sha256": {"$ref": "#/$defs/sha256"},
+    "restore_verified": {"type": "boolean"}
+  },
+  "required": [
+    "ok",
+    "platform",
+    "display",
+    "state",
+    "failure_code",
+    "records_observed",
+    "records_written",
+    "content_digest",
+    "receipt_sha256",
+    "turn_lineage_sha256",
+    "restore_verified"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "captured"}}, "required": ["state"]},
+      "then": {"properties": {
+        "ok": {"const": true},
+        "failure_code": {"type": "null"},
+        "records_observed": {"const": 1},
+        "records_written": {"const": 1},
+        "content_digest": {"$ref": "#/$defs/sha256"},
+        "restore_verified": {"const": true}
+      }}
+    },
+    {
+      "if": {"properties": {"state": {"const": "already_known"}}, "required": ["state"]},
+      "then": {"properties": {
+        "ok": {"const": true},
+        "failure_code": {"type": "null"},
+        "records_observed": {"const": 1},
+        "records_written": {"const": 0},
+        "content_digest": {"$ref": "#/$defs/sha256"},
+        "restore_verified": {"const": true}
+      }}
+    },
+    {
+      "if": {"properties": {"state": {"const": "no_new_signal"}}, "required": ["state"]},
+      "then": {"properties": {
+        "ok": {"const": true},
+        "failure_code": {"type": "null"},
+        "records_observed": {"const": 0},
+        "records_written": {"const": 0},
+        "content_digest": {"type": "null"},
+        "restore_verified": {"const": true}
+      }}
+    },
+    {
+      "if": {"properties": {"state": {"const": "ambiguous_signal"}}, "required": ["state"]},
+      "then": {"properties": {
+        "ok": {"const": false},
+        "failure_code": {"const": "ambiguous_signal"},
+        "records_observed": {"const": 0},
+        "records_written": {"const": 0},
+        "content_digest": {"type": "null"},
+        "restore_verified": {"const": false}
+      }}
+    },
+    {
+      "if": {"properties": {"state": {"const": "postcondition_failed"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "ok": {"const": false},
+          "failure_code": {"const": "postcondition_failed"},
+          "restore_verified": {"const": false}
+        },
+        "oneOf": [
+          {"properties": {
+            "records_observed": {"const": 0},
+            "records_written": {"const": 0},
+            "content_digest": {"type": "null"}
+          }},
+          {"properties": {
+            "records_observed": {"const": 1},
+            "records_written": {"enum": [0, 1]},
+            "content_digest": {"$ref": "#/$defs/sha256"}
+          }}
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"state": {"const": "sink_write_indeterminate"}}, "required": ["state"]},
+      "then": {"properties": {
+        "ok": {"const": false},
+        "failure_code": {"const": "sink_write_indeterminate"},
+        "records_observed": {"const": 1},
+        "records_written": {"type": "null"},
+        "content_digest": {"$ref": "#/$defs/sha256"},
+        "restore_verified": {"const": false}
+      }}
+    },
+    {
+      "if": {"properties": {"state": {"const": "technical_failure"}}, "required": ["state"]},
+      "then": {
+        "properties": {
+          "ok": {"const": false},
+          "failure_code": {"$ref": "#/$defs/technicalFailureCode"}
+        },
+        "oneOf": [
+          {"properties": {
+            "records_observed": {"const": 0},
+            "records_written": {"const": 0},
+            "content_digest": {"type": "null"}
+          }},
+          {"properties": {
+            "records_observed": {"const": 1},
+            "records_written": {"enum": [0, 1]},
+            "content_digest": {"$ref": "#/$defs/sha256"}
+          }}
+        ]
+      }
+    }
+  ]
+}

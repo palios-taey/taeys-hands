@@ -12,7 +12,11 @@ from consultation_v2.platforms._routing_core import (
 
 _SPEC = RouteSpec(
     platform='linkedin',
-    url_patterns=('linkedin.com/jobs/', 'linkedin.com/jobs/view/'),
+    url_patterns=(
+        'linkedin.com/jobs/',
+        'linkedin.com/jobs/view/',
+        'linkedin.com/notifications',
+    ),
 )
 
 

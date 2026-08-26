@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -30,14 +31,16 @@ SCHEMAS = {
     'result': PLATFORM_ROOT / 'result.schema.json',
     'private_input': PLATFORM_ROOT / 'private-input.schema.json',
     'receipt': PLATFORM_ROOT / 'receipt.schema.json',
+    'engagement_result': PLATFORM_ROOT / 'engagement-result.schema.json',
+    'engagement_receipt': PLATFORM_ROOT / 'engagement-receipt.schema.json',
 }
 FORBIDDEN_RUNTIME_TOKENS = (
     'find_elements',
     'get_extents',
     'xdotool',
     'pyautogui',
-    'clipboard',
     'click(',
+    'read_clipboard',
 )
 
 
@@ -75,8 +78,12 @@ def _validate_yaml() -> list[str]:
     if document.get('platform') != 'linkedin' or document.get('click_strategy') != 'atspi_only':
         errors.append(f'{YAML_PATH}: platform or click strategy drifted')
     element_map = ((document.get('tree') or {}).get('element_map') or {})
-    if set(element_map) != {'about_job_heading'}:
-        errors.append(f'{YAML_PATH}: selected-job map keys drifted')
+    if set(element_map) != {
+        'about_job_heading',
+        'my_posts_filter',
+        'selected_filter_marker',
+    }:
+        errors.append(f'{YAML_PATH}: LinkedIn map keys drifted')
     about = element_map.get('about_job_heading') or {}
     if about != {
         'name': 'About the job',
@@ -84,6 +91,19 @@ def _validate_yaml() -> list[str]:
         'scope': 'jobs.selected_detail',
     }:
         errors.append(f'{YAML_PATH}: About heading is not exact name+role')
+    if element_map.get('my_posts_filter') != {
+        'name': 'My posts',
+        'role': 'radio button',
+        'states_include': ['showing'],
+        'action': {'name': 'press', 'index': 0},
+    }:
+        errors.append(f'{YAML_PATH}: My posts exact press contract drifted')
+    if element_map.get('selected_filter_marker') != {
+        'name': 'My posts’ filters',
+        'role': 'push button',
+        'states_include': ['showing'],
+    }:
+        errors.append(f'{YAML_PATH}: My posts marker contract drifted')
     forbidden = {'contains', 'regex', 'fuzzy', 'name_contains', 'name_pattern'}
     if any(key in forbidden for spec in element_map.values() for key in spec):
         errors.append(f'{YAML_PATH}: fuzzy matcher grammar is forbidden')
@@ -132,6 +152,77 @@ def _validate_yaml() -> list[str]:
     }
     if workflow.get('job_selection') != expected_selection:
         errors.append(f'{YAML_PATH}: exact job-selection workflow drifted')
+    engagement = workflow.get('engagement_signal_capture') or {}
+    required_engagement = {
+        'operation': 'capture_visible_new_engagement_signal',
+        'sink_action': 'private_sink_write_once',
+        'postcondition': 'selected_signal_content_digest_unchanged',
+    }
+    if any(engagement.get(key) != value for key, value in required_engagement.items()):
+        errors.append(f'{YAML_PATH}: engagement operation boundary drifted')
+    navigation = engagement.get('navigation') or {}
+    if navigation.get('target') != {
+        'private_exact_name_field': 'notifications_name',
+        'role': 'link',
+        'states_include': ['showing', 'enabled'],
+        'uri': {
+            'scheme': 'https',
+            'host': 'www.linkedin.com',
+            'normalized_path': '/notifications',
+        },
+    } or navigation.get('action') != {'name': 'jump', 'index': 0}:
+        errors.append(f'{YAML_PATH}: Notifications exact jump contract drifted')
+    expected_barriers = (
+        (
+            navigation.get('observation_barrier'),
+            'exact_route_and_my_posts_state',
+        ),
+        (
+            engagement.get('observation_barrier'),
+            'exact_route_marker_and_candidate_set',
+        ),
+        (
+            (engagement.get('restore') or {}).get('observation_barrier'),
+            'exact_route_and_notifications_target_state',
+        ),
+    )
+    for barrier, projection in expected_barriers:
+        if barrier != {
+            'projection': projection,
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        }:
+            errors.append(f'{YAML_PATH}: {projection} barrier drifted')
+    candidate = engagement.get('candidate_observation') or {}
+    if candidate != {
+        'observation_name_prefix': 'Unread notification.',
+        'role': 'link',
+        'states_include': ['showing'],
+        'allowed_uri_normalized_path_prefixes': ['/feed/', '/posts/'],
+        'authority': 'observation_classification_only',
+    }:
+        errors.append(f'{YAML_PATH}: engagement classifier drifted')
+    restore = engagement.get('restore') or {}
+    if restore != {
+        'navigation_key': 'ctrl+l',
+        'address_bar': {
+            'key': 'address_bar',
+            'name': 'Search with Google or enter address',
+            'role': 'entry',
+            'states_include': ['editable', 'focusable'],
+        },
+        'submit_key': 'Return',
+        'observation_barrier': {
+            'projection': 'exact_route_and_notifications_target_state',
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        },
+    }:
+        errors.append(f'{YAML_PATH}: exact Jobs return contract drifted')
     indicators = ((document.get('validation') or {}).get('selected_job_ready') or {}).get('indicators')
     if indicators != ['about_job_heading']:
         errors.append(f'{YAML_PATH}: selected-job readiness must use the exact heading')
@@ -422,6 +513,500 @@ def _validate_interface_patterns() -> list[str]:
                             errors.append(
                                 f'{CONTRACT}: {state} count/digest mapping is not exact'
                             )
+    engagement_result = _load_json(SCHEMAS['engagement_result'])
+    engagement_receipt = _load_json(SCHEMAS['engagement_receipt'])
+    engagement_result_keys = {
+        'ok', 'platform', 'display', 'state', 'failure_code',
+        'records_observed', 'records_written', 'content_digest',
+        'receipt_sha256', 'turn_lineage_sha256', 'restore_verified',
+    }
+    if (
+        set(engagement_result.get('properties') or {}) != engagement_result_keys
+        or set(engagement_result.get('required') or []) != engagement_result_keys
+    ):
+        errors.append(f"{SCHEMAS['engagement_result']}: exact 11-key result drifted")
+    if (
+        (engagement_receipt.get('properties') or {}).get('schema', {}).get('const')
+        != 'linkedin_engagement_receipt_v1'
+    ):
+        errors.append(f"{SCHEMAS['engagement_receipt']}: receipt identity drifted")
+    engagement_cases = (
+        ('already_known', True, None, 1, 0, '2' * 64, True),
+        ('ambiguous_signal', False, 'ambiguous_signal', 0, 0, None, False),
+        ('captured', True, None, 1, 1, '2' * 64, True),
+        ('no_new_signal', True, None, 0, 0, None, True),
+        ('postcondition_failed', False, 'postcondition_failed', 0, 0, None, False),
+        (
+            'sink_write_indeterminate',
+            False,
+            'sink_write_indeterminate',
+            1,
+            None,
+            '2' * 64,
+            False,
+        ),
+        ('technical_failure', False, 'action_failed', 0, 0, None, False),
+    )
+    for state, ok, code, observed, written, digest, restored in engagement_cases:
+        candidate = {
+            'ok': ok,
+            'platform': 'linkedin',
+            'display': ':18',
+            'state': state,
+            'failure_code': code,
+            'records_observed': observed,
+            'records_written': written,
+            'content_digest': digest,
+            'receipt_sha256': '0' * 64,
+            'turn_lineage_sha256': '1' * 64,
+            'restore_verified': restored,
+        }
+        try:
+            validate_public_result(candidate)
+        except LinkedInJobsContractError as exc:
+            errors.append(f'{CONTRACT}: engagement {state} rejected: {exc}')
+        if ok:
+            candidate['restore_verified'] = False
+            try:
+                validate_public_result(candidate)
+            except LinkedInJobsContractError:
+                rejected_without_restore = True
+            else:
+                rejected_without_restore = False
+            if not rejected_without_restore:
+                errors.append(f'{CONTRACT}: {state} accepted without exact restoration')
+    return errors
+
+
+def _validate_engagement_schema_fixtures() -> list[str]:
+    from jsonschema import Draft202012Validator
+
+    errors: list[str] = []
+    result_schema = _load_json(SCHEMAS['engagement_result'])
+    receipt_schema = _load_json(SCHEMAS['engagement_receipt'])
+    for path, schema in (
+        (SCHEMAS['engagement_result'], result_schema),
+        (SCHEMAS['engagement_receipt'], receipt_schema),
+    ):
+        try:
+            Draft202012Validator.check_schema(schema)
+        except Exception as exc:
+            errors.append(f'{path}: invalid Draft 2020-12 schema: {exc}')
+
+    digest = '1' * 64
+    result = {
+        'ok': True,
+        'platform': 'linkedin',
+        'display': ':18',
+        'state': 'captured',
+        'failure_code': None,
+        'records_observed': 1,
+        'records_written': 1,
+        'content_digest': digest,
+        'receipt_sha256': '2' * 64,
+        'turn_lineage_sha256': '3' * 64,
+        'restore_verified': True,
+    }
+    action = {
+        'stage': 'notifications_navigation',
+        'target_match_count': 1,
+        'action_name': 'jump',
+        'action_index': 0,
+        'action_match_count': 1,
+        'verdict': 'executed',
+    }
+    receipt = {
+        'schema': 'linkedin_engagement_receipt_v1',
+        'platform': 'linkedin',
+        'operation': 'capture_visible_new_engagement_signal',
+        'display': ':18',
+        'requester': 'schema-fixture',
+        'turn_lineage_sha256': '3' * 64,
+        'correlation_id_sha256': '4' * 64,
+        'deadline_seconds': 300,
+        'hands_commit': '5' * 40,
+        'yaml_sha256': '6' * 64,
+        'terminal_state': 'captured',
+        'ok': True,
+        'failure_code': None,
+        'records_observed': 1,
+        'records_written': 1,
+        'content_digest': digest,
+        'restore_verified': True,
+        'transaction_sha256': '7' * 64,
+        'expected_transaction_sha256': '7' * 64,
+        'source_ref_sha256': '8' * 64,
+        'sink_ref_sha256': '9' * 64,
+        'notifications_name_sha256': 'a' * 64,
+        'return_url_sha256': 'b' * 64,
+        'start': {
+            'route_exact': True,
+            'route_kind_exact': True,
+            'notifications_target_match_count': 1,
+            'notifications_target_state_digest': 'c' * 64,
+        },
+        'notifications_action': action,
+        'notifications_postcondition': {
+            'route_exact': True,
+            'my_posts_match_count': 1,
+            'my_posts_state_digest': 'd' * 64,
+            'stable_cycles_required': 2,
+            'stable_cycles_observed': 2,
+        },
+        'my_posts_action': {
+            **action,
+            'stage': 'my_posts_filter',
+            'action_name': 'press',
+        },
+        'my_posts_postcondition': {
+            'route_exact': True,
+            'selected_filter_marker_match_count': 1,
+            'candidate_count': 1,
+            'candidate_set_digest': 'e' * 64,
+            'stable_cycles_required': 2,
+            'stable_cycles_observed': 2,
+        },
+        'candidate': {'match_count': 1, 'content_digest': digest},
+        'sink': {
+            'kind': 'private_sink_write_once',
+            'verdict': 'written',
+            'records_written': 1,
+        },
+        'signal_postcondition': 'satisfied',
+        'restore': {
+            'verdict': 'satisfied',
+            'failed_substep': None,
+            'firefox_pid_sha256': 'f' * 64,
+            'stable_cycles_required': 2,
+            'stable_cycles_observed': 2,
+            'return_url_sha256': 'b' * 64,
+        },
+        'lock': {
+            'policy': 'careers',
+            'request_id': '0' * 64,
+            'acquired': True,
+            'released': True,
+            'owner_token_sha256': '1' * 64,
+            'wait_ms': 0,
+            'turn_lineage_sha256': '3' * 64,
+            'correlation_id_sha256': '4' * 64,
+            'deadline_seconds': 300,
+        },
+    }
+    validators = {
+        'result': Draft202012Validator(result_schema),
+        'receipt': Draft202012Validator(receipt_schema),
+    }
+    for label, validator, candidate in (
+        ('valid captured result', validators['result'], result),
+        ('valid captured receipt', validators['receipt'], receipt),
+    ):
+        if not validator.is_valid(candidate):
+            errors.append(f'{label} rejected by engagement schema')
+
+    empty_action = {
+        'stage': 'notifications_navigation',
+        'target_match_count': 0,
+        'action_name': None,
+        'action_index': None,
+        'action_match_count': 0,
+        'verdict': 'not_executed',
+    }
+    empty_restore = {
+        'verdict': 'not_executed',
+        'failed_substep': None,
+        'firefox_pid_sha256': None,
+        'stable_cycles_required': 0,
+        'stable_cycles_observed': 0,
+        'return_url_sha256': None,
+    }
+    already_known = deepcopy(receipt)
+    already_known.update({
+        'terminal_state': 'already_known',
+        'records_written': 0,
+    })
+    already_known['sink'].update({'verdict': 'already_present', 'records_written': 0})
+    no_new = deepcopy(receipt)
+    no_new.update({
+        'terminal_state': 'no_new_signal',
+        'records_observed': 0,
+        'records_written': 0,
+        'content_digest': None,
+    })
+    no_new['candidate'] = {'match_count': 0, 'content_digest': None}
+    no_new['my_posts_postcondition']['candidate_count'] = 0
+    no_new['sink'] = {
+        'kind': 'private_sink_write_once',
+        'verdict': 'not_executed',
+        'records_written': 0,
+    }
+    no_new['signal_postcondition'] = 'not_evaluated'
+    ambiguous = deepcopy(no_new)
+    ambiguous.update({
+        'terminal_state': 'ambiguous_signal',
+        'ok': False,
+        'failure_code': 'ambiguous_signal',
+        'restore_verified': False,
+    })
+    ambiguous['candidate']['match_count'] = 2
+    ambiguous['my_posts_postcondition']['candidate_count'] = 2
+    ambiguous['restore'] = empty_restore
+    postcondition_failed = deepcopy(receipt)
+    postcondition_failed.update({
+        'terminal_state': 'postcondition_failed',
+        'ok': False,
+        'failure_code': 'postcondition_failed',
+        'restore_verified': False,
+    })
+    postcondition_failed['signal_postcondition'] = 'failed'
+    postcondition_failed['restore'] = empty_restore
+    sink_indeterminate = deepcopy(receipt)
+    sink_indeterminate.update({
+        'terminal_state': 'sink_write_indeterminate',
+        'ok': False,
+        'failure_code': 'sink_write_indeterminate',
+        'records_written': None,
+        'restore_verified': False,
+    })
+    sink_indeterminate['sink'].update({
+        'verdict': 'indeterminate',
+        'records_written': None,
+    })
+    sink_indeterminate['signal_postcondition'] = 'not_evaluated'
+    sink_indeterminate['restore'] = empty_restore
+    technical_failure = deepcopy(receipt)
+    technical_failure.update({
+        'terminal_state': 'technical_failure',
+        'ok': False,
+        'failure_code': 'pre_observation_failed',
+        'records_observed': 0,
+        'records_written': 0,
+        'content_digest': None,
+        'restore_verified': False,
+        'start': {},
+        'notifications_action': empty_action,
+        'notifications_postcondition': {},
+        'my_posts_action': {**empty_action, 'stage': 'my_posts_filter'},
+        'my_posts_postcondition': {},
+        'candidate': {'match_count': 0, 'content_digest': None},
+        'sink': {
+            'kind': 'private_sink_write_once',
+            'verdict': 'not_executed',
+            'records_written': 0,
+        },
+        'signal_postcondition': 'not_evaluated',
+        'restore': empty_restore,
+    })
+    for state, candidate in (
+        ('captured', receipt),
+        ('already_known', already_known),
+        ('no_new_signal', no_new),
+        ('ambiguous_signal', ambiguous),
+        ('postcondition_failed', postcondition_failed),
+        ('sink_write_indeterminate', sink_indeterminate),
+        ('technical_failure', technical_failure),
+    ):
+        if not validators['receipt'].is_valid(candidate):
+            errors.append(f'actual-shape {state} receipt rejected by engagement schema')
+    chain_receipts = (
+        ('captured', receipt),
+        ('already_known', already_known),
+        ('no_new_signal', no_new),
+        ('ambiguous_signal', ambiguous),
+        ('sink_write_indeterminate', sink_indeterminate),
+    )
+    for state, candidate in chain_receipts:
+        missing_start = deepcopy(candidate)
+        missing_start['start'] = {}
+        if validators['receipt'].is_valid(missing_start):
+            errors.append(f'{state} accepted without exact start proof')
+        for postcondition_key in (
+            'notifications_postcondition',
+            'my_posts_postcondition',
+        ):
+            missing_postcondition = deepcopy(candidate)
+            missing_postcondition[postcondition_key] = {}
+            if validators['receipt'].is_valid(missing_postcondition):
+                errors.append(
+                    f'{state} accepted without exact {postcondition_key} proof'
+                )
+        unowned_lock = deepcopy(candidate)
+        unowned_lock['lock'].update({
+            'acquired': False,
+            'released': False,
+            'owner_token_sha256': None,
+        })
+        if validators['receipt'].is_valid(unowned_lock):
+            required_lock = (
+                'acquired lock'
+                if state == 'sink_write_indeterminate'
+                else 'acquired+released lock'
+            )
+            errors.append(f'{state} accepted without {required_lock} proof')
+
+    sink_unreleased = deepcopy(sink_indeterminate)
+    sink_unreleased['lock']['released'] = False
+    if not validators['receipt'].is_valid(sink_unreleased):
+        errors.append('sink indeterminacy with truthful released=false rejected')
+    sink_after_signal_postcondition = deepcopy(sink_indeterminate)
+    sink_after_signal_postcondition['signal_postcondition'] = 'satisfied'
+    if validators['receipt'].is_valid(sink_after_signal_postcondition):
+        errors.append('sink indeterminacy accepted after signal postcondition')
+
+    action_verdicts = {
+        'target_not_exact': {
+            'stage': 'notifications_navigation',
+            'target_match_count': 0,
+            'action_name': 'jump',
+            'action_index': None,
+            'action_match_count': 0,
+            'verdict': 'target_not_exact',
+        },
+        'action_enumeration_failed': {
+            'stage': 'notifications_navigation',
+            'target_match_count': 1,
+            'action_name': 'jump',
+            'action_index': None,
+            'action_match_count': 0,
+            'verdict': 'action_enumeration_failed',
+        },
+        'action_not_exact': {
+            'stage': 'notifications_navigation',
+            'target_match_count': 1,
+            'action_name': 'jump',
+            'action_index': None,
+            'action_match_count': 0,
+            'verdict': 'action_not_exact',
+        },
+        'action_raised': {
+            'stage': 'notifications_navigation',
+            'target_match_count': 1,
+            'action_name': 'jump',
+            'action_index': 0,
+            'action_match_count': 1,
+            'verdict': 'action_raised',
+        },
+        'action_returned_false': {
+            'stage': 'notifications_navigation',
+            'target_match_count': 1,
+            'action_name': 'jump',
+            'action_index': 0,
+            'action_match_count': 1,
+            'verdict': 'action_returned_false',
+        },
+    }
+    action_failure_receipts: dict[str, dict[str, Any]] = {}
+    for verdict, action_facts in action_verdicts.items():
+        candidate = deepcopy(technical_failure)
+        candidate.update({
+            'failure_code': 'action_failed',
+            'start': deepcopy(receipt['start']),
+            'notifications_action': action_facts,
+        })
+        action_failure_receipts[verdict] = candidate
+        if not validators['receipt'].is_valid(candidate):
+            errors.append(f'valid {verdict} action facts rejected')
+
+    invalid_action_facts = {
+        'target_not_exact': {'target_match_count': 1},
+        'action_enumeration_failed': {'target_match_count': 0},
+        'action_not_exact': {'action_match_count': 1},
+        'action_raised': {'action_match_count': 0},
+        'action_returned_false': {'target_match_count': 0},
+    }
+    for verdict, impossible_facts in invalid_action_facts.items():
+        candidate = deepcopy(action_failure_receipts[verdict])
+        candidate['notifications_action'].update(impossible_facts)
+        if validators['receipt'].is_valid(candidate):
+            errors.append(f'impossible {verdict} action facts accepted')
+    result_cases = (
+        result,
+        {**result, 'state': 'already_known', 'records_written': 0},
+        {
+            **result,
+            'state': 'no_new_signal',
+            'records_observed': 0,
+            'records_written': 0,
+            'content_digest': None,
+        },
+        {
+            **result,
+            'state': 'ambiguous_signal',
+            'ok': False,
+            'failure_code': 'ambiguous_signal',
+            'records_observed': 0,
+            'records_written': 0,
+            'content_digest': None,
+            'restore_verified': False,
+        },
+        {
+            **result,
+            'state': 'postcondition_failed',
+            'ok': False,
+            'failure_code': 'postcondition_failed',
+            'restore_verified': False,
+        },
+        {
+            **result,
+            'state': 'sink_write_indeterminate',
+            'ok': False,
+            'failure_code': 'sink_write_indeterminate',
+            'records_written': None,
+            'restore_verified': False,
+        },
+        {
+            **result,
+            'state': 'technical_failure',
+            'ok': False,
+            'failure_code': 'pre_observation_failed',
+            'records_observed': 0,
+            'records_written': 0,
+            'content_digest': None,
+            'restore_verified': False,
+        },
+    )
+    for candidate in result_cases:
+        if not validators['result'].is_valid(candidate):
+            errors.append(
+                f"actual-shape {candidate['state']} result rejected by engagement schema"
+            )
+
+    impossible_captured = deepcopy(result)
+    impossible_captured['records_written'] = 0
+    impossible_failure = deepcopy(result)
+    impossible_failure.update({
+        'ok': False,
+        'state': 'technical_failure',
+        'failure_code': None,
+        'records_observed': 0,
+        'records_written': 0,
+        'content_digest': None,
+        'restore_verified': False,
+    })
+    impossible_action = deepcopy(receipt)
+    impossible_action['notifications_action']['coordinate'] = [1, 2]
+    impossible_lock = deepcopy(receipt)
+    del impossible_lock['lock']['released']
+    impossible_no_action_chain = deepcopy(receipt)
+    impossible_no_action_chain.update({
+        'notifications_action': empty_action,
+        'notifications_postcondition': {},
+        'my_posts_action': {**empty_action, 'stage': 'my_posts_filter'},
+        'my_posts_postcondition': {},
+    })
+    for label, validator, candidate in (
+        ('impossible captured facts', validators['result'], impossible_captured),
+        ('impossible failure identity', validators['result'], impossible_failure),
+        ('impossible action object', validators['receipt'], impossible_action),
+        ('impossible lock object', validators['receipt'], impossible_lock),
+        (
+            'captured without exact action/postcondition chain',
+            validators['receipt'],
+            impossible_no_action_chain,
+        ),
+    ):
+        if validator.is_valid(candidate):
+            errors.append(f'{label} accepted by engagement schema')
     return errors
 
 
@@ -444,8 +1029,6 @@ def _validate_runtime_source() -> list[str]:
     ast.parse(display_lock_source, filename=str(DISPLAY_LOCK))
     if 'from consultation_v2.snapshot import build_snapshot' not in runner_source:
         errors.append(f'{RUNNER}: canonical snapshot builder is not wired')
-    if runner_source.count("build_snapshot('linkedin')") != 3:
-        errors.append(f'{RUNNER}: transaction must use only pre/barrier/post canonical observations')
     if 'write_selected_job_once(before, sink_root)' not in runner_source:
         errors.append(f'{RUNNER}: frozen one-action sink write is not wired')
     if 'selected_job_postcondition(before, after)' not in runner_source:
@@ -481,8 +1064,6 @@ def _validate_runtime_source() -> list[str]:
         errors.append(f'{RUNNER}: permanent-claim digest grammar is not exact')
     if '_MAXIMUM_DEADLINE_SECONDS = 1700' not in runner_source:
         errors.append(f'{RUNNER}: internal deadline no longer preserves the Presence margin')
-    if runner_source.count('with _internal_deadline(deadline_at):') != 3:
-        errors.append(f'{RUNNER}: pre/action/post stages must share three bounded deadline scopes')
     if 'signal.setitimer(signal.ITIMER_REAL, 0.0)' not in runner_source:
         errors.append(f'{RUNNER}: internal deadline is not canceled before finalization')
     for token in (
@@ -554,8 +1135,11 @@ def _validate_runtime_source() -> list[str]:
             for node in ast.walk(lock_node)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         ]
-        if calls.count('_execute_locked_transaction') != 1:
-            errors.append(f'{RUNNER}: the frozen transaction must execute once inside the lock')
+        if (
+            calls.count('_execute_locked_transaction') != 1
+            or calls.count('_execute_engagement_transaction') != 1
+        ):
+            errors.append(f'{RUNNER}: each operation dispatcher must occur once inside the lock')
         if '_finalize' in calls:
             errors.append(f'{RUNNER}: receipt finalization must occur after display-lock cleanup')
     execute_node = next(
@@ -575,6 +1159,59 @@ def _validate_runtime_source() -> list[str]:
         errors.append(f'{RUNNER}: exact job-card action must occur once inside the lock')
     if execute_calls.count('write_selected_job_once') != 1:
         errors.append(f'{RUNNER}: the single sink action must occur inside the locked transaction')
+    engagement_node = next(
+        node for node in runner_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == '_execute_engagement_transaction'
+    )
+    engagement_calls = [
+        node.func.id
+        for node in ast.walk(engagement_node)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    if engagement_calls.count('_bind_display') != 1:
+        errors.append(f'{RUNNER}: engagement display binding must occur once')
+    for exact_call in (
+        'activate_notifications',
+        'stable_notifications_observation',
+        'activate_my_posts',
+        'stable_my_posts_observation',
+        'exact_engagement_return',
+    ):
+        if engagement_calls.count(exact_call) != 1:
+            errors.append(f'{RUNNER}: engagement must call {exact_call} exactly once')
+    required_engagement_source = {
+        "indexes != [0]",
+        "action_iface.do_action(0)",
+        "focus_firefox_pid(pid)",
+        "press_key_cleared('ctrl+l')",
+        "clipboard_paste(return_url)",
+        "press_key_cleared('Return')",
+        "build_snapshot('linkedin')",
+        "'source_ref_sha256': _digest_text(source_ref)",
+    }
+    if any(token not in driver_source + runner_source for token in required_engagement_source):
+        errors.append(f'{RUNNER}: exact engagement sequence or provenance is incomplete')
+    if "'source_ref':" in driver_source:
+        errors.append(f'{DRIVER}: source_ref must not enter stable signal identity')
+    if (
+        "readback = read_owned_private_bytes(artifact, 'engagement artifact')"
+        not in driver_source
+        or 'sha256_hex(readback) != observation.content_digest' not in driver_source
+    ):
+        errors.append(f'{DRIVER}: engagement sink lacks persisted-byte digest proof')
+    routing_source = (PLATFORM_ROOT / 'routing.py').read_text(encoding='utf-8')
+    if 'linkedin.com/feed/' in routing_source or 'linkedin.com/posts/' in routing_source:
+        errors.append(f'{PLATFORM_ROOT / "routing.py"}: candidate URIs entered routing authority')
+    if (
+        'operation: str | None = None' not in runner_source
+        or 'if operation is None:\n            raise' not in runner_source
+    ):
+        errors.append(f'{RUNNER}: unknown private operation does not fail before receipt fabrication')
+    if 'def _restore_contract()' not in driver_source:
+        errors.append(f'{DRIVER}: exact restore contract preflight is missing')
+    if 'Back' in driver_source or 'go_back' in driver_source:
+        errors.append(f'{DRIVER}: browser Back is forbidden for exact restoration')
     if "if lock.get('acquired') is not True" not in runner_source:
         errors.append(f'{RUNNER}: CAREERS fail-open must be rejected before UI access')
     if (
@@ -640,7 +1277,7 @@ def _validate_runtime_source() -> list[str]:
         if not (
             isinstance(return_node.value, ast.Call)
             and isinstance(return_node.value.func, ast.Name)
-            and return_node.value.func.id == '_finalize'
+            and return_node.value.func.id in {'_finalize', '_finalize_engagement'}
         ):
             errors.append(f'{RUNNER}: every run terminal must pass through immutable receipt finalization')
             break
@@ -666,8 +1303,12 @@ def validate() -> list[str]:
     errors.extend(_validate_schema(SCHEMAS['request'], {'operation'}))
     errors.extend(_validate_schema(
         SCHEMAS['private_input'],
-        {'schema', 'operation', 'search_ref', 'sink_ref'},
-        {'target_card_name', 'detail_title_name', 'detail_company_name'},
+        {'schema', 'operation', 'sink_ref'},
+        {
+            'search_ref', 'target_card_name', 'detail_title_name',
+            'detail_company_name', 'source_ref', 'notifications_name',
+            'return_url',
+        },
     ))
     errors.extend(_validate_schema(SCHEMAS['result'], {
         'ok', 'platform', 'display', 'state', 'failure_code', 'records_observed',
@@ -686,8 +1327,26 @@ def validate() -> list[str]:
         },
         {'selection'},
     ))
+    errors.extend(_validate_schema(SCHEMAS['engagement_result'], {
+        'ok', 'platform', 'display', 'state', 'failure_code', 'records_observed',
+        'records_written', 'content_digest', 'receipt_sha256',
+        'turn_lineage_sha256', 'restore_verified',
+    }))
+    errors.extend(_validate_schema(SCHEMAS['engagement_receipt'], {
+        'schema', 'platform', 'operation', 'display', 'requester',
+        'turn_lineage_sha256', 'correlation_id_sha256', 'deadline_seconds',
+        'hands_commit', 'yaml_sha256', 'terminal_state', 'ok', 'failure_code',
+        'records_observed', 'records_written', 'content_digest',
+        'restore_verified', 'transaction_sha256', 'expected_transaction_sha256',
+        'source_ref_sha256', 'sink_ref_sha256', 'notifications_name_sha256',
+        'return_url_sha256', 'start', 'notifications_action',
+        'notifications_postcondition', 'my_posts_action',
+        'my_posts_postcondition', 'candidate', 'sink',
+        'signal_postcondition', 'restore', 'lock',
+    }))
     errors.extend(_validate_yaml())
     errors.extend(_validate_interface_patterns())
+    errors.extend(_validate_engagement_schema_fixtures())
     errors.extend(_validate_runtime_source())
     from consultation_v2.yaml_contract import clear_yaml_cache, load_platform_yaml
 

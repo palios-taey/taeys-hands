@@ -1,0 +1,624 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-engagement-receipt-v1.json",
+  "title": "LinkedIn engagement immutable receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullableSha256": {
+      "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+    },
+    "technicalFailureCode": {
+      "enum": [
+        "action_failed",
+        "deadline_expired",
+        "display_lock_unavailable",
+        "lock_release_indeterminate",
+        "navigation_not_exact",
+        "post_observation_indeterminate",
+        "pre_observation_failed",
+        "private_input_invalid",
+        "restore_indeterminate"
+      ]
+    },
+    "start": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "maxProperties": 0},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "route_exact": {"type": "boolean"},
+            "route_kind_exact": {"type": "boolean"},
+            "notifications_target_match_count": {"type": "integer", "minimum": 0},
+            "notifications_target_state_digest": {"$ref": "#/$defs/nullableSha256"}
+          },
+          "required": [
+            "route_exact",
+            "route_kind_exact",
+            "notifications_target_match_count",
+            "notifications_target_state_digest"
+          ]
+        }
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stage": {"enum": ["notifications_navigation", "my_posts_filter"]},
+        "target_match_count": {"type": "integer", "minimum": 0},
+        "action_name": {
+          "oneOf": [{"enum": ["jump", "press"]}, {"type": "null"}]
+        },
+        "action_index": {
+          "oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+        },
+        "action_match_count": {"type": "integer", "minimum": 0},
+        "verdict": {
+          "enum": [
+            "not_executed",
+            "target_not_exact",
+            "action_enumeration_failed",
+            "action_not_exact",
+            "action_raised",
+            "action_returned_false",
+            "executed"
+          ]
+        }
+      },
+      "required": [
+        "stage",
+        "target_match_count",
+        "action_name",
+        "action_index",
+        "action_match_count",
+        "verdict"
+      ],
+      "allOf": [
+        {
+          "if": {"properties": {"stage": {"const": "notifications_navigation"}}, "required": ["stage"]},
+          "then": {"properties": {"action_name": {"oneOf": [{"const": "jump"}, {"type": "null"}]}}}
+        },
+        {
+          "if": {"properties": {"stage": {"const": "my_posts_filter"}}, "required": ["stage"]},
+          "then": {"properties": {"action_name": {"oneOf": [{"const": "press"}, {"type": "null"}]}}}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "not_executed"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 0},
+            "action_name": {"type": "null"},
+            "action_index": {"type": "null"},
+            "action_match_count": {"const": 0}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "executed"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 1},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"const": 0},
+            "action_match_count": {"const": 1}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "target_not_exact"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"not": {"const": 1}},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"type": "null"},
+            "action_match_count": {"const": 0}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "action_enumeration_failed"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 1},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"type": "null"},
+            "action_match_count": {"const": 0}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "action_not_exact"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 1},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"type": "null"},
+            "action_match_count": {"not": {"const": 1}}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "action_raised"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 1},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"const": 0},
+            "action_match_count": {"const": 1}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "action_returned_false"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "target_match_count": {"const": 1},
+            "action_name": {"enum": ["jump", "press"]},
+            "action_index": {"const": 0},
+            "action_match_count": {"const": 1}
+          }}
+        }
+      ]
+    },
+    "notificationsPostcondition": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "maxProperties": 0},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "route_exact": {"type": "boolean"},
+            "my_posts_match_count": {"type": "integer", "minimum": 0},
+            "my_posts_state_digest": {"$ref": "#/$defs/nullableSha256"},
+            "stable_cycles_required": {"const": 2},
+            "stable_cycles_observed": {"type": "integer", "minimum": 0, "maximum": 2}
+          },
+          "required": [
+            "route_exact",
+            "my_posts_match_count",
+            "my_posts_state_digest",
+            "stable_cycles_required",
+            "stable_cycles_observed"
+          ]
+        }
+      ]
+    },
+    "myPostsPostcondition": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "maxProperties": 0},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "route_exact": {"type": "boolean"},
+            "selected_filter_marker_match_count": {"type": "integer", "minimum": 0},
+            "candidate_count": {"type": "integer", "minimum": 0},
+            "candidate_set_digest": {"$ref": "#/$defs/sha256"},
+            "stable_cycles_required": {"const": 2},
+            "stable_cycles_observed": {"type": "integer", "minimum": 0, "maximum": 2}
+          },
+          "required": [
+            "route_exact",
+            "selected_filter_marker_match_count",
+            "candidate_count",
+            "candidate_set_digest",
+            "stable_cycles_required",
+            "stable_cycles_observed"
+          ]
+        }
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "match_count": {"type": "integer", "minimum": 0},
+        "content_digest": {"$ref": "#/$defs/nullableSha256"}
+      },
+      "required": ["match_count", "content_digest"],
+      "allOf": [{
+        "if": {"properties": {"match_count": {"const": 1}}, "required": ["match_count"]},
+        "then": {"properties": {"content_digest": {"$ref": "#/$defs/sha256"}}},
+        "else": {"properties": {"content_digest": {"type": "null"}}}
+      }]
+    },
+    "sink": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"const": "private_sink_write_once"},
+        "verdict": {
+          "enum": ["not_executed", "written", "already_present", "indeterminate"]
+        },
+        "records_written": {
+          "oneOf": [{"type": "integer", "enum": [0, 1]}, {"type": "null"}]
+        }
+      },
+      "required": ["kind", "verdict", "records_written"],
+      "allOf": [
+        {"if": {"properties": {"verdict": {"const": "not_executed"}}, "required": ["verdict"]}, "then": {"properties": {"records_written": {"const": 0}}}},
+        {"if": {"properties": {"verdict": {"const": "written"}}, "required": ["verdict"]}, "then": {"properties": {"records_written": {"const": 1}}}},
+        {"if": {"properties": {"verdict": {"const": "already_present"}}, "required": ["verdict"]}, "then": {"properties": {"records_written": {"const": 0}}}},
+        {"if": {"properties": {"verdict": {"const": "indeterminate"}}, "required": ["verdict"]}, "then": {"properties": {"records_written": {"type": "null"}}}}
+      ]
+    },
+    "restore": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {"enum": ["not_executed", "indeterminate", "satisfied"]},
+        "failed_substep": {
+          "oneOf": [
+            {
+              "enum": [
+                "firefox_process_identity",
+                "focus_firefox_pid",
+                "navigation_key",
+                "address_bar_focus",
+                "selection_action",
+                "selection_proof",
+                "paste",
+                "pasted_text_proof",
+                "submit",
+                "return_postcondition"
+              ]
+            },
+            {"type": "null"}
+          ]
+        },
+        "firefox_pid_sha256": {"$ref": "#/$defs/nullableSha256"},
+        "stable_cycles_required": {"type": "integer", "enum": [0, 2]},
+        "stable_cycles_observed": {"type": "integer", "minimum": 0, "maximum": 2},
+        "return_url_sha256": {"$ref": "#/$defs/nullableSha256"}
+      },
+      "required": [
+        "verdict",
+        "failed_substep",
+        "firefox_pid_sha256",
+        "stable_cycles_required",
+        "stable_cycles_observed",
+        "return_url_sha256"
+      ],
+      "allOf": [
+        {
+          "if": {"properties": {"verdict": {"const": "not_executed"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "failed_substep": {"type": "null"},
+            "firefox_pid_sha256": {"type": "null"},
+            "stable_cycles_required": {"const": 0},
+            "stable_cycles_observed": {"const": 0},
+            "return_url_sha256": {"type": "null"}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "satisfied"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "failed_substep": {"type": "null"},
+            "firefox_pid_sha256": {"$ref": "#/$defs/sha256"},
+            "stable_cycles_required": {"const": 2},
+            "stable_cycles_observed": {"const": 2},
+            "return_url_sha256": {"$ref": "#/$defs/sha256"}
+          }}
+        },
+        {
+          "if": {"properties": {"verdict": {"const": "indeterminate"}}, "required": ["verdict"]},
+          "then": {"properties": {
+            "failed_substep": {"not": {"type": "null"}},
+            "return_url_sha256": {"$ref": "#/$defs/sha256"}
+          }}
+        }
+      ]
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": {"const": "careers"},
+        "request_id": {"$ref": "#/$defs/sha256"},
+        "acquired": {"type": "boolean"},
+        "released": {"type": "boolean"},
+        "owner_token_sha256": {"$ref": "#/$defs/nullableSha256"},
+        "wait_ms": {"type": "integer", "minimum": 0},
+        "turn_lineage_sha256": {"$ref": "#/$defs/sha256"},
+        "correlation_id_sha256": {"$ref": "#/$defs/sha256"},
+        "deadline_seconds": {"type": "integer", "minimum": 30, "maximum": 1700}
+      },
+      "required": [
+        "policy",
+        "request_id",
+        "acquired",
+        "released",
+        "owner_token_sha256",
+        "wait_ms",
+        "turn_lineage_sha256",
+        "correlation_id_sha256",
+        "deadline_seconds"
+      ],
+      "allOf": [{
+        "if": {"properties": {"acquired": {"const": false}}, "required": ["acquired"]},
+        "then": {"properties": {
+          "released": {"const": false},
+          "owner_token_sha256": {"type": "null"}
+        }},
+        "else": {"properties": {"owner_token_sha256": {"$ref": "#/$defs/sha256"}}}
+      }]
+    },
+    "executedNotificationsAction": {
+      "allOf": [
+        {"$ref": "#/$defs/action"},
+        {"properties": {
+          "stage": {"const": "notifications_navigation"},
+          "target_match_count": {"const": 1},
+          "action_name": {"const": "jump"},
+          "action_index": {"const": 0},
+          "action_match_count": {"const": 1},
+          "verdict": {"const": "executed"}
+        }}
+      ]
+    },
+    "executedMyPostsAction": {
+      "allOf": [
+        {"$ref": "#/$defs/action"},
+        {"properties": {
+          "stage": {"const": "my_posts_filter"},
+          "target_match_count": {"const": 1},
+          "action_name": {"const": "press"},
+          "action_index": {"const": 0},
+          "action_match_count": {"const": 1},
+          "verdict": {"const": "executed"}
+        }}
+      ]
+    },
+    "stableNotificationsPostcondition": {
+      "allOf": [
+        {"$ref": "#/$defs/notificationsPostcondition"},
+        {"properties": {
+          "route_exact": {"const": true},
+          "my_posts_match_count": {"const": 1},
+          "my_posts_state_digest": {"$ref": "#/$defs/sha256"},
+          "stable_cycles_required": {"const": 2},
+          "stable_cycles_observed": {"const": 2}
+        }, "required": [
+          "route_exact",
+          "my_posts_match_count",
+          "my_posts_state_digest",
+          "stable_cycles_required",
+          "stable_cycles_observed"
+        ]}
+      ]
+    },
+    "stableMyPostsPostcondition": {
+      "allOf": [
+        {"$ref": "#/$defs/myPostsPostcondition"},
+        {"properties": {
+          "route_exact": {"const": true},
+          "selected_filter_marker_match_count": {"const": 1},
+          "candidate_set_digest": {"$ref": "#/$defs/sha256"},
+          "stable_cycles_required": {"const": 2},
+          "stable_cycles_observed": {"const": 2}
+        }, "required": [
+          "route_exact",
+          "selected_filter_marker_match_count",
+          "candidate_count",
+          "candidate_set_digest",
+          "stable_cycles_required",
+          "stable_cycles_observed"
+        ]}
+      ]
+    },
+    "exactStart": {
+      "allOf": [
+        {"$ref": "#/$defs/start"},
+        {"properties": {
+          "route_exact": {"const": true},
+          "route_kind_exact": {"const": true},
+          "notifications_target_match_count": {"const": 1},
+          "notifications_target_state_digest": {"$ref": "#/$defs/sha256"}
+        }, "required": [
+          "route_exact",
+          "route_kind_exact",
+          "notifications_target_match_count",
+          "notifications_target_state_digest"
+        ]}
+      ]
+    },
+    "acquiredReleasedLock": {
+      "allOf": [
+        {"$ref": "#/$defs/lock"},
+        {"properties": {
+          "acquired": {"const": true},
+          "released": {"const": true},
+          "owner_token_sha256": {"$ref": "#/$defs/sha256"}
+        }, "required": ["acquired", "released", "owner_token_sha256"]}
+      ]
+    },
+    "acquiredLock": {
+      "allOf": [
+        {"$ref": "#/$defs/lock"},
+        {"properties": {
+          "acquired": {"const": true},
+          "owner_token_sha256": {"$ref": "#/$defs/sha256"}
+        }, "required": ["acquired", "released", "owner_token_sha256"]}
+      ]
+    },
+    "exactInteractionChain": {
+      "type": "object",
+      "properties": {
+        "start": {"$ref": "#/$defs/exactStart"},
+        "notifications_action": {"$ref": "#/$defs/executedNotificationsAction"},
+        "notifications_postcondition": {"$ref": "#/$defs/stableNotificationsPostcondition"},
+        "my_posts_action": {"$ref": "#/$defs/executedMyPostsAction"},
+        "my_posts_postcondition": {"$ref": "#/$defs/stableMyPostsPostcondition"}
+      },
+      "required": [
+        "start",
+        "notifications_action",
+        "notifications_postcondition",
+        "my_posts_action",
+        "my_posts_postcondition"
+      ]
+    },
+    "exactCompletedEngagementChain": {
+      "allOf": [
+        {"$ref": "#/$defs/exactInteractionChain"},
+        {
+          "type": "object",
+          "properties": {"lock": {"$ref": "#/$defs/acquiredReleasedLock"}},
+          "required": ["lock"]
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema": {"const": "linkedin_engagement_receipt_v1"},
+    "platform": {"const": "linkedin"},
+    "operation": {"const": "capture_visible_new_engagement_signal"},
+    "display": {"type": "string", "pattern": "^:[0-9]{1,3}$"},
+    "requester": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},
+    "turn_lineage_sha256": {"$ref": "#/$defs/sha256"},
+    "correlation_id_sha256": {"$ref": "#/$defs/sha256"},
+    "deadline_seconds": {"type": "integer", "minimum": 30, "maximum": 1700},
+    "hands_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "yaml_sha256": {"$ref": "#/$defs/sha256"},
+    "terminal_state": {
+      "enum": [
+        "already_known", "ambiguous_signal", "captured", "no_new_signal",
+        "postcondition_failed", "sink_write_indeterminate", "technical_failure"
+      ]
+    },
+    "ok": {"type": "boolean"},
+    "failure_code": {
+      "oneOf": [
+        {"type": "null"},
+        {"const": "ambiguous_signal"},
+        {"const": "postcondition_failed"},
+        {"const": "sink_write_indeterminate"},
+        {"$ref": "#/$defs/technicalFailureCode"}
+      ]
+    },
+    "records_observed": {"type": "integer", "enum": [0, 1]},
+    "records_written": {
+      "oneOf": [{"type": "integer", "enum": [0, 1]}, {"type": "null"}]
+    },
+    "content_digest": {"$ref": "#/$defs/nullableSha256"},
+    "restore_verified": {"type": "boolean"},
+    "transaction_sha256": {"$ref": "#/$defs/nullableSha256"},
+    "expected_transaction_sha256": {"$ref": "#/$defs/sha256"},
+    "source_ref_sha256": {"$ref": "#/$defs/nullableSha256"},
+    "sink_ref_sha256": {"$ref": "#/$defs/nullableSha256"},
+    "notifications_name_sha256": {"$ref": "#/$defs/nullableSha256"},
+    "return_url_sha256": {"$ref": "#/$defs/nullableSha256"},
+    "start": {"$ref": "#/$defs/start"},
+    "notifications_action": {"$ref": "#/$defs/action"},
+    "notifications_postcondition": {"$ref": "#/$defs/notificationsPostcondition"},
+    "my_posts_action": {"$ref": "#/$defs/action"},
+    "my_posts_postcondition": {"$ref": "#/$defs/myPostsPostcondition"},
+    "candidate": {"$ref": "#/$defs/candidate"},
+    "sink": {"$ref": "#/$defs/sink"},
+    "signal_postcondition": {"enum": ["not_evaluated", "satisfied", "failed"]},
+    "restore": {"$ref": "#/$defs/restore"},
+    "lock": {"$ref": "#/$defs/lock"}
+  },
+  "required": [
+    "schema", "platform", "operation", "display", "requester",
+    "turn_lineage_sha256", "correlation_id_sha256", "deadline_seconds",
+    "hands_commit", "yaml_sha256", "terminal_state", "ok", "failure_code",
+    "records_observed", "records_written", "content_digest", "restore_verified",
+    "transaction_sha256", "expected_transaction_sha256", "source_ref_sha256",
+    "sink_ref_sha256", "notifications_name_sha256", "return_url_sha256", "start",
+    "notifications_action", "notifications_postcondition", "my_posts_action",
+    "my_posts_postcondition", "candidate", "sink", "signal_postcondition",
+    "restore", "lock"
+  ],
+  "allOf": [
+    {
+      "if": {"properties": {"terminal_state": {"const": "captured"}}, "required": ["terminal_state"]},
+      "then": {"properties": {
+        "ok": {"const": true}, "failure_code": {"type": "null"},
+        "records_observed": {"const": 1}, "records_written": {"const": 1},
+        "content_digest": {"$ref": "#/$defs/sha256"}, "restore_verified": {"const": true},
+        "candidate": {"properties": {"match_count": {"const": 1}, "content_digest": {"$ref": "#/$defs/sha256"}}},
+        "sink": {"properties": {"verdict": {"const": "written"}, "records_written": {"const": 1}}},
+        "signal_postcondition": {"const": "satisfied"},
+        "restore": {"properties": {"verdict": {"const": "satisfied"}, "failed_substep": {"type": "null"}}}
+      }, "allOf": [
+        {"$ref": "#/$defs/exactCompletedEngagementChain"},
+        {"properties": {"my_posts_postcondition": {"properties": {"candidate_count": {"const": 1}}}}}
+      ]}
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "already_known"}}, "required": ["terminal_state"]},
+      "then": {"properties": {
+        "ok": {"const": true}, "failure_code": {"type": "null"},
+        "records_observed": {"const": 1}, "records_written": {"const": 0},
+        "content_digest": {"$ref": "#/$defs/sha256"}, "restore_verified": {"const": true},
+        "candidate": {"properties": {"match_count": {"const": 1}, "content_digest": {"$ref": "#/$defs/sha256"}}},
+        "sink": {"properties": {"verdict": {"const": "already_present"}, "records_written": {"const": 0}}},
+        "signal_postcondition": {"const": "satisfied"},
+        "restore": {"properties": {"verdict": {"const": "satisfied"}, "failed_substep": {"type": "null"}}}
+      }, "allOf": [
+        {"$ref": "#/$defs/exactCompletedEngagementChain"},
+        {"properties": {"my_posts_postcondition": {"properties": {"candidate_count": {"const": 1}}}}}
+      ]}
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "no_new_signal"}}, "required": ["terminal_state"]},
+      "then": {"properties": {
+        "ok": {"const": true}, "failure_code": {"type": "null"},
+        "records_observed": {"const": 0}, "records_written": {"const": 0},
+        "content_digest": {"type": "null"}, "restore_verified": {"const": true},
+        "candidate": {"properties": {"match_count": {"const": 0}, "content_digest": {"type": "null"}}},
+        "sink": {"properties": {"verdict": {"const": "not_executed"}, "records_written": {"const": 0}}},
+        "signal_postcondition": {"const": "not_evaluated"},
+        "restore": {"properties": {"verdict": {"const": "satisfied"}, "failed_substep": {"type": "null"}}}
+      }, "allOf": [
+        {"$ref": "#/$defs/exactCompletedEngagementChain"},
+        {"properties": {"my_posts_postcondition": {"properties": {"candidate_count": {"const": 0}}}}}
+      ]}
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "ambiguous_signal"}}, "required": ["terminal_state"]},
+      "then": {"properties": {
+        "ok": {"const": false}, "failure_code": {"const": "ambiguous_signal"},
+        "records_observed": {"const": 0}, "records_written": {"const": 0},
+        "content_digest": {"type": "null"}, "restore_verified": {"const": false},
+        "candidate": {"properties": {"match_count": {"type": "integer", "minimum": 2}, "content_digest": {"type": "null"}}},
+        "sink": {"properties": {"verdict": {"const": "not_executed"}, "records_written": {"const": 0}}},
+        "signal_postcondition": {"const": "not_evaluated"},
+        "restore": {"properties": {"verdict": {"const": "not_executed"}}}
+      }, "allOf": [
+        {"$ref": "#/$defs/exactCompletedEngagementChain"},
+        {"properties": {"my_posts_postcondition": {"properties": {"candidate_count": {"type": "integer", "minimum": 2}}}}}
+      ]}
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "postcondition_failed"}}, "required": ["terminal_state"]},
+      "then": {
+        "properties": {
+          "ok": {"const": false}, "failure_code": {"const": "postcondition_failed"},
+          "restore_verified": {"const": false}
+        },
+        "oneOf": [
+          {"properties": {"records_observed": {"const": 0}, "records_written": {"const": 0}, "content_digest": {"type": "null"}}},
+          {"properties": {"records_observed": {"const": 1}, "records_written": {"enum": [0, 1]}, "content_digest": {"$ref": "#/$defs/sha256"}}}
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "sink_write_indeterminate"}}, "required": ["terminal_state"]},
+      "then": {"properties": {
+        "ok": {"const": false}, "failure_code": {"const": "sink_write_indeterminate"},
+        "records_observed": {"const": 1}, "records_written": {"type": "null"},
+        "content_digest": {"$ref": "#/$defs/sha256"}, "restore_verified": {"const": false},
+        "candidate": {"properties": {"match_count": {"const": 1}, "content_digest": {"$ref": "#/$defs/sha256"}}},
+        "sink": {"properties": {"verdict": {"const": "indeterminate"}, "records_written": {"type": "null"}}},
+        "signal_postcondition": {"const": "not_evaluated"},
+        "restore": {"properties": {"verdict": {"const": "not_executed"}}}
+      }, "allOf": [
+        {"$ref": "#/$defs/exactInteractionChain"},
+        {"properties": {"lock": {"$ref": "#/$defs/acquiredLock"}}, "required": ["lock"]},
+        {"properties": {"my_posts_postcondition": {"properties": {"candidate_count": {"const": 1}}}}}
+      ]}
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "technical_failure"}}, "required": ["terminal_state"]},
+      "then": {
+        "properties": {"ok": {"const": false}, "failure_code": {"$ref": "#/$defs/technicalFailureCode"}},
+        "oneOf": [
+          {"properties": {"records_observed": {"const": 0}, "records_written": {"const": 0}, "content_digest": {"type": "null"}}},
+          {"properties": {"records_observed": {"const": 1}, "records_written": {"enum": [0, 1]}, "content_digest": {"$ref": "#/$defs/sha256"}}}
+        ]
+      }
+    }
+  ]
+}

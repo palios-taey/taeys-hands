@@ -23,14 +23,14 @@ The raw record contains the private search reference, selected source URL, exact
 
 ## Public request and result
 
-The Hands platform request is exactly one of:
+The Jobs operations are exactly:
 
 ```json
 {"operation":"capture_selected_job"}
 {"operation":"select_and_capture_job"}
 ```
 
-`consultation_v2/platforms/linkedin/request.schema.json` rejects all other Hands operations and fields. The distinct Taey-facing tool request remains exactly `{"display":":N"}`. The private transaction selects the operation. Search and sink references, paths, exact job-card/detail identity, lineage, and deadlines are Presence-injected private inputs, not model-authored arguments.
+The same public LinkedIn platform now also registers `capture_visible_new_engagement_signal`, whose distinct contract is `docs/LINKEDIN_ENGAGERS_CAPTURE_CONTRACT.md`. The request schema rejects every other operation and every extra public field. The distinct Taey-facing tool request remains exactly `{"display":":N"}`. The private transaction selects the operation. Search and sink references, paths, exact job-card/detail identity, lineage, and deadlines are Presence-injected private inputs, not model-authored arguments.
 
 The internal one-shot runner interface is:
 

@@ -24,6 +24,19 @@ tree:
       name: About the job
       role: heading
       scope: jobs.selected_detail
+    my_posts_filter:
+      name: My posts
+      role: radio button
+      states_include:
+        - showing
+      action:
+        name: press
+        index: 0
+    selected_filter_marker:
+      name: My posts’ filters
+      role: push button
+      states_include:
+        - showing
 workflow:
   job_selection:
     operation: select_and_capture_job
@@ -69,6 +82,82 @@ workflow:
     description_interface: atspi_text
     action: private_sink_write_once
     postcondition: selected_job_content_digest_unchanged
+  engagement_signal_capture:
+    operation: capture_visible_new_engagement_signal
+    routes:
+      jobs:
+        scheme: https
+        host: www.linkedin.com
+        normalized_path: /jobs/search-results
+      notifications_all:
+        scheme: https
+        host: www.linkedin.com
+        normalized_path: /notifications
+        exact_query:
+          filter: all
+      notifications_my_posts:
+        scheme: https
+        host: www.linkedin.com
+        normalized_path: /notifications
+        exact_query:
+          filter: my_posts_all
+    navigation:
+      target:
+        private_exact_name_field: notifications_name
+        role: link
+        states_include:
+          - showing
+          - enabled
+        uri:
+          scheme: https
+          host: www.linkedin.com
+          normalized_path: /notifications
+      action:
+        name: jump
+        index: 0
+      observation_barrier:
+        projection: exact_route_and_my_posts_state
+        refresh_policy: invalidate_reacquire
+        stable_cycles: 2
+        interval_ms: 200
+        timeout_ms: 10000
+    candidate_observation:
+      observation_name_prefix: Unread notification.
+      role: link
+      states_include:
+        - showing
+      allowed_uri_normalized_path_prefixes:
+        - /feed/
+        - /posts/
+      authority: observation_classification_only
+    observation_barrier:
+      projection: exact_route_marker_and_candidate_set
+      refresh_policy: invalidate_reacquire
+      stable_cycles: 2
+      interval_ms: 200
+      timeout_ms: 10000
+    candidate_cardinality:
+      no_new_signal: 0
+      capture: 1
+      ambiguous_signal_minimum: 2
+    sink_action: private_sink_write_once
+    postcondition: selected_signal_content_digest_unchanged
+    restore:
+      navigation_key: ctrl+l
+      address_bar:
+        key: address_bar
+        name: Search with Google or enter address
+        role: entry
+        states_include:
+          - editable
+          - focusable
+      submit_key: Return
+      observation_barrier:
+        projection: exact_route_and_notifications_target_state
+        refresh_policy: invalidate_reacquire
+        stable_cycles: 2
+        interval_ms: 200
+        timeout_ms: 10000
 validation:
   selected_job_ready:
     indicators:
