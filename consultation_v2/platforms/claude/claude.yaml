@@ -321,6 +321,14 @@ tree:
       name: Send message
       role: push button
       scope: base.composer
+    claude_memory_review_dialog:
+      name: Review updates to Claude’s memory
+      role: dialog
+      scope: pre_send.exception
+    claude_memory_not_now:
+      name: Not now
+      role: push button
+      scope: pre_send.exception
     stop_button:
       name: Stop response
       role: push button
@@ -665,6 +673,33 @@ workflow:
       stable_cycles: 2
       interval_ms: 250
       timeout_ms: 12000
+  pre_send:
+    exceptions:
+      memory_review:
+        detect:
+          - claude_memory_review_dialog
+          - claude_memory_not_now
+        detect_states:
+          claude_memory_review_dialog:
+            - showing
+            - focused
+          claude_memory_not_now:
+            - showing
+            - focusable
+            - enabled
+        navigation_controls_absent:
+          - input
+          - model_selector
+          - toggle_menu
+        recovery:
+          action: click
+          element: claude_memory_not_now
+          max_attempts: 1
+          url_prefix: https://claude.ai/new
+          absent_after_recovery:
+            - claude_memory_review_dialog
+            - claude_memory_not_now
+          success_postcondition: navigation
   defaults:
     model: null
     mode: extended_thinking

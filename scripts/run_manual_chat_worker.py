@@ -51,6 +51,17 @@ def build_parser() -> argparse.ArgumentParser:
     recover.add_argument("--exception-key", required=True)
     recover.add_argument("--source-response-json", required=True)
 
+    recover_claude_pre_send = phases.add_parser(
+        "recover-claude-pre-send",
+        help="Classify and dismiss one exact Claude pre-send interstitial.",
+    )
+    recover_claude_pre_send.set_defaults(platform="claude")
+    recover_claude_pre_send.add_argument("--display", required=True)
+    recover_claude_pre_send.add_argument("--seat-id", required=True)
+    recover_claude_pre_send.add_argument("--artifact-root", required=True)
+    recover_claude_pre_send.add_argument("--exception-key", required=True)
+    recover_claude_pre_send.add_argument("--source-terminal-identity", required=True)
+
     diagnose_chatgpt_model_menu = phases.add_parser(
         "diagnose-chatgpt-model-menu",
         help="Map one ChatGPT advanced-model submenu without selecting or sending.",
@@ -186,6 +197,141 @@ def _post_send_exceptions(platform: str) -> dict[str, dict[str, object]]:
             )
         normalized[exception_key] = dict(raw_spec)
     return normalized
+
+
+def _claude_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
+    cfg = load_platform_yaml("claude")
+    workflow = cfg.get("workflow")
+    element_map = (cfg.get("tree") or {}).get("element_map")
+    if not isinstance(workflow, dict) or not isinstance(element_map, dict):
+        raise RuntimeError("claude YAML has no valid workflow or element_map")
+    navigation = workflow.get("navigation")
+    pre_send = workflow.get("pre_send")
+    monitor = workflow.get("monitor")
+    if (
+        not isinstance(navigation, dict)
+        or not isinstance(pre_send, dict)
+        or not isinstance(monitor, dict)
+    ):
+        raise RuntimeError("claude YAML has no navigation or pre-send contract")
+    exceptions = pre_send.get("exceptions")
+    if not isinstance(exceptions, dict):
+        raise RuntimeError("claude workflow.pre_send.exceptions must be a mapping")
+    raw_spec = exceptions.get(exception_key)
+    if not isinstance(raw_spec, dict):
+        raise RuntimeError(f"claude has no mapped pre-send exception {exception_key}")
+
+    detect = raw_spec.get("detect")
+    detect_states = raw_spec.get("detect_states")
+    navigation_controls_absent = raw_spec.get("navigation_controls_absent")
+    recovery = raw_spec.get("recovery")
+    postcondition = navigation.get("postcondition")
+    observation = navigation.get("observation")
+    if (
+        not isinstance(detect, list)
+        or len(detect) != 2
+        or len(detect) != len(set(detect))
+        or not all(isinstance(key, str) and key in element_map for key in detect)
+    ):
+        raise RuntimeError("claude pre-send exception detect elements are invalid")
+    if not isinstance(detect_states, dict) or set(detect_states) != set(detect):
+        raise RuntimeError("claude pre-send exception detect states are invalid")
+    for key, states in detect_states.items():
+        if (
+            not isinstance(states, list)
+            or not states
+            or len(states) != len(set(states))
+            or not all(isinstance(state, str) and state for state in states)
+        ):
+            raise RuntimeError(f"claude pre-send exception states are invalid for {key}")
+    if not isinstance(postcondition, dict) or postcondition.get("scope") != "base":
+        raise RuntimeError("claude navigation postcondition must use base scope")
+    exact_singletons = postcondition.get("exact_singletons")
+    if (
+        not isinstance(exact_singletons, list)
+        or not exact_singletons
+        or len(exact_singletons) != len(set(exact_singletons))
+        or not all(
+            isinstance(key, str) and key in element_map
+            for key in exact_singletons
+        )
+    ):
+        raise RuntimeError("claude navigation exact singleton controls are invalid")
+    if navigation_controls_absent != exact_singletons:
+        raise RuntimeError(
+            "claude pre-send blocked state must exclude the navigation singleton controls"
+        )
+    if not isinstance(observation, dict):
+        raise RuntimeError("claude navigation observation contract is missing")
+    refresh_policy = observation.get("refresh_policy")
+    stable_cycles = observation.get("stable_cycles")
+    interval_ms = observation.get("interval_ms")
+    timeout_ms = observation.get("timeout_ms")
+    if (
+        refresh_policy != "invalidate_reacquire"
+        or stable_cycles != 2
+        or isinstance(interval_ms, bool)
+        or not isinstance(interval_ms, int)
+        or interval_ms <= 0
+        or isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, int)
+        or timeout_ms < interval_ms * stable_cycles
+    ):
+        raise RuntimeError("claude navigation observation barrier is invalid")
+    max_samples = (timeout_ms + interval_ms - 1) // interval_ms
+    if not 2 <= max_samples <= 100:
+        raise RuntimeError("claude navigation observation sample bound is invalid")
+
+    if not isinstance(recovery, dict):
+        raise RuntimeError("claude pre-send exception has no recovery mapping")
+    action = recovery.get("action")
+    element = recovery.get("element")
+    max_attempts = recovery.get("max_attempts")
+    url_prefix = recovery.get("url_prefix")
+    absent_after_recovery = recovery.get("absent_after_recovery")
+    if action != "click" or max_attempts != 1 or element not in detect:
+        raise RuntimeError("claude pre-send recovery must be one exact mapped click")
+    if url_prefix != "https://claude.ai/new":
+        raise RuntimeError("claude pre-send recovery URL prefix is invalid")
+    if absent_after_recovery != detect:
+        raise RuntimeError("claude pre-send recovery must remove the complete exception set")
+    if recovery.get("success_postcondition") != "navigation":
+        raise RuntimeError("claude pre-send recovery must reuse the navigation postcondition")
+    stop_keys = monitor.get("stop_keys")
+    exception_states = monitor.get("exception_states")
+    if (
+        not isinstance(stop_keys, list)
+        or not stop_keys
+        or not isinstance(exception_states, list)
+    ):
+        raise RuntimeError("claude monitor exception contract is invalid")
+    forbidden_after_recovery: list[str] = []
+    for key in stop_keys:
+        if not isinstance(key, str) or key not in element_map:
+            raise RuntimeError("claude monitor Stop key is invalid")
+        forbidden_after_recovery.append(key)
+    for state in exception_states:
+        detect_keys = state.get("detect") if isinstance(state, dict) else None
+        if not isinstance(detect_keys, list):
+            raise RuntimeError("claude monitor exception state is invalid")
+        for key in detect_keys:
+            if not isinstance(key, str) or key not in element_map:
+                raise RuntimeError("claude monitor exception element is invalid")
+            if key not in forbidden_after_recovery:
+                forbidden_after_recovery.append(key)
+    return {
+        "detect": tuple(detect),
+        "detect_states": {
+            key: tuple(states) for key, states in detect_states.items()
+        },
+        "navigation_controls": tuple(exact_singletons),
+        "element": element,
+        "url_prefix": url_prefix,
+        "absent_after_recovery": tuple(absent_after_recovery),
+        "stable_cycles": stable_cycles,
+        "max_samples": max_samples,
+        "forbidden_after_recovery": tuple(forbidden_after_recovery),
+    }
 
 
 def _completed_before_stop_state(platform: str) -> dict[str, object] | None:
@@ -463,6 +609,70 @@ def _chatgpt_model_menu_compact_reset_content(display: str) -> str:
         "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected "
         "element, state, action, scope, or postcondition, return the first-mismatch stop report "
         "and halt. Do not retry or recover."
+    )
+
+
+def _claude_pre_send_recovery_content(
+    display: str,
+    exception_key: str,
+    source_terminal_identity: str,
+) -> str:
+    spec = _claude_pre_send_recovery_spec(exception_key)
+    detect = tuple(str(value) for value in spec["detect"])
+    detect_states = dict(spec["detect_states"])
+    navigation_controls = tuple(str(value) for value in spec["navigation_controls"])
+    absent_after_recovery = tuple(
+        str(value) for value in spec["absent_after_recovery"]
+    )
+    forbidden_after_recovery = tuple(
+        str(value) for value in spec["forbidden_after_recovery"]
+    )
+    element = str(spec["element"])
+    url_prefix = str(spec["url_prefix"])
+    stable_cycles = int(spec["stable_cycles"])
+    max_samples = int(spec["max_samples"])
+    state_contract = "; ".join(
+        f"{key} states include {', '.join(str(state) for state in states)}"
+        for key, states in detect_states.items()
+    )
+    return (
+        f"Execute one frozen Claude pre-send exception recovery transaction on {display}. "
+        f"The terminal source identity is {source_terminal_identity}; never invoke or retry "
+        "that identity. This turn has a new identity. Use drive_chat only. Do not attach, paste, "
+        "send, extract, navigate, focus, press a key, operate any menu, or click any control "
+        f"except {element} exactly once.\n"
+        f"1. observe scope=base exactly once. Require current_url to begin exactly {url_prefix}, "
+        f"one populated Claude tree, exactly one each of {', '.join(detect)}, and {state_contract}. "
+        f"Require zero of the navigation-ready controls {', '.join(navigation_controls)}. Record "
+        "classification_revision_1. Any missing, duplicate, renamed, different, or additional "
+        "state is a first mismatch and ends the turn without mutation.\n"
+        "2. observe scope=base exactly once more without mutation. Require the same URL, exact "
+        "exception elements, states, and absent navigation-ready controls. Record "
+        "classification_revision_2 and the fresh recovery-control ref. Any difference ends the "
+        "turn without mutation.\n"
+        f"3. click element={element} exactly once using only that fresh ref. Require "
+        "performed=true. This is the only mutation authorized.\n"
+        f"4. Begin the existing YAML-owned navigation observation barrier. Take at most "
+        f"{max_samples} fresh base observations. A sample matches only when current_url still "
+        f"begins {url_prefix}, the tree is populated, exactly one each of "
+        f"{', '.join(navigation_controls)} is mapped, and every element in "
+        f"{', '.join((*absent_after_recovery, *forbidden_after_recovery))} is absent. Require "
+        f"{stable_cycles} consecutive "
+        "matching samples. A nonmatching settling sample authorizes only the next read-only base "
+        "observation; it never authorizes another mutation. If the exception remains after the "
+        "click, one of the exact forbidden elements appears, an element duplicates or changes, or the "
+        "sample bound ends without the stable postcondition, return a FIRST-MISMATCH STOP REPORT "
+        "with every observation revision and current mapped elements, then stop.\n"
+        "5. After the stable barrier, make no more drive_chat calls. Return a CLAUDE PRE-SEND "
+        "RECOVERY RECEIPT containing platform, display, source_terminal_identity, exception_key, "
+        "classification_revision_1, classification_revision_2, clicked_element, click_count, "
+        "navigation_postcondition_elements, stable_cycles, post_recovery_revision_1, "
+        "post_recovery_revision_2, interstitial_absent, attached, pasted, sent, and recovered. "
+        f"Use exact values platform=claude, display={display}, "
+        f"source_terminal_identity={source_terminal_identity}, exception_key={exception_key}, "
+        f"clicked_element={element}, click_count=1, stable_cycles={stable_cycles}, "
+        "interstitial_absent=true, attached=false, pasted=false, sent=false, and recovered=true. "
+        "The two post-recovery revisions must be the final two matching barrier samples. Then halt."
     )
 
 
@@ -1329,6 +1539,7 @@ def main() -> int:
 
     source_response = None
     source_response_sha256 = None
+    source_terminal_identity = None
     exception_key = None
     completed_before_stop_response_file = None
     if args.phase == "diagnose-chatgpt-model-menu":
@@ -1369,6 +1580,28 @@ def main() -> int:
             f"{seat_id}\0{args.platform}\0{args.display}\0{content}".encode("utf-8")
         ).hexdigest()
         event_id = f"reset-model-menu-compact-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
+    elif args.phase == "recover-claude-pre-send":
+        exception_key = _identity(args.exception_key, "exception key")
+        source_terminal_identity = _identity(
+            args.source_terminal_identity,
+            "source terminal identity",
+        )
+        if seat_id == source_terminal_identity:
+            raise RuntimeError(
+                "Claude pre-send recovery requires a new seat identity"
+            )
+        content = _claude_pre_send_recovery_content(
+            args.display,
+            exception_key,
+            source_terminal_identity,
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0claude\0{args.display}\0{exception_key}\0"
+            f"{source_terminal_identity}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"recover-claude-pre-send-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
     elif args.phase == "send":
@@ -1611,11 +1844,101 @@ def main() -> int:
             mutation_stop_report = args.phase in {
                 "send",
                 "recover",
+                "recover-claude-pre-send",
                 "diagnose-chatgpt-model-menu",
                 "diagnose-chatgpt-power-right",
                 "reset-chatgpt-model-menu-compact",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if args.phase == "recover-claude-pre-send":
+            assert exception_key is not None
+            assert source_terminal_identity is not None
+            lowered_receipt = receipt.lower()
+            required_receipt_fields = (
+                "claude pre-send recovery receipt",
+                "platform",
+                "display",
+                "source_terminal_identity",
+                "exception_key",
+                "classification_revision_1",
+                "classification_revision_2",
+                "clicked_element",
+                "click_count",
+                "navigation_postcondition_elements",
+                "stable_cycles",
+                "post_recovery_revision_1",
+                "post_recovery_revision_2",
+                "interstitial_absent",
+                "attached",
+                "pasted",
+                "sent",
+                "recovered",
+            )
+            missing_receipt_fields = [
+                field
+                for field in required_receipt_fields
+                if field not in lowered_receipt
+            ]
+            if missing_receipt_fields:
+                raise RuntimeError(
+                    "Claude pre-send recovery response is missing receipt fields: "
+                    f"{missing_receipt_fields}"
+                )
+            exact_receipt_values = {
+                "platform": "claude",
+                "display": args.display,
+                "source_terminal_identity": source_terminal_identity,
+                "exception_key": exception_key,
+                "clicked_element": "claude_memory_not_now",
+                "click_count": "1",
+                "stable_cycles": "2",
+                "interstitial_absent": "true",
+                "attached": "false",
+                "pasted": "false",
+                "sent": "false",
+                "recovered": "true",
+            }
+            invalid_receipt_values = [
+                field
+                for field, expected in exact_receipt_values.items()
+                if not _receipt_field_matches(receipt, field, expected)
+            ]
+            if invalid_receipt_values:
+                raise RuntimeError(
+                    "Claude pre-send recovery response has invalid receipt values: "
+                    f"{invalid_receipt_values}"
+                )
+            revision_fields = (
+                "classification_revision_1",
+                "classification_revision_2",
+                "post_recovery_revision_1",
+                "post_recovery_revision_2",
+            )
+            invalid_revisions = [
+                field
+                for field in revision_fields
+                if re.search(
+                    rf"(?im)\b{field}\b"
+                    r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{64}\b",
+                    receipt,
+                )
+                is None
+            ]
+            if invalid_revisions:
+                raise RuntimeError(
+                    "Claude pre-send recovery response has invalid revisions: "
+                    f"{invalid_revisions}"
+                )
+            navigation_controls = tuple(
+                str(value)
+                for value in _claude_pre_send_recovery_spec(exception_key)[
+                    "navigation_controls"
+                ]
+            )
+            if any(key not in receipt for key in navigation_controls):
+                raise RuntimeError(
+                    "Claude pre-send recovery response omits navigation controls"
+                )
         if args.phase == "diagnose-chatgpt-model-menu":
             required_receipt_fields = (
                 "chatgpt model menu diagnostic receipt",
@@ -1856,6 +2179,7 @@ def main() -> int:
     finally:
         if args.phase in {
             "extract",
+            "recover-claude-pre-send",
             "diagnose-chatgpt-model-menu",
             "diagnose-chatgpt-power-right",
             "reset-chatgpt-model-menu-compact",
@@ -1902,6 +2226,11 @@ def main() -> int:
         else:
             source_result["exception_key"] = exception_key
         result.update(source_result)
+    if source_terminal_identity is not None:
+        result.update({
+            "source_terminal_identity": source_terminal_identity,
+            "exception_key": exception_key,
+        })
     if completed_before_stop:
         completed_state = _completed_before_stop_state(args.platform)
         assert completed_state is not None
@@ -1919,6 +2248,7 @@ def main() -> int:
                 "response_sha256": _sha256(completed_before_stop_response_file),
             })
     if args.phase in {
+        "recover-claude-pre-send",
         "diagnose-chatgpt-model-menu",
         "diagnose-chatgpt-power-right",
         "reset-chatgpt-model-menu-compact",
