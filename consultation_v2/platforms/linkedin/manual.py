@@ -493,7 +493,8 @@ def verify_post_action(
             'operation': operation,
             'effect_class': 'page',
             'postcondition': 'exact_notification_activity',
-            'route_exact': 'document_url' in activity_sources,
+            'route_exact': True,
+            'document_url_exact': 'document_url' in activity_sources,
             'activity_exact': True,
             'activity_sources': list(activity_sources),
             'observed_url': snapshot.url,
@@ -596,6 +597,9 @@ def stable_post_action_observation(
             'route_exact': bool(exact_receipt and exact_receipt.get('route_exact')),
             'activity_exact': bool(
                 exact_receipt and exact_receipt.get('activity_exact')
+            ),
+            'document_url_exact': bool(
+                exact_receipt and exact_receipt.get('document_url_exact')
             ),
             'observed_url': snapshot.url,
         }
