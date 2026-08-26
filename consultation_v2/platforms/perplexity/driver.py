@@ -4477,6 +4477,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             'when_report_card_counts': {
                 'research_report_open': 0,
                 'artifact_options': 0,
+                'artifacts_one_button': 0,
             },
             'scroll_to_bottom': True,
             'copy_key': 'copy_button',
@@ -4512,10 +4513,15 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
             answer_thread_url = (self.runtime.current_url() or snap.url or '').strip()
             report_openers = list(snap.mapped.get('research_report_open') or [])
             options_targets = list(snap.mapped.get('artifact_options') or [])
+            artifacts_one_targets = list(
+                snap.mapped.get('artifacts_one_button') or []
+            )
             direct_counts = dict(direct_answer['when_report_card_counts'])
             direct_surface = bool(
-                len(report_openers) == int(direct_counts['research_report_open'])
-                and len(options_targets) == int(direct_counts['artifact_options'])
+                all(
+                    len(snap.mapped.get(key) or []) == int(expected_count)
+                    for key, expected_count in direct_counts.items()
+                )
             )
             if direct_surface:
                 return self._extract_direct_research_answer(
@@ -4533,6 +4539,7 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                     stop_condition='extraction_failed',
                     report_open_count=len(report_openers),
                     options_count=len(options_targets),
+                    artifacts_one_count=len(artifacts_one_targets),
                     snapshot=snap.serializable(),
                 )
                 return False
@@ -4966,18 +4973,75 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         result: ConsultationResult,
     ) -> bool:
         if self._is_deep_research(request):
-            verified = bool(result.response_text.strip()) and not result.extractions
+            direct_surface_steps = [
+                step for step in result.steps
+                if (
+                    step.step == 'select_research_report_surface'
+                    and step.success
+                    and step.evidence.get('surface_variant') == 'direct_answer'
+                )
+            ]
+            report_surface_steps = [
+                step for step in result.steps
+                if step.step == 'open_research_report' and step.success
+            ]
+            cleanup_steps = [
+                step for step in result.steps
+                if step.step == 'close_standalone_research_report' and step.success
+            ]
+            artifacts_one_count = 0
+            if len(direct_surface_steps) == 1:
+                snapshot = self.runtime.snapshot()
+                artifacts_one_count = len(
+                    snapshot.mapped.get('artifacts_one_button') or []
+                )
+                surface_variant = 'direct_answer'
+                surface_verified = bool(
+                    not report_surface_steps
+                    and not cleanup_steps
+                    and artifacts_one_count == 0
+                )
+            elif (
+                not direct_surface_steps
+                and len(report_surface_steps) == 1
+                and len(cleanup_steps) == 1
+            ):
+                surface_variant = 'standalone_report'
+                surface_verified = True
+            else:
+                surface_variant = 'unverified'
+                surface_verified = False
+            verified = bool(
+                result.response_text.strip()
+                and not result.extractions
+                and surface_verified
+            )
+            if verified and surface_variant == 'direct_answer':
+                message = (
+                    'Perplexity Deep Research direct Copy is the complete response; '
+                    'no mapped report surface is present'
+                )
+            elif verified:
+                message = (
+                    'Perplexity Deep Research standalone report Copy is the '
+                    'complete response'
+                )
+            else:
+                message = (
+                    'Perplexity Deep Research output surface contract was not satisfied'
+                )
             result.add_step(
                 'extract_additional',
                 verified,
-                (
-                    'Perplexity Deep Research direct Copy is the complete response; no additional artifact expected'
-                    if verified
-                    else 'Perplexity Deep Research direct Copy output contract was not satisfied'
-                ),
+                message,
                 expected_count=0,
                 observed_count=len(result.extractions),
                 response_characters=len(result.response_text),
+                surface_variant=surface_variant,
+                direct_surface_step_count=len(direct_surface_steps),
+                report_surface_step_count=len(report_surface_steps),
+                cleanup_step_count=len(cleanup_steps),
+                artifacts_one_count=artifacts_one_count,
             )
             return verified
 
