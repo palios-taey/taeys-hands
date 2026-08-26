@@ -35,9 +35,12 @@ once, then send the exact YAML open key. The runtime refuses a contradictory fre
 operation.
 
 `mapped_pointer_activate` is one semantic `operate`: the shared primitive accepts only the exact bound element,
-reacquires its live AT-SPI extent, and emits one primary-button event. It accepts and returns no geometry, has no
-alternate target, action fallback, or retry, and cannot authorize another mutation. The next fresh observation of
-the YAML-declared scope is the only success oracle.
+reacquires its live AT-SPI extent, requires that full extent inside the actual bound-display geometry, and emits
+one primary-button event. `click_at` independently refuses any point outside that same live geometry before
+`xdotool`. The primitive accepts and returns no geometry, has no alternate target, action fallback, or retry, and
+cannot authorize another mutation. An off-screen mapped target requires a separate YAML-declared
+`scroll_into_view` transition, exact-key reacquisition, and fresh observation before pointer activation. The next
+fresh observation of the YAML-declared scope is the only success oracle.
 
 `consultation_v2/runtime.py::ConsultationRuntime` belongs to the retained Layer-3 engine. Its click and focus paths
 are fail-closed AT-SPI operations. Promotion still requires proving one real platform transaction through the same

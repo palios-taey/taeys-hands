@@ -7,6 +7,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from consultation_v2.interact import atspi_element_viewport_state
 from consultation_v2.platforms.linkedin.driver import (
     _all_elements,
     _element_uri,
@@ -156,6 +157,18 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'effect_class': 'page',
                 'primitives': ['mapped_pointer_activate'],
                 'allowed_now': ['mapped_pointer_activate'],
+            },
+            'scroll_into_view': {
+                'effect_class': 'viewport',
+                'primitives': ['scroll_into_view'],
+                'allowed_now': ['scroll_into_view'],
+                'postcondition': 'exact_selected_thread_opener_in_viewport',
+                'observation_barrier': {
+                    'refresh_policy': 'invalidate_reacquire',
+                    'stable_cycles': 2,
+                    'interval_ms': 200,
+                    'timeout_ms': 10000,
+                },
             },
             'postcondition': 'exact_selected_activity_visible_comment_controls',
         },
@@ -674,15 +687,27 @@ def element_operation(
         if element_key == NOTIFICATIONS_NAVIGATION
         else {'focusable', 'enabled'}
     )
-    declared_action = (
-        _manual_notification_contract()['selected_thread']['action']
-        if selected_thread_open_match is not None
-        else {
+    if selected_thread_open_match is not None:
+        viewport = atspi_element_viewport_state(dict(context or {}))
+        if viewport.get('live_extent_in_viewport') is True:
+            declared_action = _manual_notification_contract()[
+                'selected_thread'
+            ]['action']
+        elif viewport.get('error') == 'live_extent_outside_display':
+            declared_action = _manual_notification_contract()[
+                'selected_thread'
+            ]['scroll_into_view']
+        else:
+            raise ValueError(
+                'LinkedIn selected-thread opener viewport state is unavailable: '
+                f"{viewport.get('error') or 'unknown'}"
+            )
+    else:
+        declared_action = {
             'effect_class': 'page',
             'primitives': ['activate'],
             'allowed_now': ['activate'],
         }
-    )
     declared_primitive = declared_action['primitives'][0]
     allowed_now = (
         [declared_primitive]
@@ -702,12 +727,17 @@ def element_operation(
                 'activate',
                 'hover',
                 'mapped_pointer_activate',
+                'scroll_into_view',
             ]
             if primitive != declared_primitive
         ],
         'postcondition': {
             'kind': (
-                'exact_selected_activity_visible_comment_controls'
+                (
+                    'exact_selected_thread_opener_in_viewport'
+                    if declared_primitive == 'scroll_into_view'
+                    else 'exact_selected_activity_visible_comment_controls'
+                )
                 if selected_thread_open_match is not None
                 else (
                     'exact_notification_activity'
@@ -869,6 +899,113 @@ def verify_post_action(
     }
 
 
+def stable_scroll_post_action_observation(
+    element_key: str,
+    deadline_at: float,
+) -> tuple[Snapshot | None, dict[str, Any]]:
+    selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    if selected_thread_open_match is None:
+        raise ValueError(
+            'LinkedIn scroll post-action observation requires an exact '
+            'selected-thread opener key'
+        )
+    if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
+        raise ValueError('LinkedIn scroll post-action deadline must be monotonic seconds')
+
+    scroll_contract = _manual_notification_contract()[
+        'selected_thread'
+    ]['scroll_into_view']
+    barrier = scroll_contract['observation_barrier']
+    stable_cycles_required = barrier['stable_cycles']
+    interval = barrier['interval_ms'] / 1000.0
+    started_at = time.monotonic()
+    barrier_deadline = min(
+        float(deadline_at),
+        started_at + (barrier['timeout_ms'] / 1000.0),
+    )
+    stable_cycles_observed = 0
+    last_snapshot: Snapshot | None = None
+    samples: list[dict[str, Any]] = []
+
+    while time.monotonic() < barrier_deadline:
+        _firefox, _document, base_snapshot = build_snapshot('linkedin')
+        snapshot = augment_snapshot(base_snapshot)
+        last_snapshot = snapshot
+        matches = list(snapshot.mapped.get(element_key) or [])
+        viewport: dict[str, Any] = {}
+        exact = False
+        if len(matches) == 1:
+            target = matches[0]
+            viewport = atspi_element_viewport_state(dict(target.raw or {}))
+            if viewport.get('live_extent_in_viewport') is True:
+                declared = element_operation(
+                    element_key,
+                    list(target.states),
+                    dict(target.raw or {}),
+                )
+                exact = bool(
+                    declared
+                    and declared.get('method') == 'mapped_pointer_activate'
+                    and declared.get('primitives') == ['mapped_pointer_activate']
+                    and declared.get('allowed_now') == ['mapped_pointer_activate']
+                )
+        stable_cycles_observed = stable_cycles_observed + 1 if exact else 0
+        samples.append({
+            'sample': len(samples) + 1,
+            'elapsed_ms': round((time.monotonic() - started_at) * 1000),
+            'exact_element_key_count': len(matches),
+            'live_extent_resolved': bool(viewport.get('live_extent_resolved')),
+            'display_geometry_resolved': bool(
+                viewport.get('display_geometry_resolved')
+            ),
+            'live_extent_in_viewport': bool(
+                viewport.get('live_extent_in_viewport')
+            ),
+            **(
+                {'viewport_error': str(viewport['error'])}
+                if viewport.get('error')
+                else {}
+            ),
+        })
+        if stable_cycles_observed >= stable_cycles_required:
+            postcondition_receipt = {
+                'element_key': element_key,
+                'operation': 'scroll_into_view',
+                'effect_class': 'viewport',
+                'postcondition': scroll_contract['postcondition'],
+                'route_exact': True,
+                'element_key_exact': True,
+                'activity_exact': True,
+                'body_sha256_exact': True,
+                'live_extent_in_viewport': True,
+            }
+            return snapshot, {
+                'result': 'PASS',
+                'next_mutation_authorized': False,
+                'observe_required_before_next_mutation': True,
+                'projection': scroll_contract['postcondition'],
+                'refresh_policy': barrier['refresh_policy'],
+                'stable_cycles_required': stable_cycles_required,
+                'stable_cycles_observed': stable_cycles_observed,
+                'samples': samples,
+                'postcondition_receipt': postcondition_receipt,
+            }
+        remaining = barrier_deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(interval, remaining))
+
+    return last_snapshot, {
+        'result': 'TIMEOUT',
+        'next_mutation_authorized': False,
+        'observe_required_before_next_mutation': True,
+        'projection': scroll_contract['postcondition'],
+        'refresh_policy': barrier['refresh_policy'],
+        'stable_cycles_required': stable_cycles_required,
+        'stable_cycles_observed': stable_cycles_observed,
+        'samples': samples,
+    }
+
+
 def stable_post_action_observation(
     element_key: str,
     operation: str,
@@ -886,11 +1023,20 @@ def stable_post_action_observation(
     if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
         raise ValueError('LinkedIn post-action deadline must be monotonic seconds')
 
-    postcondition = (
-        navigation_contract['postcondition']
-        if element_key == navigation_contract['element_key']
-        else element_operation(element_key, ['enabled', 'focusable'])['postcondition']
-    )
+    selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    if element_key == navigation_contract['element_key']:
+        postcondition = navigation_contract['postcondition']
+    elif selected_thread_open_match is not None:
+        postcondition = {
+            'kind': 'exact_selected_activity_visible_comment_controls',
+            'activity': selected_thread_open_match.group('activity'),
+            'body_sha256': selected_thread_open_match.group('body'),
+        }
+    else:
+        postcondition = element_operation(
+            element_key,
+            ['enabled', 'focusable'],
+        )['postcondition']
     barrier = (
         navigation_contract['observation_barrier']
         if element_key == navigation_contract['element_key']
@@ -969,6 +1115,7 @@ __all__ = [
     'NOTIFICATIONS_CONTINUATION_PREFIX',
     'augment_snapshot',
     'element_operation',
+    'stable_scroll_post_action_observation',
     'stable_post_action_observation',
     'verify_post_action',
 ]

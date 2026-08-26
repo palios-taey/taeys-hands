@@ -62,9 +62,43 @@ def press_key_cleared(key: str, timeout: int = 10) -> bool:
         return False
 
 
+def display_geometry(timeout: int = 5) -> tuple[int, int]:
+    """Return the actual geometry of the currently bound X display."""
+    result = subprocess.run(
+        ['xdotool', 'getdisplaygeometry'],
+        env=_get_env(), capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"xdotool getdisplaygeometry failed: {result.stderr.strip()}"
+        )
+    parts = result.stdout.split()
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"xdotool getdisplaygeometry returned {result.stdout!r}"
+        )
+    width, height = (int(value) for value in parts)
+    if width <= 0 or height <= 0:
+        raise RuntimeError(
+            f"xdotool getdisplaygeometry returned invalid geometry {width}x{height}"
+        )
+    return width, height
+
+
 def click_at(x: int, y: int, timeout: int = 5) -> bool:
     """Move to one live-mapped screen point and click the primary button once."""
     try:
+        width, height = display_geometry(timeout=timeout)
+        if not 0 <= x < width or not 0 <= y < height:
+            logger.error(
+                "Mapped pointer activation refused out-of-bounds point "
+                "(%s,%s) for display geometry %sx%s",
+                x,
+                y,
+                width,
+                height,
+            )
+            return False
         result = subprocess.run(
             ['xdotool', 'mousemove', str(x), str(y), 'click', '1'],
             env=_get_env(), capture_output=True, timeout=timeout,
