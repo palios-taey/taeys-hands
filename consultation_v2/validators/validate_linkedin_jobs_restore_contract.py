@@ -156,8 +156,8 @@ def _validate_private_contract(base: Path, contract) -> str:
         _write_private(path, contract.canonical_json_bytes(value))
         try:
             contract.read_private_input(path, private_root)
-        except Exception:
-            pass
+        except contract.LinkedInJobsContractError as exc:
+            assert str(exc), name
         else:
             raise AssertionError(f'{name} was accepted')
 
@@ -165,8 +165,8 @@ def _validate_private_contract(base: Path, contract) -> str:
     _write_private(noncanonical, raw_bytes + b'\n')
     try:
         contract.read_private_input(noncanonical, private_root)
-    except Exception:
-        pass
+    except contract.LinkedInJobsContractError as exc:
+        assert str(exc), 'noncanonical'
     else:
         raise AssertionError('noncanonical transaction was accepted')
 
@@ -182,8 +182,8 @@ def _validate_private_contract(base: Path, contract) -> str:
     )
     try:
         contract.read_private_input(duplicate, private_root)
-    except Exception:
-        pass
+    except contract.LinkedInJobsContractError as exc:
+        assert str(exc), 'duplicate'
     else:
         raise AssertionError('duplicate transaction field was accepted')
     return digest
