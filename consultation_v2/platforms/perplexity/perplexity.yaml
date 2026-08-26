@@ -341,6 +341,13 @@ tree:
     artifact_options:
       name: Artifact options
       role: push button
+    artifacts_one_button:
+      name: Artifacts 1
+      role: push button
+      states_include:
+      - showing
+      - focusable
+      - enabled
     artifact_open_new_tab:
       name: Open in new tab
       role: menu item
@@ -570,6 +577,7 @@ workflow:
       when_report_card_counts:
         research_report_open: 0
         artifact_options: 0
+        artifacts_one_button: 0
       scroll_to_bottom: true
       copy_key: copy_button
       copy_count: 1
