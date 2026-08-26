@@ -176,6 +176,21 @@ def _validate_yaml() -> list[str]:
         },
     } or navigation.get('action') != {'name': 'jump', 'index': 0}:
         errors.append(f'{YAML_PATH}: Notifications exact jump contract drifted')
+    if navigation.get('manual_post_action') != {
+        'element_key': 'notifications_navigation',
+        'operation': 'activate',
+        'postcondition': {
+            'projection': 'exact_route',
+            'route_key': 'notifications_all',
+        },
+        'observation_barrier': {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        },
+    }:
+        errors.append(f'{YAML_PATH}: manual Notifications route barrier drifted')
     expected_barriers = (
         (
             navigation.get('observation_barrier'),
