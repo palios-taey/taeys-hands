@@ -153,7 +153,7 @@ workflow:
           - focusable
       submit_key: Return
       observation_barrier:
-        projection: exact_route_and_notifications_target_state
+        projection: exact_return_route_and_current_notifications_state
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
         interval_ms: 200

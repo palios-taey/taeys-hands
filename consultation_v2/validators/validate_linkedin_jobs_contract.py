@@ -183,7 +183,7 @@ def _validate_yaml() -> list[str]:
         ),
         (
             (engagement.get('restore') or {}).get('observation_barrier'),
-            'exact_route_and_notifications_target_state',
+            'exact_return_route_and_current_notifications_state',
         ),
     )
     for barrier, projection in expected_barriers:
@@ -215,7 +215,7 @@ def _validate_yaml() -> list[str]:
         },
         'submit_key': 'Return',
         'observation_barrier': {
-            'projection': 'exact_route_and_notifications_target_state',
+            'projection': 'exact_return_route_and_current_notifications_state',
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
@@ -1010,6 +1010,100 @@ def _validate_engagement_schema_fixtures() -> list[str]:
     return errors
 
 
+def _validate_restore_projection() -> list[str]:
+    from consultation_v2.platforms.linkedin.driver import (
+        _exact_notifications_target,
+        observe_engagement_restore,
+    )
+    from consultation_v2.types import ElementRef, Snapshot
+
+    class Hyperlink:
+        def __init__(self, uri: str) -> None:
+            self._uri = uri
+
+        def get_uri(self, index: int) -> str:
+            if index != 0:
+                raise IndexError(index)
+            return self._uri
+
+    class Accessible:
+        def __init__(self, uri: str) -> None:
+            self._hyperlink = Hyperlink(uri)
+
+        def get_hyperlink(self) -> Hyperlink:
+            return self._hyperlink
+
+    def notifications(name: str, uri: str) -> ElementRef:
+        return ElementRef(
+            key=None,
+            name=name,
+            role='link',
+            x=None,
+            y=None,
+            states=['showing', 'enabled'],
+            atspi_obj=Accessible(uri),
+        )
+
+    def snapshot(*elements: ElementRef) -> Snapshot:
+        return Snapshot(
+            platform='linkedin',
+            url='https://www.linkedin.com/jobs/search-results?keywords=engineering',
+            unknown=list(elements),
+        )
+
+    errors: list[str] = []
+    old_name = 'Notifications, 933 new notifications'
+    current_name = 'Notifications, 0 new notifications'
+    notifications_uri = 'https://www.linkedin.com/notifications'
+    return_url = 'https://www.linkedin.com/jobs/search-results?keywords=engineering'
+    old_snapshot = snapshot(notifications(old_name, notifications_uri))
+    current_snapshot = snapshot(notifications(current_name, notifications_uri))
+
+    old_target, old_count = _exact_notifications_target(old_snapshot, old_name)
+    changed_target, changed_count = _exact_notifications_target(
+        current_snapshot,
+        old_name,
+    )
+    if (
+        old_target is None
+        or old_count != 1
+        or changed_target is not None
+        or changed_count != 0
+    ):
+        errors.append('pre-action Notifications target no longer requires private exact name')
+
+    first = observe_engagement_restore(current_snapshot, return_url)
+    second = observe_engagement_restore(current_snapshot, return_url)
+    if not (
+        first['route_exact'] is True
+        and first['route_kind_exact'] is True
+        and first['notifications_target_match_count'] == 1
+        and isinstance(first['notifications_target_state_digest'], str)
+        and first['notifications_target_state_digest']
+        == second['notifications_target_state_digest']
+    ):
+        errors.append('changed unread count did not satisfy stable restore projection')
+
+    failures = {
+        'zero': snapshot(),
+        'duplicate': snapshot(
+            notifications(current_name, notifications_uri),
+            notifications('Notifications, 1 new notification', notifications_uri),
+        ),
+        'wrong_uri': snapshot(
+            notifications(current_name, 'https://www.linkedin.com/feed/'),
+        ),
+    }
+    for label, candidate in failures.items():
+        observed = observe_engagement_restore(candidate, return_url)
+        if (
+            observed['notifications_target_match_count'] == 1
+            or observed['notifications_target_state_digest'] is not None
+        ):
+            errors.append(f'{label} Notifications target satisfied restore projection')
+    return errors
+
+
 def _validate_runtime_source() -> list[str]:
     errors: list[str] = []
     for path in (DRIVER, RUNNER):
@@ -1347,6 +1441,7 @@ def validate() -> list[str]:
     errors.extend(_validate_yaml())
     errors.extend(_validate_interface_patterns())
     errors.extend(_validate_engagement_schema_fixtures())
+    errors.extend(_validate_restore_projection())
     errors.extend(_validate_runtime_source())
     from consultation_v2.yaml_contract import clear_yaml_cache, load_platform_yaml
 

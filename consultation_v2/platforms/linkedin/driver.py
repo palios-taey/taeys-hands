@@ -522,6 +522,22 @@ def _exact_notifications_target(
     return (matches[0] if len(matches) == 1 else None), len(matches)
 
 
+def _restore_notifications_target(
+    snapshot: Snapshot,
+) -> tuple[ElementRef | None, int]:
+    target = (_engagement_workflow().get('navigation') or {}).get('target') or {}
+    matches = [
+        element
+        for element in _all_elements(snapshot)
+        if (
+            element.role == target.get('role')
+            and _states_match(element, target.get('states_include'))
+            and _uri_matches(_element_uri(element), target.get('uri') or {})
+        )
+    ]
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
 def _exact_mapped_engagement_element(
     snapshot: Snapshot,
     key: str,
@@ -596,6 +612,25 @@ def observe_engagement_start(
     return_url: str,
 ) -> dict[str, Any]:
     target, count = _exact_notifications_target(snapshot, notifications_name)
+    state_digest = sha256_hex(canonical_json_bytes({
+        'name': target.name,
+        'role': target.role,
+        'states': sorted(target.states),
+        'uri': _element_uri(target),
+    })) if target is not None else None
+    return {
+        'route_exact': snapshot.url == return_url,
+        'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
+        'notifications_target_match_count': count,
+        'notifications_target_state_digest': state_digest,
+    }
+
+
+def observe_engagement_restore(
+    snapshot: Snapshot,
+    return_url: str,
+) -> dict[str, Any]:
+    target, count = _restore_notifications_target(snapshot)
     state_digest = sha256_hex(canonical_json_bytes({
         'name': target.name,
         'role': target.role,
@@ -837,7 +872,7 @@ def _restore_contract() -> dict[str, Any]:
         },
         'submit_key': 'Return',
         'observation_barrier': {
-            'projection': 'exact_route_and_notifications_target_state',
+            'projection': 'exact_return_route_and_current_notifications_state',
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
@@ -905,7 +940,6 @@ def _full_address_selection_proven(snapshot: Snapshot) -> bool:
 def exact_engagement_return(
     display: str,
     return_url: str,
-    notifications_name: str,
     deadline_at: float,
 ) -> dict[str, Any]:
     restore = _restore_contract()
@@ -955,7 +989,7 @@ def exact_engagement_return(
         fail('submit')
     required, interval, timeout = _barrier_settings(
         restore,
-        'exact_route_and_notifications_target_state',
+        'exact_return_route_and_current_notifications_state',
     )
     receipt['stable_cycles_required'] = required
     barrier_deadline = min(deadline_at, time.monotonic() + timeout)
@@ -963,12 +997,12 @@ def exact_engagement_return(
     cycles = 0
     while time.monotonic() < barrier_deadline:
         _firefox, _document, snapshot = build_snapshot('linkedin')
-        start = observe_engagement_start(snapshot, notifications_name, return_url)
-        digest = start['notifications_target_state_digest']
+        restored = observe_engagement_restore(snapshot, return_url)
+        digest = restored['notifications_target_state_digest']
         exact = (
-            start['route_exact'] is True
-            and start['route_kind_exact'] is True
-            and start['notifications_target_match_count'] == 1
+            restored['route_exact'] is True
+            and restored['route_kind_exact'] is True
+            and restored['notifications_target_match_count'] == 1
             and isinstance(digest, str)
         )
         cycles = cycles + 1 if exact and digest == prior else (1 if exact else 0)

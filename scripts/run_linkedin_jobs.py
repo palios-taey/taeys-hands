@@ -1028,7 +1028,6 @@ def _execute_engagement_transaction(
             restore = exact_engagement_return(
                 display,
                 return_url,
-                notifications_name,
                 deadline_at,
             )
             return _engagement_terminal(
