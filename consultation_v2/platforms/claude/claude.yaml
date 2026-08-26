@@ -672,7 +672,7 @@ workflow:
       refresh_policy: invalidate_reacquire
       stable_cycles: 2
       interval_ms: 250
-      timeout_ms: 12000
+      timeout_ms: 60000
   pre_send:
     exceptions:
       memory_review:
