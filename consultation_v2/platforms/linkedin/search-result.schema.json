@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-job-search-result-v1.json",
+  "title": "LinkedIn mounted job-search compact result",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullable_digest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+  },
+  "properties": {
+    "ok": {"type": "boolean"},
+    "platform": {"const": "linkedin"},
+    "display": {"type": "string", "pattern": "^:[0-9]{1,3}$"},
+    "state": {"enum": ["captured", "already_captured", "no_cards", "postcondition_failed", "technical_failure"]},
+    "failure_code": {
+      "oneOf": [
+        {"enum": ["deadline_expired", "display_lock_unavailable", "lock_release_indeterminate", "post_observation_indeterminate", "postcondition_failed", "pre_observation_failed", "private_input_invalid", "sink_write_indeterminate"]},
+        {"type": "null"}
+      ]
+    },
+    "batches_observed": {"type": "integer", "minimum": 0, "maximum": 1},
+    "batches_written": {"oneOf": [{"type": "integer", "minimum": 0, "maximum": 1}, {"type": "null"}]},
+    "cards_observed": {"type": "integer", "minimum": 0},
+    "content_digest": {"$ref": "#/$defs/nullable_digest"},
+    "receipt_sha256": {"$ref": "#/$defs/digest"},
+    "turn_lineage_sha256": {"$ref": "#/$defs/digest"}
+  },
+  "required": ["ok", "platform", "display", "state", "failure_code", "batches_observed", "batches_written", "cards_observed", "content_digest", "receipt_sha256", "turn_lineage_sha256"]
+}

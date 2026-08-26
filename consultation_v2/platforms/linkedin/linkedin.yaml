@@ -38,6 +38,46 @@ tree:
       states_include:
         - showing
 workflow:
+  mounted_job_search_read:
+    operation: capture_mounted_job_search
+    route:
+      scheme: https
+      host: www.linkedin.com
+      normalized_path: /jobs/search-results
+    card:
+      role: push button
+      states_include:
+        - enabled
+      action_names_exact:
+        - click
+      direct_child_roles_prefix:
+        - section
+        - paragraph
+        - paragraph
+        - push button
+        - section
+      minimum_direct_children: 6
+      title:
+        child_index: 3
+        role: push button
+        exact_prefix: "Dismiss "
+        exact_suffix: " job"
+      company:
+        child_index: 1
+        role: paragraph
+        interface: atspi_text
+      location:
+        child_index: 2
+        role: paragraph
+        interface: atspi_text
+    observation_barrier:
+      projection: exact_route_and_mounted_job_card_set
+      refresh_policy: invalidate_reacquire
+      stable_cycles: 2
+      interval_ms: 200
+      timeout_ms: 10000
+    action: private_sink_write_once
+    postcondition: mounted_job_card_set_digest_unchanged
   job_selection:
     operation: select_and_capture_job
     observation: canonical_snapshot_private_exact_name

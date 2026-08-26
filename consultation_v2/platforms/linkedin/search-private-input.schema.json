@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-job-search-private-input-v1.json",
+  "title": "LinkedIn mounted job-search private input",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "linkedin_job_search_private_input_v1"},
+    "operation": {"const": "capture_mounted_job_search"},
+    "search_ref": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "sink_ref": {"type": "string", "minLength": 1, "maxLength": 4096}
+  },
+  "required": ["schema", "operation", "search_ref", "sink_ref"]
+}
