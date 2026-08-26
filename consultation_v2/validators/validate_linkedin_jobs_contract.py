@@ -1183,7 +1183,14 @@ def _validate_restore_projection() -> list[str]:
         notifications('933 new notifications Notifications', notifications_uri, preload_url),
     )
     changed_target, changed_count = _notifications_target(changed_name)
-    if changed_target is None or changed_count != 1:
+    changed_start = observe_engagement_start(changed_name, return_url)
+    changed_restore = observe_engagement_restore(changed_name, return_url)
+    if (
+        changed_target is None
+        or changed_count != 1
+        or changed_start['notifications_target_state_digest'] != digests[0]
+        or changed_restore['notifications_target_state_digest'] != digests[0]
+    ):
         errors.append('mutable unread count remained part of Notifications authority')
 
     failures = {

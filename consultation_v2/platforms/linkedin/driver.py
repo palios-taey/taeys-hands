@@ -566,6 +566,25 @@ def _notifications_target(snapshot: Snapshot) -> tuple[ElementRef | None, int]:
     return (matches[0] if len(matches) == 1 else None), len(matches)
 
 
+def _notifications_target_state_digest(
+    snapshot: Snapshot,
+    target: ElementRef,
+    match_count: int,
+) -> str:
+    navigation = _engagement_workflow().get('navigation') or {}
+    authority = navigation.get('target') or {}
+    action = navigation.get('action') or {}
+    return sha256_hex(canonical_json_bytes({
+        'current_document_url': snapshot.url,
+        'role': target.role,
+        'states_include': authority.get('states_include'),
+        'normalized_uri': authority.get('uri'),
+        'action_name': action.get('name'),
+        'action_index': action.get('index'),
+        'match_count': match_count,
+    }))
+
+
 def _exact_mapped_engagement_element(
     snapshot: Snapshot,
     key: str,
@@ -639,12 +658,11 @@ def observe_engagement_start(
     return_url: str,
 ) -> dict[str, Any]:
     target, count = _notifications_target(snapshot)
-    state_digest = sha256_hex(canonical_json_bytes({
-        'name': target.name,
-        'role': target.role,
-        'states': sorted(target.states),
-        'uri': _element_uri(target),
-    })) if target is not None else None
+    state_digest = (
+        _notifications_target_state_digest(snapshot, target, count)
+        if target is not None
+        else None
+    )
     return {
         'route_exact': snapshot.url == return_url,
         'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
@@ -658,12 +676,11 @@ def observe_engagement_restore(
     return_url: str,
 ) -> dict[str, Any]:
     target, count = _notifications_target(snapshot)
-    state_digest = sha256_hex(canonical_json_bytes({
-        'name': target.name,
-        'role': target.role,
-        'states': sorted(target.states),
-        'uri': _element_uri(target),
-    })) if target is not None else None
+    state_digest = (
+        _notifications_target_state_digest(snapshot, target, count)
+        if target is not None
+        else None
+    )
     return {
         'route_exact': snapshot.url == return_url,
         'route_kind_exact': _exact_engagement_route(snapshot.url, 'jobs'),
