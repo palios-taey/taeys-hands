@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import re
 import time
 from typing import Any
@@ -25,7 +26,7 @@ _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
 )
 _CONTINUATION_KEY = re.compile(
-    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)$'
+    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_(?P<prefix>[0-9a-f]{{16}})$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
 
@@ -245,6 +246,14 @@ def _notification_candidates(
     return candidates
 
 
+def _activity_prefix_digest(
+    candidates: list[tuple[Any, str, str]],
+    count: int | None = None,
+) -> str:
+    activities = [activity for _element, activity, _age in candidates[:count]]
+    return hashlib.sha256('\n'.join(activities).encode('ascii')).hexdigest()[:16]
+
+
 def _notification_categories_exact(snapshot: Snapshot, contract: dict[str, Any]) -> bool:
     elements = _all_elements(snapshot)
     categories = {
@@ -324,7 +333,10 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         if len(continuations) > 1:
             raise ValueError('LinkedIn Show more results target is ambiguous')
         if continuations:
-            key = f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(candidates):03d}'
+            key = (
+                f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(candidates):03d}_'
+                f'{_activity_prefix_digest(candidates)}'
+            )
             mapped[key] = [replace(
                 continuations[0],
                 key=key,
@@ -390,6 +402,11 @@ def element_operation(
                 else {}
             ),
             **(
+                {'prior_activity_prefix': continuation_match.group('prefix')}
+                if continuation_match is not None
+                else {}
+            ),
+            **(
                 {'route_key': 'notifications_all'}
                 if element_key == NOTIFICATIONS_NAVIGATION
                 else {}
@@ -434,14 +451,17 @@ def verify_post_action(
         contract = _manual_notification_contract()
         candidates = _notification_candidates(snapshot, contract)
         prior_count = int(continuation_match.group('count'))
+        expected_prefix = continuation_match.group('prefix')
+        observed_prefix = _activity_prefix_digest(candidates, prior_count)
         if (
             not _exact_engagement_route(snapshot.url, 'notifications_all')
             or not _notification_categories_exact(snapshot, contract)
             or len(candidates) <= prior_count
+            or observed_prefix != expected_prefix
         ):
             raise ValueError(
                 'LinkedIn notification continuation postcondition failed: '
-                'fresh candidate count did not grow on the exact Notifications-All route'
+                'fresh candidate set did not preserve its exact ordered prefix and grow'
             )
         return {
             'element_key': element_key,
@@ -450,6 +470,8 @@ def verify_post_action(
             'postcondition': 'notification_candidate_count_growth',
             'route_exact': True,
             'prior_candidate_count': prior_count,
+            'prior_activity_prefix': expected_prefix,
+            'observed_activity_prefix': observed_prefix,
             'observed_candidate_count': len(candidates),
             'candidate_count_grew': True,
             'observed_url': snapshot.url,
