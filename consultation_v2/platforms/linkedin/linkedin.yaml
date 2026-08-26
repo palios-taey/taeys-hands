@@ -260,6 +260,32 @@ workflow:
           effect_class: observation
           primitives: []
           allowed_now: []
+      selected_thread:
+        element_key_prefix: selected_post_thread_activity_
+        open_element_key_prefix: selected_post_thread_open_activity_
+        comment_count:
+          role: push button
+          name_pattern: "^[1-9][0-9,]* comments?$"
+          relative_depth: 2
+          states_include:
+            - enabled
+            - focusable
+        visible_comment:
+          role: push button
+          name_prefix: View more options for
+          name_suffix: comment.
+        observation:
+          max_chars: 16000
+          effect_class: observation
+          primitives: []
+          allowed_now: []
+        action:
+          effect_class: page
+          primitives:
+            - activate
+          allowed_now:
+            - activate
+        postcondition: exact_selected_activity_visible_thread
       observation_barrier:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
