@@ -73,6 +73,28 @@ The public result has exactly eleven keys: `ok`, `platform`, `display`,
 Jobs operations retain their existing exact ten-key public result. Raw labels,
 URLs, notification text, references, paths, and records remain in
 owner-controlled mode-`0700` private roots and immutable mode-`0400`
-artifacts. This contract is not a production qualification claim; qualification
-requires exact-SHA R5 approval and real before/engagement/after receipts from a
-clean display `:18` deployment.
+artifacts.
+
+## Production qualification — 2026-08-26
+
+The display-`:18` Taey sequence passed from clean public production checkouts:
+
+- Hands `673702160424eaf45910aa21f8673c0907df6615`;
+- Presence `56aede9a064c808ee205e213469692d177923c29`;
+- Jobs-before receipt SHA-256
+  `25567fb65e82126c632f49b7abe8907bde32cecbc5cc7369dd60dc343476ca7e`:
+  exact action, stable `2`, private sink `1/1`, lock acquired and released;
+- engagement receipt SHA-256
+  `aa98208e4adc6d2e2be48f65fd0ac8ccb5fe2ffba9bc036d49052cfc6f59213f`:
+  exact `jump[0]`, stable `2`, exact `press[0]`, stable `2`,
+  `no_new_signal` `0/0`, return stable `2`, lock acquired and released;
+- Jobs-after receipt SHA-256
+  `c7e608caeb470e2bf50e3337dbbae1e9a9ebb871df0fc7ac9972d711c860f3b4`:
+  exact action, stable `2`, private sink `1/1`, lock acquired and released.
+
+The first engagement identity terminated without retry at receipt SHA-256
+`f17279e99add79045907bf99d3635c2632db12c39eef87720088ee2b1aa5dc65`.
+It proved the exact return URL but exposed the mutable-unread-label defect fixed
+by PR `#222`; the fresh post-fix identity produced the successful chain above.
+The private receipts remain the evidence authority. This public record exposes
+only their hashes and non-personal terminal facts.
