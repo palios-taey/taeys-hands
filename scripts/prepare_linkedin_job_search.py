@@ -147,8 +147,6 @@ def _read_draft(
         if len(raw_bytes) > 16384:
             raise LinkedInJobsContractError('draft manifest is too large')
         value = _strict_object(raw_bytes)
-        if canonical_json_bytes(value) != raw_bytes:
-            raise LinkedInJobsContractError('draft manifest is not canonical')
         if frozenset(value) != _DRAFT_FIELDS:
             raise LinkedInJobsContractError('draft manifest fields are not exact')
         if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] != OPERATION:
@@ -166,7 +164,8 @@ def _read_draft(
             raise LinkedInJobsContractError('private sink is not the derived identity sink')
     except (LinkedInJobsContractError, OSError, PreparationRefused, ValueError):
         raise PreparationRefused('draft_invalid') from None
-    return {key: str(value[key]) for key in value}, raw_bytes
+    draft = {key: str(value[key]) for key in value}
+    return draft, canonical_json_bytes(draft)
 
 
 def _path_exists(path: Path) -> bool:
@@ -304,7 +303,7 @@ def _validate_prepared(
     private_root: Path,
     paths: dict[str, Path],
     draft: dict[str, str],
-    draft_bytes: bytes,
+    canonical_draft_bytes: bytes,
     expected_transaction_sha256: str,
 ) -> str:
     from consultation_v2.linkedin_job_search_contract import read_private_input
@@ -325,7 +324,10 @@ def _validate_prepared(
             REPO_ROOT,
             private_root,
         )
-        if transaction != draft or sha256_hex(draft_bytes) != transaction_sha256:
+        if (
+            transaction != draft
+            or sha256_hex(canonical_draft_bytes) != transaction_sha256
+        ):
             raise PreparationRefused('transaction_invalid')
         if transaction_sha256 != expected_transaction_sha256:
             raise PreparationRefused('digest_mismatch')
@@ -348,7 +350,7 @@ def _prepare(
         write_new_private_json,
     )
 
-    draft, draft_bytes = _read_draft(private_root, paths['sink'])
+    draft, canonical_draft_bytes = _read_draft(private_root, paths['sink'])
     _refuse_spent_identity(paths)
     for relative in ('transactions', 'receipts', 'sinks'):
         _create_or_validate_directory(private_root / relative)
@@ -360,13 +362,13 @@ def _prepare(
     except (LinkedInJobsContractError, OSError):
         raise PreparationRefused('transaction_write_refused') from None
     transaction_sha256 = sha256_hex(transaction_bytes)
-    if transaction_bytes != draft_bytes:
+    if transaction_bytes != canonical_draft_bytes:
         raise PreparationRefused('transaction_invalid')
     _validate_prepared(
         private_root,
         paths,
         draft,
-        draft_bytes,
+        canonical_draft_bytes,
         transaction_sha256,
     )
     return _result('prepared', seat_id, correlation_id, transaction_sha256)
@@ -379,12 +381,12 @@ def _preflight(
     correlation_id: str,
     expected_transaction_sha256: str,
 ) -> dict[str, str]:
-    draft, draft_bytes = _read_draft(private_root, paths['sink'])
+    draft, canonical_draft_bytes = _read_draft(private_root, paths['sink'])
     transaction_sha256 = _validate_prepared(
         private_root,
         paths,
         draft,
-        draft_bytes,
+        canonical_draft_bytes,
         expected_transaction_sha256,
     )
     return _result('ready', seat_id, correlation_id, transaction_sha256)

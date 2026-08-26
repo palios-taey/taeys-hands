@@ -39,8 +39,10 @@ public output never contains the URL, search policy, card text, title, company, 
 
 Never assemble the transaction topology with individual `mkdir`, copy, or JSON-write commands. Start with a new
 public-safe seat and correlation identity and one existing owner-private draft manifest. The draft must be an
-owner-owned, nonsymlink, canonical UTF-8 JSON regular file with exact mode `0400`, stored beneath an owner-owned
-private root with exact mode `0700`. Its fields are exactly:
+owner-owned, nonsymlink, strict UTF-8 JSON regular file with exact mode `0400`, stored beneath an owner-owned
+private root with exact mode `0700`. Formatting whitespace, including trailing newlines, is allowed. Duplicate keys,
+NaN and other non-JSON constants, non-object roots, extra fields, and wrong field values are refused. Its fields
+are exactly:
 
 ```json
 {"operation":"capture_mounted_job_search","schema":"linkedin_job_search_private_input_v1","search_ref":"PRIVATE_AUTHORIZED_SEARCH_REFERENCE","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION"}
@@ -98,10 +100,11 @@ curl --fail-with-body --silent --show-error --max-time 1850 \
 `prepare` first validates the owner-private root and identity-derived paths, then creates or validates the exact
 owner-owned `0700` claim parent. That is the accepted-identity boundary. It next creates or validates the `0700`
 base and seat directories for transactions, receipts, and sinks; creates the exact empty identity sink at
-`0700`; and freezes the canonical transaction at `0400` with exclusive creation. `preflight` independently
-rereads the draft and transaction, proves the exact digest and topology, requires an empty sink, and requires
-both claim and receipt to remain absent. Successful commands emit only public-safe seat/correlation identities
-and SHA-256 evidence.
+`0700`; canonicalizes the validated semantic mapping; and freezes exact no-newline transaction bytes at `0400`
+with exclusive creation. `preflight` independently rereads and validates the draft, compares its semantic
+mapping and canonical digest with the frozen transaction, proves the topology, requires an empty sink, and
+requires both claim and receipt to remain absent. Successful commands emit only public-safe seat/correlation
+identities and SHA-256 evidence.
 
 After the accepted-identity boundary, every `prepare` or `preflight` refusal atomically creates an immutable
 `linkedin_job_search_preparation_terminal_v1` marker at the same claim path Presence derives for the
