@@ -1,6 +1,6 @@
 # LinkedIn Jobs read-only transaction
 
-Status: selected-job capture is production-qualified; exact job-card selection is implemented pending production qualification.
+Status: both selected-job capture and exact job-card selection are production-qualified.
 
 ## Frozen boundary
 
@@ -44,7 +44,7 @@ Nontechnical states have exact facts: `captured` is observed `1`, written `1`, w
 
 ## Private input and storage
 
-The required private root is an owner-controlled, nonsymlink, exact-mode `0700` directory that does not overlap the public repository. The transaction file must resolve beneath it as an owner-controlled, nonsymlink, exact-mode `0400` JSON file with exactly `schema`, `operation`, `search_ref`, and `sink_ref`. Presence supplies the digest bound to its permanent claim; immediately after its one private-file read, Hands requires the actual byte digest to match that claim before acquiring a lock or touching the UI or sink. The new receipt path and the owner-controlled, nonsymlink, exact-mode `0700` sink directory must resolve beneath that same root. Presence derives transaction and receipt locations from its private root, seat, and correlation ID; Hands independently enforces containment.
+The required private root is an owner-controlled, nonsymlink, exact-mode `0700` directory that does not overlap the public repository. The transaction file must resolve beneath it as an owner-controlled, nonsymlink, exact-mode `0400` JSON file. `capture_selected_job` contains exactly `schema`, `operation`, `search_ref`, and `sink_ref`. `select_and_capture_job` additionally contains exactly `target_card_name`, `detail_title_name`, and `detail_company_name`. Presence supplies the digest bound to its permanent claim; immediately after its one private-file read, Hands requires the actual byte digest to match that claim before acquiring a lock or touching the UI or sink. The new receipt path and the owner-controlled, nonsymlink, exact-mode `0700` sink directory must resolve beneath that same root. Presence derives transaction and receipt locations from its private root, seat, and correlation ID; Hands independently enforces containment.
 
 Raw records and receipts are created once with exclusive creation, synced, changed to exact mode `0400`, and read back by digest. An existing record is an `already_captured` terminal state only when its bytes match the selected-job digest. Every normal terminal outcome, including no exact selected job, lock collision, pre-observation failure, sink indeterminacy, and postcondition failure, writes the requested compact receipt. If the receipt itself cannot be created, the runner emits no model-facing result.
 
@@ -60,4 +60,11 @@ Observed design evidence:
 - `68a12f3d` defines the public revenue UI rollout boundary.
 - `353a3258` requires dynamic revenue content to remain off-context in a private sink.
 
-The older screenshot, clipboard, and coordinate fallbacks are not authority for this lane and are not implemented. The already-selected capture was production-qualified on display `:18` at Hands commit `d24730a34dcf665fb4cc7196444982802785821b`: one record observed and written, exact pre/post counts `1/1`, stable content digest, positive lock release, and durable redacted receipt SHA-256 `66172f12ec60f3f8340627c3224caa2a4890f0baedcccf524f871f16d5d43ef9`. Exact-card selection requires its own production receipt before qualification.
+The older screenshot, clipboard, and coordinate fallbacks are not authority for this lane and are not implemented. The already-selected capture was production-qualified on display `:18` at Hands commit `d24730a34dcf665fb4cc7196444982802785821b`: one record observed and written, exact pre/post counts `1/1`, stable content digest, positive lock release, and durable redacted receipt SHA-256 `66172f12ec60f3f8340627c3224caa2a4890f0baedcccf524f871f16d5d43ef9`.
+
+Exact-card selection was production-qualified twice on display `:18` through the Taey-facing `linkedin_jobs` tool. Each one-shot turn supplied only the display, invoked one exact `click[0]`, observed exactly one private target, title, and company for two stable fresh cycles, captured one record to the private sink, satisfied the unchanged-content postcondition, released the CAREERS lock, and ended with zero open turns. The immutable receipt SHA-256 values are:
+
+- `25567fb65e82126c632f49b7abe8907bde32cecbc5cc7369dd60dc343476ca7e` at Hands `34489b5634b97d109c0ab19b4876d89117edea68`;
+- `c7e608caeb470e2bf50e3337dbbae1e9a9ebb871df0fc7ac9972d711c860f3b4` at Hands `673702160424eaf45910aa21f8673c0907df6615`.
+
+Presence `56aede9a064c808ee205e213469692d177923c29` served both turns. The private receipts remain the evidence authority; this public record exposes only their hashes and non-personal terminal facts.
