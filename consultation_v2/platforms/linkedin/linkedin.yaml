@@ -181,6 +181,55 @@ workflow:
         - /feed/
         - /posts/
       authority: observation_classification_only
+    manual_notification_selection:
+      route_key: notifications_all
+      article_names:
+        - Notification
+        - Notification.
+        - Unread notification.
+      candidate:
+        name_prefix: Unread notification.
+        role: link
+        states_include:
+          - enabled
+          - focusable
+        uri:
+          scheme: https
+          host: www.linkedin.com
+          normalized_path: /feed
+          activity_query_key: highlightedUpdateUrn
+          activity_prefix: "urn:li:activity:"
+      relative_age:
+        role: paragraph
+        units:
+          - s
+          - m
+          - h
+          - d
+          - w
+      categories:
+        - All
+        - Jobs
+        - My posts
+        - Mentions
+      selection_policy:
+        order: newest_first
+        max_age_hours: 72
+        author_cooloff_hours: 48
+        filter_after_ordered_observation: true
+        cooloff_source: private_careers_activity_database
+        continue_only_when_all_mounted_candidates_are_evidenced_excluded: true
+      continuation:
+        name: Show more results
+        role: push button
+        states_include:
+          - enabled
+          - focusable
+      observation_barrier:
+        refresh_policy: invalidate_reacquire
+        stable_cycles: 2
+        interval_ms: 200
+        timeout_ms: 10000
     observation_barrier:
       projection: exact_route_marker_and_candidate_set
       refresh_policy: invalidate_reacquire
