@@ -7,7 +7,6 @@ import time
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from consultation_v2.interact import atspi_element_viewport_state
 from consultation_v2.platforms.linkedin.driver import (
     _all_elements,
     _element_uri,
@@ -629,6 +628,12 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
     return replace(snapshot, mapped=mapped)
 
 
+def _selected_thread_viewport_state(element: dict[str, Any]) -> dict[str, object]:
+    from consultation_v2.interact import atspi_element_viewport_state
+
+    return atspi_element_viewport_state(element)
+
+
 def element_operation(
     element_key: str,
     states: list[str],
@@ -688,7 +693,7 @@ def element_operation(
         else {'focusable', 'enabled'}
     )
     if selected_thread_open_match is not None:
-        viewport = atspi_element_viewport_state(dict(context or {}))
+        viewport = _selected_thread_viewport_state(dict(context or {}))
         if viewport.get('live_extent_in_viewport') is True:
             declared_action = _manual_notification_contract()[
                 'selected_thread'
@@ -936,7 +941,7 @@ def stable_scroll_post_action_observation(
         exact = False
         if len(matches) == 1:
             target = matches[0]
-            viewport = atspi_element_viewport_state(dict(target.raw or {}))
+            viewport = _selected_thread_viewport_state(dict(target.raw or {}))
             if viewport.get('live_extent_in_viewport') is True:
                 declared = element_operation(
                     element_key,

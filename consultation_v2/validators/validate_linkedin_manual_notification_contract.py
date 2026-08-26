@@ -62,9 +62,9 @@ def main() -> int:
     element_key = (
         'selected_post_thread_open_activity_123_body_' + ('a' * 64)
     )
-    original = manual.atspi_element_viewport_state
+    original = manual._selected_thread_viewport_state
     try:
-        manual.atspi_element_viewport_state = lambda _element: {
+        manual._selected_thread_viewport_state = lambda _element: {
             'live_extent_in_viewport': False,
             'error': 'live_extent_outside_display',
         }
@@ -88,7 +88,7 @@ def main() -> int:
             'off-screen opener did not expose only the exact scroll transition',
         )
 
-        manual.atspi_element_viewport_state = lambda _element: {
+        manual._selected_thread_viewport_state = lambda _element: {
             'live_extent_in_viewport': True,
         }
         onscreen = manual.element_operation(
@@ -106,7 +106,7 @@ def main() -> int:
             'in-viewport opener did not expose only mapped pointer activation',
         )
     finally:
-        manual.atspi_element_viewport_state = original
+        manual._selected_thread_viewport_state = original
 
     pointer_source = _function_source(
         INTERACT_PATH,
