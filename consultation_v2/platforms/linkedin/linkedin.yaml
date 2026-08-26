@@ -260,6 +260,27 @@ workflow:
           effect_class: observation
           primitives: []
           allowed_now: []
+      selected_thread:
+        open_element_key_prefix: selected_post_thread_open_activity_
+        comment_count:
+          role: push button
+          index_path:
+            - 0
+            - 11
+          states_include:
+            - enabled
+            - focusable
+        visible_comment:
+          role: push button
+          name_prefix: View more options for
+          name_suffix: comment.
+        action:
+          effect_class: page
+          primitives:
+            - activate
+          allowed_now:
+            - activate
+        postcondition: exact_selected_activity_visible_comment_controls
       observation_barrier:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2

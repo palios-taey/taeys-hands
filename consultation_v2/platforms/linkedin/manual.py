@@ -22,6 +22,7 @@ NOTIFICATIONS_NAVIGATION = 'notifications_navigation'
 NOTIFICATION_CANDIDATE_PREFIX = 'notification_candidate_'
 NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_after_'
 SELECTED_POST_PREFIX = 'selected_post_activity_'
+SELECTED_THREAD_OPEN_PREFIX = 'selected_post_thread_open_activity_'
 
 _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
@@ -31,6 +32,10 @@ _CONTINUATION_KEY = re.compile(
 )
 _SELECTED_POST_KEY = re.compile(
     rf'^{SELECTED_POST_PREFIX}(?P<activity>[0-9]+)$'
+)
+_SELECTED_THREAD_OPEN_KEY = re.compile(
+    rf'^{SELECTED_THREAD_OPEN_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
 
@@ -134,6 +139,25 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'primitives': [],
                 'allowed_now': [],
             },
+        },
+        'selected_thread': {
+            'open_element_key_prefix': SELECTED_THREAD_OPEN_PREFIX,
+            'comment_count': {
+                'role': 'push button',
+                'index_path': [0, 11],
+                'states_include': ['enabled', 'focusable'],
+            },
+            'visible_comment': {
+                'role': 'push button',
+                'name_prefix': 'View more options for',
+                'name_suffix': 'comment.',
+            },
+            'action': {
+                'effect_class': 'page',
+                'primitives': ['activate'],
+                'allowed_now': ['activate'],
+            },
+            'postcondition': 'exact_selected_activity_visible_comment_controls',
         },
         'observation_barrier': {
             'refresh_policy': 'invalidate_reacquire',
@@ -282,17 +306,17 @@ def _selected_activity_identity(
     return identity, matched_sources
 
 
-def _selected_post_body(
+def _selected_post_root_and_body(
     snapshot: Snapshot,
     contract: dict[str, Any],
-) -> tuple[Any | None, str | None]:
+) -> tuple[Any | None, Any | None, str | None]:
     observation = contract['selected_post_observation']
     root_contract = observation['root']
     heading_contract = observation['heading']
     body_contract = observation['body']
     elements = _all_elements(snapshot)
     elements_by_identity = {id(element.atspi_obj): element for element in elements}
-    roots: list[tuple[Any, str]] = []
+    roots: list[tuple[Any, Any, str]] = []
     for element in elements:
         if (
             element.role != root_contract['role']
@@ -323,10 +347,67 @@ def _selected_post_body(
             continue
         text = body_element.text or _node_text(body)
         if text:
-            roots.append((body_element, text))
+            roots.append((element, body_element, text))
     if len(roots) != root_contract['exact_match_count']:
-        return None, None
+        return None, None, None
     return roots[0]
+
+
+def _selected_post_descendants(
+    snapshot: Snapshot,
+    root: Any,
+) -> list[tuple[Any, int]]:
+    root_path = _structural_index_path(root.atspi_obj)
+    descendants: list[tuple[Any, int]] = []
+    for element in _all_elements(snapshot):
+        path = _structural_index_path(element.atspi_obj)
+        if (
+            len(path) > len(root_path)
+            and path[:len(root_path)] == root_path
+        ):
+            descendants.append((element, len(path) - len(root_path)))
+    return descendants
+
+
+def _selected_thread_controls(
+    snapshot: Snapshot,
+    root: Any,
+    contract: dict[str, Any],
+) -> tuple[list[Any], list[Any]]:
+    selected_thread = contract['selected_thread']
+    count_contract = selected_thread['comment_count']
+    visible_contract = selected_thread['visible_comment']
+    required_states = set(count_contract['states_include'])
+    comment_counts: list[Any] = []
+    visible_comments: list[Any] = []
+    count_node = _node_at_index_path(root.atspi_obj, count_contract['index_path'])
+    elements_by_identity = {
+        id(element.atspi_obj): element for element in _all_elements(snapshot)
+    }
+    count_element = elements_by_identity.get(id(count_node))
+    if count_element is not None:
+        count_name = count_element.name
+        count_token = (
+            count_name.removesuffix(' comments').replace(',', '')
+            if count_name.endswith(' comments')
+            else '1' if count_name == '1 comment' else ''
+        )
+        if (
+            count_element.role == count_contract['role']
+            and count_token.isdigit()
+            and int(count_token) > 0
+            and required_states.issubset(count_element.states)
+        ):
+            comment_counts.append(count_element)
+    for element, relative_depth in _selected_post_descendants(snapshot, root):
+        if (
+            relative_depth > 0
+            and element.role == visible_contract['role']
+            and element.name.startswith(visible_contract['name_prefix'])
+            and element.name.endswith(visible_contract['name_suffix'])
+        ):
+            visible_comments.append(element)
+    return comment_counts, visible_comments
 
 
 def _notification_relative_age(element: Any, contract: dict[str, Any]) -> str | None:
@@ -426,6 +507,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             and not key.startswith(NOTIFICATION_CANDIDATE_PREFIX)
             and not key.startswith(NOTIFICATIONS_CONTINUATION_PREFIX)
             and not key.startswith(SELECTED_POST_PREFIX)
+            and not key.startswith(SELECTED_THREAD_OPEN_PREFIX)
         )
     }
     mapped[NOTIFICATIONS_NAVIGATION] = (
@@ -487,8 +569,8 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         contract,
     )
     if selected_activity is not None:
-        body, body_text = _selected_post_body(snapshot, contract)
-        if body is None or body_text is None:
+        root, body, body_text = _selected_post_root_and_body(snapshot, contract)
+        if root is None or body is None or body_text is None:
             raise ValueError(
                 'LinkedIn selected activity lacks one exact showing post body'
             )
@@ -510,6 +592,27 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             ),
             raw=raw,
         )]
+        comment_counts, visible_comments = _selected_thread_controls(
+            snapshot,
+            root,
+            contract,
+        )
+        if comment_counts and not visible_comments:
+            thread_open_key = (
+                f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}_body_{body_digest}'
+            )
+            mapped[thread_open_key] = [replace(
+                comment_counts[0],
+                key=thread_open_key,
+                description=(
+                    f'activity={selected_activity}; open exact visible thread'
+                ),
+                raw={
+                    **dict(comment_counts[0].raw),
+                    'selected_activity': selected_activity,
+                    'selected_post_body_sha256': body_digest,
+                },
+            )]
     return replace(snapshot, mapped=mapped)
 
 
@@ -521,11 +624,13 @@ def element_operation(
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
+    selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
     if (
         element_key != NOTIFICATIONS_NAVIGATION
         and candidate_match is None
         and continuation_match is None
         and selected_post_match is None
+        and selected_thread_open_match is None
     ):
         return None
     if selected_post_match is not None:
@@ -561,7 +666,6 @@ def element_operation(
                 'body_sha256': body_digest,
             },
         }
-    del context
     normalized_states = {
         str(state).strip().lower().replace('_', ' ') for state in states
     }
@@ -575,20 +679,33 @@ def element_operation(
         if required_states.issubset(normalized_states)
         else []
     )
+    declared_action = (
+        _manual_notification_contract()['selected_thread']['action']
+        if selected_thread_open_match is not None
+        else {
+            'effect_class': 'page',
+            'primitives': ['activate'],
+            'allowed_now': ['activate'],
+        }
+    )
     return {
         'method': 'activate',
-        'effect_class': 'page',
-        'primitives': ['activate'],
+        'effect_class': declared_action['effect_class'],
+        'primitives': declared_action['primitives'],
         'allowed_now': allowed_now,
         'forbidden': ['click', 'focus', 'hover', 'mapped_pointer_activate'],
         'postcondition': {
             'kind': (
-                'exact_notification_activity'
-                if candidate_match is not None
+                'exact_selected_activity_visible_comment_controls'
+                if selected_thread_open_match is not None
                 else (
-                    'notification_candidate_count_growth'
-                    if continuation_match is not None
-                    else 'exact_document_route'
+                    'exact_notification_activity'
+                    if candidate_match is not None
+                    else (
+                        'notification_candidate_count_growth'
+                        if continuation_match is not None
+                        else 'exact_document_route'
+                    )
                 )
             ),
             **(
@@ -611,6 +728,14 @@ def element_operation(
                 if element_key == NOTIFICATIONS_NAVIGATION
                 else {}
             ),
+            **(
+                {
+                    'activity': selected_thread_open_match.group('activity'),
+                    'body_sha256': selected_thread_open_match.group('body'),
+                }
+                if selected_thread_open_match is not None
+                else {}
+            ),
         },
     }
 
@@ -627,6 +752,44 @@ def verify_post_action(
         )
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
+    selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    if selected_thread_open_match is not None:
+        contract = _manual_notification_contract()
+        activity, activity_sources = _selected_activity_identity(snapshot, contract)
+        expected_activity = selected_thread_open_match.group('activity')
+        expected_body_digest = selected_thread_open_match.group('body')
+        root, _body, body_text = _selected_post_root_and_body(snapshot, contract)
+        if root is None or body_text is None:
+            raise ValueError(
+                'LinkedIn selected-thread postcondition lost the exact selected post'
+            )
+        observed_body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+        _comment_counts, visible_comments = _selected_thread_controls(
+            snapshot,
+            root,
+            contract,
+        )
+        if (
+            activity != expected_activity
+            or observed_body_digest != expected_body_digest
+            or not visible_comments
+        ):
+            raise ValueError(
+                'LinkedIn selected-thread postcondition failed: the exact '
+                'selected activity/body has no visible comment controls'
+            )
+        return {
+            'element_key': element_key,
+            'operation': operation,
+            'effect_class': 'page',
+            'postcondition': 'exact_selected_activity_visible_comment_controls',
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': list(activity_sources),
+            'selected_post_body_sha256': observed_body_digest,
+            'visible_comment_count': len(visible_comments),
+            'observed_url': snapshot.url,
+        }
     if candidate_match is not None:
         activity, activity_sources = _selected_activity_identity(
             snapshot,
@@ -706,6 +869,7 @@ def stable_post_action_observation(
         element_key != navigation_contract['element_key']
         and _CANDIDATE_KEY.fullmatch(element_key) is None
         and _CONTINUATION_KEY.fullmatch(element_key) is None
+        and _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key) is None
     ):
         raise ValueError('LinkedIn stable post-action observation is not declared')
     if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
