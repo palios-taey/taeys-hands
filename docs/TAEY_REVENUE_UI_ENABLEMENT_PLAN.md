@@ -133,7 +133,7 @@ The completed natural unit is the Presence intake adapter:
 
 The fresh joined-chain acceptance proof from exact public/deployed commits is now complete:
 
-- mounted search captured 25 cards with stable pre/post evidence and zero residual turn/lease;
+- mounted search captured 24 cards with stable pre/post evidence and zero residual turn/lease;
 - deterministic ordinal `1` selection executed one exact YAML-owned click, stabilized exact title/company identity twice,
   captured one unchanged detail record, and released the lock; and
 - the separate intake transaction joined all four Hands source hashes, inserted exactly one unclassified row,
