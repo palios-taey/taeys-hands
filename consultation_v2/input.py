@@ -213,18 +213,64 @@ def focus_firefox_pid(pid: int | None, timeout: int = 5) -> bool:
     if not pid:
         return False
     try:
-        r = subprocess.run(
-            ['xdotool', 'search', '--pid', str(pid), '--name', ''],
+        search = subprocess.run(
+            [
+                'xdotool', 'search', '--all', '--onlyvisible',
+                '--pid', str(pid), '--class', 'Firefox',
+            ],
             env=_get_env(), capture_output=True, text=True, timeout=timeout,
         )
-        wids = [w.strip() for w in r.stdout.strip().split('\n') if w.strip()]
-        if not wids:
+        wids = [wid.strip() for wid in search.stdout.splitlines() if wid.strip()]
+        if (
+            search.returncode != 0
+            or 'error' in (search.stderr or '').lower()
+            or len(wids) != 1
+        ):
+            logger.warning(
+                "Firefox PID focus requires one visible Firefox window for PID %s; found %s",
+                pid,
+                len(wids),
+            )
             return False
-        subprocess.run(
-            ['xdotool', 'windowactivate', wids[-1]],
-            env=_get_env(), capture_output=True, text=True, timeout=10,
+        window_id = wids[0]
+        active_probe = subprocess.run(
+            ['xdotool', 'getactivewindow'],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
         )
+        active_window_id = active_probe.stdout.strip()
+        operation, proof = (
+            ('windowactivate', 'getactivewindow')
+            if active_probe.returncode == 0 and active_window_id.isdigit()
+            else ('windowfocus', 'getwindowfocus')
+        )
+        focused = subprocess.run(
+            ['xdotool', operation, window_id],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
+        )
+        if focused.returncode != 0 or 'error' in (focused.stderr or '').lower():
+            logger.warning(
+                "Firefox PID %s %s failed: %s",
+                pid,
+                operation,
+                (focused.stderr or '').strip(),
+            )
+            return False
         time.sleep(0.3)
+        observed = subprocess.run(
+            ['xdotool', proof],
+            env=_get_env(), capture_output=True, text=True, timeout=timeout,
+        )
+        if (
+            observed.returncode != 0
+            or 'error' in (observed.stderr or '').lower()
+            or observed.stdout.strip() != window_id
+        ):
+            logger.warning(
+                "Firefox PID %s focus proof failed for window %s",
+                pid,
+                window_id,
+            )
+            return False
         return True
     except subprocess.TimeoutExpired:
         logger.warning(f"Firefox PID focus timed out for PID {pid}")
