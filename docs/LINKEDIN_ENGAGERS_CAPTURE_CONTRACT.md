@@ -75,6 +75,81 @@ URLs, notification text, references, paths, and records remain in
 owner-controlled mode-`0700` private roots and immutable mode-`0400`
 artifacts.
 
+## Canonical preparation and preflight
+
+Never assemble an engagement transaction, claim, receipt, or sink with
+individual directory or JSON-write commands. Start with a wholly new
+public-safe seat and correlation identity and one existing owner-private draft
+manifest. The draft must be an owner-owned, nonsymlink, strict UTF-8 JSON
+regular file at exact mode `0400` beneath an owner-owned private root at exact
+mode `0700`. Its semantic fields are exactly the existing engagement private
+input contract:
+
+```json
+{"notifications_name":"PRIVATE_EXACT_NOTIFICATIONS_LABEL","operation":"capture_visible_new_engagement_signal","return_url":"https://www.linkedin.com/jobs/search-results/?PRIVATE_QUERY","schema":"linkedin_jobs_private_input_v1","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION","source_ref":"PRIVATE_AUTHORIZED_SOURCE_REFERENCE"}
+```
+
+The absolute `sink_ref` must equal the sink derived from the seat and
+correlation identity. Formatting whitespace and a trailing newline in the
+draft are allowed; duplicate fields, non-JSON constants, extra or missing
+fields, unsafe paths, an inexact return route, and every other semantic
+change are refused. Private fields and paths are environment bindings and
+never appear in arguments or compact command results.
+
+From the clean deployed public Hands checkout, run exactly:
+
+```bash
+export TAEY_LINKEDIN_ENGAGEMENT_PRIVATE_ROOT=/owner/private/linkedin-engagement
+export TAEY_LINKEDIN_ENGAGEMENT_DRAFT=/owner/private/linkedin-engagement/drafts/frozen-engagement.json
+
+SEAT_ID=PUBLIC_SAFE_NEW_SEAT
+CORRELATION_ID=PUBLIC_SAFE_NEW_CORRELATION
+
+PREPARATION_JSON="$(
+  python3 scripts/prepare_linkedin_engagement.py prepare \
+    --seat-id "$SEAT_ID" \
+    --correlation-id "$CORRELATION_ID"
+)" || exit 1
+
+TRANSACTION_SHA256="$(
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["transaction_sha256"])' \
+    <<<"$PREPARATION_JSON"
+)" || exit 1
+
+python3 scripts/prepare_linkedin_engagement.py preflight \
+  --seat-id "$SEAT_ID" \
+  --correlation-id "$CORRELATION_ID" \
+  --expected-transaction-sha256 "$TRANSACTION_SHA256" || exit 1
+```
+
+`prepare` establishes the accepted-identity boundary at the exact claim
+parent, creates the identity-derived transaction, receipt, and sink topology
+at `0700`, canonicalizes the semantic draft, writes the no-newline transaction
+once at `0400`, and leaves claim and receipt absent. `preflight` independently
+rereads both the draft and frozen transaction, proves their semantic and digest
+identity, requires an empty exact sink, and requires claim and receipt to remain
+absent.
+
+After the claim parent is safely established, every preparation or preflight
+refusal spends the identity with one immutable `0400`
+`linkedin_engagement_preparation_terminal_v1` marker at the exact claim path.
+It contains only public-safe identity, command, state, and failure code. It is
+never overwritten or deleted; corrected input requires a wholly new identity.
+The mechanical validator is:
+
+```bash
+python3 consultation_v2/validators/validate_linkedin_engagement_preparation.py
+```
+
+Preparation proves only the immutable private transaction topology. It does
+not inspect the UI, satisfy the existing Jobs-search start gate, restore a
+selected-detail surface, authorize a retry, or qualify a production run. Do
+not invoke the engagement runner unless Taey has separately established the
+exact required Jobs-search start surface. The currently observed
+selected-detail surface is not an accepted start state; production
+qualification therefore waits for an explicit Taey restore transaction or a
+separately preflighted CAREERS display.
+
 ## Production qualification — 2026-08-26
 
 The display-`:18` Taey sequence passed from clean public production checkouts:
