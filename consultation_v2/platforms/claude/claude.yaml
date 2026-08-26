@@ -307,7 +307,6 @@ tree:
       match_strategy: name_agnostic_structural
       structural:
         after: toggle_menu
-        before: press_record_button
       reason: stable locator for Claude's dynamic model and effort label
     press_record_button:
       name: Press and hold to record
@@ -751,6 +750,7 @@ workflow:
             element: model_opus
             active_trigger_names:
               - 'Model: Opus 5 Extra'
+              - 'Model: Opus 5 · Extra'
           sonnet:
             element: model_sonnet
             path:
@@ -794,6 +794,7 @@ workflow:
             element: effort_extra
             active_trigger_names:
               - 'Model: Opus 5 Extra'
+              - 'Model: Opus 5 · Extra'
             path:
               - element: effort_menu
                 action: hover
@@ -832,6 +833,9 @@ workflow:
       projection: attachment_shortcut_v1
       scope: base
       attachment_count_element: remove_attachment
+      focused_element: input
+      unfocused_elements:
+        - address_bar
     observation:
       stable_cycles: 2
       interval_ms: 250

@@ -39,6 +39,8 @@ def _attachment_rule() -> tuple[
     str,
     tuple[str, ...],
     str,
+    str,
+    tuple[str, ...],
     tuple[str, ...],
     tuple[str, ...],
 ]:
@@ -76,6 +78,35 @@ def _attachment_rule() -> tuple[
             'claude attachment key_precondition attachment_count_element must '
             'name an exact tree.element_map key'
         )
+    focused_element = _exact_string(
+        precondition.get('focused_element'),
+        'workflow.attachment.key_precondition.focused_element',
+    )
+    if focused_element not in element_map:
+        raise ValueError(
+            'claude attachment key_precondition focused_element must name an '
+            'exact tree.element_map key'
+        )
+    if focused_element != 'input':
+        raise ValueError(
+            'claude attachment key_precondition focused_element must be input'
+        )
+    unfocused_elements = _exact_string_list(
+        precondition.get('unfocused_elements'),
+        'workflow.attachment.key_precondition.unfocused_elements',
+    )
+    if len(unfocused_elements) != len(set(unfocused_elements)):
+        raise ValueError(
+            'claude attachment key_precondition unfocused_elements must be unique'
+        )
+    if focused_element in unfocused_elements:
+        raise ValueError(
+            'claude attachment key_precondition focus elements must be disjoint'
+        )
+    if unfocused_elements != ('address_bar',):
+        raise ValueError(
+            'claude attachment key_precondition must exclude Firefox address_bar focus'
+        )
 
     navigation = workflow.get('navigation') or {}
     postcondition = navigation.get('postcondition') or {}
@@ -94,6 +125,11 @@ def _attachment_rule() -> tuple[
     if missing:
         raise ValueError(
             f'claude navigation exact_singletons omit required controls {missing}'
+        )
+    if focused_element not in exact_singletons:
+        raise ValueError(
+            'claude attachment key_precondition focused_element must be a '
+            'navigation exact singleton'
         )
 
     urls = cfg.get('urls') or {}
@@ -158,6 +194,8 @@ def _attachment_rule() -> tuple[
         fresh_url,
         exact_singletons,
         attachment_count_element,
+        focused_element,
+        unfocused_elements,
         tuple(sorted(stop_keys)),
         tuple(sorted(exception_keys)),
     )
@@ -181,6 +219,8 @@ def _semantic_projection(
         fresh_url,
         exact_singletons,
         attachment_key,
+        focused_element,
+        unfocused_elements,
         stop_keys,
         exception_keys,
     ) = _attachment_rule()
@@ -202,9 +242,23 @@ def _semantic_projection(
             'role': element.role,
         }
 
-    input_element = selected['input']
-    if 'focused' not in _normalized_states(input_element):
+    focused_matches = list(snapshot.mapped.get(focused_element) or ())
+    if len(focused_matches) != 1:
         return None
+    if 'focused' not in _normalized_states(focused_matches[0]):
+        return None
+    unfocused_facts: dict[str, dict[str, Any]] = {}
+    for element_key in unfocused_elements:
+        matches = list(snapshot.mapped.get(element_key) or ())
+        if len(matches) != 1:
+            return None
+        states = _normalized_states(matches[0])
+        if 'focused' in states:
+            return None
+        unfocused_facts[element_key] = {
+            'match_count': 1,
+            'focused': False,
+        }
     model_selector_name = selected['model_selector'].name
     if not model_selector_name:
         return None
@@ -218,7 +272,12 @@ def _semantic_projection(
         'shortcut': shortcut,
         'fresh_url': fresh_url,
         'controls': controls,
-        'input_focused': True,
+        'focus': {
+            'focused_element': focused_element,
+            'focused_match_count': 1,
+            'focused': True,
+            'unfocused_elements': unfocused_facts,
+        },
         'model_selector_name': model_selector_name,
         'remove_attachment_count': len(snapshot.mapped.get(attachment_key) or ()),
         'stop_keys_absent': list(stop_keys),

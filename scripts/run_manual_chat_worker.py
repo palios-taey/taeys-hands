@@ -224,6 +224,45 @@ def _post_send_exceptions(platform: str) -> dict[str, dict[str, object]]:
     return normalized
 
 
+def _claude_active_model_names() -> tuple[str, ...]:
+    workflow = load_platform_yaml("claude").get("workflow") or {}
+    selection = workflow.get("selection") or {}
+    menus = selection.get("menus") or {}
+    if not isinstance(menus, dict):
+        raise RuntimeError("claude workflow.selection.menus must be a mapping")
+    option_paths = (("model", "opus"), ("mode", "extended_thinking"))
+    accepted: tuple[str, ...] | None = None
+    for menu_name, option_name in option_paths:
+        menu = menus.get(menu_name) or {}
+        options = menu.get("options") or {}
+        option = options.get(option_name) or {}
+        names = option.get("active_trigger_names")
+        if (
+            not isinstance(names, list)
+            or not names
+            or not all(
+                isinstance(name, str) and name and name == name.strip()
+                for name in names
+            )
+            or len(names) != len(set(names))
+        ):
+            raise RuntimeError(
+                "claude workflow.selection.menus."
+                f"{menu_name}.options.{option_name}.active_trigger_names must "
+                "be unique exact strings"
+            )
+        current = tuple(names)
+        if accepted is None:
+            accepted = current
+        elif set(current) != set(accepted):
+            raise RuntimeError(
+                "claude opus and extended-thinking active trigger names must agree"
+            )
+    if accepted is None:
+        raise RuntimeError("claude active model names were not resolved")
+    return accepted
+
+
 def _claude_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
     cfg = load_platform_yaml("claude")
     workflow = cfg.get("workflow")
@@ -770,6 +809,10 @@ def _send_content(
         completed_before_stop_response_file,
     )
     if platform == "claude":
+        active_model_names = json.dumps(
+            list(_claude_active_model_names()),
+            ensure_ascii=False,
+        )
         return (
             f"Execute one frozen Claude send transaction on {display}. Use drive_chat only. "
             "Do not read any file, runbook, or YAML. Use a ref or snapshot revision only from "
@@ -777,7 +820,8 @@ def _send_content(
             "one fresh observation after every mutation:\n"
             "1. navigate to https://claude.ai/new; observe scope=base; require current_url to "
             "be the Claude fresh URL, a populated Claude tree, exactly one input, exactly one "
-            "toggle_menu, and exactly one model_selector whose exact name is Model: Opus 5 Extra. "
+            "toggle_menu, and exactly one model_selector whose exact name is in the "
+            f"YAML-derived set {active_model_names}. "
             "Require no stop_button and none of these mapped "
             "exception elements: send_blocked_previous_message, send_blocked_previous_message_curly, "
             "network_connection_alert, send_blocked_caution_banner, claude_capacity_alert, "
@@ -794,10 +838,19 @@ def _send_content(
             "remove_attachment controls, and record that observation as the clean "
             "post-navigation base proof. If the initial state is neither clean nor stale-attachment state, "
             "or any count/postcondition fails, stop without opening the model or effort menu.\n"
-            f"2. Attach Bundle A from {bundle_a}: call drive_chat with exactly action=key, "
+            f"2. Attach Bundle A from {bundle_a}: before ctrl+u, require the immediately "
+            "preceding fresh base observation to expose key_preconditions.ctrl+u as one exact "
+            "lowercase SHA-256 token. If it is absent, focus element=input exactly once from "
+            "that fresh observation; observe scope=base exactly once; require the same Claude "
+            "fresh URL, zero remove_attachment controls, model_selector exact name still in the "
+            f"YAML-derived set {active_model_names}, no stop_button, none of the mapped exception "
+            "elements above, and key_preconditions.ctrl+u now present as one exact lowercase "
+            "SHA-256 token. If it is still absent, return the first-mismatch stop report and stop. "
+            "Then call drive_chat with exactly action=key, "
             f"display={display}, key=ctrl+u; pass no element, ref, scope, or other argument; "
             "observe scope=base; require the same Claude fresh URL, zero remove_attachment controls, "
-            "model_selector still named Model: Opus 5 Extra, and no mapped exception; focus_dialog "
+            "model_selector exact name still in the "
+            f"YAML-derived set {active_model_names}, and no mapped exception; focus_dialog "
             "using that fresh observation "
             "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
             "Choose File, or Select File; observe; require exactly one active "
@@ -811,12 +864,23 @@ def _send_content(
             "remove_attachment control and at least one fresh snapshot node whose role is push button, "
             "list item, or heading and whose name matches Bundle A by the Claude driver rule: exact "
             "absolute path or basename, first token, comma prefix, or one ellipsis with matching prefix "
-            "and suffix. Require zero Bundle B matches, model_selector still named Model: Opus 5 Extra, "
+            "and suffix. Require zero Bundle B matches, model_selector exact name still in the "
+            f"YAML-derived set {active_model_names}, "
             "and no mapped exception.\n"
-            f"3. Attach Bundle B from {bundle_b}: call drive_chat with exactly action=key, "
+            f"3. Attach Bundle B from {bundle_b}: before ctrl+u, require the immediately "
+            "preceding fresh base observation to expose key_preconditions.ctrl+u as one exact "
+            "lowercase SHA-256 token. If it is absent, focus element=input exactly once from "
+            "that fresh observation; observe scope=base exactly once; require the same Claude "
+            "fresh URL, exactly one remove_attachment control, the same Bundle A filename proof, "
+            "zero Bundle B matches, model_selector exact name still in the "
+            f"YAML-derived set {active_model_names}, no stop_button, none of the mapped exception "
+            "elements above, and key_preconditions.ctrl+u now present as one exact lowercase "
+            "SHA-256 token. If it is still absent, return the first-mismatch stop report and stop. "
+            "Then call drive_chat with exactly action=key, "
             f"display={display}, key=ctrl+u; pass no element, ref, scope, or other argument; "
             "observe scope=base; require exactly one mapped remove_attachment control, model_selector "
-            "still named Model: Opus 5 Extra, and no mapped exception; focus_dialog using that fresh observation "
+            "exact name still in the "
+            f"YAML-derived set {active_model_names}, and no mapped exception; focus_dialog using that fresh observation "
             "and require focused=true with matched_title equal to one of File Upload, Open File, Open, "
             "Choose File, or Select File; observe; require exactly one active "
             "dialog_root and one enabled chooser_widget; key ctrl+l using the fresh native-dialog "
@@ -828,20 +892,22 @@ def _send_content(
             "the fresh native-dialog revision; observe scope=base; require exactly two mapped "
             "remove_attachment controls, at least one filename-bearing snapshot node matching Bundle A, "
             "and at least one filename-bearing snapshot node matching Bundle B under the same Claude "
-            "driver rule. Require no third remove_attachment control, model_selector still named "
-            "Model: Opus 5 Extra, and no mapped exception.\n"
+            "driver rule. Require no third remove_attachment control, model_selector exact name still "
+            f"in the YAML-derived set {active_model_names}, and no mapped exception.\n"
             "4. focus the fresh input ref; observe scope=base; require input match_count 1 with "
             "state focused, the same exact two remove_attachment controls, and Bundle A plus "
             "Bundle B filename proofs; paste "
             f"text_file={prompt_file} exactly once; observe scope=base; require the same two "
             "attachment-count and filename proofs, exactly one enabled send_button named Send message, "
-            "model_selector still named Model: Opus 5 Extra, and no mapped exception. Do not require a "
+            "model_selector exact name still in the "
+            f"YAML-derived set {active_model_names}, and no mapped exception. Do not require a "
             "composer character count or type-text fallback.\n"
             "5. click the fresh send_button ref exactly once; observe scope=base exactly once; require "
             "current_url to differ from the recorded post-navigation fresh URL and to contain /chat/; "
             "then follow the post-send confirmation below. On a Stop-proven observation, require no "
             "mapped exception and return a receipt containing platform/display, final URL, "
-            "the Model: Opus 5 Extra proof, Bundle A one-count proof, Bundle B two-count proof, the "
+            f"the YAML-derived active-model proof {active_model_names}, Bundle A one-count proof, "
+            "Bundle B two-count proof, the "
             "mapped Stop key, and monitor_id. Then stop all UI calls.\n"
             f"{post_send}"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
