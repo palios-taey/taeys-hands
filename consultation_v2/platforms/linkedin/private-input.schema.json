@@ -45,6 +45,11 @@
       "minLength": 1,
       "maxLength": 4096
     },
+    "notifications_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
     "return_url": {
       "type": "string",
       "minLength": 1,
@@ -93,6 +98,7 @@
       "then": {
         "required": [
           "source_ref",
+          "notifications_name",
           "return_url"
         ],
         "not": {
@@ -110,6 +116,11 @@
             {
               "required": [
                 "source_ref"
+              ]
+            },
+            {
+              "required": [
+                "notifications_name"
               ]
             },
             {

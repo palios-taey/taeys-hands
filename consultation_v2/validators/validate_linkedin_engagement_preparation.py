@@ -50,7 +50,7 @@ def write_private_file(path: Path, raw_bytes: bytes, mode: int = 0o400) -> None:
 
 def transaction(private_root: Path, **changes: Any) -> dict[str, Any]:
     value = {
-        'schema': 'linkedin_jobs_private_input_v1',
+        'schema': 'linkedin_engagement_private_input_v2',
         'operation': 'capture_visible_new_engagement_signal',
         'source_ref': SOURCE_REF,
         'sink_ref': str(private_root / 'sinks' / SEAT / CORRELATION),

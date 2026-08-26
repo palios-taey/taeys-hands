@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://palios-taey.org/schemas/linkedin-engagement-receipt-v1.json",
-  "title": "LinkedIn engagement immutable receipt",
+  "$id": "https://palios-taey.org/schemas/linkedin-engagement-receipt-v2.json",
+  "title": "LinkedIn engagement immutable receipt v2",
   "type": "object",
   "additionalProperties": false,
   "$defs": {
@@ -460,7 +460,7 @@
     }
   },
   "properties": {
-    "schema": {"const": "linkedin_engagement_receipt_v1"},
+    "schema": {"const": "linkedin_engagement_receipt_v2"},
     "platform": {"const": "linkedin"},
     "operation": {"const": "capture_visible_new_engagement_signal"},
     "display": {"type": "string", "pattern": "^:[0-9]{1,3}$"},
@@ -496,7 +496,6 @@
     "expected_transaction_sha256": {"$ref": "#/$defs/sha256"},
     "source_ref_sha256": {"$ref": "#/$defs/nullableSha256"},
     "sink_ref_sha256": {"$ref": "#/$defs/nullableSha256"},
-    "notifications_name_sha256": {"$ref": "#/$defs/nullableSha256"},
     "return_url_sha256": {"$ref": "#/$defs/nullableSha256"},
     "start": {"$ref": "#/$defs/start"},
     "notifications_action": {"$ref": "#/$defs/action"},
@@ -515,7 +514,7 @@
     "hands_commit", "yaml_sha256", "terminal_state", "ok", "failure_code",
     "records_observed", "records_written", "content_digest", "restore_verified",
     "transaction_sha256", "expected_transaction_sha256", "source_ref_sha256",
-    "sink_ref_sha256", "notifications_name_sha256", "return_url_sha256", "start",
+    "sink_ref_sha256", "return_url_sha256", "start",
     "notifications_action", "notifications_postcondition", "my_posts_action",
     "my_posts_postcondition", "candidate", "sink", "signal_postcondition",
     "restore", "lock"

@@ -127,8 +127,8 @@ def _read_draft(
     expected_sink: Path,
 ) -> tuple[dict[str, str], bytes]:
     from consultation_v2.linkedin_jobs_contract import (
+        ENGAGEMENT_PRIVATE_INPUT_SCHEMA,
         LinkedInJobsContractError,
-        PRIVATE_INPUT_SCHEMA,
         canonical_json_bytes,
         read_owned_private_bytes,
         validate_path_beneath_private_root,
@@ -154,7 +154,10 @@ def _read_draft(
         value = _strict_object(raw_bytes)
         if frozenset(value) != _DRAFT_FIELDS:
             raise LinkedInJobsContractError('draft manifest fields are not exact')
-        if value['schema'] != PRIVATE_INPUT_SCHEMA or value['operation'] != OPERATION:
+        if (
+            value['schema'] != ENGAGEMENT_PRIVATE_INPUT_SCHEMA
+            or value['operation'] != OPERATION
+        ):
             raise LinkedInJobsContractError('draft manifest contract is unsupported')
         for field in ('source_ref', 'sink_ref', 'return_url'):
             item = value[field]

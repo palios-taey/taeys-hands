@@ -89,7 +89,7 @@ mode `0700`. Its semantic fields are exactly the existing engagement private
 input contract:
 
 ```json
-{"operation":"capture_visible_new_engagement_signal","return_url":"https://www.linkedin.com/jobs/search-results/?PRIVATE_QUERY","schema":"linkedin_jobs_private_input_v1","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION","source_ref":"PRIVATE_AUTHORIZED_SOURCE_REFERENCE"}
+{"operation":"capture_visible_new_engagement_signal","return_url":"https://www.linkedin.com/jobs/search-results/?PRIVATE_QUERY","schema":"linkedin_engagement_private_input_v2","sink_ref":"ABS_PRIVATE_ROOT/sinks/PUBLIC_SAFE_SEAT/PUBLIC_SAFE_CORRELATION","source_ref":"PRIVATE_AUTHORIZED_SOURCE_REFERENCE"}
 ```
 
 The absolute `sink_ref` must equal the sink derived from the seat and
@@ -176,6 +176,17 @@ It proved the exact return URL but exposed the mutable-unread-label defect fixed
 by PR `#222`; the fresh post-fix identity produced the successful chain above.
 The private receipts remain the evidence authority. This public record exposes
 only their hashes and non-personal terminal facts.
+
+The v1 transaction and receipt schemas remain frozen for historical
+verification. The label-free preparer emits only
+`linkedin_engagement_private_input_v2`, and the runner emits only
+`linkedin_engagement_receipt_v2`. An authorized operator can prove the exact
+private prod2 receipt remains valid without publishing it:
+
+```bash
+python3 consultation_v2/validators/validate_linkedin_engagement_history.py \
+  --prod2-receipt "$AUTHORIZED_PRIVATE_PROD2_RECEIPT"
+```
 
 The qualification above remains historical evidence for its pinned commits.
 It is not evidence for later transaction preparation: an accepted private draft
