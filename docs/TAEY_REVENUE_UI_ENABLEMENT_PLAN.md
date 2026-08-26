@@ -54,51 +54,106 @@ verdicts, counts, and content hashes. Raw dynamic content is written off-context
 never serialized into the model transcript. Private receipt storage may retain the corresponding values.
 Public code never points at an operator-only repository or path.
 
+## Current observed baseline
+
+- Grok's repeated non-actionable notification loop is fixed; it is not a remaining revenue-UI gate.
+- Exact `select_and_capture_job` (and `capture_selected_job`) selected-detail capture have real production PASS
+  receipts. They remain read-only/local-effect baselines. Adapter work does not modify their YAML, runner,
+  snapshot, lock, or receipt contracts.
+- LinkedIn `capture_mounted_job_search` is candidate mechanics. Existing search receipts are not a production
+  baseline until one fresh joined mounted-search -> exact selected-detail -> separate intake chain passes from
+  exact public/deployed commits.
+- Public `palios-taey/taey-apply` main `ee8406f16ac552a8cf557538fd136e7750125564` validates the exact
+  paired Hands search and selected artifacts/receipts and writes one unclassified LinkedIn job into the
+  existing private jobs database. It does not score, filter, drive an ATS, or submit.
+- The Presence intake adapter is the active unfinished unit. No comment, message, invitation, proposal,
+  application fill, or submit authority is released by the completed read-only chain.
+
+**Inferred:** the minimum next cut is one Taey-facing Presence call that invokes the frozen public intake
+connector and proves exact private readback. **Unknown:** the adapter's merged/deployed commit and production
+receipt, scorer one-shot safety, the first current ATS provider, and whether the captured lead contains enough
+information to resolve an ATS target.
+
 ## Implementation order
 
-### 1. LinkedIn Jobs read-only
+### 1. LinkedIn Jobs to unclassified application intake
 
-Build the smallest complete vertical slice on the existing LinkedIn display:
+The source mechanics:
 
-1. Observe the current LinkedIn surface through the canonical tree.
-2. Expose the exact Jobs navigation control as a snapshot-bound reference.
-3. Execute one navigation action and require a LinkedIn-Jobs postcondition from a fresh observation.
-4. Load one runtime-injected search policy without exposing its value to the public projection.
-5. Project the mounted job-card collection into the off-context private sink as bounded structured records
-   using the canonical tree; expose only count, shape, and digest to Taey.
-6. Open one card with one action and verify selected-card identity before reading detail content.
-7. Extract the complete job description and apply-channel facts into the private sink.
-8. Emit a public-safe receipt joining the input-policy digest, card identity digest, description hash,
-   private-store result, and independent readback result.
+- `select_and_capture_job` is a retained production baseline: one exact `click[0]`, private target/title/company
+  and selected detail stable for two fresh observations, one selected-detail write, unchanged content, CAREERS
+  lock released, then stop.
+- `capture_mounted_job_search` remains candidate mechanics. It captures only the cards already mounted on one
+  authorized search-results page; it does not enter search terms, change filters, scroll, open, save, dismiss,
+  or apply. Do not treat existing search receipts as a frozen baseline until the joined chain below passes.
+- The selected record is an application lead: it contains the private search reference, selected source
+  URL/current job identity, exact detail heading, and description. Apply-channel facts are not part of the
+  qualified record and must not be inferred.
 
-The historical implementation is evidence only. Its coordinate clicks, `xdotool` navigation, custom recursive
-walker, and implicit multi-action sweep are not copied. The private runtime must select one source/dedup policy;
-public mechanics do not silently choose between conflicting historical policies.
+The active natural unit is the Presence intake adapter:
 
-Acceptance is one real read-only production unit with:
+1. Expose one empty-input or otherwise opaque Taey-facing call; Taey supplies no paths, job values, IDs,
+   policy, or database arguments.
+2. Bind the seat/correlation identity to one frozen private transaction containing the exact Hands search
+   artifact/receipt, selected artifact/receipt, and card digest.
+3. Invoke exact public `taey-apply` commit `ee8406f16ac552a8cf557538fd136e7750125564` once.
+4. Require one exact jobs row whose canonical URL, title, company, location, and description match the paired
+   capture; a non-identical collision, duplicate identity, digest mismatch, unsafe path, or indeterminate write
+   is terminal.
+5. Require a new row to retain SQL `NULL` for `verdict`, `score`, and `applied_at`; `applications` and
+   `apply_runs` counts remain unchanged. A distinct transaction referencing identical evidence may return
+   `already_present` with zero writes.
+6. Return only the compact connector/Presence receipt and close the turn. Do not invoke a scorer, ATS, or
+   another UI action.
 
-- one public Hands commit and one exact surface-policy digest;
-- no UI mutation without the previous exact postcondition;
-- full job detail captured with selected-card identity agreement;
-- a non-empty private-store write and independent readback;
-- no private values committed to public Git or public receipts;
-- a terminal receipt that distinguishes success, valid no-new-results, and technical failure.
+Acceptance requires two production proofs from exact public/deployed commits:
+
+- one existing qualified paired capture ingests or proves identical prior presence with independent database
+  readback; and
+- one fresh mounted-search -> exact selected-detail -> separate intake transaction joins the Hands and intake
+  receipt hashes, ends with zero open turns/leases, and produces no outward effect.
+
+Adapter work must not change the LinkedIn YAML, runners, snapshot traversal, CAREERS lock, private
+record shapes, or public result shapes. If the lead later cannot resolve one exact ATS target, add only the
+missing read-only target projection under a new frozen contract and requalify it; do not widen search by
+assumption.
 
 ### 2. LinkedIn engagement
 
-Restore the six historically working leaves independently: comment, own-post engager capture, messaging,
-invitation acceptance, connection invitation, and Jobs. Each leaf keeps its platform-specific surface map and
-postcondition. Read-only leaves qualify first. Outward leaves also require their existing content, truth, voice,
-and account-policy authority before the single outward action is exposed.
+Keep the six historical leaves independent: comment, own-post engager capture, messaging, invitation
+acceptance, connection invitation, and Jobs.
+
+- Jobs selected-detail capture is a retained production baseline; do not reopen it for intake-adapter work.
+  Mounted-search stays candidate mechanics until the joined search-select-intake chain passes.
+- Own-post engagement currently proves only the `no_new_signal` route/filter/restore result. Full qualification
+  still requires one real `captured` write-once receipt followed by a fresh `already_known` receipt; lack of a
+  live signal is not a reason to change the map.
+- Comment, messaging, invitation acceptance, and connection invitation remain separate outward/account-effect
+  leaves. Each requires a fresh read-only map proof, its own frozen transaction and postcondition, and existing
+  content, truth, voice, target, dedup, budget, and account-policy authority before one outward action is
+  exposed.
+
+No leaf shares a fallback or platform-specific control with another leaf, and no leaf's missing qualification
+blocks the Jobs-to-intake slice.
 
 ### 3. Sales Navigator, ATS, Upwork, and X
 
 Apply the same machine without sharing platform-specific controls:
 
 - Sales Navigator: search/profile visibility before any connection or message.
-- ATS: form visibility and required-field projection before a separately authorized submit.
+- ATS: first name one current provider and public baseline, then qualify exact form identity and required-field
+  projection read-only. Field fill is a separately authorized non-submit mutation lane; submit is a further
+  separately frozen outward authority. Historical fill/submit evidence is design evidence only and authorizes
+  no current action.
 - Upwork: scan and proposal-form visibility before a separately authorized proposal.
 - X: clean public implementation and read-only account-state proof before any public action.
+
+After the first clean Presence-to-intake production PASS, two read-only lanes may proceed independently:
+(a) inspect and expose the narrowest one-shot scorer path with zero ATS/action-task side effects while both
+polling loops remain inactive; and (b) measure one current ATS provider's form identity, public-substrate
+location, and required-field projection with zero field or submit actions. They join only on the same immutable
+intake digest after separate terminal receipts. No provider, score threshold, fill authority, or submit
+authority is inferred.
 
 ## Qualification and release
 
@@ -109,3 +164,17 @@ or transaction identity. One terminal lane cannot retry or affect another lane.
 A production baseline is frozen only after merge to public `main`, deployment from that exact commit, mechanical
 receipt verification, and a real production observation. The release record names the public commit, private
 input digest, surface-policy digest, production receipt, and remaining unknowns.
+
+A downstream connector or adapter consumes qualified Hands receipts and may not edit their producing YAML,
+runners, snapshots, locks, or result schemas. Any genuinely shared-path change invalidates the affected
+baseline and requires that exact production unit to be re-earned before release.
+
+The Jobs-to-intake critical path remains serial until one fresh end-to-end receipt chain passes. Afterward,
+only lanes with separate mutable state may run concurrently; they share immutable digests and public schemas
+only, never a display lease, CAREERS lock, browser profile, private root, database write transaction, receipt
+root, or turn identity.
+
+Stop immediately on a pairing mismatch, non-exact database identity, non-null new-row classification state,
+application-state count change, private-value leak, scorer/ATS activation, or any outward action. No SFT is on
+this plan's critical path unless a specific model trajectory defect remains after the deterministic contract
+and authority gaps are removed.
