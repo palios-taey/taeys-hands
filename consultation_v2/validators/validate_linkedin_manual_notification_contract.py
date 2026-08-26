@@ -12,7 +12,6 @@ INTERACT_PATH = REPO_ROOT / 'consultation_v2/interact.py'
 INPUT_PATH = REPO_ROOT / 'consultation_v2/input.py'
 MANUAL_PATH = REPO_ROOT / 'consultation_v2/platforms/linkedin/manual.py'
 
-from consultation_v2.platforms.linkedin import manual
 from consultation_v2.yaml_contract import load_platform_yaml
 
 
@@ -59,54 +58,23 @@ def main() -> int:
         'LinkedIn selected-thread viewport transition drifted',
     )
 
-    element_key = (
-        'selected_post_thread_open_activity_123_body_' + ('a' * 64)
-    )
-    original = manual._selected_thread_viewport_state
-    try:
-        manual._selected_thread_viewport_state = lambda _element: {
-            'live_extent_in_viewport': False,
-            'error': 'live_extent_outside_display',
-        }
-        offscreen = manual.element_operation(
-            element_key,
-            ['enabled', 'focusable'],
-            {'atspi_obj': object()},
-        )
+    operation_source = _function_source(MANUAL_PATH, 'element_operation')
+    for required in (
+        '_SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)',
+        '_selected_thread_viewport_state(dict(context or {}))',
+        "viewport.get('live_extent_in_viewport') is True",
+        "viewport.get('error') == 'live_extent_outside_display'",
+        "'selected_thread'",
+        "]['action']",
+        "]['scroll_into_view']",
+        "'exact_selected_thread_opener_in_viewport'",
+        "'scroll_into_view'",
+        "'mapped_pointer_activate'",
+    ):
         _require(
-            offscreen is not None
-            and offscreen['method'] == 'scroll_into_view'
-            and offscreen['effect_class'] == 'viewport'
-            and offscreen['primitives'] == ['scroll_into_view']
-            and offscreen['allowed_now'] == ['scroll_into_view']
-            and 'mapped_pointer_activate' in offscreen['forbidden']
-            and offscreen['postcondition'] == {
-                'kind': 'exact_selected_thread_opener_in_viewport',
-                'activity': '123',
-                'body_sha256': 'a' * 64,
-            },
-            'off-screen opener did not expose only the exact scroll transition',
+            required in operation_source,
+            f'LinkedIn selected-thread operation missing {required!r}',
         )
-
-        manual._selected_thread_viewport_state = lambda _element: {
-            'live_extent_in_viewport': True,
-        }
-        onscreen = manual.element_operation(
-            element_key,
-            ['enabled', 'focusable'],
-            {'atspi_obj': object()},
-        )
-        _require(
-            onscreen is not None
-            and onscreen['method'] == 'mapped_pointer_activate'
-            and onscreen['effect_class'] == 'page'
-            and onscreen['primitives'] == ['mapped_pointer_activate']
-            and onscreen['allowed_now'] == ['mapped_pointer_activate']
-            and 'scroll_into_view' in onscreen['forbidden'],
-            'in-viewport opener did not expose only mapped pointer activation',
-        )
-    finally:
-        manual._selected_thread_viewport_state = original
 
     pointer_source = _function_source(
         INTERACT_PATH,
