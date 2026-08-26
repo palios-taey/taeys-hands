@@ -76,12 +76,58 @@ def atspi_click(element: Dict, timeout: float = 0.3) -> bool:
     return False
 
 
+def atspi_element_viewport_state(element: Dict) -> Dict[str, object]:
+    """Report whether one exact bound object's live extent fits the display."""
+    evidence: Dict[str, object] = {
+        'atspi_object_bound': False,
+        'live_extent_resolved': False,
+        'display_geometry_resolved': False,
+        'live_extent_in_viewport': False,
+    }
+    obj = element.get('atspi_obj')
+    if not obj or is_defunct(element):
+        evidence['error'] = 'missing_or_defunct_atspi_object'
+        return evidence
+    evidence['atspi_object_bound'] = True
+    try:
+        component = obj.get_component_iface()
+        if component is None:
+            evidence['error'] = 'missing_component_iface'
+            return evidence
+        rect = component.get_extents(Atspi.CoordType.SCREEN)
+        if (
+            rect is None
+            or rect.width <= 0
+            or rect.height <= 0
+        ):
+            evidence['error'] = 'invalid_live_extent'
+            return evidence
+        evidence['live_extent_resolved'] = True
+        display_width, display_height = inp.display_geometry()
+        evidence['display_geometry_resolved'] = True
+        if (
+            rect.x < 0
+            or rect.y < 0
+            or rect.x + rect.width > display_width
+            or rect.y + rect.height > display_height
+        ):
+            evidence['error'] = 'live_extent_outside_display'
+            return evidence
+        evidence['live_extent_in_viewport'] = True
+        return evidence
+    except Exception as exc:
+        evidence['error'] = f'viewport_state_failed:{type(exc).__name__}'
+        return evidence
+
+
 def atspi_mapped_pointer_activate(element: Dict) -> Dict[str, object]:
     """Activate one exact bound object at the center of its live AT-SPI extent."""
     evidence: Dict[str, object] = {
         'ok': False,
         'atspi_object_bound': False,
         'live_extent_resolved': False,
+        'display_geometry_resolved': False,
+        'live_extent_in_viewport': False,
         'pointer_event_sent': False,
     }
     obj = element.get('atspi_obj')
@@ -97,14 +143,23 @@ def atspi_mapped_pointer_activate(element: Dict) -> Dict[str, object]:
         rect = component.get_extents(Atspi.CoordType.SCREEN)
         if (
             rect is None
-            or rect.x < 0
-            or rect.y < 0
             or rect.width <= 0
             or rect.height <= 0
         ):
             evidence['error'] = 'invalid_live_extent'
             return evidence
         evidence['live_extent_resolved'] = True
+        display_width, display_height = inp.display_geometry()
+        evidence['display_geometry_resolved'] = True
+        if (
+            rect.x < 0
+            or rect.y < 0
+            or rect.x + rect.width > display_width
+            or rect.y + rect.height > display_height
+        ):
+            evidence['error'] = 'live_extent_outside_display'
+            return evidence
+        evidence['live_extent_in_viewport'] = True
         sent = inp.click_at(
             rect.x + rect.width // 2,
             rect.y + rect.height // 2,
