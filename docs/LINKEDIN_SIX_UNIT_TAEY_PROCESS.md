@@ -75,9 +75,10 @@ has not been completely observed.
    author-cooloff policy. A comment target must be no older than 72 hours.
 6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
 7. Observe the exact selected post and bind its activity identity and body SHA-256. Read the full selected post.
-8. If the exact selected-thread opener is mapped, invoke its YAML-declared `mapped_pointer_activate` once and
-   require the same activity, same body digest, and visible target-scoped comment controls. Read the complete
-   visible thread, including every visible author reply, before any draft exists.
+8. If exact `selected_post_thread_open_activity_<id>_body_<digest>` is observed, invoke that key once using its
+   declared `mapped_pointer_activate` primitive and require the same activity, same body digest, and visible
+   target-scoped comment controls. Read the complete visible thread, including every visible author reply,
+   before any draft exists.
 9. Like, compose, gate, send, rendered-comment verification, and durable touch persistence are separate effects.
    They may execute only after each effect has its own current public YAML mapping and production qualification.
 
