@@ -10,6 +10,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.platforms.claude import manual
 from consultation_v2.types import ElementRef, Snapshot
+from consultation_v2.yaml_contract import load_platform_yaml
+from scripts.run_manual_chat_worker import _claude_active_model_names, _send_content
 
 
 def _element(
@@ -48,7 +50,7 @@ def _snapshot() -> Snapshot:
             'model_selector': [
                 _element(
                     'model_selector',
-                    'Model: Opus 5 Extra',
+                    'Model: Opus 5 · Extra',
                     'push button',
                     states=['enabled', 'showing'],
                 )
@@ -59,6 +61,14 @@ def _snapshot() -> Snapshot:
                     'Add files, connectors, and more',
                     'push button',
                     states=['enabled', 'showing'],
+                )
+            ],
+            'address_bar': [
+                _element(
+                    'address_bar',
+                    'Search with Google or enter address',
+                    'entry',
+                    states=['enabled', 'focusable', 'showing'],
                 )
             ],
         },
@@ -72,6 +82,15 @@ def _token(snapshot: Snapshot) -> str:
 
 
 def main() -> int:
+    cfg = load_platform_yaml('claude')
+    element_map = cfg['tree']['element_map']
+    assert element_map['model_selector']['structural'] == {'after': 'toggle_menu'}
+    assert element_map['press_record_button']['name'] == 'Press and hold to record'
+    assert element_map['voice_mode_button']['name'] == 'Use voice mode'
+    key_precondition = cfg['workflow']['attachment']['key_precondition']
+    assert key_precondition['focused_element'] == 'input'
+    assert key_precondition['unfocused_elements'] == ['address_bar']
+
     baseline = _snapshot()
     baseline_token = _token(baseline)
     manual.validate_key_precondition(
@@ -103,6 +122,25 @@ def main() -> int:
     unfocused = _snapshot()
     unfocused.mapped['input'][0].states.remove('focused')
     assert manual.key_preconditions(unfocused, scope='base') == {}
+
+    dual_focused = _snapshot()
+    dual_focused.mapped['address_bar'][0].states.append('focused')
+    assert manual.key_preconditions(dual_focused, scope='base') == {}
+
+    missing_unfocused_element = _snapshot()
+    del missing_unfocused_element.mapped['address_bar']
+    assert manual.key_preconditions(missing_unfocused_element, scope='base') == {}
+
+    duplicate_unfocused_element = _snapshot()
+    duplicate_unfocused_element.mapped['address_bar'].append(
+        _element(
+            'address_bar',
+            'Search with Google or enter address',
+            'entry',
+            states=['enabled', 'focusable', 'showing'],
+        )
+    )
+    assert manual.key_preconditions(duplicate_unfocused_element, scope='base') == {}
 
     stopped = _snapshot()
     stopped.mapped['stop_button'] = [
@@ -148,6 +186,26 @@ def main() -> int:
     assert manual.key_preconditions(baseline, scope='menu_snapshot') == {}
     assert manual.key_requires_state('ctrl+u') is True
     assert manual.key_requires_state('Return') is False
+
+    active_model_names = _claude_active_model_names()
+    assert active_model_names == (
+        'Model: Opus 5 Extra',
+        'Model: Opus 5 · Extra',
+    )
+    content = _send_content(
+        'claude',
+        ':3',
+        Path('/bundles/bundle-a.md'),
+        Path('/bundles/bundle-b.md'),
+        Path('/bundles/prompt.txt'),
+    )
+    names_literal = '["Model: Opus 5 Extra", "Model: Opus 5 · Extra"]'
+    assert content.count(f'YAML-derived set {names_literal}') >= 7
+    assert content.count('key_preconditions.ctrl+u') == 4
+    assert content.count('focus element=input exactly once') == 2
+    assert content.count('If it is still absent') == 2
+    assert content.count('key=ctrl+u') == 2
+    assert 'whose exact name is Model: Opus 5 Extra' not in content
     print('PASS: Claude semantic attachment shortcut contract')
     return 0
 
