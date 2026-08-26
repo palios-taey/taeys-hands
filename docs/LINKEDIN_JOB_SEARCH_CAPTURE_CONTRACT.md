@@ -1,6 +1,6 @@
 # LinkedIn mounted job-search capture
 
-Status: bounded read-only production candidate.
+Status: production-qualified bounded read-only baseline.
 
 This transaction captures the job cards already mounted on one exact LinkedIn Jobs search-results page. It does
 not choose or enter search terms, change filters, scroll, open a card, apply, save, dismiss, message, or retry.
@@ -125,3 +125,32 @@ This is deliberately a mounted-batch unit, not a claim that the infinite results
 scroll transition requires its own one-action postcondition and production qualification. Each downstream
 card-page capture uses the already-qualified `select_and_capture_job` transaction with the exact private card,
 title, and company values from this batch.
+
+## Production qualification — 2026-08-26
+
+One fresh joined search -> selected-detail -> application-intake chain passed from clean public production
+checkouts:
+
+- Hands `e3daab97f59f6cd8d8dfed24912dfbfa5f39bfee` and Presence
+  `c42bd319b2fb8ef6b9774b6ef171293baf73e897` produced the mounted-search transaction SHA-256
+  `eb06ff6c734f3ce99299374cbd8224e5da30ddbf4a157526f7eca3a0b92ab33e`, artifact SHA-256
+  `213fccb088ce0437f3d885e4b602c51cfa2cae2ebf6b082c3c6c572620e1a348`, and receipt SHA-256
+  `159f258eb4b7c45ed8fa42218024be83e35a65b1441d96f18583f4aeb862877f`. The receipt proves 25
+  mounted cards, two stable observations, an unchanged fresh post-observation digest and match counts, positive
+  CAREERS lock release, and zero residual display lease or turn.
+- The deterministic downstream rule selected ordinal `1`, the lowest tree-order card with `showing=true`, from
+  six eligible cards. The separate selected-detail transaction SHA-256
+  `ff2d6e1a1fa8c84bdd25bc38720c1d1197504214480625b8a3ef3e7b2abba110` produced artifact SHA-256
+  `c9205449d21a57517c9791e3ecd1deacf62af3ba03b86cb52a46aea4f585bd49` and receipt SHA-256
+  `37bd41e250ad66e4a0875d8f9c8471731084434c66bf89bd1b7eb2078de9aa70`. The receipt proves exactly one
+  private target, title, and company match, exactly one `click[0]`, two stable detail cycles, unchanged selected
+  content, positive lock release, and zero residual display lease or turn.
+- Public `taey-apply` `253b882571673ae30d3beadda6f174439755a241` consumed those exact four immutable sources through
+  transaction SHA-256 `eab0e62a33ff343f4fd04040af74fb06447ad8bed8d01a97e3dedd5cc3af9960` and receipt SHA-256
+  `d73d96d18932ac45b9f87c1c138f7b4494ebd859923fd1c27fad9745a6645157`. Independent database readback
+  proved jobs `2239 -> 2240`, applications `49 -> 49`, apply runs `593 -> 593`, and SQL `NULL` for verdict,
+  score, and applied-at classification fields.
+
+The private receipts remain the evidence authority. This qualification covers only the already-mounted batch,
+one deterministic exact-card selection, and one unclassified intake row. It grants no search-policy choice,
+scroll, scoring, ATS, application, messaging, or other outward authority.
