@@ -22,7 +22,6 @@ NOTIFICATIONS_NAVIGATION = 'notifications_navigation'
 NOTIFICATION_CANDIDATE_PREFIX = 'notification_candidate_'
 NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_after_'
 SELECTED_POST_PREFIX = 'selected_post_activity_'
-SELECTED_THREAD_PREFIX = 'selected_post_thread_activity_'
 SELECTED_THREAD_OPEN_PREFIX = 'selected_post_thread_open_activity_'
 
 _CANDIDATE_KEY = re.compile(
@@ -34,11 +33,9 @@ _CONTINUATION_KEY = re.compile(
 _SELECTED_POST_KEY = re.compile(
     rf'^{SELECTED_POST_PREFIX}(?P<activity>[0-9]+)$'
 )
-_SELECTED_THREAD_KEY = re.compile(
-    rf'^{SELECTED_THREAD_PREFIX}(?P<activity>[0-9]+)$'
-)
 _SELECTED_THREAD_OPEN_KEY = re.compile(
-    rf'^{SELECTED_THREAD_OPEN_PREFIX}(?P<activity>[0-9]+)$'
+    rf'^{SELECTED_THREAD_OPEN_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
 
@@ -144,12 +141,10 @@ def _manual_notification_contract() -> dict[str, Any]:
             },
         },
         'selected_thread': {
-            'element_key_prefix': SELECTED_THREAD_PREFIX,
             'open_element_key_prefix': SELECTED_THREAD_OPEN_PREFIX,
             'comment_count': {
                 'role': 'push button',
-                'name_pattern': r'^[1-9][0-9,]* comments?$',
-                'relative_depth': 2,
+                'index_path': [0, 11],
                 'states_include': ['enabled', 'focusable'],
             },
             'visible_comment': {
@@ -157,18 +152,12 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name_prefix': 'View more options for',
                 'name_suffix': 'comment.',
             },
-            'observation': {
-                'max_chars': 16000,
-                'effect_class': 'observation',
-                'primitives': [],
-                'allowed_now': [],
-            },
             'action': {
                 'effect_class': 'page',
                 'primitives': ['activate'],
                 'allowed_now': ['activate'],
             },
-            'postcondition': 'exact_selected_activity_visible_thread',
+            'postcondition': 'exact_selected_activity_visible_comment_controls',
         },
         'observation_barrier': {
             'refresh_policy': 'invalidate_reacquire',
@@ -388,26 +377,36 @@ def _selected_thread_controls(
     selected_thread = contract['selected_thread']
     count_contract = selected_thread['comment_count']
     visible_contract = selected_thread['visible_comment']
-    count_pattern = re.compile(count_contract['name_pattern'])
     required_states = set(count_contract['states_include'])
     comment_counts: list[Any] = []
     visible_comments: list[Any] = []
+    count_node = _node_at_index_path(root.atspi_obj, count_contract['index_path'])
+    elements_by_identity = {
+        id(element.atspi_obj): element for element in _all_elements(snapshot)
+    }
+    count_element = elements_by_identity.get(id(count_node))
+    if count_element is not None:
+        count_name = count_element.name
+        count_token = (
+            count_name.removesuffix(' comments').replace(',', '')
+            if count_name.endswith(' comments')
+            else '1' if count_name == '1 comment' else ''
+        )
+        if (
+            count_element.role == count_contract['role']
+            and count_token.isdigit()
+            and int(count_token) > 0
+            and required_states.issubset(count_element.states)
+        ):
+            comment_counts.append(count_element)
     for element, relative_depth in _selected_post_descendants(snapshot, root):
         if (
-            element.role == count_contract['role']
-            and relative_depth == count_contract['relative_depth']
-            and count_pattern.fullmatch(element.name)
-            and required_states.issubset(element.states)
-        ):
-            comment_counts.append(element)
-        if (
-            element.role == visible_contract['role']
+            relative_depth > 0
+            and element.role == visible_contract['role']
             and element.name.startswith(visible_contract['name_prefix'])
             and element.name.endswith(visible_contract['name_suffix'])
         ):
             visible_comments.append(element)
-    if len(comment_counts) > 1:
-        raise ValueError('LinkedIn selected post comment-count target is ambiguous')
     return comment_counts, visible_comments
 
 
@@ -508,7 +507,6 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             and not key.startswith(NOTIFICATION_CANDIDATE_PREFIX)
             and not key.startswith(NOTIFICATIONS_CONTINUATION_PREFIX)
             and not key.startswith(SELECTED_POST_PREFIX)
-            and not key.startswith(SELECTED_THREAD_PREFIX)
             and not key.startswith(SELECTED_THREAD_OPEN_PREFIX)
         )
     }
@@ -600,7 +598,9 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             contract,
         )
         if comment_counts and not visible_comments:
-            thread_open_key = f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}'
+            thread_open_key = (
+                f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}_body_{body_digest}'
+            )
             mapped[thread_open_key] = [replace(
                 comment_counts[0],
                 key=thread_open_key,
@@ -610,33 +610,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 raw={
                     **dict(comment_counts[0].raw),
                     'selected_activity': selected_activity,
-                },
-            )]
-        if visible_comments:
-            thread_text = root.name or _node_name(root.atspi_obj)
-            max_chars = contract['selected_thread']['observation']['max_chars']
-            if not thread_text or len(thread_text) > max_chars:
-                raise ValueError(
-                    'LinkedIn selected visible thread is empty or exceeds its '
-                    'declared complete-content bound'
-                )
-            thread_digest = hashlib.sha256(thread_text.encode('utf-8')).hexdigest()
-            thread_key = f'{SELECTED_THREAD_PREFIX}{selected_activity}'
-            mapped[thread_key] = [replace(
-                root,
-                key=thread_key,
-                name='Selected LinkedIn visible thread',
-                text=thread_text,
-                description=(
-                    f'activity={selected_activity}; '
-                    f'visible_comments={len(visible_comments)}; '
-                    f'thread_sha256={thread_digest}'
-                ),
-                raw={
-                    **dict(root.raw),
-                    'selected_activity': selected_activity,
-                    'selected_thread_sha256': thread_digest,
-                    'visible_comment_count': len(visible_comments),
+                    'selected_post_body_sha256': body_digest,
                 },
             )]
     return replace(snapshot, mapped=mapped)
@@ -650,14 +624,12 @@ def element_operation(
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
-    selected_thread_match = _SELECTED_THREAD_KEY.fullmatch(element_key)
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
     if (
         element_key != NOTIFICATIONS_NAVIGATION
         and candidate_match is None
         and continuation_match is None
         and selected_post_match is None
-        and selected_thread_match is None
         and selected_thread_open_match is None
     ):
         return None
@@ -694,42 +666,6 @@ def element_operation(
                 'body_sha256': body_digest,
             },
         }
-    if selected_thread_match is not None:
-        selected_context = dict(context or {})
-        activity = selected_thread_match.group('activity')
-        thread_text = selected_context.get('text')
-        thread_digest = selected_context.get('selected_thread_sha256')
-        visible_comment_count = selected_context.get('visible_comment_count')
-        if (
-            selected_context.get('selected_activity') != activity
-            or not isinstance(thread_text, str)
-            or not thread_text
-            or thread_digest != hashlib.sha256(thread_text.encode('utf-8')).hexdigest()
-            or isinstance(visible_comment_count, bool)
-            or not isinstance(visible_comment_count, int)
-            or visible_comment_count < 1
-        ):
-            raise ValueError(
-                'LinkedIn selected-thread observation identity is not exact'
-            )
-        operation = _manual_notification_contract()['selected_thread']['observation']
-        return {
-            'method': 'observe',
-            **operation,
-            'forbidden': [
-                'click',
-                'focus',
-                'activate',
-                'hover',
-                'mapped_pointer_activate',
-            ],
-            'postcondition': {
-                'kind': 'exact_selected_activity_visible_thread',
-                'activity': activity,
-                'thread_sha256': thread_digest,
-                'visible_comment_count': visible_comment_count,
-            },
-        }
     normalized_states = {
         str(state).strip().lower().replace('_', ' ') for state in states
     }
@@ -760,7 +696,7 @@ def element_operation(
         'forbidden': ['click', 'focus', 'hover', 'mapped_pointer_activate'],
         'postcondition': {
             'kind': (
-                'exact_selected_activity_visible_thread'
+                'exact_selected_activity_visible_comment_controls'
                 if selected_thread_open_match is not None
                 else (
                     'exact_notification_activity'
@@ -793,7 +729,10 @@ def element_operation(
                 else {}
             ),
             **(
-                {'activity': selected_thread_open_match.group('activity')}
+                {
+                    'activity': selected_thread_open_match.group('activity'),
+                    'body_sha256': selected_thread_open_match.group('body'),
+                }
                 if selected_thread_open_match is not None
                 else {}
             ),
@@ -818,29 +757,36 @@ def verify_post_action(
         contract = _manual_notification_contract()
         activity, activity_sources = _selected_activity_identity(snapshot, contract)
         expected_activity = selected_thread_open_match.group('activity')
-        root, _body, _body_text = _selected_post_root_and_body(snapshot, contract)
-        if root is None:
+        expected_body_digest = selected_thread_open_match.group('body')
+        root, _body, body_text = _selected_post_root_and_body(snapshot, contract)
+        if root is None or body_text is None:
             raise ValueError(
                 'LinkedIn selected-thread postcondition lost the exact selected post'
             )
+        observed_body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
         _comment_counts, visible_comments = _selected_thread_controls(
             snapshot,
             root,
             contract,
         )
-        if activity != expected_activity or not visible_comments:
+        if (
+            activity != expected_activity
+            or observed_body_digest != expected_body_digest
+            or not visible_comments
+        ):
             raise ValueError(
                 'LinkedIn selected-thread postcondition failed: the exact '
-                'selected activity has no visible comment thread'
+                'selected activity/body has no visible comment controls'
             )
         return {
             'element_key': element_key,
             'operation': operation,
             'effect_class': 'page',
-            'postcondition': 'exact_selected_activity_visible_thread',
+            'postcondition': 'exact_selected_activity_visible_comment_controls',
             'route_exact': True,
             'activity_exact': True,
             'activity_sources': list(activity_sources),
+            'selected_post_body_sha256': observed_body_digest,
             'visible_comment_count': len(visible_comments),
             'observed_url': snapshot.url,
         }
