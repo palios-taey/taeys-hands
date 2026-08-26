@@ -155,7 +155,8 @@ Apply the same machine without sharing platform-specific controls:
 - ATS: first name one current provider and public baseline, then qualify exact form identity and required-field
   projection read-only. Field fill is a separately authorized non-submit mutation lane; submit is a further
   separately frozen outward authority. Historical fill/submit evidence is design evidence only and authorizes
-  no current action.
+  no current action. The public mechanical candidate is now Greenhouse-only and observe-only; its specs,
+  primitive bindings, stop conditions, and canary procedure are in `ATS_PROVIDER_READ_ONLY_RUNBOOK.md`.
 - Upwork: scan and proposal-form visibility before a separately authorized proposal.
 - X: clean public implementation and read-only account-state proof before any public action.
 
