@@ -130,6 +130,31 @@ requires a fresh base observation. After any failed, refused, absent, duplicate,
 the leg immediately and report the first mismatch. Do not press Escape, close a menu, retry, recover, switch
 displays, or invent a fallback in that turn.
 
+## Claude memory-review pre-send recovery
+
+Claude can replace the fresh composer with the exact dialog `Review updates to Claude’s memory`. That state
+is a terminal first mismatch for the send identity. Never resend that identity. After the failure is preserved,
+launch one separately identified recovery transaction only when a fresh canonical base observation maps exactly
+one `claude_memory_review_dialog` and one enabled `claude_memory_not_now`, with the three navigation-ready
+controls absent:
+
+```bash
+python3 scripts/run_manual_chat_worker.py recover-claude-pre-send \
+  --display :3 \
+  --seat-id NEW_RECOVERY_SEAT \
+  --artifact-root NEW_PRIVATE_ARTIFACT_ROOT \
+  --exception-key memory_review \
+  --source-terminal-identity SPENT_SEND_IDENTITY
+```
+
+The recovery worker takes two read-only classification observations, clicks only the YAML-mapped `Not now`
+control once, and then applies Claude's existing navigation postcondition barrier: exactly one `input`,
+`model_selector`, and `toggle_menu` for two consecutive fresh base observations. The dialog, recovery button,
+Stop control, and mapped monitor exceptions must be absent. A settling sample authorizes only another read; any
+real mismatch or exhausted barrier writes failure evidence and stops. A successful recovery does not attach,
+paste, send, register a monitor, or authorize reuse of the failed send identity. Start the valuable consultation
+as another new send identity after the recovery receipt passes.
+
 ## Platform card
 
 | Member | Platform/display | YAML | Requested selection | Attachment menu observation | Submit |
