@@ -68,8 +68,9 @@ has not been completely observed.
 1. Observe the current LinkedIn document and require exactly one YAML-mapped `notifications_navigation`.
 2. Activate it once and require the exact `notifications_all` route in the fresh post-action observation.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
-4. If `Show more results` is mapped, activate that exact continuation once and require candidate-set growth in
-   the fresh postcondition receipt. Each further continuation is a new transition with a new observation.
+4. If `Show more results` is mapped, activate that exact continuation once and require both candidate-set growth
+   and preservation of the exact ordered activity-ID prefix digest in the fresh postcondition receipt. Each
+   further continuation is a new transition with a new observation.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
    author-cooloff policy. A comment target must be no older than 72 hours.
 6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
