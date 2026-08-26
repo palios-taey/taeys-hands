@@ -154,8 +154,8 @@ def _manual_notification_contract() -> dict[str, Any]:
             },
             'action': {
                 'effect_class': 'page',
-                'primitives': ['activate'],
-                'allowed_now': ['activate'],
+                'primitives': ['mapped_pointer_activate'],
+                'allowed_now': ['mapped_pointer_activate'],
             },
             'postcondition': 'exact_selected_activity_visible_comment_controls',
         },
@@ -674,11 +674,6 @@ def element_operation(
         if element_key == NOTIFICATIONS_NAVIGATION
         else {'focusable', 'enabled'}
     )
-    allowed_now = (
-        ['activate']
-        if required_states.issubset(normalized_states)
-        else []
-    )
     declared_action = (
         _manual_notification_contract()['selected_thread']['action']
         if selected_thread_open_match is not None
@@ -688,12 +683,28 @@ def element_operation(
             'allowed_now': ['activate'],
         }
     )
+    declared_primitive = declared_action['primitives'][0]
+    allowed_now = (
+        [declared_primitive]
+        if required_states.issubset(normalized_states)
+        else []
+    )
     return {
-        'method': 'activate',
+        'method': declared_primitive,
         'effect_class': declared_action['effect_class'],
         'primitives': declared_action['primitives'],
         'allowed_now': allowed_now,
-        'forbidden': ['click', 'focus', 'hover', 'mapped_pointer_activate'],
+        'forbidden': [
+            primitive
+            for primitive in [
+                'click',
+                'focus',
+                'activate',
+                'hover',
+                'mapped_pointer_activate',
+            ]
+            if primitive != declared_primitive
+        ],
         'postcondition': {
             'kind': (
                 'exact_selected_activity_visible_comment_controls'

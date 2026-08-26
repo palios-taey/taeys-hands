@@ -277,9 +277,9 @@ workflow:
         action:
           effect_class: page
           primitives:
-            - activate
+            - mapped_pointer_activate
           allowed_now:
-            - activate
+            - mapped_pointer_activate
         postcondition: exact_selected_activity_visible_comment_controls
       observation_barrier:
         refresh_policy: invalidate_reacquire
