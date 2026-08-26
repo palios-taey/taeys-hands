@@ -33,8 +33,10 @@ It does not replace the narrower executable contracts below:
 | Boundary | Public authority |
 | --- | --- |
 | UI observation, one-action execution, and receipts | [`UI_INTERACTION_AUTHORITY.md`](UI_INTERACTION_AUTHORITY.md) plus the current LinkedIn YAML |
+| My-post engagement capture and exact Jobs-route restoration | [`LINKEDIN_ENGAGERS_CAPTURE_CONTRACT.md`](LINKEDIN_ENGAGERS_CAPTURE_CONTRACT.md) |
 | Jobs search-surface restoration | [`LINKEDIN_JOBS_SURFACE_RESTORE_CONTRACT.md`](LINKEDIN_JOBS_SURFACE_RESTORE_CONTRACT.md) |
 | Mounted Jobs capture and exact-card selection | [`LINKEDIN_JOB_SEARCH_CAPTURE_CONTRACT.md`](LINKEDIN_JOB_SEARCH_CAPTURE_CONTRACT.md) and [`LINKEDIN_JOBS_READ_ONLY_CONTRACT.md`](LINKEDIN_JOBS_READ_ONLY_CONTRACT.md) |
+| Production qualification ledger for the revenue UI chain | [`TAEY_REVENUE_UI_ENABLEMENT_PLAN.md`](TAEY_REVENUE_UI_ENABLEMENT_PLAN.md) |
 | Company-site observation | [`ATS_PROVIDER_READ_ONLY_RUNBOOK.md`](ATS_PROVIDER_READ_ONLY_RUNBOOK.md) |
 
 Private records supply targets, routes, policy values, identities, facts, drafts, and results. They never create
