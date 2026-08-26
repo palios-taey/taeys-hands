@@ -72,7 +72,7 @@ has not been completely observed.
    the fresh postcondition receipt. Each further continuation is a new transition with a new observation.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
    author-cooloff policy. A comment target must be no older than 72 hours.
-6. Activate one exact `notification_candidate_<activity>` and require that same activity in the selected route.
+6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
 7. Observe the exact selected post and bind its activity identity and body SHA-256. Read the full selected post.
 8. If the exact selected-thread opener is mapped, invoke its YAML-declared `mapped_pointer_activate` once and
    require the same activity, same body digest, and visible target-scoped comment controls. Read the complete
