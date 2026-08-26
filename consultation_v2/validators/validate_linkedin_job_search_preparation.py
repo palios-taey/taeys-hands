@@ -225,6 +225,84 @@ def validate_happy_path(case_root: Path) -> None:
     )
 
 
+def validate_formatted_drafts(base: Path) -> None:
+    for case_name, render in (
+        ('trailing-newline', lambda value: canonical_bytes(value) + b'\n'),
+        (
+            'pretty-whitespace',
+            lambda value: json.dumps(
+                value,
+                allow_nan=False,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=False,
+            ).encode('utf-8'),
+        ),
+    ):
+        case = base / case_name
+        sink = case / 'private' / 'sinks' / SEAT / CORRELATION
+        transaction = {
+            'schema': 'linkedin_job_search_private_input_v1',
+            'operation': 'capture_mounted_job_search',
+            'search_ref': PRIVATE_MARKER,
+            'sink_ref': str(sink),
+        }
+        private_root, draft, _ = fixture(
+            case,
+            raw_override=render(transaction),
+        )
+        prepared = invoke('prepare', private_root, draft)
+        assert prepared.returncode == 0, (case_name, prepared.stdout, prepared.stderr)
+        result = json.loads(prepared.stdout)
+        transaction_path = (
+            private_root / 'transactions' / SEAT / f'{CORRELATION}.json'
+        )
+        transaction_bytes = transaction_path.read_bytes()
+        assert transaction_bytes == canonical_bytes(transaction)
+        assert not transaction_bytes.endswith(b'\n')
+        assert hashlib.sha256(transaction_bytes).hexdigest() == result['transaction_sha256']
+        preflight_draft = private_root / 'drafts' / f'{case_name}-preflight.json'
+        alternate_format = (
+            json.dumps(transaction, indent=4, sort_keys=True).encode('utf-8') + b'\n'
+            if case_name == 'trailing-newline'
+            else canonical_bytes(transaction)
+        )
+        write_private_file(preflight_draft, alternate_format)
+        ready = invoke(
+            'preflight',
+            private_root,
+            preflight_draft,
+            digest=result['transaction_sha256'],
+        )
+        assert ready.returncode == 0, (case_name, ready.stdout, ready.stderr)
+        assert json.loads(ready.stdout)['state'] == 'ready'
+        assert not claim_path(private_root).exists()
+
+
+def require_invalid_draft_blocks_corrected_reuse(
+    root: Path,
+    draft: Path,
+    valid_transaction: dict[str, Any],
+    failure_code: str,
+) -> None:
+    marker = claim_path(root)
+    require_refusal(
+        invoke('prepare', root, draft),
+        failure_code,
+        identity_spent=True,
+        marker_path=marker,
+    )
+    marker_bytes = marker.read_bytes()
+    corrected = root / 'drafts' / f'{failure_code}-corrected.json'
+    write_private_file(corrected, canonical_bytes(valid_transaction))
+    require_refusal(
+        invoke('prepare', root, corrected),
+        'identity_spent',
+        identity_spent=True,
+    )
+    assert marker.read_bytes() == marker_bytes
+
+
 def validate_bad_drafts(base: Path) -> None:
     case = base / 'extra-field'
     root, draft, _ = fixture(case, extra={'unexpected': True})
@@ -258,22 +336,6 @@ def validate_bad_drafts(base: Path) -> None:
     assert not (root / 'transactions' / SEAT / f'{CORRELATION}.json').exists()
     assert not (root / 'sinks' / SEAT / CORRELATION).exists()
 
-    case = base / 'noncanonical'
-    sink = case / 'private' / 'sinks' / SEAT / CORRELATION
-    value = {
-        'schema': 'linkedin_job_search_private_input_v1',
-        'operation': 'capture_mounted_job_search',
-        'search_ref': PRIVATE_MARKER,
-        'sink_ref': str(sink),
-    }
-    root, draft, _ = fixture(case, raw_override=json.dumps(value, indent=2).encode('utf-8'))
-    require_refusal(
-        invoke('prepare', root, draft),
-        'draft_invalid',
-        identity_spent=True,
-        marker_path=claim_path(root),
-    )
-
     case = base / 'duplicate-field'
     sink = case / 'private' / 'sinks' / SEAT / CORRELATION
     raw = (
@@ -282,7 +344,72 @@ def validate_bad_drafts(base: Path) -> None:
         f'"search_ref":"{PRIVATE_MARKER}","search_ref":"duplicate",'
         f'"sink_ref":"{sink}"}}'
     ).encode('utf-8')
+    root, draft, transaction = fixture(case, raw_override=raw)
+    require_invalid_draft_blocks_corrected_reuse(
+        root,
+        draft,
+        transaction,
+        'draft_invalid',
+    )
+
+    case = base / 'nan'
+    sink = case / 'private' / 'sinks' / SEAT / CORRELATION
+    transaction = {
+        'schema': 'linkedin_job_search_private_input_v1',
+        'operation': 'capture_mounted_job_search',
+        'search_ref': PRIVATE_MARKER,
+        'sink_ref': str(sink),
+    }
+    raw = (
+        '{"operation":"capture_mounted_job_search",'
+        '"schema":"linkedin_job_search_private_input_v1",'
+        '"search_ref":NaN,'
+        f'"sink_ref":"{sink}"}}'
+    ).encode('utf-8')
     root, draft, _ = fixture(case, raw_override=raw)
+    require_invalid_draft_blocks_corrected_reuse(
+        root,
+        draft,
+        transaction,
+        'draft_invalid',
+    )
+
+    case = base / 'non-object'
+    root, draft, _ = fixture(case, raw_override=b'[]')
+    require_refusal(
+        invoke('prepare', root, draft),
+        'draft_invalid',
+        identity_spent=True,
+        marker_path=claim_path(root),
+    )
+
+    case = base / 'wrong-schema'
+    root, draft, _ = fixture(case, extra=None)
+    wrong_schema = {
+        'operation': 'capture_mounted_job_search',
+        'schema': 'wrong_schema',
+        'search_ref': PRIVATE_MARKER,
+        'sink_ref': str(root / 'sinks' / SEAT / CORRELATION),
+    }
+    draft.unlink()
+    write_private_file(draft, canonical_bytes(wrong_schema))
+    require_refusal(
+        invoke('prepare', root, draft),
+        'draft_invalid',
+        identity_spent=True,
+        marker_path=claim_path(root),
+    )
+
+    case = base / 'wrong-operation'
+    root, draft, _ = fixture(case, extra=None)
+    wrong_operation = {
+        'operation': 'wrong_operation',
+        'schema': 'linkedin_job_search_private_input_v1',
+        'search_ref': PRIVATE_MARKER,
+        'sink_ref': str(root / 'sinks' / SEAT / CORRELATION),
+    }
+    draft.unlink()
+    write_private_file(draft, canonical_bytes(wrong_operation))
     require_refusal(
         invoke('prepare', root, draft),
         'draft_invalid',
@@ -509,11 +636,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix='linkedin-search-prepare-validator-') as raw:
         base = Path(raw)
         validate_happy_path(base / 'happy')
+        validate_formatted_drafts(base / 'formatted')
         validate_bad_drafts(base / 'drafts')
         validate_unsafe_topology(base / 'topology')
         validate_digest_mismatch_spends_identity(base / 'digest-mismatch')
     print(json.dumps({
-        'adversarial_cases': 23,
+        'adversarial_cases': 30,
         'private_values_on_argv': False,
         'profile': 'linkedin-job-search',
         'status': 'PASS',
