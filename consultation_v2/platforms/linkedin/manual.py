@@ -23,6 +23,9 @@ NOTIFICATION_CANDIDATE_PREFIX = 'notification_candidate_'
 NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_after_'
 SELECTED_POST_PREFIX = 'selected_post_activity_'
 SELECTED_THREAD_OPEN_PREFIX = 'selected_post_thread_open_activity_'
+SELECTED_POST_REACTION_PREFIX = 'selected_post_reaction_activity_'
+SELECTED_POST_EDITOR_PREFIX = 'selected_post_editor_activity_'
+SELECTED_POST_SUBMIT_PREFIX = 'selected_post_submit_activity_'
 
 _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
@@ -36,6 +39,18 @@ _SELECTED_POST_KEY = re.compile(
 _SELECTED_THREAD_OPEN_KEY = re.compile(
     rf'^{SELECTED_THREAD_OPEN_PREFIX}(?P<activity>[0-9]+)_body_'
     r'(?P<body>[0-9a-f]{64})$'
+)
+_SELECTED_POST_REACTION_KEY = re.compile(
+    rf'^{SELECTED_POST_REACTION_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})$'
+)
+_SELECTED_POST_EDITOR_KEY = re.compile(
+    rf'^{SELECTED_POST_EDITOR_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})$'
+)
+_SELECTED_POST_SUBMIT_KEY = re.compile(
+    rf'^{SELECTED_POST_SUBMIT_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})_draft_(?P<draft>[0-9a-f]{64})$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
 
@@ -183,6 +198,91 @@ def _manual_notification_contract() -> dict[str, Any]:
     return dict(contract)
 
 
+def _manual_comment_contract() -> dict[str, Any]:
+    workflow = load_platform_yaml('linkedin').get('workflow') or {}
+    engagement = workflow.get('engagement_signal_capture') or {}
+    contract = engagement.get('manual_comment_composition')
+    expected = {
+        'selected_post_identity': {
+            'activity_source': 'exact_selected_activity',
+            'body_digest': 'sha256_utf8',
+        },
+        'reaction': {
+            'element_key_prefix': SELECTED_POST_REACTION_PREFIX,
+            'role': 'push button',
+            'relative_depth': 2,
+            'exact_names': {
+                'no_reaction': 'Reaction button state: no reaction',
+                'liked': 'Reaction button state: Like',
+            },
+            'action': {
+                'effect_class': 'outward',
+                'primitives': ['activate_optional_like'],
+                'allowed_now': ['activate_optional_like'],
+            },
+            'postcondition': 'exact_same_activity_body_reaction_like',
+        },
+        'editor': {
+            'element_key_prefix': SELECTED_POST_EDITOR_PREFIX,
+            'name': 'Text editor for creating comment',
+            'role': 'entry',
+            'relative_depth': 5,
+            'states_include': ['editable', 'focusable', 'visible', 'sensitive'],
+            'ready_states_include': ['showing'],
+            'max_text_chars': 1800,
+            'text_child': {
+                'role': 'paragraph',
+                'parent_text': '\uFFFC',
+                'empty_texts': ['Add a comment...', 'Add a comment...\n'],
+                'states_include': ['editable', 'visible', 'sensitive'],
+            },
+            'action': {
+                'effect_class': 'draft',
+                'primitives': ['paste_frozen_text'],
+                'allowed_now': ['paste_frozen_text'],
+            },
+            'postcondition': 'exact_same_activity_body_editor_text_sha256',
+        },
+        'submit': {
+            'element_key_prefix': SELECTED_POST_SUBMIT_PREFIX,
+            'name': 'Comment',
+            'role': 'push button',
+            'relative_depth': 4,
+            'states_include': ['focusable', 'showing', 'visible', 'sensitive'],
+            'action': {
+                'effect_class': 'outward',
+                'primitives': ['submit_frozen_comment'],
+                'allowed_now': ['submit_frozen_comment'],
+            },
+            'precondition': 'exact_unsent_draft_on_same_activity_body',
+            'postcondition': 'exact_comment_delivery',
+        },
+        'own_comment': {
+            'control_name_prefix': 'View more options for ',
+            'control_name_suffix': '\u2019s comment.',
+            'role': 'push button',
+            'relative_depth': 5,
+            'states_include': ['visible', 'sensitive'],
+            'relative_text': {
+                'root_distance': 2,
+                'root_role': 'section',
+                'child_path': [2, 0, 0, 0],
+                'role': 'section',
+                'max_text_chars': 1800,
+            },
+        },
+        'observation_barrier': {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 10000,
+        },
+    }
+    if contract != expected:
+        raise RuntimeError('LinkedIn manual comment composition contract is invalid')
+    return dict(contract)
+
+
 def _node_role(node: Any) -> str:
     try:
         return str(node.get_role_name() or '')
@@ -211,6 +311,107 @@ def _node_text(node: Any) -> str:
         return str(Atspi.Text.get_text(text_iface, 0, count) or '').strip()
     except Exception:
         return ''
+
+
+def _node_exact_text(node: Any, max_chars: int) -> str:
+    try:
+        import gi
+
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        text_iface = node.get_text_iface()
+        if text_iface is None:
+            raise ValueError('LinkedIn exact-text node has no Text interface')
+        count = int(Atspi.Text.get_character_count(text_iface))
+        if count < 0 or count > max_chars:
+            raise ValueError(
+                f'LinkedIn exact-text length is outside 0..{max_chars}: {count}'
+            )
+        return str(Atspi.Text.get_text(text_iface, 0, count) or '')
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError('LinkedIn exact text is unreadable') from exc
+
+
+def _node_has_states(node: Any, required: list[str]) -> bool:
+    try:
+        import gi
+
+        gi.require_version('Atspi', '2.0')
+        from gi.repository import Atspi
+
+        states = node.get_state_set()
+        return all(
+            states.contains(getattr(Atspi.StateType, state.upper()))
+            for state in required
+        )
+    except Exception:
+        return False
+
+
+def _comment_editor_text(node: Any, contract: dict[str, Any]) -> str:
+    text_child = contract['text_child']
+    parent_text = _node_exact_text(node, len(text_child['parent_text']))
+    if parent_text != text_child['parent_text']:
+        raise ValueError(
+            'LinkedIn comment editor parent text no longer matches YAML'
+        )
+    children = _direct_children(node)
+    if len(children) != 1:
+        raise ValueError(
+            'LinkedIn comment editor must expose one YAML-authorized text child'
+        )
+    child = children[0]
+    if (
+        _node_role(child) != text_child['role']
+        or not _node_has_states(child, text_child['states_include'])
+    ):
+        raise ValueError(
+            'LinkedIn comment editor text child no longer matches YAML'
+        )
+    text = _node_exact_text(child, contract['max_text_chars'])
+    return '' if text in text_child['empty_texts'] else text
+
+
+def _comment_relative_text(node: Any, contract: dict[str, Any]) -> str:
+    root = node
+    for _depth in range(contract['root_distance']):
+        try:
+            root = root.get_parent()
+        except Exception as exc:
+            raise ValueError(
+                'LinkedIn comment relative-text root is unreadable'
+            ) from exc
+        if root is None:
+            raise ValueError('LinkedIn comment relative-text root is absent')
+    if _node_role(root) != contract['root_role']:
+        raise ValueError('LinkedIn comment relative-text root role drifted')
+    target = _node_at_index_path(root, contract['child_path'])
+    if target is None or _node_role(target) != contract['role']:
+        raise ValueError('LinkedIn comment relative-text path drifted')
+    return _node_exact_text(target, contract['max_text_chars'])
+
+
+def _validate_frozen_comment_text(text: str, contract: dict[str, Any]) -> str:
+    if not isinstance(text, str) or not text:
+        raise ValueError('LinkedIn frozen comment text must be non-empty')
+    if len(text) > contract['editor']['max_text_chars']:
+        raise ValueError('LinkedIn frozen comment text exceeds the YAML maximum')
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _validate_private_author_name(author_name: str) -> str:
+    if (
+        not isinstance(author_name, str)
+        or not author_name
+        or author_name != author_name.strip()
+        or len(author_name) > 200
+        or any(ord(character) < 32 or ord(character) == 127 for character in author_name)
+    ):
+        raise ValueError('LinkedIn private comment author name is invalid')
+    return author_name
 
 
 def _direct_children(node: Any) -> list[Any]:
@@ -381,6 +582,167 @@ def _selected_post_descendants(
     return descendants
 
 
+def _selected_comment_controls(
+    snapshot: Snapshot,
+    root: Any,
+    contract: dict[str, Any],
+) -> dict[str, Any]:
+    descendants = _selected_post_descendants(snapshot, root)
+    reaction_contract = contract['reaction']
+    reaction_candidates = [
+        element
+        for element, depth in descendants
+        if (
+            depth == reaction_contract['relative_depth']
+            and element.role == reaction_contract['role']
+            and element.name.startswith('Reaction button state:')
+        )
+    ]
+    allowed_reaction_names = set(reaction_contract['exact_names'].values())
+    if any(
+        element.name not in allowed_reaction_names
+        for element in reaction_candidates
+    ):
+        raise ValueError('LinkedIn selected-post reaction state is not declared')
+    if len(reaction_candidates) > 1:
+        raise ValueError('LinkedIn selected-post reaction control is ambiguous')
+
+    editor_contract = contract['editor']
+    editor_candidates = [
+        element
+        for element, depth in descendants
+        if (
+            depth == editor_contract['relative_depth']
+            and element.name == editor_contract['name']
+            and element.role == editor_contract['role']
+        )
+    ]
+    if len(editor_candidates) > 1:
+        raise ValueError('LinkedIn selected-post comment editor is ambiguous')
+    editor_candidate = editor_candidates[0] if editor_candidates else None
+    editor = (
+        editor_candidate
+        if editor_candidate is not None
+        and _node_has_states(
+            editor_candidate.atspi_obj,
+            editor_contract['states_include'],
+        )
+        else None
+    )
+    editor_text: str | None = None
+    editor_ready = False
+    if editor is not None:
+        editor_text = _comment_editor_text(editor.atspi_obj, editor_contract)
+        editor_ready = _node_has_states(
+            editor.atspi_obj,
+            editor_contract['states_include']
+            + editor_contract['ready_states_include'],
+        )
+
+    submit_contract = contract['submit']
+    submit_candidates = [
+        element
+        for element, depth in descendants
+        if (
+            depth == submit_contract['relative_depth']
+            and element.name == submit_contract['name']
+            and element.role == submit_contract['role']
+        )
+    ]
+    if len(submit_candidates) > 1:
+        raise ValueError('LinkedIn selected-post comment submit is ambiguous')
+    submit_candidate = submit_candidates[0] if submit_candidates else None
+    submit = (
+        submit_candidate
+        if submit_candidate is not None
+        and _node_has_states(
+            submit_candidate.atspi_obj,
+            submit_contract['states_include'],
+        )
+        else None
+    )
+    if editor_text and submit is None:
+        raise ValueError(
+            'LinkedIn non-empty comment editor lacks one ready same-card submit'
+        )
+
+    own_contract = contract['own_comment']
+    comment_controls = [
+        element
+        for element, depth in descendants
+        if (
+            depth == own_contract['relative_depth']
+            and element.role == own_contract['role']
+            and element.name.startswith(own_contract['control_name_prefix'])
+            and element.name.endswith(own_contract['control_name_suffix'])
+            and set(own_contract['states_include']).issubset(element.states)
+        )
+    ]
+    return {
+        'reaction': reaction_candidates[0] if reaction_candidates else None,
+        'editor': editor,
+        'editor_text': editor_text,
+        'editor_ready': editor_ready,
+        'submit': submit,
+        'comment_controls': comment_controls,
+    }
+
+
+def _selected_comment_surface(snapshot: Snapshot) -> dict[str, Any]:
+    notification_contract = _manual_notification_contract()
+    comment_contract = _manual_comment_contract()
+    activity, activity_sources = _selected_activity_identity(
+        snapshot,
+        notification_contract,
+    )
+    if activity is None:
+        raise ValueError('LinkedIn comment surface lacks one exact activity')
+    root, _body, body_text = _selected_post_root_and_body(
+        snapshot,
+        notification_contract,
+    )
+    if root is None or body_text is None:
+        raise ValueError('LinkedIn comment surface lacks one exact post body')
+    body_sha256 = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+    return {
+        'activity': activity,
+        'activity_sources': activity_sources,
+        'body_sha256': body_sha256,
+        'root': root,
+        'controls': _selected_comment_controls(
+            snapshot,
+            root,
+            comment_contract,
+        ),
+        'contract': comment_contract,
+    }
+
+
+def _exact_own_comment_count(
+    surface: dict[str, Any],
+    expected_author_name: str,
+    expected_text: str,
+) -> int:
+    author_name = _validate_private_author_name(expected_author_name)
+    own_contract = surface['contract']['own_comment']
+    expected_name = (
+        f"{own_contract['control_name_prefix']}"
+        f"{author_name}{own_contract['control_name_suffix']}"
+    )
+    matches = [
+        element
+        for element in surface['controls']['comment_controls']
+        if (
+            element.name == expected_name
+            and _comment_relative_text(
+                element.atspi_obj,
+                own_contract['relative_text'],
+            ) == expected_text
+        )
+    ]
+    return len(matches)
+
+
 def _selected_thread_controls(
     snapshot: Snapshot,
     root: Any,
@@ -520,6 +882,9 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             and not key.startswith(NOTIFICATIONS_CONTINUATION_PREFIX)
             and not key.startswith(SELECTED_POST_PREFIX)
             and not key.startswith(SELECTED_THREAD_OPEN_PREFIX)
+            and not key.startswith(SELECTED_POST_REACTION_PREFIX)
+            and not key.startswith(SELECTED_POST_EDITOR_PREFIX)
+            and not key.startswith(SELECTED_POST_SUBMIT_PREFIX)
         )
     }
     mapped[NOTIFICATIONS_NAVIGATION] = (
@@ -587,12 +952,29 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 'LinkedIn selected activity lacks one exact showing post body'
             )
         body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+        comment_contract = _manual_comment_contract()
+        comment_controls = _selected_comment_controls(
+            snapshot,
+            root,
+            comment_contract,
+        )
+        reaction = comment_controls['reaction']
+        reaction_state = None
+        if reaction is not None:
+            reaction_state = next(
+                state
+                for state, exact_name in comment_contract['reaction'][
+                    'exact_names'
+                ].items()
+                if reaction.name == exact_name
+            )
         key = f'{SELECTED_POST_PREFIX}{selected_activity}'
         raw = {
             **dict(body.raw),
             'selected_activity': selected_activity,
             'selected_activity_sources': list(activity_sources),
             'selected_post_body_sha256': body_digest,
+            'selected_post_reaction_state': reaction_state,
         }
         mapped[key] = [replace(
             body,
@@ -600,10 +982,84 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             name='Selected LinkedIn post body',
             text=body_text,
             description=(
-                f'activity={selected_activity}; body_sha256={body_digest}'
+                f'activity={selected_activity}; body_sha256={body_digest}; '
+                f'reaction_state={reaction_state or "not_mounted"}'
             ),
             raw=raw,
         )]
+        if reaction is not None:
+            reaction_key = (
+                f'{SELECTED_POST_REACTION_PREFIX}{selected_activity}_body_'
+                f'{body_digest}'
+            )
+            mapped[reaction_key] = [replace(
+                reaction,
+                key=reaction_key,
+                description=(
+                    f'activity={selected_activity}; body_sha256={body_digest}; '
+                    f'reaction_state={reaction_state}'
+                ),
+                raw={
+                    **dict(reaction.raw),
+                    'selected_activity': selected_activity,
+                    'selected_post_body_sha256': body_digest,
+                    'selected_post_reaction_state': reaction_state,
+                },
+            )]
+        editor = comment_controls['editor']
+        editor_text = comment_controls['editor_text']
+        if editor is not None and editor_text is not None:
+            editor_text_sha256 = hashlib.sha256(
+                editor_text.encode('utf-8')
+            ).hexdigest()
+            editor_key = (
+                f'{SELECTED_POST_EDITOR_PREFIX}{selected_activity}_body_'
+                f'{body_digest}'
+            )
+            mapped[editor_key] = [replace(
+                editor,
+                key=editor_key,
+                name='LinkedIn selected-post comment editor',
+                text=None,
+                description=(
+                    f'activity={selected_activity}; body_sha256={body_digest}; '
+                    f'editor_text_sha256={editor_text_sha256}; '
+                    f'editor_text_chars={len(editor_text)}'
+                ),
+                raw={
+                    **dict(editor.raw),
+                    'selected_activity': selected_activity,
+                    'selected_post_body_sha256': body_digest,
+                    'comment_editor_ready': comment_controls['editor_ready'],
+                    'comment_editor_empty': editor_text == '',
+                    'comment_editor_text_sha256': editor_text_sha256,
+                    'comment_editor_text_chars': len(editor_text),
+                },
+            )]
+            submit = comment_controls['submit']
+            if editor_text and submit is not None:
+                submit_key = (
+                    f'{SELECTED_POST_SUBMIT_PREFIX}{selected_activity}_body_'
+                    f'{body_digest}_draft_{editor_text_sha256}'
+                )
+                mapped[submit_key] = [replace(
+                    submit,
+                    key=submit_key,
+                    name='LinkedIn selected-post comment submit',
+                    description=(
+                        f'activity={selected_activity}; body_sha256={body_digest}; '
+                        f'draft_sha256={editor_text_sha256}; '
+                        f'draft_chars={len(editor_text)}'
+                    ),
+                    raw={
+                        **dict(submit.raw),
+                        'selected_activity': selected_activity,
+                        'selected_post_body_sha256': body_digest,
+                        'comment_submit_ready': True,
+                        'comment_draft_sha256': editor_text_sha256,
+                        'comment_draft_chars': len(editor_text),
+                    },
+                )]
         comment_counts, visible_comments = _selected_thread_controls(
             snapshot,
             root,
@@ -643,12 +1099,18 @@ def element_operation(
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
+    selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
+    selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
     if (
         element_key != NOTIFICATIONS_NAVIGATION
         and candidate_match is None
         and continuation_match is None
         and selected_post_match is None
         and selected_thread_open_match is None
+        and selected_reaction_match is None
+        and selected_editor_match is None
+        and selected_submit_match is None
     ):
         return None
     if selected_post_match is not None:
@@ -682,6 +1144,166 @@ def element_operation(
                 'kind': 'exact_selected_post_body',
                 'activity': activity,
                 'body_sha256': body_digest,
+            },
+        }
+    selected_context = dict(context or {})
+    if selected_reaction_match is not None:
+        activity = selected_reaction_match.group('activity')
+        body_sha256 = selected_reaction_match.group('body')
+        reaction_state = selected_context.get('selected_post_reaction_state')
+        if (
+            selected_context.get('selected_activity') != activity
+            or selected_context.get('selected_post_body_sha256') != body_sha256
+            or reaction_state not in {'no_reaction', 'liked'}
+        ):
+            raise ValueError('LinkedIn reaction identity is not exact')
+        reaction_contract = _manual_comment_contract()['reaction']
+        if reaction_state == 'liked':
+            return {
+                'method': 'observe',
+                'effect_class': 'observation',
+                'primitives': [],
+                'allowed_now': [],
+                'forbidden': [
+                    'activate',
+                    'activate_optional_like',
+                    'paste_frozen_text',
+                    'submit_frozen_comment',
+                ],
+                'postcondition': {
+                    'kind': reaction_contract['postcondition'],
+                    'activity': activity,
+                    'body_sha256': body_sha256,
+                    'reaction_state': 'liked',
+                },
+            }
+        return {
+            'method': 'activate_optional_like',
+            **reaction_contract['action'],
+            'forbidden': [
+                'click',
+                'focus',
+                'activate',
+                'hover',
+                'mapped_pointer_activate',
+                'paste_frozen_text',
+                'submit_frozen_comment',
+            ],
+            'postcondition': {
+                'kind': reaction_contract['postcondition'],
+                'activity': activity,
+                'body_sha256': body_sha256,
+                'reaction_state': 'liked',
+            },
+        }
+    if selected_editor_match is not None:
+        activity = selected_editor_match.group('activity')
+        body_sha256 = selected_editor_match.group('body')
+        editor_contract = _manual_comment_contract()['editor']
+        editor_empty = selected_context.get('comment_editor_empty')
+        editor_text_sha256 = selected_context.get(
+            'comment_editor_text_sha256'
+        )
+        editor_text_chars = selected_context.get('comment_editor_text_chars')
+        empty_digest = hashlib.sha256(b'').hexdigest()
+        if (
+            selected_context.get('selected_activity') != activity
+            or selected_context.get('selected_post_body_sha256') != body_sha256
+            or selected_context.get('comment_editor_ready') is not True
+            or not isinstance(editor_empty, bool)
+            or not isinstance(editor_text_sha256, str)
+            or re.fullmatch(r'[0-9a-f]{64}', editor_text_sha256) is None
+            or isinstance(editor_text_chars, bool)
+            or not isinstance(editor_text_chars, int)
+            or not 0 <= editor_text_chars <= editor_contract['max_text_chars']
+            or editor_empty != (editor_text_chars == 0)
+            or (editor_empty and editor_text_sha256 != empty_digest)
+            or (not editor_empty and editor_text_sha256 == empty_digest)
+        ):
+            raise ValueError(
+                'LinkedIn same-card editor observation identity is not exact'
+            )
+        if not editor_empty:
+            return {
+                'method': 'observe',
+                'effect_class': 'observation',
+                'primitives': [],
+                'allowed_now': [],
+                'forbidden': [
+                    'activate',
+                    'activate_optional_like',
+                    'paste_frozen_text',
+                    'submit_frozen_comment',
+                ],
+                'postcondition': {
+                    'kind': editor_contract['postcondition'],
+                    'activity': activity,
+                    'body_sha256': body_sha256,
+                    'editor_text_sha256': editor_text_sha256,
+                    'editor_text_chars': editor_text_chars,
+                },
+            }
+        return {
+            'method': 'paste_frozen_text',
+            'effect_class': editor_contract['action']['effect_class'],
+            'primitives': list(editor_contract['action']['primitives']),
+            'allowed_now': list(editor_contract['action']['allowed_now']),
+            'max_text_chars': editor_contract['max_text_chars'],
+            'forbidden': [
+                'click',
+                'activate',
+                'hover',
+                'mapped_pointer_activate',
+                'submit_frozen_comment',
+            ],
+            'postcondition': {
+                'kind': editor_contract['postcondition'],
+                'activity': activity,
+                'body_sha256': body_sha256,
+            },
+        }
+    if selected_submit_match is not None:
+        activity = selected_submit_match.group('activity')
+        body_sha256 = selected_submit_match.group('body')
+        draft_sha256 = selected_submit_match.group('draft')
+        draft_chars = selected_context.get('comment_draft_chars')
+        if (
+            selected_context.get('selected_activity') != activity
+            or selected_context.get('selected_post_body_sha256') != body_sha256
+            or selected_context.get('comment_submit_ready') is not True
+            or selected_context.get('comment_draft_sha256') != draft_sha256
+            or isinstance(draft_chars, bool)
+            or not isinstance(draft_chars, int)
+            or not 1 <= draft_chars <= _manual_comment_contract()['editor'][
+                'max_text_chars'
+            ]
+        ):
+            raise ValueError('LinkedIn frozen comment submit identity is not exact')
+        submit_contract = _manual_comment_contract()['submit']
+        return {
+            'method': 'submit_frozen_comment',
+            'effect_class': submit_contract['action']['effect_class'],
+            'primitives': list(submit_contract['action']['primitives']),
+            'allowed_now': list(submit_contract['action']['allowed_now']),
+            'forbidden': [
+                'click',
+                'focus',
+                'activate',
+                'hover',
+                'mapped_pointer_activate',
+                'paste_frozen_text',
+            ],
+            'precondition': {
+                'kind': submit_contract['precondition'],
+                'activity': activity,
+                'body_sha256': body_sha256,
+                'draft_sha256': draft_sha256,
+            },
+            'postcondition': {
+                'kind': submit_contract['postcondition'],
+                'activity': activity,
+                'body_sha256': body_sha256,
+                'draft_sha256': draft_sha256,
             },
         }
     normalized_states = {
@@ -786,12 +1408,182 @@ def element_operation(
     }
 
 
+def verify_comment_submit_precondition(
+    snapshot: Snapshot,
+    element_key: str,
+    expected_text: str,
+    expected_author_name: str,
+) -> dict[str, Any]:
+    _require_linkedin(snapshot)
+    submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
+    if submit_match is None:
+        raise ValueError(
+            'LinkedIn comment-submit precondition requires one exact submit key'
+        )
+    surface = _selected_comment_surface(snapshot)
+    text_sha256 = _validate_frozen_comment_text(
+        expected_text,
+        surface['contract'],
+    )
+    author_name = _validate_private_author_name(expected_author_name)
+    controls = surface['controls']
+    if (
+        submit_match.group('activity') != surface['activity']
+        or submit_match.group('body') != surface['body_sha256']
+        or submit_match.group('draft') != text_sha256
+        or controls['editor_ready'] is not True
+        or controls['editor_text'] != expected_text
+        or controls['submit'] is None
+        or _exact_own_comment_count(surface, author_name, expected_text) != 0
+    ):
+        raise ValueError(
+            'LinkedIn comment-submit precondition is not one exact unsent '
+            'draft on the selected activity/body'
+        )
+    author_control = (
+        f"{surface['contract']['own_comment']['control_name_prefix']}"
+        f"{author_name}"
+        f"{surface['contract']['own_comment']['control_name_suffix']}"
+    )
+    return {
+        'element_key': element_key,
+        'operation': 'submit_frozen_comment',
+        'effect_class': 'outward',
+        'precondition': surface['contract']['submit']['precondition'],
+        'route_exact': True,
+        'activity_exact': True,
+        'body_sha256_exact': True,
+        'draft_sha256': text_sha256,
+        'draft_chars': len(expected_text),
+        'own_comment_control_sha256': hashlib.sha256(
+            author_control.encode('utf-8')
+        ).hexdigest(),
+        'existing_exact_own_comment_count': 0,
+    }
+
+
 def verify_post_action(
     snapshot: Snapshot,
     element_key: str,
     operation: str,
+    *,
+    expected_text: str | None = None,
+    expected_author_name: str | None = None,
 ) -> dict[str, Any]:
     _require_linkedin(snapshot)
+    reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
+    editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
+    submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
+    if reaction_match is not None:
+        if operation != 'activate_optional_like':
+            raise ValueError(
+                'LinkedIn reaction postcondition requires activate_optional_like'
+            )
+        surface = _selected_comment_surface(snapshot)
+        reaction = surface['controls']['reaction']
+        liked_name = surface['contract']['reaction']['exact_names']['liked']
+        if (
+            reaction_match.group('activity') != surface['activity']
+            or reaction_match.group('body') != surface['body_sha256']
+            or reaction is None
+            or reaction.name != liked_name
+        ):
+            raise ValueError(
+                'LinkedIn reaction postcondition did not prove Like on the '
+                'same activity/body'
+            )
+        return {
+            'element_key': element_key,
+            'operation': operation,
+            'effect_class': 'outward',
+            'postcondition': surface['contract']['reaction']['postcondition'],
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': list(surface['activity_sources']),
+            'selected_post_body_sha256': surface['body_sha256'],
+            'reaction_state': 'liked',
+            'observed_url': snapshot.url,
+        }
+    if editor_match is not None:
+        if operation != 'paste_frozen_text' or expected_text is None:
+            raise ValueError(
+                'LinkedIn editor postcondition requires exact frozen text'
+            )
+        surface = _selected_comment_surface(snapshot)
+        text_sha256 = _validate_frozen_comment_text(
+            expected_text,
+            surface['contract'],
+        )
+        if (
+            editor_match.group('activity') != surface['activity']
+            or editor_match.group('body') != surface['body_sha256']
+            or surface['controls']['editor_ready'] is not True
+            or surface['controls']['editor_text'] != expected_text
+        ):
+            raise ValueError(
+                'LinkedIn editor postcondition did not prove exact frozen text '
+                'on the same activity/body'
+            )
+        return {
+            'element_key': element_key,
+            'operation': operation,
+            'effect_class': 'draft',
+            'postcondition': surface['contract']['editor']['postcondition'],
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': list(surface['activity_sources']),
+            'selected_post_body_sha256': surface['body_sha256'],
+            'editor_text_sha256': text_sha256,
+            'editor_text_chars': len(expected_text),
+            'observed_url': snapshot.url,
+        }
+    if submit_match is not None:
+        if (
+            operation != 'submit_frozen_comment'
+            or expected_text is None
+            or expected_author_name is None
+        ):
+            raise ValueError(
+                'LinkedIn submit postcondition requires frozen text and private author'
+            )
+        surface = _selected_comment_surface(snapshot)
+        text_sha256 = _validate_frozen_comment_text(
+            expected_text,
+            surface['contract'],
+        )
+        author_name = _validate_private_author_name(expected_author_name)
+        exact_own_comment_count = _exact_own_comment_count(
+            surface,
+            author_name,
+            expected_text,
+        )
+        if (
+            submit_match.group('activity') != surface['activity']
+            or submit_match.group('body') != surface['body_sha256']
+            or submit_match.group('draft') != text_sha256
+            or surface['controls']['editor_ready'] is not True
+            or surface['controls']['editor_text'] != ''
+            or exact_own_comment_count != 1
+        ):
+            raise ValueError(
+                'LinkedIn submit postcondition did not prove one exact own-comment '
+                'render and an empty same-card editor'
+            )
+        return {
+            'element_key': element_key,
+            'operation': operation,
+            'effect_class': 'outward',
+            'postcondition': surface['contract']['submit']['postcondition'],
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': list(surface['activity_sources']),
+            'selected_post_body_sha256': surface['body_sha256'],
+            'editor_empty': True,
+            'exact_own_comment_count': exact_own_comment_count,
+            'comment_text_sha256': text_sha256,
+            'comment_text_chars': len(expected_text),
+            'observed_url': snapshot.url,
+        }
     if operation != 'activate':
         raise ValueError(
             'LinkedIn post-action verification accepts only activate'
@@ -1015,15 +1807,38 @@ def stable_post_action_observation(
     element_key: str,
     operation: str,
     deadline_at: float,
+    *,
+    expected_text: str | None = None,
+    expected_author_name: str | None = None,
 ) -> tuple[Snapshot | None, dict[str, Any]]:
     navigation_contract = _manual_post_action_contract()
     notification_contract = _manual_notification_contract()
-    if operation != 'activate' or (
-        element_key != navigation_contract['element_key']
-        and _CANDIDATE_KEY.fullmatch(element_key) is None
-        and _CONTINUATION_KEY.fullmatch(element_key) is None
-        and _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key) is None
-    ):
+    comment_contract = _manual_comment_contract()
+    selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
+    selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
+    selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
+    existing_activate = operation == 'activate' and (
+        element_key == navigation_contract['element_key']
+        or _CANDIDATE_KEY.fullmatch(element_key) is not None
+        or _CONTINUATION_KEY.fullmatch(element_key) is not None
+        or _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key) is not None
+    )
+    reaction_activate = (
+        operation == 'activate_optional_like'
+        and selected_reaction_match is not None
+    )
+    editor_write = (
+        operation == 'paste_frozen_text'
+        and selected_editor_match is not None
+        and expected_text is not None
+    )
+    comment_submit = (
+        operation == 'submit_frozen_comment'
+        and selected_submit_match is not None
+        and expected_text is not None
+        and expected_author_name is not None
+    )
+    if not any((existing_activate, reaction_activate, editor_write, comment_submit)):
         raise ValueError('LinkedIn stable post-action observation is not declared')
     if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
         raise ValueError('LinkedIn post-action deadline must be monotonic seconds')
@@ -1037,16 +1852,46 @@ def stable_post_action_observation(
             'activity': selected_thread_open_match.group('activity'),
             'body_sha256': selected_thread_open_match.group('body'),
         }
+    elif selected_reaction_match is not None:
+        postcondition = {
+            'kind': comment_contract['reaction']['postcondition'],
+            'activity': selected_reaction_match.group('activity'),
+            'body_sha256': selected_reaction_match.group('body'),
+        }
+    elif selected_editor_match is not None:
+        postcondition = {
+            'kind': comment_contract['editor']['postcondition'],
+            'activity': selected_editor_match.group('activity'),
+            'body_sha256': selected_editor_match.group('body'),
+            'text_sha256': hashlib.sha256(
+                str(expected_text).encode('utf-8')
+            ).hexdigest(),
+        }
+    elif selected_submit_match is not None:
+        postcondition = {
+            'kind': comment_contract['submit']['postcondition'],
+            'activity': selected_submit_match.group('activity'),
+            'body_sha256': selected_submit_match.group('body'),
+            'text_sha256': selected_submit_match.group('draft'),
+        }
     else:
         postcondition = element_operation(
             element_key,
             ['enabled', 'focusable'],
         )['postcondition']
-    barrier = (
-        navigation_contract['observation_barrier']
-        if element_key == navigation_contract['element_key']
-        else notification_contract['observation_barrier']
-    )
+    if any(
+        match is not None
+        for match in (
+            selected_reaction_match,
+            selected_editor_match,
+            selected_submit_match,
+        )
+    ):
+        barrier = comment_contract['observation_barrier']
+    elif element_key == navigation_contract['element_key']:
+        barrier = navigation_contract['observation_barrier']
+    else:
+        barrier = notification_contract['observation_barrier']
     stable_cycles_required = barrier['stable_cycles']
     interval = barrier['interval_ms'] / 1000.0
     started_at = time.monotonic()
@@ -1062,7 +1907,13 @@ def stable_post_action_observation(
         _firefox, _document, snapshot = build_snapshot('linkedin')
         last_snapshot = snapshot
         try:
-            exact_receipt = verify_post_action(snapshot, element_key, operation)
+            exact_receipt = verify_post_action(
+                snapshot,
+                element_key,
+                operation,
+                expected_text=expected_text,
+                expected_author_name=expected_author_name,
+            )
         except ValueError:
             exact_receipt = None
         exact = exact_receipt is not None
@@ -1087,11 +1938,26 @@ def stable_post_action_observation(
                 sample['observed_candidate_count'] = exact_receipt[
                     'observed_candidate_count'
                 ]
+            for field in (
+                'reaction_state',
+                'editor_text_sha256',
+                'editor_text_chars',
+                'editor_empty',
+                'exact_own_comment_count',
+                'comment_text_sha256',
+                'comment_text_chars',
+            ):
+                if field in exact_receipt:
+                    sample[field] = exact_receipt[field]
         samples.append(sample)
         if stable_cycles_observed >= stable_cycles_required:
             return snapshot, {
                 'result': 'PASS',
-                'next_mutation_authorized': True,
+                'next_mutation_authorized': operation != 'submit_frozen_comment',
+                'terminal_delivery_verified': operation == 'submit_frozen_comment',
+                'observe_required_before_next_mutation': (
+                    operation != 'submit_frozen_comment'
+                ),
                 'projection': postcondition.get('kind') or postcondition['projection'],
                 'refresh_policy': barrier['refresh_policy'],
                 'stable_cycles_required': stable_cycles_required,
@@ -1118,9 +1984,13 @@ __all__ = [
     'NOTIFICATION_CANDIDATE_PREFIX',
     'NOTIFICATIONS_NAVIGATION',
     'NOTIFICATIONS_CONTINUATION_PREFIX',
+    'SELECTED_POST_EDITOR_PREFIX',
+    'SELECTED_POST_REACTION_PREFIX',
+    'SELECTED_POST_SUBMIT_PREFIX',
     'augment_snapshot',
     'element_operation',
     'stable_scroll_post_action_observation',
     'stable_post_action_observation',
+    'verify_comment_submit_precondition',
     'verify_post_action',
 ]

@@ -298,6 +298,95 @@ workflow:
         stable_cycles: 2
         interval_ms: 200
         timeout_ms: 10000
+    manual_comment_composition:
+      selected_post_identity:
+        activity_source: exact_selected_activity
+        body_digest: sha256_utf8
+      reaction:
+        element_key_prefix: selected_post_reaction_activity_
+        role: push button
+        relative_depth: 2
+        exact_names:
+          no_reaction: "Reaction button state: no reaction"
+          liked: "Reaction button state: Like"
+        action:
+          effect_class: outward
+          primitives:
+            - activate_optional_like
+          allowed_now:
+            - activate_optional_like
+        postcondition: exact_same_activity_body_reaction_like
+      editor:
+        element_key_prefix: selected_post_editor_activity_
+        name: Text editor for creating comment
+        role: entry
+        relative_depth: 5
+        states_include:
+          - editable
+          - focusable
+          - visible
+          - sensitive
+        ready_states_include:
+          - showing
+        max_text_chars: 1800
+        text_child:
+          role: paragraph
+          parent_text: "\uFFFC"
+          empty_texts:
+            - "Add a comment..."
+            - "Add a comment...\n"
+          states_include:
+            - editable
+            - visible
+            - sensitive
+        action:
+          effect_class: draft
+          primitives:
+            - paste_frozen_text
+          allowed_now:
+            - paste_frozen_text
+        postcondition: exact_same_activity_body_editor_text_sha256
+      submit:
+        element_key_prefix: selected_post_submit_activity_
+        name: Comment
+        role: push button
+        relative_depth: 4
+        states_include:
+          - focusable
+          - showing
+          - visible
+          - sensitive
+        action:
+          effect_class: outward
+          primitives:
+            - submit_frozen_comment
+          allowed_now:
+            - submit_frozen_comment
+        precondition: exact_unsent_draft_on_same_activity_body
+        postcondition: exact_comment_delivery
+      own_comment:
+        control_name_prefix: "View more options for "
+        control_name_suffix: "\u2019s comment."
+        role: push button
+        relative_depth: 5
+        states_include:
+          - visible
+          - sensitive
+        relative_text:
+          root_distance: 2
+          root_role: section
+          child_path:
+            - 2
+            - 0
+            - 0
+            - 0
+          role: section
+          max_text_chars: 1800
+      observation_barrier:
+        refresh_policy: invalidate_reacquire
+        stable_cycles: 2
+        interval_ms: 200
+        timeout_ms: 10000
     observation_barrier:
       projection: exact_route_marker_and_candidate_set
       refresh_policy: invalidate_reacquire
