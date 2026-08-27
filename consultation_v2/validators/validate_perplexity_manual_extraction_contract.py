@@ -3,8 +3,10 @@ from __future__ import annotations
 
 # ruff: noqa: E402
 
+import hashlib
 from pathlib import Path
 import sys
+import tempfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,9 +20,11 @@ from scripts.run_manual_chat_worker import (
     _extract_content,
     _perplexity_artifacts_diagnostic_content,
     _perplexity_report_card_diagnostic_content,
+    _perplexity_report_card_extraction_content,
     _post_send_confirmation_content,
     _validate_perplexity_artifacts_diagnostic_receipt,
     _validate_perplexity_report_card_diagnostic_receipt,
+    _validate_perplexity_report_card_extraction_receipt,
     build_parser,
 )
 
@@ -411,6 +415,137 @@ other_mutation_count: 0
         raise AssertionError(
             'Perplexity report-card parser accepted more than one click'
         )
+    extraction_args = parser.parse_args([
+        'extract-perplexity-report-card', '--display', ':6', '--seat-id',
+        'perplexity-report-extraction-r3', '--artifact-root',
+        '/private/perplexity-report-extraction-r3', '--source-diagnostic-identity',
+        'perplexity-report-card-diagnostic-r2', '--thread-url',
+        'https://www.perplexity.ai/search/exact-thread-id', '--response-file',
+        '/private/perplexity-report-extraction-r3/response.txt',
+    ])
+    _require(
+        extraction_args.platform == 'perplexity'
+        and extraction_args.phase == 'extract-perplexity-report-card'
+        and extraction_args.source_diagnostic_identity
+        == 'perplexity-report-card-diagnostic-r2',
+        'Perplexity report-card extraction parser binding drifted',
+    )
+    extraction = _perplexity_report_card_extraction_content(
+        ':6',
+        'perplexity-report-card-diagnostic-r2',
+        'https://www.perplexity.ai/search/exact-thread-id',
+        Path('/private/perplexity-report-extraction-r3/response.txt'),
+    )
+    _require(
+        extraction.count('click element=artifact_report_entry exactly once') == 1
+        and extraction.count('click element=copy_contents_button exactly once') == 1
+        and extraction.count(
+            'read_clipboard output_file=/private/perplexity-report-extraction-r3/response.txt exactly once'
+        ) == 1
+        and 'never copy or pass an opaque ref' in extraction,
+        'Perplexity report-card extraction lost its exact element-only operations',
+    )
+    _require(
+        'If and only if initial_current_url differs from' in extraction
+        and 'navigate exactly once to https://www.perplexity.ai/search/exact-thread-id'
+        in extraction
+        and 'No other URL is authorized' in extraction
+        and 'Do not attach, paste, send, research, regenerate, retry, recover, poll'
+        in extraction,
+        'Perplexity report-card extraction widened mutation authority',
+    )
+    operations = (
+        extraction.index('observe scope=base exactly once'),
+        extraction.index('click element=artifact_report_entry exactly once'),
+        extraction.index('Immediately observe scope=base exactly once with no intervening call'),
+        extraction.index('click element=copy_contents_button exactly once'),
+        extraction.index(
+            'Immediately observe scope=base exactly once with no intervening call',
+            extraction.index('click element=copy_contents_button exactly once'),
+        ),
+        extraction.index(
+            'read_clipboard output_file=/private/perplexity-report-extraction-r3/response.txt exactly once'
+        ),
+    )
+    _require(
+        operations == tuple(sorted(operations)),
+        'Perplexity report-card extraction operation order drifted',
+    )
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        response_file = Path(temporary_directory) / 'response.txt'
+        response_file.write_bytes(b'one extracted report\n')
+        response_sha256 = hashlib.sha256(response_file.read_bytes()).hexdigest()
+        extraction_receipt = f'''# PERPLEXITY REPORT CARD EXTRACTION RECEIPT
+platform: perplexity
+display: :6
+source_diagnostic_identity: perplexity-report-card-diagnostic-r2
+thread_url: https://www.perplexity.ai/search/exact-thread-id
+initial_observation_revision: {'e' * 64}
+initial_current_url: https://www.perplexity.ai/search/exact-thread-id
+navigation_count: 0
+post_navigation_observe_count: 0
+pre_observation_revision: {'e' * 64}
+pre_current_url: https://www.perplexity.ai/search/exact-thread-id
+pre_stop_count: 0
+pre_artifacts_pane_toggle_count: 1
+pre_artifact_report_entry_count: 1
+pre_artifacts_pane_download_count: 1
+pre_report_entry_name: Current Provider and Agent-Platform Capability Intelligence Report
+clicked_report_entry: artifact_report_entry
+report_entry_click_performed: true
+report_entry_performed_primitive: click
+report_surface_observation_revision: {'f' * 64}
+report_surface_url: https://www.perplexity.ai/computer/a/exact-report-id
+report_surface_stop_count: 0
+report_surface_copy_contents_count: 1
+clicked_copy_contents: copy_contents_button
+copy_click_performed: true
+copy_performed_primitive: click
+post_copy_observation_revision: {'a' * 64}
+post_copy_url: https://www.perplexity.ai/computer/a/exact-report-id
+post_copy_stop_count: 0
+post_copy_contents_count: 1
+output_file: {response_file}
+byte_count: {response_file.stat().st_size}
+response_sha256: {response_sha256}
+initial_observe_count: 1
+report_entry_click_count: 1
+report_surface_observe_count: 1
+report_copy_click_count: 1
+post_copy_observe_count: 1
+clipboard_read_count: 1
+total_click_count: 2
+other_mutation_count: 0
+extracted: true
+sent: false
+regenerated: false
+retried: false
+'''
+        _validate_perplexity_report_card_extraction_receipt(
+            extraction_receipt, ':6', 'perplexity-report-card-diagnostic-r2',
+            'https://www.perplexity.ai/search/exact-thread-id', response_file,
+        )
+        for bad_receipt, failure in (
+            (
+                extraction_receipt.replace('total_click_count: 2', 'total_click_count: 3'),
+                'a third click',
+            ),
+            (
+                extraction_receipt.replace('navigation_count: 0', 'navigation_count: 1'),
+                'unnecessary navigation',
+            ),
+        ):
+            try:
+                _validate_perplexity_report_card_extraction_receipt(
+                    bad_receipt, ':6', 'perplexity-report-card-diagnostic-r2',
+                    'https://www.perplexity.ai/search/exact-thread-id', response_file,
+                )
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(
+                    f'Perplexity report-card extraction parser accepted {failure}'
+                )
     print('perplexity manual extraction contract: PASS')
     return 0
 
