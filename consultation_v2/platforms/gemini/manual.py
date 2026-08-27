@@ -197,6 +197,7 @@ def _card(
         'platform': 'gemini',
         'display': display,
         'phase': phase,
+        'extraction_output_type': 'research_report',
         'snapshot_revision': snapshot_revision,
         'allowed': allowed,
         'next_phase': next_phase,
