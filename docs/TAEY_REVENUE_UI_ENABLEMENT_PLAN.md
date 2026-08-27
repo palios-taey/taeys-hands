@@ -149,6 +149,11 @@ assumption.
 Keep the six historical leaves independent: comment, own-post engager capture, messaging, invitation
 acceptance, connection invitation, and Jobs.
 
+The canonical public producer and private path contract for an owner-approved
+comment is `LINKEDIN_COMMENT_PRIVATE_MATERIALIZATION.md`. It materializes only
+the immutable gate receipt and Presence transaction; it does not evaluate the
+approval, inspect LinkedIn, or authorize a UI action.
+
 - Jobs selected-detail capture is a retained production baseline; do not reopen it for intake-adapter work.
   Mounted-search is also a retained production baseline from the joined search-select-intake chain.
 - Own-post engagement currently proves only the `no_new_signal` route/filter/restore result. Full qualification
