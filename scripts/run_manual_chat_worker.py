@@ -907,7 +907,7 @@ def _perplexity_report_preview_extraction_content(
         "one close_artifact named Close, exactly one expand_artifact named Expand artifact, and "
         "exactly one report_scroll_pane with role scroll pane and states showing and enabled.\n"
         "2. operate element=artifact_options exactly once. Require performed=true and "
-        "performed_primitive=mapped_pointer_activate. Immediately observe scope=menu_snapshot "
+        "performed_primitive=mapped_pointer_activate. Immediately observe scope=base "
         "exactly once. Require current_url unchanged, stop_button absent, and exactly one "
         "artifact_open_new_tab named Open in new tab with role menu item and states showing and enabled.\n"
         "3. click element=artifact_open_new_tab exactly once. Require performed=true and "
