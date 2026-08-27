@@ -477,9 +477,12 @@ def _traverse_export_parent_directory(
     err_code = 'FC-TRACE' if is_preflight else 'export_parent_invalid'
 
     try:
-        curr_fd = os.open(export_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        curr_fd = os.open(
+            export_root,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
     except OSError as exc:
-        raise err_cls(err_code, f'unable to open export root {export_root}: {exc}') from exc
+        raise err_cls(err_code, f'unable to open export root {export_root} without symlink: {exc}') from exc
 
     try:
         for part in posix_path.parent.parts:
@@ -694,46 +697,53 @@ def _write_export_once(
     export_bytes = _canonical_json_bytes(export_data)
 
     try:
-        fd = os.open(
-            filename,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o600,
-            dir_fd=parent_fd,
-        )
-    except FileExistsError as exc:
-        os.close(parent_fd)
-        raise CaptureSupervisorQuarantineError('export_exists', f'export receipt {filename} already exists') from exc
-    except OSError as exc:
-        os.close(parent_fd)
-        raise CaptureSupervisorQuarantineError('export_create_failed', f'unable to create export receipt: {exc}') from exc
+        try:
+            fd = os.open(
+                filename,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+                dir_fd=parent_fd,
+            )
+        except FileExistsError as exc:
+            raise CaptureSupervisorQuarantineError('export_exists', f'export receipt {filename} already exists') from exc
+        except OSError as exc:
+            raise CaptureSupervisorQuarantineError('export_create_failed', f'unable to create export receipt: {exc}') from exc
 
-    try:
-        written = os.write(fd, export_bytes)
-        if written != len(export_bytes):
-            raise CaptureSupervisorQuarantineError('export_short_write', 'short write writing export receipt')
-        os.fchmod(fd, 0o600)
-        os.fsync(fd)
+        try:
+            written = os.write(fd, export_bytes)
+            if written != len(export_bytes):
+                raise CaptureSupervisorQuarantineError('export_short_write', 'short write writing export receipt')
+            os.fchmod(fd, 0o600)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+        os.fsync(parent_fd)
+
+        # Readback verification descriptor-relative to parent_fd with O_NOFOLLOW
+        try:
+            read_fd = os.open(
+                filename,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise CaptureSupervisorQuarantineError('export_readback_open_failed', f'unable to open export receipt for readback: {exc}') from exc
+
+        try:
+            metadata = os.fstat(read_fd)
+            if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+                raise CaptureSupervisorQuarantineError('export_invalid_mode', 'export receipt file mode is not 0600')
+            if metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
+                raise CaptureSupervisorQuarantineError('export_invalid_owner', 'export receipt link count or owner invalid')
+            readback = os.read(read_fd, len(export_bytes) + 1)
+        finally:
+            os.close(read_fd)
+
+        if readback != export_bytes:
+            raise CaptureSupervisorQuarantineError('export_readback_mismatch', 'export receipt readback mismatch')
     finally:
-        os.close(fd)
-
-    os.fsync(parent_fd)
-    os.close(parent_fd)
-
-    # Readback verification
-    target_path = export_root.joinpath(*PurePosixPath(export_receipt).parts)
-    read_fd = os.open(target_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        metadata = os.fstat(read_fd)
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
-            raise CaptureSupervisorQuarantineError('export_invalid_mode', 'export receipt file mode is not 0600')
-        if metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
-            raise CaptureSupervisorQuarantineError('export_invalid_owner', 'export receipt link count or owner invalid')
-        readback = os.read(read_fd, len(export_bytes) + 1)
-    finally:
-        os.close(read_fd)
-
-    if readback != export_bytes:
-        raise CaptureSupervisorQuarantineError('export_readback_mismatch', 'export receipt readback mismatch')
+        os.close(parent_fd)
 
 
 def _quarantine(
