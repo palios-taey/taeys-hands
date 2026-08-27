@@ -1199,24 +1199,56 @@ def element_operation(
     if selected_editor_match is not None:
         activity = selected_editor_match.group('activity')
         body_sha256 = selected_editor_match.group('body')
+        editor_contract = _manual_comment_contract()['editor']
+        editor_empty = selected_context.get('comment_editor_empty')
+        editor_text_sha256 = selected_context.get(
+            'comment_editor_text_sha256'
+        )
+        editor_text_chars = selected_context.get('comment_editor_text_chars')
         empty_digest = hashlib.sha256(b'').hexdigest()
         if (
             selected_context.get('selected_activity') != activity
             or selected_context.get('selected_post_body_sha256') != body_sha256
             or selected_context.get('comment_editor_ready') is not True
-            or selected_context.get('comment_editor_empty') is not True
-            or selected_context.get('comment_editor_text_sha256') != empty_digest
-            or selected_context.get('comment_editor_text_chars') != 0
+            or not isinstance(editor_empty, bool)
+            or not isinstance(editor_text_sha256, str)
+            or re.fullmatch(r'[0-9a-f]{64}', editor_text_sha256) is None
+            or isinstance(editor_text_chars, bool)
+            or not isinstance(editor_text_chars, int)
+            or not 0 <= editor_text_chars <= editor_contract['max_text_chars']
+            or editor_empty != (editor_text_chars == 0)
+            or (editor_empty and editor_text_sha256 != empty_digest)
+            or (not editor_empty and editor_text_sha256 == empty_digest)
         ):
             raise ValueError(
-                'LinkedIn frozen-text write requires one exact empty same-card editor'
+                'LinkedIn same-card editor observation identity is not exact'
             )
-        editor_contract = _manual_comment_contract()['editor']
+        if not editor_empty:
+            return {
+                'method': 'observe',
+                'effect_class': 'observation',
+                'primitives': [],
+                'allowed_now': [],
+                'forbidden': [
+                    'activate',
+                    'activate_optional_like',
+                    'paste_frozen_text',
+                    'submit_frozen_comment',
+                ],
+                'postcondition': {
+                    'kind': editor_contract['postcondition'],
+                    'activity': activity,
+                    'body_sha256': body_sha256,
+                    'editor_text_sha256': editor_text_sha256,
+                    'editor_text_chars': editor_text_chars,
+                },
+            }
         return {
             'method': 'paste_frozen_text',
             'effect_class': editor_contract['action']['effect_class'],
             'primitives': list(editor_contract['action']['primitives']),
             'allowed_now': list(editor_contract['action']['allowed_now']),
+            'max_text_chars': editor_contract['max_text_chars'],
             'forbidden': [
                 'click',
                 'activate',
