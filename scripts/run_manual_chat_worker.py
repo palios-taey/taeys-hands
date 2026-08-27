@@ -202,6 +202,11 @@ def build_parser() -> argparse.ArgumentParser:
     extraction_basis.add_argument("--monitor-id")
     extraction_basis.add_argument("--completed-before-stop-source-response-json")
     extract.add_argument("--response-file", required=True)
+    extract.add_argument(
+        "--output-type",
+        choices=("assistant_text", "research_report"),
+        default="assistant_text",
+    )
     extract.add_argument("--prepare-only", action="store_true")
     return parser
 
@@ -1683,6 +1688,7 @@ def _extract_content(
     completed_before_stop_source_sha256: str | None = None,
     claude_extraction_mode: str | None = None,
     claude_launcher_revision: str | None = None,
+    output_type: str = "assistant_text",
 ) -> str:
     if platform == "claude":
         _require_claude_extraction_workflows()
@@ -1780,6 +1786,49 @@ def _extract_content(
                 " Return completion_basis=completed_before_stop and "
                 f"source_response_json_sha256={completed_before_stop_source_sha256} in the "
                 "receipt."
+            )
+        if output_type == "research_report":
+            _require_extraction_steps(
+                "gemini",
+                "research_report",
+                (
+                    ("click", "share_export", "last", None),
+                    ("copy_element", "copy_content_item", "last", None),
+                    ("read_clipboard", None, "last", "response_complete"),
+                ),
+            )
+            return (
+                completion_basis
+                + "Execute one frozen Gemini Deep Research report extraction transaction on "
+                f"{display} with drive_chat only. Do not read any file, runbook, or YAML. "
+                "The signed Deep Research send-phase card registered "
+                "output_type=research_report with the completion route. Execute exactly this "
+                "YAML-owned sequence, using only an element key from the immediately preceding "
+                "fresh observation:\n"
+                "1. observe scope=app_root_snapshot; require current_url on gemini.google.com "
+                "matching /app/<id> or /u/<digit>/app/<id>, require stop_button absent, require "
+                "deep_think_interim_ack_placeholder absent, and require exactly one mapped "
+                "share_export named Share & Export with role push button and states showing and "
+                "enabled.\n"
+                "2. click element=share_export exactly once; observe scope=app_root_snapshot; "
+                "require the same URL and terminal conditions and exactly one mapped "
+                "copy_content_item named Copy with role menu item and states showing and enabled.\n"
+                "3. click element=copy_content_item exactly once; observe "
+                "scope=app_root_snapshot; require the same URL and terminal conditions, exactly "
+                "one mapped share_export, and copy_content_item absent because its popover closed.\n"
+                f"4. read_clipboard with output_file={response_file}. Require that drive_chat "
+                "created a new response file larger than 89 bytes whose content is not the exact "
+                "Gemini completion notice. Then stop all UI calls. Return exactly one field "
+                "output_type=research_report and the byte count and SHA-256."
+                f"{receipt_requirements}\n"
+                "At the first missing or ambiguous element, refusal, failed postcondition, or "
+                "unexpected state, return the first-mismatch stop report and stop. Do not navigate, "
+                "attach, paste, send, retry, recover, poll, use copy_button, or make a second "
+                "Share & Export or Copy attempt."
+            )
+        if output_type != "assistant_text":
+            raise RuntimeError(
+                f"Gemini extraction output type is unsupported: {output_type!r}"
             )
         return (
             completion_basis
@@ -3070,13 +3119,15 @@ def _extraction_event_id(
     platform: str,
     display: str,
     source_response_sha256: str | None,
+    output_type: str,
 ) -> str:
     completion_identity = monitor_id or (
         f"completed-before-stop\0{platform}\0{display}\0{source_response_sha256}"
     )
-    digest = hashlib.sha256(
-        f"{seat_id}\0{completion_identity}".encode("utf-8")
-    ).hexdigest()
+    identity_material = f"{seat_id}\0{completion_identity}"
+    if platform == "gemini" and output_type == "research_report":
+        identity_material += f"\0{output_type}"
+    digest = hashlib.sha256(identity_material.encode("utf-8")).hexdigest()
     return f"extract-{digest[:24]}"
 
 
@@ -3597,6 +3648,7 @@ def main() -> int:
             args.platform,
             args.display,
             source_response_sha256,
+            args.output_type,
         )
         if args.platform == "claude":
             _require_claude_extraction_workflows()
@@ -3608,6 +3660,7 @@ def main() -> int:
                 args.display,
                 response_file,
                 source_response_sha256,
+                output_type=args.output_type,
             )
             request_text = _request_text(content, 4096)
 
@@ -3643,6 +3696,7 @@ def main() -> int:
             prepared_result = {
                 "artifact_root": str(root),
                 "event_id": event_id,
+                "output_type": args.output_type,
                 "request_json": str(request_file),
                 "response_file": str(response_file),
             }
@@ -3803,6 +3857,25 @@ def main() -> int:
                 "extract-gemini-terminal-clipboard",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if (
+            args.phase == "extract"
+            and args.platform == "gemini"
+            and args.output_type == "research_report"
+        ):
+            if not _receipt_field_matches(receipt, "output_type", args.output_type):
+                raise RuntimeError(
+                    "Gemini extraction receipt does not match the selected output type"
+                )
+            assert response_file is not None
+            completion_notice = (
+                "I've completed your research. Feel free to ask me follow-up "
+                "questions or request changes."
+            )
+            extracted = response_file.read_text(encoding="utf-8").strip()
+            if len(extracted.encode("utf-8")) <= 89 or extracted == completion_notice:
+                raise RuntimeError(
+                    "Gemini research-report extraction returned the completion notice"
+                )
         if args.phase == "extract-gemini-terminal-clipboard":
             assert gemini_terminal_receipt is not None
             assert gemini_terminal_receipt_sha256 is not None
@@ -4296,6 +4369,8 @@ def main() -> int:
         "response_json": str(response_path),
         "response_json_sha256": _sha256(response_path),
     }
+    if args.phase == "extract":
+        result["output_type"] = args.output_type
     if response_file is not None:
         result.update({
             "response_file": str(response_file),

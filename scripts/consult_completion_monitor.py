@@ -304,6 +304,8 @@ def finish_route(
 
 
 def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, object]:
+    from consultation_v2.yaml_contract import get_extraction
+
     monitor_id = str(route.get("monitor_id") or "")
     actor_seat_id = str(route.get("actor_seat_id") or "")
     platform = str(route.get("platform") or "")
@@ -334,6 +336,14 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, object]:
     correlation_id = f"{event_id}-1"
     launcher = Path(REPO) / "scripts" / "run_manual_chat_worker.py"
     platform_key = platform.lower()
+    output_type = str(route.get("extraction_output_type") or "assistant_text")
+    if platform_key == "perplexity":
+        output_type = "research_report"
+    if output_type not in {"assistant_text", "research_report"}:
+        raise RuntimeError(f"unsupported extraction output type: {output_type!r}")
+    if platform_key == "gemini" and output_type == "research_report":
+        if get_extraction(platform_key, output_type) is None:
+            raise RuntimeError("Gemini research-report extraction contract is incomplete")
     command_parts = [
         str(launcher),
         "extract",
@@ -343,6 +353,7 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, object]:
         "--artifact-root", str(artifact_root),
         "--monitor-id", monitor_id,
         "--response-file", str(response_file),
+        "--output-type", output_type,
     ]
     prepared = subprocess.run(
         [*command_parts, "--prepare-only"],
@@ -360,6 +371,7 @@ def _prepare_extraction_handoff(route: dict[str, object]) -> dict[str, object]:
         "request_json": str(request_json),
         "event_id": event_id,
         "correlation_id": correlation_id,
+        "output_type": output_type,
         "command_parts": command_parts,
     }
 
@@ -462,6 +474,7 @@ def _run_extraction(route: dict[str, object]) -> dict[str, object]:
             "request_json": str(handoff["request_json"]),
             "event_id": str(handoff["event_id"]),
             "correlation_id": str(handoff["correlation_id"]),
+            "output_type": str(handoff["output_type"]),
         }
     except (
         OSError,
@@ -485,6 +498,7 @@ def _run_extraction(route: dict[str, object]) -> dict[str, object]:
             "request_json",
             "event_id",
             "correlation_id",
+            "output_type",
         ):
             if handoff.get(key):
                 outcome[key] = handoff[key]
@@ -522,6 +536,7 @@ def notify_taey(
             f" response_json={extraction_result.get('response_json')}"
             f" event_id={extraction_result.get('event_id')}"
             f" correlation_id={extraction_result.get('correlation_id')}"
+            f" output_type={extraction_result.get('output_type')}"
         )
     elif extraction_status == "failed":
         routed_message += (
@@ -557,6 +572,7 @@ def notify_taey(
     if extraction_status == "succeeded":
         taey_receipt.update({
             "bytes": extraction_result.get("response_bytes"),
+            "output_type": extraction_result.get("output_type"),
             "sha": extraction_result.get("response_sha256"),
         })
         taey_receipt.update({

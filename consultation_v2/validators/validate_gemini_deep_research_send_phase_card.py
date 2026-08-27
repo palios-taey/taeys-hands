@@ -10,12 +10,12 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from consultation_v2.platforms.gemini.manual import (
+from consultation_v2.platforms.gemini.manual import (  # noqa: E402
     deep_research_send_phase_card,
     element_operation,
     key_requires_state,
 )
-from consultation_v2.types import ElementRef, Snapshot
+from consultation_v2.types import ElementRef, Snapshot  # noqa: E402
 
 
 REVISION = '4' * 64
@@ -98,6 +98,7 @@ def main() -> int:
         'platform': 'gemini',
         'display': DISPLAY,
         'phase': 'ready_initial_send',
+        'extraction_output_type': 'research_report',
         'snapshot_revision': REVISION,
         'allowed': {'action': 'key', 'key': 'space'},
         'next_phase': 'awaiting_start_research',
@@ -139,6 +140,7 @@ def main() -> int:
     monitor_card = _card(research_stop, 'awaiting_research_stop')
     assert monitor_card is not None
     assert monitor_card['phase'] == 'monitor_ready'
+    assert monitor_card['extraction_output_type'] == 'research_report'
     assert monitor_card['allowed'] is None
     assert monitor_card['next_phase'] is None
     _assert_card_hash(monitor_card)
