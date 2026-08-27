@@ -171,6 +171,28 @@ def build_parser() -> argparse.ArgumentParser:
     extract_perplexity_report_open_menu.add_argument("--thread-url", required=True)
     extract_perplexity_report_open_menu.add_argument("--response-file", required=True)
 
+    extract_gemini_terminal_clipboard = phases.add_parser(
+        "extract-gemini-terminal-clipboard",
+        help="Materialize one already-copied terminal Gemini response without UI mutation.",
+    )
+    extract_gemini_terminal_clipboard.set_defaults(platform="gemini")
+    extract_gemini_terminal_clipboard.add_argument("--display", required=True)
+    extract_gemini_terminal_clipboard.add_argument("--seat-id", required=True)
+    extract_gemini_terminal_clipboard.add_argument("--artifact-root", required=True)
+    extract_gemini_terminal_clipboard.add_argument(
+        "--source-terminal-receipt", required=True
+    )
+    extract_gemini_terminal_clipboard.add_argument(
+        "--source-terminal-receipt-sha256", required=True
+    )
+    extract_gemini_terminal_clipboard.add_argument(
+        "--source-copy-result-json", required=True
+    )
+    extract_gemini_terminal_clipboard.add_argument(
+        "--source-copy-result-json-sha256", required=True
+    )
+    extract_gemini_terminal_clipboard.add_argument("--response-file", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once from one explicitly authorized completion basis.",
@@ -2116,6 +2138,375 @@ def _receipt_field_matches(receipt: str, field: str, expected: str) -> bool:
     ) is not None
 
 
+def _gemini_terminal_receipt_field(receipt: str, field: str) -> str:
+    matches = re.findall(
+        rf"(?m)^- {re.escape(field)}: `([^`]+)`$",
+        receipt,
+    )
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Gemini terminal receipt has {len(matches)} exact {field} fields"
+        )
+    return matches[0]
+
+
+def _clipboard_affecting_request(arguments: object) -> bool:
+    if not isinstance(arguments, dict):
+        return False
+    action = arguments.get("action")
+    element = arguments.get("element")
+    if action in {"click", "operate", "activate"} and isinstance(element, str):
+        return "copy" in element.lower()
+    key = arguments.get("key")
+    return action == "key" and isinstance(key, str) and key.lower() in {
+        "ctrl+c",
+        "ctrl+insert",
+    }
+
+
+def _clipboard_affecting_result(inner: object) -> bool:
+    if not isinstance(inner, dict):
+        return False
+    action = inner.get("action")
+    result = inner.get("result")
+    element = result.get("element") if isinstance(result, dict) else None
+    element_key = element.get("element") if isinstance(element, dict) else None
+    if action in {"click", "operate", "activate"} and isinstance(element_key, str):
+        return "copy" in element_key.lower()
+    key = result.get("key") if isinstance(result, dict) else None
+    return action == "key" and isinstance(key, str) and key.lower() in {
+        "ctrl+c",
+        "ctrl+insert",
+    }
+
+
+def _validate_gemini_terminal_clipboard_source(
+    terminal_receipt: Path,
+    expected_terminal_sha256: str,
+    copy_result_json: Path,
+    expected_copy_result_sha256: str,
+    display: str,
+    new_seat_id: str,
+) -> dict[str, object]:
+    for label, value in (
+        ("source terminal receipt SHA-256", expected_terminal_sha256),
+        ("source Copy result SHA-256", expected_copy_result_sha256),
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise RuntimeError(f"{label} must be exactly 64 lowercase hex characters")
+    if _sha256(terminal_receipt) != expected_terminal_sha256:
+        raise RuntimeError("source terminal receipt SHA-256 mismatch")
+    if _sha256(copy_result_json) != expected_copy_result_sha256:
+        raise RuntimeError("source Copy result SHA-256 mismatch")
+
+    receipt = terminal_receipt.read_text(encoding="utf-8")
+    source_seat_id = _identity(
+        _gemini_terminal_receipt_field(receipt, "seat_id"),
+        "source seat id",
+    )
+    source_turn_id = _identity(
+        _gemini_terminal_receipt_field(receipt, "turn_id"),
+        "source turn id",
+    )
+    source_event_id = _identity(
+        _gemini_terminal_receipt_field(receipt, "event_id"),
+        "source event id",
+    )
+    if new_seat_id == source_seat_id:
+        raise RuntimeError("terminal clipboard extraction requires a new seat identity")
+    expected_receipt_values = {
+        "display": display,
+        "terminal_result": "supervisor first-error halt",
+        "captured_drive_chat_calls": "51",
+        "round_51_result_sha256": expected_copy_result_sha256,
+        "start_research_call_count": "0",
+        "read_clipboard_call_count": "0",
+        "further_calls_after_round_51": "0",
+    }
+    invalid_receipt_values = [
+        field
+        for field, expected in expected_receipt_values.items()
+        if _gemini_terminal_receipt_field(receipt, field) != expected
+    ]
+    if invalid_receipt_values:
+        raise RuntimeError(
+            "Gemini terminal receipt has invalid source fields: "
+            f"{invalid_receipt_values}"
+        )
+    if (
+        "- second_unauthorized_call: round `51`, `click copy_button`, performed `true`"
+        not in receipt
+        or "This identity is spent and must never be retried or recovered." not in receipt
+    ):
+        raise RuntimeError("Gemini terminal receipt lacks the exact terminal Copy evidence")
+
+    try:
+        wrapper = json.loads(copy_result_json.read_text(encoding="utf-8"))
+        inner = json.loads(wrapper["result"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise RuntimeError("source Copy result is not a valid captured exchange") from exc
+    if not isinstance(wrapper, dict) or not isinstance(inner, dict):
+        raise RuntimeError("source Copy result capture must contain two JSON objects")
+    source_round = wrapper.get("tool_round")
+    expected_wrapper = {
+        "schema": "taey.drive_chat.exchange.v1",
+        "proxy_namespace": "taey-worker",
+        "seat_id": source_seat_id,
+        "turn_id": source_turn_id,
+        "event_id": source_event_id,
+        "tool_round": 51,
+        "tool_ok": True,
+        "returned": True,
+    }
+    invalid_wrapper = [
+        field for field, expected in expected_wrapper.items()
+        if wrapper.get(field) != expected
+    ]
+    result = inner.get("result")
+    element = result.get("element") if isinstance(result, dict) else None
+    ui_sequence = inner.get("ui_sequence")
+    if invalid_wrapper or not isinstance(result, dict) or not isinstance(element, dict):
+        raise RuntimeError(
+            f"source Copy result has invalid capture identity: {invalid_wrapper}"
+        )
+    if (
+        inner.get("ok") is not True
+        or inner.get("platform") != "gemini"
+        or inner.get("display") != display
+        or inner.get("action") != "click"
+        or inner.get("error") is not None
+        or result.get("performed") is not True
+        or result.get("performed_primitive") != "click"
+        or element.get("element") != "copy_button"
+        or element.get("name") != "Copy"
+        or element.get("role") != "push button"
+        or not isinstance(ui_sequence, dict)
+        or ui_sequence.get("state") != "mutation_complete"
+    ):
+        raise RuntimeError("source Copy result does not prove one successful Gemini Copy")
+
+    call_dir = copy_result_json.parent
+    turn_dir = call_dir.parent
+    event_dir = turn_dir.parent
+    seat_root = event_dir.parent
+    proxy_root = seat_root.parent
+    capture_root = proxy_root.parent
+    if (
+        not call_dir.name.startswith(f"{source_round:04d}-")
+        or turn_dir.name != source_turn_id
+        or event_dir.name != source_event_id
+        or seat_root.name != source_seat_id
+        or proxy_root.name != wrapper["proxy_namespace"]
+        or capture_root.name != "drive_chat_captures"
+    ):
+        raise RuntimeError("source Copy result path does not match its capture identity")
+    source_request = call_dir / "request.json"
+    if not source_request.is_file():
+        raise RuntimeError("source Copy capture has no paired request")
+    source_request_sha256 = _gemini_terminal_receipt_field(
+        receipt, "round_51_request_sha256"
+    )
+    if _sha256(source_request) != source_request_sha256:
+        raise RuntimeError("source Copy request SHA-256 mismatch")
+    try:
+        request_payload = json.loads(source_request.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("source Copy request is not valid JSON") from exc
+    if (
+        request_payload.get("seat_id") != source_seat_id
+        or request_payload.get("turn_id") != source_turn_id
+        or request_payload.get("event_id") != source_event_id
+        or request_payload.get("tool_round") != 51
+        or request_payload.get("arguments")
+        != {"action": "click", "display": display, "element": "copy_button"}
+    ):
+        raise RuntimeError("source Copy request does not match round 51 exactly")
+
+    copy_completed_ns = copy_result_json.stat().st_mtime_ns
+    capture_search_root = capture_root.parent
+    capture_roots = {capture_root}
+    capture_roots.update(
+        path.resolve(strict=True)
+        for path in capture_search_root.rglob("drive_chat_captures")
+        if path.is_dir()
+    )
+    later_clipboard_events: list[str] = []
+    uncertain_records: list[str] = []
+    for scanned_root in sorted(capture_roots):
+        for candidate in scanned_root.rglob("request.json"):
+            candidate = candidate.resolve(strict=True)
+            if candidate == source_request or candidate.stat().st_mtime_ns <= copy_completed_ns:
+                continue
+            try:
+                candidate_payload = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                uncertain_records.append(str(candidate))
+                continue
+            if _clipboard_affecting_request(candidate_payload.get("arguments")):
+                later_clipboard_events.append(str(candidate))
+        for candidate in scanned_root.rglob("result.json"):
+            candidate = candidate.resolve(strict=True)
+            if candidate == copy_result_json or candidate.stat().st_mtime_ns <= copy_completed_ns:
+                continue
+            try:
+                candidate_wrapper = json.loads(candidate.read_text(encoding="utf-8"))
+                candidate_inner = json.loads(candidate_wrapper["result"])
+            except (OSError, json.JSONDecodeError, KeyError, TypeError):
+                uncertain_records.append(str(candidate))
+                continue
+            if _clipboard_affecting_result(candidate_inner):
+                later_clipboard_events.append(str(candidate))
+    certainty = (
+        "captured_proven"
+        if not later_clipboard_events and not uncertain_records
+        else "uncertain"
+    )
+    return {
+        "source_seat_id": source_seat_id,
+        "source_turn_id": source_turn_id,
+        "source_event_id": source_event_id,
+        "source_copy_tool_round": source_round,
+        "source_terminal_receipt_sha256": expected_terminal_sha256,
+        "source_copy_result_json_sha256": expected_copy_result_sha256,
+        "capture_root": capture_root,
+        "proxy_namespace": wrapper["proxy_namespace"],
+        "clipboard_source_certainty": certainty,
+        "provider_output_proven": certainty == "captured_proven",
+        "global_capture_roots_scanned": tuple(
+            str(path) for path in sorted(capture_roots)
+        ),
+        "later_clipboard_affecting_records": tuple(sorted(later_clipboard_events)),
+        "uncertain_capture_records": tuple(sorted(uncertain_records)),
+    }
+
+
+def _gemini_terminal_clipboard_only_content(
+    display: str,
+    response_file: Path,
+    source: dict[str, object],
+) -> str:
+    return (
+        f"Execute one source-bound terminal Gemini clipboard materialization on {display}. "
+        "The prior terminal turn already performed the one Copy action; this turn must not "
+        "touch the UI. Call drive_chat exactly once with "
+        f"display={display}, action=read_clipboard, output_file={response_file}. Do not call "
+        "observe, scroll_to_bottom, click, focus, activate, hover, operate, key, type, paste, "
+        "navigate, focus_dialog, abort, or any other tool or action before or after that one "
+        "read_clipboard call. Do not retry if it is refused or empty. The source proof is "
+        f"source_terminal_receipt_sha256={source['source_terminal_receipt_sha256']}, "
+        f"source_copy_result_json_sha256={source['source_copy_result_json_sha256']}, "
+        f"source_seat_id={source['source_seat_id']}, and "
+        f"source_copy_tool_round={source['source_copy_tool_round']}. After the one successful "
+        "call, return a Gemini terminal clipboard-only receipt with exactly these fields: "
+        "platform=gemini; "
+        f"display={display}; "
+        f"source_terminal_receipt_sha256={source['source_terminal_receipt_sha256']}; "
+        f"source_copy_result_json_sha256={source['source_copy_result_json_sha256']}; "
+        f"source_seat_id={source['source_seat_id']}; "
+        f"source_copy_tool_round={source['source_copy_tool_round']}; "
+        f"clipboard_source_certainty={source['clipboard_source_certainty']}; "
+        f"provider_output_proven={str(source['provider_output_proven']).lower()}; "
+        "clipboard_read_count=1; observe_count=0; scroll_count=0; click_count=0; "
+        "key_count=0; navigation_count=0; ui_mutation_count=0; other_tool_call_count=0; "
+        f"output_file={response_file}; byte_count=<exact integer>; "
+        "response_sha256=<exact 64-hex SHA-256>. Stop immediately."
+    )
+
+
+def _validate_gemini_terminal_clipboard_only_receipt(
+    receipt: str,
+    display: str,
+    response_file: Path,
+    source: dict[str, object],
+) -> None:
+    if "gemini terminal clipboard-only receipt" not in receipt.lower():
+        raise RuntimeError("Gemini clipboard-only response has no exact receipt heading")
+    expected = {
+        "platform": "gemini",
+        "display": display,
+        "source_terminal_receipt_sha256": str(
+            source["source_terminal_receipt_sha256"]
+        ),
+        "source_copy_result_json_sha256": str(
+            source["source_copy_result_json_sha256"]
+        ),
+        "source_seat_id": str(source["source_seat_id"]),
+        "source_copy_tool_round": str(source["source_copy_tool_round"]),
+        "clipboard_source_certainty": str(source["clipboard_source_certainty"]),
+        "provider_output_proven": str(source["provider_output_proven"]).lower(),
+        "clipboard_read_count": "1",
+        "observe_count": "0",
+        "scroll_count": "0",
+        "click_count": "0",
+        "key_count": "0",
+        "navigation_count": "0",
+        "ui_mutation_count": "0",
+        "other_tool_call_count": "0",
+        "output_file": str(response_file),
+        "byte_count": str(response_file.stat().st_size),
+        "response_sha256": _sha256(response_file),
+    }
+    invalid = [
+        field for field, value in expected.items()
+        if not _receipt_field_matches(receipt, field, value)
+    ]
+    if invalid:
+        raise RuntimeError(
+            f"Gemini clipboard-only response has invalid receipt fields: {invalid}"
+        )
+
+
+def _validate_gemini_terminal_clipboard_only_capture(
+    seat_id: str,
+    event_id: str,
+    display: str,
+    response_file: Path,
+    source: dict[str, object],
+) -> None:
+    capture_root = source.get("capture_root")
+    proxy_namespace = source.get("proxy_namespace")
+    if not isinstance(capture_root, Path) or not isinstance(proxy_namespace, str):
+        raise RuntimeError("Gemini clipboard-only capture root is invalid")
+    seat_root = capture_root / proxy_namespace / seat_id
+    requests = sorted(seat_root.rglob("request.json")) if seat_root.is_dir() else []
+    results = sorted(seat_root.rglob("result.json")) if seat_root.is_dir() else []
+    if len(requests) != 1 or len(results) != 1:
+        raise RuntimeError(
+            "Gemini clipboard-only turn must capture exactly one request and one result"
+        )
+    try:
+        request = json.loads(requests[0].read_text(encoding="utf-8"))
+        wrapper = json.loads(results[0].read_text(encoding="utf-8"))
+        inner = json.loads(wrapper["result"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise RuntimeError("Gemini clipboard-only capture is invalid") from exc
+    expected_arguments = {
+        "action": "read_clipboard",
+        "display": display,
+        "output_file": str(response_file),
+    }
+    result = inner.get("result") if isinstance(inner, dict) else None
+    if (
+        request.get("seat_id") != seat_id
+        or request.get("event_id") != event_id
+        or request.get("tool_round") != 1
+        or request.get("arguments") != expected_arguments
+        or wrapper.get("seat_id") != seat_id
+        or wrapper.get("event_id") != event_id
+        or wrapper.get("tool_round") != 1
+        or wrapper.get("tool_ok") is not True
+        or inner.get("ok") is not True
+        or inner.get("platform") != "gemini"
+        or inner.get("display") != display
+        or inner.get("action") != "read_clipboard"
+        or not isinstance(result, dict)
+        or result.get("output_file") != str(response_file)
+        or result.get("bytes") != response_file.stat().st_size
+        or result.get("sha256") != _sha256(response_file)
+    ):
+        raise RuntimeError("Gemini clipboard-only capture does not prove one exact read")
+
+
 def _validate_perplexity_diagnostic_receipt(
     receipt: str,
     label: str,
@@ -2763,6 +3154,11 @@ def main() -> int:
     preview_source_sha256 = None
     preview_source_observation_revision = None
     perplexity_preview_url = None
+    gemini_terminal_receipt = None
+    gemini_terminal_receipt_sha256 = None
+    gemini_copy_result_json = None
+    gemini_copy_result_json_sha256 = None
+    gemini_clipboard_source = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
@@ -3057,6 +3453,61 @@ def main() -> int:
         event_id = f"recover-claude-pre-send-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
+    elif args.phase == "extract-gemini-terminal-clipboard":
+        if args.platform != "gemini":
+            raise RuntimeError(
+                "extract-gemini-terminal-clipboard requires platform gemini"
+            )
+        gemini_terminal_receipt = _absolute_input(
+            args.source_terminal_receipt,
+            "source terminal receipt",
+        )
+        gemini_terminal_receipt_sha256 = args.source_terminal_receipt_sha256
+        gemini_copy_result_json = _absolute_input(
+            args.source_copy_result_json,
+            "source Copy result JSON",
+        )
+        gemini_copy_result_json_sha256 = args.source_copy_result_json_sha256
+        response_file = Path(args.response_file).expanduser()
+        if not response_file.is_absolute():
+            raise RuntimeError("response file must be an absolute path")
+        response_file = response_file.parent.resolve(strict=False) / response_file.name
+        if response_file != root / "response.txt":
+            raise RuntimeError("response file must be ARTIFACT_ROOT/response.txt")
+        if response_file.exists():
+            raise RuntimeError(
+                f"response file already exists; refusing retry: {response_file}"
+            )
+        gemini_clipboard_source = _validate_gemini_terminal_clipboard_source(
+            gemini_terminal_receipt,
+            gemini_terminal_receipt_sha256,
+            gemini_copy_result_json,
+            gemini_copy_result_json_sha256,
+            args.display,
+            seat_id,
+        )
+        capture_root = gemini_clipboard_source["capture_root"]
+        proxy_namespace = gemini_clipboard_source["proxy_namespace"]
+        assert isinstance(capture_root, Path)
+        assert isinstance(proxy_namespace, str)
+        if (capture_root / proxy_namespace / seat_id).exists():
+            raise RuntimeError(
+                "terminal clipboard extraction seat already has captured calls; refusing retry"
+            )
+        content = _gemini_terminal_clipboard_only_content(
+            args.display,
+            response_file,
+            gemini_clipboard_source,
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0gemini\0{args.display}\0"
+            f"{gemini_terminal_receipt_sha256}\0"
+            f"{gemini_copy_result_json_sha256}\0{response_file}\0{content}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        event_id = f"extract-gemini-terminal-clipboard-{digest[:24]}"
+        request_text = _request_text(content, 2048)
     elif args.phase == "send":
         bundle_a = _absolute_input(args.bundle_a, "bundle A")
         bundle_b = _absolute_input(args.bundle_b, "bundle B")
@@ -3219,6 +3670,7 @@ def main() -> int:
         request_must_be_new = args.phase in {
             "extract-perplexity-report-card", "extract-perplexity-report-preview",
             "extract-perplexity-report-open-menu",
+            "extract-gemini-terminal-clipboard",
         }
         if args.phase == "extract" and args.platform == "claude":
             try:
@@ -3348,8 +3800,58 @@ def main() -> int:
                 "extract-perplexity-report-card",
                 "extract-perplexity-report-preview",
                 "extract-perplexity-report-open-menu",
+                "extract-gemini-terminal-clipboard",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
+        if args.phase == "extract-gemini-terminal-clipboard":
+            assert gemini_terminal_receipt is not None
+            assert gemini_terminal_receipt_sha256 is not None
+            assert gemini_copy_result_json is not None
+            assert gemini_copy_result_json_sha256 is not None
+            assert gemini_clipboard_source is not None
+            assert response_file is not None
+            if not response_file.is_file() or response_file.stat().st_size == 0:
+                raise RuntimeError(
+                    "Gemini terminal clipboard extraction did not create a non-empty file"
+                )
+            revalidated_source = _validate_gemini_terminal_clipboard_source(
+                gemini_terminal_receipt,
+                gemini_terminal_receipt_sha256,
+                gemini_copy_result_json,
+                gemini_copy_result_json_sha256,
+                args.display,
+                seat_id,
+            )
+            for field in (
+                "source_seat_id",
+                "source_turn_id",
+                "source_event_id",
+                "source_copy_tool_round",
+                "source_terminal_receipt_sha256",
+                "source_copy_result_json_sha256",
+                "clipboard_source_certainty",
+                "provider_output_proven",
+                "global_capture_roots_scanned",
+                "later_clipboard_affecting_records",
+                "uncertain_capture_records",
+            ):
+                if revalidated_source[field] != gemini_clipboard_source[field]:
+                    raise RuntimeError(
+                        f"Gemini terminal clipboard source changed during extraction: {field}"
+                    )
+            _validate_gemini_terminal_clipboard_only_capture(
+                seat_id,
+                event_id,
+                args.display,
+                response_file,
+                gemini_clipboard_source,
+            )
+            _validate_gemini_terminal_clipboard_only_receipt(
+                receipt,
+                args.display,
+                response_file,
+                gemini_clipboard_source,
+            )
         if args.phase == "extract" and args.platform == "claude":
             if extraction_mode is None:
                 raise RuntimeError("Claude extraction branch was not classified")
@@ -3767,6 +4269,7 @@ def main() -> int:
             "extract-perplexity-report-card",
             "extract-perplexity-report-preview",
             "extract-perplexity-report-open-menu",
+            "extract-gemini-terminal-clipboard",
         } or mutation_stop_report or completed_before_stop:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
@@ -3864,8 +4367,35 @@ def main() -> int:
         "extract-perplexity-report-card",
         "extract-perplexity-report-preview",
         "extract-perplexity-report-open-menu",
+        "extract-gemini-terminal-clipboard",
     }:
         result["lease_release"] = lease_release
+    if gemini_clipboard_source is not None:
+        result.update({
+            "source_terminal_receipt": str(gemini_terminal_receipt),
+            "source_terminal_receipt_sha256": gemini_terminal_receipt_sha256,
+            "source_copy_result_json": str(gemini_copy_result_json),
+            "source_copy_result_json_sha256": gemini_copy_result_json_sha256,
+            "source_seat_id": gemini_clipboard_source["source_seat_id"],
+            "source_copy_tool_round": gemini_clipboard_source[
+                "source_copy_tool_round"
+            ],
+            "clipboard_source_certainty": gemini_clipboard_source[
+                "clipboard_source_certainty"
+            ],
+            "provider_output_proven": gemini_clipboard_source[
+                "provider_output_proven"
+            ],
+            "global_capture_roots_scanned": gemini_clipboard_source[
+                "global_capture_roots_scanned"
+            ],
+            "later_clipboard_affecting_records": gemini_clipboard_source[
+                "later_clipboard_affecting_records"
+            ],
+            "uncertain_capture_records": gemini_clipboard_source[
+                "uncertain_capture_records"
+            ],
+        })
     if perplexity_diagnostic_thread_url is not None:
         result["thread_url"] = perplexity_diagnostic_thread_url
     print(json.dumps(result, sort_keys=True))
