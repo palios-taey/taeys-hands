@@ -41,6 +41,9 @@ jobs:
       - name: Prove Gemini Deep Research send sequence contract
         run: python3 consultation_v2/validators/validate_gemini_manual_deep_research_contract.py
 
+      - name: Prove Gemini Deep Research output-type handoff
+        run: python3 consultation_v2/validators/validate_gemini_deep_research_send_phase_card.py
+
       - name: Prove Gemini terminal clipboard-only contract
         run: python3 consultation_v2/validators/validate_gemini_terminal_clipboard_contract.py
 

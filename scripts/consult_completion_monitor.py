@@ -174,6 +174,9 @@ def active_completion_routes(platform: str, display: str) -> list[dict[str, obje
                 "platform": platform,
                 "display": display,
                 "url": str(record.get("url") or ""),
+                "extraction_output_type": str(
+                    record.get("extraction_output_type") or ""
+                ),
                 "notified_targets": [
                     str(target)
                     for target in (record.get("notified_targets") or [])
