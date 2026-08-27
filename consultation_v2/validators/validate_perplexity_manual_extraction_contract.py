@@ -586,7 +586,7 @@ retried: false
         and preview_card.count('click element=artifact_open_new_tab exactly once') == 1
         and preview_card.count('click element=copy_contents_button exactly once') == 1
         and preview_card.count('read_clipboard output_file=') == 1
-        and 'observe scope=menu_snapshot exactly once' in preview_card
+        and 'observe scope=base exactly once' in preview_card
         and 'Do not navigate, attach, paste, send, research, regenerate, retry' in preview_card,
         'Perplexity preview extraction widened or reordered its exact operations',
     )
