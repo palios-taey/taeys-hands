@@ -1030,6 +1030,7 @@ def _quarantine(
     failure_code: str,
     worker: subprocess.Popen[str] | None = None,
     last_hash: str | None = None,
+    worker_exit_timeout: float = 2.0,
 ) -> int:
     worker_exit_code: int | None = None
     if worker is not None:
@@ -1040,14 +1041,17 @@ def _quarantine(
                 except Exception:
                     pass
             try:
-                worker.terminate()
-                worker.wait(timeout=2.0)
+                worker.wait(timeout=worker_exit_timeout)
             except (subprocess.TimeoutExpired, Exception):
                 try:
-                    worker.kill()
-                    worker.wait(timeout=2.0)
-                except Exception:
-                    pass
+                    worker.terminate()
+                    worker.wait(timeout=worker_exit_timeout)
+                except (subprocess.TimeoutExpired, Exception):
+                    try:
+                        worker.kill()
+                        worker.wait(timeout=worker_exit_timeout)
+                    except Exception:
+                        pass
         worker_exit_code = worker.poll()
 
     envelope = {
@@ -1150,27 +1154,27 @@ def main() -> int:
         try:
             worker = _launch_worker(args, resolved_public_roots_str)
         except Exception as exc:
-            return _quarantine(f'launch_worker_failed: {exc}')
+            return _quarantine(f'launch_worker_failed: {exc}', worker_exit_timeout=args.worker_exit_timeout_seconds)
 
         # Read and relay worker handshake
         try:
             handshake_line = _read_worker_line(worker, timeout=args.close_ack_timeout_seconds)
             handshake_dict = _strict_json(handshake_line)
             if handshake_dict.get('type') != 'handshake' or handshake_dict.get('ok') is not True:
-                return _quarantine('handshake_invalid', worker)
+                return _quarantine('handshake_invalid', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
             sys.stdout.write(handshake_line)
             sys.stdout.flush()
         except Exception as exc:
-            return _quarantine(f'handshake_failed: {exc}', worker)
+            return _quarantine(f'handshake_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
         # Relay loop
         for raw_line in sys.stdin:
             if len(raw_line.encode('utf-8')) > _REQUEST_LIMIT:
-                return _quarantine('request_too_large', worker)
+                return _quarantine('request_too_large', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
             try:
                 request = _strict_json(raw_line)
             except Exception:
-                return _quarantine('protocol_invalid', worker)
+                return _quarantine('protocol_invalid', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
             command = request.get('command')
             if command in {'execute_approved', 'observe'}:
@@ -1179,7 +1183,7 @@ def main() -> int:
                     sys.stdout.write(resp_line)
                     sys.stdout.flush()
                 except Exception as exc:
-                    return _quarantine(f'relay_failed: {exc}', worker)
+                    return _quarantine(f'relay_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 continue
 
             if command == 'cancel':
@@ -1190,32 +1194,32 @@ def main() -> int:
                     worker.wait(timeout=args.worker_exit_timeout_seconds)
                     return 0
                 except Exception as exc:
-                    return _quarantine(f'cancel_failed: {exc}', worker)
+                    return _quarantine(f'cancel_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
             if command == 'close':
                 try:
                     _require_keys(request, frozenset({'command', 'request_id'}))
                     request_id = _uuid_text(request['request_id'])
                 except Exception:
-                    return _quarantine('close_request_invalid', worker)
+                    return _quarantine('close_request_invalid', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 close_request_dict = dict(request)
                 try:
                     ack_dict = _close_ack(worker, close_request_dict, timeout=args.close_ack_timeout_seconds)
                 except CaptureSupervisorQuarantineError as exc:
-                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                    return _quarantine(exc.failure_code, worker, exc.last_hash, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 except Exception as exc:
-                    return _quarantine(f'close_ack_failed: {exc}', worker)
+                    return _quarantine(f'close_ack_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 # Wait for worker exit code 0
                 try:
                     exit_code = worker.wait(timeout=args.worker_exit_timeout_seconds)
                     if exit_code != 0:
-                        return _quarantine('worker_exit_nonzero', worker)
+                        return _quarantine('worker_exit_nonzero', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 except subprocess.TimeoutExpired:
-                    return _quarantine('worker_exit_timeout', worker)
+                    return _quarantine('worker_exit_timeout', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 except Exception as exc:
-                    return _quarantine(f'worker_wait_failed: {exc}', worker)
+                    return _quarantine(f'worker_wait_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 # Independent rehash
                 try:
@@ -1227,9 +1231,9 @@ def main() -> int:
                         scorer_module,
                     )
                 except CaptureSupervisorQuarantineError as exc:
-                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                    return _quarantine(exc.failure_code, worker, exc.last_hash, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 except Exception as exc:
-                    return _quarantine(f'rehash_failed: {exc}', worker)
+                    return _quarantine(f'rehash_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 # Compute capture content sha256
                 capture_script_path = REPO_ROOT / 'scripts' / 'run_supervised_ui_capture.py'
@@ -1265,9 +1269,9 @@ def main() -> int:
                 try:
                     _write_export_once(export_root, export_receipt_posix, export_data)
                 except CaptureSupervisorQuarantineError as exc:
-                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                    return _quarantine(exc.failure_code, worker, exc.last_hash, worker_exit_timeout=args.worker_exit_timeout_seconds)
                 except Exception as exc:
-                    return _quarantine(f'export_write_failed: {exc}', worker)
+                    return _quarantine(f'export_write_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 terminal_envelope = {
                     'export_receipt_path': export_receipt_posix,
@@ -1280,10 +1284,10 @@ def main() -> int:
                 sys.stdout.flush()
                 return 0
 
-            return _quarantine('unknown_command', worker)
+            return _quarantine('unknown_command', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
         # Worker EOF before close
-        return _quarantine('worker_eof_before_close', worker)
+        return _quarantine('worker_eof_before_close', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
     finally:
         if repo_fd >= 0:
             os.close(repo_fd)
